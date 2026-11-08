@@ -11,6 +11,7 @@ description: "在 CodexWorkbench 仓库中规划、开发或评审工作台插�
 
 - Windows 和 macOS 都是目标平台。普通 TypeScript／JavaScript 使用跨平台的 Node.js 与 Web API，不按操作系统重复实现，也不预先添加无用途的平台分支。
 - 前端采用 TypeScript、React、Vite；后端采用 Node.js、TypeScript；仓库采用 pnpm workspace。暂不使用 C#。
+- 插件默认通过 Git 仓库的远程 marketplace 安装；提供实际插件目录与可直接启动的运行资源，不默认制作 ZIP 安装包，也不要求最终用户先构建源码。
 - 界面支持明亮、暗色两套主题。MCP App 跟随宿主；Web 页面在没有可用宿主主题信号时跟随系统，并提供明亮／暗色／跟随系统选项。
 - 支持 MCP App（Widget）和 Web 两种界面形式。MCP App 可按需提供 Global、Thread、File 入口及 inline／fullscreen 呈现；Web 默认在 Codex 内置浏览器打开。
 - 每个插件按需求选择形式和扩展点，不要求提供所有入口。多个入口共享业务逻辑、数据契约和适合复用的组件。
@@ -25,7 +26,7 @@ description: "在 CodexWorkbench 仓库中规划、开发或评审工作台插�
 - 选择语言、依赖、模块边界或目录：读 [技术栈与仓库结构](references/architecture.md)。
 - 选择入口、Agent 交互、文件处理、主题或宿主接入：读 [界面形式与扩展点选型](references/extensions.md)。
 - 制作插件原型或配置页面：查看 [Codex 官方实图与 Windows／macOS 对照](../../../docs/references/codex-plugin-ui/README.md)，再确定容器、平台和可设计区域。
-- 实现、检查、打包、跨平台验证或更新规范：读 [工程与交付约定](references/engineering.md)。
+- 实现、检查、商城分发、跨平台验证或更新规范：读 [工程与交付约定](references/engineering.md)。
 
 按需读取，不必每次加载全部参考。参考中的目录与命令是目标约定，使用前检查仓库实际状态；本 Skill 本身不代表这些基础设施已实现。
 
@@ -38,7 +39,7 @@ description: "在 CodexWorkbench 仓库中规划、开发或评审工作台插�
 3. 数据、界面状态与上下文分别属于全局、工作区、资源还是当前对话。
 4. 页面关闭、切换对话、Codex 退出后，工具和后台任务如何处理。
 5. 主题、宿主能力、平台依赖与数据写入有哪些实现约束。
-6. 如何从最终安装包验证 Windows、macOS 与所声明的入口。
+6. 如何从远程商城安装的插件验证 Windows、macOS 与所声明的入口。
 
 按任务复杂度缩减说明。已有约定能决定的细节直接采用默认值；影响用户工作方式、引入新的运行时或改变兼容边界时，再沟通取舍。
 

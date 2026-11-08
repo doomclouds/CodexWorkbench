@@ -2,7 +2,18 @@
 
 基于 Codex 桌面端的个人工作台插件集合，面向 Windows 和 macOS。通过可组合的本地工具、界面与工作流，逐步形成自己的工作环境。
 
-当前处于开发规范与仓库基础设施阶段，尚未提供可安装的业务插件。
+首个插件是 [文献库](plugins/agentero-library/README.md)：复用 Agentero CLI／MCP，在当前对话旁检索文献、阅读 PDF 和维护研究笔记。
+
+## 安装插件
+
+在 Codex 中添加远程商城 `https://github.com/doomclouds/CodexWorkbench`，然后安装“文献库”。也可以使用：
+
+```sh
+codex plugin marketplace add doomclouds/CodexWorkbench --ref main
+codex plugin add agentero-library@codex-workbench
+```
+
+插件随仓库提供预构建运行文件，无需下载 ZIP 或自行构建。运行需要 Node.js 24 与用户安装的 Agentero CLI v0.15.2；PDF 原生处理的依赖见插件说明。Windows 已完成隔离 CLI／MCP 和模拟宿主浏览器验证；macOS arm64 与真实 Codex 界面仍需实机验证。
 
 ## 开发方向
 
@@ -15,6 +26,7 @@
 | 跨平台 | Windows、macOS；普通 JS 共用实现，原生能力单独适配 |
 | 主题 | 明亮与暗色；宿主内跟随宿主，Web 无宿主信号时跟随系统 |
 | 组织方式 | pnpm workspace，每个插件独立交付，按实际需求提取共享代码 |
+| 安装与分发 | 远程 Git marketplace，用户添加商城后安装插件，无需下载 ZIP 或自行构建 |
 
 不是每个插件都需要界面或全部入口。业务功能在对应任务中选型，具体 SDK 版本与兼容性通过实际验证确定。
 
@@ -38,28 +50,31 @@
 pnpm install --frozen-lockfile
 pnpm test
 pnpm check
+pnpm build
 ```
 
-目前检查工具没有第三方运行依赖，也可以直接执行：
+`test` 包括仓库与插件测试，`check` 包括文本检查和 TypeScript 检查，`build` 更新商城所需运行文件。只检查仓库文本时，也可直接执行：
 
 ```sh
 node --test tooling/check-repository.test.mjs
 node tooling/check-repository.mjs
 ```
 
-检查覆盖仓库文本编码、换行、JSON、Markdown 本地链接与 Skill 基础结构。仅在向 GitHub 推送 Git 标签（tag）时，GitHub Actions 才在 Windows 和 macOS 上运行这些检查；普通分支推送和 Pull Request 不触发。仓库检查不代表尚未实现的业务插件已通过宿主验收。
+文本检查覆盖编码、换行、JSON、Markdown 本地链接与 Skill 基础结构。仅在推送 Git 标签（tag）时，GitHub Actions 才在 Windows 和 macOS 上运行测试、类型检查和运行文件一致性检查；普通分支推送和 Pull Request 不触发。自动检查不替代真实宿主验收。
 
 ## 当前目录
 
 ```text
 .agents/skills/     项目开发 Skill 及其参考
+.agents/plugins/    远程商城目录
 .github/           Issue／PR 模板与双平台 CI
+plugins/           插件源码、Skills 与可直接运行的资源
 tooling/           跨平台仓库检查工具
 AGENTS.md          开发 Agent 执行规则
 CONTRIBUTING.md    开发与提交流程
 ```
 
-后续按需求引入 `plugins/`、`packages/` 等目录，具体结构见项目 Skill。
+后续按真实复用需求提取 `packages/`，具体结构见项目 Skill。
 
 ## License
 
