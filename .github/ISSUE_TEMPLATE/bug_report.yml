@@ -1,0 +1,37 @@
+name: 问题反馈
+description: 报告可复现的问题
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 预期与实际行为
+      description: 说明涉及的插件、功能或仓库工具。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Windows
+        - macOS
+        - 两者均有
+        - 不适用
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: 相关版本
+      description: 按需填写系统、Codex、Node 或插件版本。
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志或截图
+      description: 提交前移除密钥和无关的个人信息。

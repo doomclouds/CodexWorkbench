@@ -1,0 +1,21 @@
+name: 功能建议
+description: 描述希望完成的工作及使用场景
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: 希望完成什么工作
+      description: 描述使用者、场景和当前遇到的问题。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: 可选方案或参考
+      description: 可以提供参考链接、入口偏好或其他约束，尚未确定也可以留空。

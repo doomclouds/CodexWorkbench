@@ -1,0 +1,31 @@
+# Dependencies and generated output
+node_modules/
+.pnpm-store/
+dist/
+build/
+coverage/
+artifacts/
+*.tsbuildinfo
+
+# Local state, configuration and credentials
+.codegraph/
+.cache/
+.local/
+.data/
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+*.log
+
+# Editors and operating systems
+.idea/
+.vs/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
