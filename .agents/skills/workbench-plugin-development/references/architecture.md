@@ -101,6 +101,25 @@ plugins/<plugin-id>/
 
 ## 数据归属
 
+插件默认数据根目录为 `~/.codexworkbench/<plugin-id>/`，其中 `~` 表示当前用户主目录。使用稳定插件 ID，不随展示名称或界面语言变化。Windows 与 macOS 都通过系统提供的用户主目录和路径 API 定位，不硬编码用户名。
+
+文献插件的建议布局如下，目录按实际需要创建：
+
+```text
+~/.codexworkbench/agentero-library/
+├─ config.json               # 插件配置、CLI 路径、当前 Vault 等
+├─ state/                    # 按可用对话／实例标识隔离的视图与草稿状态
+├─ cache/                    # 可重建的缩略图等
+├─ logs/                     # 运行诊断
+└─ vault/                    # 默认 Agentero Vault
+   ├─ papers/
+   ├─ notes/
+   ├─ data/
+   └─ .agentero/             # 上游管理的目录、catalog.sqlite 等
+```
+
+Vault 的完整结构由 Agentero CLI 创建和维护，以上只列主要目录。用户可以配置已有的外部 Vault；插件保存引用并显式传递路径，不静默迁移或复制现有内容。用户自行安装的 CLI 保持原安装位置，插件配置保存可执行文件路径。
+
 每个插件定义用户内容、配置、运行状态与缓存的归属和存储方式。普通文件、JSON、SQLite 按业务选择，不要求所有插件使用同一种存储。
 
 必须区分可重建索引与需要保留的原始数据；不能笼统把 SQLite 文件都当缓存删除。描述备份、导出、格式升级与失败恢复方式。

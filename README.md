@@ -24,6 +24,7 @@
 - [项目开发 Skill](.agents/skills/workbench-plugin-development/SKILL.md)
 - [技术栈、模块边界与目录约定](.agents/skills/workbench-plugin-development/references/architecture.md)
 - [界面形式与扩展点选型](.agents/skills/workbench-plugin-development/references/extensions.md)
+- [Codex 官方界面与 Windows／macOS 可视化参考](docs/references/codex-plugin-ui/README.md)
 - [工程、检查与交付约定](.agents/skills/workbench-plugin-development/references/engineering.md)
 - [贡献流程](CONTRIBUTING.md)
 
@@ -62,4 +63,4 @@ CONTRIBUTING.md    开发与提交流程
 
 ## License
 
-本项目采用 [MIT License](LICENSE)。
+本项目自有内容采用 [MIT License](LICENSE)。保留的上游参考素材及其来源见 [第三方声明](THIRD_PARTY_NOTICES.md)。
