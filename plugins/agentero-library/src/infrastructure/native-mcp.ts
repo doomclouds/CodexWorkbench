@@ -4,6 +4,7 @@ import { realpath } from 'node:fs/promises';
 import { normalize } from 'node:path';
 import type { NativeBackend, NativeContext } from '../contracts/types.js';
 import { LibraryError } from '../contracts/errors.js';
+import { PLUGIN_VERSION } from '../contracts/version.js';
 import { cliEnvironment, spawnOwned, stopOwnedProcess } from './cli.js';
 
 async function freePort(): Promise<number> {
@@ -48,7 +49,7 @@ export async function createNativeBackend(context: NativeContext): Promise<Nativ
     if (context.signal?.aborted) throw new LibraryError('SERVICE_CLOSED', '连接已取消。');
     const child = spawnOwned(context.settings.cliPath, args, environment);
     let stderr = '';
-    const client = new Client({ name: 'codex-workbench-agentero-library', version: '0.1.0' }, { capabilities: {} });
+    const client = new Client({ name: 'codex-workbench-agentero-library', version: PLUGIN_VERSION }, { capabilities: {} });
     let closed = false;
     let closing: Promise<void> | undefined;
     const abort = () => { void close(); };

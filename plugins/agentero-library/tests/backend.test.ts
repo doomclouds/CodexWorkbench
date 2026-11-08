@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -97,7 +97,7 @@ async function fixture(options: { papers?: number; nativeFactory?: (vault: strin
   const cli = new FakeCli();
   cli.papers = Array.from({ length: options.papers ?? 1 }, (_, index) => ({ id: `p${index + 1}`, path: `papers/p${index + 1}`, title: `Paper ${String(index + 1).padStart(3, '0')}`, authors: ['Author'], tags: ['Agent'], isRead: false, year: 2020 + index % 6 }));
   const natives: FakeNative[] = [];
-  const service = new LibraryService({ dataRoot, cliRunner: cli, nativeFactory: async () => { const native = options.nativeFactory?.(vault, natives.length) ?? new FakeNative(vault); natives.push(native); return native; } });
+  const service = new LibraryService({ dataRoot, cliRunner: cli, nativeFactory: async context => { const native = options.nativeFactory?.(context.vaultPath, natives.length) ?? new FakeNative(context.vaultPath); natives.push(native); return native; } });
   cleanups.push(() => service.close());
   const settings = await service.updateSettings({ cliPath: 'fake-agentero', vaultPath: vault });
   return { root, vault, dataRoot, cli, natives, service, vaultId: settings.vaultId! };
@@ -110,6 +110,142 @@ async function waitUntil(predicate: () => Promise<boolean> | boolean, millisecon
 }
 
 describe('library backend', () => {
+  it('observes another instance saving after the first read found no config', async () => {
+    const root = await temporary();
+    const dataRoot = join(root, 'shared-plugin');
+    const vault = join(root, 'Shared Vault');
+    await makeVault(vault);
+    const first = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    cleanups.push(() => first.close(), () => second.close());
+    expect((await first.readSettings()).vaultId).toBeNull();
+    const saved = await second.updateSettings({ cliPath: 'configured-cli', vaultPath: vault });
+    expect(await first.readSettings()).toEqual(saved);
+    const status = await first.status();
+    expect(status.ready).toBe(true);
+    expect(status.cli.path).toBe('configured-cli');
+    expect(status.vault.vaultId).toBe(saved.vaultId);
+    // A stale process saving the same path must not mint a second identity.
+    expect((await first.updateSettings({ vaultPath: saved.vaultPath })).vaultId).toBe(saved.vaultId);
+    expect((await second.readSettings()).vaultId).toBe(saved.vaultId);
+  });
+
+  it('invalidates native and snapshot/probe caches after external policy changes', async () => {
+    const { service, dataRoot, cli, vaultId, vault, natives } = await fixture();
+    const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    cleanups.push(() => second.close());
+    await writeFile(join(vault, 'notes', 'test.md'), 'Shared note');
+    await service.status();
+    await service.listPapers({ vaultId });
+    await service.readNote({ vaultId, path: 'notes/test.md' });
+    const firstNative = natives[0];
+    const versionCalls = cli.calls.filter(call => call.args.includes('--version')).length;
+    const parseCalls = cli.calls.filter(call => call.args.includes('parse')).length;
+    const lists = cli.calls.filter(call => call.args.includes('list')).length;
+    await second.updateSettings({ allowAgentPdfText: true });
+    expect((await service.readSettings()).allowAgentPdfText).toBe(true);
+    expect(firstNative.closed).toBe(true);
+    await service.status();
+    await service.listPapers({ vaultId });
+    expect(cli.calls.filter(call => call.args.includes('--version')).length).toBeGreaterThan(versionCalls);
+    expect(cli.calls.filter(call => call.args.includes('parse')).length).toBeGreaterThan(parseCalls);
+    expect(cli.calls.filter(call => call.args.includes('list')).length).toBe(lists + 1);
+    await service.readPaper({ vaultId, paperPath: 'papers/p1', source: 'pdf' });
+    expect(natives).toHaveLength(2);
+    await second.updateSettings({ allowAgentPdfText: false });
+    await expect(service.readPaper({ vaultId, paperPath: 'papers/p1', source: 'pdf' })).rejects.toMatchObject({ code: 'TEXT_ACCESS_DISABLED' });
+    expect(natives[1].closed).toBe(true);
+    expect((await service.readNote({ vaultId, path: 'notes/test.md' })).content).toBe('Shared note');
+    expect(natives).toHaveLength(3);
+  });
+
+  it('rejects old references and rebuilds its own native backend for an externally selected Vault', async () => {
+    const { service, dataRoot, root, vaultId, vault, natives } = await fixture();
+    const secondVault = join(root, 'Another Vault');
+    await makeVault(secondVault);
+    await writeFile(join(vault, 'notes', 'same.md'), 'Old Vault');
+    await writeFile(join(secondVault, 'notes', 'same.md'), 'New Vault');
+    const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    cleanups.push(() => second.close());
+    expect((await service.readNote({ vaultId, path: 'notes/same.md' })).content).toBe('Old Vault');
+    const next = await second.updateSettings({ vaultPath: secondVault });
+    await expect(service.readNote({ vaultId, path: 'notes/same.md' })).rejects.toMatchObject({ code: 'VAULT_CHANGED' });
+    expect(natives[0].closed).toBe(true);
+    expect((await service.readNote({ vaultId: next.vaultId!, path: 'notes/same.md' })).content).toBe('New Vault');
+    expect(natives).toHaveLength(2);
+    expect(natives[1].vault).toBe(await realpath(secondVault));
+    expect(natives[1].calls.every(call => call.args.vault === next.vaultPath)).toBe(true);
+  });
+
+  it('keeps an already running CLI operation pinned when another process switches Vault', async () => {
+    const { service, dataRoot, root, vaultId, vault, cli } = await fixture();
+    const secondVault = join(root, 'Next Vault'); await makeVault(secondVault);
+    const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    cleanups.push(() => second.close());
+    let request: CliRequest | undefined;
+    let finish!: (result: unknown) => void;
+    cli.operation = input => { request = input; return new Promise(resolve => { finish = resolve; }); };
+    const operation = await service.importPaper({ vaultId, text: '1706.03762' });
+    await waitUntil(() => !!request);
+    const next = await second.updateSettings({ vaultPath: secondVault });
+    expect((await service.readSettings()).vaultId).toBe(next.vaultId);
+    expect(request!.args[request!.args.indexOf('--vault') + 1]).toBe(await realpath(vault));
+    expect(request!.signal!.aborted).toBe(false);
+    finish({ path: 'papers/old-target' });
+    await waitUntil(async () => (await service.getOperation({ operationId: operation.operationId })).status === 'succeeded');
+    const finished = await service.getOperation({ operationId: operation.operationId });
+    expect(finished.vaultId).toBe(vaultId);
+    expect(cli.calls.filter(call => call.signal && call.args.includes('import'))).toHaveLength(1);
+    await expect(service.listPapers({ vaultId })).rejects.toMatchObject({ code: 'VAULT_CHANGED' });
+  });
+
+  it('preserves queued drafts instead of retrying a write after an external switch', async () => {
+    const { service, dataRoot, root, vaultId, vault, natives } = await fixture();
+    const secondVault = join(root, 'New Draft Vault'); await makeVault(secondVault);
+    await writeFile(join(vault, 'notes', 'queued.md'), 'Original');
+    await writeFile(join(secondVault, 'notes', 'queued.md'), 'Unchanged new Vault');
+    const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    cleanups.push(() => second.close());
+    const note = await service.readNote({ vaultId, path: 'notes/queued.md' });
+    let writing = false;
+    let release!: () => void;
+    natives[0].beforeWrite = () => { writing = true; return new Promise(resolve => { release = resolve; }); };
+    const first = service.writeNote({ vaultId, path: note.path, revision: note.revision, content: 'First draft' }).catch(error => error);
+    await waitUntil(() => writing);
+    const queued = service.writeNote({ vaultId, path: note.path, revision: note.revision, content: 'Queued draft' }).catch(error => error);
+    await second.updateSettings({ vaultPath: secondVault });
+    await service.readSettings();
+    release();
+    expect(await first).toBeInstanceOf(LibraryError);
+    expect(await queued).toMatchObject({ code: 'VAULT_CHANGED' });
+    expect(natives).toHaveLength(1);
+    expect(await readFile(join(vault, 'notes', 'queued.md'), 'utf8')).toBe('Original');
+    expect(await readFile(join(secondVault, 'notes', 'queued.md'), 'utf8')).toBe('Unchanged new Vault');
+    expect((await readdir(join(dataRoot, 'state', 'drafts'))).some(name => name.endsWith('.draft.json'))).toBe(true);
+  });
+
+  it('waits for a connection already being closed by a disk refresh during shutdown', async () => {
+    const { service, dataRoot, root, vaultId, natives } = await fixture();
+    const secondVault = join(root, 'Shutdown Vault'); await makeVault(secondVault);
+    const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
+    cleanups.push(() => second.close());
+    await service.listNotes({ vaultId });
+    let closing = false;
+    let release!: () => void;
+    natives[0].close = () => { natives[0].closed = true; closing = true; return new Promise(resolve => { release = resolve; }); };
+    await second.updateSettings({ vaultPath: secondVault });
+    const refreshing = service.readSettings();
+    await waitUntil(() => closing);
+    let stopped = false;
+    const stopping = service.close().then(() => { stopped = true; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(stopped).toBe(false);
+    release();
+    await Promise.all([refreshing, stopping]);
+    await expect(service.listNotes({ vaultId })).rejects.toMatchObject({ code: 'SERVICE_CLOSED' });
+    expect(natives).toHaveLength(1);
+  });
+
   it('does not create a default Vault on startup or turn a missing path into one', async () => {
     const root = await temporary();
     const dataRoot = join(root, 'data');

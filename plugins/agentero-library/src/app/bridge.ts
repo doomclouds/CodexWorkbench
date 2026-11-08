@@ -1,5 +1,6 @@
 import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
+import { PLUGIN_VERSION } from '../contracts/version';
 
 export interface HostState {
   connected: boolean;
@@ -14,7 +15,7 @@ export interface HostState {
 }
 
 const embedded = window.parent !== window;
-const app = new App({ name: 'Agentero Library', version: '0.1.0' }, {}, { autoResize: false });
+const app = new App({ name: 'Agentero Library', version: PLUGIN_VERSION }, {}, { autoResize: false });
 const extensions = new OpenAIExtensions(app);
 const listeners = new Set<(state: HostState) => void>();
 const beforeTeardown = new Set<() => Promise<void>>();
