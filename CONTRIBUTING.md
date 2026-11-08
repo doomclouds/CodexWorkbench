@@ -14,9 +14,10 @@ cd CodexWorkbench
 pnpm install --frozen-lockfile
 pnpm test
 pnpm check
+pnpm build
 ```
 
-当前没有业务插件，不需要 API Key 或模型配置即可运行这些检查。
+日常测试使用隔离数据，不需要 API Key 或模型配置。真实文献工作流还需用户安装 Agentero CLI，原生 PDF 能力单独诊断。
 
 ## 修改流程
 
@@ -26,11 +27,11 @@ pnpm check
 4. 查看 `git diff`、暂存内容和生成产物，确认不包含本机配置、凭据或用户内容。
 5. 创建内容相关的提交，通过 Pull Request 说明行为变化和验证结果。
 
-新插件按实际需要建立，使用中的依赖、资源和公开契约在插件目录中声明。引入业务运行代码时，再添加相应构建、测试和打包流程。
+新插件按实际需要建立，依赖、资源和公开契约在插件目录中声明。默认经远程 Git marketplace 安装，开发者构建并提交必要运行资源，安装者无需构建源码。不默认增加 ZIP 安装包。
 
 ## 自动工作流
 
-GitHub Actions 仅在推送 Git 标签（tag）时触发；普通分支推送、Pull Request 和手动启动不触发。日常修改在本地运行检查。后续新增的自动构建、打包和发布流程同样使用 tag 触发。
+GitHub Actions 仅在推送 Git 标签（tag）时触发；普通分支推送、Pull Request 和手动启动不触发。日常修改在本地运行检查。后续新增的自动构建和发布流程同样使用 tag 触发。
 
 ## 提交说明
 

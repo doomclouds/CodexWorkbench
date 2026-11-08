@@ -1,0 +1,4 @@
+interface:
+  display_name: "文献库设置"
+  short_description: "检查文献插件的本机连接、知识库配置与 PDF 能力，定位缺失依赖"
+  default_prompt: "使用 $library-setup 检查文献库连接，并引导我完成需要的设置。"

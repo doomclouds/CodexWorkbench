@@ -11,3 +11,7 @@
 *.pdf binary
 *.zip binary
 *.wasm binary
+
+# Generated bundles preserve whitespace in upstream strings and PDF fixtures.
+plugins/*/runtime/** linguist-generated=true -whitespace
+plugins/*/assets/licenses/packages/** linguist-vendored=true

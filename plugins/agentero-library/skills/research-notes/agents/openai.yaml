@@ -1,0 +1,4 @@
+interface:
+  display_name: "研究笔记"
+  short_description: "按明确要求整理或更新研究笔记，保留引用、已有内容并处理版本冲突"
+  default_prompt: "使用 $research-notes 把这轮讨论整理到阅读笔记，并保留参考文献。"

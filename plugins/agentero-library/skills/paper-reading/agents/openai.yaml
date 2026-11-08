@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文阅读"
+  short_description: "根据论文正文与选区证据解释方法、比较结论，并返回真实引用定位"
+  default_prompt: "使用 $paper-reading 解释当前论文的关键方法，并注明使用的原文位置。"

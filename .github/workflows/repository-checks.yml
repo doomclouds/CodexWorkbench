@@ -31,7 +31,15 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Test repository checker
-        run: node --test tooling/check-repository.test.mjs
-      - name: Check repository files
-        run: node tooling/check-repository.mjs
+      - name: Install pnpm
+        run: npm install --global pnpm@11.28.5
+      - name: Install development dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run tests
+        run: pnpm test
+      - name: Check repository and types
+        run: pnpm check
+      - name: Verify marketplace runtime matches source
+        run: |
+          pnpm build
+          git diff --exit-code -- plugins/agentero-library/runtime
