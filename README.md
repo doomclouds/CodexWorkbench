@@ -46,7 +46,7 @@ node --test tooling/check-repository.test.mjs
 node tooling/check-repository.mjs
 ```
 
-检查覆盖仓库文本编码、换行、JSON、Markdown 本地链接与 Skill 基础结构。GitHub Actions 在 Windows 和 macOS 上运行这些检查；它不代表尚未实现的业务插件已通过宿主验收。
+检查覆盖仓库文本编码、换行、JSON、Markdown 本地链接与 Skill 基础结构。仅在向 GitHub 推送 Git 标签（tag）时，GitHub Actions 才在 Windows 和 macOS 上运行这些检查；普通分支推送和 Pull Request 不触发。仓库检查不代表尚未实现的业务插件已通过宿主验收。
 
 ## 当前目录
 

@@ -2,8 +2,8 @@ name: Repository checks
 
 on:
   push:
-  pull_request:
-  workflow_dispatch:
+    tags:
+      - '**'
 
 permissions:
   contents: read
