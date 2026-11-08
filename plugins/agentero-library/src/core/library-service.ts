@@ -22,6 +22,7 @@ const MAX_PDF_CHUNK = 1024 * 1024;
 const activeStatuses = new Set(['queued', 'running', 'cancel_requested']);
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const strings = (value: unknown): string[] => Array.isArray(value) ? value.map(item => typeof item === 'string' ? item : String(record(item).name ?? '')).filter(Boolean) : [];
+const settingsKey = (settings: LibrarySettings) => JSON.stringify([settings.schemaVersion, settings.cliPath, settings.vaultPath, settings.pdfiumPath, settings.allowAgentPdfText, settings.vaultId]);
 
 export class LibraryService {
   readonly dataRoot: string;
@@ -29,7 +30,9 @@ export class LibraryService {
   private readonly runner: CliRunner;
   private readonly factory: NonNullable<LibraryServiceOptions['nativeFactory']>;
   private readonly snapshotTtl: number;
-  private settingsPromise?: Promise<LibrarySettings>;
+  private settingsSnapshot?: LibrarySettings;
+  private settingsReads: Promise<void> = Promise.resolve();
+  private settingsGeneration = 0;
   private settingsChain: Promise<unknown> = Promise.resolve();
   private native?: Promise<NativeBackend>;
   private nativeAbort?: AbortController;
@@ -49,8 +52,25 @@ export class LibraryService {
   }
 
   async readSettings(): Promise<LibrarySettings> {
-    this.settingsPromise ??= this.loadSettings();
-    return { ...await this.settingsPromise };
+    // Codex may launch separate MCP processes for plugin settings and Threads.
+    // Read the atomically replaced file instead of memoizing the first value.
+    const reading = this.settingsReads.then(async () => {
+      const next = await this.loadSettings();
+      const changed = this.settingsSnapshot && settingsKey(this.settingsSnapshot) !== settingsKey(next);
+      this.settingsSnapshot = next;
+      if (changed) {
+        this.settingsGeneration += 1;
+        this.snapshot = undefined;
+        this.cliProbe = undefined;
+        this.pdfProbe = undefined;
+        // Running CLI operations own their captured Vault/settings. Only the
+        // cached native connection belongs to this current configuration.
+        await this.closeNative();
+      }
+      return { ...next };
+    });
+    this.settingsReads = reading.then(() => undefined, () => undefined);
+    return reading;
   }
 
   private async loadSettings(): Promise<LibrarySettings> {
@@ -88,13 +108,16 @@ export class LibraryService {
         throw new LibraryError('VAULT_BUSY', '存在运行中的任务或保存操作，请完成或取消后再修改连接。');
       }
       next.vaultId = changed ? (next.vaultPath ? randomUUID() : null) : (next.vaultPath ? current.vaultId ?? randomUUID() : null);
+      // This catches changes observed before our atomic replace. It is an
+      // optimistic check, not a cross-process CAS or configuration lock.
+      if (settingsKey(await this.loadSettings()) !== settingsKey(current)) {
+        await this.readSettings();
+        throw new LibraryError('SETTINGS_CHANGED', '配置已被其他实例修改，请重新读取后再保存。', true);
+      }
       await atomicJson(join(this.dataRoot, 'config.json'), next);
-      await this.closeNative();
-      this.settingsPromise = Promise.resolve(next);
-      this.snapshot = undefined;
-      this.cliProbe = undefined;
-      this.pdfProbe = undefined;
-      return { ...next };
+      const saved = await this.readSettings();
+      if (settingsKey(saved) !== settingsKey(next)) throw new LibraryError('SETTINGS_CHANGED', '保存期间配置又被其他实例修改，请重新载入当前值。', true);
+      return saved;
     });
     this.settingsChain = task.catch(() => undefined);
     return task;
@@ -135,6 +158,7 @@ export class LibraryService {
   }
 
   private async probeCli(settings: LibrarySettings): Promise<LibraryStatus['cli']> {
+    const generation = this.settingsGeneration;
     if (this.cliProbe?.key === settings.cliPath && Date.now() - this.cliProbe.at < 10_000) return this.cliProbe.result;
     let result: LibraryStatus['cli'];
     try {
@@ -148,7 +172,7 @@ export class LibraryService {
       }
       result = { available: true, supported, path: settings.cliPath, version, ...(!supported ? { error: '首版已验证 Agentero 0.15.2，请使用该版本。' } : {}) };
     } catch (error) { result = { available: false, supported: false, path: settings.cliPath, version: null, error: asLibraryError(error).message }; }
-    this.cliProbe = { key: settings.cliPath, at: Date.now(), result };
+    if (generation === this.settingsGeneration && this.settingsSnapshot && settingsKey(settings) === settingsKey(this.settingsSnapshot)) this.cliProbe = { key: settings.cliPath, at: Date.now(), result };
     return result;
   }
 
@@ -159,6 +183,7 @@ export class LibraryService {
   }
 
   private async probePdf(settings: LibrarySettings): Promise<LibraryStatus['pdfium']> {
+    const generation = this.settingsGeneration;
     const key = `${settings.cliPath}\0${settings.pdfiumPath}`;
     if (this.pdfProbe?.key === key && Date.now() - this.pdfProbe.at < 60_000) return this.pdfProbe.result;
     let result: LibraryStatus['pdfium'];
@@ -175,7 +200,7 @@ export class LibraryService {
       await this.cli(settings, ['--json', '--vault', vault, 'paper', 'parse', path, '--force'], undefined, 30_000);
       result = { configured: !!settings.pdfiumPath, available: true, path: settings.pdfiumPath, diagnostic: '已使用隔离 PDF 验证原生解析。' };
     } catch (error) { result = { configured: !!settings.pdfiumPath, available: false, path: settings.pdfiumPath, diagnostic: asLibraryError(error).message }; }
-    this.pdfProbe = { key, at: Date.now(), result };
+    if (generation === this.settingsGeneration && this.settingsSnapshot && settingsKey(settings) === settingsKey(this.settingsSnapshot)) this.pdfProbe = { key, at: Date.now(), result };
     return result;
   }
 
@@ -212,7 +237,7 @@ export class LibraryService {
     this.ensureOpen();
     await this.requireCli(context.settings);
     this.ensureOpen();
-    if ((await this.readSettings()).vaultId !== context.id) throw new LibraryError('VAULT_CHANGED', '知识库已切换，请重新载入。');
+    this.assertCurrentContext(context, await this.readSettings());
     if (!this.native) {
       this.nativeAbort = new AbortController();
       const pending = this.factory({ settings: context.settings, dataRoot: this.dataRoot, vaultPath: context.path, signal: this.nativeAbort.signal }).catch(error => { if (this.native === pending) this.native = undefined; throw error; });
@@ -223,7 +248,12 @@ export class LibraryService {
 
   private async call(context: Context, name: string, args: Record<string, unknown>) {
     const backend = await this.backend(context);
-    try { return await backend.call(name, { ...args, vault: context.path }); }
+    try {
+      this.assertCurrentContext(context, await this.readSettings());
+      const output = await backend.call(name, { ...args, vault: context.path });
+      this.assertCurrentContext(context, await this.readSettings());
+      return output;
+    }
     catch (error) {
       if (error instanceof LibraryError && error.code === 'UPSTREAM_CLOSED') {
         const slot = this.native;
@@ -231,6 +261,14 @@ export class LibraryService {
       }
       throw error;
     }
+  }
+
+  private assertCurrentContext(context: Context, settings: LibrarySettings): void {
+    // Another serialized reader may already have adopted newer disk values
+    // while this caller was resuming from an older read promise.
+    settings = this.settingsSnapshot ?? settings;
+    if (settings.vaultId !== context.id || settings.vaultPath !== context.settings.vaultPath) throw new LibraryError('VAULT_CHANGED', '知识库已切换，请重新载入当前视图。');
+    if (settingsKey(settings) !== settingsKey(context.settings)) throw new LibraryError('SETTINGS_CHANGED', '连接或正文设置已改变，请重新读取后再操作。', true);
   }
 
   private normalizePaper(value: unknown): Paper {
@@ -257,6 +295,7 @@ export class LibraryService {
     if (input.refresh || !this.snapshot || this.snapshot.vaultId !== context.id || Date.now() - this.snapshot.createdAt > this.snapshotTtl) {
       const data = await this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'list', '--fields', 'authors,year,date,tags,is_read,publication,doi']);
       if (!Array.isArray(data)) throw new LibraryError('UPSTREAM_INVALID', 'CLI 文献列表格式无效。');
+      this.assertCurrentContext(context, await this.readSettings());
       this.snapshot = { id: randomUUID(), vaultId: context.id, createdAt: Date.now(), items: data.map(value => this.normalizePaper(value)) };
     }
     const snapshot = this.snapshot;
@@ -576,6 +615,9 @@ export class LibraryService {
     this.closed = true;
     for (const operation of this.operations.values()) if (activeStatuses.has(operation.public.status)) operation.controller.abort();
     await this.closeNative();
+    // A concurrent disk refresh may already own the previous connection's
+    // close promise after removing it from this.native. Wait for that owner.
+    await Promise.allSettled([this.settingsReads, this.settingsChain]);
     await this.runner.close?.();
     await Promise.allSettled([...this.operations.values()].map(operation => operation.done));
     await Promise.allSettled([...this.queues.values()]);

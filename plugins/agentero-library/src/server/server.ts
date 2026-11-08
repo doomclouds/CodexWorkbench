@@ -4,8 +4,9 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { z } from 'zod';
 import { LibraryService } from '../core/library-service.js';
+import { PLUGIN_VERSION } from '../contracts/version.js';
 
-const URI = 'ui://agentero-library/app/v0.1.0';
+const URI = `ui://agentero-library/app/v${PLUGIN_VERSION}`;
 const key = z.string().min(1).max(4096);
 const vault = { vaultId: key };
 const paper = { ...vault, paperPath: key };
@@ -22,7 +23,7 @@ function failure(error: unknown) {
 }
 
 export function createLibraryServer(service: LibraryService, options: { html?: string } = {}) {
-  const server = new McpServer({ name: 'agentero-library', version: '0.1.0', title: '文献库' }, {
+  const server = new McpServer({ name: 'agentero-library', version: PLUGIN_VERSION, title: '文献库' }, {
     capabilities: { experimental: { 'openai/settings': { readTool: 'settings_read', updateTool: 'settings_update' } } },
   });
   function tool(name: string, description: string, shape: z.ZodRawShape, run: (input: any) => Promise<unknown>, readOnly = true, appOnly = false) {

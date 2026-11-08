@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
@@ -24,6 +24,10 @@ async function connect() {
 
 test('unconfigured server exposes native settings and Thread app without requiring a CLI', async () => {
   const { client } = await connect();
+  const manifest = JSON.parse(await readFile(new URL('../plugin.json', import.meta.url), 'utf8'));
+  const packageInfo = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  expect(client.getServerVersion()?.version).toBe(manifest.version);
+  expect(manifest.version).toBe(packageInfo.version);
   expect(client.getServerCapabilities()?.experimental?.['openai/settings']).toEqual({ readTool: 'settings_read', updateTool: 'settings_update' });
   const { tools } = await client.listTools();
   const open = tools.find((tool) => tool.name === 'library_open');

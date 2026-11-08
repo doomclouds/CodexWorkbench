@@ -39031,6 +39031,11 @@ import { once } from "node:events";
 import { createServer } from "node:net";
 import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
+
+// src/contracts/version.ts
+var PLUGIN_VERSION = "0.1.1";
+
+// src/infrastructure/native-mcp.ts
 async function freePort() {
   const server2 = createServer();
   server2.listen(0, "127.0.0.1");
@@ -39080,7 +39085,7 @@ async function createNativeBackend(context) {
     if (context.signal?.aborted) throw new LibraryError("SERVICE_CLOSED", "\u8FDE\u63A5\u5DF2\u53D6\u6D88\u3002");
     const child = spawnOwned(context.settings.cliPath, args, environment);
     let stderr = "";
-    const client = new Client2({ name: "codex-workbench-agentero-library", version: "0.1.0" }, { capabilities: {} });
+    const client = new Client2({ name: "codex-workbench-agentero-library", version: PLUGIN_VERSION }, { capabilities: {} });
     let closed = false;
     let closing2;
     const abort = () => {
@@ -39202,13 +39207,16 @@ var MAX_PDF_CHUNK = 1024 * 1024;
 var activeStatuses = /* @__PURE__ */ new Set(["queued", "running", "cancel_requested"]);
 var record2 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
 var strings = (value) => Array.isArray(value) ? value.map((item) => typeof item === "string" ? item : String(record2(item).name ?? "")).filter(Boolean) : [];
+var settingsKey = (settings) => JSON.stringify([settings.schemaVersion, settings.cliPath, settings.vaultPath, settings.pdfiumPath, settings.allowAgentPdfText, settings.vaultId]);
 var LibraryService = class {
   dataRoot;
   instanceId = randomUUID2();
   runner;
   factory;
   snapshotTtl;
-  settingsPromise;
+  settingsSnapshot;
+  settingsReads = Promise.resolve();
+  settingsGeneration = 0;
   settingsChain = Promise.resolve();
   native;
   nativeAbort;
@@ -39226,8 +39234,21 @@ var LibraryService = class {
     this.snapshotTtl = options.snapshotTtlMs ?? 3e4;
   }
   async readSettings() {
-    this.settingsPromise ??= this.loadSettings();
-    return { ...await this.settingsPromise };
+    const reading = this.settingsReads.then(async () => {
+      const next = await this.loadSettings();
+      const changed = this.settingsSnapshot && settingsKey(this.settingsSnapshot) !== settingsKey(next);
+      this.settingsSnapshot = next;
+      if (changed) {
+        this.settingsGeneration += 1;
+        this.snapshot = void 0;
+        this.cliProbe = void 0;
+        this.pdfProbe = void 0;
+        await this.closeNative();
+      }
+      return { ...next };
+    });
+    this.settingsReads = reading.then(() => void 0, () => void 0);
+    return reading;
   }
   async loadSettings() {
     const value = await readJson(join3(this.dataRoot, "config.json"));
@@ -39263,13 +39284,14 @@ var LibraryService = class {
         throw new LibraryError("VAULT_BUSY", "\u5B58\u5728\u8FD0\u884C\u4E2D\u7684\u4EFB\u52A1\u6216\u4FDD\u5B58\u64CD\u4F5C\uFF0C\u8BF7\u5B8C\u6210\u6216\u53D6\u6D88\u540E\u518D\u4FEE\u6539\u8FDE\u63A5\u3002");
       }
       next.vaultId = changed ? next.vaultPath ? randomUUID2() : null : next.vaultPath ? current.vaultId ?? randomUUID2() : null;
+      if (settingsKey(await this.loadSettings()) !== settingsKey(current)) {
+        await this.readSettings();
+        throw new LibraryError("SETTINGS_CHANGED", "\u914D\u7F6E\u5DF2\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u4FDD\u5B58\u3002", true);
+      }
       await atomicJson(join3(this.dataRoot, "config.json"), next);
-      await this.closeNative();
-      this.settingsPromise = Promise.resolve(next);
-      this.snapshot = void 0;
-      this.cliProbe = void 0;
-      this.pdfProbe = void 0;
-      return { ...next };
+      const saved = await this.readSettings();
+      if (settingsKey(saved) !== settingsKey(next)) throw new LibraryError("SETTINGS_CHANGED", "\u4FDD\u5B58\u671F\u95F4\u914D\u7F6E\u53C8\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8F7D\u5165\u5F53\u524D\u503C\u3002", true);
+      return saved;
     });
     this.settingsChain = task.catch(() => void 0);
     return task;
@@ -39313,6 +39335,7 @@ var LibraryService = class {
     return envelope.data;
   }
   async probeCli(settings) {
+    const generation = this.settingsGeneration;
     if (this.cliProbe?.key === settings.cliPath && Date.now() - this.cliProbe.at < 1e4) return this.cliProbe.result;
     let result;
     try {
@@ -39329,7 +39352,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     } catch (error62) {
       result = { available: false, supported: false, path: settings.cliPath, version: null, error: asLibraryError(error62).message };
     }
-    this.cliProbe = { key: settings.cliPath, at: Date.now(), result };
+    if (generation === this.settingsGeneration && this.settingsSnapshot && settingsKey(settings) === settingsKey(this.settingsSnapshot)) this.cliProbe = { key: settings.cliPath, at: Date.now(), result };
     return result;
   }
   async requireCli(settings) {
@@ -39338,6 +39361,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (!cli.supported) throw new LibraryError("CLI_UNSUPPORTED", cli.error ?? "CLI \u7248\u672C\u4E0D\u53D7\u652F\u6301\u3002");
   }
   async probePdf(settings) {
+    const generation = this.settingsGeneration;
     const key2 = `${settings.cliPath}\0${settings.pdfiumPath}`;
     if (this.pdfProbe?.key === key2 && Date.now() - this.pdfProbe.at < 6e4) return this.pdfProbe.result;
     let result;
@@ -39356,7 +39380,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     } catch (error62) {
       result = { configured: !!settings.pdfiumPath, available: false, path: settings.pdfiumPath, diagnostic: asLibraryError(error62).message };
     }
-    this.pdfProbe = { key: key2, at: Date.now(), result };
+    if (generation === this.settingsGeneration && this.settingsSnapshot && settingsKey(settings) === settingsKey(this.settingsSnapshot)) this.pdfProbe = { key: key2, at: Date.now(), result };
     return result;
   }
   async status() {
@@ -39402,7 +39426,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     this.ensureOpen();
     await this.requireCli(context.settings);
     this.ensureOpen();
-    if ((await this.readSettings()).vaultId !== context.id) throw new LibraryError("VAULT_CHANGED", "\u77E5\u8BC6\u5E93\u5DF2\u5207\u6362\uFF0C\u8BF7\u91CD\u65B0\u8F7D\u5165\u3002");
+    this.assertCurrentContext(context, await this.readSettings());
     if (!this.native) {
       this.nativeAbort = new AbortController();
       const pending = this.factory({ settings: context.settings, dataRoot: this.dataRoot, vaultPath: context.path, signal: this.nativeAbort.signal }).catch((error62) => {
@@ -39416,7 +39440,10 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
   async call(context, name, args) {
     const backend = await this.backend(context);
     try {
-      return await backend.call(name, { ...args, vault: context.path });
+      this.assertCurrentContext(context, await this.readSettings());
+      const output2 = await backend.call(name, { ...args, vault: context.path });
+      this.assertCurrentContext(context, await this.readSettings());
+      return output2;
     } catch (error62) {
       if (error62 instanceof LibraryError && error62.code === "UPSTREAM_CLOSED") {
         const slot = this.native;
@@ -39424,6 +39451,10 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       }
       throw error62;
     }
+  }
+  assertCurrentContext(context, settings) {
+    if (settings.vaultId !== context.id || settings.vaultPath !== context.settings.vaultPath) throw new LibraryError("VAULT_CHANGED", "\u77E5\u8BC6\u5E93\u5DF2\u5207\u6362\uFF0C\u8BF7\u91CD\u65B0\u8F7D\u5165\u5F53\u524D\u89C6\u56FE\u3002");
+    if (settingsKey(settings) !== settingsKey(context.settings)) throw new LibraryError("SETTINGS_CHANGED", "\u8FDE\u63A5\u6216\u6B63\u6587\u8BBE\u7F6E\u5DF2\u6539\u53D8\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u64CD\u4F5C\u3002", true);
   }
   normalizePaper(value) {
     const item = record2(value);
@@ -39452,6 +39483,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (input2.refresh || !this.snapshot || this.snapshot.vaultId !== context.id || Date.now() - this.snapshot.createdAt > this.snapshotTtl) {
       const data = await this.cli(context.settings, ["--json", "--vault", context.path, "paper", "list", "--fields", "authors,year,date,tags,is_read,publication,doi"]);
       if (!Array.isArray(data)) throw new LibraryError("UPSTREAM_INVALID", "CLI \u6587\u732E\u5217\u8868\u683C\u5F0F\u65E0\u6548\u3002");
+      this.assertCurrentContext(context, await this.readSettings());
       this.snapshot = { id: randomUUID2(), vaultId: context.id, createdAt: Date.now(), items: data.map((value) => this.normalizePaper(value)) };
     }
     const snapshot = this.snapshot;
@@ -39790,6 +39822,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     this.closed = true;
     for (const operation2 of this.operations.values()) if (activeStatuses.has(operation2.public.status)) operation2.controller.abort();
     await this.closeNative();
+    await Promise.allSettled([this.settingsReads, this.settingsChain]);
     await this.runner.close?.();
     await Promise.allSettled([...this.operations.values()].map((operation2) => operation2.done));
     await Promise.allSettled([...this.queues.values()]);
@@ -41428,7 +41461,7 @@ var M = external_exports.object({ protocolVersion: external_exports.string().des
 var p = "text/html;profile=mcp-app";
 
 // src/server/server.ts
-var URI = "ui://agentero-library/app/v0.1.0";
+var URI = `ui://agentero-library/app/v${PLUGIN_VERSION}`;
 var key = external_exports.string().min(1).max(4096);
 var vault = { vaultId: key };
 var paper = { ...vault, paperPath: key };
@@ -41443,7 +41476,7 @@ function failure2(error62) {
   return { isError: true, content: [{ type: "text", text: detail.message }], structuredContent: { ok: false, error: detail } };
 }
 function createLibraryServer(service2, options = {}) {
-  const server2 = new McpServer({ name: "agentero-library", version: "0.1.0", title: "\u6587\u732E\u5E93" }, {
+  const server2 = new McpServer({ name: "agentero-library", version: PLUGIN_VERSION, title: "\u6587\u732E\u5E93" }, {
     capabilities: { experimental: { "openai/settings": { readTool: "settings_read", updateTool: "settings_update" } } }
   });
   function tool(name, description, shape, run, readOnly = true, appOnly = false) {
