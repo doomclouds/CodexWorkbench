@@ -1,17 +1,19 @@
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { execFileSync, spawn as spawnProcess, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { closeNativePickers, nativePickerLaunch, pickNativePath, validatePickerInput, validatePickerResult } from '../src/infrastructure/native-picker';
+import { cancelNativePicker, closeNativePickers, nativePickerLaunch, pickNativePath, validatePickerInput, validatePickerResult } from '../src/infrastructure/native-picker';
 import type { FilePickerInput } from '../src/contracts/picker';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   await closeNativePickers();
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+  vi.restoreAllMocks();
 });
 
 async function fixture() {
@@ -168,6 +170,86 @@ describe('selection and cancellation results', () => {
 });
 
 describe('owned helper process lifecycle', () => {
+  it('rejects malformed identities without starting or cancelling a helper', async () => {
+    const fake = executor();
+    await expect(cancelNativePicker('not-a-request')).rejects.toMatchObject({ code: 'PICKER_INVALID_INPUT' });
+    await expect(pickNativePath({ mode: 'open-file' }, { requestId: 'not-a-request', platform: 'win32', spawn: fake.spawn })).rejects.toMatchObject({ code: 'PICKER_INVALID_INPUT' });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('remembers a cancellation that arrives before the picker starts', async () => {
+    const requestId = randomUUID(); const fake = executor();
+    expect(await cancelNativePicker(requestId.toUpperCase())).toEqual({ requestId, closed: true });
+    await expect(pickNativePath({ mode: 'open-file' }, { requestId, platform: 'win32', spawn: fake.spawn })).rejects.toMatchObject({ code: 'PICKER_ABORTED' });
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('registers a request before asynchronous path preparation and suppresses its launch on cancel', async () => {
+    const requestId = randomUUID(); const fake = executor();
+    const outcome = pickNativePath({ mode: 'open-file' }, { requestId, platform: 'win32', spawn: fake.spawn }).catch(error => error);
+    expect(fake.calls).toHaveLength(0);
+    expect(await cancelNativePicker(requestId)).toEqual({ requestId, closed: true });
+    expect((await outcome).code).toBe('PICKER_ABORTED');
+    expect(fake.calls).toHaveLength(0);
+    const next = executor(child => child.respond({ cancelled: true, paths: [] }));
+    expect(await pickNativePath({ mode: 'open-file' }, { requestId: randomUUID(), platform: 'win32', spawn: next.spawn })).toEqual({ cancelled: true, paths: [] });
+  });
+
+  it('waits for the owned helper to close before acknowledging explicit cancellation', async () => {
+    const requestId = randomUUID(); const fake = executor();
+    const outcome = pickNativePath({ mode: 'open-file' }, { requestId, platform: 'win32', spawn: fake.spawn }).catch(error => error);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    const child = fake.calls[0].child;
+    vi.spyOn(child, 'kill').mockImplementation((signal = 'SIGTERM') => { child.killed = true; child.signalCode = signal; return true; });
+    let acknowledged = false;
+    const cancelling = cancelNativePicker(requestId).then(value => { acknowledged = true; return value; });
+    await vi.waitFor(() => expect(child.killed).toBe(true));
+    child.emit('error', new Error('A helper error does not prove that its process exited.'));
+    await Promise.resolve(); await Promise.resolve();
+    expect(acknowledged).toBe(false);
+    child.emit('close', null, 'SIGTERM');
+    expect(await cancelling).toEqual({ requestId, closed: true });
+    expect((await outcome).code).toBe('PICKER_ABORTED');
+    expect(fake.calls[1].args).toEqual(['/PID', String(child.pid), '/T', '/F']);
+  });
+
+  it('makes duplicate cancellation idempotent and never lets an old or unrelated ID close a new picker', async () => {
+    const oldId = randomUUID(); const requestId = randomUUID(); const fake = executor();
+    await cancelNativePicker(oldId);
+    const outcome = pickNativePath({ mode: 'open-file' }, { requestId, platform: 'darwin', spawn: fake.spawn }).catch(error => error);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    await expect(pickNativePath({ mode: 'open-file' }, { requestId, platform: 'darwin', spawn: fake.spawn })).rejects.toMatchObject({ code: 'PICKER_BUSY' });
+    await cancelNativePicker(oldId); await cancelNativePicker(randomUUID());
+    expect(fake.calls[0].child.killed).toBe(false);
+    const [one, two] = await Promise.all([cancelNativePicker(requestId), cancelNativePicker(requestId)]);
+    expect(one).toEqual({ requestId, closed: true }); expect(two).toEqual(one);
+    expect((await outcome).code).toBe('PICKER_ABORTED');
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].child.signalCode).toBe('SIGTERM');
+  });
+
+  it('bounds cancellation records without evicting unexpired IDs and expires them after five minutes', async () => {
+    vi.resetModules();
+    const isolated = await import('../src/infrastructure/native-picker');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const ids = Array.from({ length: 256 }, () => randomUUID());
+    for (const id of ids) await isolated.cancelNativePicker(id);
+    await expect(isolated.cancelNativePicker(randomUUID())).rejects.toMatchObject({ code: 'PICKER_BUSY' });
+    expect(await isolated.cancelNativePicker(ids[0])).toEqual({ requestId: ids[0], closed: true });
+    const fake = executor(child => child.respond({ cancelled: true, paths: [] }));
+    await expect(isolated.pickNativePath({ mode: 'open-file' }, { requestId: ids[0], platform: 'win32', spawn: fake.spawn })).rejects.toMatchObject({ code: 'PICKER_ABORTED' });
+    clock.mockReturnValue(301_001);
+    expect(await isolated.pickNativePath({ mode: 'open-file' }, { requestId: ids[0], platform: 'win32', spawn: fake.spawn })).toEqual({ cancelled: true, paths: [] });
+  });
+
+  it('cancels preparation as well as active dialogs when the server shuts down', async () => {
+    const fake = executor();
+    const outcome = pickNativePath({ mode: 'open-directory' }, { requestId: randomUUID(), platform: 'win32', spawn: fake.spawn }).catch(error => error);
+    await closeNativePickers();
+    expect((await outcome).code).toBe('PICKER_ABORTED');
+    expect(fake.calls).toHaveLength(0);
+  });
+
   it('times out and terminates only the PID tree created for its own dialog', async () => {
     const fake = executor();
     await expect(pickNativePath({ mode: 'open-file' }, { platform: 'win32', spawn: fake.spawn, timeoutMs: 100 })).rejects.toMatchObject({ code: 'PICKER_TIMEOUT' });
@@ -210,10 +292,17 @@ describe('owned helper process lifecycle', () => {
     expect(await pickNativePath({ mode: 'open-file' }, { platform: 'win32', spawn: fake.spawn })).toEqual({ cancelled: true, paths: [] });
   });
 
-  it.skipIf(process.platform !== 'win32')('aborts an owned real helper and its child without touching unrelated processes', async () => {
+  it.skipIf(process.platform !== 'win32').each(['signal', 'explicit'] as const)('cancels an owned real helper and its child through %s without touching unrelated processes', async mode => {
     const { root } = await fixture();
     const marker = join(root, 'owned-pids.json');
     const controller = new AbortController();
+    const requestId = randomUUID();
+    const unrelated = spawnProcess(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { windowsHide: true, stdio: 'ignore' });
+    cleanups.push(async () => {
+      if (unrelated.exitCode !== null || unrelated.signalCode !== null) return;
+      const closed = new Promise<void>(resolve => { unrelated.once('close', () => resolve()); });
+      unrelated.kill(); await closed;
+    });
     let helperPid: number | undefined;
     const helperScript = `const {spawn}=require('node:child_process');const fs=require('node:fs');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{windowsHide:true,stdio:'ignore'});fs.writeFileSync(${JSON.stringify(marker)},JSON.stringify({pid:process.pid,childPid:child.pid}));setInterval(()=>{},1000);`;
     const launch = (command: string, args: readonly string[], options: SpawnOptions) => {
@@ -224,10 +313,17 @@ describe('owned helper process lifecycle', () => {
       }
       return spawnProcess(command, args, options);
     };
-    const outcome = pickNativePath({ mode: 'open-file' }, { platform: 'win32', spawn: launch, signal: controller.signal, timeoutMs: 10_000 }).catch(error => error);
+    const outcome = pickNativePath({ mode: 'open-file' }, { requestId, platform: 'win32', spawn: launch, signal: controller.signal, timeoutMs: 10_000 }).catch(error => error);
     let pids!: { pid: number; childPid: number };
     await vi.waitFor(async () => { pids = JSON.parse(await readFile(marker, 'utf8')); expect(pids.pid).toBe(helperPid); }, { timeout: 5000 });
-    controller.abort(); expect((await outcome).code).toBe('PICKER_ABORTED');
+    if (mode === 'signal') controller.abort();
+    else expect(await cancelNativePicker(requestId)).toEqual({ requestId, closed: true });
+    expect((await outcome).code).toBe('PICKER_ABORTED');
+    expect(() => process.kill(unrelated.pid!, 0)).not.toThrow();
+    if (mode === 'explicit') {
+      expect(() => process.kill(pids.pid, 0)).toThrow();
+      expect(() => process.kill(pids.childPid, 0)).toThrow();
+    }
     await vi.waitFor(() => {
       expect(() => process.kill(pids.pid, 0)).toThrow();
       expect(() => process.kill(pids.childPid, 0)).toThrow();

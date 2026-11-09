@@ -8,6 +8,8 @@ const REQUEST_ENV = 'CODEXWORKBENCH_PICKER_REQUEST';
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+const CANCELLED_REQUEST_TTL_MS = 300_000;
+const MAX_REQUEST_RECORDS = 256;
 
 export class NativePickerError extends Error {
   constructor(public readonly code: string, message: string) { super(message); this.name = 'NativePickerError'; }
@@ -15,6 +17,8 @@ export class NativePickerError extends Error {
 
 type SpawnPicker = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 export interface NativePickerOptions {
+  /** App-generated identity for explicit cancellation across the host bridge. */
+  requestId?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Injection points for platform/process contract tests; not MCP input fields. */
@@ -24,9 +28,38 @@ export interface NativePickerOptions {
 
 interface PreparedPicker extends FilePickerInput { initialDirectory: string; fileName: string }
 interface ActivePicker { stop(error: NativePickerError): void; completed: Promise<void> }
+interface RequestRecord { job?: ActivePicker; expiresAt?: number }
 const active = new Set<ActivePicker>();
+const requests = new Map<string, RequestRecord>();
 let reserved = false;
 let generation = 0;
+
+function validateRequestId(value: string): string {
+  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new NativePickerError('PICKER_INVALID_INPUT', '选择器请求标识不正确。');
+  return value.toLowerCase();
+}
+
+function pruneRequests() {
+  const now = Date.now();
+  for (const [id, record] of requests) if (!record.job && record.expiresAt !== undefined && record.expiresAt <= now) requests.delete(id);
+}
+
+/** Acknowledge only after this request's owned helper has exited, or prevent a delayed start. */
+export async function cancelNativePicker(value: string): Promise<{ requestId: string; closed: true }> {
+  const requestId = validateRequestId(value);
+  pruneRequests();
+  let record = requests.get(requestId);
+  if (!record) {
+    if (requests.size >= MAX_REQUEST_RECORDS) throw new NativePickerError('PICKER_BUSY', '选择器取消记录已满，请稍后重试。');
+    record = {};
+    requests.set(requestId, record);
+  }
+  record.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
+  const job = record.job;
+  job?.stop(new NativePickerError('PICKER_ABORTED', '已取消选择。'));
+  await job?.completed;
+  return { requestId, closed: true };
+}
 
 // Static scripts receive user data through JSON in the child environment, never shell text.
 const WINDOWS_SCRIPT = String.raw`
@@ -204,28 +237,42 @@ export async function validatePickerResult(value: unknown, input: FilePickerInpu
 
 export async function pickNativePath(input: FilePickerInput, options: NativePickerOptions = {}): Promise<FilePickerResult> {
   const request = validatePickerInput(input);
+  const requestId = options.requestId === undefined ? undefined : validateRequestId(options.requestId);
   const platform = options.platform ?? process.platform;
   const launch = nativePickerLaunch(platform);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) throw new NativePickerError('PICKER_INVALID_INPUT', '选择器等待时间不正确。');
   if (options.signal?.aborted) throw new NativePickerError('PICKER_ABORTED', '已取消选择。');
+  pruneRequests();
+  if (requestId && requests.get(requestId)?.expiresAt !== undefined) throw new NativePickerError('PICKER_ABORTED', '已取消选择。');
+  if (requestId && requests.has(requestId)) throw new NativePickerError('PICKER_BUSY', '该选择器请求仍在处理中。');
   if (reserved) throw new NativePickerError('PICKER_BUSY', '已有一个系统选择器打开，请先完成或取消。');
+  if (requestId && requests.size >= MAX_REQUEST_RECORDS) throw new NativePickerError('PICKER_BUSY', '选择器取消记录已满，请稍后重试。');
   reserved = true;
   const capturedGeneration = generation;
   const spawn = options.spawn ?? spawnProcess;
-  let job: ActivePicker | undefined;
+  let stopped: NativePickerError | undefined;
+  let stopChild: (() => void) | undefined;
+  let childClosed: Promise<void> | undefined;
+  let completed!: () => void;
+  const completion = new Promise<void>(resolve => { completed = resolve; });
+  const job: ActivePicker = { stop(error) { stopped ??= error; stopChild?.(); }, completed: completion };
+  const record: RequestRecord = { job };
+  active.add(job);
+  if (requestId) requests.set(requestId, record);
+  const abort = () => job.stop(new NativePickerError('PICKER_ABORTED', '已取消选择。'));
+  options.signal?.addEventListener('abort', abort, { once: true });
   try {
     const prepared = await prepare(request);
+    if (stopped) throw stopped;
     if (capturedGeneration !== generation || options.signal?.aborted) throw new NativePickerError('PICKER_ABORTED', '已取消选择。');
     let child: ChildProcess;
     try {
       child = spawn(launch.command, launch.args, { cwd: prepared.initialDirectory, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, [REQUEST_ENV]: JSON.stringify(prepared) } });
     } catch { throw new NativePickerError('PICKER_UNAVAILABLE', '无法启动系统选择器，请检查系统组件是否可用。'); }
-    let completed!: () => void;
-    const completion = new Promise<void>(resolve => { completed = resolve; });
-    let stopped: NativePickerError | undefined;
     let terminate: Promise<void> | undefined;
-    const closed = new Promise<void>(resolve => { child.once('close', () => resolve()); child.once('error', () => resolve()); });
+    // An error (for example a failed kill) is not proof that an existing helper exited.
+    const closed = childClosed = new Promise<void>(resolve => { child.once('close', () => resolve()); });
     async function stopProcess() {
       terminate ??= (async () => {
         if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
@@ -251,28 +298,36 @@ export async function pickNativePath(input: FilePickerInput, options: NativePick
       const finish = (error?: unknown, result?: FilePickerResult) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer); options.signal?.removeEventListener('abort', abort);
-        completed(); error ? reject(error) : resolve(result!);
+        clearTimeout(timer);
+        error ? reject(error) : resolve(result!);
       };
-      const stop = (error: NativePickerError) => { stopped ??= error; void stopProcess().then(() => finish(stopped), () => finish(stopped)); };
-      const abort = () => stop(new NativePickerError('PICKER_ABORTED', '已取消选择。'));
-      const timer = setTimeout(() => stop(new NativePickerError('PICKER_TIMEOUT', '系统选择器等待超时，已关闭；请重新选择。')), timeoutMs);
-      job = { stop, completed: completion }; active.add(job);
-      options.signal?.addEventListener('abort', abort, { once: true });
+      stopChild = () => { void stopProcess().then(() => finish(stopped), () => finish(stopped)); };
+      const timer = setTimeout(() => job.stop(new NativePickerError('PICKER_TIMEOUT', '系统选择器等待超时，已关闭；请重新选择。')), timeoutMs);
       if (options.signal?.aborted) abort();
       child.stdout?.setEncoding('utf8');
-      child.stdout?.on('data', (chunk: string) => { outputBytes += Buffer.byteLength(chunk); if (outputBytes > MAX_OUTPUT_BYTES) stop(new NativePickerError('PICKER_FAILED', '系统选择器返回的数据过大。')); else output += chunk; });
+      child.stdout?.on('data', (chunk: string) => { outputBytes += Buffer.byteLength(chunk); if (outputBytes > MAX_OUTPUT_BYTES) job.stop(new NativePickerError('PICKER_FAILED', '系统选择器返回的数据过大。')); else output += chunk; });
       child.stderr?.on('data', () => { /* Native diagnostics are not leaked into model/tool results. */ });
-      child.once('error', () => finish(new NativePickerError('PICKER_UNAVAILABLE', '无法启动系统选择器，请检查系统组件是否可用。')));
+      child.on('error', () => { if (!stopped) finish(new NativePickerError('PICKER_UNAVAILABLE', '无法启动系统选择器，请检查系统组件是否可用。')); });
       child.once('close', code => {
-        if (stopped) { finish(stopped); return; }
+        // stopChild awaits the owned tree terminator as well as the dialog's close.
+        if (stopped) return;
         if (code !== 0) { finish(new NativePickerError('PICKER_FAILED', '系统选择器未能完成，请确认桌面可用并重试。')); return; }
         let parsed: unknown;
         try { parsed = JSON.parse(output.replace(/^\uFEFF/, '').trim()); } catch { finish(new NativePickerError('PICKER_FAILED', '系统选择器返回格式不正确。')); return; }
         void validatePickerResult(parsed, request).then(result => finish(stopped, result), finish);
       });
     });
-  } finally { if (job) active.delete(job); reserved = false; }
+  } finally {
+    await childClosed;
+    options.signal?.removeEventListener('abort', abort);
+    active.delete(job);
+    if (requestId) {
+      if (record.expiresAt !== undefined) { record.job = undefined; record.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS; }
+      else requests.delete(requestId);
+    }
+    reserved = false;
+    completed();
+  }
 }
 
 export async function closeNativePickers(): Promise<void> {

@@ -20,3 +20,14 @@ export interface FilePickerResult {
   /** Absolute local paths selected by the user. Empty when cancelled. */
   paths: string[];
 }
+
+/** A fresh, App-owned UUID identifies a chooser across the host's two RPC hops. */
+export interface FilePickerRequest extends FilePickerInput {
+  requestId: string;
+}
+
+export interface FilePickerCancelResult {
+  requestId: string;
+  /** No helper for this request remains; a not-yet-started request is suppressed. */
+  closed: true;
+}

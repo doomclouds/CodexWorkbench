@@ -5,7 +5,7 @@ import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { z } from 'zod';
 import { LibraryService } from '../core/library-service.js';
 import { PLUGIN_VERSION } from '../contracts/version.js';
-import { pickNativePath, closeNativePickers } from '../infrastructure/native-picker.js';
+import { pickNativePath, cancelNativePicker, closeNativePickers } from '../infrastructure/native-picker.js';
 import { TranslationProvider } from '../infrastructure/translation-provider.js';
 
 const URI = `ui://agentero-library/app/v${PLUGIN_VERSION}`;
@@ -101,7 +101,9 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
   tool('paper_download', '为已入库的文献补下载可用PDF／TeX资源，返回实际资源结果。', paper, input => service.downloadPaper(input), false);
   tool('bibliography_import', '导入用户指定的BibTeX文本或本机文件，结果按实际上游返回。', { ...vault, text: z.string().max(2 * 1024 * 1024).optional(), filePath: key.optional() }, input => service.importBibliography(input), false);
   privatePayload('bibliography_export', '导出文献库BibTeX到用户选择的位置，App可获得文本，模型只获得文件摘要。', { ...vault, filePath: key.optional() }, 'export', input => service.exportBibliography(input), false, false);
-  privatePayload('file_picker', '打开系统文件、文件夹或保存位置选择器，取消不会修改配置。', { mode: z.enum(['open-file', 'open-directory', 'save-file']), title: z.string().max(160).optional(), defaultPath: z.string().max(4096).optional(), multiple: z.boolean().optional(), filters: z.array(z.object({ name: z.string().max(80), extensions: z.array(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_+-]{0,19}$/)).min(1).max(20) })).max(12).optional() }, 'picker', (input, signal) => pickNativePath(input, { signal }), true);
+  const pickerRequestId = z.string().uuid();
+  privatePayload('file_picker', '打开系统文件、文件夹或保存位置选择器，取消不会修改配置。requestId为当前App生成的唯一UUID。', { requestId: pickerRequestId, mode: z.enum(['open-file', 'open-directory', 'save-file']), title: z.string().max(160).optional(), defaultPath: z.string().max(4096).optional(), multiple: z.boolean().optional(), filters: z.array(z.object({ name: z.string().max(80), extensions: z.array(z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_+-]{0,19}$/)).min(1).max(20) })).max(12).optional() }, 'picker', ({ requestId, ...input }, signal) => pickNativePath(input, { signal, requestId }), true);
+  tool('file_picker_cancel', '取消当前App拥有的系统选择器。返回前等待该请求的对话进程退出；提前取消会阻止5分钟内的延迟请求打开，不写用户文件。', { requestId: pickerRequestId }, input => cancelNativePicker(input.requestId), true, true);
 
   const fields = {
     cliPath: { type: 'string', title: 'Agentero CLI 路径', description: '自行安装的 agentero 可执行文件；留空时从 PATH 查找。' },

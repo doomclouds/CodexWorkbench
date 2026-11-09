@@ -36320,13 +36320,13 @@ var init_client = __esm({
 });
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1_ce399f1e4e31d6809a54d35f78d374fe/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
-function assertToolsCallTaskCapability(requests, method, entityName) {
-  if (!requests) {
+function assertToolsCallTaskCapability(requests2, method, entityName) {
+  if (!requests2) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
   }
   switch (method) {
     case "tools/call":
-      if (!requests.tools?.call) {
+      if (!requests2.tools?.call) {
         throw new Error(`${entityName} does not support task creation for tools/call (required for ${method})`);
       }
       break;
@@ -36334,18 +36334,18 @@ function assertToolsCallTaskCapability(requests, method, entityName) {
       break;
   }
 }
-function assertClientRequestTaskCapability(requests, method, entityName) {
-  if (!requests) {
+function assertClientRequestTaskCapability(requests2, method, entityName) {
+  if (!requests2) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
   }
   switch (method) {
     case "sampling/createMessage":
-      if (!requests.sampling?.createMessage) {
+      if (!requests2.sampling?.createMessage) {
         throw new Error(`${entityName} does not support task creation for sampling/createMessage (required for ${method})`);
       }
       break;
     case "elicitation/create":
-      if (!requests.elicitation?.create) {
+      if (!requests2.elicitation?.create) {
         throw new Error(`${entityName} does not support task creation for elicitation/create (required for ${method})`);
       }
       break;
@@ -61015,7 +61015,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.2.0";
+var PLUGIN_VERSION = "0.2.1";
 
 // src/infrastructure/native-mcp.ts
 async function freePort() {
@@ -64097,6 +64097,8 @@ var REQUEST_ENV = "CODEXWORKBENCH_PICKER_REQUEST";
 var DEFAULT_TIMEOUT_MS = 12e4;
 var MAX_TIMEOUT_MS = 3e5;
 var MAX_OUTPUT_BYTES = 1024 * 1024;
+var CANCELLED_REQUEST_TTL_MS = 3e5;
+var MAX_REQUEST_RECORDS = 256;
 var NativePickerError = class extends Error {
   constructor(code, message) {
     super(message);
@@ -64106,8 +64108,32 @@ var NativePickerError = class extends Error {
   code;
 };
 var active = /* @__PURE__ */ new Set();
+var requests = /* @__PURE__ */ new Map();
 var reserved = false;
 var generation = 0;
+function validateRequestId(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new NativePickerError("PICKER_INVALID_INPUT", "\u9009\u62E9\u5668\u8BF7\u6C42\u6807\u8BC6\u4E0D\u6B63\u786E\u3002");
+  return value.toLowerCase();
+}
+function pruneRequests() {
+  const now = Date.now();
+  for (const [id, record3] of requests) if (!record3.job && record3.expiresAt !== void 0 && record3.expiresAt <= now) requests.delete(id);
+}
+async function cancelNativePicker(value) {
+  const requestId = validateRequestId(value);
+  pruneRequests();
+  let record3 = requests.get(requestId);
+  if (!record3) {
+    if (requests.size >= MAX_REQUEST_RECORDS) throw new NativePickerError("PICKER_BUSY", "\u9009\u62E9\u5668\u53D6\u6D88\u8BB0\u5F55\u5DF2\u6EE1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+    record3 = {};
+    requests.set(requestId, record3);
+  }
+  record3.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
+  const job = record3.job;
+  job?.stop(new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002"));
+  await job?.completed;
+  return { requestId, closed: true };
+}
 var WINDOWS_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -64293,18 +64319,39 @@ async function validatePickerResult(value, input2) {
 }
 async function pickNativePath(input2, options = {}) {
   const request = validatePickerInput(input2);
+  const requestId = options.requestId === void 0 ? void 0 : validateRequestId(options.requestId);
   const platform = options.platform ?? process.platform;
   const launch = nativePickerLaunch(platform);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMEOUT_MS) throw new NativePickerError("PICKER_INVALID_INPUT", "\u9009\u62E9\u5668\u7B49\u5F85\u65F6\u95F4\u4E0D\u6B63\u786E\u3002");
   if (options.signal?.aborted) throw new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002");
+  pruneRequests();
+  if (requestId && requests.get(requestId)?.expiresAt !== void 0) throw new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002");
+  if (requestId && requests.has(requestId)) throw new NativePickerError("PICKER_BUSY", "\u8BE5\u9009\u62E9\u5668\u8BF7\u6C42\u4ECD\u5728\u5904\u7406\u4E2D\u3002");
   if (reserved) throw new NativePickerError("PICKER_BUSY", "\u5DF2\u6709\u4E00\u4E2A\u7CFB\u7EDF\u9009\u62E9\u5668\u6253\u5F00\uFF0C\u8BF7\u5148\u5B8C\u6210\u6216\u53D6\u6D88\u3002");
+  if (requestId && requests.size >= MAX_REQUEST_RECORDS) throw new NativePickerError("PICKER_BUSY", "\u9009\u62E9\u5668\u53D6\u6D88\u8BB0\u5F55\u5DF2\u6EE1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
   reserved = true;
   const capturedGeneration = generation;
   const spawn2 = options.spawn ?? spawnProcess;
-  let job;
+  let stopped;
+  let stopChild;
+  let childClosed;
+  let completed;
+  const completion = new Promise((resolve4) => {
+    completed = resolve4;
+  });
+  const job = { stop(error62) {
+    stopped ??= error62;
+    stopChild?.();
+  }, completed: completion };
+  const record3 = { job };
+  active.add(job);
+  if (requestId) requests.set(requestId, record3);
+  const abort = () => job.stop(new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002"));
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
     const prepared = await prepare(request);
+    if (stopped) throw stopped;
     if (capturedGeneration !== generation || options.signal?.aborted) throw new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002");
     let child;
     try {
@@ -64312,15 +64359,9 @@ async function pickNativePath(input2, options = {}) {
     } catch {
       throw new NativePickerError("PICKER_UNAVAILABLE", "\u65E0\u6CD5\u542F\u52A8\u7CFB\u7EDF\u9009\u62E9\u5668\uFF0C\u8BF7\u68C0\u67E5\u7CFB\u7EDF\u7EC4\u4EF6\u662F\u5426\u53EF\u7528\u3002");
     }
-    let completed;
-    const completion = new Promise((resolve4) => {
-      completed = resolve4;
-    });
-    let stopped;
     let terminate;
-    const closed = new Promise((resolve4) => {
+    const closed = childClosed = new Promise((resolve4) => {
       child.once("close", () => resolve4());
-      child.once("error", () => resolve4());
     });
     async function stopProcess() {
       terminate ??= (async () => {
@@ -64366,34 +64407,26 @@ async function pickNativePath(input2, options = {}) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        options.signal?.removeEventListener("abort", abort);
-        completed();
         error62 ? reject(error62) : resolve4(result);
       };
-      const stop = (error62) => {
-        stopped ??= error62;
+      stopChild = () => {
         void stopProcess().then(() => finish(stopped), () => finish(stopped));
       };
-      const abort = () => stop(new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002"));
-      const timer = setTimeout(() => stop(new NativePickerError("PICKER_TIMEOUT", "\u7CFB\u7EDF\u9009\u62E9\u5668\u7B49\u5F85\u8D85\u65F6\uFF0C\u5DF2\u5173\u95ED\uFF1B\u8BF7\u91CD\u65B0\u9009\u62E9\u3002")), timeoutMs);
-      job = { stop, completed: completion };
-      active.add(job);
-      options.signal?.addEventListener("abort", abort, { once: true });
+      const timer = setTimeout(() => job.stop(new NativePickerError("PICKER_TIMEOUT", "\u7CFB\u7EDF\u9009\u62E9\u5668\u7B49\u5F85\u8D85\u65F6\uFF0C\u5DF2\u5173\u95ED\uFF1B\u8BF7\u91CD\u65B0\u9009\u62E9\u3002")), timeoutMs);
       if (options.signal?.aborted) abort();
       child.stdout?.setEncoding("utf8");
       child.stdout?.on("data", (chunk) => {
         outputBytes += Buffer.byteLength(chunk);
-        if (outputBytes > MAX_OUTPUT_BYTES) stop(new NativePickerError("PICKER_FAILED", "\u7CFB\u7EDF\u9009\u62E9\u5668\u8FD4\u56DE\u7684\u6570\u636E\u8FC7\u5927\u3002"));
+        if (outputBytes > MAX_OUTPUT_BYTES) job.stop(new NativePickerError("PICKER_FAILED", "\u7CFB\u7EDF\u9009\u62E9\u5668\u8FD4\u56DE\u7684\u6570\u636E\u8FC7\u5927\u3002"));
         else output2 += chunk;
       });
       child.stderr?.on("data", () => {
       });
-      child.once("error", () => finish(new NativePickerError("PICKER_UNAVAILABLE", "\u65E0\u6CD5\u542F\u52A8\u7CFB\u7EDF\u9009\u62E9\u5668\uFF0C\u8BF7\u68C0\u67E5\u7CFB\u7EDF\u7EC4\u4EF6\u662F\u5426\u53EF\u7528\u3002")));
+      child.on("error", () => {
+        if (!stopped) finish(new NativePickerError("PICKER_UNAVAILABLE", "\u65E0\u6CD5\u542F\u52A8\u7CFB\u7EDF\u9009\u62E9\u5668\uFF0C\u8BF7\u68C0\u67E5\u7CFB\u7EDF\u7EC4\u4EF6\u662F\u5426\u53EF\u7528\u3002"));
+      });
       child.once("close", (code) => {
-        if (stopped) {
-          finish(stopped);
-          return;
-        }
+        if (stopped) return;
         if (code !== 0) {
           finish(new NativePickerError("PICKER_FAILED", "\u7CFB\u7EDF\u9009\u62E9\u5668\u672A\u80FD\u5B8C\u6210\uFF0C\u8BF7\u786E\u8BA4\u684C\u9762\u53EF\u7528\u5E76\u91CD\u8BD5\u3002"));
           return;
@@ -64409,8 +64442,17 @@ async function pickNativePath(input2, options = {}) {
       });
     });
   } finally {
-    if (job) active.delete(job);
+    await childClosed;
+    options.signal?.removeEventListener("abort", abort);
+    active.delete(job);
+    if (requestId) {
+      if (record3.expiresAt !== void 0) {
+        record3.job = void 0;
+        record3.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
+      } else requests.delete(requestId);
+    }
     reserved = false;
+    completed();
   }
 }
 async function closeNativePickers() {
@@ -64681,7 +64723,9 @@ function createLibraryServer(service2, options = {}) {
   tool("paper_download", "\u4E3A\u5DF2\u5165\u5E93\u7684\u6587\u732E\u8865\u4E0B\u8F7D\u53EF\u7528PDF\uFF0FTeX\u8D44\u6E90\uFF0C\u8FD4\u56DE\u5B9E\u9645\u8D44\u6E90\u7ED3\u679C\u3002", paper, (input2) => service2.downloadPaper(input2), false);
   tool("bibliography_import", "\u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684BibTeX\u6587\u672C\u6216\u672C\u673A\u6587\u4EF6\uFF0C\u7ED3\u679C\u6309\u5B9E\u9645\u4E0A\u6E38\u8FD4\u56DE\u3002", { ...vault, text: external_exports.string().max(2 * 1024 * 1024).optional(), filePath: key.optional() }, (input2) => service2.importBibliography(input2), false);
   privatePayload("bibliography_export", "\u5BFC\u51FA\u6587\u732E\u5E93BibTeX\u5230\u7528\u6237\u9009\u62E9\u7684\u4F4D\u7F6E\uFF0CApp\u53EF\u83B7\u5F97\u6587\u672C\uFF0C\u6A21\u578B\u53EA\u83B7\u5F97\u6587\u4EF6\u6458\u8981\u3002", { ...vault, filePath: key.optional() }, "export", (input2) => service2.exportBibliography(input2), false, false);
-  privatePayload("file_picker", "\u6253\u5F00\u7CFB\u7EDF\u6587\u4EF6\u3001\u6587\u4EF6\u5939\u6216\u4FDD\u5B58\u4F4D\u7F6E\u9009\u62E9\u5668\uFF0C\u53D6\u6D88\u4E0D\u4F1A\u4FEE\u6539\u914D\u7F6E\u3002", { mode: external_exports.enum(["open-file", "open-directory", "save-file"]), title: external_exports.string().max(160).optional(), defaultPath: external_exports.string().max(4096).optional(), multiple: external_exports.boolean().optional(), filters: external_exports.array(external_exports.object({ name: external_exports.string().max(80), extensions: external_exports.array(external_exports.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_+-]{0,19}$/)).min(1).max(20) })).max(12).optional() }, "picker", (input2, signal) => pickNativePath(input2, { signal }), true);
+  const pickerRequestId = external_exports.string().uuid();
+  privatePayload("file_picker", "\u6253\u5F00\u7CFB\u7EDF\u6587\u4EF6\u3001\u6587\u4EF6\u5939\u6216\u4FDD\u5B58\u4F4D\u7F6E\u9009\u62E9\u5668\uFF0C\u53D6\u6D88\u4E0D\u4F1A\u4FEE\u6539\u914D\u7F6E\u3002requestId\u4E3A\u5F53\u524DApp\u751F\u6210\u7684\u552F\u4E00UUID\u3002", { requestId: pickerRequestId, mode: external_exports.enum(["open-file", "open-directory", "save-file"]), title: external_exports.string().max(160).optional(), defaultPath: external_exports.string().max(4096).optional(), multiple: external_exports.boolean().optional(), filters: external_exports.array(external_exports.object({ name: external_exports.string().max(80), extensions: external_exports.array(external_exports.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_+-]{0,19}$/)).min(1).max(20) })).max(12).optional() }, "picker", ({ requestId, ...input2 }, signal) => pickNativePath(input2, { signal, requestId }), true);
+  tool("file_picker_cancel", "\u53D6\u6D88\u5F53\u524DApp\u62E5\u6709\u7684\u7CFB\u7EDF\u9009\u62E9\u5668\u3002\u8FD4\u56DE\u524D\u7B49\u5F85\u8BE5\u8BF7\u6C42\u7684\u5BF9\u8BDD\u8FDB\u7A0B\u9000\u51FA\uFF1B\u63D0\u524D\u53D6\u6D88\u4F1A\u963B\u6B625\u5206\u949F\u5185\u7684\u5EF6\u8FDF\u8BF7\u6C42\u6253\u5F00\uFF0C\u4E0D\u5199\u7528\u6237\u6587\u4EF6\u3002", { requestId: pickerRequestId }, (input2) => cancelNativePicker(input2.requestId), true, true);
   const fields = {
     cliPath: { type: "string", title: "Agentero CLI \u8DEF\u5F84", description: "\u81EA\u884C\u5B89\u88C5\u7684 agentero \u53EF\u6267\u884C\u6587\u4EF6\uFF1B\u7559\u7A7A\u65F6\u4ECE PATH \u67E5\u627E\u3002" },
     vaultPath: { type: "string", title: "\u6587\u732E\u5E93\u8DEF\u5F84", description: "\u9009\u62E9\u5DF2\u6709 Agentero Vault\uFF1B\u521B\u5EFA\u65B0\u5E93\u8BF7\u6253\u5F00\u914D\u7F6E\u4E0E\u8BCA\u65AD\u3002" },

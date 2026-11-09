@@ -1,6 +1,7 @@
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { afterEach, expect, test } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -84,7 +85,34 @@ test('bounds model annotation context while preserving the complete App collecti
   expect((result._meta?.marks as { items: unknown[] }).items).toHaveLength(130);
   const tools = (await client.listTools()).tools;
   expect(tools.some(tool => tool.name === 'paper_discover')).toBe(false);
-  for (const name of ['file_picker', 'paper_markdown', 'paper_layout', 'note_asset_read', 'mark_asset_read']) expect(tools.find(tool => tool.name === name)?._meta?.ui).toMatchObject({ visibility: ['app'] });
+  for (const name of ['file_picker', 'file_picker_cancel', 'paper_markdown', 'paper_layout', 'note_asset_read', 'mark_asset_read']) expect(tools.find(tool => tool.name === name)?._meta?.ui).toMatchObject({ visibility: ['app'] });
+});
+
+test('explicit App cancellation crosses the MCP server boundary before a delayed picker request', async () => {
+  const { client } = await connect();
+  const requestId = randomUUID();
+  const cancel = () => client.callTool({ name: 'file_picker_cancel', arguments: { requestId } });
+  const first = await cancel();
+  expect(first.isError).not.toBe(true);
+  expect(first.structuredContent).toMatchObject({ ok: true, data: { requestId, closed: true } });
+  // Deliberately no SDK AbortSignal: a host that drops cancellation cannot open this ID later.
+  const late = await client.callTool({ name: 'file_picker', arguments: { requestId, mode: 'open-file' } });
+  expect(late.isError).toBe(true);
+  expect(late.structuredContent).toMatchObject({ ok: false, error: { code: 'PICKER_ABORTED' } });
+  expect((await cancel()).structuredContent).toMatchObject({ ok: true, data: { requestId, closed: true } });
+});
+
+test('picker tools reject missing or malformed request IDs before opening any native dialog', async () => {
+  const { client } = await connect();
+  for (const input of [
+    { name: 'file_picker', arguments: { mode: 'open-directory' } },
+    { name: 'file_picker', arguments: { requestId: 'not-a-uuid', mode: 'save-file' } },
+    { name: 'file_picker_cancel', arguments: { requestId: '../another-app' } },
+  ]) {
+    const result = await client.callTool(input);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toBeUndefined();
+  }
 });
 
 test('annotation mutations preserve full App results without bypassing the model result bound', async () => {

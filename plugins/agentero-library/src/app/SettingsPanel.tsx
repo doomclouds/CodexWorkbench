@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, LoaderCircle, X } from 'lucide-react';
 import type { LibrarySettings, LibraryStatus } from '../contracts/types';
 import { callTool } from './api';
+import { cancelAppPickers } from './bridge';
 import { messageOf } from './model';
 import { PathField } from './PathField';
 import { TranslationSettings } from './TranslationSettings';
@@ -28,13 +29,25 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
   const [notice, setNotice] = useState('');
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [picking, setPicking] = useState(false);
-  const locked = busy || picking;
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const locked = busy || picking || closing;
 
   useEffect(() => {
     if (standalone) return;
     dialog.current?.showModal();
     return () => { dialog.current?.close(); };
   }, [standalone]);
+
+  async function requestClose() {
+    if (busy || closingRef.current) return;
+    closingRef.current = true; setClosing(true); setError('');
+    try {
+      await cancelAppPickers();
+      onClose();
+    } catch (reason) { setError(`系统选择器尚未确认关闭，设置已保留。${messageOf(reason)} 请重试关闭。`); }
+    finally { closingRef.current = false; setClosing(false); }
+  }
 
   async function save() {
     if (preview || locked) return;
@@ -86,7 +99,7 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
   const content = <>
     <header className="modal-heading">
       <div><h2>文献库设置</h2><p>连接本机 Agentero，选择你的知识库</p></div>
-      {!standalone && <button className="icon-button" aria-label="关闭设置" disabled={busy} onClick={onClose}><X size={18} /></button>}
+      {!standalone && <button className="icon-button" aria-label="关闭设置" disabled={busy || closing} onClick={() => void requestClose()}><X size={18} /></button>}
     </header>
     <div className="settings-body">
       {preview && <p className="callout">界面预览不会检测或修改本机配置。请在 Codex 插件中完成设置。</p>}
@@ -125,10 +138,10 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
       {error && <p className="callout error" role="alert">{error}</p>}
       {notice && <p className="success-text" role="status">{notice}</p>}
     </div>
-    <footer className="modal-footer">{!standalone && <button onClick={onClose} disabled={busy}>关闭</button>}<button className="primary" onClick={() => void save()} disabled={locked || preview}>{busy && <LoaderCircle className="spin" size={15} />}保存配置</button></footer>
+    <footer className="modal-footer">{!standalone && <button onClick={() => void requestClose()} disabled={busy || closing}>{closing ? '正在关闭选择器…' : '关闭'}</button>}<button className="primary" onClick={() => void save()} disabled={locked || preview}>{busy && <LoaderCircle className="spin" size={15} />}保存配置</button></footer>
   </>;
 
-  return standalone ? <section className="settings-page">{content}</section> : <dialog className="settings-modal" ref={dialog} onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>{content}</dialog>;
+  return standalone ? <section className="settings-page">{content}</section> : <dialog className="settings-modal" ref={dialog} onCancel={e => { e.preventDefault(); void requestClose(); }}>{content}</dialog>;
 }
 
 function Capability({ label, available, detail }: { label: string; available: boolean; detail: string }) {

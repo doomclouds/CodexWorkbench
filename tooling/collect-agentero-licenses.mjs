@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,6 +35,14 @@ const missing = error => error?.code === 'ENOENT' || error?.code === 'ENOTDIR';
 async function exists(path) { try { await lstat(path); return true; } catch (error) { if (missing(error)) return false; throw error; } }
 async function json(path) { return JSON.parse(await readFile(path, 'utf8')); }
 const sort = values => [...values].sort((a, b) => a.localeCompare(b, 'en'));
+async function retryLocked(operation) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await operation(); } catch (error) {
+      if (attempt >= 7 || !['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY'].includes(error?.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, Math.min(50 * 2 ** attempt, 800)));
+    }
+  }
+}
 
 function inputFile(id, workingDirectory) {
   if (typeof id !== 'string') return null;
@@ -204,27 +212,99 @@ export async function collectLicenses({ repoRoot = defaultRepoRoot, version } = 
   const checked = async target => {
     const absolute = resolve(target);
     if (absolute === canonicalRoot || !inside(canonicalRoot, absolute)) throw new Error('Refusing to touch a path outside the generated license directory.');
-    if (await exists(absolute)) {
-      const info = await lstat(absolute), actual = await realpath(absolute);
-      if (info.isSymbolicLink() || !inside(canonicalRoot, actual)) throw new Error('Refusing to clean a generated path with a symlink or external target.');
+    // Check the nearest existing ancestor too: a missing file underneath a
+    // junction must never become an out-of-tree write or rollback target.
+    for (let probe = absolute; probe !== canonicalRoot; probe = dirname(probe)) {
+      if (!(await exists(probe))) continue;
+      const info = await lstat(probe), actual = await realpath(probe);
+      const same = process.platform === 'win32' ? actual.toLowerCase() === probe.toLowerCase() : actual === probe;
+      if (info.isSymbolicLink() || !inside(canonicalRoot, actual) || !same) throw new Error('Refusing to clean a generated path with a symlink or external target.');
+      break;
     }
     return absolute;
   };
+
+  const existing = new Map(), directories = [];
+  const scan = async directory => {
+    const path = await checked(directory);
+    if (!(await exists(path))) return;
+    if (!(await lstat(path)).isDirectory()) throw new Error('A generated license subtree is not a directory.');
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      const child = await checked(join(path, entry.name));
+      if (entry.isDirectory()) await scan(child);
+      else if (entry.isFile()) existing.set(slash(relative(canonicalRoot, child)), await readFile(child));
+      else throw new Error('Unexpected non-file entry in the generated license archive.');
+    }
+    directories.push(path);
+  };
+  for (const name of ['packages', 'sources']) await scan(join(canonicalRoot, name));
+  const metadata = ['README.md', 'THIRD_PARTY_LICENSES.txt', 'manifest.json'];
+  for (const name of metadata) {
+    const path = await checked(join(canonicalRoot, name));
+    if (await exists(path)) existing.set(name, await readFile(path));
+  }
+  const updates = [...documents].filter(([path, bytes]) => !existing.get(path)?.equals(bytes));
+  // These checked-in supplements are source inputs, not obsolete generated
+  // package output. Keep them intact even if a future bundle omits a package.
+  const obsolete = [...existing.keys()].filter(path => !documents.has(path) && !path.startsWith('sources/npm-supplements/'));
+  if (!updates.length && !obsolete.length) return { manifest, outputDirectory: `${pluginRelative}/assets/licenses`, packageCount: packages.length, licenseFileCount: [...packages, ...sources].reduce((total, item) => total + item.files.length, 0), sourceCount: sources.length };
   const stage = await checked(join(canonicalRoot, `.generated-${randomUUID()}`));
   await mkdir(stage);
+  const applied = [];
+  let keepRecovery = false;
+  const replaceFile = async (relativePath, bytes) => {
+    const target = await checked(join(canonicalRoot, relativePath));
+    await retryLocked(() => mkdir(dirname(target), { recursive: true }));
+    const temporary = await checked(join(dirname(target), `.${basename(target)}.${randomUUID()}.tmp`));
+    try {
+      await retryLocked(() => writeFile(temporary, bytes, { flag: 'wx' }));
+      await retryLocked(async () => { await checked(target); await rename(temporary, target); });
+    } finally {
+      // Never unlink the destination to make a rename succeed. A persistent
+      // lock must leave its prior contents in place.
+      await retryLocked(() => rm(temporary, { force: true })).catch(() => undefined);
+    }
+  };
   try {
-    for (const [path, bytes] of documents) {
-      const destination = await checked(join(stage, path)); await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, bytes);
+    // Back up only files we may change/delete, before touching any destination.
+    // If rollback itself encounters a persistent lock, these exact old bytes
+    // remain on disk for recovery instead of being discarded in finally.
+    for (const path of [...updates.map(([path]) => path), ...obsolete]) {
+      const before = existing.get(path);
+      if (before === undefined) continue;
+      const backup = await checked(join(stage, 'backup', path));
+      await mkdir(dirname(backup), { recursive: true }); await writeFile(backup, before);
     }
-    // Only these generated subtrees are recursively replaced. The guard runs
-    // immediately before every recursive remove, using resolved absolute paths.
-    for (const directory of ['packages', 'sources']) {
-      const target = await checked(join(canonicalRoot, directory));
-      await rm(target, { recursive: true, force: true });
-      await rename(await checked(join(stage, directory)), target);
+    await writeFile(join(stage, 'recovery.json'), `${JSON.stringify({ changed: updates.map(([path]) => ({ path, existed: existing.has(path) })), obsolete }, null, 2)}\n`);
+    // Publish the manifest last. Unchanged originals and pinned source texts
+    // are not opened for writing, renamed or deleted on repeat builds.
+    const ordered = [...updates.filter(([path]) => !metadata.includes(path)), ...metadata.flatMap(name => updates.filter(([path]) => path === name))];
+    for (const [path, bytes] of ordered.filter(([path]) => !metadata.includes(path))) {
+      await replaceFile(path, bytes); applied.push(path);
     }
-    for (const file of ['manifest.json', 'THIRD_PARTY_LICENSES.txt', 'README.md']) await rename(await checked(join(stage, file)), await checked(join(canonicalRoot, file)));
-  } finally { await rm(await checked(stage), { recursive: true, force: true }); }
+    for (const path of obsolete) { const target = await checked(join(canonicalRoot, path)); await retryLocked(() => rm(target)); applied.push(path); }
+    for (const directory of directories) {
+      if ((await readdir(await checked(directory))).length) continue;
+      await retryLocked(() => rmdir(directory));
+    }
+    for (const [path, bytes] of ordered.filter(([path]) => metadata.includes(path))) { await replaceFile(path, bytes); applied.push(path); }
+  } catch (error) {
+    const failures = [];
+    for (const path of applied.reverse()) {
+      try {
+        const before = existing.get(path);
+        if (before !== undefined) await replaceFile(path, before);
+        else { const target = await checked(join(canonicalRoot, path)); await retryLocked(() => rm(target, { force: true })); }
+      } catch (failure) { failures.push(failure); }
+    }
+    if (failures.length) {
+      keepRecovery = true;
+      throw new AggregateError([error, ...failures], `License collection failed and rollback was blocked; old bytes are retained at ${stage}.`);
+    }
+    throw new Error('License collection failed; the previous archive files were restored.', { cause: error });
+  } finally {
+    if (!keepRecovery) await retryLocked(async () => { await rm(await checked(stage), { recursive: true, force: true }); }).catch(error => { console.warn(`License recovery directory retained after cleanup failed (${error.code}): ${stage}`); });
+  }
   return { manifest, outputDirectory: `${pluginRelative}/assets/licenses`, packageCount: packages.length, licenseFileCount: [...packages, ...sources].reduce((total, item) => total + item.files.length, 0), sourceCount: sources.length };
 }
 
