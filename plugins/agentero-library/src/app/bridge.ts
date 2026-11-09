@@ -1,6 +1,7 @@
 import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { PLUGIN_VERSION } from '../contracts/version';
+import { createPickerClient } from './picker-client';
 
 export interface HostState {
   connected: boolean;
@@ -19,6 +20,7 @@ const app = new App({ name: 'Agentero Library', version: PLUGIN_VERSION }, {}, {
 const extensions = new OpenAIExtensions(app);
 const listeners = new Set<(state: HostState) => void>();
 const beforeTeardown = new Set<() => Promise<void>>();
+const pickers = createPickerClient(callRemoteTool);
 let state: HostState = { connected: false, preview: !embedded, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', canSendSelection: false };
 let connection: Promise<void> | undefined;
 const publish = (patch: Partial<HostState>) => {
@@ -40,7 +42,13 @@ app.ontoolresult = (result) => {
   if (data && typeof data.view === 'string') publish({ view: data.view, paperPath: typeof data.paperPath === 'string' ? data.paperPath : undefined, vaultId: typeof data.vaultId === 'string' ? data.vaultId : undefined, routeRevision: (state.routeRevision ?? 0) + 1 });
 };
 app.onteardown = async () => {
-  await Promise.allSettled([...beforeTeardown].map((task) => task()));
+  // Await a separate server acknowledgement; SDK cancellation may stop at the host.
+  // Other cleanup, including note recovery, must also run when cancellation fails.
+  const [pickerCleanup] = await Promise.allSettled([
+    pickers.cancelAll(),
+    ...[...beforeTeardown].map(async task => { await task(); }),
+  ]);
+  if (pickerCleanup.status === 'rejected') throw pickerCleanup.reason;
   publish({ connected: false, canSendSelection: false });
   return {};
 };
@@ -70,9 +78,18 @@ export function subscribeHost(listener: (state: HostState) => void) {
 }
 
 export async function callTool<T = unknown>(name: string, args: Record<string, unknown> = {}, options: { signal?: AbortSignal } = {}): Promise<T> {
+  if (name === 'file_picker') return await pickers.pick(args, options) as T;
+  return callRemoteTool<T>(name, args, options);
+}
+
+/** Used before a local view unmounts; a failed cancellation remains retryable. */
+export const cancelAppPickers = () => pickers.cancelAll();
+
+async function callRemoteTool<T = unknown>(name: string, args: Record<string, unknown> = {}, options: { signal?: AbortSignal } = {}): Promise<T> {
   await connect();
   options.signal?.throwIfAborted();
-  const result = await app.callServerTool({ name, arguments: args }, { timeout: name === 'file_picker' ? 300_000 : 90_000, signal: options.signal });
+  const timeout = name === 'file_picker' ? 300_000 : name === 'file_picker_cancel' ? 15_000 : 90_000;
+  const result = await app.callServerTool({ name, arguments: args }, { timeout, signal: options.signal });
   const content = result.structuredContent as Record<string, unknown> | undefined;
   if (result.isError || content?.ok === false) {
     const failure = content?.error as { message?: string; code?: string } | undefined;

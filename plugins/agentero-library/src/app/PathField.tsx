@@ -31,17 +31,18 @@ export function PathField({ id, label, value, onChange, mode, title, filters, di
   }, []);
 
   async function choose() {
-    if (disabled || pickerDisabled || picking) return;
-    controller.current = new AbortController();
+    if (disabled || pickerDisabled || picking || controller.current) return;
+    const selection = new AbortController();
+    controller.current = selection;
     setPicking(true); setError(''); onPickingChange?.(true);
     try {
       const input: FilePickerInput = { mode, title: title ?? label, ...(value ? { defaultPath: value } : {}), ...(filters?.length ? { filters } : {}) };
-      const result = await callTool<FilePickerResult>('file_picker', { ...input }, { signal: controller.current.signal });
+      const result = await callTool<FilePickerResult>('file_picker', { ...input }, { signal: selection.signal });
       if (!mounted.current || result.cancelled) return;
       if (!result.paths?.[0]) throw new Error('选择器未返回路径，请重新选择。');
       onChange(result.paths[0]);
-    } catch (reason) { if (mounted.current && !controller.current.signal.aborted) setError(messageOf(reason)); }
-    finally { if (mounted.current) { setPicking(false); onPickingChange?.(false); } controller.current = null; }
+    } catch (reason) { if (mounted.current && !selection.signal.aborted) setError(messageOf(reason)); }
+    finally { if (mounted.current) { setPicking(false); onPickingChange?.(false); } if (controller.current === selection) controller.current = null; }
   }
 
   return <div className="path-field">
