@@ -60,3 +60,70 @@ test('schema rejects unbounded PDF chunks and unsupported note modes', async () 
   expect(invalidWrite.isError).toBe(true);
   expect(invalidWrite.structuredContent).toBeUndefined();
 });
+
+test('keeps exported bytes and UI documents out of model-visible tool content', async () => {
+  const { client, service } = await connect();
+  service.exportPaper = async () => ({ fileName: 'sample.pdf', mediaType: 'application/pdf', totalBytes: 5, base64: 'SGVsbG8=', content: 'private export content' });
+  service.readPaperMarkdown = async () => ({ path: 'papers/sample/PAPER.md', content: 'private paper body', revision: 'revision', exists: true });
+  const exported = await client.callTool({ name: 'paper_export', arguments: { vaultId: 'test', paperPath: 'papers/sample', format: 'pdf' } });
+  expect(exported.isError).not.toBe(true);
+  expect(exported._meta?.export).toMatchObject({ base64: 'SGVsbG8=', content: 'private export content' });
+  expect(JSON.stringify(exported.structuredContent)).not.toMatch(/SGVsbG8|private export content/);
+  expect(JSON.stringify(exported.content)).not.toMatch(/SGVsbG8|private export content/);
+  const document = await client.callTool({ name: 'paper_markdown', arguments: { vaultId: 'test', paperPath: 'papers/sample' } });
+  expect(document._meta?.document).toMatchObject({ content: 'private paper body' });
+  expect(JSON.stringify(document.structuredContent)).not.toContain('private paper body');
+});
+
+test('bounds model annotation context while preserving the complete App collection and excludes cancelled discovery', async () => {
+  const { client, service } = await connect();
+  service.listMarks = async () => ({ vaultId: 'test', paperPath: 'papers/sample', revision: 'r1', items: Array.from({ length: 130 }, (_, index) => ({ id: String(index), kind: 'highlight' as const, page: 1, space: 'pt' as const, rects: [{ x: 1, y: 1, w: 10, h: 2 }], quote: 'quoted text', note: '' })) });
+  const result = await client.callTool({ name: 'mark_list', arguments: { vaultId: 'test', paperPath: 'papers/sample' } });
+  expect(result.structuredContent).toMatchObject({ ok: true, data: { truncated: true } });
+  expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(100);
+  expect((result._meta?.marks as { items: unknown[] }).items).toHaveLength(130);
+  const tools = (await client.listTools()).tools;
+  expect(tools.some(tool => tool.name === 'paper_discover')).toBe(false);
+  for (const name of ['file_picker', 'paper_markdown', 'paper_layout', 'note_asset_read', 'mark_asset_read']) expect(tools.find(tool => tool.name === name)?._meta?.ui).toMatchObject({ visibility: ['app'] });
+});
+
+test('annotation mutations preserve full App results without bypassing the model result bound', async () => {
+  const { client, service } = await connect();
+  const marks = { vaultId: 'test', paperPath: 'papers/sample', revision: 'r2', items: Array.from({ length: 130 }, (_, index) => ({ id: String(index), kind: 'highlight' as const, page: 1, space: 'pt' as const, rects: [{ x: 1, y: 1, w: 10, h: 2 }], quote: `quoted item ${index}`, note: '' })) };
+  service.addMark = async () => marks;
+  service.updateMark = async () => marks;
+  service.deleteMark = async () => marks;
+  const shared = { vaultId: 'test', paperPath: 'papers/sample', revision: 'r1' };
+  const cases = [
+    { name: 'mark_add', arguments: { ...shared, kind: 'highlight', page: 1, rects: [{ x: 1, y: 1, w: 10, h: 2 }], pageSize: { width: 500, height: 700 }, quote: 'selected quote' } },
+    { name: 'mark_update', arguments: { ...shared, id: '0', comment: 'saved comment' } },
+    { name: 'mark_delete', arguments: { ...shared, id: '0' } },
+  ];
+  for (const input of cases) {
+    const result = await client.callTool(input);
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({ ok: true, data: { revision: 'r2', truncated: true } });
+    expect((result.structuredContent as { data: { items: unknown[] } }).data.items).toHaveLength(100);
+    expect((result._meta?.marks as { items: unknown[] }).items).toHaveLength(130);
+    expect(JSON.stringify(result.structuredContent)).not.toContain('quoted item 129');
+  }
+});
+
+test('forwards MCP request cancellation into the default CLI translation branch', async () => {
+  const { client, service } = await connect();
+  service.validateScope = async () => {};
+  let started!: () => void, cancelled!: () => void;
+  const incoming = new Promise<void>(resolve => { started = resolve; });
+  const aborted = new Promise<void>(resolve => { cancelled = resolve; });
+  service.translateText = async (_input, signal) => {
+    expect(signal).toBeDefined();
+    started();
+    return new Promise((_, reject) => { signal!.addEventListener('abort', () => { cancelled(); reject(new Error('cancelled owned request')); }, { once: true }); });
+  };
+  const controller = new AbortController();
+  const request = client.callTool({ name: 'translate_text', arguments: { vaultId: 'test', text: 'owned cancellation test' } }, undefined, { signal: controller.signal }).catch(error => error);
+  await incoming;
+  controller.abort();
+  await request;
+  await aborted;
+});

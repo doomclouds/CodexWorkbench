@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agentero-library",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "在 Codex 对话旁管理本地文献、阅读 PDF 并整理研究笔记。",
   "author": {
     "name": "doomclouds"
@@ -9,17 +9,25 @@
   "homepage": "https://github.com/doomclouds/CodexWorkbench",
   "repository": "https://github.com/doomclouds/CodexWorkbench",
   "license": "MIT",
-  "keywords": ["research", "papers", "notes", "agentero", "codex"],
+  "keywords": [
+    "research",
+    "papers",
+    "notes",
+    "agentero",
+    "codex"
+  ],
   "extensions": {
     "com.openai": {
       "onboardingSkill": "./skills/library-setup/SKILL.md",
       "interface": {
         "displayName": "文献库",
-        "shortDescription": "本地文献、PDF 阅读与研究笔记",
-        "longDescription": "连接用户安装的 Agentero CLI，在 Codex 对话旁检索本地文献、阅读论文并维护研究笔记。通过插件设置配置 CLI 与 Vault，按需启用 PDF 正文读取。",
+        "shortDescription": "本地 PDF 阅读、批注与研究笔记",
+        "longDescription": "连接用户安装的 Agentero CLI，在 Codex 对话旁导入本地 PDF、阅读批注、翻译并维护 Markdown 研究笔记。通过系统选择器配置 CLI 与 Vault，按需启用 Agent 正文读取。",
         "developerName": "doomclouds",
         "category": "Productivity",
-        "capabilities": ["Interactive"],
+        "capabilities": [
+          "Interactive"
+        ],
         "defaultPrompt": "打开文献库，检查本机连接并继续阅读。",
         "composerIcon": "./assets/icon.png",
         "logo": "./assets/icon.png"

@@ -45,6 +45,18 @@ test('reports missing and escaping local links', async (t) => {
   assert.ok(errors.some((error) => error.includes('leaves the repository')));
 });
 
+test('preserves original license archives while checking their generated index', async (t) => {
+  const root = await fixture(t, {
+    'plugins/example/assets/licenses/packages/upstream/1.0.0/LICENSE': 'Original\r\nNo final newline',
+    'plugins/example/assets/licenses/sources/upstream/NOTICE.md': '[Upstream](../not-in-this-repo)',
+    'plugins/example/assets/licenses/index.json': '{invalid',
+  });
+  const { checked, errors } = await checkRepository(root);
+  assert.equal(checked, 1);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.every((error) => error.startsWith('plugins/example/assets/licenses/index.json:')));
+});
+
 test('rejects invalid UTF-8, JSON and text line endings', async (t) => {
   const root = await fixture(t, {
     'invalid.md': Buffer.from([0xff]),

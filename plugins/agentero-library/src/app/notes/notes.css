@@ -1,0 +1,70 @@
+.note-heading-title { flex: 1; min-width: 0; }
+.note-list-filter { margin: 0 8px 8px; width: calc(100% - 16px); font-size: 12px; }
+.notes-view.note-list-collapsed { grid-template-columns: 1fr; }
+.note-editor-shell { min-height: 0; min-width: 0; flex: 1; display: flex; flex-direction: column; }
+.note-editor-modes { display: flex; align-items: center; gap: 6px; border-block: 1px solid var(--line); padding: 6px 12px; flex-shrink: 0; }
+.note-mode-switch { display: flex; gap: 3px; }
+.note-mode-switch button { border: none; min-height: 29px; padding: 4px 9px; font-size: 12px; }
+.note-rich-toolbar { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; padding: 5px 12px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.note-rich-toolbar button { min-height: 29px; min-width: 29px; padding: 4px 6px; border-color: transparent; font-size: 12px; }
+.note-rich-toolbar select { padding: 3px 5px; min-height: 27px; font-size: 12px; max-width: 100px; }
+.note-rich-scroll { min-width: 0; min-height: 0; flex: 1; overflow: auto; }
+.note-rich-content { padding: 24px clamp(16px, 4%, 48px) 70px; min-height: 100%; color: var(--text); font-size: 14px; line-height: 1.8; overflow-wrap: anywhere; outline: none; }
+.note-rich-content > * { position: relative; }
+.note-rich-content p { margin: .55em 0; min-height: 1.65em; }
+.note-rich-content h1 { font-size: 1.95em; line-height: 1.35; margin: .65em 0 .4em; }
+.note-rich-content h2 { font-size: 1.55em; line-height: 1.4; margin: 1.05em 0 .4em; }
+.note-rich-content h3 { font-size: 1.28em; margin: 1em 0 .35em; }
+.note-rich-content h4, .note-rich-content h5, .note-rich-content h6 { margin: .9em 0 .3em; font-size: 1.05em; }
+.note-rich-content blockquote { margin: .8em 0; padding: 4px 16px; border-left: 3px solid var(--line); color: var(--muted); }
+.note-rich-content hr { border: 0; border-top: 1px solid var(--line); margin: 1.4em 0; }
+.note-rich-content code { background: var(--panel-bg); color: inherit; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .88em; padding: 2px 4px; border-radius: 4px; }
+.note-code-block { margin: 1em 0; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-bg); overflow: hidden; }
+.note-code-toolbar { display: flex; justify-content: space-between; align-items: center; padding: 4px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.note-code-toolbar select { border: 0; font-size: 11px; padding: 2px; max-width: 140px; }
+.note-rich-content pre { margin: 0; padding: 12px; overflow: auto; line-height: 1.6; white-space: pre; }
+.note-rich-content pre code { padding: 0; background: transparent; }
+.note-code-token .hljs-keyword, .note-code-token.hljs-keyword, .hljs-selector-tag { color: var(--accent); }
+.note-code-token.hljs-string, .hljs-string, .hljs-attr { color: var(--good); }
+.hljs-comment, .hljs-quote { color: var(--muted); font-style: italic; }
+.hljs-number, .hljs-literal, .hljs-built_in { color: var(--warning); }
+.note-rich-content table { margin: .8em 0; border-collapse: collapse; width: 100%; table-layout: fixed; }
+.note-rich-content td, .note-rich-content th { min-width: 70px; vertical-align: top; border: 1px solid var(--line); padding: 5px 10px; text-align: left; overflow-wrap: anywhere; }
+.note-rich-content th { background: var(--panel-bg); font-weight: 600; }
+.note-rich-content td p, .note-rich-content th p { margin: 0; }
+.note-block-list { margin-block: 0; padding-left: 1.5em; list-style-position: outside; }
+.note-block-list li > p { margin: 0; }
+.note-task-list { list-style: none; margin: 0; padding-left: 1.6em; }
+.note-task { position: relative; }
+.note-task > span[contenteditable="false"] { position: absolute; left: -1.5em; top: .2em; }
+.note-task.checked { color: var(--muted); text-decoration: line-through; }
+.note-task > p { margin: 0; }
+.note-equation { overflow-x: auto; margin: .75em 0; text-align: center; }
+.note-inline-equation { display: inline; }
+.note-inline-equation > span, .note-inline-equation > span > span { display: inline; }
+.note-equation textarea, .note-inline-equation textarea { display: block; width: 100%; min-height: 60px; font: 13px ui-monospace, monospace; text-align: left; }
+.note-rich-content math { font-size: 1.1em; }
+.note-image figure { margin: 1em 0; text-align: center; }
+.note-image img { display: block; max-width: 100%; max-height: 700px; margin: 0 auto; object-fit: contain; }
+.note-image figcaption, .note-image .path-text { display: block; color: var(--muted); font-size: 12px; }
+.note-image-status { display: block; border: 1px dashed var(--line); border-radius: 6px; padding: 20px; color: var(--muted); font-size: 12px; }
+.note-search-highlight { background: #eac95688; color: inherit; border-radius: 2px; }
+.note-findbar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 7px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.note-findbar input { width: 130px; flex: 1; padding: 5px 7px; }
+.note-findbar button { font-size: 12px; min-height: 29px; padding: 4px 7px; }
+.note-source-editor { margin: 0; border: 0 !important; border-radius: 0 !important; resize: none; padding: 20px !important; min-height: 0; flex: 1; outline-offset: -2px !important; }
+.note-metadata { flex-shrink: 0; font-size: 12px; border-bottom: 1px solid var(--line); padding: 5px 14px; color: var(--muted); }
+.note-metadata pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 150px; overflow: auto; }
+.note-links-panel { border-top: 1px solid var(--line); padding: 7px 14px; font-size: 12px; max-height: 180px; overflow: auto; flex-shrink: 0; }
+.note-links-panel > div { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.note-links-panel button { font-size: 12px; min-height: 26px; padding: 3px 6px; }
+.note-copy-dialog textarea { width: 100%; min-height: 300px; font-family: ui-monospace, monospace; }
+@media (max-width: 680px) {
+  .notes-view .note-heading { gap: 5px; padding: 10px; }
+  .note-heading h2 { font-size: 14px; }
+  .note-heading .save-state { font-size: 11px; }
+  .note-editor-modes { padding: 5px 8px; }
+  .note-rich-content { padding: 18px 14px 50px; }
+  .note-rich-toolbar { padding: 4px 8px; gap: 1px; }
+  .notes-view.note-list-collapsed .notes-list { display: none; }
+}

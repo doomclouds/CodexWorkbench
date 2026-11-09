@@ -19,6 +19,8 @@ export async function checkRepository(root) {
   const errors = [];
   let checked = 0;
   for (const file of files) {
+    // Preserve upstream license bytes, including their original whitespace and links.
+    if (/^plugins\/[^/]+\/assets\/licenses\/(?:packages|sources)\//.test(file)) continue;
     if (!textExtensions.has(extname(file)) && !textNames.has(basename(file))) continue;
     checked += 1;
     const path = resolve(root, file);

@@ -435,3 +435,31 @@ it('stops the real owned CLI process and its child tree on cancellation', async 
   const stopped = (pid: number) => { try { process.kill(pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } };
   await waitUntil(() => stopped(pids.parent) && stopped(pids.child));
 }, 15000);
+
+it('cancels the current CLI translation process tree and never starts later chunks', async () => {
+  const root = await temporary(), vault = join(root, 'vault'), file = join(root, 'translation-pids.json');
+  await makeVault(vault);
+  const realRunner = new ProcessCliRunner(), fake = new FakeCli();
+  let translationCalls = 0;
+  const script = `const {spawn}=require('node:child_process');const fs=require('node:fs');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync(${JSON.stringify(file)},JSON.stringify({parent:process.pid,child:child.pid}));setInterval(()=>{},1000);`;
+  const service = new LibraryService({ dataRoot: join(root, 'data'), cliRunner: {
+    run: request => {
+      if (!request.args.includes('translate')) return fake.run(request);
+      translationCalls += 1;
+      return realRunner.run({ ...request, cliPath: process.execPath, args: ['-e', script] });
+    }, close: () => realRunner.close(),
+  } });
+  cleanups.push(() => service.close());
+  const settings = await service.updateSettings({ cliPath: 'fake-agentero', vaultPath: vault });
+  const controller = new AbortController();
+  const pending = service.translateText({ vaultId: settings.vaultId!, text: 'A'.repeat(9000) }, controller.signal).catch(error => error);
+  await waitUntil(async () => readFile(file).then(() => true, () => false));
+  const pids = JSON.parse(await readFile(file, 'utf8')) as { parent: number; child: number };
+  controller.abort();
+  expect(await pending).toMatchObject({ code: 'OPERATION_CANCELLED' });
+  expect(translationCalls).toBe(1);
+  const stopped = (pid: number) => { try { process.kill(pid, 0); return false; } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; } };
+  await waitUntil(() => stopped(pids.parent) && stopped(pids.child));
+  await expect(service.translateText({ vaultId: settings.vaultId!, text: 'Do not start' }, AbortSignal.abort())).rejects.toMatchObject({ code: 'OPERATION_CANCELLED' });
+  expect(translationCalls).toBe(1);
+}, 15000);

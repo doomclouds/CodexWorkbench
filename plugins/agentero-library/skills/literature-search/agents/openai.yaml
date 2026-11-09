@@ -1,4 +1,4 @@
 interface:
   display_name: "文献检索"
-  short_description: "检索本地文献与笔记，按明确需求在线发现论文并导入授权条目"
+  short_description: "检索本地 PDF、标注与笔记，按明确要求导入用户选择的本机文件"
   default_prompt: "使用 $literature-search 在我的文献库中查找与当前问题相关的论文。"
