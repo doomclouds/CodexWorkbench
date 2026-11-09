@@ -135,7 +135,7 @@ describe('library backend', () => {
     const second = new LibraryService({ dataRoot, cliRunner: new FakeCli() });
     cleanups.push(() => second.close());
     await writeFile(join(vault, 'notes', 'test.md'), 'Shared note');
-    await service.status();
+    await service.status({ diagnosePdf: true });
     await service.listPapers({ vaultId });
     await service.readNote({ vaultId, path: 'notes/test.md' });
     const firstNative = natives[0];
@@ -148,7 +148,7 @@ describe('library backend', () => {
     await service.status();
     await service.listPapers({ vaultId });
     expect(cli.calls.filter(call => call.args.includes('--version')).length).toBeGreaterThan(versionCalls);
-    expect(cli.calls.filter(call => call.args.includes('parse')).length).toBeGreaterThan(parseCalls);
+    expect(cli.calls.filter(call => call.args.includes('parse')).length).toBe(parseCalls);
     expect(cli.calls.filter(call => call.args.includes('list')).length).toBe(lists + 1);
     await service.readPaper({ vaultId, paperPath: 'papers/p1', source: 'pdf' });
     expect(natives).toHaveLength(2);

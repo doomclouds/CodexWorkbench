@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Bold, Code, FileCode, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Quote, Radical, Search, Strikethrough, Table, X } from 'lucide-react';
 import { ListStyleType, toggleList } from '@platejs/list';
 import { insertTable } from '@platejs/table';
@@ -19,7 +19,7 @@ interface Props {
 }
 interface InsertAction { insert(markdown: string): void }
 
-export function MarkdownEditor({ value, onChange, environment, onSave, saveDisabled }: Props) {
+export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, environment, onSave, saveDisabled }: Props) {
   const [mode, setMode] = useState<Mode>('rich'); const [findOpen, setFindOpen] = useState(false);
   const [linkKind, setLinkKind] = useState<'link' | 'wiki' | null>(null); const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [error, setError] = useState(''); const fileInput = useRef<HTMLInputElement>(null); const source = useRef<HTMLTextAreaElement>(null);
@@ -78,7 +78,7 @@ export function MarkdownEditor({ value, onChange, environment, onSave, saveDisab
       {linkKind && <LinkDialog wiki={linkKind === 'wiki'} notePath={environment.notePath} onClose={() => setLinkKind(null)} onInsert={(target, label) => { setLinkKind(null); insertMarkdown(linkKind === 'wiki' ? `[[${target}${label && label !== target ? `|${label}` : ''}]]` : `[${label || target}](${target})`); }} />}
     </div>
   </NoteEnvironmentContext.Provider>;
-}
+});
 
 export function MarkdownPreview({ markdown, environment }: { markdown: string; environment: NoteEnvironment }) {
   const insert = useRef<InsertAction | null>(null);
@@ -90,7 +90,8 @@ function RichNote({ markdown, readOnly, onMarkdown, findOpen, onCloseFind, inser
   insert: React.RefObject<InsertAction | null>; onLink(): void; onWiki(): void; onImage(): void; imageDisabled: boolean;
 }) {
   const editor = usePlateEditor({ plugins: notePlugins, value: instance => deserializeNote(instance, markdown), shouldNormalizeEditor: true }, []);
-  const published = useRef(markdown); const prefix = useRef(splitNoteMarkdown(markdown).prefix); const baseline = useRef(serializeNote(editor, prefix.current)); const resetting = useRef(false);
+  const published = useRef(markdown); const prefix = useRef(splitNoteMarkdown(markdown).prefix); const baseline = useRef<string | null>(null); const resetting = useRef(false);
+  if (baseline.current === null) baseline.current = serializeNote(editor, prefix.current);
   useEffect(() => {
     if (markdown === published.current) return;
     resetting.current = true; prefix.current = splitNoteMarkdown(markdown).prefix; published.current = markdown;
@@ -100,7 +101,7 @@ function RichNote({ markdown, readOnly, onMarkdown, findOpen, onCloseFind, inser
     const action = { insert(value: string) { editor.tf.focus(); editor.tf.insertNodes(deserializeNote(editor, value)); } };
     insert.current = action; return () => { if (insert.current === action) insert.current = null; };
   }, [editor, insert]);
-  return <Plate editor={editor} onChange={() => {
+  return <Plate editor={editor} onValueChange={() => {
     if (readOnly || resetting.current) return;
     const next = serializeNote(editor, prefix.current); if (next === baseline.current) return;
     baseline.current = next; published.current = next; onMarkdown(next);

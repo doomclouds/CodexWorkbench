@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectLicenses } from './collect-agentero-licenses.mjs';
+import { sdkProtocolDebugPlugin } from './app-sdk-debug.mjs';
 
 const root = fileURLToPath(new URL('../plugins/agentero-library/', import.meta.url));
 const packageInfo = JSON.parse(await readFile(`${root}package.json`, 'utf8'));
@@ -10,7 +11,7 @@ if (packageInfo.version !== manifest.version || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-
   throw new Error('Plugin manifests must agree on a valid version.');
 }
 const pluginRequire = createRequire(`${root}package.json`);
-const { build: bundle } = await import(pathToFileURL(pluginRequire.resolve('esbuild')).href);
+const { build: bundle, transform: transformScript } = await import(pathToFileURL(pluginRequire.resolve('esbuild')).href);
 const { build: viteBuild } = await import(pathToFileURL(pluginRequire.resolve('vite')).href);
 const { viteSingleFile } = await import(pathToFileURL(pluginRequire.resolve('vite-plugin-singlefile')).href);
 const runtime = `${root}runtime`;
@@ -31,7 +32,7 @@ let appInputs = [];
 await viteBuild({
   configFile: false,
   root: `${root}src/app`,
-  plugins: [viteSingleFile(), { name: 'record-runtime-inputs', generateBundle() { appInputs = [...this.getModuleIds()]; } }],
+  plugins: [sdkProtocolDebugPlugin(transformScript), viteSingleFile(), { name: 'record-runtime-inputs', generateBundle() { appInputs = [...this.getModuleIds()]; } }],
   build: { outDir: runtime, emptyOutDir: false, target: 'es2023', minify: true, sourcemap: false, reportCompressedSize: false },
 });
 const html = await readFile(`${runtime}/index.html`, 'utf8');

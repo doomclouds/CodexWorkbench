@@ -6,6 +6,8 @@
 .parity-reader .pdf-continuous-pages { display: flex; flex-direction: column; align-items: flex-start; gap: 24px; position: relative; width: 100%; min-width: 100%; }
 .parity-reader .pdf-sheet { position: relative; flex: none; margin-inline: auto; }
 .parity-reader .pdf-sheet.with-comment-cards { padding-right: 226px; }
+.parity-reader .pdf-page-slot { position: relative; width: 100%; flex: none; }
+.parity-reader .pdf-page-placeholder { margin-inline: auto; padding: 14px; background: #fff; color: #999; font-size: 12px; box-shadow: 0 2px 10px #0003; }
 .parity-reader .parity-pdf-page { margin: 0; flex: none; }
 .parity-reader .parity-pdf-page > canvas { position: absolute; left: 0; top: 0; z-index: 0; }
 .parity-reader .paper-dark { background: #000; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ExternalLink, LoaderCircle, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleHelp, ExternalLink, LoaderCircle, X } from 'lucide-react';
 import type { LibrarySettings, LibraryStatus } from '../contracts/types';
 import { callTool } from './api';
 import { cancelAppPickers } from './bridge';
@@ -15,9 +15,10 @@ interface Props {
   standalone?: boolean;
   onClose(): void;
   onSaved(settings: LibrarySettings): Promise<void>;
+  onDiagnosed?(): Promise<void>;
 }
 
-export function SettingsPanel({ settings, status, preview, dirty, standalone = false, onClose, onSaved }: Props) {
+export function SettingsPanel({ settings, status, preview, dirty, standalone = false, onClose, onSaved, onDiagnosed }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [draft, setDraft] = useState({
     cliPath: settings?.cliPath ?? 'agentero', vaultPath: settings?.vaultPath ?? '',
@@ -73,7 +74,8 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
       if (dirty && draft.vaultPath !== settings?.vaultPath) throw new Error('请先保存笔记，再检测另一个知识库。');
       const next = await callTool<LibrarySettings>('settings_update', { set: draft });
       await onSaved(next);
-      setDiagnosis(await callTool<LibraryStatus>('library_status'));
+      setDiagnosis(await callTool<LibraryStatus>('library_diagnose'));
+      await onDiagnosed?.();
       setNotice('检测完成，结果对应已保存的配置。');
     } catch (reason) { setError(messageOf(reason)); }
     finally { setBusy(false); }
@@ -120,9 +122,9 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
         <div className="data-root"><span>插件数据目录</span><code>{diagnosis?.dataRoot ?? '~/.codexworkbench/agentero-library/'}</code></div>
       </section>
       <section className="settings-section">
-        <h3>PDF 与正文访问</h3>
+        <h3>后台 PDF 解析（可选）</h3>
         <PathField id="pdfium-path" label="PDFium 路径（可选）" value={draft.pdfiumPath} onChange={value => setDraft(current => ({ ...current, pdfiumPath: value }))} mode="open-directory" title="选择已安装 PDFium 的目录" placeholder="已安装 PDFium 的目录" disabled={locked} pickerDisabled={preview} onPickingChange={setPicking} />
-        <p className="field-help">原生解析依赖 PDFium；浏览器基础阅读使用独立的阅读器，不依赖此原生库。</p>
+        <p className="field-help">PDFium 用于后台解析与 Agent 正文提取；基础 PDF 阅读、批注和笔记不受影响。</p>
         <label className="checkbox-row"><input type="checkbox" checked={draft.allowAgentPdfText} disabled={locked} onChange={e => setDraft({ ...draft, allowAgentPdfText: e.target.checked })} /><span>允许 Agent 读取 PDF 正文</span></label>
         <p className="field-help">开启后可按需读取与搜索正文。你主动发送的选区由当次操作决定。</p>
       </section>
@@ -131,7 +133,7 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
         <Capability label="CLI" available={Boolean(diagnosis?.cli.available && diagnosis.cli.supported)} detail={diagnosis?.cli.version ? `v${diagnosis.cli.version}` : diagnosis?.cli.error ?? '尚未检测'} />
         <Capability label="文献库" available={Boolean(diagnosis?.vault.valid)} detail={diagnosis?.vault.valid ? '可用' : diagnosis?.vault.error ?? '尚未连接'} />
         <Capability label="笔记读写" available={Boolean(diagnosis?.capabilities.notes)} detail={diagnosis?.capabilities.notes ? '可用' : '需要可用的 CLI 与知识库'} />
-        <Capability label="PDF 解析" available={Boolean(diagnosis?.capabilities.pdfParse)} detail={diagnosis?.pdfium.diagnostic ?? '尚未检测'} />
+        <Capability label="后台 PDF 解析（可选）" available={diagnosis?.pdfium.state === 'unknown' ? null : diagnosis?.pdfium.available ?? null} detail={diagnosis?.pdfium.state === 'unknown' || !diagnosis || diagnosis.pdfium.available === null ? '未检测；可点击“保存并检测”。不影响阅读、批注和笔记。' : diagnosis.pdfium.available ? diagnosis.pdfium.diagnostic : `检测未通过。${diagnosis.pdfium.diagnostic}`} />
         {Boolean(diagnosis?.recoveryDrafts) && <p className="field-help warning-text">有 {diagnosis?.recoveryDrafts} 份恢复草稿，请保留插件数据目录以便恢复。</p>}
       </section>
       <TranslationSettings preview={preview} />
@@ -144,6 +146,6 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
   return standalone ? <section className="settings-page">{content}</section> : <dialog className="settings-modal" ref={dialog} onCancel={e => { e.preventDefault(); void requestClose(); }}>{content}</dialog>;
 }
 
-function Capability({ label, available, detail }: { label: string; available: boolean; detail: string }) {
-  return <div className="capability-row"><span>{label}</span><span className={available ? 'success-text' : 'muted'}>{available ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}{detail}</span></div>;
+function Capability({ label, available, detail }: { label: string; available: boolean | null; detail: string }) {
+  return <div className="capability-row"><span>{label}</span><span className={available ? 'success-text' : 'muted'}>{available ? <CheckCircle2 size={15} /> : available === null ? <CircleHelp size={15} /> : <AlertTriangle size={15} />}{detail}</span></div>;
 }

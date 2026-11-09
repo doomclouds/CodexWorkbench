@@ -60766,10 +60766,10 @@ var StdioServerTransport = class {
 };
 
 // src/core/library-service.ts
-import { createHash as createHash3, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir4, open as open2, readFile as readFile3, readdir as readdir2, realpath as realpath3, rename as rename2, rm as rm3, stat as stat2, writeFile as writeFile4 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { basename as basename2, dirname as dirname3, extname, isAbsolute as isAbsolute2, join as join3, posix, resolve as resolve2 } from "node:path";
+import { basename as basename2, dirname as dirname3, extname, isAbsolute as isAbsolute2, join as join4, posix as posix2, resolve as resolve2 } from "node:path";
 
 // src/contracts/errors.ts
 var LibraryError = class extends Error {
@@ -61015,7 +61015,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.2.1";
+var PLUGIN_VERSION = "0.2.2";
 
 // src/infrastructure/native-mcp.ts
 async function freePort() {
@@ -61183,8 +61183,54 @@ ${xref}
   return Buffer.from(document2);
 }
 
+// src/infrastructure/pdf-diagnostic-cache.ts
+import { createHash as createHash2 } from "node:crypto";
+import { join as join3 } from "node:path";
+var pdfDiagnosticKey = (identity) => createHash2("sha256").update(JSON.stringify([identity.cliPath, identity.pdfiumPath, identity.cliVersion])).digest("hex");
+var cachePath = (dataRoot) => join3(dataRoot, "state", "pdf-diagnostic.json");
+async function readPdfDiagnostic(dataRoot, identity) {
+  try {
+    const value = await readJson(cachePath(dataRoot));
+    if (!value || typeof value !== "object") return void 0;
+    const data = value;
+    if (data.schemaVersion !== 1 || data.key !== pdfDiagnosticKey(identity) || typeof data.available !== "boolean" || typeof data.diagnostic !== "string" || typeof data.checkedAt !== "string" || !Number.isFinite(Date.parse(data.checkedAt))) return void 0;
+    return { configured: !!identity.pdfiumPath, path: identity.pdfiumPath, available: data.available, state: data.available ? "available" : "unavailable", checkedAt: data.checkedAt, diagnostic: data.diagnostic };
+  } catch {
+    return void 0;
+  }
+}
+async function writePdfDiagnostic(dataRoot, identity, result) {
+  if (typeof result.available !== "boolean" || !result.checkedAt) throw new Error("Only completed PDF diagnostics can be persisted.");
+  await atomicJson(cachePath(dataRoot), { schemaVersion: 1, key: pdfDiagnosticKey(identity), identity, available: result.available, checkedAt: result.checkedAt, diagnostic: result.diagnostic });
+}
+
+// src/infrastructure/external-pdf.ts
+import { spawn as spawn2 } from "node:child_process";
+import { posix, win32 } from "node:path";
+function externalPdfCommand(path, platform = process.platform) {
+  if (!(platform === "win32" ? win32.isAbsolute(path) : posix.isAbsolute(path)) || path.includes("\0")) throw new LibraryError("INVALID_PATH", "\u7CFB\u7EDF\u9605\u8BFB\u5668\u9700\u8981\u672C\u5730 PDF \u7684\u7EDD\u5BF9\u8DEF\u5F84\u3002");
+  if (platform === "win32") return { command: win32.join(process.env.SystemRoot || "C:\\Windows", "explorer.exe"), args: [path] };
+  if (platform === "darwin") return { command: "/usr/bin/open", args: [path] };
+  throw new LibraryError("PLATFORM_UNSUPPORTED", "\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u5DF2\u914D\u7F6E\u7684\u7CFB\u7EDF PDF \u6253\u5F00\u65B9\u5F0F\u3002");
+}
+async function requestExternalPdfOpen(path, options = {}) {
+  const launch = externalPdfCommand(path, options.platform);
+  await new Promise((resolve4, reject) => {
+    try {
+      const child = (options.spawn ?? spawn2)(launch.command, launch.args, { shell: false, windowsHide: true, detached: true, stdio: "ignore" });
+      child.once("error", () => reject(new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002")));
+      child.once("spawn", () => {
+        child.unref();
+        resolve4();
+      });
+    } catch {
+      reject(new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002"));
+    }
+  });
+}
+
 // src/infrastructure/marks.ts
-import { createHash as createHash2, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash3, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir3, readFile as readFile2, readdir, rm as rm2, stat, writeFile as writeFile3 } from "node:fs/promises";
 import { dirname as dirname2 } from "node:path";
 var markPalette = { yellow: "#fcd34d", green: "#86efac", blue: "#7dd3fc", pink: "#f9a8d4", purple: "#d8b4fe" };
@@ -61214,7 +61260,7 @@ var MarksStore = class {
   async load() {
     const directory = await containedPath(this.root, `${this.paperPath}/marks`, true);
     const names = await exists(directory) ? (await readdir(directory)).filter((n) => n.endsWith(".json")).sort() : [];
-    const hash2 = createHash2("sha256"), files = /* @__PURE__ */ new Map(), malformed = [];
+    const hash2 = createHash3("sha256"), files = /* @__PURE__ */ new Map(), malformed = [];
     let annotations = [], bytes = 0;
     for (const name2 of names) {
       const path = await this.path(name2);
@@ -61488,16 +61534,18 @@ var LibraryService = class {
   nativeAbort;
   snapshot;
   cliProbe;
-  pdfProbe;
+  pdfDiagnosis;
+  externalPdfOpener;
   queues = /* @__PURE__ */ new Map();
   operations = /* @__PURE__ */ new Map();
   busyWrites = 0;
   closed = false;
   constructor(options = {}) {
-    this.dataRoot = resolve2(expandHome(options.dataRoot ?? join3(homedir2(), ".codexworkbench", "agentero-library")));
+    this.dataRoot = resolve2(expandHome(options.dataRoot ?? join4(homedir2(), ".codexworkbench", "agentero-library")));
     this.runner = options.cliRunner ?? new ProcessCliRunner();
     this.factory = options.nativeFactory ?? createNativeBackend;
     this.snapshotTtl = options.snapshotTtlMs ?? 3e4;
+    this.externalPdfOpener = options.externalPdfOpener ?? requestExternalPdfOpen;
   }
   async readSettings() {
     const reading = this.settingsReads.then(async () => {
@@ -61508,7 +61556,6 @@ var LibraryService = class {
         this.settingsGeneration += 1;
         this.snapshot = void 0;
         this.cliProbe = void 0;
-        this.pdfProbe = void 0;
         await this.closeNative();
       }
       return { ...next };
@@ -61517,7 +61564,7 @@ var LibraryService = class {
     return reading;
   }
   async loadSettings() {
-    const value = await readJson(join3(this.dataRoot, "config.json"));
+    const value = await readJson(join4(this.dataRoot, "config.json"));
     if (value === void 0) return { schemaVersion: 1, cliPath: "agentero", vaultPath: "", pdfiumPath: "", allowAgentPdfText: false, vaultId: null };
     const data = record2(value);
     if (data.schemaVersion !== 1 || typeof data.cliPath !== "string" || typeof data.vaultPath !== "string" || typeof data.pdfiumPath !== "string" || typeof data.allowAgentPdfText !== "boolean" || !(data.vaultId === null || typeof data.vaultId === "string")) {
@@ -61554,7 +61601,7 @@ var LibraryService = class {
         await this.readSettings();
         throw new LibraryError("SETTINGS_CHANGED", "\u914D\u7F6E\u5DF2\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u4FDD\u5B58\u3002", true);
       }
-      await atomicJson(join3(this.dataRoot, "config.json"), next);
+      await atomicJson(join4(this.dataRoot, "config.json"), next);
       const saved = await this.readSettings();
       if (settingsKey(saved) !== settingsKey(next)) throw new LibraryError("SETTINGS_CHANGED", "\u4FDD\u5B58\u671F\u95F4\u914D\u7F6E\u53C8\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8F7D\u5165\u5F53\u524D\u503C\u3002", true);
       return saved;
@@ -61570,7 +61617,7 @@ var LibraryService = class {
   }
   async validateVault(input2) {
     const path = resolve2(expandHome(input2));
-    if (!await exists(path) || !(await stat2(path)).isDirectory() || !await exists(join3(path, ".agentero", "catalog.sqlite")) || !await exists(join3(path, "papers"))) {
+    if (!await exists(path) || !(await stat2(path)).isDirectory() || !await exists(join4(path, ".agentero", "catalog.sqlite")) || !await exists(join4(path, "papers"))) {
       throw new LibraryError("VAULT_INVALID", "\u8BE5\u76EE\u5F55\u4E0D\u662F\u5DF2\u6709 Agentero Vault\uFF0C\u8BF7\u9009\u62E9\u5DF2\u6709\u77E5\u8BC6\u5E93\u6216\u660E\u786E\u521B\u5EFA\u65B0\u5E93\u3002");
     }
     return realpath3(path);
@@ -61603,9 +61650,9 @@ var LibraryService = class {
     }
     return envelope.data;
   }
-  async probeCli(settings) {
+  async probeCli(settings, refresh = false) {
     const generation2 = this.settingsGeneration;
-    if (this.cliProbe?.key === settings.cliPath && Date.now() - this.cliProbe.at < 1e4) return this.cliProbe.result;
+    if (!refresh && this.cliProbe?.key === settings.cliPath && Date.now() - this.cliProbe.at < 1e4) return this.cliProbe.result;
     let result;
     try {
       const versionResult = await this.runner.run({ cliPath: settings.cliPath, args: ["--version"], dataRoot: this.dataRoot, timeoutMs: 5e3 });
@@ -61629,33 +61676,43 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (!cli.available) throw new LibraryError("CLI_NOT_FOUND", cli.error ?? "\u672A\u627E\u5230 Agentero CLI\u3002");
     if (!cli.supported) throw new LibraryError("CLI_UNSUPPORTED", cli.error ?? "CLI \u7248\u672C\u4E0D\u53D7\u652F\u6301\u3002");
   }
-  async probePdf(settings) {
-    const generation2 = this.settingsGeneration;
-    const key2 = `${settings.cliPath}\0${settings.pdfiumPath}`;
-    if (this.pdfProbe?.key === key2 && Date.now() - this.pdfProbe.at < 6e4) return this.pdfProbe.result;
-    let result;
+  async probePdf(settings, identity) {
+    const key2 = pdfDiagnosticKey(identity);
+    if (this.pdfDiagnosis?.key === key2) return this.pdfDiagnosis.pending;
+    const controller = new AbortController();
+    const pending = (async () => {
+      let result;
+      try {
+        const directory = join4(this.dataRoot, "cache", "diagnostics", `${key2.slice(0, 16)}-${this.instanceId}`);
+        const vault2 = join4(directory, "vault");
+        await mkdir4(directory, { recursive: true });
+        if (!await exists(join4(vault2, ".agentero", "catalog.sqlite"))) await this.cli(settings, ["--json", "vault", "create", vault2], controller.signal);
+        const pdf = join4(directory, "codex-workbench-probe.pdf");
+        await writeFile4(pdf, diagnosticPdf());
+        const imported = record2(await this.cli(settings, ["--json", "--vault", vault2, "import", "pdf", pdf, "--no-recognize"], controller.signal));
+        const papers = Array.isArray(imported.papers) ? imported.papers : [];
+        const path = String(record2(papers[0]).path ?? "papers/codex-workbench-probe");
+        await this.cli(settings, ["--json", "--vault", vault2, "paper", "parse", path, "--force"], controller.signal, 3e4);
+        result = { configured: !!settings.pdfiumPath, available: true, state: "available", path: settings.pdfiumPath, diagnostic: "\u5DF2\u4F7F\u7528\u9694\u79BB PDF \u9A8C\u8BC1\u539F\u751F\u89E3\u6790\u3002", checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      } catch (error62) {
+        if (controller.signal.aborted || this.closed) throw new LibraryError("OPERATION_CANCELLED", "PDF \u8BCA\u65AD\u5DF2\u505C\u6B62\u3002");
+        result = { configured: !!settings.pdfiumPath, available: false, state: "unavailable", path: settings.pdfiumPath, diagnostic: asLibraryError(error62).message, checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
+      }
+      const current = await this.readSettings();
+      if (!this.closed && current.cliPath === identity.cliPath && current.pdfiumPath === identity.pdfiumPath) await writePdfDiagnostic(this.dataRoot, identity, result);
+      return result;
+    })();
+    this.pdfDiagnosis = { key: key2, controller, pending };
     try {
-      const directory = join3(this.dataRoot, "cache", "diagnostics", createHash3("sha256").update(key2).digest("hex").slice(0, 16));
-      const vault2 = join3(directory, "vault");
-      await mkdir4(directory, { recursive: true });
-      if (!await exists(join3(vault2, ".agentero", "catalog.sqlite"))) await this.cli(settings, ["--json", "vault", "create", vault2]);
-      const pdf = join3(directory, "codex-workbench-probe.pdf");
-      await writeFile4(pdf, diagnosticPdf());
-      const imported = record2(await this.cli(settings, ["--json", "--vault", vault2, "import", "pdf", pdf, "--no-recognize"]));
-      const papers = Array.isArray(imported.papers) ? imported.papers : [];
-      const path = String(record2(papers[0]).path ?? "papers/codex-workbench-probe");
-      await this.cli(settings, ["--json", "--vault", vault2, "paper", "parse", path, "--force"], void 0, 3e4);
-      result = { configured: !!settings.pdfiumPath, available: true, path: settings.pdfiumPath, diagnostic: "\u5DF2\u4F7F\u7528\u9694\u79BB PDF \u9A8C\u8BC1\u539F\u751F\u89E3\u6790\u3002" };
-    } catch (error62) {
-      result = { configured: !!settings.pdfiumPath, available: false, path: settings.pdfiumPath, diagnostic: asLibraryError(error62).message };
+      return await pending;
+    } finally {
+      if (this.pdfDiagnosis?.pending === pending) this.pdfDiagnosis = void 0;
     }
-    if (generation2 === this.settingsGeneration && this.settingsSnapshot && settingsKey(settings) === settingsKey(this.settingsSnapshot)) this.pdfProbe = { key: key2, at: Date.now(), result };
-    return result;
   }
-  async status() {
+  async status(options = {}) {
     this.ensureOpen();
     const settings = await this.readSettings();
-    const cli = await this.probeCli(settings);
+    const cli = await this.probeCli(settings, options.diagnosePdf === true);
     let valid = false;
     let vaultError;
     if (settings.vaultPath) try {
@@ -61664,16 +61721,19 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     } catch (error62) {
       vaultError = asLibraryError(error62).message;
     }
-    const pdfium = cli.supported ? await this.probePdf(settings) : { configured: !!settings.pdfiumPath, available: false, path: settings.pdfiumPath, diagnostic: "\u8BF7\u5148\u914D\u7F6E\u53EF\u7528 CLI\u3002" };
+    const identity = { cliPath: settings.cliPath, pdfiumPath: settings.pdfiumPath, cliVersion: cli.version ?? "" };
+    const unknown2 = { configured: !!settings.pdfiumPath, available: null, state: "unknown", path: settings.pdfiumPath, diagnostic: cli.supported ? "\u5C1A\u672A\u68C0\u6D4B\u5F53\u524D\u914D\u7F6E\u7684 PDF \u539F\u751F\u80FD\u529B\uFF1B\u53EF\u5728\u8BBE\u7F6E\u4E2D\u660E\u786E\u8FD0\u884C\u8BCA\u65AD\u3002" : "\u8BF7\u5148\u914D\u7F6E\u53EF\u7528 CLI\uFF0C\u518D\u8FD0\u884C PDF \u8BCA\u65AD\u3002" };
+    const pdfium = cli.supported && cli.version ? options.diagnosePdf === true ? await this.probePdf(settings, identity) : await readPdfDiagnostic(this.dataRoot, identity) ?? unknown2 : unknown2;
+    if (settingsKey(settings) !== settingsKey(await this.readSettings())) throw new LibraryError("SETTINGS_CHANGED", "\u8BFB\u53D6\u72B6\u6001\u671F\u95F4\u914D\u7F6E\u5DF2\u6539\u53D8\uFF0C\u8BF7\u5237\u65B0\u5F53\u524D\u72B6\u6001\u3002", true);
     const ready = cli.available && cli.supported && valid;
     return {
       ready,
       instanceId: this.instanceId,
       dataRoot: this.dataRoot,
-      defaultVaultPath: join3(this.dataRoot, "vault"),
+      defaultVaultPath: join4(this.dataRoot, "vault"),
       cli,
       vault: { configured: !!settings.vaultId, valid, vaultId: settings.vaultId, path: settings.vaultPath, name: settings.vaultPath ? basename2(settings.vaultPath) : "", ...vaultError ? { error: vaultError } : {} },
-      capabilities: { metadata: ready, notes: ready, pdfRead: ready, pdfText: ready && settings.allowAgentPdfText && pdfium.available, pdfParse: ready && pdfium.available, layout: ready },
+      capabilities: { metadata: ready, notes: ready, pdfRead: ready, pdfText: ready && settings.allowAgentPdfText && pdfium.available === true, pdfParse: ready && pdfium.available === true, layout: ready },
       capabilityScope: "service-support",
       pdfium,
       allowAgentPdfText: settings.allowAgentPdfText,
@@ -61758,7 +61818,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       this.snapshot = { id: randomUUID3(), vaultId: context.id, createdAt: Date.now(), items: data.map((value) => this.normalizePaper(value)) };
     }
     const snapshot = this.snapshot;
-    const fingerprint = createHash3("sha256").update(JSON.stringify([input2.query ?? "", input2.tag ?? [], input2.unread ?? false, input2.sortBy ?? "title", input2.sortDir ?? "asc"])).digest("hex");
+    const fingerprint = createHash4("sha256").update(JSON.stringify([input2.query ?? "", input2.tag ?? [], input2.unread ?? false, input2.sortBy ?? "title", input2.sortDir ?? "asc"])).digest("hex");
     let offset = 0;
     if (input2.cursor) {
       let cursor;
@@ -62006,7 +62066,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const handle = await open2(path, "r");
     try {
       const before = await handle.stat();
-      const revision = `pdf:${createHash3("sha256").update(JSON.stringify([before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs])).digest("hex")}`;
+      const revision = `pdf:${createHash4("sha256").update(JSON.stringify([before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs])).digest("hex")}`;
       const offset = input2.offset ?? 0;
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > before.size) throw new LibraryError("INVALID_RANGE", "PDF \u8BFB\u53D6\u504F\u79FB\u65E0\u6548\u3002");
       if (offset > 0 && !input2.revision) throw new LibraryError("PDF_REVISION_REQUIRED", "\u540E\u7EED PDF \u5206\u5757\u5FC5\u987B\u643A\u5E26\u9996\u5757\u7684 revision\u3002");
@@ -62066,16 +62126,16 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (typeof input2.content !== "string" || Buffer.byteLength(input2.content) > MAX_NOTE_BYTES) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u5185\u5BB9\u5FC5\u987B\u662F 2 MiB \u4EE5\u5185\u7684\u6587\u672C\u3002");
     const location = await this.noteLocation(context, input2);
     const key2 = `${context.id}:${location.paperPath ?? location.path}`;
-    const recoveryId = `${this.instanceId}-${createHash3("sha256").update(key2).digest("hex").slice(0, 24)}`;
+    const recoveryId = `${this.instanceId}-${createHash4("sha256").update(key2).digest("hex").slice(0, 24)}`;
     const attemptId = randomUUID3();
-    const draftPath = join3(this.dataRoot, "state", "drafts", `${recoveryId}.draft.json`);
+    const draftPath = join4(this.dataRoot, "state", "drafts", `${recoveryId}.draft.json`);
     await atomicJson(draftPath, { instanceId: this.instanceId, attemptId, vaultId: context.id, ...location, revision: input2.revision, mode: input2.mode ?? "replace", content: input2.content, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
     this.busyWrites += 1;
     const previous = this.queues.get(key2) ?? Promise.resolve();
     const task = previous.catch(() => void 0).then(async () => {
       const current = await this.readLocatedNote(context, location);
       if (current.revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u7B14\u8BB0\u5DF2\u88AB\u5176\u4ED6\u64CD\u4F5C\u4FEE\u6539\uFF1B\u8349\u7A3F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u6BD4\u8F83\u3002", false, { currentRevision: current.revision, recoveryId });
-      await atomicJson(join3(this.dataRoot, "state", "drafts", `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
+      await atomicJson(join4(this.dataRoot, "state", "drafts", `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
       try {
         if (location.paperPath) await this.call(context, "paper_notes_write", { ref: location.paperPath, content: input2.content, mode: input2.mode ?? "replace" });
         else await this.call(context, "file_write", { path: location.path, content: input2.content, mode: input2.mode ?? "replace" });
@@ -62177,8 +62237,31 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const filename = names.includes(`${basename2(paperPath)}.pdf`) ? `${basename2(paperPath)}.pdf` : names.filter((n) => n.toLowerCase().endsWith(".pdf")).sort()[0];
     if (!filename) throw new LibraryError("PDF_MISSING", "\u8BBA\u6587\u6CA1\u6709\u672C\u5730 PDF\u3002");
     const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat2(path);
+    if (!info.isFile()) throw new LibraryError("INVALID_PDF", "\u8BBA\u6587 PDF \u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
     if (info.size > 256 * 1024 * 1024) throw new LibraryError("PDF_TOO_LARGE", "PDF \u8D85\u8FC7 256 MiB\u3002");
-    return { path, filename, revision: `pdf:${createHash3("sha256").update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest("hex")}` };
+    return { path, filename, revision: `pdf:${createHash4("sha256").update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest("hex")}` };
+  }
+  async openPaperExternally(input2) {
+    const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
+    const location = await this.pdfLocation(context, paperPath);
+    if (extname(location.path).toLowerCase() !== ".pdf") throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u672C\u5730 PDF \u6587\u4EF6\u3002");
+    const handle = await open2(location.path, "r");
+    try {
+      if (!(await handle.stat()).isFile()) throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u666E\u901A PDF \u6587\u4EF6\u3002");
+      const header = Buffer.alloc(1024), { bytesRead } = await handle.read(header, 0, header.length, 0);
+      if (!header.subarray(0, bytesRead).includes(Buffer.from("%PDF-"))) throw new LibraryError("INVALID_PDF", "\u6240\u9009\u6587\u4EF6\u6CA1\u6709\u6709\u6548\u7684 PDF \u6587\u4EF6\u5934\u3002");
+    } finally {
+      await handle.close();
+    }
+    this.ensureOpen();
+    this.assertCurrentContext(context, await this.readSettings());
+    try {
+      await this.externalPdfOpener(location.path);
+    } catch (error62) {
+      if (error62 instanceof LibraryError) throw error62;
+      throw new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002");
+    }
+    return { requested: true, vaultId: context.id, paperPath, fileName: location.filename, handler: "system-default" };
   }
   async atomicBytes(path, bytes) {
     const temporary = `${path}.${randomUUID3()}.tmp`;
@@ -62256,7 +62339,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     return { path: relative2, content, revision: contentRevision(content), exists: true };
   }
   readerStatePath(context, paperPath) {
-    return join3(this.dataRoot, "state", "reader", `${createHash3("sha256").update(`${context.id}:${paperPath}`).digest("hex")}.json`);
+    return join4(this.dataRoot, "state", "reader", `${createHash4("sha256").update(`${context.id}:${paperPath}`).digest("hex")}.json`);
   }
   async readReaderState(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
@@ -62304,7 +62387,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     let path, temporary = false;
     if (input2.text !== void 0) {
       if (typeof input2.text !== "string" || Buffer.byteLength(input2.text) > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u6587\u732E\u683C\u5F0F\u6587\u672C\u8D85\u8FC7 8 MiB\u3002");
-      path = join3(this.dataRoot, "state", "imports", `${randomUUID3()}.bib`);
+      path = join4(this.dataRoot, "state", "imports", `${randomUUID3()}.bib`);
       await mkdir4(dirname3(path), { recursive: true });
       await writeFile4(path, input2.text, { flag: "wx", mode: 384 });
       temporary = true;
@@ -62357,7 +62440,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     const source = relativePath(input2.notePath);
     const note2 = source.startsWith("papers/") && source.endsWith("/PAPER.md") ? { path: source, paperPath: await this.paperPath(context, source.slice(0, -"/PAPER.md".length)) } : await this.noteLocation(context, { vaultId: input2.vaultId, path: input2.notePath });
     if (typeof input2.assetPath !== "string" || /^(?:[a-z]+:|\/|\\)/i.test(input2.assetPath)) throw new LibraryError("INVALID_PATH", "\u8BF7\u4F7F\u7528\u7B14\u8BB0\u5185\u7684\u76F8\u5BF9\u56FE\u7247\u8DEF\u5F84\u3002");
-    const relative2 = relativePath(posix.normalize(posix.join(posix.dirname(note2.path), input2.assetPath.replaceAll("\\", "/"))));
+    const relative2 = relativePath(posix2.normalize(posix2.join(posix2.dirname(note2.path), input2.assetPath.replaceAll("\\", "/"))));
     if (!relative2.startsWith("notes/") && !(note2.paperPath && relative2.startsWith(`${note2.paperPath}/`))) throw new LibraryError("INVALID_PATH", "\u9644\u4EF6\u8D85\u51FA\u5F53\u524D\u7B14\u8BB0\u8303\u56F4\u3002");
     const path = await containedPath(context.path, relative2), mimeType = this.assetMime(path), info = await stat2(path);
     if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
@@ -62379,7 +62462,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
       bytes = Buffer.from(input2.base64, "base64");
     }
     if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
-    const file2 = `${randomUUID3()}-${fileName}`, path = `${posix.dirname(note2.path)}/assets/${file2}`;
+    const file2 = `${randomUUID3()}-${fileName}`, path = `${posix2.dirname(note2.path)}/assets/${file2}`;
     return this.exclusive(context, note2.paperPath ?? note2.path, async () => {
       if (note2.paperPath) await this.paperPath(context, note2.paperPath);
       const target = await containedPath(context.path, path, true);
@@ -62419,7 +62502,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
         try {
           const target = decodeURIComponent(raw.split("#")[0]);
           if (/^[a-z]+:|^\//i.test(target)) return [];
-          const path = relativePath(target.startsWith("notes/") || target.startsWith("papers/") ? target : posix.normalize(posix.join(posix.dirname(source), target.endsWith(".md") ? target : `${target}.md`)));
+          const path = relativePath(target.startsWith("notes/") || target.startsWith("papers/") ? target : posix2.normalize(posix2.join(posix2.dirname(source), target.endsWith(".md") ? target : `${target}.md`)));
           return path.startsWith("notes/") || path.startsWith("papers/") && path.endsWith("/NOTES.md") ? [path] : [];
         } catch {
           return [];
@@ -62448,16 +62531,19 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
   }
   async close() {
     this.closed = true;
+    const diagnosis = this.pdfDiagnosis;
+    diagnosis?.controller.abort();
     for (const operation2 of this.operations.values()) if (activeStatuses.has(operation2.public.status)) operation2.controller.abort();
     await this.closeNative();
     await Promise.allSettled([this.settingsReads, this.settingsChain]);
     await this.runner.close?.();
+    if (diagnosis) await Promise.allSettled([diagnosis.pending]);
     await Promise.allSettled([...this.operations.values()].map((operation2) => operation2.done));
     await Promise.allSettled([...this.queues.values()]);
   }
   async recoveryDraftCount() {
     try {
-      return (await readdir2(join3(this.dataRoot, "state", "drafts"))).filter((name2) => /^[a-f0-9-]+-[a-f0-9]{24}\.draft\.json$/.test(name2)).length;
+      return (await readdir2(join4(this.dataRoot, "state", "drafts"))).filter((name2) => /^[a-f0-9-]+-[a-f0-9]{24}\.draft\.json$/.test(name2)).length;
     } catch (error62) {
       if (error62.code === "ENOENT") return 0;
       throw error62;
@@ -64092,7 +64178,7 @@ var p = "text/html;profile=mcp-app";
 import { spawn as spawnProcess } from "node:child_process";
 import { stat as stat3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, dirname as dirname4, extname as extname2, isAbsolute as isAbsolute3, join as join4, resolve as resolve3 } from "node:path";
+import { basename as basename3, dirname as dirname4, extname as extname2, isAbsolute as isAbsolute3, join as join5, resolve as resolve3 } from "node:path";
 var REQUEST_ENV = "CODEXWORKBENCH_PICKER_REQUEST";
 var DEFAULT_TIMEOUT_MS = 12e4;
 var MAX_TIMEOUT_MS = 3e5;
@@ -64259,7 +64345,7 @@ function validatePickerInput(value) {
 }
 async function prepare(input2) {
   const home = homedir3();
-  const documents = join4(home, "Documents");
+  const documents = join5(home, "Documents");
   let fallback = home;
   try {
     if ((await stat3(documents)).isDirectory()) fallback = documents;
@@ -64286,7 +64372,7 @@ async function prepare(input2) {
   return { ...input2, initialDirectory: directory, fileName };
 }
 function nativePickerLaunch(platform) {
-  if (platform === "win32") return { command: join4(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64")] };
+  if (platform === "win32") return { command: join5(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64")] };
   if (platform === "darwin") return { command: "/usr/bin/osascript", args: ["-l", "JavaScript", "-e", MACOS_SCRIPT] };
   throw new NativePickerError("PICKER_UNAVAILABLE", "\u539F\u751F\u9009\u62E9\u5668\u76EE\u524D\u652F\u6301 Windows \u548C macOS\u3002");
 }
@@ -64332,7 +64418,7 @@ async function pickNativePath(input2, options = {}) {
   if (requestId && requests.size >= MAX_REQUEST_RECORDS) throw new NativePickerError("PICKER_BUSY", "\u9009\u62E9\u5668\u53D6\u6D88\u8BB0\u5F55\u5DF2\u6EE1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
   reserved = true;
   const capturedGeneration = generation;
-  const spawn2 = options.spawn ?? spawnProcess;
+  const spawn3 = options.spawn ?? spawnProcess;
   let stopped;
   let stopChild;
   let childClosed;
@@ -64355,7 +64441,7 @@ async function pickNativePath(input2, options = {}) {
     if (capturedGeneration !== generation || options.signal?.aborted) throw new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002");
     let child;
     try {
-      child = spawn2(launch.command, launch.args, { cwd: prepared.initialDirectory, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, [REQUEST_ENV]: JSON.stringify(prepared) } });
+      child = spawn3(launch.command, launch.args, { cwd: prepared.initialDirectory, windowsHide: true, shell: false, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, [REQUEST_ENV]: JSON.stringify(prepared) } });
     } catch {
       throw new NativePickerError("PICKER_UNAVAILABLE", "\u65E0\u6CD5\u542F\u52A8\u7CFB\u7EDF\u9009\u62E9\u5668\uFF0C\u8BF7\u68C0\u67E5\u7CFB\u7EDF\u7EC4\u4EF6\u662F\u5426\u53EF\u7528\u3002");
     }
@@ -64368,7 +64454,7 @@ async function pickNativePath(input2, options = {}) {
         if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
         if (platform === "win32") {
           await new Promise((resolve4) => {
-            const killer = spawn2(join4(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
+            const killer = spawn3(join5(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
             const timer = setTimeout(() => {
               killer.kill();
               child.kill();
@@ -64463,7 +64549,7 @@ async function closeNativePickers() {
 }
 
 // src/infrastructure/translation-provider.ts
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 var defaults = { schemaVersion: 1, provider: "cli", baseUrl: "", model: "", targetLanguage: "zh-CN", apiKey: "" };
 function endpoint(baseUrl) {
   let value;
@@ -64479,7 +64565,7 @@ function endpoint(baseUrl) {
 var TranslationProvider = class {
   constructor(dataRoot, timeoutMs = 6e4) {
     this.timeoutMs = timeoutMs;
-    this.file = join5(dataRoot, "secrets", "translation.json");
+    this.file = join6(dataRoot, "secrets", "translation.json");
   }
   timeoutMs;
   file;
@@ -64643,13 +64729,13 @@ function createLibraryServer(service2, options = {}) {
   const server2 = new McpServer({ name: "agentero-library", version: PLUGIN_VERSION, title: "\u6587\u732E\u5E93" }, {
     capabilities: { experimental: { "openai/settings": { readTool: "settings_read", updateTool: "settings_update" } } }
   });
-  function tool(name2, description, shape, run, readOnly = true, appOnly = false) {
+  function tool(name2, description, shape, run, readOnly = true, appOnly = false, destructive = !readOnly) {
     server2.registerTool(name2, {
       title: description.split("\u3002")[0],
       description,
       inputSchema: external_exports.object(shape).strict(),
       outputSchema: businessResult,
-      annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: ["paper_import", "paper_download", "translate_text"].includes(name2) },
+      annotations: { readOnlyHint: readOnly, destructiveHint: destructive, openWorldHint: ["paper_import", "paper_download", "translate_text"].includes(name2) },
       _meta: { ui: { visibility: appOnly ? ["app"] : ["model", "app"] } }
     }, async (input2, extra) => {
       try {
@@ -64678,8 +64764,10 @@ function createLibraryServer(service2, options = {}) {
     });
   }
   tool("library_status", "\u68C0\u67E5\u6587\u732E\u63D2\u4EF6\u7684 CLI\u3001Vault \u4E0E\u5206\u9879\u80FD\u529B\u3002\u7F3A\u5C11\u4F9D\u8D56\u65F6\u4E5F\u53EF\u8C03\u7528\u3002", {}, () => service2.status());
+  tool("library_diagnose", "\u7528\u6237\u660E\u786E\u70B9\u51FB\u68C0\u6D4B\u540E\u9A8C\u8BC1\u540E\u53F0 PDF \u539F\u751F\u89E3\u6790\uFF1B\u666E\u901A\u72B6\u6001\u5237\u65B0\u4E0D\u4F1A\u6267\u884C\u5BFC\u5165\u6216\u89E3\u6790\u3002", {}, () => service2.status({ diagnosePdf: true }), false, true, false);
   tool("paper_list", "\u5217\u51FA\u6587\u732E\u6458\u8981\u5E76\u5206\u9875\u3002\u9996\u6B21\u6216\u663E\u5F0F\u5237\u65B0\u540E\u4ECE Agentero CLI \u83B7\u53D6\u5B8C\u6574\u5217\u8868\u5FEB\u7167\u3002", { ...vault, query: external_exports.string().max(1e3).optional(), tag: external_exports.array(key).max(100).optional(), unread: external_exports.boolean().optional(), sortBy: external_exports.enum(["title", "authors", "year", "tags", "date"]).optional(), sortDir: external_exports.enum(["asc", "desc"]).optional(), limit: external_exports.number().int().min(1).max(200).optional(), cursor: external_exports.string().max(8192).optional(), refresh: external_exports.boolean().optional() }, (input2) => service2.listPapers(input2));
   tool("paper_get", "\u8BFB\u53D6\u5355\u7BC7\u8BBA\u6587\u5143\u6570\u636E\u4E0E\u53EF\u7528\u8D44\u6E90\uFF0C\u4E0D\u8FD4\u56DE PDF \u5B57\u8282\u3002", paper, (input2) => service2.getPaper(input2));
+  tool("paper_open_external", "\u7528\u6237\u70B9\u51FB\u540E\u5728\u7CFB\u7EDF PDF \u67E5\u770B\u5668\u4E2D\u6253\u5F00\u5F53\u524D\u77E5\u8BC6\u5E93\u7684\u539F\u6587\uFF0C\u4E0D\u81EA\u52A8\u542F\u52A8\u3002", paper, (input2) => service2.openPaperExternally(input2), false, true, false);
   tool("library_search", "\u641C\u7D22\u672C\u5730\u5143\u6570\u636E\u3001\u7B14\u8BB0\u6216\u5DF2\u6709\u6B63\u6587\u3002\u5173\u952E\u8BCD\u5339\u914D\uFF0C\u4E0D\u662F\u8BED\u4E49\u68C0\u7D22\uFF1B\u6B63\u6587\u8303\u56F4\u9700\u8981\u5F00\u542F Agent \u6B63\u6587\u8BBF\u95EE\u3002", { ...vault, query: external_exports.string().min(1).max(1e3), scope: external_exports.enum(["all", "metadata", "notes", "body"]).optional(), limit: external_exports.number().int().min(1).max(200).optional(), year: external_exports.number().int().optional(), publication: key.optional(), doi: key.optional(), isRead: external_exports.boolean().optional() }, (input2) => service2.search(input2));
   tool("paper_import", "\u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u7684\u6807\u8BC6\u7B26\u6216\u672C\u5730 PDF\uFF0C\u8FD4\u56DE\u540E\u53F0\u4EFB\u52A1\uFF1B\u5BFC\u5165\u4E0E\u89E3\u6790\u7ED3\u679C\u5206\u5F00\u3002", { ...vault, text: key.optional(), filePath: key.optional(), filePaths: external_exports.array(key).min(1).max(100).optional(), parent: key.optional(), noRecognize: external_exports.boolean().optional() }, (input2) => service2.importPaper(input2), false);
   tool("paper_parse", "\u6309\u660E\u786E\u5904\u7406\u4EFB\u52A1\u89E3\u6790\u5DF2\u6709 PDF\uFF1B\u5199\u5165\u6D3E\u751F\u6B63\u6587\uFF0C\u4E0D\u4FDD\u8BC1\u4EA7\u751F\u7248\u9762 layout\u3002\u4E0D\u5F97\u56E0\u666E\u901A\u95EE\u7B54\u81EA\u52A8\u89E3\u6790\u3002", { ...paper, force: external_exports.boolean().optional() }, (input2) => service2.parsePaper(input2), false);
@@ -64789,7 +64877,7 @@ function createLibraryServer(service2, options = {}) {
     uri: URI,
     mimeType: p,
     text: options.html ?? await readFile4(fileURLToPath(new URL("./app.html", import.meta.url)), "utf8"),
-    _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: false }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["inline", "fullscreen"] } }
+    _meta: { ui: { csp: { connectDomains: [], resourceDomains: ["blob:", "data:"] }, prefersBorder: false }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["inline", "fullscreen"] } }
   }] }));
   const originalClose = server2.close.bind(server2);
   let closing2;

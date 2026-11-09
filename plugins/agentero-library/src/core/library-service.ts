@@ -7,13 +7,15 @@ import type {
   CliRunner, DiscoverInput, ImportPaperInput, LibraryOperation, LibraryServiceOptions, LibrarySettings,
   LibraryStatus, ListNotesInput, ListPapersInput, NativeBackend, NoteDocument, NoteInput, NoteList,
   OperationInput, Paper, PaperInput, PaperPage, PaperRead, ParsePaperInput, PdfChunk, PdfChunkInput,
-  ReadPaperInput, SearchInput, SettingsPatch, UpdatePaperInput, VaultInput, WriteNoteInput,
+  ReadPaperInput, SearchInput, SettingsPatch, StatusOptions, UpdatePaperInput, VaultInput, WriteNoteInput,
 } from '../contracts/types.js';
 import { asLibraryError, LibraryError } from '../contracts/errors.js';
 import { ProcessCliRunner } from '../infrastructure/cli.js';
 import { atomicJson, containedPath, contentRevision, exists, expandHome, readJson, relativePath } from '../infrastructure/files.js';
 import { createNativeBackend } from '../infrastructure/native-mcp.js';
 import { diagnosticPdf } from '../infrastructure/pdf-probe.js';
+import { pdfDiagnosticKey, readPdfDiagnostic, writePdfDiagnostic, type PdfDiagnosticIdentity } from '../infrastructure/pdf-diagnostic-cache.js';
+import { requestExternalPdfOpen } from '../infrastructure/external-pdf.js';
 import { MarksStore } from '../infrastructure/marks.js';
 import { annotatedPdf, editBookmarks } from '../infrastructure/pdf-edit.js';
 
@@ -41,7 +43,8 @@ export class LibraryService {
   private nativeAbort?: AbortController;
   private snapshot?: Snapshot;
   private cliProbe?: { key: string; at: number; result: LibraryStatus['cli'] };
-  private pdfProbe?: { key: string; at: number; result: LibraryStatus['pdfium'] };
+  private pdfDiagnosis?: { key: string; controller: AbortController; pending: Promise<LibraryStatus['pdfium']> };
+  private readonly externalPdfOpener: (path: string) => Promise<void>;
   private readonly queues = new Map<string, Promise<unknown>>();
   private readonly operations = new Map<string, OperationState>();
   private busyWrites = 0;
@@ -52,6 +55,7 @@ export class LibraryService {
     this.runner = options.cliRunner ?? new ProcessCliRunner();
     this.factory = options.nativeFactory ?? createNativeBackend;
     this.snapshotTtl = options.snapshotTtlMs ?? 30_000;
+    this.externalPdfOpener = options.externalPdfOpener ?? requestExternalPdfOpen;
   }
 
   async readSettings(): Promise<LibrarySettings> {
@@ -65,7 +69,6 @@ export class LibraryService {
         this.settingsGeneration += 1;
         this.snapshot = undefined;
         this.cliProbe = undefined;
-        this.pdfProbe = undefined;
         // Running CLI operations own their captured Vault/settings. Only the
         // cached native connection belongs to this current configuration.
         await this.closeNative();
@@ -161,9 +164,9 @@ export class LibraryService {
     return envelope.data;
   }
 
-  private async probeCli(settings: LibrarySettings): Promise<LibraryStatus['cli']> {
+  private async probeCli(settings: LibrarySettings, refresh = false): Promise<LibraryStatus['cli']> {
     const generation = this.settingsGeneration;
-    if (this.cliProbe?.key === settings.cliPath && Date.now() - this.cliProbe.at < 10_000) return this.cliProbe.result;
+    if (!refresh && this.cliProbe?.key === settings.cliPath && Date.now() - this.cliProbe.at < 10_000) return this.cliProbe.result;
     let result: LibraryStatus['cli'];
     try {
       const versionResult = await this.runner.run({ cliPath: settings.cliPath, args: ['--version'], dataRoot: this.dataRoot, timeoutMs: 5000 });
@@ -186,41 +189,54 @@ export class LibraryService {
     if (!cli.supported) throw new LibraryError('CLI_UNSUPPORTED', cli.error ?? 'CLI 版本不受支持。');
   }
 
-  private async probePdf(settings: LibrarySettings): Promise<LibraryStatus['pdfium']> {
-    const generation = this.settingsGeneration;
-    const key = `${settings.cliPath}\0${settings.pdfiumPath}`;
-    if (this.pdfProbe?.key === key && Date.now() - this.pdfProbe.at < 60_000) return this.pdfProbe.result;
-    let result: LibraryStatus['pdfium'];
-    try {
-      const directory = join(this.dataRoot, 'cache', 'diagnostics', createHash('sha256').update(key).digest('hex').slice(0, 16));
-      const vault = join(directory, 'vault');
-      await mkdir(directory, { recursive: true });
-      if (!(await exists(join(vault, '.agentero', 'catalog.sqlite')))) await this.cli(settings, ['--json', 'vault', 'create', vault]);
-      const pdf = join(directory, 'codex-workbench-probe.pdf');
-      await writeFile(pdf, diagnosticPdf());
-      const imported = record(await this.cli(settings, ['--json', '--vault', vault, 'import', 'pdf', pdf, '--no-recognize']));
-      const papers = Array.isArray(imported.papers) ? imported.papers : [];
-      const path = String(record(papers[0]).path ?? 'papers/codex-workbench-probe');
-      await this.cli(settings, ['--json', '--vault', vault, 'paper', 'parse', path, '--force'], undefined, 30_000);
-      result = { configured: !!settings.pdfiumPath, available: true, path: settings.pdfiumPath, diagnostic: '已使用隔离 PDF 验证原生解析。' };
-    } catch (error) { result = { configured: !!settings.pdfiumPath, available: false, path: settings.pdfiumPath, diagnostic: asLibraryError(error).message }; }
-    if (generation === this.settingsGeneration && this.settingsSnapshot && settingsKey(settings) === settingsKey(this.settingsSnapshot)) this.pdfProbe = { key, at: Date.now(), result };
-    return result;
+  private async probePdf(settings: LibrarySettings, identity: PdfDiagnosticIdentity): Promise<LibraryStatus['pdfium']> {
+    const key = pdfDiagnosticKey(identity);
+    if (this.pdfDiagnosis?.key === key) return this.pdfDiagnosis.pending;
+    const controller = new AbortController();
+    const pending = (async () => {
+      let result: LibraryStatus['pdfium'];
+      try {
+        // Different MCP processes use separate fixture Vaults. They share only
+        // the completed diagnostic record, never a catalog or running parser.
+        const directory = join(this.dataRoot, 'cache', 'diagnostics', `${key.slice(0, 16)}-${this.instanceId}`);
+        const vault = join(directory, 'vault');
+        await mkdir(directory, { recursive: true });
+        if (!(await exists(join(vault, '.agentero', 'catalog.sqlite')))) await this.cli(settings, ['--json', 'vault', 'create', vault], controller.signal);
+        const pdf = join(directory, 'codex-workbench-probe.pdf');
+        await writeFile(pdf, diagnosticPdf());
+        const imported = record(await this.cli(settings, ['--json', '--vault', vault, 'import', 'pdf', pdf, '--no-recognize'], controller.signal));
+        const papers = Array.isArray(imported.papers) ? imported.papers : [];
+        const path = String(record(papers[0]).path ?? 'papers/codex-workbench-probe');
+        await this.cli(settings, ['--json', '--vault', vault, 'paper', 'parse', path, '--force'], controller.signal, 30_000);
+        result = { configured: !!settings.pdfiumPath, available: true, state: 'available', path: settings.pdfiumPath, diagnostic: '已使用隔离 PDF 验证原生解析。', checkedAt: new Date().toISOString() };
+      } catch (error) {
+        if (controller.signal.aborted || this.closed) throw new LibraryError('OPERATION_CANCELLED', 'PDF 诊断已停止。');
+        result = { configured: !!settings.pdfiumPath, available: false, state: 'unavailable', path: settings.pdfiumPath, diagnostic: asLibraryError(error).message, checkedAt: new Date().toISOString() };
+      }
+      const current = await this.readSettings();
+      if (!this.closed && current.cliPath === identity.cliPath && current.pdfiumPath === identity.pdfiumPath) await writePdfDiagnostic(this.dataRoot, identity, result);
+      return result;
+    })();
+    this.pdfDiagnosis = { key, controller, pending };
+    try { return await pending; } finally { if (this.pdfDiagnosis?.pending === pending) this.pdfDiagnosis = undefined; }
   }
 
-  async status(): Promise<LibraryStatus> {
+  async status(options: StatusOptions = {}): Promise<LibraryStatus> {
     this.ensureOpen();
     const settings = await this.readSettings();
-    const cli = await this.probeCli(settings);
+    const cli = await this.probeCli(settings, options.diagnosePdf === true);
     let valid = false;
     let vaultError: string | undefined;
     if (settings.vaultPath) try { await this.validateVault(settings.vaultPath); valid = !!settings.vaultId; } catch (error) { vaultError = asLibraryError(error).message; }
-    const pdfium = cli.supported ? await this.probePdf(settings) : { configured: !!settings.pdfiumPath, available: false, path: settings.pdfiumPath, diagnostic: '请先配置可用 CLI。' };
+    const identity = { cliPath: settings.cliPath, pdfiumPath: settings.pdfiumPath, cliVersion: cli.version ?? '' };
+    const unknown: LibraryStatus['pdfium'] = { configured: !!settings.pdfiumPath, available: null, state: 'unknown', path: settings.pdfiumPath, diagnostic: cli.supported ? '尚未检测当前配置的 PDF 原生能力；可在设置中明确运行诊断。' : '请先配置可用 CLI，再运行 PDF 诊断。' };
+    const pdfium = cli.supported && cli.version ? options.diagnosePdf === true ? await this.probePdf(settings, identity) : await readPdfDiagnostic(this.dataRoot, identity) ?? unknown : unknown;
+    if (settingsKey(settings) !== settingsKey(await this.readSettings())) throw new LibraryError('SETTINGS_CHANGED', '读取状态期间配置已改变，请刷新当前状态。', true);
     const ready = cli.available && cli.supported && valid;
     return {
       ready, instanceId: this.instanceId, dataRoot: this.dataRoot, defaultVaultPath: join(this.dataRoot, 'vault'), cli,
       vault: { configured: !!settings.vaultId, valid, vaultId: settings.vaultId, path: settings.vaultPath, name: settings.vaultPath ? basename(settings.vaultPath) : '', ...(vaultError ? { error: vaultError } : {}) },
-      capabilities: { metadata: ready, notes: ready, pdfRead: ready, pdfText: ready && settings.allowAgentPdfText && pdfium.available, pdfParse: ready && pdfium.available, layout: ready },
+      capabilities: { metadata: ready, notes: ready, pdfRead: ready, pdfText: ready && settings.allowAgentPdfText && pdfium.available === true, pdfParse: ready && pdfium.available === true, layout: ready },
       capabilityScope: 'service-support',
       pdfium, allowAgentPdfText: settings.allowAgentPdfText, activeOperations: this.activeOperationCount(), recoveryDrafts: await this.recoveryDraftCount(),
     };
@@ -679,8 +695,25 @@ export class LibraryService {
     const filename = names.includes(`${basename(paperPath)}.pdf`) ? `${basename(paperPath)}.pdf` : names.filter(n => n.toLowerCase().endsWith('.pdf')).sort()[0];
     if (!filename) throw new LibraryError('PDF_MISSING', '论文没有本地 PDF。');
     const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat(path);
+    if (!info.isFile()) throw new LibraryError('INVALID_PDF', '论文 PDF 不是普通文件。');
     if (info.size > 256 * 1024 * 1024) throw new LibraryError('PDF_TOO_LARGE', 'PDF 超过 256 MiB。');
     return { path, filename, revision: `pdf:${createHash('sha256').update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest('hex')}` };
+  }
+  async openPaperExternally(input: PaperInput) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    const location = await this.pdfLocation(context, paperPath);
+    if (extname(location.path).toLowerCase() !== '.pdf') throw new LibraryError('INVALID_PDF', '所选资源不是本地 PDF 文件。');
+    const handle = await open(location.path, 'r');
+    try {
+      if (!(await handle.stat()).isFile()) throw new LibraryError('INVALID_PDF', '所选资源不是普通 PDF 文件。');
+      const header = Buffer.alloc(1024), { bytesRead } = await handle.read(header, 0, header.length, 0);
+      if (!header.subarray(0, bytesRead).includes(Buffer.from('%PDF-'))) throw new LibraryError('INVALID_PDF', '所选文件没有有效的 PDF 文件头。');
+    } finally { await handle.close(); }
+    this.ensureOpen();
+    this.assertCurrentContext(context, await this.readSettings());
+    try { await this.externalPdfOpener(location.path); }
+    catch (error) { if (error instanceof LibraryError) throw error; throw new LibraryError('EXTERNAL_OPEN_FAILED', '无法向系统 PDF 阅读器发送打开请求，请检查默认阅读器。'); }
+    return { requested: true as const, vaultId: context.id, paperPath, fileName: location.filename, handler: 'system-default' as const };
   }
   private async atomicBytes(path: string, bytes: Uint8Array) {
     const temporary = `${path}.${randomUUID()}.tmp`;
@@ -891,12 +924,15 @@ export class LibraryService {
 
   async close(): Promise<void> {
     this.closed = true;
+    const diagnosis = this.pdfDiagnosis;
+    diagnosis?.controller.abort();
     for (const operation of this.operations.values()) if (activeStatuses.has(operation.public.status)) operation.controller.abort();
     await this.closeNative();
     // A concurrent disk refresh may already own the previous connection's
     // close promise after removing it from this.native. Wait for that owner.
     await Promise.allSettled([this.settingsReads, this.settingsChain]);
     await this.runner.close?.();
+    if (diagnosis) await Promise.allSettled([diagnosis.pending]);
     await Promise.allSettled([...this.operations.values()].map(operation => operation.done));
     await Promise.allSettled([...this.queues.values()]);
   }
