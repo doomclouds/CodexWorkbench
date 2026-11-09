@@ -2,7 +2,7 @@
 
 基于 Codex 桌面端的个人工作台插件集合，面向 Windows 和 macOS。通过可组合的本地工具、界面与工作流，逐步形成自己的工作环境。
 
-首个插件是 [文献库](plugins/agentero-library/README.md)：复用 Agentero CLI／MCP，在当前对话旁检索文献、阅读 PDF 和维护研究笔记。
+首个插件是 [文献库](plugins/agentero-library/README.md)，当前版本为 **0.2.0**：复用 Agentero CLI／MCP，在当前对话旁管理本地 PDF，完成阅读、批注、翻译和 Markdown 笔记。界面采用 MCP App Thread 入口，跟随 Codex 的明暗主题。
 
 ## 安装插件
 
@@ -13,7 +13,9 @@ codex plugin marketplace add doomclouds/CodexWorkbench --ref main
 codex plugin add agentero-library@codex-workbench
 ```
 
-插件随仓库提供预构建运行文件，无需下载 ZIP 或自行构建。运行需要 Node.js 24 与用户安装的 Agentero CLI v0.15.2；PDF 原生处理的依赖见插件说明。Windows 已完成隔离 CLI／MCP 和模拟宿主浏览器验证；macOS arm64 与真实 Codex 界面仍需实机验证。
+插件随仓库提供预构建运行文件，无需下载 ZIP、克隆源码或自行构建。运行需要 Node.js 24 与用户安装的 Agentero CLI v0.15.2；后台 PDF 原生处理还需要 PDFium，基础阅读器使用随插件提供的 PDF.js。翻译可选择 Agentero 文本翻译或单独配置兼容模型服务，具体设置见插件说明。
+
+Windows 已完成隔离 CLI／MCP 和模拟宿主浏览器验证；macOS arm64 尚未实测。自动检查与模拟宿主结果不代表所有 Codex 桌面版本的行为已经验证。
 
 ## 开发方向
 

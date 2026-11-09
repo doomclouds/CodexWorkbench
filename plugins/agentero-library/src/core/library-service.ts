@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, posix, resolve } from 'node:path';
+import type { AddMarkInput, BibliographyInput, ChangeTagInput, DeleteMarkInput, ExportBibliographyInput, ExportPaperInput, ExportResult, MarkListInput, NoteAssetImportInput, NoteAssetReadInput, NoteLinksInput, RenameNoteInput, TranslateInput, UpdateMarkInput, WriteBookmarksInput } from '../contracts/reader.js';
 import type {
   CliRunner, DiscoverInput, ImportPaperInput, LibraryOperation, LibraryServiceOptions, LibrarySettings,
   LibraryStatus, ListNotesInput, ListPapersInput, NativeBackend, NoteDocument, NoteInput, NoteList,
@@ -13,6 +14,8 @@ import { ProcessCliRunner } from '../infrastructure/cli.js';
 import { atomicJson, containedPath, contentRevision, exists, expandHome, readJson, relativePath } from '../infrastructure/files.js';
 import { createNativeBackend } from '../infrastructure/native-mcp.js';
 import { diagnosticPdf } from '../infrastructure/pdf-probe.js';
+import { MarksStore } from '../infrastructure/marks.js';
+import { annotatedPdf, editBookmarks } from '../infrastructure/pdf-edit.js';
 
 interface Context { id: string; path: string; settings: LibrarySettings }
 interface Snapshot { id: string; vaultId: string; createdAt: number; items: Paper[] }
@@ -141,6 +144,7 @@ export class LibraryService {
     if (input.vaultId !== settings.vaultId) throw new LibraryError('VAULT_CHANGED', '知识库已切换，请重新载入当前视图。');
     return { id: settings.vaultId, path: await this.validateVault(settings.vaultPath), settings };
   }
+  async validateScope(input: VaultInput): Promise<void> { await this.context(input); }
 
   private async cli(settings: LibrarySettings, args: string[], signal?: AbortSignal, timeoutMs = 30_000): Promise<unknown> {
     const result = await this.runner.run({ cliPath: settings.cliPath, args, dataRoot: this.dataRoot, pdfiumPath: settings.pdfiumPath, signal, timeoutMs });
@@ -275,7 +279,7 @@ export class LibraryService {
     const item = record(value);
     return {
       ...item, id: String(item.id ?? ''), path: String(item.path ?? '').replaceAll('\\', '/'), title: String(item.title ?? ''),
-      authors: strings(item.authors), tags: strings(item.tags), isRead: Boolean(item.isRead ?? item.is_read),
+      authors: strings(item.authors), tags: strings(item.tags), tagDetails: Array.isArray(item.tags) ? item.tags.map(tag => typeof tag === 'string' ? { name: tag } : { name: String(record(tag).name ?? ''), ...(typeof record(tag).color === 'string' ? { color: String(record(tag).color) } : {}) }).filter(tag => tag.name) : [], isRead: Boolean(item.isRead ?? item.is_read),
       ...(item.arxiv_id ? { arxivId: String(item.arxiv_id) } : {}),
     } as Paper;
   }
@@ -290,7 +294,7 @@ export class LibraryService {
 
   async listPapers(input: ListPapersInput): Promise<PaperPage> {
     const context = await this.context(input);
-    if (input.sortBy && !['title', 'year', 'date'].includes(input.sortBy)) throw new LibraryError('INVALID_SORT', '仅支持按标题、年份或日期排序。');
+    if (input.sortBy && !['title', 'year', 'date', 'authors', 'tags'].includes(input.sortBy)) throw new LibraryError('INVALID_SORT', '不支持该排序列。');
     await this.requireCli(context.settings);
     if (input.refresh || !this.snapshot || this.snapshot.vaultId !== context.id || Date.now() - this.snapshot.createdAt > this.snapshotTtl) {
       const data = await this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'list', '--fields', 'authors,year,date,tags,is_read,publication,doi']);
@@ -308,7 +312,7 @@ export class LibraryService {
       offset = Number(cursor.offset);
     }
     const query = (input.query ?? '').trim().toLocaleLowerCase();
-    let items = snapshot.items.filter(paper => (!query || [paper.title, paper.id, paper.path, ...paper.authors, ...paper.tags].some(text => text.toLocaleLowerCase().includes(query))) && (!input.unread || !paper.isRead) && (!input.tag?.length || input.tag.every(tag => paper.tags.some(value => value.toLocaleLowerCase() === tag.toLocaleLowerCase()))));
+    let items = snapshot.items.filter(paper => (!query || [paper.title, paper.id, paper.path, String(paper.year ?? ''), paper.date ?? '', ...paper.authors, ...paper.tags].some(text => text.toLocaleLowerCase().includes(query))) && (!input.unread || !paper.isRead) && (!input.tag?.length || input.tag.every(tag => paper.tags.some(value => value.toLocaleLowerCase() === tag.toLocaleLowerCase()))));
     const key = input.sortBy ?? 'title';
     const direction = input.sortDir === 'desc' ? -1 : 1;
     items = items.toSorted((a, b) => String(a[key] ?? '').localeCompare(String(b[key] ?? ''), undefined, { numeric: true }) * direction || a.path.localeCompare(b.path));
@@ -320,11 +324,21 @@ export class LibraryService {
   async getPaper(input: PaperInput): Promise<Record<string, unknown>> {
     const context = await this.context(input);
     const path = await this.paperPath(context, input.paperPath);
-    const [metadata, paths] = await Promise.all([this.call(context, 'paper_get', { ref: path }), this.call(context, 'paper_paths', { ref: path })]);
+    await this.requireCli(context.settings);
+    const [metadata, paths, detail] = await Promise.all([
+      this.call(context, 'paper_get', { ref: path }), this.call(context, 'paper_paths', { ref: path }),
+      this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'get', path]),
+    ]);
+    this.assertCurrentContext(context, await this.readSettings());
+    // Native MCP flattens PaperTag to names. A targeted CLI record preserves
+    // colors without loading a full library or reusing a stale list snapshot.
+    const taggedPaper = record(record(detail).paper);
+    if (taggedPaper.path !== path || !Array.isArray(taggedPaper.tags)) throw new LibraryError('UPSTREAM_INVALID', 'CLI 单篇文献标签格式无效。');
+    const tags = this.normalizePaper(taggedPaper);
     const hasPdf = (await readdir(await containedPath(context.path, path))).some(name => name.toLowerCase().endsWith('.pdf'));
     const hasMarkdown = await exists(await containedPath(context.path, `${path}/PAPER.md`, true));
     const hasLayout = await exists(await containedPath(context.path, `${path}/source/layout.json`, true));
-    return { vaultId: context.id, ...this.normalizePaper(metadata), paths: paths.paths, hasPdf, hasMarkdown, hasLayout };
+    return { vaultId: context.id, ...this.normalizePaper(metadata), tags: tags.tags, tagDetails: tags.tagDetails, paths: paths.paths, hasPdf, hasMarkdown, hasLayout };
   }
 
   async search(input: SearchInput): Promise<Record<string, unknown>> {
@@ -377,7 +391,7 @@ export class LibraryService {
     return { vaultId: context.id, ...await this.call(context, 'discover_arxiv', { keywords: input.keywords ?? [], categories: input.categories ?? [], ...(input.since ? { since: input.since } : {}), ...(input.until ? { until: input.until } : {}), ...(input.top !== undefined ? { top: input.top } : {}), ...(input.maxCandidates !== undefined ? { maxCandidates: input.maxCandidates } : {}), dedup: input.dedup ?? true }) };
   }
 
-  private startOperation(context: Context, type: 'import' | 'parse', run: (signal: AbortSignal) => Promise<unknown>, paperPath?: string): LibraryOperation {
+  private startOperation(context: Context, type: LibraryOperation['type'], run: (signal: AbortSignal) => Promise<unknown>, paperPath?: string): LibraryOperation {
     const operationId = `${this.instanceId}:${randomUUID()}`;
     const now = new Date().toISOString();
     const operation: LibraryOperation = { operationId, instanceId: this.instanceId, vaultId: context.id, type, status: 'queued', stage: 'queued', createdAt: now, updatedAt: now, ...(paperPath ? { paperPath } : {}) };
@@ -400,20 +414,24 @@ export class LibraryService {
   async importPaper(input: ImportPaperInput): Promise<LibraryOperation> {
     const context = await this.context(input);
     await this.requireCli(context.settings);
-    if (!!input.text?.trim() === !!input.filePath?.trim()) throw new LibraryError('INVALID_IMPORT', '请提供论文标识符或本地 PDF 路径中的一个。');
+    const modes = Number(input.text !== undefined) + Number(input.filePath !== undefined) + Number(input.filePaths !== undefined);
+    if (modes !== 1 || input.text !== undefined && (typeof input.text !== 'string' || !input.text.trim())) throw new LibraryError('INVALID_IMPORT', '请提供标识符、单个 PDF 路径或 PDF 路径数组中的一种。');
+    const requestedFiles = input.filePaths ?? (input.filePath !== undefined ? [input.filePath] : []);
+    if (!Array.isArray(requestedFiles) || input.filePaths !== undefined && (requestedFiles.length < 1 || requestedFiles.length > 100) || requestedFiles.some(file => typeof file !== 'string' || !file.trim() || file.length > 4096)) throw new LibraryError('INVALID_IMPORT', '一次导入请选择 1 至 100 个有效 PDF 路径。');
     const parent = relativePath(input.parent ?? 'papers');
     if (parent !== 'papers' && !parent.startsWith('papers/')) throw new LibraryError('INVALID_PATH', '导入目录必须位于 papers/。');
-    let file: string | undefined;
-    if (input.filePath) {
-      file = resolve(expandHome(input.filePath));
+    const localFiles: string[] = [];
+    for (const requested of requestedFiles) {
+      const file = resolve(expandHome(requested));
       if (!file.toLowerCase().endsWith('.pdf') || !(await stat(file)).isFile()) throw new LibraryError('INVALID_IMPORT', '请选择已有的本地 PDF 文件。');
+      if (!localFiles.some(existing => process.platform === 'win32' ? existing.toLowerCase() === file.toLowerCase() : existing === file)) localFiles.push(file);
     }
-    const localFile = file;
     return this.startOperation(context, 'import', async signal => {
-      const args = ['--json', '--vault', context.path, 'import', localFile ? 'pdf' : 'id', localFile ?? input.text!.trim(), '--parent', parent];
-      if (localFile && (input.noRecognize ?? true)) args.push('--no-recognize');
+      const args = ['--json', '--vault', context.path, 'import', localFiles.length ? 'pdf' : 'id', '--parent', parent];
+      if (localFiles.length && (input.noRecognize ?? true)) args.push('--no-recognize');
+      args.push('--', ...(localFiles.length ? localFiles : [input.text!.trim()]));
       const result = await this.cli(context.settings, args, signal, 300_000);
-      return { data: result, ...(localFile && (input.noRecognize ?? true) ? { metadataSource: 'filename', warning: '本次跳过元数据识别，可后续完善。' } : {}) };
+      return { data: result, ...(localFiles.length && (input.noRecognize ?? true) ? { metadataSource: 'filename', warning: '本次跳过元数据识别，可后续完善。' } : {}) };
     });
   }
 
@@ -579,7 +597,7 @@ export class LibraryService {
     if (input.mode && input.mode !== 'replace' && input.mode !== 'append') throw new LibraryError('INVALID_MODE', '保存模式仅支持 replace 或 append。');
     if (typeof input.content !== 'string' || Buffer.byteLength(input.content) > MAX_NOTE_BYTES) throw new LibraryError('NOTE_TOO_LARGE', '笔记内容必须是 2 MiB 以内的文本。');
     const location = await this.noteLocation(context, input);
-    const key = `${context.id}:${location.path}`;
+    const key = `${context.id}:${location.paperPath ?? location.path}`;
     const recoveryId = `${this.instanceId}-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
     const attemptId = randomUUID();
     const draftPath = join(this.dataRoot, 'state', 'drafts', `${recoveryId}.draft.json`);
@@ -601,6 +619,266 @@ export class LibraryService {
     });
     this.queues.set(key, task);
     try { return await task; } finally { this.busyWrites -= 1; if (this.queues.get(key) === task) this.queues.delete(key); }
+  }
+
+  private async exclusive<T>(context: Context, resource: string, run: () => Promise<T>): Promise<T> {
+    const key = `${context.id}:${resource}`;
+    this.busyWrites += 1;
+    const task = (this.queues.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+      this.ensureOpen(); this.assertCurrentContext(context, await this.readSettings());
+      return run();
+    });
+    this.queues.set(key, task);
+    try { return await task; } finally { this.busyWrites -= 1; if (this.queues.get(key) === task) this.queues.delete(key); }
+  }
+
+  private async markStore(input: PaperInput) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    return { context, store: new MarksStore(context.path, paperPath, context.id), paperPath };
+  }
+  async listMarks(input: MarkListInput) {
+    const { store } = await this.markStore(input), result = await store.list();
+    const query = (input.query ?? '').toLocaleLowerCase();
+    return { ...result, items: result.items.filter(mark => (!input.kind || mark.kind === input.kind) && (!input.page || mark.page === input.page) && (!query || [mark.quote, mark.note, mark.result, ...(mark.messages ?? []).map(m => m.content)].some(t => t?.toLocaleLowerCase().includes(query)))) };
+  }
+  async addMark(input: AddMarkInput) { const { context, store, paperPath } = await this.markStore(input); return this.exclusive(context, paperPath, async () => { await this.paperPath(context, paperPath); return store.add(input); }); }
+  async updateMark(input: UpdateMarkInput) { const { context, store, paperPath } = await this.markStore(input); return this.exclusive(context, paperPath, async () => { await this.paperPath(context, paperPath); return store.update(input); }); }
+  async deleteMark(input: DeleteMarkInput) { const { context, store, paperPath } = await this.markStore(input); return this.exclusive(context, paperPath, async () => { await this.paperPath(context, paperPath); return store.remove(input.id, input.revision); }); }
+  async readMarkAsset(input: PaperInput & { id: string }) { const { store } = await this.markStore(input); return store.asset(input.id); }
+
+  async translateText(input: TranslateInput, signal?: AbortSignal) {
+    const checkCancellation = () => { if (signal?.aborted) throw new LibraryError('OPERATION_CANCELLED', '翻译已取消。'); };
+    checkCancellation();
+    const context = await this.context(input);
+    if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 20_000) throw new LibraryError('INVALID_TRANSLATION', '翻译原文必须为 1 至 20000 字符。');
+    const to = input.to ?? 'zh-CN', from = input.from ?? 'auto';
+    if (![to, from].every(s => /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(s))) throw new LibraryError('INVALID_TRANSLATION', '语言代码无效。');
+    const providers = ['google', 'googleapi', 'deeplx', 'cnki', 'huoshanweb', 'tencenttransmart'];
+    if (input.provider && !providers.includes(input.provider)) throw new LibraryError('INVALID_TRANSLATION', 'CLI 仅支持免费翻译引擎。');
+    await this.requireCli(context.settings);
+    // Native free-MT limits one request to 5000 characters. Preserve all text
+    // through bounded chunks instead of silently truncating a page paragraph.
+    const chunks = input.text.match(/[\s\S]{1,4000}/gu) ?? [], translated: string[] = [];
+    for (const chunk of chunks) {
+      checkCancellation();
+      this.assertCurrentContext(context, await this.readSettings());
+      checkCancellation();
+      const args = ['--json', '--vault', context.path, 'translate', '--to', to, '--from', from];
+      if (input.provider) args.push('--provider', input.provider);
+      args.push('--', chunk);
+      const data = record(await this.cli(context.settings, args, signal, 120_000));
+      checkCancellation();
+      if (typeof data.text !== 'string' || !data.text.trim()) throw new LibraryError('UPSTREAM_INVALID', '翻译引擎未返回译文。');
+      translated.push(data.text);
+    }
+    return { text: translated.join('\n'), sourceLang: from, targetLang: to };
+  }
+
+  private async pdfLocation(context: Context, paperPath: string) {
+    const directory = await containedPath(context.path, paperPath), names = await readdir(directory);
+    const filename = names.includes(`${basename(paperPath)}.pdf`) ? `${basename(paperPath)}.pdf` : names.filter(n => n.toLowerCase().endsWith('.pdf')).sort()[0];
+    if (!filename) throw new LibraryError('PDF_MISSING', '论文没有本地 PDF。');
+    const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat(path);
+    if (info.size > 256 * 1024 * 1024) throw new LibraryError('PDF_TOO_LARGE', 'PDF 超过 256 MiB。');
+    return { path, filename, revision: `pdf:${createHash('sha256').update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest('hex')}` };
+  }
+  private async atomicBytes(path: string, bytes: Uint8Array) {
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    try { await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 }); await rename(temporary, path); }
+    finally { await rm(temporary, { force: true }); }
+  }
+  async writePdfBookmarks(input: WriteBookmarksInput) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    return this.exclusive(context, paperPath, async () => {
+      const location = await this.pdfLocation(context, paperPath);
+      if (!input.revision || location.revision !== input.revision) throw new LibraryError('PDF_CHANGED', 'PDF 已变化，请重新打开后编辑目录。', true);
+      const bytes = await editBookmarks(await readFile(location.path), input.nodes);
+      this.assertCurrentContext(context, await this.readSettings());
+      if ((await this.pdfLocation(context, paperPath)).revision !== input.revision) throw new LibraryError('PDF_CHANGED', 'PDF 在保存期间发生变化。', true);
+      await this.atomicBytes(location.path, bytes);
+      return { revision: (await this.pdfLocation(context, paperPath)).revision, saved: true as const, totalBytes: bytes.length };
+    });
+  }
+  async exportPaper(input: ExportPaperInput): Promise<ExportResult> {
+    const { context, store, paperPath } = await this.markStore(input), marks = await store.list();
+    if (!['pdf', 'markdown', 'json'].includes(input.format)) throw new LibraryError('INVALID_EXPORT', '导出格式无效。');
+    let bytes: Buffer, content: string | undefined;
+    const extension = input.format === 'markdown' ? 'md' : input.format;
+    if (input.format === 'pdf') {
+      const location = await this.pdfLocation(context, paperPath);
+      if (input.revision && input.revision !== location.revision) throw new LibraryError('PDF_CHANGED', 'PDF 已变化，请刷新后导出。', true);
+      const original = await readFile(location.path);
+      bytes = Buffer.from(input.includeMarks === false ? original : await annotatedPdf(original, marks.items));
+    } else {
+      content = input.format === 'json' ? `${JSON.stringify(marks, null, 2)}\n` : `# ${basename(paperPath)} — 阅读标注\n\n${marks.items.map(mark => `## 第 ${mark.page} 页 · ${mark.kind}\n\n${mark.quote ? `> ${mark.quote.replaceAll('\n', '\n> ')}\n\n` : ''}${[mark.comment, mark.result, ...(mark.messages ?? []).map(m => `**${m.role}**: ${m.content}`)].filter(Boolean).join('\n\n')}\n`).join('\n')}`;
+      bytes = Buffer.from(content);
+    }
+    const result: ExportResult = { fileName: `${basename(paperPath)}-annotated.${extension}`, mediaType: input.format === 'pdf' ? 'application/pdf' : input.format === 'json' ? 'application/json' : 'text/markdown', totalBytes: bytes.length, ...(content === undefined ? {} : { content }) };
+    this.assertCurrentContext(context, await this.readSettings());
+    if (input.filePath) {
+      const path = resolve(expandHome(input.filePath));
+      if (!isAbsolute(expandHome(input.filePath))) throw new LibraryError('INVALID_PATH', '导出目标必须是明确选择的绝对路径。');
+      const original = input.format === 'pdf' ? (await this.pdfLocation(context, paperPath)).path : '';
+      const targetCanonical = await exists(path) ? await realpath(path) : path;
+      const comparable = (v: string) => process.platform === 'win32' ? v.toLocaleLowerCase() : v;
+      if (comparable(targetCanonical) === comparable(original)) throw new LibraryError('INVALID_PATH', '导出文件不能覆盖知识库原 PDF。');
+      await this.atomicBytes(path, bytes); result.savedPath = path;
+    } else {
+      if (bytes.length > 32 * 1024 * 1024) throw new LibraryError('EXPORT_TOO_LARGE', '超过 32 MiB 的导出请明确选择本地保存位置。');
+      result.base64 = bytes.toString('base64');
+    }
+    return result;
+  }
+  async readLayout(input: PaperInput) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    const path = await containedPath(context.path, `${paperPath}/source/layout.json`, true);
+    if (!(await exists(path))) return { regions: [] };
+    if ((await stat(path)).size > 32 * 1024 * 1024) throw new LibraryError('LAYOUT_TOO_LARGE', '版面文件超过 32 MiB。');
+    return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  }
+  async readPaperMarkdown(input: PaperInput) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath), relative = `${paperPath}/PAPER.md`;
+    const path = await containedPath(context.path, relative, true);
+    if (!(await exists(path))) return { path: relative, content: '', revision: null, exists: false };
+    if ((await stat(path)).size > MAX_NOTE_BYTES) throw new LibraryError('MARKDOWN_TOO_LARGE', '论文 Markdown 超过 2 MiB。');
+    const content = await readFile(path, 'utf8');
+    return { path: relative, content, revision: contentRevision(content), exists: true };
+  }
+  private readerStatePath(context: Context, paperPath: string) { return join(this.dataRoot, 'state', 'reader', `${createHash('sha256').update(`${context.id}:${paperPath}`).digest('hex')}.json`); }
+  async readReaderState(input: PaperInput) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    return { state: record(await readJson(this.readerStatePath(context, paperPath))).state ?? {} };
+  }
+  async writeReaderState(input: PaperInput & { state: Record<string, unknown> }) {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    const state = record(input.state), allowed = ['pageNumber', 'zoom', 'fit', 'rotation', 'tone', 'outlineOpen', 'marksOpen', 'notesOpen'];
+    if (Object.keys(state).some(k => !allowed.includes(k)) || JSON.stringify(state).length > 2000) throw new LibraryError('INVALID_STATE', '阅读状态无效。');
+    if (state.pageNumber !== undefined && (!Number.isInteger(state.pageNumber) || Number(state.pageNumber) < 1)) throw new LibraryError('INVALID_STATE', '页码无效。');
+    if (state.rotation !== undefined && ![0, 90, 180, 270].includes(Number(state.rotation))) throw new LibraryError('INVALID_STATE', '旋转角度无效。');
+    return this.exclusive(context, `${paperPath}/reader-state`, async () => { await atomicJson(this.readerStatePath(context, paperPath), { state }); return { state }; });
+  }
+
+  async changeTag(input: ChangeTagInput) {
+    const context = await this.context(input), path = await this.paperPath(context, input.paperPath);
+    if (!['add', 'rm'].includes(input.op) || typeof input.tag !== 'string' || !input.tag.trim() || input.tag.length > 1000) throw new LibraryError('INVALID_TAG', '标签操作无效。');
+    return this.exclusive(context, path, async () => { await this.requireCli(context.settings); const data = await this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'tag', input.op, path, '--', input.tag]); this.snapshot = undefined; return record(data); });
+  }
+  async deletePaper(input: PaperInput) {
+    const context = await this.context(input), path = await this.paperPath(context, input.paperPath);
+    return this.exclusive(context, path, async () => { await this.requireCli(context.settings); const data = await this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'delete', path]); this.snapshot = undefined; return record(data); });
+  }
+  async downloadPaper(input: PaperInput): Promise<LibraryOperation> {
+    const context = await this.context(input), path = await this.paperPath(context, input.paperPath); await this.requireCli(context.settings);
+    return this.startOperation(context, 'download', signal => this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'download', path], signal, 120_000), path);
+  }
+  async importBibliography(input: BibliographyInput): Promise<LibraryOperation> {
+    const context = await this.context(input); await this.requireCli(context.settings);
+    if (!!input.text === !!input.filePath) throw new LibraryError('INVALID_IMPORT', '请提供 BibTeX 文本或本地文件之一。');
+    let path: string, temporary = false;
+    if (input.text !== undefined) {
+      if (typeof input.text !== 'string' || Buffer.byteLength(input.text) > 8 * 1024 * 1024) throw new LibraryError('INVALID_IMPORT', '文献格式文本超过 8 MiB。');
+      path = join(this.dataRoot, 'state', 'imports', `${randomUUID()}.bib`); await mkdir(dirname(path), { recursive: true }); await writeFile(path, input.text, { flag: 'wx', mode: 0o600 }); temporary = true;
+    } else {
+      if (!isAbsolute(expandHome(input.filePath!))) throw new LibraryError('INVALID_PATH', '导入文件必须是绝对路径。');
+      path = await realpath(expandHome(input.filePath!));
+      if (!(await stat(path)).isFile() || (await stat(path)).size > 8 * 1024 * 1024) throw new LibraryError('INVALID_IMPORT', '导入文件超过 8 MiB 或不是普通文件。');
+    }
+    return this.startOperation(context, 'bibliography', async signal => { try { return await this.cli(context.settings, ['--json', '--vault', context.path, 'import', 'bib', '--', path], signal, 120_000); } finally { if (temporary) await rm(path, { force: true }); } });
+  }
+  async exportBibliography(input: ExportBibliographyInput) {
+    const context = await this.context(input); await this.requireCli(context.settings);
+    const data = record(await this.cli(context.settings, ['--json', '--vault', context.path, 'export', 'bib'], undefined, 120_000));
+    if (typeof data.content !== 'string') throw new LibraryError('UPSTREAM_INVALID', 'CLI 没有返回 BibTeX 内容。');
+    if (input.filePath) {
+      if (!isAbsolute(expandHome(input.filePath))) throw new LibraryError('INVALID_PATH', '导出文件必须是绝对路径。');
+      await this.atomicBytes(resolve(expandHome(input.filePath)), Buffer.from(data.content));
+    }
+    return { ...data, content: data.content, ...(input.filePath ? { savedPath: resolve(expandHome(input.filePath)) } : {}) };
+  }
+
+  async renameNote(input: RenameNoteInput) {
+    const context = await this.context(input), location = await this.noteLocation(context, { vaultId: input.vaultId, path: input.path });
+    const destination = await this.noteLocation(context, { vaultId: input.vaultId, path: input.newPath });
+    if (location.paperPath || destination.paperPath) throw new LibraryError('INVALID_PATH', '论文 NOTES.md 不能重命名。');
+    return this.exclusive(context, location.path, async () => {
+      const before = await this.readLocatedNote(context, location);
+      if (!before.exists || before.revision !== input.revision) throw new LibraryError('NOTE_CONFLICT', '笔记已变化，请先重新载入。', true);
+      const target = await containedPath(context.path, destination.path, true);
+      if (await exists(target)) throw new LibraryError('FILE_EXISTS', '目标笔记已存在。');
+      const moved = await this.call(context, 'file_move', { from: location.path, to: destination.path });
+      const saved = await this.readLocatedNote(context, destination);
+      return { ...saved, renamedFrom: location.path, updatedSources: moved.updatedSources ?? [], skipped: moved.skipped ?? [] };
+    });
+  }
+  private assetMime(path: string) {
+    const mime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.avif': 'image/avif' };
+    const value = mime[extname(path).toLowerCase()]; if (!value) throw new LibraryError('INVALID_ASSET', '仅支持 PNG/JPEG/GIF/WebP/AVIF 图片附件。'); return value;
+  }
+  async readNoteAsset(input: NoteAssetReadInput) {
+    const context = await this.context(input);
+    const source = relativePath(input.notePath);
+    const note = source.startsWith('papers/') && source.endsWith('/PAPER.md')
+      ? { path: source, paperPath: await this.paperPath(context, source.slice(0, -'/PAPER.md'.length)) }
+      : await this.noteLocation(context, { vaultId: input.vaultId, path: input.notePath });
+    if (typeof input.assetPath !== 'string' || /^(?:[a-z]+:|\/|\\)/i.test(input.assetPath)) throw new LibraryError('INVALID_PATH', '请使用笔记内的相对图片路径。');
+    const relative = relativePath(posix.normalize(posix.join(posix.dirname(note.path), input.assetPath.replaceAll('\\', '/'))));
+    if (!relative.startsWith('notes/') && !(note.paperPath && relative.startsWith(`${note.paperPath}/`))) throw new LibraryError('INVALID_PATH', '附件超出当前笔记范围。');
+    const path = await containedPath(context.path, relative), mimeType = this.assetMime(path), info = await stat(path);
+    if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError('ASSET_TOO_LARGE', '图片附件超过 8 MiB。');
+    return { path: relative, markdownPath: input.assetPath, mimeType, totalBytes: info.size, base64: (await readFile(path)).toString('base64') };
+  }
+  async importNoteAsset(input: NoteAssetImportInput) {
+    const context = await this.context(input), note = await this.noteLocation(context, { vaultId: input.vaultId, path: input.notePath });
+    if (!!input.filePath === !!input.base64) throw new LibraryError('INVALID_ASSET', '请提供本地图片文件或 base64 数据之一。');
+    const fileName = basename(input.fileName).replace(/[^\p{L}\p{N}._-]/gu, '_'), mimeType = this.assetMime(fileName);
+    if (mimeType !== input.mimeType) throw new LibraryError('INVALID_ASSET', '附件扩展名与类型不一致。');
+    let bytes: Buffer;
+    if (input.filePath) {
+      if (!isAbsolute(expandHome(input.filePath))) throw new LibraryError('INVALID_PATH', '图片文件必须是绝对路径。');
+      const source = await realpath(expandHome(input.filePath)), info = await stat(source);
+      if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError('ASSET_TOO_LARGE', '图片附件超过 8 MiB。');
+      bytes = await readFile(source);
+    } else {
+      if (!input.base64 || input.base64.length > 12 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64)) throw new LibraryError('INVALID_ASSET', '图片编码无效。');
+      bytes = Buffer.from(input.base64, 'base64');
+    }
+    if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new LibraryError('ASSET_TOO_LARGE', '图片附件超过 8 MiB。');
+    const file = `${randomUUID()}-${fileName}`, path = `${posix.dirname(note.path)}/assets/${file}`;
+    return this.exclusive(context, note.paperPath ?? note.path, async () => { if (note.paperPath) await this.paperPath(context, note.paperPath); const target = await containedPath(context.path, path, true); await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes, { flag: 'wx', mode: 0o600 }); return { path, markdownPath: `assets/${file}`, mimeType, totalBytes: bytes.length }; });
+  }
+  async noteLinks(input: NoteLinksInput) {
+    const context = await this.context(input), note = await this.noteLocation(context, input), files: string[] = [];
+    let truncated = false;
+    const scan = async (directory: string, depth: number): Promise<void> => {
+      if (depth > 16 || files.length >= 1000) { truncated = true; return; }
+      const path = await containedPath(context.path, directory, true); if (!(await exists(path))) return;
+      for (const entry of await readdir(path, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) continue;
+        const relative = `${directory}/${entry.name}`;
+        if (entry.isDirectory() && (directory.startsWith('notes') || !['source', 'marks', 'assets'].includes(entry.name))) await scan(relative, depth + 1);
+        else if (entry.isFile() && (relative.startsWith('notes/') && relative.endsWith('.md') || entry.name === 'NOTES.md')) { files.push(relative); if (files.length >= 1000) { truncated = true; return; } }
+      }
+    };
+    await scan('notes', 0); await scan('papers', 0);
+    const links = (content: string, source: string) => {
+      const found = [...content.matchAll(/\[\[([^\]#|]+)(?:[^\]]*)\]\]|(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(match => match[1] ?? match[2]);
+      return [...new Set(found.flatMap(raw => {
+        try {
+          const target = decodeURIComponent(raw.split('#')[0]); if (/^[a-z]+:|^\//i.test(target)) return [];
+          const path = relativePath(target.startsWith('notes/') || target.startsWith('papers/') ? target : posix.normalize(posix.join(posix.dirname(source), target.endsWith('.md') ? target : `${target}.md`)));
+          return path.startsWith('notes/') || path.startsWith('papers/') && path.endsWith('/NOTES.md') ? [path] : [];
+        } catch { return []; }
+      }))];
+    };
+    const document = await this.readLocatedNote(context, note), outgoing = links(document.content, note.path).map(path => ({ path, title: basename(path, '.md') })), backlinks: { path: string; title: string }[] = [];
+    let scannedBytes = 0;
+    for (const path of files) {
+      const target = await containedPath(context.path, path), info = await stat(target);
+      if (info.size > MAX_NOTE_BYTES || scannedBytes + info.size > 32 * 1024 * 1024) { truncated = true; continue; }
+      scannedBytes += info.size;
+      if (path !== note.path && links(await readFile(target, 'utf8'), path).includes(note.path)) backlinks.push({ path, title: basename(path, '.md') });
+    }
+    return { outgoing, backlinks, truncated };
   }
 
   private async closeNative(): Promise<void> {

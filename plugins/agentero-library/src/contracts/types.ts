@@ -30,7 +30,7 @@ export interface ListPapersInput extends VaultInput {
   query?: string;
   tag?: string[];
   unread?: boolean;
-  sortBy?: 'title' | 'year' | 'date';
+  sortBy?: 'title' | 'year' | 'date' | 'authors' | 'tags';
   sortDir?: 'asc' | 'desc';
   limit?: number;
   cursor?: string;
@@ -43,6 +43,7 @@ export interface Paper {
   title: string;
   authors: string[];
   tags: string[];
+  tagDetails?: { name: string; color?: string }[];
   isRead: boolean;
   year?: number;
   date?: string;
@@ -85,6 +86,7 @@ export interface DiscoverInput extends VaultInput {
 export interface ImportPaperInput extends VaultInput {
   text?: string;
   filePath?: string;
+  filePaths?: string[];
   parent?: string;
   noRecognize?: boolean;
 }
@@ -128,7 +130,7 @@ export interface LibraryOperation {
   operationId: string;
   instanceId: string;
   vaultId: string;
-  type: 'import' | 'parse';
+  type: 'import' | 'parse' | 'download' | 'bibliography';
   status: OperationStatus;
   stage: string;
   createdAt: string;

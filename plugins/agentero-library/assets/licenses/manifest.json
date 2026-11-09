@@ -1,7 +1,118 @@
 {
+  "schemaVersion": 1,
+  "plugin": "agentero-library",
+  "pluginVersion": "0.2.0",
   "scope": "bundled-runtime-inputs",
-  "inputInventory": "server esbuild metafile and app Vite module IDs",
+  "inputInventory": "artifacts/agentero-library/v0.2.0/validation/bundle-inputs.json",
   "packages": [
+    {
+      "name": "@floating-ui/core",
+      "version": "1.8.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/floating-ui__core/1.8.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@floating-ui/core@1.8.0/LICENSE",
+          "sourceSha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/dom",
+      "version": "1.8.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/floating-ui__dom/1.8.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@floating-ui/dom@1.8.0/LICENSE",
+          "sourceSha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/react-dom",
+      "version": "2.1.9",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/floating-ui__react-dom/2.1.9/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@floating-ui/react-dom@2.1.9/LICENSE",
+          "sourceSha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/react",
+      "version": "0.26.28",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/floating-ui__react/0.26.28/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@floating-ui/react@0.26.28/LICENSE",
+          "sourceSha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@floating-ui/utils",
+      "version": "0.2.12",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/floating-ui__utils/0.2.12/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@floating-ui/utils@0.2.12/LICENSE",
+          "sourceSha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ]
+    },
+    {
+      "name": "@juggle/resize-observer",
+      "version": "3.4.0",
+      "license": "Apache-2.0",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 24,
+      "files": [
+        {
+          "path": "packages/juggle__resize-observer/3.4.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@juggle/resize-observer@3.4.0/LICENSE",
+          "sourceSha256": "293c905e2ec4f6c30c4684592898fd24215ac735f0601b07b158d1588c8a5af7"
+        }
+      ]
+    },
     {
       "name": "@modelcontextprotocol/ext-apps",
       "version": "1.7.5",
@@ -59,6 +170,464 @@
       ]
     },
     {
+      "name": "@pdf-lib/standard-fonts",
+      "version": "1.0.0",
+      "license": "MIT",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 19,
+      "files": [
+        {
+          "path": "packages/pdf-lib__standard-fonts/1.0.0/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "source": "npm:@pdf-lib/standard-fonts@1.0.0/LICENSE.md",
+          "sourceSha256": "45cc2bb9957ed43f5c7f5eb1912f9f670730394d614079510477cae626194649"
+        }
+      ]
+    },
+    {
+      "name": "@pdf-lib/upng",
+      "version": "1.0.1",
+      "license": "MIT",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/pdf-lib__upng/1.0.1/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@pdf-lib/upng@1.0.1/LICENSE",
+          "sourceSha256": "c1fb8861eca211bf5aea574358aba7039396c0c1824c2a1477cc126d398efd89"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/basic-nodes",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__basic-nodes/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/basic-nodes@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/code-block",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__code-block/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/code-block@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/core",
+      "version": "53.5.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 5,
+      "files": [
+        {
+          "path": "packages/platejs__core/53.5.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/core@53.5.2/LICENSE",
+          "sourceSha256": "228ab3c2f96242633f2c3bdfb064e54728fd2e2eb6e54c3fd68034b0fa1cf40b"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/date",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/platejs__date/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/date@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/find-replace",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/platejs__find-replace/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/find-replace@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/floating",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/platejs__floating/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/floating@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/indent",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__indent/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/indent@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/link",
+      "version": "53.3.5",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/platejs__link/53.3.5/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/link@53.3.5/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/list",
+      "version": "53.1.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__list/53.1.3/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/list@53.1.3/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/markdown",
+      "version": "53.2.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/platejs__markdown/53.2.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/markdown@53.2.2/LICENSE",
+          "sourceSha256": "31b53b5b0e566850597786281f579e76ef16efe649999d0c68e0b3983ad8ac53"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/math",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__math/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/math@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/media",
+      "version": "53.1.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/platejs__media/53.1.4/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/media@53.1.4/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/resizable",
+      "version": "53.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/platejs__resizable/53.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/resizable@53.0.0/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/slate",
+      "version": "53.3.18",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/platejs__slate/53.3.18/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/slate@53.3.18/LICENSE",
+          "sourceSha256": "279cd6a0368f964603b228486f154e652bc3b7160864e3e4a1c3f26119abd62a"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/table",
+      "version": "53.0.9",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__table/53.0.9/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/table@53.0.9/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@platejs/utils",
+      "version": "53.5.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/platejs__utils/53.5.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@platejs/utils@53.5.2/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@radix-ui/react-compose-refs",
+      "version": "1.1.5",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/radix-ui__react-compose-refs/1.1.5/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@radix-ui/react-compose-refs@1.1.5/LICENSE",
+          "sourceSha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ]
+    },
+    {
+      "name": "@radix-ui/react-slot",
+      "version": "1.5.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/radix-ui__react-slot/1.5.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@radix-ui/react-slot@1.5.0/LICENSE",
+          "sourceSha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ]
+    },
+    {
+      "name": "@udecode/react-hotkeys",
+      "version": "52.0.11",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/udecode__react-hotkeys/52.0.11/LICENSE",
+          "upstreamPath": "LICENSE",
+          "upstreamCommit": "0a02e15d2f704bf60d28176b97c3761fe7aa4923",
+          "source": "https://raw.githubusercontent.com/udecode/plate/0a02e15d2f704bf60d28176b97c3761fe7aa4923/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        },
+        {
+          "path": "sources/npm-supplements/udecode__react-hotkeys/52.0.11/ORIGINAL-LICENSE",
+          "upstreamPath": "LICENSE",
+          "upstreamCommit": "8e821c694d30454dd01609bb00a4b2fa0498121a",
+          "source": "https://raw.githubusercontent.com/JohannesKlauss/react-hotkeys-hook/8e821c694d30454dd01609bb00a4b2fa0498121a/LICENSE",
+          "sourceSha256": "1def416e8042d3442057400f3345c3bd089476898d94b5d5ae9669b0c0d340a8"
+        }
+      ]
+    },
+    {
+      "name": "@udecode/react-utils",
+      "version": "52.3.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/udecode__react-utils/52.3.4/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@udecode/react-utils@52.3.4/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "@udecode/utils",
+      "version": "52.3.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/udecode__utils/52.3.4/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:@udecode/utils@52.3.4/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "acorn-jsx",
+      "version": "5.3.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/acorn-jsx/5.3.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:acorn-jsx@5.3.2/LICENSE",
+          "sourceSha256": "cfa72b62b9ae173078823a3796b25c027a9071046a263beddf966df67018ce06"
+        }
+      ]
+    },
+    {
+      "name": "acorn",
+      "version": "8.19.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/acorn/8.19.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:acorn@8.19.0/LICENSE",
+          "sourceSha256": "76a876cf886ff9be2a8b5e2e86514fed06223c8c9f0c1e9ee9606e93841e00b7"
+        }
+      ]
+    },
+    {
       "name": "ajv-formats",
       "version": "3.0.1",
       "license": "MIT",
@@ -95,6 +664,132 @@
       ]
     },
     {
+      "name": "bail",
+      "version": "2.0.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/bail/2.0.2/license",
+          "upstreamPath": "license",
+          "source": "npm:bail@2.0.2/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "ccount",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/ccount/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:ccount@2.0.1/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "character-entities-html4",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/character-entities-html4/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:character-entities-html4@2.1.0/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "character-entities-legacy",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/character-entities-legacy/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:character-entities-legacy@3.0.0/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "character-reference-invalid",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/character-reference-invalid/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:character-reference-invalid@2.0.1/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "clsx",
+      "version": "2.1.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/clsx/2.1.1/license",
+          "upstreamPath": "license",
+          "source": "npm:clsx@2.1.1/license",
+          "sourceSha256": "9a9edad7baae52622bddf3c15b2ef8a33d2c89f2d25408ad13e8a7481c6b0c97"
+        }
+      ]
+    },
+    {
+      "name": "compute-scroll-into-view",
+      "version": "3.1.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/compute-scroll-into-view/3.1.1/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:compute-scroll-into-view@3.1.1/LICENSE",
+          "sourceSha256": "dfe2b2d612c7c1de1f32dcab5969bd68ecac0022a7582ca8cd4594729b9c8664"
+        }
+      ]
+    },
+    {
       "name": "content-type",
       "version": "1.0.5",
       "license": "MIT",
@@ -113,6 +808,132 @@
       ]
     },
     {
+      "name": "decode-named-character-reference",
+      "version": "1.3.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/decode-named-character-reference/1.3.0/license",
+          "upstreamPath": "license",
+          "source": "npm:decode-named-character-reference@1.3.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "dequal",
+      "version": "2.0.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/dequal/2.0.3/license",
+          "upstreamPath": "license",
+          "source": "npm:dequal@2.0.3/license",
+          "sourceSha256": "306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae"
+        }
+      ]
+    },
+    {
+      "name": "devlop",
+      "version": "1.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/devlop/1.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:devlop@1.1.0/license",
+          "sourceSha256": "6f296a5eccc1dc96714bb94ebaa9cac25b0a1467d74cc5263ac4d0646ab01f62"
+        }
+      ]
+    },
+    {
+      "name": "direction",
+      "version": "1.0.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/direction/1.0.4/license",
+          "upstreamPath": "license",
+          "source": "npm:direction@1.0.4/license",
+          "sourceSha256": "9966260ba3ea9d6a5f839297dca80ddc99735a34b4ae82811cac7b956d2e3afd"
+        }
+      ]
+    },
+    {
+      "name": "escape-string-regexp",
+      "version": "5.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/escape-string-regexp/5.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:escape-string-regexp@5.0.0/license",
+          "sourceSha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "name": "estree-util-is-identifier-name",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/estree-util-is-identifier-name/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:estree-util-is-identifier-name@3.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "estree-util-visit",
+      "version": "2.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/estree-util-visit/2.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:estree-util-visit@2.0.0/license",
+          "sourceSha256": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa"
+        }
+      ]
+    },
+    {
       "name": "eventsource-parser",
       "version": "3.1.1",
       "license": "MIT",
@@ -127,6 +948,24 @@
           "upstreamPath": "LICENSE",
           "source": "npm:eventsource-parser@3.1.1/LICENSE",
           "sourceSha256": "835eb611a23301b27115ca1be9f754c876e643ceb7fe63049c6b50609a1cafeb"
+        }
+      ]
+    },
+    {
+      "name": "extend",
+      "version": "3.0.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/extend/3.0.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:extend@3.0.2/LICENSE",
+          "sourceSha256": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c"
         }
       ]
     },
@@ -167,6 +1006,223 @@
       ]
     },
     {
+      "name": "highlight.js",
+      "version": "11.11.2",
+      "license": "BSD-3-Clause",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 194,
+      "files": [
+        {
+          "path": "packages/highlight.js/11.11.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:highlight.js@11.11.2/LICENSE",
+          "sourceSha256": "6c081431591d9df696c82dc598fe1423765b8a299b200ed00b281afd0f64c490"
+        }
+      ]
+    },
+    {
+      "name": "immer",
+      "version": "10.2.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/immer/10.2.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:immer@10.2.0/LICENSE",
+          "sourceSha256": "99cf22f6960a6fe228ec84ea9aefb0d75b27999ece83a3a9801e1c2081fa270b"
+        }
+      ]
+    },
+    {
+      "name": "is-alphabetical",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-alphabetical/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:is-alphabetical@2.0.1/license",
+          "sourceSha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "is-alphanumerical",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-alphanumerical/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:is-alphanumerical@2.0.1/license",
+          "sourceSha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "is-decimal",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-decimal/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:is-decimal@2.0.1/license",
+          "sourceSha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "is-hexadecimal",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-hexadecimal/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:is-hexadecimal@2.0.1/license",
+          "sourceSha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "is-hotkey",
+      "version": "0.2.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-hotkey/0.2.1/License.md",
+          "upstreamPath": "License.md",
+          "source": "npm:is-hotkey@0.2.1/License.md",
+          "sourceSha256": "0f644bc01d85e4b1958bdfe5a851704bd886404c78188d4d6fba43dc8293bc91"
+        }
+      ]
+    },
+    {
+      "name": "is-plain-obj",
+      "version": "4.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-plain-obj/4.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:is-plain-obj@4.1.0/license",
+          "sourceSha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ]
+    },
+    {
+      "name": "is-plain-object",
+      "version": "5.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/is-plain-object/5.1.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:is-plain-object@5.1.0/LICENSE",
+          "sourceSha256": "4cd903859549d4b20b571041f96dfae1136ed079c476126268f9d7cc1b611150"
+        }
+      ]
+    },
+    {
+      "name": "jotai-optics",
+      "version": "0.4.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/jotai-optics/0.4.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:jotai-optics@0.4.0/LICENSE",
+          "sourceSha256": "9f79f9d00a0994e7f67603c63dfe2d5cf4ecadeb141170b9b03501cc3657a0a5"
+        }
+      ]
+    },
+    {
+      "name": "jotai-x",
+      "version": "2.3.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/jotai-x/2.3.4/LICENSE",
+          "upstreamPath": "LICENSE",
+          "upstreamCommit": "11cf4bb2e565c7d1734537bea3bf947e474d9a59",
+          "source": "https://raw.githubusercontent.com/udecode/jotai-x/11cf4bb2e565c7d1734537bea3bf947e474d9a59/LICENSE",
+          "sourceSha256": "5df218cd6bf499692e632d09c75078466f4e05f7c2ca2bf83febfc98c43a91a1"
+        }
+      ]
+    },
+    {
+      "name": "jotai",
+      "version": "2.8.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 6,
+      "files": [
+        {
+          "path": "packages/jotai/2.8.4/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:jotai@2.8.4/LICENSE",
+          "sourceSha256": "cea97f0609de01f9e17d7b6d5fb5716e7de6404662c56f8c286aef9c5b4ca09c"
+        }
+      ]
+    },
+    {
       "name": "json-schema-traverse",
       "version": "1.0.0",
       "license": "MIT",
@@ -181,6 +1237,114 @@
           "upstreamPath": "LICENSE",
           "source": "npm:json-schema-traverse@1.0.0/LICENSE",
           "sourceSha256": "7bf9b2de73a6b356761c948d0e9eeb4be6c1270bd04c79cd489c1e400ffdfc1a"
+        }
+      ]
+    },
+    {
+      "name": "katex",
+      "version": "0.16.22",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/katex/0.16.22/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:katex@0.16.22/LICENSE",
+          "sourceSha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3"
+        }
+      ]
+    },
+    {
+      "name": "katex",
+      "version": "0.16.47",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/katex/0.16.47/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:katex@0.16.47/LICENSE",
+          "sourceSha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3"
+        }
+      ]
+    },
+    {
+      "name": "katex",
+      "version": "0.18.11",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/katex/0.18.11/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:katex@0.18.11/LICENSE",
+          "sourceSha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3"
+        }
+      ]
+    },
+    {
+      "name": "lodash",
+      "version": "4.18.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 210,
+      "files": [
+        {
+          "path": "packages/lodash/4.18.1/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:lodash@4.18.1/LICENSE",
+          "sourceSha256": "f71e8ed126b46346494aad5486874cd8f0aafe95092ed67d2e3cb6110f939abc"
+        }
+      ]
+    },
+    {
+      "name": "longest-streak",
+      "version": "3.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/longest-streak/3.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:longest-streak@3.1.0/license",
+          "sourceSha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ]
+    },
+    {
+      "name": "lowlight",
+      "version": "3.3.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 4,
+      "files": [
+        {
+          "path": "packages/lowlight/3.3.0/license",
+          "upstreamPath": "license",
+          "source": "npm:lowlight@3.3.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
         }
       ]
     },
@@ -203,6 +1367,1068 @@
       ]
     },
     {
+      "name": "markdown-table",
+      "version": "3.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/markdown-table/3.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:markdown-table@3.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "marked",
+      "version": "15.0.12",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/marked/15.0.12/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "source": "npm:marked@15.0.12/LICENSE.md",
+          "sourceSha256": "8e3a3f82f59a60958f56ca08f445647c32a4733dc7ca6c2c46f6eb898471ab9c"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-find-and-replace",
+      "version": "3.0.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-find-and-replace/3.0.4/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-find-and-replace@3.0.4/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-from-markdown",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-from-markdown/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-from-markdown@2.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-autolink-literal",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-gfm-autolink-literal/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-gfm-autolink-literal@2.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-footnote",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-gfm-footnote/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-gfm-footnote@2.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-strikethrough",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-gfm-strikethrough/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-gfm-strikethrough@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-table",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-gfm-table/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-gfm-table@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm-task-list-item",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-gfm-task-list-item/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-gfm-task-list-item@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-gfm",
+      "version": "3.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-gfm/3.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-gfm@3.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-math",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-math/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-math@3.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-mdx-expression",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-mdx-expression/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-mdx-expression@2.0.1/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-mdx-jsx",
+      "version": "3.2.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-mdx-jsx/3.2.1/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-mdx-jsx@3.2.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-mdx",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-mdx/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-mdx@3.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-mdxjs-esm",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-mdxjs-esm/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-mdxjs-esm@2.0.1/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-phrasing",
+      "version": "4.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-phrasing/4.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-phrasing@4.1.0/license",
+          "sourceSha256": "b6d1a4e1831b177acc96f22a817d4f0f4c18419355badc3125754445fc69e3a7"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-to-markdown",
+      "version": "2.2.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 50,
+      "files": [
+        {
+          "path": "packages/mdast-util-to-markdown/2.2.3/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-to-markdown@2.2.3/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mdast-util-to-string",
+      "version": "4.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/mdast-util-to-string/4.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:mdast-util-to-string@4.0.0/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "micromark-core-commonmark",
+      "version": "2.0.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 24,
+      "files": [
+        {
+          "path": "packages/micromark-core-commonmark/2.0.4/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-core-commonmark@2.0.4/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-autolink-literal",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm-autolink-literal/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm-autolink-literal@2.1.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-footnote",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm-footnote/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm-footnote@2.1.0/license",
+          "sourceSha256": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-strikethrough",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm-strikethrough/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm-strikethrough@2.1.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-table",
+      "version": "2.1.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 5,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm-table/2.1.2/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm-table@2.1.2/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-tagfilter",
+      "version": "2.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm-tagfilter/2.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm-tagfilter@2.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm-task-list-item",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm-task-list-item/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm-task-list-item@2.1.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-gfm",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-extension-gfm/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-gfm@3.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-math",
+      "version": "3.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 5,
+      "files": [
+        {
+          "path": "packages/micromark-extension-math/3.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-math@3.1.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-mdx-expression",
+      "version": "3.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/micromark-extension-mdx-expression/3.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-mdx-expression@3.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-mdx-jsx",
+      "version": "3.0.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 5,
+      "files": [
+        {
+          "path": "packages/micromark-extension-mdx-jsx/3.0.2/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-mdx-jsx@3.0.2/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-mdx-md",
+      "version": "2.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-extension-mdx-md/2.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-mdx-md@2.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-mdxjs-esm",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/micromark-extension-mdxjs-esm/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-mdxjs-esm@3.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-extension-mdxjs",
+      "version": "3.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-extension-mdxjs/3.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-extension-mdxjs@3.0.0/license",
+          "sourceSha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-destination",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-factory-destination/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-factory-destination@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-label",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-factory-label/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-factory-label@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-mdx-expression",
+      "version": "2.0.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-factory-mdx-expression/2.0.3/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-factory-mdx-expression@2.0.3/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-space",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-factory-space/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-factory-space@2.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-title",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-factory-title/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-factory-title@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-factory-whitespace",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-factory-whitespace/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-factory-whitespace@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-character",
+      "version": "2.1.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-character/2.1.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-character@2.1.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-chunked",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-chunked/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-chunked@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-classify-character",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-classify-character/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-classify-character@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-combine-extensions",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-combine-extensions/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-combine-extensions@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-decode-numeric-character-reference",
+      "version": "2.0.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-decode-numeric-character-reference/2.0.2/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-decode-numeric-character-reference@2.0.2/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-decode-string",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-decode-string/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-decode-string@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-edit-map",
+      "version": "1.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-edit-map/1.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-edit-map@1.0.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-encode",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-encode/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-encode@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-events-to-acorn",
+      "version": "2.0.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/micromark-util-events-to-acorn/2.0.3/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-events-to-acorn@2.0.3/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-html-tag-name",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-html-tag-name/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-html-tag-name@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-normalize-identifier",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-normalize-identifier/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-normalize-identifier@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-resolve-all",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-resolve-all/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-resolve-all@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-sanitize-uri",
+      "version": "2.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/micromark-util-sanitize-uri/2.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-sanitize-uri@2.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark-util-subtokenize",
+      "version": "2.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/micromark-util-subtokenize/2.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark-util-subtokenize@2.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "micromark",
+      "version": "4.0.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 11,
+      "files": [
+        {
+          "path": "packages/micromark/4.0.3/license",
+          "upstreamPath": "license",
+          "source": "npm:micromark@4.0.3/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "mutative",
+      "version": "1.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/mutative/1.1.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:mutative@1.1.0/LICENSE",
+          "sourceSha256": "8f0bab26b1edc2caedf89b889ef80305d660d876d240fba8ffb26b7acdfeab18"
+        }
+      ]
+    },
+    {
+      "name": "nanoid",
+      "version": "5.1.16",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/nanoid/5.1.16/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:nanoid@5.1.16/LICENSE",
+          "sourceSha256": "4383cb2c3608397ce7a4159502614ed66890f8999c2a9c056dd3b1024d6721f0"
+        }
+      ]
+    },
+    {
+      "name": "optics-ts",
+      "version": "2.4.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/optics-ts/2.4.1/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:optics-ts@2.4.1/LICENSE",
+          "sourceSha256": "031b4b7cdc2ce813c3aed3f113d24a6cc87d3eacd06c0b8b1c8205ec44c1a86c"
+        }
+      ]
+    },
+    {
+      "name": "pako",
+      "version": "1.0.11",
+      "license": "(MIT AND Zlib)",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 16,
+      "files": [
+        {
+          "path": "packages/pako/1.0.11/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:pako@1.0.11/LICENSE",
+          "sourceSha256": "a04665b3b2de56c66730c1f720f528175739e4104f79073614aa611da1e85539"
+        }
+      ]
+    },
+    {
+      "name": "parse-entities",
+      "version": "4.0.2",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/parse-entities/4.0.2/license",
+          "upstreamPath": "license",
+          "source": "npm:parse-entities@4.0.2/license",
+          "sourceSha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+        }
+      ]
+    },
+    {
+      "name": "pdf-lib",
+      "version": "1.17.1",
+      "license": "MIT",
+      "scope": [
+        "server"
+      ],
+      "direct": true,
+      "inputCount": 136,
+      "files": [
+        {
+          "path": "packages/pdf-lib/1.17.1/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "source": "npm:pdf-lib@1.17.1/LICENSE.md",
+          "sourceSha256": "f2c9fc00fdb66eb99ac156ba52d734af66d8d309f65753ae809ad34ee2883bcb"
+        }
+      ]
+    },
+    {
       "name": "pdfjs-dist",
       "version": "6.5.438",
       "license": "Apache-2.0",
@@ -212,12 +2438,6 @@
       "direct": true,
       "inputCount": 3,
       "files": [
-        {
-          "path": "packages/pdfjs-dist/6.5.438/LICENSE",
-          "upstreamPath": "LICENSE",
-          "source": "npm:pdfjs-dist@6.5.438/LICENSE",
-          "sourceSha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
-        },
         {
           "path": "packages/pdfjs-dist/6.5.438/cmaps/LICENSE",
           "upstreamPath": "cmaps/LICENSE",
@@ -229,6 +2449,12 @@
           "upstreamPath": "iccs/LICENSE",
           "source": "npm:pdfjs-dist@6.5.438/iccs/LICENSE",
           "sourceSha256": "286e4fd7b447330b2c88e23890e3cd0a9d38cb398d4a59cb247f578ccbda3213"
+        },
+        {
+          "path": "packages/pdfjs-dist/6.5.438/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:pdfjs-dist@6.5.438/LICENSE",
+          "sourceSha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
           "path": "packages/pdfjs-dist/6.5.438/standard_fonts/LICENSE_FOXIT",
@@ -311,6 +2537,61 @@
       ]
     },
     {
+      "name": "platejs",
+      "version": "53.3.14",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/platejs/53.3.14/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:platejs@53.3.14/LICENSE",
+          "sourceSha256": "8b649e3569682298f50ed2048210e8f528034feb56f5d43a9977a7d60b0f7065"
+        }
+      ]
+    },
+    {
+      "name": "proxy-compare",
+      "version": "2.6.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/proxy-compare/2.6.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:proxy-compare@2.6.0/LICENSE",
+          "sourceSha256": "9dd70d748ceac21bcc34056812068bf8b577899647b7c60a6f9953ff153b3e55"
+        }
+      ]
+    },
+    {
+      "name": "react-compiler-runtime",
+      "version": "1.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/react-compiler-runtime/1.0.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "upstreamCommit": "5c15c1cd3442f28044217703b5625f98c40042ee",
+          "source": "https://raw.githubusercontent.com/facebook/react/5c15c1cd3442f28044217703b5625f98c40042ee/LICENSE",
+          "sourceSha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
       "name": "react-dom",
       "version": "19.3.1",
       "license": "MIT",
@@ -318,13 +2599,31 @@
         "app"
       ],
       "direct": true,
-      "inputCount": 4,
+      "inputCount": 7,
       "files": [
         {
           "path": "packages/react-dom/19.3.1/LICENSE",
           "upstreamPath": "LICENSE",
           "source": "npm:react-dom@19.3.1/LICENSE",
           "sourceSha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "react-tracked",
+      "version": "1.7.14",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/react-tracked/1.7.14/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:react-tracked@1.7.14/LICENSE",
+          "sourceSha256": "73ceddd047962ccad96a8d60f22e2032ca0db0610f46f225259bb624c674879c"
         }
       ]
     },
@@ -347,6 +2646,97 @@
       ]
     },
     {
+      "name": "remark-gfm",
+      "version": "4.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/remark-gfm/4.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:remark-gfm@4.0.1/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "remark-math",
+      "version": "6.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": true,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "sources/npm-supplements/remark-math/6.0.0/license",
+          "upstreamPath": "license",
+          "upstreamCommit": "d5d0660b150810a535bbb07eac6cc96a4510aa24",
+          "source": "https://raw.githubusercontent.com/remarkjs/remark-math/d5d0660b150810a535bbb07eac6cc96a4510aa24/license",
+          "sourceSha256": "cb992262f361a5359e6771c28740d33c7041e15332ae8537fae40538992591a9"
+        }
+      ]
+    },
+    {
+      "name": "remark-mdx",
+      "version": "3.1.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/remark-mdx/3.1.1/license",
+          "upstreamPath": "license",
+          "source": "npm:remark-mdx@3.1.1/license",
+          "sourceSha256": "a18bf7b2118ad99ef5af34b0b28efd0262156982d74697d8af6378425fe3e60a"
+        }
+      ]
+    },
+    {
+      "name": "remark-parse",
+      "version": "11.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/remark-parse/11.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:remark-parse@11.0.0/license",
+          "sourceSha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+        }
+      ]
+    },
+    {
+      "name": "remark-stringify",
+      "version": "11.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/remark-stringify/11.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:remark-stringify@11.0.0/license",
+          "sourceSha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+        }
+      ]
+    },
+    {
       "name": "scheduler",
       "version": "0.28.0",
       "license": "MIT",
@@ -361,6 +2751,388 @@
           "upstreamPath": "LICENSE",
           "source": "npm:scheduler@0.28.0/LICENSE",
           "sourceSha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "scroll-into-view-if-needed",
+      "version": "3.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/scroll-into-view-if-needed/3.1.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:scroll-into-view-if-needed@3.1.0/LICENSE",
+          "sourceSha256": "62b9f69bb4ccf131e7e4cc8ce6ec5b4acf3d9848f0ac73c3c2f285d716ff1b5c"
+        }
+      ]
+    },
+    {
+      "name": "slate-dom",
+      "version": "0.146.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/slate-dom/0.146.0/License.md",
+          "upstreamPath": "License.md",
+          "upstreamCommit": "b9237ba8077be40578f5882caa498c24955aa7b3",
+          "source": "https://raw.githubusercontent.com/ianstormtaylor/slate/b9237ba8077be40578f5882caa498c24955aa7b3/License.md",
+          "sourceSha256": "519c180a1c7b62ae33d2beb749abd57dda92eddada65eb81daca7686fa1fef40"
+        }
+      ]
+    },
+    {
+      "name": "slate-hyperscript",
+      "version": "0.138.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/slate-hyperscript/0.138.3/License.md",
+          "upstreamPath": "License.md",
+          "upstreamCommit": "33b64bb871a5a8470b65330bb23766a8c9879ce2",
+          "source": "https://raw.githubusercontent.com/ianstormtaylor/slate/33b64bb871a5a8470b65330bb23766a8c9879ce2/License.md",
+          "sourceSha256": "519c180a1c7b62ae33d2beb749abd57dda92eddada65eb81daca7686fa1fef40"
+        }
+      ]
+    },
+    {
+      "name": "slate-react",
+      "version": "0.145.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/slate-react/0.145.1/License.md",
+          "upstreamPath": "License.md",
+          "upstreamCommit": "e1f20ded3d042662b576acffb266edc90b1f7b6f",
+          "source": "https://raw.githubusercontent.com/ianstormtaylor/slate/e1f20ded3d042662b576acffb266edc90b1f7b6f/License.md",
+          "sourceSha256": "519c180a1c7b62ae33d2beb749abd57dda92eddada65eb81daca7686fa1fef40"
+        }
+      ]
+    },
+    {
+      "name": "slate",
+      "version": "0.146.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "sources/npm-supplements/slate/0.146.0/License.md",
+          "upstreamPath": "License.md",
+          "upstreamCommit": "b9237ba8077be40578f5882caa498c24955aa7b3",
+          "source": "https://raw.githubusercontent.com/ianstormtaylor/slate/b9237ba8077be40578f5882caa498c24955aa7b3/License.md",
+          "sourceSha256": "519c180a1c7b62ae33d2beb749abd57dda92eddada65eb81daca7686fa1fef40"
+        }
+      ]
+    },
+    {
+      "name": "stringify-entities",
+      "version": "4.0.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 9,
+      "files": [
+        {
+          "path": "packages/stringify-entities/4.0.4/license",
+          "upstreamPath": "license",
+          "source": "npm:stringify-entities@4.0.4/license",
+          "sourceSha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ]
+    },
+    {
+      "name": "tabbable",
+      "version": "6.5.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/tabbable/6.5.1/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:tabbable@6.5.1/LICENSE",
+          "sourceSha256": "8e714750725e75c8b31172ef84c0805f94873f86e3b5cfca8a948553f0778fa1"
+        }
+      ]
+    },
+    {
+      "name": "trough",
+      "version": "2.2.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/trough/2.2.0/license",
+          "upstreamPath": "license",
+          "source": "npm:trough@2.2.0/license",
+          "sourceSha256": "6c03fd41cfd7c92d8aa8a2fa521b94b2683f059123281dcf921ddea9216b6254"
+        }
+      ]
+    },
+    {
+      "name": "tslib",
+      "version": "1.14.1",
+      "license": "0BSD",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/tslib/1.14.1/LICENSE.txt",
+          "upstreamPath": "LICENSE.txt",
+          "source": "npm:tslib@1.14.1/LICENSE.txt",
+          "sourceSha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751"
+        }
+      ]
+    },
+    {
+      "name": "unified",
+      "version": "11.0.5",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/unified/11.0.5/license",
+          "upstreamPath": "license",
+          "source": "npm:unified@11.0.5/license",
+          "sourceSha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-is",
+      "version": "6.0.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/unist-util-is/6.0.1/license",
+          "upstreamPath": "license",
+          "source": "npm:unist-util-is@6.0.1/license",
+          "sourceSha256": "82974dbf2639d13edab95c32ed9cb6c0867ede272cd2e07ce47ce8548fe55c05"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-position-from-estree",
+      "version": "2.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/unist-util-position-from-estree/2.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:unist-util-position-from-estree@2.0.0/license",
+          "sourceSha256": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-stringify-position",
+      "version": "4.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/unist-util-stringify-position/4.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:unist-util-stringify-position@4.0.0/license",
+          "sourceSha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-visit-parents",
+      "version": "6.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/unist-util-visit-parents/6.1.0/license",
+          "upstreamPath": "license",
+          "source": "npm:unist-util-visit-parents@6.1.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-visit",
+      "version": "5.0.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/unist-util-visit/5.0.0/license",
+          "upstreamPath": "license",
+          "source": "npm:unist-util-visit@5.0.0/license",
+          "sourceSha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ]
+    },
+    {
+      "name": "unist-util-visit",
+      "version": "5.2.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/unist-util-visit/5.2.0/license",
+          "upstreamPath": "license",
+          "source": "npm:unist-util-visit@5.2.0/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "use-context-selector",
+      "version": "1.4.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/use-context-selector/1.4.4/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:use-context-selector@1.4.4/LICENSE",
+          "sourceSha256": "73ceddd047962ccad96a8d60f22e2032ca0db0610f46f225259bb624c674879c"
+        }
+      ]
+    },
+    {
+      "name": "use-deep-compare",
+      "version": "1.3.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/use-deep-compare/1.3.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:use-deep-compare@1.3.0/LICENSE",
+          "sourceSha256": "156701f3274f3e9b08833a9c48d294a534677d8ce491e4564312f254f84edb68"
+        }
+      ]
+    },
+    {
+      "name": "use-sync-external-store",
+      "version": "1.4.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 4,
+      "files": [
+        {
+          "path": "packages/use-sync-external-store/1.4.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:use-sync-external-store@1.4.0/LICENSE",
+          "sourceSha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ]
+    },
+    {
+      "name": "vfile-message",
+      "version": "4.0.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/vfile-message/4.0.4/license",
+          "upstreamPath": "license",
+          "source": "npm:vfile-message@4.0.4/license",
+          "sourceSha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ]
+    },
+    {
+      "name": "vfile",
+      "version": "6.0.3",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 6,
+      "files": [
+        {
+          "path": "packages/vfile/6.0.3/license",
+          "upstreamPath": "license",
+          "source": "npm:vfile@6.0.3/license",
+          "sourceSha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
         }
       ]
     },
@@ -417,6 +3189,78 @@
           "upstreamPath": "LICENSE",
           "source": "npm:zod@4.6.7/LICENSE",
           "sourceSha256": "3f1189b28e3866e0d979968d466b78f813f76827cfdca1fbb124cc0a5c8841f8"
+        }
+      ]
+    },
+    {
+      "name": "zustand-x",
+      "version": "6.2.1",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "sources/npm-supplements/zustand-x/6.2.1/LICENSE",
+          "upstreamPath": "LICENSE",
+          "upstreamCommit": "78abd51d8e3414ed3ae8c9b577ec273e91bdab4b",
+          "source": "https://raw.githubusercontent.com/udecode/zustand-x/78abd51d8e3414ed3ae8c9b577ec273e91bdab4b/LICENSE",
+          "sourceSha256": "5df218cd6bf499692e632d09c75078466f4e05f7c2ca2bf83febfc98c43a91a1"
+        }
+      ]
+    },
+    {
+      "name": "zustand",
+      "version": "5.1.0",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/zustand/5.1.0/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:zustand@5.1.0/LICENSE",
+          "sourceSha256": "c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417"
+        }
+      ]
+    },
+    {
+      "name": "zwitch",
+      "version": "2.0.4",
+      "license": "MIT",
+      "scope": [
+        "app"
+      ],
+      "direct": false,
+      "inputCount": 1,
+      "files": [
+        {
+          "path": "packages/zwitch/2.0.4/license",
+          "upstreamPath": "license",
+          "source": "npm:zwitch@2.0.4/license",
+          "sourceSha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "name": "motif translation core via agentero-dsh-plugin",
+      "license": "MIT",
+      "upstreamRepository": "https://github.com/poco-ai/agentero-dsh-plugin",
+      "upstreamCommit": "2c0a7f85e0e3a1b78673f95abc187e04852a7f4f",
+      "sourceDirectory": "plugins/agentero-library/src/app/pdf/translation",
+      "files": [
+        {
+          "path": "sources/motif-translation/MOTIF-LICENSE.txt",
+          "upstreamPath": "packages/pdf/src/client/translation/MOTIF-LICENSE.txt",
+          "source": "https://github.com/poco-ai/agentero-dsh-plugin/blob/2c0a7f85e0e3a1b78673f95abc187e04852a7f4f/packages/pdf/src/client/translation/MOTIF-LICENSE.txt",
+          "sourceSha256": "f2b7f0cc6fb11f63654ac171d46640de6a8f63407a1a9fa77181a5c43a841fcf"
         }
       ]
     }

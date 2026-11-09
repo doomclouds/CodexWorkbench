@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { collectLicenses } from './collect-agentero-licenses.mjs';
 
 const root = fileURLToPath(new URL('../plugins/agentero-library/', import.meta.url));
 const packageInfo = JSON.parse(await readFile(`${root}package.json`, 'utf8'));
@@ -39,4 +40,5 @@ await unlink(`${runtime}/index.html`);
 const validation = fileURLToPath(new URL(`../artifacts/agentero-library/v${packageInfo.version}/validation/`, import.meta.url));
 await mkdir(validation, { recursive: true });
 await writeFile(`${validation}bundle-inputs.json`, `${JSON.stringify({ server: serverResult.metafile, appInputs }, null, 2)}\n`);
+await collectLicenses({ version: packageInfo.version });
 console.log('Built marketplace runtime: server.mjs and app.html (no ZIP).');

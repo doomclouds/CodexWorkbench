@@ -14,4 +14,6 @@
 
 # Generated bundles preserve whitespace in upstream strings and PDF fixtures.
 plugins/*/runtime/** linguist-generated=true -whitespace
-plugins/*/assets/licenses/packages/** linguist-vendored=true
+plugins/*/assets/licenses/packages/** -text -whitespace linguist-vendored=true
+plugins/*/assets/licenses/sources/** -text -whitespace linguist-vendored=true
+plugins/*/assets/licenses/THIRD_PARTY_LICENSES.txt -text -whitespace linguist-generated=true
