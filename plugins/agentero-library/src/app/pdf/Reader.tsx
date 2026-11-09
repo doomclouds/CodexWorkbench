@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronLeft, ChevronRight, Crop, Download, FileText, Languages, List, LoaderCircle, MessageSquare, NotebookPen, Palette, RotateCw, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { LibraryOperation, Paper, PdfChunk } from '../../contracts/types';
@@ -7,12 +7,14 @@ import { callTool } from '../api';
 import { openExternalLink, registerBeforeTeardown, sendSelection } from '../bridge';
 import { formatBytes, messageOf, PDF_CHUNK_BYTES, readPdfChunks } from '../model';
 import { NotesView } from '../NotesView';
-import { pdfjs } from '../pdf-runtime';
+import { createPdfWorker, pdfjs } from '../pdf-runtime';
 import { PageView, type RegisteredPage, type VisualSelection } from './PageView';
 import { MarksPanel, OutlinePanel, SelectionToolbar, TranslationCard, type FloatingTranslation, type ReaderSelection } from './ReaderPanels';
 import { fitPageScale, screenRectToPoints, usefulRects } from './geometry';
 import { textLayerMatches, textMatches } from './search';
 import { useDocumentTranslation } from './translation/useDocumentTranslation';
+import { abortable, MAX_CANVAS_PIXELS, MAX_IMAGE_PIXELS, timeBudget, yieldToHost } from './scheduling';
+import { PageAnchorCoordinator, pageAtOffset, pageSlots, pageWindow, type PageSize } from './virtualization';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import './reader.css';
 
@@ -25,6 +27,8 @@ interface ReaderState { pageNumber: number; zoom: number; fit: boolean; rotation
 const initialView: ReaderState = { pageNumber: 1, zoom: 1, fit: true, rotation: 0, tone: 'white', outlineOpen: false, marksOpen: false, notesOpen: false };
 interface SearchHit { page: number; index: number; ordinal: number; text: string; excerpt: string }
 const editable = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]'));
+const EMPTY_MARKS: ReaderMark[] = [];
+interface PdfSession { status: 'loading' | 'ready' | 'failed'; dispose(): void }
 
 export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, onNotes, onOperation, onBack, onDirtyChange }: Props) {
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null); const [loadRevision, setLoadRevision] = useState(0);
@@ -32,7 +36,11 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const [view, setView] = useState<ReaderState>(initialView); const [viewReady, setViewReady] = useState(false);
   const viewRef = useRef(view); viewRef.current = view;
   const [pageInput, setPageInput] = useState('1'); const [estimate, setEstimate] = useState({ width: 612, height: 792 }); const [containerWidth, setContainerWidth] = useState(700);
+  const estimateRef = useRef(estimate); estimateRef.current = estimate;
   const [fitPageWidth, setFitPageWidth] = useState(612);
+  const [sizeRevision, setSizeRevision] = useState(0); const knownSizes = useRef(new Map<number, PageSize>());
+  const [windowRange, setWindowRange] = useState({ start: 0, end: 3 });
+  const [failedPages, setFailedPages] = useState<ReadonlyMap<number, string>>(new Map());
   const [marks, setMarks] = useState<MarkList | null>(null); const marksRef = useRef(marks); marksRef.current = marks;
   const [markError, setMarkError] = useState(''); const [selectedMark, setSelectedMark] = useState<string | null>(null); const [busy, setBusy] = useState(false); const busyRef = useRef(false);
   const [selection, setSelection] = useState<ReaderSelection | null>(null); const [translationCard, setTranslationCard] = useState<FloatingTranslation | null>(null);
@@ -47,11 +55,17 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const host = useRef<HTMLElement>(null); const viewport = useRef<HTMLDivElement>(null); const pages = useRef(new Map<number, RegisteredPage>());
   const generation = useRef(0); const pdfRevision = useRef(''); const searchRun = useRef(0); const stateSave = useRef<Promise<unknown>>(Promise.resolve());
   const stateTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const activeRef = useRef(active); activeRef.current = active;
+  const session = useRef<PdfSession | null>(null); const startDocument = useRef<(() => void) | null>(null);
+  const scrollFrame = useRef(0); const sizeFrame = useRef(0); const searchAbort = useRef<AbortController | null>(null);
+  const resizeFrame = useRef(0); const measuredWidth = useRef(0);
   const panning = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null); const justPanned = useRef(0);
-  const restore = useRef<{ page: number; ratio: number } | null>(null); const pendingAnchor = useRef<{ page: number; point: number[] } | null>(null);
+  const restore = useRef(new PageAnchorCoordinator()); const [navigationRevision, setNavigationRevision] = useState(0); const pendingAnchor = useRef<{ page: number; point: number[] } | null>(null);
   const showCards = cards && containerWidth >= 680;
   const availablePageWidth = Math.max(1, containerWidth - (showCards ? 226 : 0));
   const scale = view.fit ? fitPageScale(fitPageWidth, availablePageWidth) : view.zoom;
+  const slots = useMemo(() => pageSlots(document?.numPages ?? 0, knownSizes.current, estimate, view.rotation, view.zoom, view.fit ? availablePageWidth : undefined, showCards ? 226 : 0), [document, estimate, view.rotation, view.zoom, view.fit, availablePageWidth, showCards, sizeRevision]);
+  const slotsRef = useRef(slots); slotsRef.current = slots;
   const paperPath = paper?.path ?? '';
   const translated = useDocumentTranslation({ document, vaultId, paperPath, open: translationOpen && active, currentPage: view.pageNumber, targetLanguage });
 
@@ -63,70 +77,127 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   }, [vaultId, paperPath, preview]);
 
   useEffect(() => {
-    if (!paper || preview) { setDocument(null); return; }
-    const controller = new AbortController(); const ticket = ++generation.current; const path = paper.path;
-    let task: ReturnType<typeof pdfjs.getDocument> | undefined;
-    setLoading(true); setViewReady(false); setError(''); setNotice(reloadNotice.current ?? ''); reloadNotice.current = null; setDocument(null); setMarks(null); marksRef.current = null;
+    let closed = false;
+    session.current?.dispose(); session.current = null;
+    setLoading(false); setViewReady(false); setError(''); setNotice(reloadNotice.current ?? ''); reloadNotice.current = null; setDocument(null); setMarks(null); marksRef.current = null;
+    knownSizes.current.clear(); restore.current.clear(); pendingAnchor.current = null; setFailedPages(new Map()); setSizeRevision(value => value + 1);
     setSelection(null); setTranslationCard(null); setTranslationOpen(false); setHits([]); setHitIndex(-1); setSelectedMark(null); setPasswordRequired(false); pages.current.clear();
-    translationRun.current += 1; searchRun.current += 1; selectionTranslationAbort.current?.abort();
-    const savedState = callTool<{ state?: Partial<ReaderState> }>('reader_state_get', { vaultId, paperPath: path }).catch(() => ({ state: {} }));
-    void refreshMarks();
-    void readPdfChunks(async (offset, revision) => {
-      const result = await callTool<PdfChunk>('pdf_read_chunk', { vaultId, paperPath: path, offset, length: PDF_CHUNK_BYTES, revision });
-      if (offset === 0 && ticket === generation.current) pdfRevision.current = result.revision;
-      return result;
-    }, { signal: controller.signal, onProgress: (loaded, total) => { if (!controller.signal.aborted) setProgress(`${formatBytes(loaded)} / ${formatBytes(total)}`); } }).then(async bytes => {
-      controller.signal.throwIfAborted();
-      task = pdfjs.getDocument({ data: bytes, useWorkerFetch: false, useSystemFonts: true, stopAtErrors: true });
-      task.onPassword = (update: (value: string) => void, reason: number) => { if (!controller.signal.aborted) { passwordUpdate.current = update; setPasswordWrong(reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD); setPasswordRequired(true); } };
-      const pdf = await task.promise; const state = ((await savedState).state ?? {}) as Partial<ReaderState>;
-      controller.signal.throwIfAborted();
-      const first = await pdf.getPage(1); const base = first.getViewport({ scale: 1 });
-      controller.signal.throwIfAborted();
-      const next: ReaderState = { ...initialView, ...state, pageNumber: Math.min(pdf.numPages, Math.max(1, Number(state.pageNumber) || 1)), zoom: Math.max(.35, Math.min(3, Number(state.zoom) || 1)), rotation: [0, 90, 180, 270].includes(Number(state.rotation)) ? Number(state.rotation) : 0, tone: state.tone === 'dark' ? 'dark' : 'white' };
-      setEstimate({ width: base.width, height: base.height }); setFitPageWidth(next.rotation % 180 ? base.height : base.width); setView(next); viewRef.current = next; setPageInput(String(next.pageNumber)); restore.current = { page: next.pageNumber, ratio: 0 };
-      setDocument(pdf); setViewReady(true); setPasswordRequired(false);
-    }).catch(cause => { if (!controller.signal.aborted) setError(messageOf(cause)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => { controller.abort(); generation.current += 1; searchRun.current += 1; translationRun.current += 1; selectionTranslationAbort.current?.abort(); passwordUpdate.current = null; void task?.destroy().catch(() => {}); };
+    translationRun.current += 1; searchRun.current += 1; selectionTranslationAbort.current?.abort(); searchAbort.current?.abort();
+    const start = () => {
+      if (closed || !activeRef.current || !paperPath || preview || session.current) return;
+      const controller = new AbortController(); const ticket = ++generation.current; const path = paperPath;
+      let task: ReturnType<typeof pdfjs.getDocument> | undefined; let worker: Awaited<ReturnType<typeof createPdfWorker>> | undefined;
+      let disposed = false;
+      const current: PdfSession = { status: 'loading', dispose: () => {
+        if (disposed) return; disposed = true; controller.abort(); worker?.dispose(); worker = undefined;
+        const previous = task; task = undefined; void previous?.destroy().catch(() => {});
+        if (session.current === current) session.current = null;
+      } };
+      session.current = current; setLoading(true); setError('');
+      const fail = (cause: unknown) => {
+        if (closed || ticket !== generation.current || controller.signal.aborted) return;
+        current.status = 'failed'; setError(messageOf(cause)); setDocument(null); setViewReady(false); setLoading(false);
+        current.dispose(); session.current = current; // A failed resource is retried only by an explicit reload.
+      };
+      const savedState = callTool<{ state?: Partial<ReaderState> }>('reader_state_get', { vaultId, paperPath: path }, { signal: controller.signal }).catch(() => ({ state: {} }));
+      void refreshMarks();
+      void (async () => {
+        worker = await createPdfWorker({ signal: controller.signal, onFailure: fail });
+        const bytes = await readPdfChunks(async (offset, revision) => {
+          const result = await callTool<PdfChunk>('pdf_read_chunk', { vaultId, paperPath: path, offset, length: PDF_CHUNK_BYTES, revision }, { signal: controller.signal });
+          if (offset === 0 && ticket === generation.current) pdfRevision.current = result.revision;
+          return result;
+        }, { signal: controller.signal, onProgress: (loaded, total) => { if (!controller.signal.aborted) setProgress(`${formatBytes(loaded)} / ${formatBytes(total)}`); } });
+        controller.signal.throwIfAborted();
+        task = pdfjs.getDocument({ data: bytes, worker: worker.worker, useWorkerFetch: false, useSystemFonts: true, stopAtErrors: true, maxImageSize: MAX_IMAGE_PIXELS, canvasMaxAreaInBytes: MAX_CANVAS_PIXELS * 4 });
+        task.onPassword = (update: (value: string) => void, reason: number) => { if (!controller.signal.aborted) { passwordUpdate.current = update; setPasswordWrong(reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD); setPasswordRequired(true); } };
+        const pdf = await abortable(task.promise, controller.signal); const state = ((await savedState).state ?? {}) as Partial<ReaderState>;
+        controller.signal.throwIfAborted();
+        const first = await abortable(pdf.getPage(1), controller.signal); const base = first.getViewport({ scale: 1 });
+        controller.signal.throwIfAborted();
+        const next: ReaderState = { ...initialView, ...state, pageNumber: Math.min(pdf.numPages, Math.max(1, Number(state.pageNumber) || 1)), zoom: Math.max(.35, Math.min(3, Number(state.zoom) || 1)), rotation: [0, 90, 180, 270].includes(Number(state.rotation)) ? Number(state.rotation) : 0, tone: state.tone === 'dark' ? 'dark' : 'white' };
+        knownSizes.current.set(1, { width: base.width, height: base.height }); setSizeRevision(value => value + 1);
+        setEstimate({ width: base.width, height: base.height }); setFitPageWidth(next.rotation % 180 ? base.height : base.width); setView(next); viewRef.current = next; setPageInput(String(next.pageNumber)); restore.current.navigate(next.pageNumber);
+        setWindowRange({ start: Math.max(0, next.pageNumber - 3), end: Math.min(pdf.numPages - 1, next.pageNumber + 2) });
+        current.status = 'ready'; setDocument(pdf); setViewReady(true); setPasswordRequired(false); setLoading(false);
+      })().catch(cause => { if (!controller.signal.aborted) fail(cause); });
+    };
+    startDocument.current = start; start();
+    return () => { closed = true; startDocument.current = null; session.current?.dispose(); session.current = null; generation.current += 1; searchRun.current += 1; translationRun.current += 1; selectionTranslationAbort.current?.abort(); searchAbort.current?.abort(); passwordUpdate.current = null; };
   }, [vaultId, paperPath, preview, loadRevision, refreshMarks]);
 
   useEffect(() => {
-    if (!document || !view.fit) return;
+    if (active) startDocument.current?.();
+    else {
+      searchAbort.current?.abort(); searchRun.current += 1; setSearchBusy(false); selectionTranslationAbort.current?.abort(); translationRun.current += 1;
+      if (session.current?.status === 'loading') { session.current.dispose(); setLoading(false); setViewReady(false); setDocument(null); }
+    }
+  }, [active]);
+  useEffect(() => registerBeforeTeardown(async () => { searchAbort.current?.abort(); session.current?.dispose(); session.current = null; }), []);
+
+  useEffect(() => {
+    if (!active || !document || !view.fit) return;
     let cancelled = false;
     // Only current-page metadata is requested; PDF.js caches already visited pages.
     void document.getPage(view.pageNumber).then(page => {
       if (!cancelled) setFitPageWidth(page.getViewport({ scale: 1, rotation: (page.rotate + view.rotation) % 360 }).width);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [document, view.fit, view.pageNumber, view.rotation]);
+  }, [document, view.fit, view.pageNumber, view.rotation, active]);
 
   useEffect(() => {
-    if (!viewport.current) return;
-    const observer = new ResizeObserver(([entry]) => { if (entry.contentRect.width > 0) { rememberPosition(); setContainerWidth(entry.contentRect.width); } });
-    observer.observe(viewport.current); return () => observer.disconnect();
+    if (!active || !viewport.current) return;
+    let pendingWidth = measuredWidth.current;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width <= 0) return;
+      const pixelRatio = window.devicePixelRatio || 1; pendingWidth = Math.round(entry.contentRect.width * pixelRatio) / pixelRatio;
+      if (Math.abs(pendingWidth - measuredWidth.current) < .5 || resizeFrame.current) return;
+      resizeFrame.current = requestAnimationFrame(() => { resizeFrame.current = 0; if (!activeRef.current || Math.abs(pendingWidth - measuredWidth.current) < .5) return; rememberPosition(); measuredWidth.current = pendingWidth; setContainerWidth(pendingWidth); });
+    });
+    observer.observe(viewport.current); return () => { observer.disconnect(); cancelAnimationFrame(resizeFrame.current); resizeFrame.current = 0; };
   }, [document, active]);
 
-  const goToPage = useCallback((number: number, ratio = 0) => {
+  const applyPageAnchor = useCallback((number: number, ratio = 0) => {
     if (!document || !viewport.current) return;
-    const next = Math.min(document.numPages, Math.max(1, number)); const target = viewport.current.querySelector<HTMLElement>(`[data-sheet-page="${next}"]`);
-    if (target) { viewport.current.scrollTo({ top: Math.max(0, target.offsetTop + target.offsetHeight * ratio - 16), behavior: 'auto' }); setView(value => value.pageNumber === next ? value : { ...value, pageNumber: next }); }
+    const next = Math.min(document.numPages, Math.max(1, number)); const slot = slotsRef.current[next - 1];
+    if (slot) {
+      const contentTop = viewport.current.querySelector<HTMLElement>('.pdf-continuous-pages')?.offsetTop ?? 0;
+      const top = Math.max(0, contentTop + slot.top + slot.height * ratio - 16);
+      setWindowRange(pageWindow(slotsRef.current, Math.max(0, top - contentTop), viewport.current.clientHeight));
+      viewRef.current = { ...viewRef.current, pageNumber: next };
+      viewport.current.scrollTo({ top, behavior: 'auto' }); setView(value => value.pageNumber === next ? value : { ...value, pageNumber: next });
+    }
   }, [document]);
+  const goToPage = useCallback((number: number, ratio = 0) => {
+    if (!document) return;
+    const next = Math.min(document.numPages, Math.max(1, number));
+    cancelAnimationFrame(scrollFrame.current); scrollFrame.current = 0;
+    pendingAnchor.current = null;
+    restore.current.navigate(next, ratio); viewRef.current = { ...viewRef.current, pageNumber: next };
+    applyPageAnchor(next, ratio); setNavigationRevision(value => value + 1);
+  }, [document, applyPageAnchor]);
   const layoutScale = view.fit ? availablePageWidth : view.zoom;
   useEffect(() => {
     if (!document || !active) return;
     let second = 0;
-    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { const target = restore.current ?? { page: viewRef.current.pageNumber, ratio: 0 }; restore.current = null; goToPage(target.page, target.ratio); }); });
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { const pending = restore.current.pending; const target = pending ?? { page: viewRef.current.pageNumber, ratio: 0 }; applyPageAnchor(target.page, target.ratio); if (pending) restore.current.settle(pending.sequence); }); });
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
-  }, [document, layoutScale, view.fit, view.rotation, active, goToPage]);
+  }, [document, layoutScale, view.fit, view.rotation, active, applyPageAnchor, sizeRevision, navigationRevision]);
   useEffect(() => { setPageInput(String(view.pageNumber)); }, [view.pageNumber]);
 
   const registerPage = useCallback((number: number, entry: RegisteredPage | null) => {
     if (entry) {
       pages.current.set(number, entry);
+      const base = entry.page.getViewport({ scale: 1, rotation: entry.page.rotate }); const before = knownSizes.current.get(number) ?? estimateRef.current;
+      knownSizes.current.set(number, { width: base.width, height: base.height });
+      if (Math.abs(before.width - base.width) > .01 || Math.abs(before.height - base.height) > .01) {
+        rememberPosition();
+        if (!sizeFrame.current) sizeFrame.current = requestAnimationFrame(() => { sizeFrame.current = 0; setSizeRevision(value => value + 1); });
+      }
       const pending = pendingAnchor.current;
       if (pending?.page === number && viewport.current) {
         const point = entry.geometry.viewport.convertToViewportPoint(pending.point[0], pending.point[1]); const sheet = entry.element.closest<HTMLElement>('[data-sheet-page]');
-        if (sheet) { const top = sheet.offsetTop + point[1] - 20; requestAnimationFrame(() => viewport.current?.scrollTo({ top: Math.max(0, top), behavior: 'auto' })); pendingAnchor.current = null; }
+        if (sheet) { restore.current.navigate(number, Math.max(0, point[1] / entry.geometry.viewport.height)); setNavigationRevision(value => value + 1); pendingAnchor.current = null; }
       }
     } else pages.current.delete(number);
   }, []);
@@ -142,25 +213,33 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
       if (typeof ref === 'number') target = ref + 1;
       else if (ref && typeof ref === 'object' && 'num' in ref && 'gen' in ref) target = await document.getPageIndex({ num: Number(ref.num), gen: Number(ref.gen) }) + 1;
       else return;
-      if (value[1]?.name === 'XYZ' && typeof value[3] === 'number') pendingAnchor.current = { page: target, point: [typeof value[2] === 'number' ? value[2] : 0, value[3]] };
       goToPage(target);
+      if (value[1]?.name === 'XYZ' && typeof value[3] === 'number') pendingAnchor.current = { page: target, point: [typeof value[2] === 'number' ? value[2] : 0, value[3]] };
       const existing = pages.current.get(target); if (existing && pendingAnchor.current) registerPage(target, existing);
     } catch (cause) { setNotice(messageOf(cause)); }
   }
 
   function scroll() {
-    const target = viewport.current; if (!target || panning.current) return;
-    const pivot = target.scrollTop + Math.min(target.clientHeight * .25, 150);
-    for (const sheet of target.querySelectorAll<HTMLElement>('[data-sheet-page]')) if (sheet.offsetTop + sheet.offsetHeight >= pivot) { const number = Number(sheet.dataset.sheetPage); setView(value => value.pageNumber === number ? value : { ...value, pageNumber: number }); break; }
+    if (scrollFrame.current) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = 0;
+      const target = viewport.current; const positions = slotsRef.current; if (!target || !activeRef.current || panning.current || restore.current.pending || !positions.length) return;
+      const contentTop = target.querySelector<HTMLElement>('.pdf-continuous-pages')?.offsetTop ?? 0;
+      const top = Math.max(0, target.scrollTop - contentTop); const number = pageAtOffset(positions, top + Math.min(target.clientHeight * .25, 150)) + 1;
+      const next = pageWindow(positions, top, target.clientHeight);
+      setWindowRange(value => value.start === next.start && value.end === next.end ? value : next);
+      viewRef.current = { ...viewRef.current, pageNumber: number }; setView(value => value.pageNumber === number ? value : { ...value, pageNumber: number });
+    });
   }
   function zoom(value: number, fit = false) {
     rememberPosition();
     setView(current => ({ ...current, fit, zoom: Math.max(.35, Math.min(3, value)) }));
   }
   function rememberPosition() {
-    if (restore.current) return;
-    const parent = viewport.current; const number = viewRef.current.pageNumber; const sheet = parent?.querySelector<HTMLElement>(`[data-sheet-page="${number}"]`);
-    if (parent && sheet?.offsetHeight) restore.current = { page: number, ratio: (parent.scrollTop + 16 - sheet.offsetTop) / sheet.offsetHeight };
+    if (restore.current.pending) return;
+    const parent = viewport.current; const number = viewRef.current.pageNumber; const slot = slotsRef.current[number - 1];
+    const contentTop = parent?.querySelector<HTMLElement>('.pdf-continuous-pages')?.offsetTop ?? 0;
+    if (parent && slot?.height) restore.current.remember(number, (parent.scrollTop + 16 - contentTop - slot.top) / slot.height);
   }
   useEffect(() => {
     const target = viewport.current; if (!target || !active) return;
@@ -177,6 +256,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   useEffect(() => { clearTimeout(stateTimer.current); if (viewReady) stateTimer.current = setTimeout(() => { void persistView(); }, 500); return () => clearTimeout(stateTimer.current); }, [view, viewReady, persistView]);
   useEffect(() => registerBeforeTeardown(async () => { clearTimeout(stateTimer.current); await persistView(); }), [persistView]);
   useEffect(() => registerBeforeTeardown(async () => { selectionTranslationAbort.current?.abort(); }), []);
+  useEffect(() => () => { cancelAnimationFrame(scrollFrame.current); cancelAnimationFrame(sizeFrame.current); cancelAnimationFrame(resizeFrame.current); }, []);
   useEffect(() => { onDirtyChange?.(noteDirty); return () => onDirtyChange?.(false); }, [noteDirty, onDirtyChange]);
 
   function captureSelection() {
@@ -269,22 +349,29 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   }
 
   async function search() {
-    if (!document || !query.trim()) return;
+    if (!activeRef.current || !document || !query.trim()) return;
+    searchAbort.current?.abort(); const controller = new AbortController(); searchAbort.current = controller;
+    const { signal } = controller; const checkpoint = timeBudget(signal);
     const ticket = ++searchRun.current; const needle = query.trim(); setSearchBusy(true); setHits([]); setHitIndex(-1);
     const found: SearchHit[] = [];
     try {
       for (let number = 1; number <= document.numPages; number++) {
-        if (ticket !== searchRun.current) return;
-        const content = await (await document.getPage(number)).getTextContent();
-        const text = content.items.filter((item): item is typeof item & { str: string } => 'str' in item).map(item => item.str).join(' ');
+        await yieldToHost(signal);
+        if (ticket !== searchRun.current || !activeRef.current) return;
+        const page = await abortable(document.getPage(number), signal); const content = await abortable(page.getTextContent(), signal); signal.throwIfAborted();
+        const parts: string[] = [];
+        for (let index = 0; index < content.items.length; index++) { const item = content.items[index]; if ('str' in item) parts.push(item.str); if (index % 256 === 0) await checkpoint(); }
+        const text = parts.join(' ');
         for (const [ordinal, index] of textMatches(text, needle, 2000 - found.length).entries()) found.push({ page: number, index, ordinal, text: needle, excerpt: text.slice(Math.max(0, index - 32), index + needle.length + 60) });
+        if (!pages.current.has(number)) page.cleanup();
         if (found.length >= 2000) break;
       }
       if (ticket !== searchRun.current) return;
       locatedHit.current = ''; setHits(found); if (found.length) { setHitIndex(0); goToPage(found[0].page); } else setNotice('没有找到匹配文字；扫描 PDF 可能没有文字层。');
-    } catch (cause) { if (ticket === searchRun.current) setNotice(messageOf(cause)); }
-    finally { if (ticket === searchRun.current) setSearchBusy(false); }
+    } catch (cause) { if (!signal.aborted && ticket === searchRun.current) setNotice(messageOf(cause)); }
+    finally { if (searchAbort.current === controller) { searchAbort.current = null; setSearchBusy(false); } }
   }
+  function cancelSearch() { searchAbort.current?.abort(); searchAbort.current = null; searchRun.current += 1; setSearchBusy(false); }
   function moveHit(delta: number) { if (!hits.length) return; const next = (hitIndex + delta + hits.length) % hits.length; setHitIndex(next); goToPage(hits[next].page); }
   useEffect(() => {
     const target = hits[hitIndex];
@@ -308,7 +395,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     const keydown = (event: KeyboardEvent) => {
       if (event.target instanceof Element && event.target.closest('.pdf-notes-sidebar')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); requestAnimationFrame(() => searchInput.current?.focus()); return; }
-      if (event.key === 'Escape') { setSelection(null); setTranslationCard(null); selectionTranslationAbort.current?.abort(); setCrop(false); setSearchOpen(false); translationRun.current += 1; return; }
+      if (event.key === 'Escape') { setSelection(null); setTranslationCard(null); selectionTranslationAbort.current?.abort(); setCrop(false); setSearchOpen(false); cancelSearch(); translationRun.current += 1; return; }
       if (editable(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key)) { event.preventDefault(); zoom(event.key === '0' ? 1 : scale + (event.key === '-' ? -.1 : .1), event.key === '0'); return; }
       if ((event.key === ' ' || event.code === 'Space') && !(event.target instanceof Element && event.target.closest('button,a,[role="button"]'))) { event.preventDefault(); setSpace(true); }
@@ -321,9 +408,16 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   }, [active, scale, goToPage]);
   function panStart(event: React.PointerEvent<HTMLDivElement>) { if (!viewport.current || editable(event.target) || (event.button !== 1 && !(space && event.button === 0))) return; event.preventDefault(); event.stopPropagation(); panning.current = { x: event.clientX, y: event.clientY, left: viewport.current.scrollLeft, top: viewport.current.scrollTop, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); }
   function panMove(event: React.PointerEvent<HTMLDivElement>) { if (!panning.current || !viewport.current) return; event.preventDefault(); const value = panning.current; value.moved ||= Math.abs(event.clientX - value.x) + Math.abs(event.clientY - value.y) > 3; viewport.current.scrollLeft = value.left - (event.clientX - value.x); viewport.current.scrollTop = value.top - (event.clientY - value.y); }
-  function panEnd(event: React.PointerEvent<HTMLDivElement>) { if (panning.current) { if (panning.current.moved) justPanned.current = Date.now() + 250; panning.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); } else captureSelection(); }
+  function panEnd(event: React.PointerEvent<HTMLDivElement>) { if (panning.current) { if (panning.current.moved) justPanned.current = Date.now() + 250; panning.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); scroll(); } else captureSelection(); }
   const inlineNotesTarget = useRef<{ paperPath: string }>({ paperPath });
   if (inlineNotesTarget.current.paperPath !== paperPath) inlineNotesTarget.current = { paperPath };
+  const pageActions = useRef({ selectMark, navigate }); pageActions.current = { selectMark, navigate };
+  const onPageMark = useCallback((mark: ReaderMark) => pageActions.current.selectMark(mark), []);
+  const onPageDestination = useCallback((destination: unknown, action?: string) => { void pageActions.current.navigate(destination, action); }, []);
+  const onPageExternal = useCallback((url: string) => { void openExternalLink(url).catch(cause => setNotice(messageOf(cause))); }, []);
+  const onPageVisual = useCallback((value: VisualSelection) => { setCrop(false); setSelection({ text: value.quote, parts: [{ page: value.page, quote: value.quote, rects: value.rects, pageSize: value.pageSize }], x: value.x, y: value.y, asset: value.asset }); }, []);
+  const onPageFailure = useCallback((number: number, message: string) => { setFailedPages(value => new Map(value).set(number, message)); setError(message); }, []);
+  async function openSystemViewer() { try { await callTool('paper_open_external', { vaultId, paperPath }); setNotice('已向系统默认查看器发送打开请求。'); } catch (cause) { setNotice(messageOf(cause)); } }
 
   if (!paper) return <div className="empty-state reader-empty"><BookOpen size={34} /><strong>打开一篇文献开始阅读</strong><span>选择文字以高亮、备注、翻译或向所属对话提问。</span><button onClick={onBack}>返回文献库</button></div>;
   if (preview) return <div className="empty-state reader-empty"><FileText size={30} /><strong>{paper.title}</strong><span>这是界面预览，不连接真实 PDF 或标注数据。</span><button onClick={onBack}>返回演示列表</button></div>;
@@ -331,15 +425,17 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   return <section ref={host} className="reader-view view-fill parity-reader" aria-label="PDF 阅读器">
     <header className="reader-heading"><strong title={paper.title}>{paper.title}</strong><div className="button-row"><button className={view.notesOpen ? 'selected' : ''} disabled={noteDirty} onClick={() => setView(value => ({ ...value, notesOpen: !value.notesOpen }))}><NotebookPen size={14} />论文笔记</button><button disabled={!canParse || busy} title={canParse ? '写入派生正文，作为独立后台任务执行' : '原生解析需要 PDFium'} onClick={() => { void callTool<LibraryOperation>('paper_parse', { vaultId, paperPath }).then(onOperation).catch(cause => setNotice(messageOf(cause))); }}>解析正文</button><button disabled={!document || busy} onClick={() => void exportPaper('pdf')}><Download size={14} />导出</button></div></header>
     <div className="reader-toolbar pdf-parity-toolbar"><button className={`icon-button ${view.outlineOpen ? 'selected' : ''}`} aria-label="显示目录" aria-pressed={view.outlineOpen} disabled={!document} onClick={() => setView(value => ({ ...value, outlineOpen: !value.outlineOpen }))}><List size={17} /></button><button className={`icon-button ${view.marksOpen ? 'selected' : ''}`} aria-label="显示批注" aria-pressed={view.marksOpen} disabled={!document} onClick={() => setView(value => ({ ...value, marksOpen: !value.marksOpen }))}><MessageSquare size={16} /></button><button className="icon-button" aria-label="查找 PDF 文字" disabled={!document} onClick={() => { setSearchOpen(value => !value); requestAnimationFrame(() => searchInput.current?.focus()); }}><Search size={17} /></button><button className={`icon-button ${crop ? 'selected' : ''}`} aria-label="截取 PDF 区域" aria-pressed={crop} disabled={!document} onClick={() => { setCrop(value => !value); setSelection(null); }}><Crop size={17} /></button><button className={`icon-button ${translationOpen ? 'selected' : ''}`} aria-label={translationOpen ? '显示原文' : '全文翻译'} aria-pressed={translationOpen} disabled={!document} onClick={() => { setSelection(null); setTranslationOpen(value => !value); }}><Languages size={17} /></button><select aria-label="翻译目标语言" value={targetLanguage} onChange={event => setTargetLanguage(event.target.value)}><option value="">按插件设置</option><option value="zh-CN">简体中文</option><option value="en">English</option><option value="ja">日本語</option><option value="de">Deutsch</option><option value="fr">Français</option></select><span className="toolbar-spacer" /><button className="icon-button" aria-label="旋转 PDF" disabled={!document} onClick={() => { rememberPosition(); setView(value => ({ ...value, rotation: (value.rotation + 90) % 360 })); }}><RotateCw size={16} /></button><button className="icon-button" aria-label="切换黑白纸色" title={view.tone === 'white' ? '切换黑色纸张' : '切换白色纸张'} onClick={() => setView(value => ({ ...value, tone: value.tone === 'white' ? 'dark' : 'white' }))}><Palette size={16} /></button><button className="icon-button" aria-label="缩小" disabled={!document || scale <= .35} onClick={() => zoom(scale - .15)}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(scale * 100)}%</span><button className="icon-button" aria-label="放大" disabled={!document || scale >= 3} onClick={() => zoom(scale + .15)}><ZoomIn size={17} /></button><button disabled={!document} className={view.fit ? 'selected' : ''} onClick={() => zoom(1, true)}>适合宽度</button></div>
-    {searchOpen && <form className="pdf-find" onSubmit={event => { event.preventDefault(); void search(); }}><input ref={searchInput} aria-label="PDF 查找文字" placeholder="查找 PDF 文字" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && hits.length && query === hits[0]?.text) { event.preventDefault(); moveHit(event.shiftKey ? -1 : 1); } }} /><button disabled={searchBusy || !query.trim()}>{searchBusy ? <LoaderCircle size={14} className="spin" /> : '查找'}</button><button type="button" aria-label="上一个匹配" disabled={!hits.length} onClick={() => moveHit(-1)}><ChevronLeft size={14} /></button><span>{hits.length ? `${hitIndex + 1}/${hits.length}${hits.length >= 2000 ? '+' : ''}` : ''}</span><button type="button" aria-label="下一个匹配" disabled={!hits.length} onClick={() => moveHit(1)}><ChevronRight size={14} /></button><button type="button" className="icon-button" aria-label="关闭查找" onClick={() => { setSearchOpen(false); searchRun.current += 1; }}><X size={15} /></button></form>}
+    {searchOpen && <form className="pdf-find" onSubmit={event => { event.preventDefault(); void search(); }}><input ref={searchInput} aria-label="PDF 查找文字" placeholder="查找 PDF 文字" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && hits.length && query === hits[0]?.text) { event.preventDefault(); moveHit(event.shiftKey ? -1 : 1); } }} /><button disabled={searchBusy || !query.trim()}>{searchBusy ? <LoaderCircle size={14} className="spin" /> : '查找'}</button><button type="button" aria-label="上一个匹配" disabled={!hits.length} onClick={() => moveHit(-1)}><ChevronLeft size={14} /></button><span>{hits.length ? `${hitIndex + 1}/${hits.length}${hits.length >= 2000 ? '+' : ''}` : ''}</span><button type="button" aria-label="下一个匹配" disabled={!hits.length} onClick={() => moveHit(1)}><ChevronRight size={14} /></button><button type="button" className="icon-button" aria-label="关闭查找" onClick={() => { setSearchOpen(false); cancelSearch(); }}><X size={15} /></button></form>}
     {translationOpen && <div className="pdf-translation-status" role="status"><Languages size={14} /><span>{translated.running ? translated.progress || '准备全文翻译…' : translated.error || translated.progress || '逐页翻译当前文档'}</span>{translated.running && <LoaderCircle size={14} className="spin" />}{translated.error && <button onClick={translated.retry}>重试未完成段落</button>}<button onClick={() => setTranslationOpen(false)}>{translated.running ? '停止并显示原文' : '显示原文'}</button></div>}
-    {crop && <p className="inline-notice">在页面上拖出区域，添加截图备注。按 Esc 退出。</p>}{notice && <p className="inline-notice" role="status">{notice}</p>}{error && <p className="callout error" role="alert">{error}</p>}
+    {crop && <p className="inline-notice">在页面上拖出区域，添加截图备注。按 Esc 退出。</p>}{notice && <p className="inline-notice" role="status">{notice}</p>}{error && <div className="callout error" role="alert">{error}<div className="button-row"><button onClick={() => void openSystemViewer()}>用系统查看器打开</button><button disabled={!active || loading} onClick={() => setLoadRevision(value => value+1)}>重新加载 PDF</button></div></div>}
     {passwordRequired && <form className="pdf-password" onSubmit={event => { event.preventDefault(); passwordUpdate.current?.(password); setPassword(''); }}><label>PDF 密码<input type="password" autoFocus autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} /></label><button className="primary">解锁</button>{passwordWrong && <span className="error-text">密码不正确，请重试。</span>}</form>}
     <div className="reader-body pdf-parity-body">
       {view.outlineOpen && document && <OutlinePanel document={document} currentPage={view.pageNumber} busy={busy} onNavigate={(dest, page) => { void navigate(dest, undefined, page); }} onSave={saveBookmarks} onClose={() => setView(value => ({ ...value, outlineOpen: false }))} />}
       <div ref={viewport} className={`pdf-viewport parity-viewport ${space ? 'pan-armed' : ''}`} onScroll={scroll} onPointerDownCapture={panStart} onPointerMove={panMove} onPointerUp={panEnd} onPointerCancel={() => { panning.current = null; }} onKeyUp={captureSelection} onClickCapture={event => { if (Date.now() < justPanned.current) { event.preventDefault(); event.stopPropagation(); } }}>
         {loading && <div className="empty-state"><LoaderCircle className="spin" /><strong>正在读取 PDF…</strong><span>{progress}</span></div>}
-        {document && <div className="pdf-continuous-pages">{Array.from({ length: document.numPages }, (_, index) => <PageView key={`${loadRevision}:${index}`} document={document} number={index + 1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? []} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index + 1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={selectMark} onDestination={(destination, action) => { void navigate(destination, action); }} onExternal={url => { void openExternalLink(url).catch(cause => setNotice(messageOf(cause))); }} onVisual={(value: VisualSelection) => { setCrop(false); setSelection({ text: value.quote, parts: [{ page: value.page, quote: value.quote, rects: value.rects, pageSize: value.pageSize }], x: value.x, y: value.y, asset: value.asset }); }} />)}</div>}
+        {document && <div className="pdf-continuous-pages">{slots.map((slot,index) => <div key={loadRevision+':'+index} className="pdf-page-slot" data-sheet-page={index+1} style={{height:slot.height}}>
+          {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
+        </div>)}</div>}
       </div>
       {view.marksOpen && <MarksPanel list={marks} selectedId={selectedMark} busy={busy} error={markError} onSelect={selectMark} onSave={updateMark} onDelete={deleteMark} onReply={replyMark} onRefresh={() => { void refreshMarks(); }} onExport={format => { void exportPaper(format); }} onClose={() => setView(value => ({ ...value, marksOpen: false }))} />}
       {view.notesOpen && <aside className="pdf-notes-sidebar" aria-label="论文笔记侧栏"><header className="pdf-panel-heading"><strong>论文笔记</strong><button disabled={noteDirty} title={noteDirty ? '请先保存或处理当前草稿' : '单独打开笔记页'} onClick={() => onNotes(paper)}>单独打开</button><button className="icon-button" disabled={noteDirty} aria-label="关闭论文笔记" onClick={() => setView(value => ({ ...value, notesOpen: false }))}><X size={14} /></button></header><NotesView active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={inlineNotesTarget.current} onDirtyChange={setNoteDirty} /></aside>}

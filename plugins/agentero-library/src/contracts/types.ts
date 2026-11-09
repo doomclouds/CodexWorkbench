@@ -8,6 +8,7 @@ export interface LibrarySettings {
 }
 
 export type SettingsPatch = Partial<Pick<LibrarySettings, 'cliPath' | 'vaultPath' | 'pdfiumPath' | 'allowAgentPdfText'>>;
+export interface StatusOptions { diagnosePdf?: boolean }
 
 export interface LibraryStatus {
   ready: boolean;
@@ -18,7 +19,7 @@ export interface LibraryStatus {
   vault: { configured: boolean; valid: boolean; vaultId: string | null; path: string; name: string; error?: string };
   capabilities: { metadata: boolean; notes: boolean; pdfRead: boolean; pdfText: boolean; pdfParse: boolean; layout: boolean };
   capabilityScope: 'service-support';
-  pdfium: { configured: boolean; available: boolean; path: string; diagnostic: string };
+  pdfium: { configured: boolean; available: boolean | null; path: string; diagnostic: string; state?: 'unknown' | 'available' | 'unavailable'; checkedAt?: string };
   allowAgentPdfText: boolean;
   activeOperations: number;
   recoveryDrafts: number;
@@ -192,4 +193,5 @@ export interface LibraryServiceOptions {
   cliRunner?: CliRunner;
   nativeFactory?: (context: NativeContext) => Promise<NativeBackend>;
   snapshotTtlMs?: number;
+  externalPdfOpener?: (path: string) => Promise<void>;
 }

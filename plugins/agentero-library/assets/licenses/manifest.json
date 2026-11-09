@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "plugin": "agentero-library",
-  "pluginVersion": "0.2.1",
+  "pluginVersion": "0.2.2",
   "scope": "bundled-runtime-inputs",
-  "inputInventory": "artifacts/agentero-library/v0.2.1/validation/bundle-inputs.json",
+  "inputInventory": "artifacts/agentero-library/v0.2.2/validation/bundle-inputs.json",
   "packages": [
     {
       "name": "@floating-ui/core",

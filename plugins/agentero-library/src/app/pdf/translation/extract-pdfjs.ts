@@ -1,9 +1,11 @@
 import type { PDFPageProxy } from 'pdfjs-dist';
 import { pdfjs } from '../../pdf-runtime';
 import { pageGeometry, screenRectToPoints } from '../geometry';
-import { fallbackCharacterGroups, rotatedCharacterIndexes } from './coverage';
+import { rotatedCharacterIndexes } from './coverage';
+import { cooperativeCharacterGroups } from './cooperative-groups';
 import { paragraphFromCharacters } from './paragraph';
 import { type Box, type Character, type Paragraph, type ReflowPage, unionBoxes } from './types';
+import { abortable, canvasBudget, pdfRenderScheduler, timeBudget } from '../scheduling';
 
 export interface LayoutRegion { id: string; pageIndex: number; kind: string; score?: number; bbox?: Box; rect?: Box }
 const centerInside = (a: Box, b: Box) => a.x + a.w / 2 >= b.x && a.x + a.w / 2 <= b.x + b.w && a.y + a.h / 2 >= b.y && a.y + a.h / 2 <= b.y + b.h;
@@ -20,7 +22,11 @@ function regionBox(region: LayoutRegion, width: number, height: number): Box | n
 
 /** Public PDF.js rendering/TextLayer APIs supply the same glyph geometry that the reader selects. */
 export async function extractPage(page: PDFPageProxy, regions: LayoutRegion[], signal: AbortSignal): Promise<{ source: ReflowPage; formulas: Map<string, string> }> {
+  return pdfRenderScheduler.run(() => extractQueuedPage(page, regions, signal), signal);
+}
+async function extractQueuedPage(page: PDFPageProxy, regions: LayoutRegion[], signal: AbortSignal): Promise<{ source: ReflowPage; formulas: Map<string, string> }> {
   signal.throwIfAborted();
+  const checkpoint = timeBudget(signal);
   const geometry = pageGeometry(page, 1, 0);
   const host = window.document.createElement('div');
   host.className = 'pdf-page pdf-reflow-probe';
@@ -28,9 +34,9 @@ export async function extractPage(page: PDFPageProxy, regions: LayoutRegion[], s
   host.style.setProperty('--scale-factor', '1'); host.style.setProperty('--total-scale-factor', String(page.userUnit));
   const content = window.document.createElement('div'); content.className = 'textLayer'; host.append(content);
   const canvas = window.document.createElement('canvas');
-  const rasterScale = Math.min(2, Math.sqrt(8_000_000 / (geometry.viewport.width * geometry.viewport.height)));
+  const budget = canvasBudget(geometry.viewport.width, geometry.viewport.height, 2); const rasterScale = budget.ratio;
   const rasterViewport = page.getViewport({ scale: rasterScale, rotation: 0 });
-  canvas.width = Math.ceil(rasterViewport.width); canvas.height = Math.ceil(rasterViewport.height);
+  canvas.width = budget.width; canvas.height = budget.height;
   window.document.body.append(host);
   let layer: InstanceType<typeof pdfjs.TextLayer> | undefined;
   const render = page.render({ canvas, viewport: rasterViewport, annotationMode: pdfjs.AnnotationMode.DISABLE });
@@ -38,20 +44,22 @@ export async function extractPage(page: PDFPageProxy, regions: LayoutRegion[], s
   const cancel = () => { render.cancel(); layer?.cancel(); };
   signal.addEventListener('abort', cancel, { once: true });
   try {
-    await render.promise;
+    await abortable(render.promise, signal);
     signal.throwIfAborted();
-    const text = await page.getTextContent();
+    const text = await abortable(page.getTextContent(), signal);
     layer = new pdfjs.TextLayer({ textContentSource: text, container: content, viewport: geometry.viewport });
-    await layer.render();
+    await abortable(layer.render(), signal);
     signal.throwIfAborted();
     const bounds = host.getBoundingClientRect(); const characters: Character[] = [];
     for (const span of content.querySelectorAll<HTMLSpanElement>('span[role="presentation"]')) {
+      await checkpoint();
       const node = span.firstChild;
       if (!(node instanceof Text)) continue;
       const style = getComputedStyle(span); let offset = 0;
       const size = Number.parseFloat(span.style.getPropertyValue('--font-height')) || Number.parseFloat(style.fontSize) || 10;
       const textAngle = (Number.parseFloat(span.style.getPropertyValue('--rotate')) || 0) * Math.PI / 180;
       for (const char of node.data) {
+        if (characters.length % 64 === 0) await checkpoint();
         const range = window.document.createRange(); range.setStart(node, offset); offset += char.length; range.setEnd(node, offset);
         const rect = range.getBoundingClientRect();
         if (rect.height < .1) continue;
@@ -68,15 +76,17 @@ export async function extractPage(page: PDFPageProxy, regions: LayoutRegion[], s
     const usable = characters.filter(char => !rotated.has(char.index));
     const claimed = new Set<number>(); const paragraphs: Paragraph[] = [];
     for (const { region, box } of normalized.filter(item => ['text', 'abstract', 'header', 'figure_title', 'caption'].includes(item.region.kind))) {
+      await checkpoint();
       const owned = usable.filter(char => !claimed.has(char.index) && centerInside(char.box, box));
       if (!owned.length) continue;
       owned.forEach(char => claimed.add(char.index));
       paragraphs.push(paragraphFromCharacters(region.id, pageIndex, box, owned, formulas, region.kind === 'header'));
     }
     // The MIT reading-order core splits separate columns and table cells before grouping prose.
-    const fragments = fallbackCharacterGroups(usable.filter(char => !claimed.has(char.index) && !preserve.some(item => centerInside(char.box, item.box))));
+    const fragments = await cooperativeCharacterGroups(usable.filter(char => !claimed.has(char.index) && !preserve.some(item => centerInside(char.box, item.box))), checkpoint);
     const groups: Character[][] = [];
     for (const fragment of fragments) {
+      await checkpoint();
       const b = unionBoxes(fragment.map(char => char.box)); const size = fragment[0]?.style.size ?? 10;
       const previous = [...groups].reverse().find(group => {
         const prior = unionBoxes(group.map(char => char.box)); const gap = b.y - prior.y - prior.h;
@@ -85,14 +95,16 @@ export async function extractPage(page: PDFPageProxy, regions: LayoutRegion[], s
       if (previous) previous.push(...fragment); else groups.push([...fragment]);
     }
     for (const [index, group] of groups.entries()) {
+      await checkpoint();
       const box = unionBoxes(group.map(char => char.box));
       const paragraph = paragraphFromCharacters(`${pageIndex}:fallback:${index}`, pageIndex, box, group, formulas, false);
       paragraph.fixedBox = true; paragraph.origin = 'fallback'; paragraphs.push(paragraph);
     }
     // Fixed table regions preserve cell boundaries and numeric/math-only content.
     for (const { region, box } of normalized.filter(item => item.region.kind === 'table')) {
-      const cells = fallbackCharacterGroups(usable.filter(char => !claimed.has(char.index) && centerInside(char.box, box)));
+      const cells = await cooperativeCharacterGroups(usable.filter(char => !claimed.has(char.index) && centerInside(char.box, box)), checkpoint);
       for (const [index, cell] of cells.entries()) {
+        await checkpoint();
         const cellBox = unionBoxes(cell.map(char => char.box));
         const paragraph = paragraphFromCharacters(`${region.id}:cell:${index}`, pageIndex, cellBox, cell, formulas, false);
         if (!/\p{L}{2}/u.test(paragraph.protectedText.replace(/⟪(?:F|\/?S)\d+⟫/gu, ''))) continue;
@@ -102,10 +114,11 @@ export async function extractPage(page: PDFPageProxy, regions: LayoutRegion[], s
     const source: ReflowPage = { index: pageIndex, width: geometry.width, height: geometry.height, paragraphs: paragraphs.filter(paragraph => /\p{L}{2}/u.test(paragraph.protectedText.replace(/⟪(?:F|\/?S)\d+⟫/gu, ''))), obstacles: preserve.map(item => item.box) };
     const formulaImages = new Map<string, string>(); const sx = canvas.width / source.width; const sy = canvas.height / source.height;
     for (const paragraph of source.paragraphs) for (const formula of paragraph.formulas) {
+      await checkpoint();
       const crop = window.document.createElement('canvas'); crop.width = Math.max(1, Math.ceil(formula.box.w * sx)); crop.height = Math.max(1, Math.ceil(formula.box.h * sy));
       crop.getContext('2d')?.drawImage(canvas, formula.box.x * sx, formula.box.y * sy, formula.box.w * sx, formula.box.h * sy, 0, 0, crop.width, crop.height);
       formulaImages.set(`${paragraph.id}:${formula.id}`, crop.toDataURL('image/png'));
     }
     return { source, formulas: formulaImages };
-  } finally { signal.removeEventListener('abort', cancel); layer?.cancel(); host.remove(); canvas.width = 0; canvas.height = 0; }
+  } finally { signal.removeEventListener('abort', cancel); layer?.cancel(); host.remove(); canvas.width = 0; canvas.height = 0; page.cleanup(); }
 }

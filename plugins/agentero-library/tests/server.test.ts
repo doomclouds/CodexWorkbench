@@ -40,6 +40,28 @@ test('unconfigured server exposes native settings and Thread app without requiri
   const resources = await client.listResources();
   const html = await client.readResource({ uri: resources.resources[0].uri });
   expect(html.contents[0]).toMatchObject({ mimeType: 'text/html;profile=mcp-app', text: '<!doctype html><title>Library</title>' });
+  expect(html.contents[0]._meta).toMatchObject({ ui: { csp: { connectDomains: [], resourceDomains: ['blob:', 'data:'] } } });
+});
+
+test('keeps native diagnostics and external viewer actions explicit and App-only', async () => {
+  const { client, service } = await connect();
+  const status = await service.status();
+  const probes: unknown[] = [];
+  service.status = async options => { probes.push(options); return status; };
+  const opened: unknown[] = [];
+  service.openPaperExternally = async input => { opened.push(input); return { requested: true, vaultId: input.vaultId, paperPath: input.paperPath, fileName: 'selected.pdf', handler: 'system-default' }; };
+  for (const name of ['library_diagnose', 'paper_open_external']) {
+    const tool = (await client.listTools()).tools.find(tool => tool.name === name);
+    expect(tool?._meta?.ui).toMatchObject({ visibility: ['app'] });
+    expect(tool?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  }
+  await client.callTool({ name: 'library_status', arguments: {} });
+  expect(probes).toEqual([undefined]);
+  expect(opened).toEqual([]);
+  await client.callTool({ name: 'library_diagnose', arguments: {} });
+  expect(probes).toEqual([undefined, { diagnosePdf: true }]);
+  await client.callTool({ name: 'paper_open_external', arguments: { vaultId: 'bound-vault', paperPath: 'papers/selected' } });
+  expect(opened).toEqual([{ vaultId: 'bound-vault', paperPath: 'papers/selected' }]);
 });
 
 test('native settings accept partial updates and preserve omitted values', async () => {

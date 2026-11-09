@@ -29,10 +29,10 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
   const server = new McpServer({ name: 'agentero-library', version: PLUGIN_VERSION, title: '文献库' }, {
     capabilities: { experimental: { 'openai/settings': { readTool: 'settings_read', updateTool: 'settings_update' } } },
   });
-  function tool(name: string, description: string, shape: z.ZodRawShape, run: (input: any, signal?: AbortSignal) => Promise<unknown>, readOnly = true, appOnly = false) {
+  function tool(name: string, description: string, shape: z.ZodRawShape, run: (input: any, signal?: AbortSignal) => Promise<unknown>, readOnly = true, appOnly = false, destructive = !readOnly) {
     server.registerTool(name, {
       title: description.split('。')[0], description, inputSchema: z.object(shape).strict(), outputSchema: businessResult,
-      annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: ['paper_import', 'paper_download', 'translate_text'].includes(name) },
+      annotations: { readOnlyHint: readOnly, destructiveHint: destructive, openWorldHint: ['paper_import', 'paper_download', 'translate_text'].includes(name) },
       _meta: { ui: { visibility: appOnly ? ['app'] : ['model', 'app'] } },
     }, async (input, extra) => {
       try { return { content: [{ type: 'text', text: `${name} 已完成。` }], structuredContent: { ok: true, data: await run(input, extra.signal) } }; }
@@ -55,8 +55,10 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
   }
 
   tool('library_status', '检查文献插件的 CLI、Vault 与分项能力。缺少依赖时也可调用。', {}, () => service.status());
+  tool('library_diagnose', '用户明确点击检测后验证后台 PDF 原生解析；普通状态刷新不会执行导入或解析。', {}, () => service.status({ diagnosePdf: true }), false, true, false);
   tool('paper_list', '列出文献摘要并分页。首次或显式刷新后从 Agentero CLI 获取完整列表快照。', { ...vault, query: z.string().max(1000).optional(), tag: z.array(key).max(100).optional(), unread: z.boolean().optional(), sortBy: z.enum(['title', 'authors', 'year', 'tags', 'date']).optional(), sortDir: z.enum(['asc', 'desc']).optional(), limit: z.number().int().min(1).max(200).optional(), cursor: z.string().max(8192).optional(), refresh: z.boolean().optional() }, (input) => service.listPapers(input));
   tool('paper_get', '读取单篇论文元数据与可用资源，不返回 PDF 字节。', paper, (input) => service.getPaper(input));
+  tool('paper_open_external', '用户点击后在系统 PDF 查看器中打开当前知识库的原文，不自动启动。', paper, (input) => service.openPaperExternally(input), false, true, false);
   tool('library_search', '搜索本地元数据、笔记或已有正文。关键词匹配，不是语义检索；正文范围需要开启 Agent 正文访问。', { ...vault, query: z.string().min(1).max(1000), scope: z.enum(['all', 'metadata', 'notes', 'body']).optional(), limit: z.number().int().min(1).max(200).optional(), year: z.number().int().optional(), publication: key.optional(), doi: key.optional(), isRead: z.boolean().optional() }, (input) => service.search(input));
   tool('paper_import', '导入用户明确指定的标识符或本地 PDF，返回后台任务；导入与解析结果分开。', { ...vault, text: key.optional(), filePath: key.optional(), filePaths: z.array(key).min(1).max(100).optional(), parent: key.optional(), noRecognize: z.boolean().optional() }, (input) => service.importPaper(input), false);
   tool('paper_parse', '按明确处理任务解析已有 PDF；写入派生正文，不保证产生版面 layout。不得因普通问答自动解析。', { ...paper, force: z.boolean().optional() }, (input) => service.parsePaper(input), false);
@@ -149,7 +151,7 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
   server.registerResource('agentero-library-ui', URI, { mimeType: RESOURCE_MIME_TYPE }, async () => ({ contents: [{
     uri: URI, mimeType: RESOURCE_MIME_TYPE,
     text: options.html ?? await readFile(fileURLToPath(new URL('./app.html', import.meta.url)), 'utf8'),
-    _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: false }, 'openai/ui': { preferredDisplayMode: 'fullscreen', availableDisplayModes: ['inline', 'fullscreen'] } },
+    _meta: { ui: { csp: { connectDomains: [], resourceDomains: ['blob:', 'data:'] }, prefersBorder: false }, 'openai/ui': { preferredDisplayMode: 'fullscreen', availableDisplayModes: ['inline', 'fullscreen'] } },
   }] }));
   const originalClose = server.close.bind(server);
   let closing: Promise<void> | undefined;

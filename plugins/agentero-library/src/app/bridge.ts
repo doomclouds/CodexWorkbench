@@ -2,6 +2,7 @@ import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables 
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { PLUGIN_VERSION } from '../contracts/version';
 import { createPickerClient } from './picker-client';
+import { mergeHostPatch } from './activity';
 
 export interface HostState {
   connected: boolean;
@@ -24,8 +25,11 @@ const pickers = createPickerClient(callRemoteTool);
 let state: HostState = { connected: false, preview: !embedded, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', canSendSelection: false };
 let connection: Promise<void> | undefined;
 const publish = (patch: Partial<HostState>) => {
-  state = { ...state, ...patch };
-  applyDocumentTheme(state.theme);
+  const next = mergeHostPatch(state, patch);
+  if (next === state) return;
+  const changedTheme = next.theme !== state.theme;
+  state = next;
+  if (changedTheme) applyDocumentTheme(state.theme);
   for (const listener of listeners) listener(state);
 };
 

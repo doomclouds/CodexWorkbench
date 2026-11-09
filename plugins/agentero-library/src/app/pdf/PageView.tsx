@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import type { MarkRect, ReaderMark } from '../../contracts/reader';
 import { pdfjs } from '../pdf-runtime';
@@ -6,6 +6,7 @@ import { messageOf } from '../model';
 import { COLOR_HEX, fitPageScale, markText, pageGeometry, pointsRectToViewport, safePdfUrl, screenRectToPoints, type PageGeometry } from './geometry';
 import { TranslationOverlay } from './translation/TranslationOverlay';
 import type { TranslatedPage } from './translation/useDocumentTranslation';
+import { abortable, canvasBudget, pdfRenderScheduler, releasePageResources } from './scheduling';
 
 export interface RegisteredPage { element: HTMLDivElement; canvas: HTMLCanvasElement; geometry: PageGeometry; page: PDFPageProxy }
 export interface VisualSelection { page: number; rects: MarkRect[]; pageSize: { width: number; height: number }; quote: string; x: number; y: number; asset: { mediaType: 'image/png'; data: string } }
@@ -17,73 +18,83 @@ interface Props {
   onDestination(destination: unknown, action?: string): void; onExternal(url: string): void;
   onVisual(selection: VisualSelection): void;
   onRendered(number: number): void;
+  onFailure?(number: number, message: string): void;
 }
 interface Link { id: string; rect: number[]; url?: string; dest?: unknown; action?: string }
 
-export function PageView(props: Props) {
-  const { document, number, active, scale, fitWidth, rotation, tone, estimate, viewportRef, marks, selectedMark, cards, crop, translated, onReady, onMark, onDestination, onExternal, onVisual, onRendered } = props;
+function PageViewComponent(props: Props) {
+  const { document, number, active, scale, fitWidth, rotation, tone, estimate, viewportRef, marks, selectedMark, cards, crop, translated, onReady, onMark, onDestination, onExternal, onVisual, onRendered, onFailure } = props;
   const sheet = useRef<HTMLDivElement>(null); const element = useRef<HTMLDivElement>(null); const canvas = useRef<HTMLCanvasElement>(null); const text = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(number === 1); const [page, setPage] = useState<PDFPageProxy | null>(null);
   const [links, setLinks] = useState<Link[]>([]);
   const [rendering, setRendering] = useState(false); const [error, setError] = useState('');
   const [cropRect, setCropRect] = useState<MarkRect | null>(null); const drag = useRef<{ x: number; y: number } | null>(null);
   const chain = useRef<Promise<void>>(Promise.resolve());
+  const failed = useRef(false);
+  const renderEpoch = useRef(0); const pageRef = useRef(page); pageRef.current = page;
   const baseSize = page ? page.getViewport({ scale: 1, rotation: (page.rotate + rotation) % 360 }) : { width: rotation % 180 ? estimate.height : estimate.width, height: rotation % 180 ? estimate.width : estimate.height };
   const renderedScale = fitWidth === undefined ? scale : fitPageScale(baseSize.width, fitWidth);
   const geometry = useMemo(() => page ? pageGeometry(page, renderedScale, (page.rotate + rotation) % 360) : null, [page, renderedScale, rotation]);
   const placeholder = { width: baseSize.width * renderedScale, height: baseSize.height * renderedScale };
 
   useEffect(() => {
-    if (!sheet.current || !viewportRef.current) return;
+    if (!active || !sheet.current || !viewportRef.current) return;
     const observer = new IntersectionObserver(([entry]) => setNear(entry.isIntersecting), { root: viewportRef.current, rootMargin: '1000px 0px' });
     observer.observe(sheet.current); return () => observer.disconnect();
-  }, [viewportRef, document]);
+  }, [viewportRef, document, active]);
   useEffect(() => {
-    if (!near || page) return;
+    if (!active || !near || page) return;
     let cancelled = false;
     void document.getPage(number).then(next => { if (!cancelled) setPage(next); }).catch(cause => { if (!cancelled) setError(messageOf(cause)); });
     return () => { cancelled = true; };
-  }, [document, number, near, page]);
+  }, [document, number, near, page, active]);
   useEffect(() => {
     if (!geometry || !page || !element.current || !canvas.current) return;
     onReady(number, { element: element.current, canvas: canvas.current, geometry, page });
     return () => { onReady(number, null); };
   }, [geometry, page, number, onReady]);
   useEffect(() => {
-    if (!page || !near) return;
+    if (!active || !page || !near) return;
     let cancelled = false;
     void page.getAnnotations({ intent: 'display' }).then(items => {
       if (!cancelled) setLinks(items.filter(item => Array.isArray(item.rect) && (item.url || item.dest || item.action)).map((item, index) => ({ id: String(item.id ?? index), rect: item.rect, url: safePdfUrl(item.url) ?? undefined, dest: item.dest, action: item.action })));
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [page, near]);
+  }, [page, near, active]);
   useEffect(() => {
-    if (!page || !geometry || !active || !near || !canvas.current || !text.current) {
-      if (!near && canvas.current) { canvas.current.width = 0; canvas.current.height = 0; text.current?.replaceChildren(); }
+    const epoch = ++renderEpoch.current;
+    if (!page || !geometry || !active || !near || !canvas.current || !text.current || failed.current) {
+      const target = canvas.current; const content = text.current;
+      if (!near || !active) void chain.current.finally(() => { if (renderEpoch.current === epoch) releasePageResources(target, content, page); });
       return;
     }
+    const controller = new AbortController();
     let cancelled = false; let task: RenderTask | undefined; let layer: InstanceType<typeof pdfjs.TextLayer> | undefined;
-    const work = chain.current.catch(() => {}).then(async () => {
+    const work = chain.current.catch(() => {}).then(() => pdfRenderScheduler.run(async () => {
       if (cancelled) return;
       setRendering(true); setError('');
       const target = canvas.current!; const content = text.current!;
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      target.width = Math.ceil(geometry.viewport.width * ratio); target.height = Math.ceil(geometry.viewport.height * ratio);
+      const budget = canvasBudget(geometry.viewport.width, geometry.viewport.height, window.devicePixelRatio || 1); const ratio = budget.ratio;
+      target.width = budget.width; target.height = budget.height;
       target.style.width = `${geometry.viewport.width}px`; target.style.height = `${geometry.viewport.height}px`;
       content.replaceChildren();
       task = page.render({ canvas: target, viewport: geometry.viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
       const rendered = task.promise; void rendered.catch(() => {});
       try {
-        const source = await page.getTextContent();
+        const source = await abortable(page.getTextContent(), controller.signal);
         if (cancelled) return;
         layer = new pdfjs.TextLayer({ textContentSource: source, container: content, viewport: geometry.viewport });
-        await Promise.all([rendered, layer.render()]);
+        await abortable(Promise.all([rendered, layer.render()]), controller.signal);
         if (!cancelled) onRendered(number);
-      } finally { if (cancelled) { task.cancel(); layer?.cancel(); } await rendered.catch(() => {}); }
-    }).catch(cause => { if (!cancelled && !/cancel/i.test(String((cause as Error).name))) setError(messageOf(cause)); }).finally(() => { if (!cancelled) setRendering(false); });
+      } finally { if (cancelled) { task.cancel(); layer?.cancel(); } await abortable(rendered.catch(() => {}), controller.signal).catch(() => {}); }
+    }, controller.signal)).catch(cause => { if (!cancelled && !/cancel|abort/i.test(String((cause as Error).name))) { failed.current = true; const message = `第 ${number} 页无法在安全预算内显示：${messageOf(cause)}`; setError(message); onFailure?.(number, message); } }).finally(() => { if (!cancelled) setRendering(false); });
     chain.current = work;
-    return () => { cancelled = true; task?.cancel(); layer?.cancel(); };
+    return () => { cancelled = true; controller.abort(); task?.cancel(); layer?.cancel(); };
   }, [active, near, page, geometry, number, onRendered]);
+  useEffect(() => {
+    const target = canvas.current; const content = text.current;
+    return () => { const previous = pageRef.current; void chain.current.finally(() => releasePageResources(target, content, previous)); };
+  }, []);
 
   const pageMarks = useMemo(() => marks.filter(mark => mark.page === number), [marks, number]);
   const commentCards = useMemo(() => {
@@ -119,7 +130,7 @@ export function PageView(props: Props) {
     onVisual({ page: number, rects: [points], pageSize: { width: geometry.width, height: geometry.height }, quote: `第 ${number} 页区域截图`, x: event.clientX, y: event.clientY, asset: { mediaType: 'image/png', data: target.toDataURL('image/png').split(',')[1] } });
   }
 
-  return <div ref={sheet} className={`pdf-sheet ${cards ? 'with-comment-cards' : ''}`} data-sheet-page={number} style={{ minHeight: geometry?.viewport.height ?? placeholder.height, width: (geometry?.viewport.width ?? placeholder.width) + (cards ? 226 : 0) }}>
+  return <div ref={sheet} className={`pdf-sheet ${cards ? 'with-comment-cards' : ''}`} style={{ minHeight: geometry?.viewport.height ?? placeholder.height, width: (geometry?.viewport.width ?? placeholder.width) + (cards ? 226 : 0) }}>
     <div ref={element} className={`pdf-page parity-pdf-page ${tone === 'dark' ? 'paper-dark' : ''} ${crop ? 'crop-mode' : ''}`} data-pdf-page={number} style={{ width: geometry?.viewport.width ?? placeholder.width, height: geometry?.viewport.height ?? placeholder.height, '--scale-factor': renderedScale, '--total-scale-factor': renderedScale * (page?.userUnit ?? 1) } as React.CSSProperties}>
       <canvas ref={canvas} />
       {geometry && <MarkOverlays marks={pageMarks} geometry={geometry} selected={selectedMark} />}
@@ -142,6 +153,8 @@ export function PageView(props: Props) {
     </div>
   </div>;
 }
+
+export const PageView = memo(PageViewComponent);
 
 function MarkOverlays({ marks, geometry, selected }: { marks: ReaderMark[]; geometry: PageGeometry; selected: string | null }) {
   const point = (x: number, y: number) => geometry.viewport.convertToViewportPoint(geometry.view[0] + x, geometry.view[3] - y);

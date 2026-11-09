@@ -9,6 +9,7 @@ import { browserFonts } from './fonts';
 import { layoutReflowDocument } from './layout';
 import { type ParagraphLayout, type ReflowPage } from './types';
 import { translateProtected } from './translate-protected';
+import { abortable, yieldToHost } from '../scheduling';
 
 export interface TranslatedPage { source: ReflowPage; formulas: Map<string, string>; translations: Map<string, string>; layouts: ParagraphLayout[]; error: string; done: boolean }
 
@@ -40,7 +41,7 @@ export function useDocumentTranslation(options: { document: PDFDocumentProxy | n
       const regions = layoutRegions(rawLayout); const fonts = browserFonts();
       const remaining = new Set(Array.from({ length: document.numPages }, (_, index) => index + 1));
       while (remaining.size) {
-        signal.throwIfAborted();
+        await yieldToHost(signal);
         const number = remaining.has(currentPage.current) ? currentPage.current : remaining.values().next().value!;
         remaining.delete(number);
         const old = cache.current.get(number);
@@ -48,12 +49,13 @@ export function useDocumentTranslation(options: { document: PDFDocumentProxy | n
         setProgress(`第 ${number} / ${document.numPages} 页`);
         let state = old;
         if (!state) {
-          const extracted = await extractPage(await document.getPage(number), regions, signal);
+          const extracted = await extractPage(await abortable(document.getPage(number), signal), regions, signal);
+          for (const paragraph of extracted.source.paragraphs) paragraph.characters = []; // Geometry is no longer needed once protected text/formulas are built.
           state = { ...extracted, translations: new Map(), layouts: [], error: '', done: false }; cache.current.set(number, state);
         }
         state.error = '';
         for (const [index, paragraph] of state.source.paragraphs.entries()) {
-          signal.throwIfAborted();
+          await yieldToHost(signal);
           if (state.translations.has(paragraph.id)) continue;
           setProgress(`第 ${number} / ${document.numPages} 页 · 段落 ${index + 1}/${state.source.paragraphs.length}`);
           try {

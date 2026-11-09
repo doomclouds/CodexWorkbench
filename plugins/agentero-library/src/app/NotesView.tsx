@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, FileText, Folder, LoaderCircle, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, X } from 'lucide-react';
 import type { NoteDocument, NoteInput, NoteList } from '../contracts/types';
 import type { NoteLinks, NoteRenameResult } from '../contracts/reader';
@@ -7,6 +7,7 @@ import { openLink, registerBeforeTeardown } from './bridge';
 import { codeOf, messageOf, noteReference, safeNotePath } from './model';
 import { MarkdownEditor } from './notes/MarkdownEditor';
 import { resolveNoteLink } from './notes/markdown-model';
+import { startSequentialPoll } from './activity';
 
 export type NoteTarget = Omit<NoteInput, 'vaultId'>;
 interface Props {
@@ -46,6 +47,7 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
   const inFlight = useRef<Promise<boolean> | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const loadingTicket = useRef(0);
+  const inspecting = useRef(false);
   const alive = useRef(true);
   const dirtyCallback = useRef(onDirtyChange); dirtyCallback.current = onDirtyChange;
 
@@ -143,7 +145,8 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
     let cancelled = false;
     const inspect = async () => {
       const current = docRef.current;
-      if (!current || blocked.current || inFlight.current || textRef.current !== current.content || window.document.visibilityState === 'hidden') return;
+      if (!current || inspecting.current || blocked.current || inFlight.current || textRef.current !== current.content || window.document.visibilityState === 'hidden') return;
+      inspecting.current = true;
       try {
         const next = await callTool<NoteDocument>('note_read', { vaultId: current.vaultId, ...noteReference(current.path) });
         if (cancelled || docRef.current !== current || inFlight.current || textRef.current !== current.content || blocked.current) return;
@@ -154,21 +157,23 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
         }
       } catch (reason) {
         if (!cancelled && codeOf(reason) === 'VAULT_CHANGED') setError(messageOf(reason));
-      }
+      } finally { inspecting.current = false; }
     };
-    const timer = setInterval(() => { void inspect(); }, 4000);
-    window.addEventListener('focus', inspect);
-    return () => { cancelled = true; clearInterval(timer); window.removeEventListener('focus', inspect); };
+    const polling = startSequentialPoll(inspect, 4000);
+    void polling.trigger().catch(() => {});
+    const focus = () => { void polling.trigger().catch(() => {}); };
+    window.addEventListener('focus', focus);
+    return () => { cancelled = true; polling.stop(); window.removeEventListener('focus', focus); };
   }, [active, preview]);
 
-  function change(value: string) {
+  const change = useCallback((value: string) => {
     textRef.current = value; setText(value); setNotice('');
     const dirty = value !== docRef.current?.content;
     dirtyCallback.current(dirty);
     if (!blocked.current) setState(dirty ? 'dirty' : 'saved');
     clearTimeout(timer.current);
     if (dirty && !blocked.current && !preview) timer.current = setTimeout(() => { void flush(); }, 400);
-  }
+  }, [flush, preview]);
 
   useEffect(() => {
     setLinks(null); setLinksError(''); if (!linksOpen || !active || preview || !document) return;
@@ -177,7 +182,7 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
     return () => { cancelled = true; };
   }, [active, preview, linksOpen, document?.path, document?.revision]);
 
-  async function followLink(url: string) {
+  const followLink = useCallback(async (url: string) => {
     const current = docRef.current; if (!current) return;
     const target = resolveNoteLink(url, current.path);
     if (!target) { setNotice('此链接不能作为安全的知识库路径或外部网址打开。'); return; }
@@ -193,7 +198,7 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
       return;
     }
     if (target.kind === 'anchor') { const heading = window.document.getElementById(target.id); if (heading) heading.scrollIntoView({ block: 'nearest' }); }
-  }
+  }, [open, flush, onOpenPaper, preview]);
 
   async function rename(newPath: string) {
     if (!await flush()) throw new Error('请先处理当前草稿或保存冲突。');
@@ -211,7 +216,9 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
     setNewOpen(false); await open({ path }); setListRevision(value => value + 1);
   }
 
-  async function retry() { blocked.current = false; await flush(); }
+  const retry = useCallback(async () => { blocked.current = false; await flush(); }, [flush]);
+  const save = useCallback(() => { void retry(); }, [retry]);
+  const environment = useMemo(() => ({ vaultId: document?.vaultId ?? '', notePath: document?.path ?? '', preview, onLink: (url: string) => { void followLink(url); } }), [document?.vaultId, document?.path, preview, followLink]);
   async function inspectRemote() {
     const current = docRef.current;
     if (!current) return;
@@ -243,7 +250,7 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
       {error && <div className="callout error" role="alert">{error}{state === 'conflict' ? <div className="button-row"><button onClick={() => void inspectRemote()}>查看磁盘版本</button><button onClick={() => void copyDraft()}><Copy size={13} />复制草稿</button></div> : state === 'error' ? <button onClick={() => void retry()}>重试保存</button> : null}</div>}
       {notice && <p className="inline-notice" role="status">{notice}</p>}
       {loading ? <div className="empty-state"><LoaderCircle className="spin" />正在读取笔记…</div> : document ? <>
-        <MarkdownEditor key={`${document.vaultId}:${document.path}`} value={text} onChange={change} environment={{ vaultId: document.vaultId, notePath: document.path, preview, onLink: url => { void followLink(url); } }} onSave={() => { void retry(); }} saveDisabled={preview || state === 'saving' || state === 'conflict' || text === document.content} />
+        {active && <MarkdownEditor key={`${document.vaultId}:${document.path}`} value={text} onChange={change} environment={environment} onSave={save} saveDisabled={preview || state === 'saving' || state === 'conflict' || text === document.content} />}
         {!preview && <details className="note-links-panel" open={linksOpen} onToggle={event => setLinksOpen(event.currentTarget.open)}><summary>引用与反向链接{links ? ` · ${links.outgoing.length} 个引用 · ${links.backlinks.length} 个反向链接${links.truncated ? '（结果截断）' : ''}` : ''}</summary>{linksError ? <p className="warning-text">{linksError}</p> : !links ? <p className="muted">正在读取链接…</p> : <>{links.outgoing.length > 0 && <div><span className="muted">引用</span>{links.outgoing.map(link => <button key={link.path} title={link.path} onClick={() => { void followLink(`workbench-wiki:${encodeURIComponent(link.path)}`); }}>{link.title}</button>)}</div>}{links.backlinks.length > 0 && <div><span className="muted">反向链接</span>{links.backlinks.map(link => <button key={link.path} title={link.path} onClick={() => { void open(noteReference(link.path)); }}>{link.title}</button>)}</div>}{!links.outgoing.length && !links.backlinks.length && <p className="muted">尚无文档链接。可以使用 [[notes/笔记.md]] 或 [[papers/论文]] 建立引用。</p>}</>}</details>}
         <footer className="note-footer">{preview ? '演示草稿不会写入真实知识库。' : '停顿后自动保存 · 保存前检查文件变化'}</footer>
       </> : <div className="empty-state"><FileText size={30} /><strong>选择或新建一篇笔记</strong><span>也可以从阅读器打开当前论文的笔记。</span></div>}
@@ -269,7 +276,7 @@ function RenameNoteDialog({ path, onClose, onRename }: { path: string; onClose()
     event.preventDefault(); const valid = safeNotePath(next);
     if (!valid || valid === path) { setError('请输入不同的 notes/ 下 Markdown 相对路径。'); return; }
     setBusy(true); setError(''); void onRename(valid).catch(reason => setError(messageOf(reason))).finally(() => setBusy(false));
-  }}><header className="modal-heading"><h2>重命名笔记</h2><button type="button" className="icon-button" aria-label="关闭重命名" disabled={busy} onClick={onClose}><X size={16} /></button></header><div className="modal-content"><label>新路径<input autoFocus value={next} onChange={event => setNext(event.target.value)} disabled={busy} /></label><p className="field-help">保存草稿后检查当前版本，不覆盖已存在的文件。已有引用不会自动改写。</p>{error && <p className="error-text" role="alert">{error}</p>}</div><footer className="modal-footer"><button type="button" onClick={onClose} disabled={busy}>取消</button><button className="primary" disabled={busy}>{busy ? '正在重命名…' : '重命名'}</button></footer></form></dialog>;
+  }}><header className="modal-heading"><h2>重命名笔记</h2><button type="button" className="icon-button" aria-label="关闭重命名" disabled={busy} onClick={onClose}><X size={16} /></button></header><div className="modal-content"><label>新路径<input autoFocus value={next} onChange={event => setNext(event.target.value)} disabled={busy} /></label><p className="field-help">保存草稿后检查当前版本，不覆盖已存在的文件。可解析的库内双链会随重命名更新。</p>{error && <p className="error-text" role="alert">{error}</p>}</div><footer className="modal-footer"><button type="button" onClick={onClose} disabled={busy}>取消</button><button className="primary" disabled={busy}>{busy ? '正在重命名…' : '重命名'}</button></footer></form></dialog>;
 }
 
 function CopyDraftDialog({ content, onClose }: { content: string; onClose(): void }) {
