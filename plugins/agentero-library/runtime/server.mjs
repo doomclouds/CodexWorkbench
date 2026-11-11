@@ -61015,7 +61015,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.3.0";
+var PLUGIN_VERSION = "0.3.1";
 
 // src/infrastructure/native-mcp.ts
 async function freePort() {
