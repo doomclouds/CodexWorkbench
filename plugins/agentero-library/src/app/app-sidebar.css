@@ -1,0 +1,40 @@
+.library-app.sidebar-layout { flex-direction: row; overflow: hidden; }
+.sidebar-layout > .workspace-column { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.workspace-column > .preview-banner, .workspace-column > .callout, .workspace-column > .operation-bar { flex-shrink: 0; }
+.workspace-column > .app-content { min-width: 0; min-height: 0; }
+.app-sidebar { flex: 0 0 196px; width: 196px; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--panel-bg); border-right: 1px solid var(--line); }
+.app-sidebar__heading { min-height: 54px; padding: 10px 10px 8px 14px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.app-sidebar__brand { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; }
+.app-sidebar__brand h1 { font-size: 14px; font-weight: 620; white-space: nowrap; }
+.app-sidebar__brand > svg { flex-shrink: 0; }
+.app-sidebar__fold { min-width: 28px; min-height: 28px; padding: 4px; border-color: transparent; }
+.app-sidebar__main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+.app-sidebar__navigation { flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; padding: 3px 8px 12px; }
+.app-sidebar .app-sidebar__item { display: flex; justify-content: flex-start; align-items: center; gap: 10px; min-height: 36px; width: 100%; min-width: 0; padding: 7px 11px; border-color: transparent; text-align: left; font-size: 13px; }
+.app-sidebar__item > svg { flex-shrink: 0; }
+.app-sidebar__item.selected { background: var(--accent-soft); color: var(--accent); }
+.app-sidebar__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-sidebar__tools { flex: 1; min-width: 0; min-height: 0; padding: 0 8px; }
+.app-sidebar__tools[hidden] { display: none !important; }
+.app-sidebar__footer { flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 7px 8px 8px; border-top: 1px solid var(--line); }
+.app-sidebar .app-sidebar__vault { min-height: 42px; }
+.app-sidebar__vault-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-sidebar__vault-text > span { overflow: hidden; text-overflow: ellipsis; }
+.app-sidebar__vault-text small { color: var(--muted); font-size: 10px; }
+.app-sidebar__connection { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.app-sidebar__connection.is-connected { background: var(--good); }
+.app-sidebar[data-collapsed="true"] { flex-basis: 48px; width: 48px; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__heading { min-height: 84px; padding: 8px 5px; flex-direction: column-reverse; gap: 12px; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__brand { flex: none; justify-content: center; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__label, .app-sidebar[data-collapsed="true"] .app-sidebar__connection { display: none; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__navigation { padding: 3px 5px 12px; gap: 5px; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__item { justify-content: center; min-height: 34px; padding: 7px; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__tools { padding-inline: 5px; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__footer { padding-inline: 5px; }
+.app-sidebar[data-collapsed="true"] .app-sidebar__vault { min-height: 34px; }
+.workspace-column > .app-operation-toast { position: absolute; right: 12px; bottom: 12px; z-index: 7; width: min(340px, calc(100% - 24px)); max-height: min(40vh, 260px); overflow: auto; align-items: flex-start; border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--shadow); padding: 10px 12px; }
+.app-operation-toast > div { flex: 1; min-width: 0; }
+.app-operation-toast details { margin-top: 4px; }
+.app-operation-toast summary { color: var(--accent); cursor: pointer; }
+.app-operation-toast ul { margin: 6px 0 0; padding-left: 17px; overflow-wrap: anywhere; }
+.workspace-column[data-reader-hud="true"] > .app-operation-toast { bottom: 76px; }

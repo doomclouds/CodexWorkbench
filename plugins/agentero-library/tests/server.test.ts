@@ -74,6 +74,27 @@ test('native settings accept partial updates and preserve omitted values', async
   expect(invalid.isError).toBe(true);
 });
 
+test('trash navigation and bounded metadata remain separate from explicit system opens', async () => {
+  const { client, service } = await connect();
+  const reads: unknown[] = [], opens: unknown[] = [];
+  service.listTrash = async input => { reads.push(input); return { vaultId: input.vaultId, items: [], total: 0, nextCursor: null, complete: true, truncated: false, diagnostics: { skippedBatches: 0, skippedItems: 0, scannedBatches: 0, warnings: [] }, restoreSupported: false, restoreReason: 'CLI does not expose restoration.' }; };
+  service.openTrash = async input => { opens.push(input); return { requested: true, target: input.target }; };
+  const tools = (await client.listTools()).tools;
+  expect(tools.find(tool => tool.name === 'trash_list')?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+  expect(tools.find(tool => tool.name === 'trash_open')?._meta?.ui).toMatchObject({ visibility: ['app'] });
+  expect(tools.find(tool => tool.name === 'trash_open')?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: false });
+  const openedView = await client.callTool({ name: 'library_open', arguments: { view: 'trash' } });
+  expect(openedView.structuredContent).toMatchObject({ ok: true, data: { view: 'trash' } });
+  await client.callTool({ name: 'trash_list', arguments: { vaultId: 'selected-vault', limit: 20 } });
+  expect(reads).toEqual([{ vaultId: 'selected-vault', limit: 20 }]);
+  expect(opens).toEqual([]);
+  const invalid = await client.callTool({ name: 'trash_open', arguments: { vaultId: 'selected-vault', batchId: 'batch', storedId: 'item', target: 'restore' } });
+  expect(invalid.isError).toBe(true);
+  expect(opens).toEqual([]);
+  await client.callTool({ name: 'trash_open', arguments: { vaultId: 'selected-vault', batchId: 'batch', storedId: 'item', target: 'pdf' } });
+  expect(opens).toEqual([{ vaultId: 'selected-vault', batchId: 'batch', storedId: 'item', target: 'pdf' }]);
+});
+
 test('schema rejects unbounded PDF chunks and unsupported note modes', async () => {
   const { client } = await connect();
   const invalidChunk = await client.callTool({ name: 'pdf_read_chunk', arguments: { vaultId: 'test', paperPath: 'papers/demo', length: 1024 * 1024 + 1 } });

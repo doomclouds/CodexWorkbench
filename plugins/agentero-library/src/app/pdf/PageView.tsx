@@ -7,6 +7,7 @@ import { COLOR_HEX, fitPageScale, markText, pageGeometry, pointsRectToViewport, 
 import { TranslationOverlay } from './translation/TranslationOverlay';
 import type { TranslatedPage } from './translation/useDocumentTranslation';
 import { abortable, canvasBudget, pdfRenderScheduler, releasePageResources } from './scheduling';
+import { latestPageIntersection, PAGE_PREFETCH_MARGIN, pageIsNearViewport } from './page-visibility';
 
 export interface RegisteredPage { element: HTMLDivElement; canvas: HTMLCanvasElement; geometry: PageGeometry; page: PDFPageProxy }
 export interface VisualSelection { page: number; rects: MarkRect[]; pageSize: { width: number; height: number }; quote: string; x: number; y: number; asset: { mediaType: 'image/png'; data: string } }
@@ -39,9 +40,16 @@ function PageViewComponent(props: Props) {
 
   useEffect(() => {
     if (!active || !sheet.current || !viewportRef.current) return;
-    const observer = new IntersectionObserver(([entry]) => setNear(entry.isIntersecting), { root: viewportRef.current, rootMargin: '1000px 0px' });
-    observer.observe(sheet.current); return () => observer.disconnect();
-  }, [viewportRef, document, active]);
+    const target = sheet.current; const root = viewportRef.current; let stopped = false; let lastTime = -Infinity;
+    const observer = new IntersectionObserver(entries => {
+      if (stopped) return;
+      const latest = latestPageIntersection(entries, target, lastTime); if (!latest) return;
+      lastTime = latest.time;
+      // Zoom/anchor restoration can move a page again before this callback runs.
+      setNear(pageIsNearViewport(target.getBoundingClientRect(), root.getBoundingClientRect()));
+    }, { root, rootMargin: PAGE_PREFETCH_MARGIN + 'px 0px' });
+    observer.observe(target); return () => { stopped = true; observer.disconnect(); };
+  }, [viewportRef, document, active, renderedScale, rotation]);
   useEffect(() => {
     if (!active || !near || page) return;
     let cancelled = false;
@@ -64,8 +72,15 @@ function PageViewComponent(props: Props) {
   useEffect(() => {
     const epoch = ++renderEpoch.current;
     if (!page || !geometry || !active || !near || !canvas.current || !text.current || failed.current) {
+      setRendering(false);
       const target = canvas.current; const content = text.current;
-      if (!near || !active) void chain.current.finally(() => { if (renderEpoch.current === epoch) releasePageResources(target, content, page); });
+      if (!near || !active) void chain.current.finally(() => {
+        if (renderEpoch.current !== epoch) return;
+        const current = sheet.current; const root = viewportRef.current;
+        // A stale "outside" observation must not erase a connected, visible canvas.
+        if (active && current?.isConnected && root && pageIsNearViewport(current.getBoundingClientRect(), root.getBoundingClientRect())) { setNear(true); return; }
+        releasePageResources(target, content, page);
+      });
       return;
     }
     const controller = new AbortController();
