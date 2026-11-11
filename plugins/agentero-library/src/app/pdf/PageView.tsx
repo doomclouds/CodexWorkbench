@@ -83,12 +83,15 @@ function PageViewComponent(props: Props) {
       });
       return;
     }
+    // Own these nodes before queueing. React can detach refs during commit,
+    // before passive effect cleanup has cancelled this job.
+    const target = canvas.current; const content = text.current;
     const controller = new AbortController();
     let cancelled = false; let task: RenderTask | undefined; let layer: InstanceType<typeof pdfjs.TextLayer> | undefined;
+    const ownsSurface = () => !cancelled && !controller.signal.aborted && renderEpoch.current === epoch && canvas.current === target && text.current === content && target.isConnected && content.isConnected;
     const work = chain.current.catch(() => {}).then(() => pdfRenderScheduler.run(async () => {
-      if (cancelled) return;
+      if (!ownsSurface()) return;
       setRendering(true); setError('');
-      const target = canvas.current!; const content = text.current!;
       const budget = canvasBudget(geometry.viewport.width, geometry.viewport.height, window.devicePixelRatio || 1); const ratio = budget.ratio;
       target.width = budget.width; target.height = budget.height;
       target.style.width = `${geometry.viewport.width}px`; target.style.height = `${geometry.viewport.height}px`;
@@ -97,12 +100,12 @@ function PageViewComponent(props: Props) {
       const rendered = task.promise; void rendered.catch(() => {});
       try {
         const source = await abortable(page.getTextContent(), controller.signal);
-        if (cancelled) return;
+        if (!ownsSurface()) return;
         layer = new pdfjs.TextLayer({ textContentSource: source, container: content, viewport: geometry.viewport });
         await abortable(Promise.all([rendered, layer.render()]), controller.signal);
-        if (!cancelled) onRendered(number);
-      } finally { if (cancelled) { task.cancel(); layer?.cancel(); } await abortable(rendered.catch(() => {}), controller.signal).catch(() => {}); }
-    }, controller.signal)).catch(cause => { if (!cancelled && !/cancel|abort/i.test(String((cause as Error).name))) { failed.current = true; const message = `第 ${number} 页无法在安全预算内显示：${messageOf(cause)}`; setError(message); onFailure?.(number, message); } }).finally(() => { if (!cancelled) setRendering(false); });
+        if (ownsSurface()) onRendered(number);
+      } finally { if (!ownsSurface()) { controller.abort(); task.cancel(); layer?.cancel(); } await abortable(rendered.catch(() => {}), controller.signal).catch(() => {}); }
+    }, controller.signal)).catch(cause => { if (ownsSurface() && !/cancel|abort/i.test(String((cause as Error | null)?.name))) { failed.current = true; const message = `第 ${number} 页无法显示：${messageOf(cause)}`; setError(message); onFailure?.(number, message); } }).finally(() => { if (ownsSurface()) setRendering(false); });
     chain.current = work;
     return () => { cancelled = true; controller.abort(); task?.cancel(); layer?.cancel(); };
   }, [active, near, page, geometry, number, onRendered]);

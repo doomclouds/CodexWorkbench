@@ -1,6 +1,6 @@
 # 文献库
 
-**0.3.0** · 在 Codex 当前对话的 MCP App 标签页中管理本地 PDF，阅读、批注、翻译并维护 Markdown 研究笔记。界面跟随宿主明暗主题；文献与笔记能力复用用户安装的 Agentero CLI／MCP，内容保留在 Agentero Vault 中。
+**0.3.1** · 在 Codex 当前对话的 MCP App 标签页中管理本地 PDF，阅读、批注、翻译并维护 Markdown 研究笔记。界面跟随宿主明暗主题；文献与笔记能力复用用户安装的 Agentero CLI／MCP，内容保留在 Agentero Vault 中。
 
 ## 安装
 
