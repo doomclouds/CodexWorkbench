@@ -16232,8 +16232,8 @@ function rewriteKeyNames(ctx) {
       bySchema.set(entry.schema, entry);
   }
   const rewrites = /* @__PURE__ */ new Map();
-  for (const record3 of pendingRecords.get(ctx) ?? []) {
-    const seen = ctx.seen.get(record3);
+  for (const record4 of pendingRecords.get(ctx) ?? []) {
+    const seen = ctx.seen.get(record4);
     const names = (seen?.def ?? seen?.schema)?.propertyNames;
     if (!names || names === true || rewrites.has(names))
       continue;
@@ -60767,9 +60767,9 @@ var StdioServerTransport = class {
 
 // src/core/library-service.ts
 import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir4, open as open2, readFile as readFile3, readdir as readdir2, realpath as realpath3, rename as rename2, rm as rm3, stat as stat2, writeFile as writeFile4 } from "node:fs/promises";
+import { mkdir as mkdir4, open as open3, readFile as readFile3, readdir as readdir2, realpath as realpath4, rename as rename2, rm as rm3, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { basename as basename2, dirname as dirname3, extname, isAbsolute as isAbsolute2, join as join4, posix as posix2, resolve as resolve2 } from "node:path";
+import { basename as basename3, dirname as dirname3, extname as extname2, isAbsolute as isAbsolute2, join as join5, posix as posix2, resolve as resolve2 } from "node:path";
 
 // src/contracts/errors.ts
 var LibraryError = class extends Error {
@@ -61015,7 +61015,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.2.2";
+var PLUGIN_VERSION = "0.3.0";
 
 // src/infrastructure/native-mcp.ts
 async function freePort() {
@@ -61229,9 +61229,199 @@ async function requestExternalPdfOpen(path, options = {}) {
   });
 }
 
+// src/infrastructure/trash-reader.ts
+import { lstat as lstat2, open as open2, opendir, realpath as realpath3, stat } from "node:fs/promises";
+import { basename as basename2, extname, join as join4 } from "node:path";
+var TRASH_REL = ".agentero/.trash";
+var TRASH_RESTORE_REASON = "Agentero 0.15.2 \u7684 CLI/MCP \u672A\u516C\u5F00\u56DE\u6536\u7AD9\u6062\u590D\u63A5\u53E3\uFF1B\u5F53\u524D\u63D2\u4EF6\u53EA\u63D0\u4F9B\u67E5\u770B\u53CA\u663E\u5F0F\u6253\u5F00\uFF0C\u4E0D\u63D0\u4F9B\u6062\u590D\u3001\u6E05\u7A7A\u6216\u6C38\u4E45\u5220\u9664\u3002";
+var MAX_ROOT_ENTRIES = 1e3;
+var MAX_BATCHES = 200;
+var MAX_MANIFEST_BYTES = 512 * 1024;
+var MAX_SCAN_BYTES = 8 * 1024 * 1024;
+var MAX_ITEMS = 200;
+var MAX_ENTRIES = 1e3;
+var MAX_CATALOG_ROWS = 2e3;
+var MAX_ITEM_FILES = 256;
+var record2 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+var batchName = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value);
+var storedName = (value) => typeof value === "string" && value.length > 0 && value.length <= 255 && !/[\\/:\0\x00-\x1f]/.test(value) && !value.includes("..") && value !== "." && !/[. ]$/.test(value);
+async function safePath(vault2, relative2, allowMissing = false) {
+  const root = await realpath3(vault2), rel = relativePath(relative2);
+  let path = root;
+  for (const component of rel.split("/")) {
+    path = join4(path, component);
+    let info;
+    try {
+      info = await lstat2(path);
+    } catch (error62) {
+      if (allowMissing && error62.code === "ENOENT") return void 0;
+      throw error62;
+    }
+    if (info.isSymbolicLink()) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u8DEF\u5F84\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u6216\u76EE\u5F55\u8054\u63A5\u3002");
+    const actual = await realpath3(path);
+    if (!within(root, actual)) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u8DEF\u5F84\u8D85\u51FA\u5F53\u524D\u6587\u732E\u5E93\u3002");
+    path = actual;
+  }
+  return path;
+}
+async function boundedDirectory(path, limit) {
+  const handle = await opendir(path), entries = [];
+  try {
+    for (let index = 0; index < limit; index++) {
+      const entry = await handle.read();
+      if (!entry) return { entries, truncated: false };
+      entries.push(entry);
+    }
+    return { entries, truncated: await handle.read() !== null };
+  } finally {
+    await handle.close();
+  }
+}
+async function readBatch(vault2, batchId, budget) {
+  if (!batchName(batchId)) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u6279\u6B21\u6807\u8BC6\u65E0\u6548\u3002");
+  const path = await safePath(vault2, `${TRASH_REL}/${batchId}/manifest.json`);
+  const handle = await open2(path, "r");
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_MANIFEST_BYTES) throw new LibraryError("TRASH_MANIFEST_LIMIT", "\u6279\u6B21\u6E05\u5355\u8D85\u8FC7\u8BFB\u53D6\u4E0A\u9650\u3002");
+    if (info.size > budget.remaining) throw new LibraryError("TRASH_SCAN_LIMIT", "\u672C\u6B21\u56DE\u6536\u7AD9\u8BFB\u53D6\u8FBE\u5230\u4E0A\u9650\u3002");
+    const buffer = Buffer.alloc(Math.min(MAX_MANIFEST_BYTES + 1, budget.remaining + 1));
+    let length = 0;
+    for (; ; ) {
+      const capacity = Math.min(buffer.length - length, budget.remaining);
+      if (capacity <= 0) throw new LibraryError("TRASH_SCAN_LIMIT", "\u672C\u6B21\u56DE\u6536\u7AD9\u8BFB\u53D6\u8FBE\u5230\u4E0A\u9650\u3002");
+      const { bytesRead } = await handle.read(buffer, length, capacity, length);
+      if (!bytesRead) break;
+      budget.remaining -= bytesRead;
+      length += bytesRead;
+      if (length > MAX_MANIFEST_BYTES) throw new LibraryError("TRASH_MANIFEST_LIMIT", "\u6279\u6B21\u6E05\u5355\u8D85\u8FC7\u8BFB\u53D6\u4E0A\u9650\u3002");
+    }
+    await safePath(vault2, `${TRASH_REL}/${batchId}/manifest.json`);
+    let data;
+    try {
+      data = record2(JSON.parse(buffer.subarray(0, length).toString("utf8")));
+    } catch {
+      throw new LibraryError("TRASH_MANIFEST_INVALID", "\u6279\u6B21\u6E05\u5355\u683C\u5F0F\u65E0\u6548\u3002");
+    }
+    if (data.batchId !== batchId || typeof data.createdAt !== "string" || data.createdAt.length > 128 || !Number.isFinite(Date.parse(data.createdAt)) || !Array.isArray(data.items) || data.items.length > MAX_ITEMS) throw new LibraryError("TRASH_MANIFEST_INVALID", "\u6279\u6B21\u6E05\u5355\u5B57\u6BB5\u6216\u6761\u76EE\u6570\u91CF\u65E0\u6548\u3002");
+    return { batchId, deletedAt: data.createdAt, items: data.items };
+  } finally {
+    await handle.close();
+  }
+}
+function readItem(raw) {
+  const data = record2(raw);
+  if (!storedName(data.stored) || typeof data.rel !== "string" || data.rel.length > 4096 || /[\x00-\x1f:]/.test(data.rel)) throw new LibraryError("TRASH_ITEM_INVALID", "\u56DE\u6536\u7AD9\u6761\u76EE\u8DEF\u5F84\u65E0\u6548\u3002");
+  const originalPath = relativePath(data.rel);
+  if (originalPath === "papers" || originalPath === ".agentero" || originalPath.startsWith(".agentero/")) throw new LibraryError("TRASH_ITEM_INVALID", "\u56DE\u6536\u7AD9\u6761\u76EE\u6307\u5411\u53D7\u4FDD\u62A4\u8DEF\u5F84\u3002");
+  if (data.phase !== void 0 && !["prepared", "trashed", "restoring"].includes(String(data.phase))) throw new LibraryError("TRASH_ITEM_INVALID", "\u56DE\u6536\u7AD9\u6761\u76EE\u9636\u6BB5\u672A\u77E5\u3002");
+  const rows = data.catalogRows ?? [];
+  if (!Array.isArray(rows) || rows.length > MAX_CATALOG_ROWS) throw new LibraryError("TRASH_ITEM_INVALID", "\u56DE\u6536\u7AD9\u6761\u76EE\u5FEB\u7167\u6570\u91CF\u65E0\u6548\u3002");
+  const paper2 = rows.length === 1 ? record2(rows[0]) : {};
+  const title = typeof paper2.title === "string" && paper2.title.trim() ? paper2.title.trim().slice(0, 500) : basename2(originalPath).slice(0, 500);
+  return { originalPath, storedId: data.stored, title, isPaper: rows.length === 1 && originalPath.startsWith("papers/") };
+}
+async function itemLocation(vault2, batchId, item) {
+  const relative2 = `${TRASH_REL}/${batchId}/${item.storedId}`, path = await safePath(vault2, relative2);
+  const info = await stat(path);
+  if (!info.isFile() && !info.isDirectory()) throw new LibraryError("TRASH_ITEM_INVALID", "\u56DE\u6536\u7AD9\u6761\u76EE\u4E0D\u662F\u666E\u901A\u6587\u4EF6\u6216\u6587\u4EF6\u5939\u3002");
+  return { relative: relative2, path, isDirectory: info.isDirectory() };
+}
+async function findPdf(vault2, batchId, item) {
+  const location = await itemLocation(vault2, batchId, item);
+  if (!location.isDirectory) return extname(location.path).toLowerCase() === ".pdf" ? location.path : void 0;
+  const { entries } = await boundedDirectory(location.path, MAX_ITEM_FILES);
+  const preferred = `${basename2(item.originalPath)}.pdf`;
+  const names = entries.filter((entry) => entry.isFile() && !entry.isSymbolicLink() && extname(entry.name).toLowerCase() === ".pdf").map((entry) => entry.name).sort((a, b) => Number(b === preferred) - Number(a === preferred) || a.localeCompare(b));
+  for (const name2 of names) {
+    const path = await safePath(vault2, `${location.relative}/${name2}`);
+    if ((await stat(path)).isFile()) return path;
+  }
+  return void 0;
+}
+async function scanTrash(vault2) {
+  const diagnostics = { skippedBatches: 0, skippedItems: 0, scannedBatches: 0, warnings: [] };
+  const warn = (message) => {
+    if (diagnostics.warnings.length < 20) diagnostics.warnings.push(message);
+  };
+  const trash = await safePath(vault2, TRASH_REL, true);
+  if (!trash) return { items: [], complete: true, diagnostics };
+  if (!(await stat(trash)).isDirectory()) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u4F4D\u7F6E\u4E0D\u662F\u6587\u4EF6\u5939\u3002");
+  const root = await boundedDirectory(trash, MAX_ROOT_ENTRIES), names = [];
+  for (const entry of root.entries) {
+    if (entry.isDirectory() && !entry.isSymbolicLink() && batchName(entry.name)) names.push(entry.name);
+    else {
+      diagnostics.skippedBatches += 1;
+      warn("\u5DF2\u5FFD\u7565\u4E0D\u7B26\u5408\u6279\u6B21\u76EE\u5F55\u683C\u5F0F\u7684\u56DE\u6536\u7AD9\u5185\u5BB9\u3002");
+    }
+  }
+  const limited = root.truncated || names.length > MAX_BATCHES;
+  let complete = !limited && diagnostics.skippedBatches === 0;
+  if (limited) warn("\u56DE\u6536\u7AD9\u6279\u6B21\u8F83\u591A\uFF0C\u672C\u6B21\u5217\u8868\u8FBE\u5230\u626B\u63CF\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u672A\u5217\u51FA\u7684\u5185\u5BB9\u3002");
+  const budget = { remaining: MAX_SCAN_BYTES }, items = [];
+  outer: for (const batchId of names.sort().reverse().slice(0, MAX_BATCHES)) {
+    diagnostics.scannedBatches += 1;
+    let batch;
+    try {
+      batch = await readBatch(vault2, batchId, budget);
+    } catch (error62) {
+      diagnostics.skippedBatches += 1;
+      complete = false;
+      warn(`\u5DF2\u8DF3\u8FC7\u65E0\u6CD5\u5B89\u5168\u8BFB\u53D6\u7684\u6279\u6B21 ${batchId}\u3002`);
+      if (error62 instanceof LibraryError && error62.code === "TRASH_SCAN_LIMIT") {
+        complete = false;
+        warn("\u672C\u6B21\u56DE\u6536\u7AD9\u6E05\u5355\u8BFB\u53D6\u8FBE\u5230\u5B57\u8282\u4E0A\u9650\uFF0C\u53EF\u80FD\u8FD8\u6709\u672A\u5217\u51FA\u7684\u5185\u5BB9\u3002");
+        break;
+      }
+      continue;
+    }
+    const seen = /* @__PURE__ */ new Set();
+    for (const raw of batch.items) {
+      try {
+        const item = readItem(raw);
+        if (seen.has(item.storedId)) throw new LibraryError("TRASH_ITEM_INVALID", "\u6279\u6B21\u5305\u542B\u91CD\u590D\u5B58\u50A8\u6807\u8BC6\u3002");
+        seen.add(item.storedId);
+        const location = await itemLocation(vault2, batchId, item), pdfAvailable = !!await findPdf(vault2, batchId, item);
+        const kind = item.isPaper ? "paper" : location.isDirectory ? "directory" : extname(item.originalPath).toLowerCase() === ".pdf" ? "pdf" : extname(item.originalPath).toLowerCase() === ".md" ? "note" : "file";
+        items.push({ id: `${batchId}::${item.storedId}`, batchId, storedId: item.storedId, title: item.title, kind, originalPath: item.originalPath, deletedAt: batch.deletedAt, itemsCount: batch.items.length, pdfAvailable, folderAvailable: true });
+        if (items.length >= MAX_ENTRIES) {
+          complete = false;
+          warn("\u56DE\u6536\u7AD9\u6761\u76EE\u8F83\u591A\uFF0C\u672C\u6B21\u5217\u8868\u8FBE\u5230\u6761\u76EE\u4E0A\u9650\u3002");
+          break outer;
+        }
+      } catch {
+        complete = false;
+        diagnostics.skippedItems += 1;
+        warn(`\u6279\u6B21 ${batchId} \u4E2D\u6709\u65E0\u6CD5\u5B89\u5168\u8BFB\u53D6\u7684\u6761\u76EE\uFF0C\u5DF2\u8DF3\u8FC7\u3002`);
+      }
+    }
+  }
+  items.sort((a, b) => Date.parse(b.deletedAt) - Date.parse(a.deletedAt) || b.id.localeCompare(a.id));
+  return { items, complete, diagnostics };
+}
+async function trashOpenTarget(vault2, input2) {
+  if (!batchName(input2.batchId) || !storedName(input2.storedId) || !["pdf", "folder"].includes(input2.target)) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u6253\u5F00\u53C2\u6570\u65E0\u6548\u3002");
+  const batch = await readBatch(vault2, input2.batchId, { remaining: MAX_MANIFEST_BYTES + 1 });
+  const matches = batch.items.filter((raw) => record2(raw).stored === input2.storedId);
+  if (matches.length !== 1) throw new LibraryError("TRASH_ITEM_NOT_FOUND", "\u56DE\u6536\u7AD9\u6761\u76EE\u4E0D\u5B58\u5728\u6216\u5B58\u50A8\u6807\u8BC6\u91CD\u590D\uFF0C\u8BF7\u5237\u65B0\u3002");
+  const item = readItem(matches[0]);
+  await itemLocation(vault2, input2.batchId, item);
+  if (input2.target === "folder") return await safePath(vault2, `${TRASH_REL}/${input2.batchId}`);
+  const pdf = await findPdf(vault2, input2.batchId, item);
+  if (!pdf) throw new LibraryError("PDF_MISSING", "\u8BE5\u56DE\u6536\u7AD9\u6761\u76EE\u6CA1\u6709\u5DF2\u786E\u8BA4\u7684 PDF\uFF0C\u53EF\u6253\u5F00\u6279\u6B21\u6587\u4EF6\u5939\u67E5\u770B\u3002");
+  const handle = await open2(pdf, "r");
+  try {
+    const buffer = Buffer.alloc(1024), { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (!buffer.subarray(0, bytesRead).includes(Buffer.from("%PDF-"))) throw new LibraryError("INVALID_PDF", "\u56DE\u6536\u7AD9\u6587\u4EF6\u6CA1\u6709\u6709\u6548\u7684 PDF \u6587\u4EF6\u5934\u3002");
+  } finally {
+    await handle.close();
+  }
+  return pdf;
+}
+
 // src/infrastructure/marks.ts
 import { createHash as createHash3, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir3, readFile as readFile2, readdir, rm as rm2, stat, writeFile as writeFile3 } from "node:fs/promises";
+import { mkdir as mkdir3, readFile as readFile2, readdir, rm as rm2, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
 import { dirname as dirname2 } from "node:path";
 var markPalette = { yellow: "#fcd34d", green: "#86efac", blue: "#7dd3fc", pink: "#f9a8d4", purple: "#d8b4fe" };
 var rec = (v2) => v2 && typeof v2 === "object" && !Array.isArray(v2) ? v2 : {};
@@ -61264,7 +61454,7 @@ var MarksStore = class {
     let annotations = [], bytes = 0;
     for (const name2 of names) {
       const path = await this.path(name2);
-      const info = await stat(path);
+      const info = await stat2(path);
       bytes += info.size;
       if (bytes > 16 * 1024 * 1024) throw new LibraryError("MARKS_TOO_LARGE", "\u6807\u6CE8\u6570\u636E\u8D85\u8FC7 16 MiB\uFF0C\u8BF7\u62C6\u5206\u8BBA\u6587\u3002");
       const raw = await readFile2(path, "utf8");
@@ -61405,7 +61595,7 @@ var MarksStore = class {
     const s = await this.load(), item = s.items.find((m2) => m2.id === id && m2.kind === "visual");
     if (!item || item.asset !== `${this.paperPath}/marks/assets/${id}.png`) throw new LibraryError("MARK_NOT_FOUND", "\u622A\u56FE\u6807\u6CE8\u4E0D\u5B58\u5728\u3002");
     const p2 = await this.path(`assets/${id}.png`);
-    if ((await stat(p2)).size > 45e5) throw new LibraryError("ASSET_TOO_LARGE", "\u622A\u56FE\u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650\u3002");
+    if ((await stat2(p2)).size > 45e5) throw new LibraryError("ASSET_TOO_LARGE", "\u622A\u56FE\u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650\u3002");
     return { mediaType: "image/png", base64: (await readFile2(p2)).toString("base64") };
   }
 };
@@ -61517,8 +61707,8 @@ async function annotatedPdf(bytes, marks) {
 var MAX_NOTE_BYTES = 2 * 1024 * 1024;
 var MAX_PDF_CHUNK = 1024 * 1024;
 var activeStatuses = /* @__PURE__ */ new Set(["queued", "running", "cancel_requested"]);
-var record2 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-var strings = (value) => Array.isArray(value) ? value.map((item) => typeof item === "string" ? item : String(record2(item).name ?? "")).filter(Boolean) : [];
+var record3 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+var strings = (value) => Array.isArray(value) ? value.map((item) => typeof item === "string" ? item : String(record3(item).name ?? "")).filter(Boolean) : [];
 var settingsKey = (settings) => JSON.stringify([settings.schemaVersion, settings.cliPath, settings.vaultPath, settings.pdfiumPath, settings.allowAgentPdfText, settings.vaultId]);
 var LibraryService = class {
   dataRoot;
@@ -61533,6 +61723,7 @@ var LibraryService = class {
   native;
   nativeAbort;
   snapshot;
+  trashSnapshot;
   cliProbe;
   pdfDiagnosis;
   externalPdfOpener;
@@ -61541,7 +61732,7 @@ var LibraryService = class {
   busyWrites = 0;
   closed = false;
   constructor(options = {}) {
-    this.dataRoot = resolve2(expandHome(options.dataRoot ?? join4(homedir2(), ".codexworkbench", "agentero-library")));
+    this.dataRoot = resolve2(expandHome(options.dataRoot ?? join5(homedir2(), ".codexworkbench", "agentero-library")));
     this.runner = options.cliRunner ?? new ProcessCliRunner();
     this.factory = options.nativeFactory ?? createNativeBackend;
     this.snapshotTtl = options.snapshotTtlMs ?? 3e4;
@@ -61555,6 +61746,7 @@ var LibraryService = class {
       if (changed) {
         this.settingsGeneration += 1;
         this.snapshot = void 0;
+        this.trashSnapshot = void 0;
         this.cliProbe = void 0;
         await this.closeNative();
       }
@@ -61564,9 +61756,9 @@ var LibraryService = class {
     return reading;
   }
   async loadSettings() {
-    const value = await readJson(join4(this.dataRoot, "config.json"));
+    const value = await readJson(join5(this.dataRoot, "config.json"));
     if (value === void 0) return { schemaVersion: 1, cliPath: "agentero", vaultPath: "", pdfiumPath: "", allowAgentPdfText: false, vaultId: null };
-    const data = record2(value);
+    const data = record3(value);
     if (data.schemaVersion !== 1 || typeof data.cliPath !== "string" || typeof data.vaultPath !== "string" || typeof data.pdfiumPath !== "string" || typeof data.allowAgentPdfText !== "boolean" || !(data.vaultId === null || typeof data.vaultId === "string")) {
       throw new LibraryError("CONFIG_INVALID", "\u63D2\u4EF6\u914D\u7F6E\u683C\u5F0F\u4E0D\u53D7\u652F\u6301\uFF0C\u8BF7\u68C0\u67E5 config.json\u3002");
     }
@@ -61590,7 +61782,7 @@ var LibraryService = class {
       if (next.vaultPath) next.vaultPath = await this.validateVault(next.vaultPath);
       if (next.pdfiumPath) {
         next.pdfiumPath = resolve2(next.pdfiumPath);
-        if (await exists(next.pdfiumPath) && (await stat2(next.pdfiumPath)).isFile()) next.pdfiumPath = dirname3(next.pdfiumPath);
+        if (await exists(next.pdfiumPath) && (await stat3(next.pdfiumPath)).isFile()) next.pdfiumPath = dirname3(next.pdfiumPath);
       }
       const changed = next.vaultPath !== current.vaultPath;
       if ((changed || next.cliPath !== current.cliPath || next.pdfiumPath !== current.pdfiumPath || next.allowAgentPdfText !== current.allowAgentPdfText) && (this.busyWrites || this.activeOperationCount())) {
@@ -61601,7 +61793,7 @@ var LibraryService = class {
         await this.readSettings();
         throw new LibraryError("SETTINGS_CHANGED", "\u914D\u7F6E\u5DF2\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u4FDD\u5B58\u3002", true);
       }
-      await atomicJson(join4(this.dataRoot, "config.json"), next);
+      await atomicJson(join5(this.dataRoot, "config.json"), next);
       const saved = await this.readSettings();
       if (settingsKey(saved) !== settingsKey(next)) throw new LibraryError("SETTINGS_CHANGED", "\u4FDD\u5B58\u671F\u95F4\u914D\u7F6E\u53C8\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8F7D\u5165\u5F53\u524D\u503C\u3002", true);
       return saved;
@@ -61617,10 +61809,10 @@ var LibraryService = class {
   }
   async validateVault(input2) {
     const path = resolve2(expandHome(input2));
-    if (!await exists(path) || !(await stat2(path)).isDirectory() || !await exists(join4(path, ".agentero", "catalog.sqlite")) || !await exists(join4(path, "papers"))) {
+    if (!await exists(path) || !(await stat3(path)).isDirectory() || !await exists(join5(path, ".agentero", "catalog.sqlite")) || !await exists(join5(path, "papers"))) {
       throw new LibraryError("VAULT_INVALID", "\u8BE5\u76EE\u5F55\u4E0D\u662F\u5DF2\u6709 Agentero Vault\uFF0C\u8BF7\u9009\u62E9\u5DF2\u6709\u77E5\u8BC6\u5E93\u6216\u660E\u786E\u521B\u5EFA\u65B0\u5E93\u3002");
     }
-    return realpath3(path);
+    return realpath4(path);
   }
   async context(input2) {
     this.ensureOpen();
@@ -61638,12 +61830,12 @@ var LibraryService = class {
     if (result.timedOut) throw new LibraryError("UPSTREAM_TIMEOUT", "Agentero \u64CD\u4F5C\u8D85\u65F6\uFF0C\u8BF7\u5148\u6838\u5B9E\u77E5\u8BC6\u5E93\u5185\u5BB9\u518D\u91CD\u8BD5\u3002");
     let envelope;
     try {
-      envelope = record2(JSON.parse(result.stdout));
+      envelope = record3(JSON.parse(result.stdout));
     } catch {
       throw new LibraryError("UPSTREAM_INVALID", "CLI \u6CA1\u6709\u8FD4\u56DE\u6709\u6548 JSON\u3002", false, { diagnostic: result.stderr.slice(-1500) });
     }
     if (result.code !== 0 || envelope.ok !== true) {
-      const error62 = record2(envelope.error);
+      const error62 = record3(envelope.error);
       const message = String(error62.message ?? result.stderr ?? "CLI \u64CD\u4F5C\u5931\u8D25\u3002");
       if (/pdfium|libraryunavailable|pdf engine/i.test(message)) throw new LibraryError("PDF_ENGINE_UNAVAILABLE", "PDF \u539F\u751F\u5F15\u64CE\u4E0D\u53EF\u7528\uFF0C\u8BF7\u914D\u7F6E PDFium\u3002");
       throw new LibraryError("UPSTREAM_FAILED", message.slice(0, 2e3), false, { upstreamCode: error62.code });
@@ -61661,7 +61853,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       if (versionResult.code !== 0 || !version2) throw new LibraryError("CLI_NOT_FOUND", "Agentero CLI \u65E0\u6CD5\u8FD0\u884C\uFF0C\u8BF7\u68C0\u67E5\u53EF\u6267\u884C\u6587\u4EF6\u8DEF\u5F84\u3002");
       const supported = version2 === "0.15.2";
       if (supported) {
-        const description = record2(await this.cli(settings, ["--json", "describe", "paper.list"]));
+        const description = record3(await this.cli(settings, ["--json", "describe", "paper.list"]));
         if (description.id !== "paper.list") throw new LibraryError("CLI_UNSUPPORTED", "CLI \u7F3A\u5C11\u6587\u732E\u5217\u8868\u7684\u673A\u5668\u5951\u7EA6\u3002");
       }
       result = { available: true, supported, path: settings.cliPath, version: version2, ...!supported ? { error: "\u9996\u7248\u5DF2\u9A8C\u8BC1 Agentero 0.15.2\uFF0C\u8BF7\u4F7F\u7528\u8BE5\u7248\u672C\u3002" } : {} };
@@ -61683,15 +61875,15 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const pending = (async () => {
       let result;
       try {
-        const directory = join4(this.dataRoot, "cache", "diagnostics", `${key2.slice(0, 16)}-${this.instanceId}`);
-        const vault2 = join4(directory, "vault");
+        const directory = join5(this.dataRoot, "cache", "diagnostics", `${key2.slice(0, 16)}-${this.instanceId}`);
+        const vault2 = join5(directory, "vault");
         await mkdir4(directory, { recursive: true });
-        if (!await exists(join4(vault2, ".agentero", "catalog.sqlite"))) await this.cli(settings, ["--json", "vault", "create", vault2], controller.signal);
-        const pdf = join4(directory, "codex-workbench-probe.pdf");
+        if (!await exists(join5(vault2, ".agentero", "catalog.sqlite"))) await this.cli(settings, ["--json", "vault", "create", vault2], controller.signal);
+        const pdf = join5(directory, "codex-workbench-probe.pdf");
         await writeFile4(pdf, diagnosticPdf());
-        const imported = record2(await this.cli(settings, ["--json", "--vault", vault2, "import", "pdf", pdf, "--no-recognize"], controller.signal));
+        const imported = record3(await this.cli(settings, ["--json", "--vault", vault2, "import", "pdf", pdf, "--no-recognize"], controller.signal));
         const papers = Array.isArray(imported.papers) ? imported.papers : [];
-        const path = String(record2(papers[0]).path ?? "papers/codex-workbench-probe");
+        const path = String(record3(papers[0]).path ?? "papers/codex-workbench-probe");
         await this.cli(settings, ["--json", "--vault", vault2, "paper", "parse", path, "--force"], controller.signal, 3e4);
         result = { configured: !!settings.pdfiumPath, available: true, state: "available", path: settings.pdfiumPath, diagnostic: "\u5DF2\u4F7F\u7528\u9694\u79BB PDF \u9A8C\u8BC1\u539F\u751F\u89E3\u6790\u3002", checkedAt: (/* @__PURE__ */ new Date()).toISOString() };
       } catch (error62) {
@@ -61730,9 +61922,9 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       ready,
       instanceId: this.instanceId,
       dataRoot: this.dataRoot,
-      defaultVaultPath: join4(this.dataRoot, "vault"),
+      defaultVaultPath: join5(this.dataRoot, "vault"),
       cli,
-      vault: { configured: !!settings.vaultId, valid, vaultId: settings.vaultId, path: settings.vaultPath, name: settings.vaultPath ? basename2(settings.vaultPath) : "", ...vaultError ? { error: vaultError } : {} },
+      vault: { configured: !!settings.vaultId, valid, vaultId: settings.vaultId, path: settings.vaultPath, name: settings.vaultPath ? basename3(settings.vaultPath) : "", ...vaultError ? { error: vaultError } : {} },
       capabilities: { metadata: ready, notes: ready, pdfRead: ready, pdfText: ready && settings.allowAgentPdfText && pdfium.available === true, pdfParse: ready && pdfium.available === true, layout: ready },
       capabilityScope: "service-support",
       pdfium,
@@ -61747,7 +61939,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const settings = await this.readSettings();
     await this.requireCli(settings);
     const path = resolve2(expandHome(input2.path));
-    if (await exists(path) && (!(await stat2(path)).isDirectory() || (await readdir2(path)).length > 0)) throw new LibraryError("VAULT_EXISTS", "\u76EE\u6807\u76EE\u5F55\u4E0D\u662F\u7A7A\u76EE\u5F55\uFF0C\u8BF7\u8FDE\u63A5\u5DF2\u6709\u5E93\u6216\u9009\u62E9\u65B0\u7684\u7A7A\u76EE\u5F55\u3002");
+    if (await exists(path) && (!(await stat3(path)).isDirectory() || (await readdir2(path)).length > 0)) throw new LibraryError("VAULT_EXISTS", "\u76EE\u6807\u76EE\u5F55\u4E0D\u662F\u7A7A\u76EE\u5F55\uFF0C\u8BF7\u8FDE\u63A5\u5DF2\u6709\u5E93\u6216\u9009\u62E9\u65B0\u7684\u7A7A\u76EE\u5F55\u3002");
     await this.cli(settings, ["--json", "vault", "create", path]);
     return this.updateSettings({ vaultPath: path });
   }
@@ -61787,7 +61979,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (settingsKey(settings) !== settingsKey(context.settings)) throw new LibraryError("SETTINGS_CHANGED", "\u8FDE\u63A5\u6216\u6B63\u6587\u8BBE\u7F6E\u5DF2\u6539\u53D8\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u64CD\u4F5C\u3002", true);
   }
   normalizePaper(value) {
-    const item = record2(value);
+    const item = record3(value);
     return {
       ...item,
       id: String(item.id ?? ""),
@@ -61795,7 +61987,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       title: String(item.title ?? ""),
       authors: strings(item.authors),
       tags: strings(item.tags),
-      tagDetails: Array.isArray(item.tags) ? item.tags.map((tag) => typeof tag === "string" ? { name: tag } : { name: String(record2(tag).name ?? ""), ...typeof record2(tag).color === "string" ? { color: String(record2(tag).color) } : {} }).filter((tag) => tag.name) : [],
+      tagDetails: Array.isArray(item.tags) ? item.tags.map((tag) => typeof tag === "string" ? { name: tag } : { name: String(record3(tag).name ?? ""), ...typeof record3(tag).color === "string" ? { color: String(record3(tag).color) } : {} }).filter((tag) => tag.name) : [],
       isRead: Boolean(item.isRead ?? item.is_read),
       ...item.arxiv_id ? { arxivId: String(item.arxiv_id) } : {}
     };
@@ -61804,7 +61996,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const path = relativePath(input2);
     if (!path.startsWith("papers/")) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u5F15\u7528\u5FC5\u987B\u662F papers/ \u4E0B\u7684\u8BBA\u6587\u76EE\u5F55\u3002");
     const actual = await containedPath(context.path, path);
-    if (!(await stat2(actual)).isDirectory()) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u5F15\u7528\u4E0D\u662F\u76EE\u5F55\u3002");
+    if (!(await stat3(actual)).isDirectory()) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u5F15\u7528\u4E0D\u662F\u76EE\u5F55\u3002");
     return path;
   }
   async listPapers(input2) {
@@ -61823,7 +62015,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (input2.cursor) {
       let cursor;
       try {
-        cursor = record2(JSON.parse(Buffer.from(input2.cursor, "base64url").toString("utf8")));
+        cursor = record3(JSON.parse(Buffer.from(input2.cursor, "base64url").toString("utf8")));
       } catch {
         throw new LibraryError("CURSOR_EXPIRED", "\u5217\u8868\u6E38\u6807\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u7B2C\u4E00\u9875\u3002", true);
       }
@@ -61849,7 +62041,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       this.cli(context.settings, ["--json", "--vault", context.path, "paper", "get", path])
     ]);
     this.assertCurrentContext(context, await this.readSettings());
-    const taggedPaper = record2(record2(detail).paper);
+    const taggedPaper = record3(record3(detail).paper);
     if (taggedPaper.path !== path || !Array.isArray(taggedPaper.tags)) throw new LibraryError("UPSTREAM_INVALID", "CLI \u5355\u7BC7\u6587\u732E\u6807\u7B7E\u683C\u5F0F\u65E0\u6548\u3002");
     const tags = this.normalizePaper(taggedPaper);
     const hasPdf = (await readdir2(await containedPath(context.path, path))).some((name2) => name2.toLowerCase().endsWith(".pdf"));
@@ -61886,7 +62078,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       const output2 = await this.call(context, "vault_search", { query, limit: 200, ...input2.year !== void 0 ? { year: input2.year } : {}, ...input2.publication ? { publication: input2.publication } : {}, ...input2.doi ? { doi: input2.doi } : {}, ...input2.isRead !== void 0 ? { isRead: input2.isRead } : {} });
       upstreamTruncated = output2.truncated === true;
       for (const raw of Array.isArray(output2.hits) ? output2.hits : []) {
-        const hit = record2(raw);
+        const hit = record3(raw);
         const path = typeof hit.path === "string" ? relativePath(hit.path) : "";
         const body = /(?:^|\/)PAPER\.md$/i.test(path);
         const note2 = path.startsWith("notes/") || /^papers\/.+\/NOTES\.md$/.test(path);
@@ -61952,7 +62144,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const localFiles = [];
     for (const requested of requestedFiles) {
       const file2 = resolve2(expandHome(requested));
-      if (!file2.toLowerCase().endsWith(".pdf") || !(await stat2(file2)).isFile()) throw new LibraryError("INVALID_IMPORT", "\u8BF7\u9009\u62E9\u5DF2\u6709\u7684\u672C\u5730 PDF \u6587\u4EF6\u3002");
+      if (!file2.toLowerCase().endsWith(".pdf") || !(await stat3(file2)).isFile()) throw new LibraryError("INVALID_IMPORT", "\u8BF7\u9009\u62E9\u5DF2\u6709\u7684\u672C\u5730 PDF \u6587\u4EF6\u3002");
       if (!localFiles.some((existing) => process.platform === "win32" ? existing.toLowerCase() === file2.toLowerCase() : existing === file2)) localFiles.push(file2);
     }
     return this.startOperation(context, "import", async (signal) => {
@@ -62014,7 +62206,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       if (!await exists(await containedPath(context.path, `${path}/source/layout.json`, true))) throw new LibraryError("PARSE_REQUIRED", "\u8BE5\u8BBA\u6587\u5C1A\u65E0\u7248\u9762\u6570\u636E\uFF1B\u666E\u901A\u6B63\u6587\u89E3\u6790\u4E0D\u4F1A\u751F\u6210\u5B8C\u6574 layout\u3002");
       const data2 = await this.call(context, "page_read", { ref: path, page });
       const regions = Array.isArray(data2.textRegions) ? data2.textRegions : [];
-      const full = regions.map((item) => String(record2(item).text ?? "")).join("\n");
+      const full = regions.map((item) => String(record3(item).text ?? "")).join("\n");
       return { vaultId: context.id, paperPath: path, source: "layout", content: full.slice(0, budget), pages: [{ page, regionCount: Number(data2.regionCount ?? regions.length) }], pageCount: Number(data2.pageCount ?? 0), truncated: full.length > budget };
     }
     if (source === "pdf" || source === "auto") {
@@ -62022,7 +62214,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       if (!pages.length || pages.length > 5 || pages.some((page) => !Number.isInteger(page) || page < 1)) throw new LibraryError("INVALID_PAGE", "\u6BCF\u6B21\u8BFB\u53D6 1\u20135 \u4E2A\u7269\u7406\u9875\uFF0C\u9875\u7801\u4ECE 1 \u5F00\u59CB\u3002");
       try {
         const data2 = await this.call(context, "paper_text_get", { ref: path, pages, maxChars: Math.max(1, Math.floor(budget / pages.length)) });
-        const output2 = Array.isArray(data2.pages) ? data2.pages.map(record2) : [];
+        const output2 = Array.isArray(data2.pages) ? data2.pages.map(record3) : [];
         const full = output2.map((item) => String(item.text ?? "")).join("\n");
         const truncated = full.length > budget || output2.some((item) => Number(item.charCount ?? 0) > String(item.text ?? "").length);
         return { vaultId: context.id, paperPath: path, source: "pdf", content: full.slice(0, budget), pages: output2.map((item) => ({ page: item.page, charCount: item.charCount })), pageCount: Number(data2.pageCount ?? 0), truncated };
@@ -62059,11 +62251,11 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const paperPath = await this.paperPath(context, input2.paperPath);
     const directory = await containedPath(context.path, paperPath);
     const names = await readdir2(directory);
-    const preferred = `${basename2(paperPath)}.pdf`;
+    const preferred = `${basename3(paperPath)}.pdf`;
     const filename = names.includes(preferred) ? preferred : names.filter((name2) => name2.toLowerCase().endsWith(".pdf")).sort()[0];
     if (!filename) throw new LibraryError("PDF_MISSING", "\u8BBA\u6587\u76EE\u5F55\u4E2D\u6CA1\u6709\u672C\u5730 PDF\u3002");
     const path = await containedPath(context.path, `${paperPath}/${filename}`);
-    const handle = await open2(path, "r");
+    const handle = await open3(path, "r");
     try {
       const before = await handle.stat();
       const revision = `pdf:${createHash4("sha256").update(JSON.stringify([before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs])).digest("hex")}`;
@@ -62090,7 +62282,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     await containedPath(context.path, path);
     const data = await this.call(context, "file_list", { path, limit: Math.min(500, Math.max(1, input2.limit ?? 200)) });
     const entries = Array.isArray(data.entries) ? data.entries : [];
-    return { vaultId: context.id, path, items: entries.map(record2).filter((item) => item.kind === "directory" || String(item.path).toLowerCase().endsWith(".md")).map((item) => ({ path: String(item.path), name: String(item.name), kind: item.kind === "directory" ? "directory" : "file" })), truncated: data.truncated === true };
+    return { vaultId: context.id, path, items: entries.map(record3).filter((item) => item.kind === "directory" || String(item.path).toLowerCase().endsWith(".md")).map((item) => ({ path: String(item.path), name: String(item.name), kind: item.kind === "directory" ? "directory" : "file" })), truncated: data.truncated === true };
   }
   async noteLocation(context, input2) {
     let path;
@@ -62110,7 +62302,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
   async readLocatedNote(context, location) {
     const actual = await containedPath(context.path, location.path, true);
     if (!await exists(actual)) return { vaultId: context.id, ...location, content: "", revision: null, exists: false };
-    if ((await stat2(actual)).size > MAX_NOTE_BYTES) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u8D85\u8FC7 2 MiB\uFF0C\u8BF7\u7F29\u5C0F\u6587\u4EF6\u3002");
+    if ((await stat3(actual)).size > MAX_NOTE_BYTES) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u8D85\u8FC7 2 MiB\uFF0C\u8BF7\u7F29\u5C0F\u6587\u4EF6\u3002");
     const data = location.paperPath ? await this.call(context, "paper_notes_get", { ref: location.paperPath }) : await this.call(context, "file_read", { path: location.path });
     if (typeof data.content !== "string") throw new LibraryError("UPSTREAM_INVALID", "\u4E0A\u6E38\u7B14\u8BB0\u5185\u5BB9\u683C\u5F0F\u65E0\u6548\u3002");
     return { vaultId: context.id, ...location, content: data.content, revision: contentRevision(data.content), exists: true };
@@ -62128,19 +62320,19 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const key2 = `${context.id}:${location.paperPath ?? location.path}`;
     const recoveryId = `${this.instanceId}-${createHash4("sha256").update(key2).digest("hex").slice(0, 24)}`;
     const attemptId = randomUUID3();
-    const draftPath = join4(this.dataRoot, "state", "drafts", `${recoveryId}.draft.json`);
+    const draftPath = join5(this.dataRoot, "state", "drafts", `${recoveryId}.draft.json`);
     await atomicJson(draftPath, { instanceId: this.instanceId, attemptId, vaultId: context.id, ...location, revision: input2.revision, mode: input2.mode ?? "replace", content: input2.content, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
     this.busyWrites += 1;
     const previous = this.queues.get(key2) ?? Promise.resolve();
     const task = previous.catch(() => void 0).then(async () => {
       const current = await this.readLocatedNote(context, location);
       if (current.revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u7B14\u8BB0\u5DF2\u88AB\u5176\u4ED6\u64CD\u4F5C\u4FEE\u6539\uFF1B\u8349\u7A3F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u6BD4\u8F83\u3002", false, { currentRevision: current.revision, recoveryId });
-      await atomicJson(join4(this.dataRoot, "state", "drafts", `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
+      await atomicJson(join5(this.dataRoot, "state", "drafts", `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
       try {
         if (location.paperPath) await this.call(context, "paper_notes_write", { ref: location.paperPath, content: input2.content, mode: input2.mode ?? "replace" });
         else await this.call(context, "file_write", { path: location.path, content: input2.content, mode: input2.mode ?? "replace" });
         const saved = await this.readLocatedNote(context, location);
-        const remaining = record2(await readJson(draftPath).catch(() => void 0));
+        const remaining = record3(await readJson(draftPath).catch(() => void 0));
         if (remaining.attemptId === attemptId) await rm3(draftPath, { force: true }).catch(() => void 0);
         return { ...saved, saved: true, recoveryId };
       } catch (error62) {
@@ -62225,7 +62417,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       const args = ["--json", "--vault", context.path, "translate", "--to", to, "--from", from];
       if (input2.provider) args.push("--provider", input2.provider);
       args.push("--", chunk);
-      const data = record2(await this.cli(context.settings, args, signal, 12e4));
+      const data = record3(await this.cli(context.settings, args, signal, 12e4));
       checkCancellation();
       if (typeof data.text !== "string" || !data.text.trim()) throw new LibraryError("UPSTREAM_INVALID", "\u7FFB\u8BD1\u5F15\u64CE\u672A\u8FD4\u56DE\u8BD1\u6587\u3002");
       translated.push(data.text);
@@ -62234,9 +62426,9 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
   }
   async pdfLocation(context, paperPath) {
     const directory = await containedPath(context.path, paperPath), names = await readdir2(directory);
-    const filename = names.includes(`${basename2(paperPath)}.pdf`) ? `${basename2(paperPath)}.pdf` : names.filter((n) => n.toLowerCase().endsWith(".pdf")).sort()[0];
+    const filename = names.includes(`${basename3(paperPath)}.pdf`) ? `${basename3(paperPath)}.pdf` : names.filter((n) => n.toLowerCase().endsWith(".pdf")).sort()[0];
     if (!filename) throw new LibraryError("PDF_MISSING", "\u8BBA\u6587\u6CA1\u6709\u672C\u5730 PDF\u3002");
-    const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat2(path);
+    const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat3(path);
     if (!info.isFile()) throw new LibraryError("INVALID_PDF", "\u8BBA\u6587 PDF \u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
     if (info.size > 256 * 1024 * 1024) throw new LibraryError("PDF_TOO_LARGE", "PDF \u8D85\u8FC7 256 MiB\u3002");
     return { path, filename, revision: `pdf:${createHash4("sha256").update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest("hex")}` };
@@ -62244,8 +62436,8 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
   async openPaperExternally(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
     const location = await this.pdfLocation(context, paperPath);
-    if (extname(location.path).toLowerCase() !== ".pdf") throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u672C\u5730 PDF \u6587\u4EF6\u3002");
-    const handle = await open2(location.path, "r");
+    if (extname2(location.path).toLowerCase() !== ".pdf") throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u672C\u5730 PDF \u6587\u4EF6\u3002");
+    const handle = await open3(location.path, "r");
     try {
       if (!(await handle.stat()).isFile()) throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u666E\u901A PDF \u6587\u4EF6\u3002");
       const header = Buffer.alloc(1024), { bytesRead } = await handle.read(header, 0, header.length, 0);
@@ -62296,7 +62488,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       bytes = Buffer.from(input2.includeMarks === false ? original : await annotatedPdf(original, marks.items));
     } else {
       content = input2.format === "json" ? `${JSON.stringify(marks, null, 2)}
-` : `# ${basename2(paperPath)} \u2014 \u9605\u8BFB\u6807\u6CE8
+` : `# ${basename3(paperPath)} \u2014 \u9605\u8BFB\u6807\u6CE8
 
 ${marks.items.map((mark) => `## \u7B2C ${mark.page} \u9875 \xB7 ${mark.kind}
 
@@ -62306,13 +62498,13 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
 `).join("\n")}`;
       bytes = Buffer.from(content);
     }
-    const result = { fileName: `${basename2(paperPath)}-annotated.${extension}`, mediaType: input2.format === "pdf" ? "application/pdf" : input2.format === "json" ? "application/json" : "text/markdown", totalBytes: bytes.length, ...content === void 0 ? {} : { content } };
+    const result = { fileName: `${basename3(paperPath)}-annotated.${extension}`, mediaType: input2.format === "pdf" ? "application/pdf" : input2.format === "json" ? "application/json" : "text/markdown", totalBytes: bytes.length, ...content === void 0 ? {} : { content } };
     this.assertCurrentContext(context, await this.readSettings());
     if (input2.filePath) {
       const path = resolve2(expandHome(input2.filePath));
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u5BFC\u51FA\u76EE\u6807\u5FC5\u987B\u662F\u660E\u786E\u9009\u62E9\u7684\u7EDD\u5BF9\u8DEF\u5F84\u3002");
       const original = input2.format === "pdf" ? (await this.pdfLocation(context, paperPath)).path : "";
-      const targetCanonical = await exists(path) ? await realpath3(path) : path;
+      const targetCanonical = await exists(path) ? await realpath4(path) : path;
       const comparable = (v2) => process.platform === "win32" ? v2.toLocaleLowerCase() : v2;
       if (comparable(targetCanonical) === comparable(original)) throw new LibraryError("INVALID_PATH", "\u5BFC\u51FA\u6587\u4EF6\u4E0D\u80FD\u8986\u76D6\u77E5\u8BC6\u5E93\u539F PDF\u3002");
       await this.atomicBytes(path, bytes);
@@ -62327,27 +62519,27 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
     const path = await containedPath(context.path, `${paperPath}/source/layout.json`, true);
     if (!await exists(path)) return { regions: [] };
-    if ((await stat2(path)).size > 32 * 1024 * 1024) throw new LibraryError("LAYOUT_TOO_LARGE", "\u7248\u9762\u6587\u4EF6\u8D85\u8FC7 32 MiB\u3002");
+    if ((await stat3(path)).size > 32 * 1024 * 1024) throw new LibraryError("LAYOUT_TOO_LARGE", "\u7248\u9762\u6587\u4EF6\u8D85\u8FC7 32 MiB\u3002");
     return JSON.parse(await readFile3(path, "utf8"));
   }
   async readPaperMarkdown(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath), relative2 = `${paperPath}/PAPER.md`;
     const path = await containedPath(context.path, relative2, true);
     if (!await exists(path)) return { path: relative2, content: "", revision: null, exists: false };
-    if ((await stat2(path)).size > MAX_NOTE_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
+    if ((await stat3(path)).size > MAX_NOTE_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
     const content = await readFile3(path, "utf8");
     return { path: relative2, content, revision: contentRevision(content), exists: true };
   }
   readerStatePath(context, paperPath) {
-    return join4(this.dataRoot, "state", "reader", `${createHash4("sha256").update(`${context.id}:${paperPath}`).digest("hex")}.json`);
+    return join5(this.dataRoot, "state", "reader", `${createHash4("sha256").update(`${context.id}:${paperPath}`).digest("hex")}.json`);
   }
   async readReaderState(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
-    return { state: record2(await readJson(this.readerStatePath(context, paperPath))).state ?? {} };
+    return { state: record3(await readJson(this.readerStatePath(context, paperPath))).state ?? {} };
   }
   async writeReaderState(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
-    const state = record2(input2.state), allowed = ["pageNumber", "zoom", "fit", "rotation", "tone", "outlineOpen", "marksOpen", "notesOpen"];
+    const state = record3(input2.state), allowed = ["pageNumber", "zoom", "fit", "rotation", "tone", "outlineOpen", "marksOpen", "notesOpen"];
     if (Object.keys(state).some((k2) => !allowed.includes(k2)) || JSON.stringify(state).length > 2e3) throw new LibraryError("INVALID_STATE", "\u9605\u8BFB\u72B6\u6001\u65E0\u6548\u3002");
     if (state.pageNumber !== void 0 && (!Number.isInteger(state.pageNumber) || Number(state.pageNumber) < 1)) throw new LibraryError("INVALID_STATE", "\u9875\u7801\u65E0\u6548\u3002");
     if (state.rotation !== void 0 && ![0, 90, 180, 270].includes(Number(state.rotation))) throw new LibraryError("INVALID_STATE", "\u65CB\u8F6C\u89D2\u5EA6\u65E0\u6548\u3002");
@@ -62363,7 +62555,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
       await this.requireCli(context.settings);
       const data = await this.cli(context.settings, ["--json", "--vault", context.path, "paper", "tag", input2.op, path, "--", input2.tag]);
       this.snapshot = void 0;
-      return record2(data);
+      return record3(data);
     });
   }
   async deletePaper(input2) {
@@ -62372,8 +62564,44 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
       await this.requireCli(context.settings);
       const data = await this.cli(context.settings, ["--json", "--vault", context.path, "paper", "delete", path]);
       this.snapshot = void 0;
-      return record2(data);
+      this.trashSnapshot = void 0;
+      return record3(data);
     });
+  }
+  async listTrash(input2) {
+    const context = await this.context(input2);
+    const limit = input2.limit ?? 50;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new LibraryError("INVALID_RANGE", "\u56DE\u6536\u7AD9\u6BCF\u9875\u5E94\u4E3A 1 \u81F3 100 \u9879\u3002");
+    let offset = 0;
+    if (input2.cursor) {
+      let cursor;
+      try {
+        if (typeof input2.cursor !== "string" || input2.cursor.length > 2048) throw new Error();
+        cursor = record3(JSON.parse(Buffer.from(input2.cursor, "base64url").toString("utf8")));
+      } catch {
+        throw new LibraryError("CURSOR_EXPIRED", "\u56DE\u6536\u7AD9\u5206\u9875\u5DF2\u5931\u6548\uFF0C\u8BF7\u5237\u65B0\u5217\u8868\u3002", true);
+      }
+      if (input2.refresh || !this.trashSnapshot || cursor.snapshot !== this.trashSnapshot.id || cursor.vault !== context.id || Date.now() - this.trashSnapshot.createdAt > this.snapshotTtl || !Number.isSafeInteger(cursor.offset) || Number(cursor.offset) < 0 || Number(cursor.offset) > this.trashSnapshot.items.length) throw new LibraryError("CURSOR_EXPIRED", "\u56DE\u6536\u7AD9\u5FEB\u7167\u6216\u6587\u732E\u5E93\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u5217\u8868\u3002", true);
+      offset = Number(cursor.offset);
+    } else if (input2.refresh || !this.trashSnapshot || this.trashSnapshot.vaultId !== context.id || Date.now() - this.trashSnapshot.createdAt > this.snapshotTtl) {
+      const data = await scanTrash(context.path);
+      this.assertCurrentContext(context, await this.readSettings());
+      this.trashSnapshot = { ...data, id: randomUUID3(), vaultId: context.id, createdAt: Date.now() };
+    }
+    const snapshot = this.trashSnapshot;
+    const end = offset + limit;
+    return { vaultId: context.id, items: snapshot.items.slice(offset, end), total: snapshot.items.length, nextCursor: end < snapshot.items.length ? Buffer.from(JSON.stringify({ snapshot: snapshot.id, vault: context.id, offset: end })).toString("base64url") : null, complete: snapshot.complete, truncated: !snapshot.complete, diagnostics: snapshot.diagnostics, restoreSupported: false, restoreReason: TRASH_RESTORE_REASON };
+  }
+  async openTrash(input2) {
+    const context = await this.context(input2), target = await trashOpenTarget(context.path, input2);
+    this.ensureOpen();
+    this.assertCurrentContext(context, await this.readSettings());
+    try {
+      await this.externalPdfOpener(target);
+    } catch {
+      throw new LibraryError("TRASH_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF\u53D1\u9001\u56DE\u6536\u7AD9\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u6216\u6587\u4EF6\u7BA1\u7406\u5668\u3002");
+    }
+    return { requested: true, target: input2.target };
   }
   async downloadPaper(input2) {
     const context = await this.context(input2), path = await this.paperPath(context, input2.paperPath);
@@ -62387,14 +62615,14 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     let path, temporary = false;
     if (input2.text !== void 0) {
       if (typeof input2.text !== "string" || Buffer.byteLength(input2.text) > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u6587\u732E\u683C\u5F0F\u6587\u672C\u8D85\u8FC7 8 MiB\u3002");
-      path = join4(this.dataRoot, "state", "imports", `${randomUUID3()}.bib`);
+      path = join5(this.dataRoot, "state", "imports", `${randomUUID3()}.bib`);
       await mkdir4(dirname3(path), { recursive: true });
       await writeFile4(path, input2.text, { flag: "wx", mode: 384 });
       temporary = true;
     } else {
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u5BFC\u5165\u6587\u4EF6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-      path = await realpath3(expandHome(input2.filePath));
-      if (!(await stat2(path)).isFile() || (await stat2(path)).size > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u5BFC\u5165\u6587\u4EF6\u8D85\u8FC7 8 MiB \u6216\u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
+      path = await realpath4(expandHome(input2.filePath));
+      if (!(await stat3(path)).isFile() || (await stat3(path)).size > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u5BFC\u5165\u6587\u4EF6\u8D85\u8FC7 8 MiB \u6216\u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
     }
     return this.startOperation(context, "bibliography", async (signal) => {
       try {
@@ -62407,7 +62635,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
   async exportBibliography(input2) {
     const context = await this.context(input2);
     await this.requireCli(context.settings);
-    const data = record2(await this.cli(context.settings, ["--json", "--vault", context.path, "export", "bib"], void 0, 12e4));
+    const data = record3(await this.cli(context.settings, ["--json", "--vault", context.path, "export", "bib"], void 0, 12e4));
     if (typeof data.content !== "string") throw new LibraryError("UPSTREAM_INVALID", "CLI \u6CA1\u6709\u8FD4\u56DE BibTeX \u5185\u5BB9\u3002");
     if (input2.filePath) {
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u5BFC\u51FA\u6587\u4EF6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\u3002");
@@ -62431,7 +62659,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
   }
   assetMime(path) {
     const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif" };
-    const value = mime[extname(path).toLowerCase()];
+    const value = mime[extname2(path).toLowerCase()];
     if (!value) throw new LibraryError("INVALID_ASSET", "\u4EC5\u652F\u6301 PNG/JPEG/GIF/WebP/AVIF \u56FE\u7247\u9644\u4EF6\u3002");
     return value;
   }
@@ -62442,19 +62670,19 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     if (typeof input2.assetPath !== "string" || /^(?:[a-z]+:|\/|\\)/i.test(input2.assetPath)) throw new LibraryError("INVALID_PATH", "\u8BF7\u4F7F\u7528\u7B14\u8BB0\u5185\u7684\u76F8\u5BF9\u56FE\u7247\u8DEF\u5F84\u3002");
     const relative2 = relativePath(posix2.normalize(posix2.join(posix2.dirname(note2.path), input2.assetPath.replaceAll("\\", "/"))));
     if (!relative2.startsWith("notes/") && !(note2.paperPath && relative2.startsWith(`${note2.paperPath}/`))) throw new LibraryError("INVALID_PATH", "\u9644\u4EF6\u8D85\u51FA\u5F53\u524D\u7B14\u8BB0\u8303\u56F4\u3002");
-    const path = await containedPath(context.path, relative2), mimeType = this.assetMime(path), info = await stat2(path);
+    const path = await containedPath(context.path, relative2), mimeType = this.assetMime(path), info = await stat3(path);
     if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
     return { path: relative2, markdownPath: input2.assetPath, mimeType, totalBytes: info.size, base64: (await readFile3(path)).toString("base64") };
   }
   async importNoteAsset(input2) {
     const context = await this.context(input2), note2 = await this.noteLocation(context, { vaultId: input2.vaultId, path: input2.notePath });
     if (!!input2.filePath === !!input2.base64) throw new LibraryError("INVALID_ASSET", "\u8BF7\u63D0\u4F9B\u672C\u5730\u56FE\u7247\u6587\u4EF6\u6216 base64 \u6570\u636E\u4E4B\u4E00\u3002");
-    const fileName = basename2(input2.fileName).replace(/[^\p{L}\p{N}._-]/gu, "_"), mimeType = this.assetMime(fileName);
+    const fileName = basename3(input2.fileName).replace(/[^\p{L}\p{N}._-]/gu, "_"), mimeType = this.assetMime(fileName);
     if (mimeType !== input2.mimeType) throw new LibraryError("INVALID_ASSET", "\u9644\u4EF6\u6269\u5C55\u540D\u4E0E\u7C7B\u578B\u4E0D\u4E00\u81F4\u3002");
     let bytes;
     if (input2.filePath) {
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u56FE\u7247\u6587\u4EF6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-      const source = await realpath3(expandHome(input2.filePath)), info = await stat2(source);
+      const source = await realpath4(expandHome(input2.filePath)), info = await stat3(source);
       if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
       bytes = await readFile3(source);
     } else {
@@ -62509,16 +62737,16 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
         }
       }))];
     };
-    const document2 = await this.readLocatedNote(context, note2), outgoing = links(document2.content, note2.path).map((path) => ({ path, title: basename2(path, ".md") })), backlinks = [];
+    const document2 = await this.readLocatedNote(context, note2), outgoing = links(document2.content, note2.path).map((path) => ({ path, title: basename3(path, ".md") })), backlinks = [];
     let scannedBytes = 0;
     for (const path of files) {
-      const target = await containedPath(context.path, path), info = await stat2(target);
+      const target = await containedPath(context.path, path), info = await stat3(target);
       if (info.size > MAX_NOTE_BYTES || scannedBytes + info.size > 32 * 1024 * 1024) {
         truncated = true;
         continue;
       }
       scannedBytes += info.size;
-      if (path !== note2.path && links(await readFile3(target, "utf8"), path).includes(note2.path)) backlinks.push({ path, title: basename2(path, ".md") });
+      if (path !== note2.path && links(await readFile3(target, "utf8"), path).includes(note2.path)) backlinks.push({ path, title: basename3(path, ".md") });
     }
     return { outgoing, backlinks, truncated };
   }
@@ -62543,7 +62771,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
   }
   async recoveryDraftCount() {
     try {
-      return (await readdir2(join4(this.dataRoot, "state", "drafts"))).filter((name2) => /^[a-f0-9-]+-[a-f0-9]{24}\.draft\.json$/.test(name2)).length;
+      return (await readdir2(join5(this.dataRoot, "state", "drafts"))).filter((name2) => /^[a-f0-9-]+-[a-f0-9]{24}\.draft\.json$/.test(name2)).length;
     } catch (error62) {
       if (error62.code === "ENOENT") return 0;
       throw error62;
@@ -64176,9 +64404,9 @@ var p = "text/html;profile=mcp-app";
 
 // src/infrastructure/native-picker.ts
 import { spawn as spawnProcess } from "node:child_process";
-import { stat as stat3 } from "node:fs/promises";
+import { stat as stat4 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename3, dirname as dirname4, extname as extname2, isAbsolute as isAbsolute3, join as join5, resolve as resolve3 } from "node:path";
+import { basename as basename4, dirname as dirname4, extname as extname3, isAbsolute as isAbsolute3, join as join6, resolve as resolve3 } from "node:path";
 var REQUEST_ENV = "CODEXWORKBENCH_PICKER_REQUEST";
 var DEFAULT_TIMEOUT_MS = 12e4;
 var MAX_TIMEOUT_MS = 3e5;
@@ -64203,19 +64431,19 @@ function validateRequestId(value) {
 }
 function pruneRequests() {
   const now = Date.now();
-  for (const [id, record3] of requests) if (!record3.job && record3.expiresAt !== void 0 && record3.expiresAt <= now) requests.delete(id);
+  for (const [id, record4] of requests) if (!record4.job && record4.expiresAt !== void 0 && record4.expiresAt <= now) requests.delete(id);
 }
 async function cancelNativePicker(value) {
   const requestId = validateRequestId(value);
   pruneRequests();
-  let record3 = requests.get(requestId);
-  if (!record3) {
+  let record4 = requests.get(requestId);
+  if (!record4) {
     if (requests.size >= MAX_REQUEST_RECORDS) throw new NativePickerError("PICKER_BUSY", "\u9009\u62E9\u5668\u53D6\u6D88\u8BB0\u5F55\u5DF2\u6EE1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
-    record3 = {};
-    requests.set(requestId, record3);
+    record4 = {};
+    requests.set(requestId, record4);
   }
-  record3.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
-  const job = record3.job;
+  record4.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
+  const job = record4.job;
   job?.stop(new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002"));
   await job?.completed;
   return { requestId, closed: true };
@@ -64345,18 +64573,18 @@ function validatePickerInput(value) {
 }
 async function prepare(input2) {
   const home = homedir3();
-  const documents = join5(home, "Documents");
+  const documents = join6(home, "Documents");
   let fallback = home;
   try {
-    if ((await stat3(documents)).isDirectory()) fallback = documents;
+    if ((await stat4(documents)).isDirectory()) fallback = documents;
   } catch {
   }
   const value = input2.defaultPath?.replace(/^~(?=$|[/\\])/, home) ?? "";
   let directory = isAbsolute3(value) ? value : fallback;
-  let fileName = input2.mode === "save-file" && value ? basename3(value) : "";
+  let fileName = input2.mode === "save-file" && value ? basename4(value) : "";
   for (let attempts = 0; attempts < 64; attempts++) {
     try {
-      if ((await stat3(directory)).isDirectory()) {
+      if ((await stat4(directory)).isDirectory()) {
         if (directory === value) fileName = "";
         break;
       }
@@ -64372,7 +64600,7 @@ async function prepare(input2) {
   return { ...input2, initialDirectory: directory, fileName };
 }
 function nativePickerLaunch(platform) {
-  if (platform === "win32") return { command: join5(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64")] };
+  if (platform === "win32") return { command: join6(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64")] };
   if (platform === "darwin") return { command: "/usr/bin/osascript", args: ["-l", "JavaScript", "-e", MACOS_SCRIPT] };
   throw new NativePickerError("PICKER_UNAVAILABLE", "\u539F\u751F\u9009\u62E9\u5668\u76EE\u524D\u652F\u6301 Windows \u548C macOS\u3002");
 }
@@ -64388,17 +64616,17 @@ async function validatePickerResult(value, input2) {
     if (typeof path !== "string" || !isAbsolute3(path) || path.includes("\0") || path.length > 32768) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u9009\u62E9\u5668\u8FD4\u56DE\u7684\u8DEF\u5F84\u4E0D\u6B63\u786E\u3002");
     const normalized = resolve3(path);
     if (input2.mode === "save-file") {
-      if (!(await stat3(dirname4(normalized))).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u76EE\u5F55\u4E0D\u5B58\u5728\u3002");
+      if (!(await stat4(dirname4(normalized))).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u76EE\u5F55\u4E0D\u5B58\u5728\u3002");
       try {
-        if ((await stat3(normalized)).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u4F4D\u7F6E\u5FC5\u987B\u662F\u6587\u4EF6\u3002");
+        if ((await stat4(normalized)).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u4F4D\u7F6E\u5FC5\u987B\u662F\u6587\u4EF6\u3002");
       } catch (error62) {
         if (error62.code !== "ENOENT") throw error62;
       }
     } else {
-      const metadata = await stat3(normalized);
+      const metadata = await stat4(normalized);
       if (input2.mode === "open-directory" ? !metadata.isDirectory() : !metadata.isFile()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u8BF7\u9009\u62E9\u6B63\u786E\u7684\u6587\u4EF6\u6216\u76EE\u5F55\u3002");
     }
-    if (input2.mode !== "open-directory" && extensions.size && !extensions.has(extname2(normalized).slice(1).toLowerCase())) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u9009\u62E9\u7684\u6587\u4EF6\u7C7B\u578B\u4E0D\u7B26\u5408\u8981\u6C42\u3002");
+    if (input2.mode !== "open-directory" && extensions.size && !extensions.has(extname3(normalized).slice(1).toLowerCase())) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u9009\u62E9\u7684\u6587\u4EF6\u7C7B\u578B\u4E0D\u7B26\u5408\u8981\u6C42\u3002");
     if (!paths.includes(normalized)) paths.push(normalized);
   }
   return { cancelled: false, paths };
@@ -64430,9 +64658,9 @@ async function pickNativePath(input2, options = {}) {
     stopped ??= error62;
     stopChild?.();
   }, completed: completion };
-  const record3 = { job };
+  const record4 = { job };
   active.add(job);
-  if (requestId) requests.set(requestId, record3);
+  if (requestId) requests.set(requestId, record4);
   const abort = () => job.stop(new NativePickerError("PICKER_ABORTED", "\u5DF2\u53D6\u6D88\u9009\u62E9\u3002"));
   options.signal?.addEventListener("abort", abort, { once: true });
   try {
@@ -64454,7 +64682,7 @@ async function pickNativePath(input2, options = {}) {
         if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
         if (platform === "win32") {
           await new Promise((resolve4) => {
-            const killer = spawn3(join5(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
+            const killer = spawn3(join6(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
             const timer = setTimeout(() => {
               killer.kill();
               child.kill();
@@ -64532,9 +64760,9 @@ async function pickNativePath(input2, options = {}) {
     options.signal?.removeEventListener("abort", abort);
     active.delete(job);
     if (requestId) {
-      if (record3.expiresAt !== void 0) {
-        record3.job = void 0;
-        record3.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
+      if (record4.expiresAt !== void 0) {
+        record4.job = void 0;
+        record4.expiresAt = Date.now() + CANCELLED_REQUEST_TTL_MS;
       } else requests.delete(requestId);
     }
     reserved = false;
@@ -64549,7 +64777,7 @@ async function closeNativePickers() {
 }
 
 // src/infrastructure/translation-provider.ts
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 var defaults = { schemaVersion: 1, provider: "cli", baseUrl: "", model: "", targetLanguage: "zh-CN", apiKey: "" };
 function endpoint(baseUrl) {
   let value;
@@ -64565,7 +64793,7 @@ function endpoint(baseUrl) {
 var TranslationProvider = class {
   constructor(dataRoot, timeoutMs = 6e4) {
     this.timeoutMs = timeoutMs;
-    this.file = join6(dataRoot, "secrets", "translation.json");
+    this.file = join7(dataRoot, "secrets", "translation.json");
   }
   timeoutMs;
   file;
@@ -64768,6 +64996,8 @@ function createLibraryServer(service2, options = {}) {
   tool("paper_list", "\u5217\u51FA\u6587\u732E\u6458\u8981\u5E76\u5206\u9875\u3002\u9996\u6B21\u6216\u663E\u5F0F\u5237\u65B0\u540E\u4ECE Agentero CLI \u83B7\u53D6\u5B8C\u6574\u5217\u8868\u5FEB\u7167\u3002", { ...vault, query: external_exports.string().max(1e3).optional(), tag: external_exports.array(key).max(100).optional(), unread: external_exports.boolean().optional(), sortBy: external_exports.enum(["title", "authors", "year", "tags", "date"]).optional(), sortDir: external_exports.enum(["asc", "desc"]).optional(), limit: external_exports.number().int().min(1).max(200).optional(), cursor: external_exports.string().max(8192).optional(), refresh: external_exports.boolean().optional() }, (input2) => service2.listPapers(input2));
   tool("paper_get", "\u8BFB\u53D6\u5355\u7BC7\u8BBA\u6587\u5143\u6570\u636E\u4E0E\u53EF\u7528\u8D44\u6E90\uFF0C\u4E0D\u8FD4\u56DE PDF \u5B57\u8282\u3002", paper, (input2) => service2.getPaper(input2));
   tool("paper_open_external", "\u7528\u6237\u70B9\u51FB\u540E\u5728\u7CFB\u7EDF PDF \u67E5\u770B\u5668\u4E2D\u6253\u5F00\u5F53\u524D\u77E5\u8BC6\u5E93\u7684\u539F\u6587\uFF0C\u4E0D\u81EA\u52A8\u542F\u52A8\u3002", paper, (input2) => service2.openPaperExternally(input2), false, true, false);
+  tool("trash_list", "\u6309\u7528\u6237\u8981\u6C42\u67E5\u770B\u5F53\u524D\u77E5\u8BC6\u5E93\u56DE\u6536\u7AD9\u7684\u6709\u754C\u5143\u6570\u636E\u5217\u8868\uFF1B\u4E0D\u6062\u590D\u6216\u5220\u9664\u5185\u5BB9\u3002", { ...vault, limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().max(4096).optional(), refresh: external_exports.boolean().optional() }, (input2) => service2.listTrash(input2));
+  tool("trash_open", "\u7528\u6237\u70B9\u51FB\u540E\u6253\u5F00\u56DE\u6536\u7AD9\u6761\u76EE\u7684 PDF \u6216\u6240\u5728\u6279\u6B21\u6587\u4EF6\u5939\uFF1B\u4E0D\u6062\u590D\u6216\u66F4\u6539\u77E5\u8BC6\u5E93\u3002", { ...vault, batchId: key, storedId: key, target: external_exports.enum(["pdf", "folder"]) }, (input2) => service2.openTrash(input2), false, true, false);
   tool("library_search", "\u641C\u7D22\u672C\u5730\u5143\u6570\u636E\u3001\u7B14\u8BB0\u6216\u5DF2\u6709\u6B63\u6587\u3002\u5173\u952E\u8BCD\u5339\u914D\uFF0C\u4E0D\u662F\u8BED\u4E49\u68C0\u7D22\uFF1B\u6B63\u6587\u8303\u56F4\u9700\u8981\u5F00\u542F Agent \u6B63\u6587\u8BBF\u95EE\u3002", { ...vault, query: external_exports.string().min(1).max(1e3), scope: external_exports.enum(["all", "metadata", "notes", "body"]).optional(), limit: external_exports.number().int().min(1).max(200).optional(), year: external_exports.number().int().optional(), publication: key.optional(), doi: key.optional(), isRead: external_exports.boolean().optional() }, (input2) => service2.search(input2));
   tool("paper_import", "\u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u7684\u6807\u8BC6\u7B26\u6216\u672C\u5730 PDF\uFF0C\u8FD4\u56DE\u540E\u53F0\u4EFB\u52A1\uFF1B\u5BFC\u5165\u4E0E\u89E3\u6790\u7ED3\u679C\u5206\u5F00\u3002", { ...vault, text: key.optional(), filePath: key.optional(), filePaths: external_exports.array(key).min(1).max(100).optional(), parent: key.optional(), noRecognize: external_exports.boolean().optional() }, (input2) => service2.importPaper(input2), false);
   tool("paper_parse", "\u6309\u660E\u786E\u5904\u7406\u4EFB\u52A1\u89E3\u6790\u5DF2\u6709 PDF\uFF1B\u5199\u5165\u6D3E\u751F\u6B63\u6587\uFF0C\u4E0D\u4FDD\u8BC1\u4EA7\u751F\u7248\u9762 layout\u3002\u4E0D\u5F97\u56E0\u666E\u901A\u95EE\u7B54\u81EA\u52A8\u89E3\u6790\u3002", { ...paper, force: external_exports.boolean().optional() }, (input2) => service2.parsePaper(input2), false);
@@ -64854,7 +65084,7 @@ function createLibraryServer(service2, options = {}) {
     server2.registerTool(name2, {
       title,
       description: title,
-      inputSchema: external_exports.object({ view: external_exports.enum(["library", "reading", "notes", "settings"]).optional(), paperPath: key.optional(), vaultId: key.optional() }).strict(),
+      inputSchema: external_exports.object({ view: external_exports.enum(["library", "reading", "notes", "trash", "settings"]).optional(), paperPath: key.optional(), vaultId: key.optional() }).strict(),
       annotations: { readOnlyHint: true },
       _meta: { ui: { resourceUri: URI, visibility: appOnly ? ["app"] : ["model", "app"] }, "openai/ui": name2 === "library_open" ? { entrypoints: [{ type: "thread" }] } : {} }
     }, async (input2) => ({ content: [], structuredContent: { ok: true, data: { ...input2, view: name2 === "settings_open" ? "settings" : input2.view ?? "library" } } }));

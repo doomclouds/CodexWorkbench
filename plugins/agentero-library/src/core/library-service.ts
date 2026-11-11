@@ -3,6 +3,7 @@ import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile }
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, posix, resolve } from 'node:path';
 import type { AddMarkInput, BibliographyInput, ChangeTagInput, DeleteMarkInput, ExportBibliographyInput, ExportPaperInput, ExportResult, MarkListInput, NoteAssetImportInput, NoteAssetReadInput, NoteLinksInput, RenameNoteInput, TranslateInput, UpdateMarkInput, WriteBookmarksInput } from '../contracts/reader.js';
+import type { TrashList, TrashListInput, TrashOpenInput, TrashOpenResult } from '../contracts/trash.js';
 import type {
   CliRunner, DiscoverInput, ImportPaperInput, LibraryOperation, LibraryServiceOptions, LibrarySettings,
   LibraryStatus, ListNotesInput, ListPapersInput, NativeBackend, NoteDocument, NoteInput, NoteList,
@@ -16,6 +17,7 @@ import { createNativeBackend } from '../infrastructure/native-mcp.js';
 import { diagnosticPdf } from '../infrastructure/pdf-probe.js';
 import { pdfDiagnosticKey, readPdfDiagnostic, writePdfDiagnostic, type PdfDiagnosticIdentity } from '../infrastructure/pdf-diagnostic-cache.js';
 import { requestExternalPdfOpen } from '../infrastructure/external-pdf.js';
+import { scanTrash, trashOpenTarget, TRASH_RESTORE_REASON, type TrashSnapshotData } from '../infrastructure/trash-reader.js';
 import { MarksStore } from '../infrastructure/marks.js';
 import { annotatedPdf, editBookmarks } from '../infrastructure/pdf-edit.js';
 
@@ -42,6 +44,7 @@ export class LibraryService {
   private native?: Promise<NativeBackend>;
   private nativeAbort?: AbortController;
   private snapshot?: Snapshot;
+  private trashSnapshot?: TrashSnapshotData & { id: string; vaultId: string; createdAt: number };
   private cliProbe?: { key: string; at: number; result: LibraryStatus['cli'] };
   private pdfDiagnosis?: { key: string; controller: AbortController; pending: Promise<LibraryStatus['pdfium']> };
   private readonly externalPdfOpener: (path: string) => Promise<void>;
@@ -68,6 +71,7 @@ export class LibraryService {
       if (changed) {
         this.settingsGeneration += 1;
         this.snapshot = undefined;
+        this.trashSnapshot = undefined;
         this.cliProbe = undefined;
         // Running CLI operations own their captured Vault/settings. Only the
         // cached native connection belongs to this current configuration.
@@ -798,7 +802,36 @@ export class LibraryService {
   }
   async deletePaper(input: PaperInput) {
     const context = await this.context(input), path = await this.paperPath(context, input.paperPath);
-    return this.exclusive(context, path, async () => { await this.requireCli(context.settings); const data = await this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'delete', path]); this.snapshot = undefined; return record(data); });
+    return this.exclusive(context, path, async () => { await this.requireCli(context.settings); const data = await this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'delete', path]); this.snapshot = undefined; this.trashSnapshot = undefined; return record(data); });
+  }
+  async listTrash(input: TrashListInput): Promise<TrashList> {
+    const context = await this.context(input);
+    const limit = input.limit ?? 50;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new LibraryError('INVALID_RANGE', '回收站每页应为 1 至 100 项。');
+    let offset = 0;
+    if (input.cursor) {
+      let cursor: Record<string, unknown>;
+      try {
+        if (typeof input.cursor !== 'string' || input.cursor.length > 2048) throw new Error();
+        cursor = record(JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')));
+      } catch { throw new LibraryError('CURSOR_EXPIRED', '回收站分页已失效，请刷新列表。', true); }
+      if (input.refresh || !this.trashSnapshot || cursor.snapshot !== this.trashSnapshot.id || cursor.vault !== context.id || Date.now() - this.trashSnapshot.createdAt > this.snapshotTtl || !Number.isSafeInteger(cursor.offset) || Number(cursor.offset) < 0 || Number(cursor.offset) > this.trashSnapshot.items.length) throw new LibraryError('CURSOR_EXPIRED', '回收站快照或文献库已变化，请刷新列表。', true);
+      offset = Number(cursor.offset);
+    } else if (input.refresh || !this.trashSnapshot || this.trashSnapshot.vaultId !== context.id || Date.now() - this.trashSnapshot.createdAt > this.snapshotTtl) {
+      const data = await scanTrash(context.path);
+      this.assertCurrentContext(context, await this.readSettings());
+      this.trashSnapshot = { ...data, id: randomUUID(), vaultId: context.id, createdAt: Date.now() };
+    }
+    const snapshot = this.trashSnapshot!;
+    const end = offset + limit;
+    return { vaultId: context.id, items: snapshot.items.slice(offset, end), total: snapshot.items.length, nextCursor: end < snapshot.items.length ? Buffer.from(JSON.stringify({ snapshot: snapshot.id, vault: context.id, offset: end })).toString('base64url') : null, complete: snapshot.complete, truncated: !snapshot.complete, diagnostics: snapshot.diagnostics, restoreSupported: false, restoreReason: TRASH_RESTORE_REASON };
+  }
+  async openTrash(input: TrashOpenInput): Promise<TrashOpenResult> {
+    const context = await this.context(input), target = await trashOpenTarget(context.path, input);
+    this.ensureOpen(); this.assertCurrentContext(context, await this.readSettings());
+    try { await this.externalPdfOpener(target); }
+    catch { throw new LibraryError('TRASH_OPEN_FAILED', '无法向系统发送回收站打开请求，请检查默认阅读器或文件管理器。'); }
+    return { requested: true, target: input.target };
   }
   async downloadPaper(input: PaperInput): Promise<LibraryOperation> {
     const context = await this.context(input), path = await this.paperPath(context, input.paperPath); await this.requireCli(context.settings);

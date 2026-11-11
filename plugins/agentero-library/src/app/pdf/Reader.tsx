@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, ChevronLeft, ChevronRight, Crop, Download, FileText, Languages, List, LoaderCircle, MessageSquare, NotebookPen, Palette, RotateCw, Search, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { BookOpen, ChevronLeft, ChevronRight, Crop, FileText, Languages, LoaderCircle, MoreHorizontal, Upload, X } from 'lucide-react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { LibraryOperation, Paper, PdfChunk } from '../../contracts/types';
 import type { BookmarkNode, ExportResult, MarkColor, MarkList, ReaderMark, TranslateResult, WriteBookmarksResult } from '../../contracts/reader';
@@ -15,6 +16,8 @@ import { textLayerMatches, textMatches } from './search';
 import { useDocumentTranslation } from './translation/useDocumentTranslation';
 import { abortable, MAX_CANVAS_PIXELS, MAX_IMAGE_PIXELS, timeBudget, yieldToHost } from './scheduling';
 import { PageAnchorCoordinator, pageAtOffset, pageSlots, pageWindow, type PageSize } from './virtualization';
+import { INITIAL_READER_VIEW, openReaderPanel, readingPreferences, restoreReadingPreferences, toggleReaderPanel, type ReaderViewState } from './reader-layout';
+import { ReaderHud, ReaderLanguageSetting, ReaderTools, TranslationLanguage, type ReaderToolActions, type ReaderToolState } from './ReaderTools';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import './reader.css';
 
@@ -22,15 +25,17 @@ interface Props {
   active: boolean; vaultId: string; paper: Paper | null; preview: boolean; canSend: boolean; canParse: boolean;
   onNotes(paper: Paper): void; onOperation(operation: LibraryOperation): void; onBack(): void;
   onDirtyChange?(dirty: boolean): void;
+  readerToolsHost?: HTMLElement | null;
+  sidebarCollapsed?: boolean;
 }
-interface ReaderState { pageNumber: number; zoom: number; fit: boolean; rotation: number; tone: 'white' | 'dark'; outlineOpen: boolean; marksOpen: boolean; notesOpen: boolean }
-const initialView: ReaderState = { pageNumber: 1, zoom: 1, fit: true, rotation: 0, tone: 'white', outlineOpen: false, marksOpen: false, notesOpen: false };
+type ReaderState = ReaderViewState;
+const initialView = INITIAL_READER_VIEW;
 interface SearchHit { page: number; index: number; ordinal: number; text: string; excerpt: string }
 const editable = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input,textarea,select,[contenteditable="true"],[role="textbox"]'));
 const EMPTY_MARKS: ReaderMark[] = [];
 interface PdfSession { status: 'loading' | 'ready' | 'failed'; dispose(): void }
 
-export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, onNotes, onOperation, onBack, onDirtyChange }: Props) {
+export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, onNotes, onOperation, onBack, onDirtyChange, readerToolsHost = null, sidebarCollapsed = false }: Props) {
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null); const [loadRevision, setLoadRevision] = useState(0);
   const [loading, setLoading] = useState(false); const [progress, setProgress] = useState(''); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [view, setView] = useState<ReaderState>(initialView); const [viewReady, setViewReady] = useState(false);
@@ -46,7 +51,8 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const [selection, setSelection] = useState<ReaderSelection | null>(null); const [translationCard, setTranslationCard] = useState<FloatingTranslation | null>(null);
   const [translationOpen, setTranslationOpen] = useState(false); const [targetLanguage, setTargetLanguage] = useState(''); const translationRun = useRef(0);
   const selectionTranslationAbort = useRef<AbortController | null>(null); const reloadNotice = useRef<string | null>(null);
-  const [cards, setCards] = useState(true); const [crop, setCrop] = useState(false); const [noteDirty, setNoteDirty] = useState(false); const [space, setSpace] = useState(false);
+  const [cards, setCards] = useState(false); const [crop, setCrop] = useState(false); const [noteDirty, setNoteDirty] = useState(false); const [space, setSpace] = useState(false);
+  const [notesMounted, setNotesMounted] = useState(false); const [moreOpen, setMoreOpen] = useState(false); const moreRoot = useRef<HTMLDivElement>(null);
   const [searchOpen, setSearchOpen] = useState(false); const [query, setQuery] = useState(''); const [searchBusy, setSearchBusy] = useState(false); const [hits, setHits] = useState<SearchHit[]>([]); const [hitIndex, setHitIndex] = useState(-1);
   const [renderRevision, setRenderRevision] = useState(0); const locatedHit = useRef('');
   const onPageRendered = useCallback(() => setRenderRevision(value => value + 1), []);
@@ -115,7 +121,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
         controller.signal.throwIfAborted();
         const first = await abortable(pdf.getPage(1), controller.signal); const base = first.getViewport({ scale: 1 });
         controller.signal.throwIfAborted();
-        const next: ReaderState = { ...initialView, ...state, pageNumber: Math.min(pdf.numPages, Math.max(1, Number(state.pageNumber) || 1)), zoom: Math.max(.35, Math.min(3, Number(state.zoom) || 1)), rotation: [0, 90, 180, 270].includes(Number(state.rotation)) ? Number(state.rotation) : 0, tone: state.tone === 'dark' ? 'dark' : 'white' };
+        const next = restoreReadingPreferences(state, viewRef.current, pdf.numPages);
         knownSizes.current.set(1, { width: base.width, height: base.height }); setSizeRevision(value => value + 1);
         setEstimate({ width: base.width, height: base.height }); setFitPageWidth(next.rotation % 180 ? base.height : base.width); setView(next); viewRef.current = next; setPageInput(String(next.pageNumber)); restore.current.navigate(next.pageNumber);
         setWindowRange({ start: Math.max(0, next.pageNumber - 3), end: Math.min(pdf.numPages - 1, next.pageNumber + 2) });
@@ -152,7 +158,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
       if (entry.contentRect.width <= 0) return;
       const pixelRatio = window.devicePixelRatio || 1; pendingWidth = Math.round(entry.contentRect.width * pixelRatio) / pixelRatio;
       if (Math.abs(pendingWidth - measuredWidth.current) < .5 || resizeFrame.current) return;
-      resizeFrame.current = requestAnimationFrame(() => { resizeFrame.current = 0; if (!activeRef.current || Math.abs(pendingWidth - measuredWidth.current) < .5) return; rememberPosition(); measuredWidth.current = pendingWidth; setContainerWidth(pendingWidth); });
+      resizeFrame.current = requestAnimationFrame(() => { resizeFrame.current = 0; if (!activeRef.current || Math.abs(pendingWidth - measuredWidth.current) < .5) return; if (viewRef.current.fit) rememberPosition(); measuredWidth.current = pendingWidth; setContainerWidth(pendingWidth); });
     });
     observer.observe(viewport.current); return () => { observer.disconnect(); cancelAnimationFrame(resizeFrame.current); resizeFrame.current = 0; };
   }, [document, active]);
@@ -232,8 +238,9 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     });
   }
   function zoom(value: number, fit = false) {
-    rememberPosition();
-    setView(current => ({ ...current, fit, zoom: Math.max(.35, Math.min(3, value)) }));
+    const next = Math.max(.35, Math.min(3, value)); const current = viewRef.current;
+    if (current.fit !== fit || (!fit && current.zoom !== next)) rememberPosition();
+    setView(existing => existing.fit === fit && existing.zoom === next ? existing : { ...existing, fit, zoom: next });
   }
   function rememberPosition() {
     if (restore.current.pending) return;
@@ -249,15 +256,23 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
 
   const persistView = useCallback(() => {
     if (!viewReady || !paperPath || preview) return Promise.resolve();
-    const state = { ...viewRef.current }; const path = paperPath; const id = vaultId;
+    const state = readingPreferences(viewRef.current); const path = paperPath; const id = vaultId;
     const task = stateSave.current.catch(() => {}).then(() => callTool('reader_state_set', { vaultId: id, paperPath: path, state })); stateSave.current = task;
     return task.catch(() => {});
   }, [viewReady, vaultId, paperPath, preview]);
-  useEffect(() => { clearTimeout(stateTimer.current); if (viewReady) stateTimer.current = setTimeout(() => { void persistView(); }, 500); return () => clearTimeout(stateTimer.current); }, [view, viewReady, persistView]);
+  useEffect(() => { clearTimeout(stateTimer.current); if (viewReady) stateTimer.current = setTimeout(() => { void persistView(); }, 500); return () => clearTimeout(stateTimer.current); }, [view.pageNumber, view.zoom, view.fit, view.rotation, view.tone, viewReady, persistView]);
   useEffect(() => registerBeforeTeardown(async () => { clearTimeout(stateTimer.current); await persistView(); }), [persistView]);
   useEffect(() => registerBeforeTeardown(async () => { selectionTranslationAbort.current?.abort(); }), []);
   useEffect(() => () => { cancelAnimationFrame(scrollFrame.current); cancelAnimationFrame(sizeFrame.current); cancelAnimationFrame(resizeFrame.current); }, []);
   useEffect(() => { onDirtyChange?.(noteDirty); return () => onDirtyChange?.(false); }, [noteDirty, onDirtyChange]);
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 6000); return () => clearTimeout(timer); }, [notice]);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (event: PointerEvent) => { if (event.target instanceof Node && !moreRoot.current?.contains(event.target)) setMoreOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMoreOpen(false); };
+    window.document.addEventListener('pointerdown', close); window.addEventListener('keydown', escape);
+    return () => { window.document.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape); };
+  }, [moreOpen]);
 
   function captureSelection() {
     if (crop || panning.current || Date.now() < justPanned.current) return;
@@ -323,7 +338,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     catch (cause) { setNotice(messageOf(cause)); }
   }
   function selectMark(mark: ReaderMark) {
-    setSelectedMark(mark.id); setView(value => ({ ...value, marksOpen: true })); goToPage(mark.page);
+    setSelectedMark(mark.id); setView(value => openReaderPanel(value, 'marksOpen')); goToPage(mark.page);
     if (mark.kind === 'translate' && (mark.result || mark.note)) {
       selectionTranslationAbort.current?.abort(); translationRun.current += 1;
       const entry = pages.current.get(mark.page); const bounds = entry?.element.getBoundingClientRect();
@@ -419,29 +434,59 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const onPageFailure = useCallback((number: number, message: string) => { setFailedPages(value => new Map(value).set(number, message)); setError(message); }, []);
   async function openSystemViewer() { try { await callTool('paper_open_external', { vaultId, paperPath }); setNotice('已向系统默认查看器发送打开请求。'); } catch (cause) { setNotice(messageOf(cause)); } }
 
-  if (!paper) return <div className="empty-state reader-empty"><BookOpen size={34} /><strong>打开一篇文献开始阅读</strong><span>选择文字以高亮、备注、翻译或向所属对话提问。</span><button onClick={onBack}>返回文献库</button></div>;
-  if (preview) return <div className="empty-state reader-empty"><FileText size={30} /><strong>{paper.title}</strong><span>这是界面预览，不连接真实 PDF 或标注数据。</span><button onClick={onBack}>返回演示列表</button></div>;
-
-  return <section ref={host} className="reader-view view-fill parity-reader" aria-label="PDF 阅读器">
-    <header className="reader-heading"><strong title={paper.title}>{paper.title}</strong><div className="button-row"><button className={view.notesOpen ? 'selected' : ''} disabled={noteDirty} onClick={() => setView(value => ({ ...value, notesOpen: !value.notesOpen }))}><NotebookPen size={14} />论文笔记</button><button disabled={!canParse || busy} title={canParse ? '写入派生正文，作为独立后台任务执行' : '原生解析需要 PDFium'} onClick={() => { void callTool<LibraryOperation>('paper_parse', { vaultId, paperPath }).then(onOperation).catch(cause => setNotice(messageOf(cause))); }}>解析正文</button><button disabled={!document || busy} onClick={() => void exportPaper('pdf')}><Download size={14} />导出</button></div></header>
-    <div className="reader-toolbar pdf-parity-toolbar"><button className={`icon-button ${view.outlineOpen ? 'selected' : ''}`} aria-label="显示目录" aria-pressed={view.outlineOpen} disabled={!document} onClick={() => setView(value => ({ ...value, outlineOpen: !value.outlineOpen }))}><List size={17} /></button><button className={`icon-button ${view.marksOpen ? 'selected' : ''}`} aria-label="显示批注" aria-pressed={view.marksOpen} disabled={!document} onClick={() => setView(value => ({ ...value, marksOpen: !value.marksOpen }))}><MessageSquare size={16} /></button><button className="icon-button" aria-label="查找 PDF 文字" disabled={!document} onClick={() => { setSearchOpen(value => !value); requestAnimationFrame(() => searchInput.current?.focus()); }}><Search size={17} /></button><button className={`icon-button ${crop ? 'selected' : ''}`} aria-label="截取 PDF 区域" aria-pressed={crop} disabled={!document} onClick={() => { setCrop(value => !value); setSelection(null); }}><Crop size={17} /></button><button className={`icon-button ${translationOpen ? 'selected' : ''}`} aria-label={translationOpen ? '显示原文' : '全文翻译'} aria-pressed={translationOpen} disabled={!document} onClick={() => { setSelection(null); setTranslationOpen(value => !value); }}><Languages size={17} /></button><select aria-label="翻译目标语言" value={targetLanguage} onChange={event => setTargetLanguage(event.target.value)}><option value="">按插件设置</option><option value="zh-CN">简体中文</option><option value="en">English</option><option value="ja">日本語</option><option value="de">Deutsch</option><option value="fr">Français</option></select><span className="toolbar-spacer" /><button className="icon-button" aria-label="旋转 PDF" disabled={!document} onClick={() => { rememberPosition(); setView(value => ({ ...value, rotation: (value.rotation + 90) % 360 })); }}><RotateCw size={16} /></button><button className="icon-button" aria-label="切换黑白纸色" title={view.tone === 'white' ? '切换黑色纸张' : '切换白色纸张'} onClick={() => setView(value => ({ ...value, tone: value.tone === 'white' ? 'dark' : 'white' }))}><Palette size={16} /></button><button className="icon-button" aria-label="缩小" disabled={!document || scale <= .35} onClick={() => zoom(scale - .15)}><ZoomOut size={17} /></button><span className="zoom-label">{Math.round(scale * 100)}%</span><button className="icon-button" aria-label="放大" disabled={!document || scale >= 3} onClick={() => zoom(scale + .15)}><ZoomIn size={17} /></button><button disabled={!document} className={view.fit ? 'selected' : ''} onClick={() => zoom(1, true)}>适合宽度</button></div>
-    {searchOpen && <form className="pdf-find" onSubmit={event => { event.preventDefault(); void search(); }}><input ref={searchInput} aria-label="PDF 查找文字" placeholder="查找 PDF 文字" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && hits.length && query === hits[0]?.text) { event.preventDefault(); moveHit(event.shiftKey ? -1 : 1); } }} /><button disabled={searchBusy || !query.trim()}>{searchBusy ? <LoaderCircle size={14} className="spin" /> : '查找'}</button><button type="button" aria-label="上一个匹配" disabled={!hits.length} onClick={() => moveHit(-1)}><ChevronLeft size={14} /></button><span>{hits.length ? `${hitIndex + 1}/${hits.length}${hits.length >= 2000 ? '+' : ''}` : ''}</span><button type="button" aria-label="下一个匹配" disabled={!hits.length} onClick={() => moveHit(1)}><ChevronRight size={14} /></button><button type="button" className="icon-button" aria-label="关闭查找" onClick={() => { setSearchOpen(false); cancelSearch(); }}><X size={15} /></button></form>}
-    {translationOpen && <div className="pdf-translation-status" role="status"><Languages size={14} /><span>{translated.running ? translated.progress || '准备全文翻译…' : translated.error || translated.progress || '逐页翻译当前文档'}</span>{translated.running && <LoaderCircle size={14} className="spin" />}{translated.error && <button onClick={translated.retry}>重试未完成段落</button>}<button onClick={() => setTranslationOpen(false)}>{translated.running ? '停止并显示原文' : '显示原文'}</button></div>}
-    {crop && <p className="inline-notice">在页面上拖出区域，添加截图备注。按 Esc 退出。</p>}{notice && <p className="inline-notice" role="status">{notice}</p>}{error && <div className="callout error" role="alert">{error}<div className="button-row"><button onClick={() => void openSystemViewer()}>用系统查看器打开</button><button disabled={!active || loading} onClick={() => setLoadRevision(value => value+1)}>重新加载 PDF</button></div></div>}
-    {passwordRequired && <form className="pdf-password" onSubmit={event => { event.preventDefault(); passwordUpdate.current?.(password); setPassword(''); }}><label>PDF 密码<input type="password" autoFocus autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} /></label><button className="primary">解锁</button>{passwordWrong && <span className="error-text">密码不正确，请重试。</span>}</form>}
+  function toggleNotes() { setNotesMounted(true); setView(value => toggleReaderPanel(value, 'notesOpen')); }
+  function toggleSearch() { if (searchOpen) cancelSearch(); setSearchOpen(value => !value); requestAnimationFrame(() => searchInput.current?.focus()); }
+  const toolState: ReaderToolState = {
+    ready: Boolean(document), hasPaper: Boolean(paper), page: view.pageNumber, total: document?.numPages ?? 0, pageInput, scale, fit: view.fit, tone: view.tone,
+    outlineOpen: view.outlineOpen, searchOpen, marksOpen: view.marksOpen, notesOpen: view.notesOpen, notesDirty: noteDirty,
+    translationOpen, translating: translationOpen && translated.running, cards, targetLanguage,
+  };
+  const toolActions: ReaderToolActions = {
+    toggleOutline: () => setView(value => toggleReaderPanel(value, 'outlineOpen')), toggleSearch,
+    toggleMarks: () => setView(value => toggleReaderPanel(value, 'marksOpen')), toggleNotes,
+    toggleTranslation: () => { setSelection(null); setTranslationOpen(value => !value); },
+    toggleCards: () => { if (viewRef.current.fit) rememberPosition(); setCards(value => !value); },
+    pageInput: setPageInput, goToPage: () => goToPage(Number.parseInt(pageInput, 10) || viewRef.current.pageNumber),
+    previous: () => goToPage(view.pageNumber - 1), next: () => goToPage(view.pageNumber + 1), zoom: value => zoom(value), fit: () => zoom(1, true),
+    rotate: () => { rememberPosition(); setView(value => ({ ...value, rotation: (value.rotation + 90) % 360 })); },
+    tone: () => setView(value => ({ ...value, tone: value.tone === 'white' ? 'dark' : 'white' })), targetLanguage: setTargetLanguage,
+  };
+  const toolsPortal = readerToolsHost ? createPortal(<ReaderTools state={toolState} actions={toolActions} collapsed={sidebarCollapsed} />, readerToolsHost, 'reader-tools') : null;
+  if (!paper) return <>{toolsPortal}<div className="empty-state reader-empty"><BookOpen size={34} /><strong>打开一篇文献开始阅读</strong><span>选择文字以高亮、备注、翻译或向所属对话提问。</span><button onClick={onBack}>返回文献库</button></div></>;
+  if (preview) return <>{toolsPortal}<div className="empty-state reader-empty"><FileText size={30} /><strong>{paper.title}</strong><span>这是界面预览，不连接真实 PDF 或标注数据。</span><button onClick={onBack}>返回演示列表</button></div></>;
+  const leaf = paper.path.split('/').at(-1) || paper.title; const documentName = leaf.toLowerCase().endsWith('.pdf') ? leaf : leaf + '.pdf';
+  const showHud = sidebarCollapsed || !readerToolsHost;
+  return <section ref={host} className="reader-view view-fill parity-reader reader-sidebar-layout" aria-label="PDF 阅读器">
+    {toolsPortal}
+    <header className="reader-document-header" data-reader-header="true"><strong title={paper.title}>{documentName}</strong><div className="reader-document-header__actions"><button aria-label="导出 PDF" disabled={busy} onClick={() => void exportPaper('pdf')}><Upload size={14} aria-hidden="true" /><span>导出</span></button><div ref={moreRoot} className="reader-more"><button className="icon-button" aria-label="更多阅读操作" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(value => !value)}><MoreHorizontal size={18} /></button>{moreOpen && <div className="reader-more__menu" role="menu" aria-label="更多阅读操作">
+      <button role="menuitem" disabled={!canParse || busy} title={canParse ? '写入派生正文，作为独立任务执行' : '原生解析需要 PDFium'} onClick={() => { setMoreOpen(false); void callTool<LibraryOperation>('paper_parse', { vaultId, paperPath }).then(onOperation).catch(cause => setNotice(messageOf(cause))); }}>解析正文</button>
+      <button role="menuitemcheckbox" aria-checked={crop} disabled={!document} onClick={() => { setMoreOpen(false); setCrop(value => !value); setSelection(null); }}><Crop size={14} />截取区域</button>
+      <ReaderLanguageSetting value={targetLanguage} onChange={setTargetLanguage} />
+      <button role="menuitem" disabled={busy} onClick={() => { setMoreOpen(false); void exportPaper('markdown'); }}>导出 Markdown 批注</button>
+      <button role="menuitem" disabled={busy} onClick={() => { setMoreOpen(false); void exportPaper('json'); }}>导出 JSON 批注</button>
+      <button role="menuitem" onClick={() => { setMoreOpen(false); void openSystemViewer(); }}>用系统查看器打开</button>
+      <button role="menuitem" disabled={!active || loading} onClick={() => { setMoreOpen(false); setLoadRevision(value => value + 1); }}>重新加载 PDF</button>
+    </div>}</div></div></header>
     <div className="reader-body pdf-parity-body">
       {view.outlineOpen && document && <OutlinePanel document={document} currentPage={view.pageNumber} busy={busy} onNavigate={(dest, page) => { void navigate(dest, undefined, page); }} onSave={saveBookmarks} onClose={() => setView(value => ({ ...value, outlineOpen: false }))} />}
-      <div ref={viewport} className={`pdf-viewport parity-viewport ${space ? 'pan-armed' : ''}`} onScroll={scroll} onPointerDownCapture={panStart} onPointerMove={panMove} onPointerUp={panEnd} onPointerCancel={() => { panning.current = null; }} onKeyUp={captureSelection} onClickCapture={event => { if (Date.now() < justPanned.current) { event.preventDefault(); event.stopPropagation(); } }}>
-        {loading && <div className="empty-state"><LoaderCircle className="spin" /><strong>正在读取 PDF…</strong><span>{progress}</span></div>}
-        {document && <div className="pdf-continuous-pages">{slots.map((slot,index) => <div key={loadRevision+':'+index} className="pdf-page-slot" data-sheet-page={index+1} style={{height:slot.height}}>
-          {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
-        </div>)}</div>}
+      <div className="reader-stage">
+        <div ref={viewport} className={'pdf-viewport parity-viewport ' + (space ? 'pan-armed' : '')} onScroll={scroll} onPointerDownCapture={panStart} onPointerMove={panMove} onPointerUp={panEnd} onPointerCancel={() => { panning.current = null; }} onKeyUp={captureSelection} onClickCapture={event => { if (Date.now() < justPanned.current) { event.preventDefault(); event.stopPropagation(); } }}>
+          {loading && <div className="empty-state"><LoaderCircle className="spin" /><strong>正在读取 PDF…</strong><span>{progress}</span></div>}
+          {document && <div className="pdf-continuous-pages">{slots.map((slot,index) => <div key={loadRevision+':'+index} className="pdf-page-slot" data-sheet-page={index+1} style={{height:slot.height}}>
+            {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
+          </div>)}</div>}
+        </div>
+        {searchOpen && <form className="reader-search-overlay" role="search" aria-label="PDF 查找" onSubmit={event => { event.preventDefault(); void search(); }}><input ref={searchInput} aria-label="PDF 查找文字" placeholder="查找 PDF 文字" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && hits.length && query === hits[0]?.text) { event.preventDefault(); moveHit(event.shiftKey ? -1 : 1); } }} /><button disabled={searchBusy || !query.trim()}>{searchBusy ? <LoaderCircle size={14} className="spin" /> : '查找'}</button><button type="button" aria-label="上一个匹配" disabled={!hits.length} onClick={() => moveHit(-1)}><ChevronLeft size={14} /></button><span>{hits.length ? (hitIndex + 1) + '/' + hits.length + (hits.length >= 2000 ? '+' : '') : ''}</span><button type="button" aria-label="下一个匹配" disabled={!hits.length} onClick={() => moveHit(1)}><ChevronRight size={14} /></button><button type="button" className="icon-button" aria-label="关闭查找" onClick={() => { setSearchOpen(false); cancelSearch(); }}><X size={15} /></button></form>}
+        {translationOpen && <div className={'reader-translation-overlay ' + (searchOpen ? 'below-search' : '')} role="status"><Languages size={14} /><span>{translated.running ? translated.progress || '准备全文翻译…' : translated.error || translated.progress || '逐页翻译当前文档'}</span>{translated.running && <LoaderCircle size={14} className="spin" />}{sidebarCollapsed && <TranslationLanguage value={targetLanguage} onChange={setTargetLanguage} />}{translated.error && <button onClick={translated.retry}>重试</button>}<button onClick={() => setTranslationOpen(false)}>{translated.running ? '停止' : '原文'}</button></div>}
+        {(notice || crop) && <div className={'reader-toast ' + (searchOpen || translationOpen ? 'reader-toast--lower' : '')} role="status"><span>{notice || '拖动框选区域，Esc 退出'}</span><button className="icon-button" aria-label="关闭阅读提示" onClick={() => { setNotice(''); if (crop) setCrop(false); }}><X size={13} /></button></div>}
+        {error && <div className="reader-error-overlay" role="alert"><p>{error}</p><div className="button-row"><button onClick={() => void openSystemViewer()}>用系统查看器打开</button><button disabled={!active || loading} onClick={() => setLoadRevision(value => value + 1)}>重新加载 PDF</button></div></div>}
+        {passwordRequired && <form className="reader-password-overlay" onSubmit={event => { event.preventDefault(); passwordUpdate.current?.(password); setPassword(''); }}><label>PDF 密码<input type="password" autoFocus autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} /></label><button className="primary">解锁</button>{passwordWrong && <span className="error-text">密码不正确，请重试。</span>}</form>}
+        {showHud && document && <ReaderHud state={toolState} actions={toolActions} />}
       </div>
       {view.marksOpen && <MarksPanel list={marks} selectedId={selectedMark} busy={busy} error={markError} onSelect={selectMark} onSave={updateMark} onDelete={deleteMark} onReply={replyMark} onRefresh={() => { void refreshMarks(); }} onExport={format => { void exportPaper(format); }} onClose={() => setView(value => ({ ...value, marksOpen: false }))} />}
-      {view.notesOpen && <aside className="pdf-notes-sidebar" aria-label="论文笔记侧栏"><header className="pdf-panel-heading"><strong>论文笔记</strong><button disabled={noteDirty} title={noteDirty ? '请先保存或处理当前草稿' : '单独打开笔记页'} onClick={() => onNotes(paper)}>单独打开</button><button className="icon-button" disabled={noteDirty} aria-label="关闭论文笔记" onClick={() => setView(value => ({ ...value, notesOpen: false }))}><X size={14} /></button></header><NotesView active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={inlineNotesTarget.current} onDirtyChange={setNoteDirty} /></aside>}
+      {notesMounted && <aside className="pdf-notes-sidebar" aria-label="论文笔记侧栏" hidden={!view.notesOpen}><header className="pdf-panel-heading"><strong>论文笔记</strong>{noteDirty && <span className="reader-note-dirty" role="status">未保存</span>}<button disabled={noteDirty} title={noteDirty ? '请先保存或处理当前草稿' : '单独打开笔记页'} onClick={() => onNotes(paper)}>单独打开</button><button className="icon-button" aria-label="关闭论文笔记" onClick={() => setView(value => ({ ...value, notesOpen: false }))}><X size={14} /></button></header><NotesView key={vaultId} active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={view.notesOpen ? inlineNotesTarget.current : null} onDirtyChange={setNoteDirty} /></aside>}
     </div>
-    <footer className="reader-footer pdf-parity-footer"><button className="icon-button" aria-label="上一页" disabled={!document || view.pageNumber <= 1} onClick={() => goToPage(view.pageNumber - 1)}><ChevronLeft size={18} /></button><form onSubmit={event => { event.preventDefault(); goToPage(Number.parseInt(pageInput, 10) || 1); }}><input aria-label="PDF 物理页码" inputMode="numeric" value={pageInput} onChange={event => setPageInput(event.target.value.replace(/\D/g, ''))} disabled={!document} /><span>/ {document?.numPages ?? '—'}</span></form><button className="icon-button" aria-label="下一页" disabled={!document || view.pageNumber >= document.numPages} onClick={() => goToPage(view.pageNumber + 1)}><ChevronRight size={18} /></button><span className="muted">物理页</span><input type="range" aria-label="PDF 缩放" min={35} max={300} step={1} value={Math.round(scale * 100)} onChange={event => zoom(Number(event.target.value) / 100)} disabled={!document} /><button className={cards ? 'selected' : ''} onClick={() => { rememberPosition(); setCards(value => !value); }} aria-pressed={showCards} title={cards && !showCards ? "面板较窄，页边备注会在放宽后显示" : "显示或隐藏页边备注"}>页边备注</button></footer>
-    {selection && <SelectionToolbar key={`${selection.parts[0]?.page}:${selection.x}:${selection.y}:${selection.text}`} selection={selection} busy={busy} canSend={canSend} onCopy={() => { void copy(selection.text, '选区'); }} onMark={(color, comment, underline) => { void highlight(color, comment, underline); }} onTranslate={() => { void translateSelection(); }} onAsk={question => { void ask(question); }} onClose={() => setSelection(null)} />}
-    {translationCard && <TranslationCard value={translationCard} busy={busy} onPin={() => { void pinTranslation(); }} onClose={() => { setTranslationCard(null); selectionTranslationAbort.current?.abort(); translationRun.current += 1; }} onRetry={() => { void translateSelection(translationCard.selection); }} onCopy={() => { void copy(translationCard.text, '译文'); }} />}
+    {selection && createPortal(<SelectionToolbar key={selection.parts[0]?.page + ':' + selection.x + ':' + selection.y + ':' + selection.text} selection={selection} busy={busy} canSend={canSend} onCopy={() => { void copy(selection.text, '选区'); }} onMark={(color, comment, underline) => { void highlight(color, comment, underline); }} onTranslate={() => { void translateSelection(); }} onAsk={question => { void ask(question); }} onClose={() => setSelection(null)} />, window.document.body)}
+    {translationCard && createPortal(<TranslationCard value={translationCard} busy={busy} onPin={() => { void pinTranslation(); }} onClose={() => { setTranslationCard(null); selectionTranslationAbort.current?.abort(); translationRun.current += 1; }} onRetry={() => { void translateSelection(translationCard.selection); }} onCopy={() => { void copy(translationCard.text, '译文'); }} />, window.document.body)}
   </section>;
 }

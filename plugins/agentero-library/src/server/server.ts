@@ -59,6 +59,8 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
   tool('paper_list', '列出文献摘要并分页。首次或显式刷新后从 Agentero CLI 获取完整列表快照。', { ...vault, query: z.string().max(1000).optional(), tag: z.array(key).max(100).optional(), unread: z.boolean().optional(), sortBy: z.enum(['title', 'authors', 'year', 'tags', 'date']).optional(), sortDir: z.enum(['asc', 'desc']).optional(), limit: z.number().int().min(1).max(200).optional(), cursor: z.string().max(8192).optional(), refresh: z.boolean().optional() }, (input) => service.listPapers(input));
   tool('paper_get', '读取单篇论文元数据与可用资源，不返回 PDF 字节。', paper, (input) => service.getPaper(input));
   tool('paper_open_external', '用户点击后在系统 PDF 查看器中打开当前知识库的原文，不自动启动。', paper, (input) => service.openPaperExternally(input), false, true, false);
+  tool('trash_list', '按用户要求查看当前知识库回收站的有界元数据列表；不恢复或删除内容。', { ...vault, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(4096).optional(), refresh: z.boolean().optional() }, input => service.listTrash(input));
+  tool('trash_open', '用户点击后打开回收站条目的 PDF 或所在批次文件夹；不恢复或更改知识库。', { ...vault, batchId: key, storedId: key, target: z.enum(['pdf', 'folder']) }, input => service.openTrash(input), false, true, false);
   tool('library_search', '搜索本地元数据、笔记或已有正文。关键词匹配，不是语义检索；正文范围需要开启 Agent 正文访问。', { ...vault, query: z.string().min(1).max(1000), scope: z.enum(['all', 'metadata', 'notes', 'body']).optional(), limit: z.number().int().min(1).max(200).optional(), year: z.number().int().optional(), publication: key.optional(), doi: key.optional(), isRead: z.boolean().optional() }, (input) => service.search(input));
   tool('paper_import', '导入用户明确指定的标识符或本地 PDF，返回后台任务；导入与解析结果分开。', { ...vault, text: key.optional(), filePath: key.optional(), filePaths: z.array(key).min(1).max(100).optional(), parent: key.optional(), noRecognize: z.boolean().optional() }, (input) => service.importPaper(input), false);
   tool('paper_parse', '按明确处理任务解析已有 PDF；写入派生正文，不保证产生版面 layout。不得因普通问答自动解析。', { ...paper, force: z.boolean().optional() }, (input) => service.parsePaper(input), false);
@@ -135,7 +137,7 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
   for (const [name, title, appOnly] of [['library_open', '打开文献库', false], ['settings_open', '配置与诊断', true]] as const) {
     server.registerTool(name, {
       title, description: title,
-      inputSchema: z.object({ view: z.enum(['library', 'reading', 'notes', 'settings']).optional(), paperPath: key.optional(), vaultId: key.optional() }).strict(),
+      inputSchema: z.object({ view: z.enum(['library', 'reading', 'notes', 'trash', 'settings']).optional(), paperPath: key.optional(), vaultId: key.optional() }).strict(),
       annotations: { readOnlyHint: true },
       _meta: { ui: { resourceUri: URI, visibility: appOnly ? ['app'] : ['model', 'app'] }, 'openai/ui': name === 'library_open' ? { entrypoints: [{ type: 'thread' }] } : {} },
     }, async (input) => ({ content: [], structuredContent: { ok: true, data: { ...input, view: name === 'settings_open' ? 'settings' : input.view ?? 'library' } } }));
