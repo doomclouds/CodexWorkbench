@@ -4585,7 +4585,7 @@ function isRef(value) {
 function cloneIssues(issues) {
   return issues.map((iss) => iss.path ? { ...iss, path: iss.path.slice() } : { ...iss });
 }
-function isRecursive(inst, stack, resolve4) {
+function isRecursive(inst, stack, resolve5) {
   const cached2 = recursive.get(inst);
   if (cached2 !== void 0)
     return cached2 ? PROVEN : NONE;
@@ -4595,7 +4595,7 @@ function isRecursive(inst, stack, resolve4) {
   let result = NONE;
   const check2 = (child) => {
     if (result !== PROVEN && child?._zod) {
-      const answer = isRecursive(child, stack, resolve4);
+      const answer = isRecursive(child, stack, resolve5);
       if (answer > result)
         result = answer;
     }
@@ -4606,7 +4606,7 @@ function isRecursive(inst, stack, resolve4) {
       const desc = Object.getOwnPropertyDescriptor(sh, key2);
       if (spread && !desc.enumerable)
         continue;
-      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve4) : NONE;
+      const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve5) : NONE;
       if (child > answer)
         answer = child;
     }
@@ -4670,7 +4670,7 @@ function isRecursive(inst, stack, resolve4) {
       break;
     // `$ZodLazy` caches its inner on the def, so a resolved edge is followed exactly
     case "lazy": {
-      const inner = def._cachedInner ?? (resolve4 ? inst._zod.innerType : void 0);
+      const inner = def._cachedInner ?? (resolve5 ? inst._zod.innerType : void 0);
       merge2(inner ? isRecursive(inner, stack, false) : ASSUMED);
       break;
     }
@@ -28426,7 +28426,7 @@ var init_protocol = __esm({
               return;
             }
             const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-            await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+            await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
             options?.signal?.throwIfAborted();
           }
         } catch (error62) {
@@ -28443,7 +28443,7 @@ var init_protocol = __esm({
        */
       request(request, resultSchema, options) {
         const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-        return new Promise((resolve4, reject) => {
+        return new Promise((resolve5, reject) => {
           const earlyReject = (error62) => {
             reject(error62);
           };
@@ -28521,7 +28521,7 @@ var init_protocol = __esm({
               if (!parseResult.success) {
                 reject(parseResult.error);
               } else {
-                resolve4(parseResult.data);
+                resolve5(parseResult.data);
               }
             } catch (error62) {
               reject(error62);
@@ -28783,12 +28783,12 @@ var init_protocol = __esm({
           }
         } catch {
         }
-        return new Promise((resolve4, reject) => {
+        return new Promise((resolve5, reject) => {
           if (signal.aborted) {
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
             return;
           }
-          const timeoutId = setTimeout(resolve4, interval);
+          const timeoutId = setTimeout(resolve5, interval);
           signal.addEventListener("abort", () => {
             clearTimeout(timeoutId);
             reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -31815,7 +31815,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve4.call(this, root, ref);
+      let _sch = resolve5.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a3 = root.localRefs) === null || _a3 === void 0 ? void 0 : _a3[ref];
         const { schemaId } = this.opts;
@@ -31842,7 +31842,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve4(root, ref) {
+    function resolve5(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -32706,7 +32706,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve4(baseURI, relativeURI, options) {
+    function resolve5(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const {
         parsed: baseParsed,
@@ -33097,7 +33097,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve4,
+      resolve: resolve5,
       resolveComponent,
       equal,
       serialize,
@@ -38676,6 +38676,1583 @@ var init_streamableHttp = __esm({
   }
 });
 
+// ../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/polyfills.js
+var require_polyfills = __commonJS({
+  "../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/polyfills.js"(exports, module) {
+    var constants = __require("constants");
+    var origCwd = process.cwd;
+    var cwd = null;
+    var platform = process.env.GRACEFUL_FS_PLATFORM || process.platform;
+    process.cwd = function() {
+      if (!cwd)
+        cwd = origCwd.call(process);
+      return cwd;
+    };
+    try {
+      process.cwd();
+    } catch (er) {
+    }
+    if (typeof process.chdir === "function") {
+      chdir = process.chdir;
+      process.chdir = function(d2) {
+        cwd = null;
+        chdir.call(process, d2);
+      };
+      if (Object.setPrototypeOf) Object.setPrototypeOf(process.chdir, chdir);
+    }
+    var chdir;
+    module.exports = patch2;
+    function patch2(fs) {
+      if (constants.hasOwnProperty("O_SYMLINK") && process.version.match(/^v0\.6\.[0-2]|^v0\.5\./)) {
+        patchLchmod(fs);
+      }
+      if (!fs.lutimes) {
+        patchLutimes(fs);
+      }
+      fs.chown = chownFix(fs.chown);
+      fs.fchown = chownFix(fs.fchown);
+      fs.lchown = chownFix(fs.lchown);
+      fs.chmod = chmodFix(fs.chmod);
+      fs.fchmod = chmodFix(fs.fchmod);
+      fs.lchmod = chmodFix(fs.lchmod);
+      fs.chownSync = chownFixSync(fs.chownSync);
+      fs.fchownSync = chownFixSync(fs.fchownSync);
+      fs.lchownSync = chownFixSync(fs.lchownSync);
+      fs.chmodSync = chmodFixSync(fs.chmodSync);
+      fs.fchmodSync = chmodFixSync(fs.fchmodSync);
+      fs.lchmodSync = chmodFixSync(fs.lchmodSync);
+      fs.stat = statFix(fs.stat);
+      fs.fstat = statFix(fs.fstat);
+      fs.lstat = statFix(fs.lstat);
+      fs.statSync = statFixSync(fs.statSync);
+      fs.fstatSync = statFixSync(fs.fstatSync);
+      fs.lstatSync = statFixSync(fs.lstatSync);
+      if (fs.chmod && !fs.lchmod) {
+        fs.lchmod = function(path, mode, cb) {
+          if (cb) process.nextTick(cb);
+        };
+        fs.lchmodSync = function() {
+        };
+      }
+      if (fs.chown && !fs.lchown) {
+        fs.lchown = function(path, uid, gid, cb) {
+          if (cb) process.nextTick(cb);
+        };
+        fs.lchownSync = function() {
+        };
+      }
+      if (platform === "win32") {
+        fs.rename = typeof fs.rename !== "function" ? fs.rename : (function(fs$rename) {
+          function rename3(from, to, cb) {
+            var start = Date.now();
+            var backoff = 0;
+            fs$rename(from, to, function CB(er) {
+              if (er && (er.code === "EACCES" || er.code === "EPERM" || er.code === "EBUSY") && Date.now() - start < 6e4) {
+                setTimeout(function() {
+                  fs.stat(to, function(stater, st) {
+                    if (stater && stater.code === "ENOENT")
+                      fs$rename(from, to, CB);
+                    else
+                      cb(er);
+                  });
+                }, backoff);
+                if (backoff < 100)
+                  backoff += 10;
+                return;
+              }
+              if (cb) cb(er);
+            });
+          }
+          if (Object.setPrototypeOf) Object.setPrototypeOf(rename3, fs$rename);
+          return rename3;
+        })(fs.rename);
+      }
+      fs.read = typeof fs.read !== "function" ? fs.read : (function(fs$read) {
+        function read(fd, buffer, offset, length, position, callback_) {
+          var callback;
+          if (callback_ && typeof callback_ === "function") {
+            var eagCounter = 0;
+            callback = function(er, _2, __) {
+              if (er && er.code === "EAGAIN" && eagCounter < 10) {
+                eagCounter++;
+                return fs$read.call(fs, fd, buffer, offset, length, position, callback);
+              }
+              callback_.apply(this, arguments);
+            };
+          }
+          return fs$read.call(fs, fd, buffer, offset, length, position, callback);
+        }
+        if (Object.setPrototypeOf) Object.setPrototypeOf(read, fs$read);
+        return read;
+      })(fs.read);
+      fs.readSync = typeof fs.readSync !== "function" ? fs.readSync : /* @__PURE__ */ (function(fs$readSync) {
+        return function(fd, buffer, offset, length, position) {
+          var eagCounter = 0;
+          while (true) {
+            try {
+              return fs$readSync.call(fs, fd, buffer, offset, length, position);
+            } catch (er) {
+              if (er.code === "EAGAIN" && eagCounter < 10) {
+                eagCounter++;
+                continue;
+              }
+              throw er;
+            }
+          }
+        };
+      })(fs.readSync);
+      function patchLchmod(fs2) {
+        fs2.lchmod = function(path, mode, callback) {
+          fs2.open(
+            path,
+            constants.O_WRONLY | constants.O_SYMLINK,
+            mode,
+            function(err, fd) {
+              if (err) {
+                if (callback) callback(err);
+                return;
+              }
+              fs2.fchmod(fd, mode, function(err2) {
+                fs2.close(fd, function(err22) {
+                  if (callback) callback(err2 || err22);
+                });
+              });
+            }
+          );
+        };
+        fs2.lchmodSync = function(path, mode) {
+          var fd = fs2.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode);
+          var threw = true;
+          var ret;
+          try {
+            ret = fs2.fchmodSync(fd, mode);
+            threw = false;
+          } finally {
+            if (threw) {
+              try {
+                fs2.closeSync(fd);
+              } catch (er) {
+              }
+            } else {
+              fs2.closeSync(fd);
+            }
+          }
+          return ret;
+        };
+      }
+      function patchLutimes(fs2) {
+        if (constants.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
+          fs2.lutimes = function(path, at, mt, cb) {
+            fs2.open(path, constants.O_SYMLINK, function(er, fd) {
+              if (er) {
+                if (cb) cb(er);
+                return;
+              }
+              fs2.futimes(fd, at, mt, function(er2) {
+                fs2.close(fd, function(er22) {
+                  if (cb) cb(er2 || er22);
+                });
+              });
+            });
+          };
+          fs2.lutimesSync = function(path, at, mt) {
+            var fd = fs2.openSync(path, constants.O_SYMLINK);
+            var ret;
+            var threw = true;
+            try {
+              ret = fs2.futimesSync(fd, at, mt);
+              threw = false;
+            } finally {
+              if (threw) {
+                try {
+                  fs2.closeSync(fd);
+                } catch (er) {
+                }
+              } else {
+                fs2.closeSync(fd);
+              }
+            }
+            return ret;
+          };
+        } else if (fs2.futimes) {
+          fs2.lutimes = function(_a3, _b, _c, cb) {
+            if (cb) process.nextTick(cb);
+          };
+          fs2.lutimesSync = function() {
+          };
+        }
+      }
+      function chmodFix(orig) {
+        if (!orig) return orig;
+        return function(target, mode, cb) {
+          return orig.call(fs, target, mode, function(er) {
+            if (chownErOk(er)) er = null;
+            if (cb) cb.apply(this, arguments);
+          });
+        };
+      }
+      function chmodFixSync(orig) {
+        if (!orig) return orig;
+        return function(target, mode) {
+          try {
+            return orig.call(fs, target, mode);
+          } catch (er) {
+            if (!chownErOk(er)) throw er;
+          }
+        };
+      }
+      function chownFix(orig) {
+        if (!orig) return orig;
+        return function(target, uid, gid, cb) {
+          return orig.call(fs, target, uid, gid, function(er) {
+            if (chownErOk(er)) er = null;
+            if (cb) cb.apply(this, arguments);
+          });
+        };
+      }
+      function chownFixSync(orig) {
+        if (!orig) return orig;
+        return function(target, uid, gid) {
+          try {
+            return orig.call(fs, target, uid, gid);
+          } catch (er) {
+            if (!chownErOk(er)) throw er;
+          }
+        };
+      }
+      function statFix(orig) {
+        if (!orig) return orig;
+        return function(target, options, cb) {
+          if (typeof options === "function") {
+            cb = options;
+            options = null;
+          }
+          function callback(er, stats) {
+            if (stats) {
+              if (stats.uid < 0) stats.uid += 4294967296;
+              if (stats.gid < 0) stats.gid += 4294967296;
+            }
+            if (cb) cb.apply(this, arguments);
+          }
+          return options ? orig.call(fs, target, options, callback) : orig.call(fs, target, callback);
+        };
+      }
+      function statFixSync(orig) {
+        if (!orig) return orig;
+        return function(target, options) {
+          var stats = options ? orig.call(fs, target, options) : orig.call(fs, target);
+          if (stats) {
+            if (stats.uid < 0) stats.uid += 4294967296;
+            if (stats.gid < 0) stats.gid += 4294967296;
+          }
+          return stats;
+        };
+      }
+      function chownErOk(er) {
+        if (!er)
+          return true;
+        if (er.code === "ENOSYS")
+          return true;
+        var nonroot = !process.getuid || process.getuid() !== 0;
+        if (nonroot) {
+          if (er.code === "EINVAL" || er.code === "EPERM")
+            return true;
+        }
+        return false;
+      }
+    }
+  }
+});
+
+// ../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/legacy-streams.js
+var require_legacy_streams = __commonJS({
+  "../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/legacy-streams.js"(exports, module) {
+    var Stream = __require("stream").Stream;
+    module.exports = legacy;
+    function legacy(fs) {
+      return {
+        ReadStream,
+        WriteStream
+      };
+      function ReadStream(path, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path, options);
+        Stream.call(this);
+        var self = this;
+        this.path = path;
+        this.fd = null;
+        this.readable = true;
+        this.paused = false;
+        this.flags = "r";
+        this.mode = 438;
+        this.bufferSize = 64 * 1024;
+        options = options || {};
+        var keys = Object.keys(options);
+        for (var index = 0, length = keys.length; index < length; index++) {
+          var key2 = keys[index];
+          this[key2] = options[key2];
+        }
+        if (this.encoding) this.setEncoding(this.encoding);
+        if (this.start !== void 0) {
+          if ("number" !== typeof this.start) {
+            throw TypeError("start must be a Number");
+          }
+          if (this.end === void 0) {
+            this.end = Infinity;
+          } else if ("number" !== typeof this.end) {
+            throw TypeError("end must be a Number");
+          }
+          if (this.start > this.end) {
+            throw new Error("start must be <= end");
+          }
+          this.pos = this.start;
+        }
+        if (this.fd !== null) {
+          process.nextTick(function() {
+            self._read();
+          });
+          return;
+        }
+        fs.open(this.path, this.flags, this.mode, function(err, fd) {
+          if (err) {
+            self.emit("error", err);
+            self.readable = false;
+            return;
+          }
+          self.fd = fd;
+          self.emit("open", fd);
+          self._read();
+        });
+      }
+      function WriteStream(path, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path, options);
+        Stream.call(this);
+        this.path = path;
+        this.fd = null;
+        this.writable = true;
+        this.flags = "w";
+        this.encoding = "binary";
+        this.mode = 438;
+        this.bytesWritten = 0;
+        options = options || {};
+        var keys = Object.keys(options);
+        for (var index = 0, length = keys.length; index < length; index++) {
+          var key2 = keys[index];
+          this[key2] = options[key2];
+        }
+        if (this.start !== void 0) {
+          if ("number" !== typeof this.start) {
+            throw TypeError("start must be a Number");
+          }
+          if (this.start < 0) {
+            throw new Error("start must be >= zero");
+          }
+          this.pos = this.start;
+        }
+        this.busy = false;
+        this._queue = [];
+        if (this.fd === null) {
+          this._open = fs.open;
+          this._queue.push([this._open, this.path, this.flags, this.mode, void 0]);
+          this.flush();
+        }
+      }
+    }
+  }
+});
+
+// ../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/clone.js
+var require_clone = __commonJS({
+  "../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/clone.js"(exports, module) {
+    "use strict";
+    module.exports = clone2;
+    var getPrototypeOf = Object.getPrototypeOf || function(obj) {
+      return obj.__proto__;
+    };
+    function clone2(obj) {
+      if (obj === null || typeof obj !== "object")
+        return obj;
+      if (obj instanceof Object)
+        var copy = { __proto__: getPrototypeOf(obj) };
+      else
+        var copy = /* @__PURE__ */ Object.create(null);
+      Object.getOwnPropertyNames(obj).forEach(function(key2) {
+        Object.defineProperty(copy, key2, Object.getOwnPropertyDescriptor(obj, key2));
+      });
+      return copy;
+    }
+  }
+});
+
+// ../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/graceful-fs.js
+var require_graceful_fs = __commonJS({
+  "../../node_modules/.pnpm/graceful-fs@4.2.11/node_modules/graceful-fs/graceful-fs.js"(exports, module) {
+    var fs = __require("fs");
+    var polyfills = require_polyfills();
+    var legacy = require_legacy_streams();
+    var clone2 = require_clone();
+    var util2 = __require("util");
+    var gracefulQueue;
+    var previousSymbol;
+    if (typeof Symbol === "function" && typeof Symbol.for === "function") {
+      gracefulQueue = /* @__PURE__ */ Symbol.for("graceful-fs.queue");
+      previousSymbol = /* @__PURE__ */ Symbol.for("graceful-fs.previous");
+    } else {
+      gracefulQueue = "___graceful-fs.queue";
+      previousSymbol = "___graceful-fs.previous";
+    }
+    function noop2() {
+    }
+    function publishQueue(context, queue2) {
+      Object.defineProperty(context, gracefulQueue, {
+        get: function() {
+          return queue2;
+        }
+      });
+    }
+    var debug = noop2;
+    if (util2.debuglog)
+      debug = util2.debuglog("gfs4");
+    else if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || ""))
+      debug = function() {
+        var m2 = util2.format.apply(util2, arguments);
+        m2 = "GFS4: " + m2.split(/\n/).join("\nGFS4: ");
+        console.error(m2);
+      };
+    if (!fs[gracefulQueue]) {
+      queue = global[gracefulQueue] || [];
+      publishQueue(fs, queue);
+      fs.close = (function(fs$close) {
+        function close(fd, cb) {
+          return fs$close.call(fs, fd, function(err) {
+            if (!err) {
+              resetQueue();
+            }
+            if (typeof cb === "function")
+              cb.apply(this, arguments);
+          });
+        }
+        Object.defineProperty(close, previousSymbol, {
+          value: fs$close
+        });
+        return close;
+      })(fs.close);
+      fs.closeSync = (function(fs$closeSync) {
+        function closeSync(fd) {
+          fs$closeSync.apply(fs, arguments);
+          resetQueue();
+        }
+        Object.defineProperty(closeSync, previousSymbol, {
+          value: fs$closeSync
+        });
+        return closeSync;
+      })(fs.closeSync);
+      if (/\bgfs4\b/i.test(process.env.NODE_DEBUG || "")) {
+        process.on("exit", function() {
+          debug(fs[gracefulQueue]);
+          __require("assert").equal(fs[gracefulQueue].length, 0);
+        });
+      }
+    }
+    var queue;
+    if (!global[gracefulQueue]) {
+      publishQueue(global, fs[gracefulQueue]);
+    }
+    module.exports = patch2(clone2(fs));
+    if (process.env.TEST_GRACEFUL_FS_GLOBAL_PATCH && !fs.__patched) {
+      module.exports = patch2(fs);
+      fs.__patched = true;
+    }
+    function patch2(fs2) {
+      polyfills(fs2);
+      fs2.gracefulify = patch2;
+      fs2.createReadStream = createReadStream;
+      fs2.createWriteStream = createWriteStream;
+      var fs$readFile = fs2.readFile;
+      fs2.readFile = readFile8;
+      function readFile8(path, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        return go$readFile(path, options, cb);
+        function go$readFile(path2, options2, cb2, startTime) {
+          return fs$readFile(path2, options2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$readFile, [path2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$writeFile = fs2.writeFile;
+      fs2.writeFile = writeFile6;
+      function writeFile6(path, data, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        return go$writeFile(path, data, options, cb);
+        function go$writeFile(path2, data2, options2, cb2, startTime) {
+          return fs$writeFile(path2, data2, options2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$writeFile, [path2, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$appendFile = fs2.appendFile;
+      if (fs$appendFile)
+        fs2.appendFile = appendFile;
+      function appendFile(path, data, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        return go$appendFile(path, data, options, cb);
+        function go$appendFile(path2, data2, options2, cb2, startTime) {
+          return fs$appendFile(path2, data2, options2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$appendFile, [path2, data2, options2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$copyFile = fs2.copyFile;
+      if (fs$copyFile)
+        fs2.copyFile = copyFile;
+      function copyFile(src, dest, flags, cb) {
+        if (typeof flags === "function") {
+          cb = flags;
+          flags = 0;
+        }
+        return go$copyFile(src, dest, flags, cb);
+        function go$copyFile(src2, dest2, flags2, cb2, startTime) {
+          return fs$copyFile(src2, dest2, flags2, function(err) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$copyFile, [src2, dest2, flags2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      var fs$readdir = fs2.readdir;
+      fs2.readdir = readdir4;
+      var noReaddirOptionVersions = /^v[0-5]\./;
+      function readdir4(path, options, cb) {
+        if (typeof options === "function")
+          cb = options, options = null;
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path2, options2, cb2, startTime) {
+          return fs$readdir(path2, fs$readdirCallback(
+            path2,
+            options2,
+            cb2,
+            startTime
+          ));
+        } : function go$readdir2(path2, options2, cb2, startTime) {
+          return fs$readdir(path2, options2, fs$readdirCallback(
+            path2,
+            options2,
+            cb2,
+            startTime
+          ));
+        };
+        return go$readdir(path, options, cb);
+        function fs$readdirCallback(path2, options2, cb2, startTime) {
+          return function(err, files) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([
+                go$readdir,
+                [path2, options2, cb2],
+                err,
+                startTime || Date.now(),
+                Date.now()
+              ]);
+            else {
+              if (files && files.sort)
+                files.sort();
+              if (typeof cb2 === "function")
+                cb2.call(this, err, files);
+            }
+          };
+        }
+      }
+      if (process.version.substr(0, 4) === "v0.8") {
+        var legStreams = legacy(fs2);
+        ReadStream = legStreams.ReadStream;
+        WriteStream = legStreams.WriteStream;
+      }
+      var fs$ReadStream = fs2.ReadStream;
+      if (fs$ReadStream) {
+        ReadStream.prototype = Object.create(fs$ReadStream.prototype);
+        ReadStream.prototype.open = ReadStream$open;
+      }
+      var fs$WriteStream = fs2.WriteStream;
+      if (fs$WriteStream) {
+        WriteStream.prototype = Object.create(fs$WriteStream.prototype);
+        WriteStream.prototype.open = WriteStream$open;
+      }
+      Object.defineProperty(fs2, "ReadStream", {
+        get: function() {
+          return ReadStream;
+        },
+        set: function(val) {
+          ReadStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      Object.defineProperty(fs2, "WriteStream", {
+        get: function() {
+          return WriteStream;
+        },
+        set: function(val) {
+          WriteStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      var FileReadStream = ReadStream;
+      Object.defineProperty(fs2, "FileReadStream", {
+        get: function() {
+          return FileReadStream;
+        },
+        set: function(val) {
+          FileReadStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      var FileWriteStream = WriteStream;
+      Object.defineProperty(fs2, "FileWriteStream", {
+        get: function() {
+          return FileWriteStream;
+        },
+        set: function(val) {
+          FileWriteStream = val;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      function ReadStream(path, options) {
+        if (this instanceof ReadStream)
+          return fs$ReadStream.apply(this, arguments), this;
+        else
+          return ReadStream.apply(Object.create(ReadStream.prototype), arguments);
+      }
+      function ReadStream$open() {
+        var that = this;
+        open6(that.path, that.flags, that.mode, function(err, fd) {
+          if (err) {
+            if (that.autoClose)
+              that.destroy();
+            that.emit("error", err);
+          } else {
+            that.fd = fd;
+            that.emit("open", fd);
+            that.read();
+          }
+        });
+      }
+      function WriteStream(path, options) {
+        if (this instanceof WriteStream)
+          return fs$WriteStream.apply(this, arguments), this;
+        else
+          return WriteStream.apply(Object.create(WriteStream.prototype), arguments);
+      }
+      function WriteStream$open() {
+        var that = this;
+        open6(that.path, that.flags, that.mode, function(err, fd) {
+          if (err) {
+            that.destroy();
+            that.emit("error", err);
+          } else {
+            that.fd = fd;
+            that.emit("open", fd);
+          }
+        });
+      }
+      function createReadStream(path, options) {
+        return new fs2.ReadStream(path, options);
+      }
+      function createWriteStream(path, options) {
+        return new fs2.WriteStream(path, options);
+      }
+      var fs$open = fs2.open;
+      fs2.open = open6;
+      function open6(path, flags, mode, cb) {
+        if (typeof mode === "function")
+          cb = mode, mode = null;
+        return go$open(path, flags, mode, cb);
+        function go$open(path2, flags2, mode2, cb2, startTime) {
+          return fs$open(path2, flags2, mode2, function(err, fd) {
+            if (err && (err.code === "EMFILE" || err.code === "ENFILE"))
+              enqueue([go$open, [path2, flags2, mode2, cb2], err, startTime || Date.now(), Date.now()]);
+            else {
+              if (typeof cb2 === "function")
+                cb2.apply(this, arguments);
+            }
+          });
+        }
+      }
+      return fs2;
+    }
+    function enqueue(elem) {
+      debug("ENQUEUE", elem[0].name, elem[1]);
+      fs[gracefulQueue].push(elem);
+      retry();
+    }
+    var retryTimer;
+    function resetQueue() {
+      var now = Date.now();
+      for (var i = 0; i < fs[gracefulQueue].length; ++i) {
+        if (fs[gracefulQueue][i].length > 2) {
+          fs[gracefulQueue][i][3] = now;
+          fs[gracefulQueue][i][4] = now;
+        }
+      }
+      retry();
+    }
+    function retry() {
+      clearTimeout(retryTimer);
+      retryTimer = void 0;
+      if (fs[gracefulQueue].length === 0)
+        return;
+      var elem = fs[gracefulQueue].shift();
+      var fn = elem[0];
+      var args = elem[1];
+      var err = elem[2];
+      var startTime = elem[3];
+      var lastTime = elem[4];
+      if (startTime === void 0) {
+        debug("RETRY", fn.name, args);
+        fn.apply(null, args);
+      } else if (Date.now() - startTime >= 6e4) {
+        debug("TIMEOUT", fn.name, args);
+        var cb = args.pop();
+        if (typeof cb === "function")
+          cb.call(null, err);
+      } else {
+        var sinceAttempt = Date.now() - lastTime;
+        var sinceStart = Math.max(lastTime - startTime, 1);
+        var desiredDelay = Math.min(sinceStart * 1.2, 100);
+        if (sinceAttempt >= desiredDelay) {
+          debug("RETRY", fn.name, args);
+          fn.apply(null, args.concat([startTime]));
+        } else {
+          fs[gracefulQueue].push(elem);
+        }
+      }
+      if (retryTimer === void 0) {
+        retryTimer = setTimeout(retry, 0);
+      }
+    }
+  }
+});
+
+// ../../node_modules/.pnpm/retry@0.12.0/node_modules/retry/lib/retry_operation.js
+var require_retry_operation = __commonJS({
+  "../../node_modules/.pnpm/retry@0.12.0/node_modules/retry/lib/retry_operation.js"(exports, module) {
+    function RetryOperation(timeouts, options) {
+      if (typeof options === "boolean") {
+        options = { forever: options };
+      }
+      this._originalTimeouts = JSON.parse(JSON.stringify(timeouts));
+      this._timeouts = timeouts;
+      this._options = options || {};
+      this._maxRetryTime = options && options.maxRetryTime || Infinity;
+      this._fn = null;
+      this._errors = [];
+      this._attempts = 1;
+      this._operationTimeout = null;
+      this._operationTimeoutCb = null;
+      this._timeout = null;
+      this._operationStart = null;
+      if (this._options.forever) {
+        this._cachedTimeouts = this._timeouts.slice(0);
+      }
+    }
+    module.exports = RetryOperation;
+    RetryOperation.prototype.reset = function() {
+      this._attempts = 1;
+      this._timeouts = this._originalTimeouts;
+    };
+    RetryOperation.prototype.stop = function() {
+      if (this._timeout) {
+        clearTimeout(this._timeout);
+      }
+      this._timeouts = [];
+      this._cachedTimeouts = null;
+    };
+    RetryOperation.prototype.retry = function(err) {
+      if (this._timeout) {
+        clearTimeout(this._timeout);
+      }
+      if (!err) {
+        return false;
+      }
+      var currentTime = (/* @__PURE__ */ new Date()).getTime();
+      if (err && currentTime - this._operationStart >= this._maxRetryTime) {
+        this._errors.unshift(new Error("RetryOperation timeout occurred"));
+        return false;
+      }
+      this._errors.push(err);
+      var timeout = this._timeouts.shift();
+      if (timeout === void 0) {
+        if (this._cachedTimeouts) {
+          this._errors.splice(this._errors.length - 1, this._errors.length);
+          this._timeouts = this._cachedTimeouts.slice(0);
+          timeout = this._timeouts.shift();
+        } else {
+          return false;
+        }
+      }
+      var self = this;
+      var timer = setTimeout(function() {
+        self._attempts++;
+        if (self._operationTimeoutCb) {
+          self._timeout = setTimeout(function() {
+            self._operationTimeoutCb(self._attempts);
+          }, self._operationTimeout);
+          if (self._options.unref) {
+            self._timeout.unref();
+          }
+        }
+        self._fn(self._attempts);
+      }, timeout);
+      if (this._options.unref) {
+        timer.unref();
+      }
+      return true;
+    };
+    RetryOperation.prototype.attempt = function(fn, timeoutOps) {
+      this._fn = fn;
+      if (timeoutOps) {
+        if (timeoutOps.timeout) {
+          this._operationTimeout = timeoutOps.timeout;
+        }
+        if (timeoutOps.cb) {
+          this._operationTimeoutCb = timeoutOps.cb;
+        }
+      }
+      var self = this;
+      if (this._operationTimeoutCb) {
+        this._timeout = setTimeout(function() {
+          self._operationTimeoutCb();
+        }, self._operationTimeout);
+      }
+      this._operationStart = (/* @__PURE__ */ new Date()).getTime();
+      this._fn(this._attempts);
+    };
+    RetryOperation.prototype.try = function(fn) {
+      console.log("Using RetryOperation.try() is deprecated");
+      this.attempt(fn);
+    };
+    RetryOperation.prototype.start = function(fn) {
+      console.log("Using RetryOperation.start() is deprecated");
+      this.attempt(fn);
+    };
+    RetryOperation.prototype.start = RetryOperation.prototype.try;
+    RetryOperation.prototype.errors = function() {
+      return this._errors;
+    };
+    RetryOperation.prototype.attempts = function() {
+      return this._attempts;
+    };
+    RetryOperation.prototype.mainError = function() {
+      if (this._errors.length === 0) {
+        return null;
+      }
+      var counts = {};
+      var mainError = null;
+      var mainErrorCount = 0;
+      for (var i = 0; i < this._errors.length; i++) {
+        var error62 = this._errors[i];
+        var message = error62.message;
+        var count = (counts[message] || 0) + 1;
+        counts[message] = count;
+        if (count >= mainErrorCount) {
+          mainError = error62;
+          mainErrorCount = count;
+        }
+      }
+      return mainError;
+    };
+  }
+});
+
+// ../../node_modules/.pnpm/retry@0.12.0/node_modules/retry/lib/retry.js
+var require_retry = __commonJS({
+  "../../node_modules/.pnpm/retry@0.12.0/node_modules/retry/lib/retry.js"(exports) {
+    var RetryOperation = require_retry_operation();
+    exports.operation = function(options) {
+      var timeouts = exports.timeouts(options);
+      return new RetryOperation(timeouts, {
+        forever: options && options.forever,
+        unref: options && options.unref,
+        maxRetryTime: options && options.maxRetryTime
+      });
+    };
+    exports.timeouts = function(options) {
+      if (options instanceof Array) {
+        return [].concat(options);
+      }
+      var opts = {
+        retries: 10,
+        factor: 2,
+        minTimeout: 1 * 1e3,
+        maxTimeout: Infinity,
+        randomize: false
+      };
+      for (var key2 in options) {
+        opts[key2] = options[key2];
+      }
+      if (opts.minTimeout > opts.maxTimeout) {
+        throw new Error("minTimeout is greater than maxTimeout");
+      }
+      var timeouts = [];
+      for (var i = 0; i < opts.retries; i++) {
+        timeouts.push(this.createTimeout(i, opts));
+      }
+      if (options && options.forever && !timeouts.length) {
+        timeouts.push(this.createTimeout(i, opts));
+      }
+      timeouts.sort(function(a, b) {
+        return a - b;
+      });
+      return timeouts;
+    };
+    exports.createTimeout = function(attempt, opts) {
+      var random2 = opts.randomize ? Math.random() + 1 : 1;
+      var timeout = Math.round(random2 * opts.minTimeout * Math.pow(opts.factor, attempt));
+      timeout = Math.min(timeout, opts.maxTimeout);
+      return timeout;
+    };
+    exports.wrap = function(obj, options, methods) {
+      if (options instanceof Array) {
+        methods = options;
+        options = null;
+      }
+      if (!methods) {
+        methods = [];
+        for (var key2 in obj) {
+          if (typeof obj[key2] === "function") {
+            methods.push(key2);
+          }
+        }
+      }
+      for (var i = 0; i < methods.length; i++) {
+        var method = methods[i];
+        var original = obj[method];
+        obj[method] = function retryWrapper(original2) {
+          var op = exports.operation(options);
+          var args = Array.prototype.slice.call(arguments, 1);
+          var callback = args.pop();
+          args.push(function(err) {
+            if (op.retry(err)) {
+              return;
+            }
+            if (err) {
+              arguments[0] = op.mainError();
+            }
+            callback.apply(this, arguments);
+          });
+          op.attempt(function() {
+            original2.apply(obj, args);
+          });
+        }.bind(obj, original);
+        obj[method].options = options;
+      }
+    };
+  }
+});
+
+// ../../node_modules/.pnpm/retry@0.12.0/node_modules/retry/index.js
+var require_retry2 = __commonJS({
+  "../../node_modules/.pnpm/retry@0.12.0/node_modules/retry/index.js"(exports, module) {
+    module.exports = require_retry();
+  }
+});
+
+// ../../node_modules/.pnpm/signal-exit@3.0.7/node_modules/signal-exit/signals.js
+var require_signals = __commonJS({
+  "../../node_modules/.pnpm/signal-exit@3.0.7/node_modules/signal-exit/signals.js"(exports, module) {
+    module.exports = [
+      "SIGABRT",
+      "SIGALRM",
+      "SIGHUP",
+      "SIGINT",
+      "SIGTERM"
+    ];
+    if (process.platform !== "win32") {
+      module.exports.push(
+        "SIGVTALRM",
+        "SIGXCPU",
+        "SIGXFSZ",
+        "SIGUSR2",
+        "SIGTRAP",
+        "SIGSYS",
+        "SIGQUIT",
+        "SIGIOT"
+        // should detect profiler and enable/disable accordingly.
+        // see #21
+        // 'SIGPROF'
+      );
+    }
+    if (process.platform === "linux") {
+      module.exports.push(
+        "SIGIO",
+        "SIGPOLL",
+        "SIGPWR",
+        "SIGSTKFLT",
+        "SIGUNUSED"
+      );
+    }
+  }
+});
+
+// ../../node_modules/.pnpm/signal-exit@3.0.7/node_modules/signal-exit/index.js
+var require_signal_exit = __commonJS({
+  "../../node_modules/.pnpm/signal-exit@3.0.7/node_modules/signal-exit/index.js"(exports, module) {
+    var process3 = global.process;
+    var processOk = function(process4) {
+      return process4 && typeof process4 === "object" && typeof process4.removeListener === "function" && typeof process4.emit === "function" && typeof process4.reallyExit === "function" && typeof process4.listeners === "function" && typeof process4.kill === "function" && typeof process4.pid === "number" && typeof process4.on === "function";
+    };
+    if (!processOk(process3)) {
+      module.exports = function() {
+        return function() {
+        };
+      };
+    } else {
+      assert2 = __require("assert");
+      signals = require_signals();
+      isWin = /^win/i.test(process3.platform);
+      EE = __require("events");
+      if (typeof EE !== "function") {
+        EE = EE.EventEmitter;
+      }
+      if (process3.__signal_exit_emitter__) {
+        emitter = process3.__signal_exit_emitter__;
+      } else {
+        emitter = process3.__signal_exit_emitter__ = new EE();
+        emitter.count = 0;
+        emitter.emitted = {};
+      }
+      if (!emitter.infinite) {
+        emitter.setMaxListeners(Infinity);
+        emitter.infinite = true;
+      }
+      module.exports = function(cb, opts) {
+        if (!processOk(global.process)) {
+          return function() {
+          };
+        }
+        assert2.equal(typeof cb, "function", "a callback must be provided for exit handler");
+        if (loaded === false) {
+          load();
+        }
+        var ev = "exit";
+        if (opts && opts.alwaysLast) {
+          ev = "afterexit";
+        }
+        var remove = function() {
+          emitter.removeListener(ev, cb);
+          if (emitter.listeners("exit").length === 0 && emitter.listeners("afterexit").length === 0) {
+            unload();
+          }
+        };
+        emitter.on(ev, cb);
+        return remove;
+      };
+      unload = function unload2() {
+        if (!loaded || !processOk(global.process)) {
+          return;
+        }
+        loaded = false;
+        signals.forEach(function(sig) {
+          try {
+            process3.removeListener(sig, sigListeners[sig]);
+          } catch (er) {
+          }
+        });
+        process3.emit = originalProcessEmit;
+        process3.reallyExit = originalProcessReallyExit;
+        emitter.count -= 1;
+      };
+      module.exports.unload = unload;
+      emit = function emit2(event, code, signal) {
+        if (emitter.emitted[event]) {
+          return;
+        }
+        emitter.emitted[event] = true;
+        emitter.emit(event, code, signal);
+      };
+      sigListeners = {};
+      signals.forEach(function(sig) {
+        sigListeners[sig] = function listener() {
+          if (!processOk(global.process)) {
+            return;
+          }
+          var listeners = process3.listeners(sig);
+          if (listeners.length === emitter.count) {
+            unload();
+            emit("exit", null, sig);
+            emit("afterexit", null, sig);
+            if (isWin && sig === "SIGHUP") {
+              sig = "SIGINT";
+            }
+            process3.kill(process3.pid, sig);
+          }
+        };
+      });
+      module.exports.signals = function() {
+        return signals;
+      };
+      loaded = false;
+      load = function load2() {
+        if (loaded || !processOk(global.process)) {
+          return;
+        }
+        loaded = true;
+        emitter.count += 1;
+        signals = signals.filter(function(sig) {
+          try {
+            process3.on(sig, sigListeners[sig]);
+            return true;
+          } catch (er) {
+            return false;
+          }
+        });
+        process3.emit = processEmit;
+        process3.reallyExit = processReallyExit;
+      };
+      module.exports.load = load;
+      originalProcessReallyExit = process3.reallyExit;
+      processReallyExit = function processReallyExit2(code) {
+        if (!processOk(global.process)) {
+          return;
+        }
+        process3.exitCode = code || /* istanbul ignore next */
+        0;
+        emit("exit", process3.exitCode, null);
+        emit("afterexit", process3.exitCode, null);
+        originalProcessReallyExit.call(process3, process3.exitCode);
+      };
+      originalProcessEmit = process3.emit;
+      processEmit = function processEmit2(ev, arg) {
+        if (ev === "exit" && processOk(global.process)) {
+          if (arg !== void 0) {
+            process3.exitCode = arg;
+          }
+          var ret = originalProcessEmit.apply(this, arguments);
+          emit("exit", process3.exitCode, null);
+          emit("afterexit", process3.exitCode, null);
+          return ret;
+        } else {
+          return originalProcessEmit.apply(this, arguments);
+        }
+      };
+    }
+    var assert2;
+    var signals;
+    var isWin;
+    var EE;
+    var emitter;
+    var unload;
+    var emit;
+    var sigListeners;
+    var loaded;
+    var load;
+    var originalProcessReallyExit;
+    var processReallyExit;
+    var originalProcessEmit;
+    var processEmit;
+  }
+});
+
+// ../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/mtime-precision.js
+var require_mtime_precision = __commonJS({
+  "../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/mtime-precision.js"(exports, module) {
+    "use strict";
+    var cacheSymbol = /* @__PURE__ */ Symbol();
+    function probe(file2, fs, callback) {
+      const cachedPrecision = fs[cacheSymbol];
+      if (cachedPrecision) {
+        return fs.stat(file2, (err, stat7) => {
+          if (err) {
+            return callback(err);
+          }
+          callback(null, stat7.mtime, cachedPrecision);
+        });
+      }
+      const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
+      fs.utimes(file2, mtime, mtime, (err) => {
+        if (err) {
+          return callback(err);
+        }
+        fs.stat(file2, (err2, stat7) => {
+          if (err2) {
+            return callback(err2);
+          }
+          const precision = stat7.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
+          Object.defineProperty(fs, cacheSymbol, { value: precision });
+          callback(null, stat7.mtime, precision);
+        });
+      });
+    }
+    function getMtime(precision) {
+      let now = Date.now();
+      if (precision === "s") {
+        now = Math.ceil(now / 1e3) * 1e3;
+      }
+      return new Date(now);
+    }
+    module.exports.probe = probe;
+    module.exports.getMtime = getMtime;
+  }
+});
+
+// ../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/lockfile.js
+var require_lockfile = __commonJS({
+  "../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
+    "use strict";
+    var path = __require("path");
+    var fs = require_graceful_fs();
+    var retry = require_retry2();
+    var onExit = require_signal_exit();
+    var mtimePrecision = require_mtime_precision();
+    var locks = {};
+    function getLockFile(file2, options) {
+      return options.lockfilePath || `${file2}.lock`;
+    }
+    function resolveCanonicalPath(file2, options, callback) {
+      if (!options.realpath) {
+        return callback(null, path.resolve(file2));
+      }
+      options.fs.realpath(file2, callback);
+    }
+    function acquireLock(file2, options, callback) {
+      const lockfilePath = getLockFile(file2, options);
+      options.fs.mkdir(lockfilePath, (err) => {
+        if (!err) {
+          return mtimePrecision.probe(lockfilePath, options.fs, (err2, mtime, mtimePrecision2) => {
+            if (err2) {
+              options.fs.rmdir(lockfilePath, () => {
+              });
+              return callback(err2);
+            }
+            callback(null, mtime, mtimePrecision2);
+          });
+        }
+        if (err.code !== "EEXIST") {
+          return callback(err);
+        }
+        if (options.stale <= 0) {
+          return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
+        }
+        options.fs.stat(lockfilePath, (err2, stat7) => {
+          if (err2) {
+            if (err2.code === "ENOENT") {
+              return acquireLock(file2, { ...options, stale: 0 }, callback);
+            }
+            return callback(err2);
+          }
+          if (!isLockStale(stat7, options)) {
+            return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
+          }
+          removeLock(file2, options, (err3) => {
+            if (err3) {
+              return callback(err3);
+            }
+            acquireLock(file2, { ...options, stale: 0 }, callback);
+          });
+        });
+      });
+    }
+    function isLockStale(stat7, options) {
+      return stat7.mtime.getTime() < Date.now() - options.stale;
+    }
+    function removeLock(file2, options, callback) {
+      options.fs.rmdir(getLockFile(file2, options), (err) => {
+        if (err && err.code !== "ENOENT") {
+          return callback(err);
+        }
+        callback();
+      });
+    }
+    function updateLock(file2, options) {
+      const lock3 = locks[file2];
+      if (lock3.updateTimeout) {
+        return;
+      }
+      lock3.updateDelay = lock3.updateDelay || options.update;
+      lock3.updateTimeout = setTimeout(() => {
+        lock3.updateTimeout = null;
+        options.fs.stat(lock3.lockfilePath, (err, stat7) => {
+          const isOverThreshold = lock3.lastUpdate + options.stale < Date.now();
+          if (err) {
+            if (err.code === "ENOENT" || isOverThreshold) {
+              return setLockAsCompromised(file2, lock3, Object.assign(err, { code: "ECOMPROMISED" }));
+            }
+            lock3.updateDelay = 1e3;
+            return updateLock(file2, options);
+          }
+          const isMtimeOurs = lock3.mtime.getTime() === stat7.mtime.getTime();
+          if (!isMtimeOurs) {
+            return setLockAsCompromised(
+              file2,
+              lock3,
+              Object.assign(
+                new Error("Unable to update lock within the stale threshold"),
+                { code: "ECOMPROMISED" }
+              )
+            );
+          }
+          const mtime = mtimePrecision.getMtime(lock3.mtimePrecision);
+          options.fs.utimes(lock3.lockfilePath, mtime, mtime, (err2) => {
+            const isOverThreshold2 = lock3.lastUpdate + options.stale < Date.now();
+            if (lock3.released) {
+              return;
+            }
+            if (err2) {
+              if (err2.code === "ENOENT" || isOverThreshold2) {
+                return setLockAsCompromised(file2, lock3, Object.assign(err2, { code: "ECOMPROMISED" }));
+              }
+              lock3.updateDelay = 1e3;
+              return updateLock(file2, options);
+            }
+            lock3.mtime = mtime;
+            lock3.lastUpdate = Date.now();
+            lock3.updateDelay = null;
+            updateLock(file2, options);
+          });
+        });
+      }, lock3.updateDelay);
+      if (lock3.updateTimeout.unref) {
+        lock3.updateTimeout.unref();
+      }
+    }
+    function setLockAsCompromised(file2, lock3, err) {
+      lock3.released = true;
+      if (lock3.updateTimeout) {
+        clearTimeout(lock3.updateTimeout);
+      }
+      if (locks[file2] === lock3) {
+        delete locks[file2];
+      }
+      lock3.options.onCompromised(err);
+    }
+    function lock2(file2, options, callback) {
+      options = {
+        stale: 1e4,
+        update: null,
+        realpath: true,
+        retries: 0,
+        fs,
+        onCompromised: (err) => {
+          throw err;
+        },
+        ...options
+      };
+      options.retries = options.retries || 0;
+      options.retries = typeof options.retries === "number" ? { retries: options.retries } : options.retries;
+      options.stale = Math.max(options.stale || 0, 2e3);
+      options.update = options.update == null ? options.stale / 2 : options.update || 0;
+      options.update = Math.max(Math.min(options.update, options.stale / 2), 1e3);
+      resolveCanonicalPath(file2, options, (err, file3) => {
+        if (err) {
+          return callback(err);
+        }
+        const operation2 = retry.operation(options.retries);
+        operation2.attempt(() => {
+          acquireLock(file3, options, (err2, mtime, mtimePrecision2) => {
+            if (operation2.retry(err2)) {
+              return;
+            }
+            if (err2) {
+              return callback(operation2.mainError());
+            }
+            const lock3 = locks[file3] = {
+              lockfilePath: getLockFile(file3, options),
+              mtime,
+              mtimePrecision: mtimePrecision2,
+              options,
+              lastUpdate: Date.now()
+            };
+            updateLock(file3, options);
+            callback(null, (releasedCallback) => {
+              if (lock3.released) {
+                return releasedCallback && releasedCallback(Object.assign(new Error("Lock is already released"), { code: "ERELEASED" }));
+              }
+              unlock(file3, { ...options, realpath: false }, releasedCallback);
+            });
+          });
+        });
+      });
+    }
+    function unlock(file2, options, callback) {
+      options = {
+        fs,
+        realpath: true,
+        ...options
+      };
+      resolveCanonicalPath(file2, options, (err, file3) => {
+        if (err) {
+          return callback(err);
+        }
+        const lock3 = locks[file3];
+        if (!lock3) {
+          return callback(Object.assign(new Error("Lock is not acquired/owned by you"), { code: "ENOTACQUIRED" }));
+        }
+        lock3.updateTimeout && clearTimeout(lock3.updateTimeout);
+        lock3.released = true;
+        delete locks[file3];
+        removeLock(file3, options, callback);
+      });
+    }
+    function check2(file2, options, callback) {
+      options = {
+        stale: 1e4,
+        realpath: true,
+        fs,
+        ...options
+      };
+      options.stale = Math.max(options.stale || 0, 2e3);
+      resolveCanonicalPath(file2, options, (err, file3) => {
+        if (err) {
+          return callback(err);
+        }
+        options.fs.stat(getLockFile(file3, options), (err2, stat7) => {
+          if (err2) {
+            return err2.code === "ENOENT" ? callback(null, false) : callback(err2);
+          }
+          return callback(null, !isLockStale(stat7, options));
+        });
+      });
+    }
+    function getLocks() {
+      return locks;
+    }
+    onExit(() => {
+      for (const file2 in locks) {
+        const options = locks[file2].options;
+        try {
+          options.fs.rmdirSync(getLockFile(file2, options));
+        } catch (e) {
+        }
+      }
+    });
+    module.exports.lock = lock2;
+    module.exports.unlock = unlock;
+    module.exports.check = check2;
+    module.exports.getLocks = getLocks;
+  }
+});
+
+// ../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/adapter.js
+var require_adapter = __commonJS({
+  "../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/adapter.js"(exports, module) {
+    "use strict";
+    var fs = require_graceful_fs();
+    function createSyncFs(fs2) {
+      const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
+      const newFs = { ...fs2 };
+      methods.forEach((method) => {
+        newFs[method] = (...args) => {
+          const callback = args.pop();
+          let ret;
+          try {
+            ret = fs2[`${method}Sync`](...args);
+          } catch (err) {
+            return callback(err);
+          }
+          callback(null, ret);
+        };
+      });
+      return newFs;
+    }
+    function toPromise(method) {
+      return (...args) => new Promise((resolve5, reject) => {
+        args.push((err, result) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve5(result);
+          }
+        });
+        method(...args);
+      });
+    }
+    function toSync(method) {
+      return (...args) => {
+        let err;
+        let result;
+        args.push((_err, _result) => {
+          err = _err;
+          result = _result;
+        });
+        method(...args);
+        if (err) {
+          throw err;
+        }
+        return result;
+      };
+    }
+    function toSyncOptions(options) {
+      options = { ...options };
+      options.fs = createSyncFs(options.fs || fs);
+      if (typeof options.retries === "number" && options.retries > 0 || options.retries && typeof options.retries.retries === "number" && options.retries.retries > 0) {
+        throw Object.assign(new Error("Cannot use retries with the sync api"), { code: "ESYNC" });
+      }
+      return options;
+    }
+    module.exports = {
+      toPromise,
+      toSync,
+      toSyncOptions
+    };
+  }
+});
+
+// ../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/index.js
+var require_proper_lockfile = __commonJS({
+  "../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/index.js"(exports, module) {
+    "use strict";
+    var lockfile = require_lockfile();
+    var { toPromise, toSync, toSyncOptions } = require_adapter();
+    async function lock2(file2, options) {
+      const release = await toPromise(lockfile.lock)(file2, options);
+      return toPromise(release);
+    }
+    function lockSync(file2, options) {
+      const release = toSync(lockfile.lock)(file2, toSyncOptions(options));
+      return toSync(release);
+    }
+    function unlock(file2, options) {
+      return toPromise(lockfile.unlock)(file2, options);
+    }
+    function unlockSync(file2, options) {
+      return toSync(lockfile.unlock)(file2, toSyncOptions(options));
+    }
+    function check2(file2, options) {
+      return toPromise(lockfile.check)(file2, options);
+    }
+    function checkSync(file2, options) {
+      return toSync(lockfile.check)(file2, toSyncOptions(options));
+    }
+    module.exports = lock2;
+    module.exports.lock = lock2;
+    module.exports.unlock = unlock;
+    module.exports.lockSync = lockSync;
+    module.exports.unlockSync = unlockSync;
+    module.exports.check = check2;
+    module.exports.checkSync = checkSync;
+  }
+});
+
 // ../../node_modules/.pnpm/tslib@1.14.1/node_modules/tslib/tslib.es6.js
 var tslib_es6_exports = {};
 __export(tslib_es6_exports, {
@@ -38737,11 +40314,11 @@ function __metadata(metadataKey, metadataValue) {
 }
 function __awaiter(thisArg, _arguments, P2, generator) {
   function adopt(value) {
-    return value instanceof P2 ? value : new P2(function(resolve4) {
-      resolve4(value);
+    return value instanceof P2 ? value : new P2(function(resolve5) {
+      resolve5(value);
     });
   }
-  return new (P2 || (P2 = Promise))(function(resolve4, reject) {
+  return new (P2 || (P2 = Promise))(function(resolve5, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -38757,7 +40334,7 @@ function __awaiter(thisArg, _arguments, P2, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve4(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve5(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -38935,14 +40512,14 @@ function __asyncValues(o) {
   }, i);
   function verb(n) {
     i[n] = o[n] && function(v2) {
-      return new Promise(function(resolve4, reject) {
-        v2 = o[n](v2), settle2(resolve4, reject, v2.done, v2.value);
+      return new Promise(function(resolve5, reject) {
+        v2 = o[n](v2), settle2(resolve5, reject, v2.done, v2.value);
       });
     };
   }
-  function settle2(resolve4, reject, d2, v2) {
+  function settle2(resolve5, reject, d2, v2) {
     Promise.resolve(v2).then(function(v3) {
-      resolve4({ value: v3, done: d2 });
+      resolve5({ value: v3, done: d2 });
     }, reject);
   }
 }
@@ -39361,9 +40938,9 @@ var require_async = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.waitForTick = void 0;
     exports.waitForTick = function() {
-      return new Promise(function(resolve4) {
+      return new Promise(function(resolve5) {
         setTimeout(function() {
-          return resolve4();
+          return resolve5();
         }, 0);
       });
     };
@@ -48106,12 +49683,12 @@ var require_CustomFontSubsetEmbedder = __commonJS({
         };
         CustomFontSubsetEmbedder2.prototype.serializeFont = function() {
           var _this = this;
-          return new Promise(function(resolve4, reject) {
+          return new Promise(function(resolve5, reject) {
             var parts = [];
             _this.subset.encodeStream().on("data", function(bytes) {
               return parts.push(bytes);
             }).on("end", function() {
-              return resolve4(utils_1.mergeUint8Arrays(parts));
+              return resolve5(utils_1.mergeUint8Arrays(parts));
             }).on("error", function(err) {
               return reject(err);
             });
@@ -60754,22 +62331,22 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve4) => {
+    return new Promise((resolve5) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve4();
+        resolve5();
       } else {
-        this._stdout.once("drain", resolve4);
+        this._stdout.once("drain", resolve5);
       }
     });
   }
 };
 
 // src/core/library-service.ts
-import { createHash as createHash4, randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir4, open as open3, readFile as readFile3, readdir as readdir2, realpath as realpath4, rename as rename2, rm as rm3, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
+import { createHash as createHash6, randomUUID as randomUUID5 } from "node:crypto";
+import { lstat as lstat6, mkdir as mkdir7, open as open5, readFile as readFile6, readdir as readdir3, realpath as realpath5, rename as rename2, rm as rm3, stat as stat5, writeFile as writeFile5 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { basename as basename3, dirname as dirname3, extname as extname2, isAbsolute as isAbsolute2, join as join5, posix as posix2, resolve as resolve2 } from "node:path";
+import { basename as basename3, dirname as dirname3, extname as extname2, isAbsolute as isAbsolute2, join as join8, posix as posix2, resolve as resolve3 } from "node:path";
 
 // src/contracts/errors.ts
 var LibraryError = class extends Error {
@@ -60820,15 +62397,15 @@ function stopOwnedProcess(child) {
 }
 async function stopOwnedProcessTree(child) {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise((resolve4) => child.once("close", () => resolve4()));
+  const exited = new Promise((resolve5) => child.once("close", () => resolve5()));
   if (process.platform === "win32") {
-    await new Promise((resolve4) => {
+    await new Promise((resolve5) => {
       const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { shell: false, windowsHide: true, stdio: "ignore" });
       killer.once("error", () => {
         child.kill();
-        resolve4();
+        resolve5();
       });
-      killer.once("close", () => resolve4());
+      killer.once("close", () => resolve5());
     });
   } else {
     try {
@@ -60848,8 +62425,8 @@ async function stopOwnedProcessTree(child) {
   timer.unref();
   let deadline;
   try {
-    await Promise.race([exited, new Promise((resolve4) => {
-      deadline = setTimeout(resolve4, 3e3);
+    await Promise.race([exited, new Promise((resolve5) => {
+      deadline = setTimeout(resolve5, 3e3);
     })]);
   } finally {
     clearTimeout(timer);
@@ -60873,7 +62450,7 @@ var ProcessCliRunner = class {
     if (this.closed) throw new LibraryError("SERVICE_CLOSED", "CLI \u6267\u884C\u5668\u5DF2\u5173\u95ED\u3002");
     const child = spawnOwned(request.cliPath, request.args, env);
     this.children.add(child);
-    return await new Promise((resolve4, reject) => {
+    return await new Promise((resolve5, reject) => {
       const stdout = [];
       const stderr = [];
       let bytes = 0;
@@ -60921,7 +62498,7 @@ var ProcessCliRunner = class {
           reject(new LibraryError("UPSTREAM_LIMIT", "\u4E0A\u6E38\u8F93\u51FA\u8D85\u8FC7 32 MiB\uFF0C\u8BF7\u7F29\u5C0F\u64CD\u4F5C\u8303\u56F4\u3002"));
           return;
         }
-        resolve4({ code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), timedOut, cancelled });
+        resolve5({ code, stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), timedOut, cancelled });
       });
       if (request.signal?.aborted) abort();
     });
@@ -61015,7 +62592,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.3.2";
+var PLUGIN_VERSION = "0.4.0";
 
 // src/infrastructure/native-mcp.ts
 var replayableReads = /* @__PURE__ */ new Set(["vault_list", "paper_get", "paper_paths", "vault_search", "page_read", "paper_text_get", "file_read", "file_list", "paper_notes_get"]);
@@ -61025,7 +62602,7 @@ async function freePort() {
   await once(server2, "listening");
   const address = server2.address();
   if (!address || typeof address === "string") throw new LibraryError("UPSTREAM_FAILED", "\u65E0\u6CD5\u5206\u914D\u672C\u673A\u7AEF\u53E3\u3002");
-  await new Promise((resolve4, reject) => server2.close((error62) => error62 ? reject(error62) : resolve4()));
+  await new Promise((resolve5, reject) => server2.close((error62) => error62 ? reject(error62) : resolve5()));
   return address.port;
 }
 function unwrapNative(result) {
@@ -61157,7 +62734,7 @@ async function createNativeBackend(context) {
     };
     context.signal?.addEventListener("abort", abort, { once: true });
     try {
-      await new Promise((resolve4, reject) => {
+      await new Promise((resolve5, reject) => {
         const timer = setTimeout(() => reject(new LibraryError("UPSTREAM_TIMEOUT", "Agentero MCP \u542F\u52A8\u8D85\u65F6\u3002", true)), 1e4);
         child.once("error", (error62) => {
           clearTimeout(timer);
@@ -61171,7 +62748,7 @@ async function createNativeBackend(context) {
           stderr = (stderr + String(chunk)).slice(-8192);
           if (stderr.includes(`MCP listening on http://127.0.0.1:${port}/mcp`)) {
             clearTimeout(timer);
-            resolve4();
+            resolve5();
           }
         });
       });
@@ -61217,6 +62794,51 @@ async function createNativeBackend(context) {
   throw new LibraryError("UPSTREAM_FAILED", `\u65E0\u6CD5\u542F\u52A8\u672C\u63D2\u4EF6\u7684 Agentero MCP\uFF1A${lastError instanceof Error ? lastError.message.slice(0, 1500) : "\u672A\u77E5\u9519\u8BEF"}`, true);
 }
 
+// src/infrastructure/paper-lock.ts
+var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
+import { createHash as createHash2 } from "node:crypto";
+import { mkdir as mkdir3 } from "node:fs/promises";
+import { join as join3 } from "node:path";
+async function withPaperDocumentLock(dataRoot, vaultPath, paperPath, run, label = "\u8FD9\u7BC7\u8BBA\u6587") {
+  const actual = await containedPath(vaultPath, paperPath, true);
+  const identity = process.platform === "win32" ? actual.toLowerCase() : actual;
+  const key2 = createHash2("sha256").update(identity).digest("hex");
+  const directory = await containedPath(dataRoot, "state/document-locks", true);
+  await mkdir3(directory, { recursive: true });
+  const target = join3(directory, key2), controller = new AbortController();
+  let compromised;
+  let release;
+  try {
+    release = await (0, import_proper_lockfile.lock)(target, {
+      realpath: false,
+      stale: 6e4,
+      update: 5e3,
+      retries: 0,
+      onCompromised: (error62) => {
+        compromised = error62;
+        controller.abort();
+      }
+    });
+  } catch (error62) {
+    if (error62.code === "ELOCKED") throw new LibraryError("DOCUMENT_BUSY", `\u53E6\u4E00\u4E2A\u63D2\u4EF6\u8FDB\u7A0B\u6B63\u5728\u5904\u7406${label}\uFF0C\u8BF7\u5B8C\u6210\u540E\u91CD\u8BD5\uFF1B\u5F53\u524D\u5185\u5BB9\u672A\u88AB\u8986\u76D6\u3002`, true);
+    throw error62;
+  }
+  const check2 = () => {
+    if (compromised) throw new LibraryError("DOCUMENT_LOCK_LOST", "\u8BBA\u6587\u64CD\u4F5C\u9501\u5DF2\u5931\u6548\uFF0C\u8BF7\u6838\u5B9E\u5F53\u524D\u7248\u672C\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u91CD\u8BD5\u4FDD\u5B58\u3002", false);
+  };
+  try {
+    check2();
+    const result = await run(check2, controller.signal);
+    check2();
+    return result;
+  } catch (error62) {
+    check2();
+    throw error62;
+  } finally {
+    if (!compromised) await release();
+  }
+}
+
 // src/infrastructure/pdf-probe.ts
 function diagnosticPdf() {
   const stream = "BT /F1 12 Tf 30 100 Td (CodexWorkbench PDF capability probe) Tj ET";
@@ -61256,10 +62878,10 @@ ${xref}
 }
 
 // src/infrastructure/pdf-diagnostic-cache.ts
-import { createHash as createHash2 } from "node:crypto";
-import { join as join3 } from "node:path";
-var pdfDiagnosticKey = (identity) => createHash2("sha256").update(JSON.stringify([identity.cliPath, identity.pdfiumPath, identity.cliVersion])).digest("hex");
-var cachePath = (dataRoot) => join3(dataRoot, "state", "pdf-diagnostic.json");
+import { createHash as createHash3 } from "node:crypto";
+import { join as join4 } from "node:path";
+var pdfDiagnosticKey = (identity) => createHash3("sha256").update(JSON.stringify([identity.cliPath, identity.pdfiumPath, identity.cliVersion])).digest("hex");
+var cachePath = (dataRoot) => join4(dataRoot, "state", "pdf-diagnostic.json");
 async function readPdfDiagnostic(dataRoot, identity) {
   try {
     const value = await readJson(cachePath(dataRoot));
@@ -61287,13 +62909,13 @@ function externalPdfCommand(path, platform = process.platform) {
 }
 async function requestExternalPdfOpen(path, options = {}) {
   const launch = externalPdfCommand(path, options.platform);
-  await new Promise((resolve4, reject) => {
+  await new Promise((resolve5, reject) => {
     try {
       const child = (options.spawn ?? spawn2)(launch.command, launch.args, { shell: false, windowsHide: true, detached: true, stdio: "ignore" });
       child.once("error", () => reject(new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002")));
       child.once("spawn", () => {
         child.unref();
-        resolve4();
+        resolve5();
       });
     } catch {
       reject(new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002"));
@@ -61303,7 +62925,7 @@ async function requestExternalPdfOpen(path, options = {}) {
 
 // src/infrastructure/trash-reader.ts
 import { lstat as lstat2, open as open2, opendir, realpath as realpath3, stat } from "node:fs/promises";
-import { basename as basename2, extname, join as join4 } from "node:path";
+import { basename as basename2, extname, join as join5 } from "node:path";
 var TRASH_REL = ".agentero/.trash";
 var TRASH_RESTORE_REASON = "Agentero 0.15.2 \u7684 CLI/MCP \u672A\u516C\u5F00\u56DE\u6536\u7AD9\u6062\u590D\u63A5\u53E3\uFF1B\u5F53\u524D\u63D2\u4EF6\u53EA\u63D0\u4F9B\u67E5\u770B\u53CA\u663E\u5F0F\u6253\u5F00\uFF0C\u4E0D\u63D0\u4F9B\u6062\u590D\u3001\u6E05\u7A7A\u6216\u6C38\u4E45\u5220\u9664\u3002";
 var MAX_ROOT_ENTRIES = 1e3;
@@ -61321,7 +62943,7 @@ async function safePath(vault2, relative2, allowMissing = false) {
   const root = await realpath3(vault2), rel = relativePath(relative2);
   let path = root;
   for (const component of rel.split("/")) {
-    path = join4(path, component);
+    path = join5(path, component);
     let info;
     try {
       info = await lstat2(path);
@@ -61492,8 +63114,8 @@ async function trashOpenTarget(vault2, input2) {
 }
 
 // src/infrastructure/marks.ts
-import { createHash as createHash3, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir3, readFile as readFile2, readdir, rm as rm2, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
+import { createHash as createHash4, randomBytes, randomUUID as randomUUID2 } from "node:crypto";
+import { mkdir as mkdir4, readFile as readFile2, readdir, rm as rm2, stat as stat2, writeFile as writeFile3 } from "node:fs/promises";
 import { dirname as dirname2 } from "node:path";
 var markPalette = { yellow: "#fcd34d", green: "#86efac", blue: "#7dd3fc", pink: "#f9a8d4", purple: "#d8b4fe" };
 var rec = (v2) => v2 && typeof v2 === "object" && !Array.isArray(v2) ? v2 : {};
@@ -61522,7 +63144,7 @@ var MarksStore = class {
   async load() {
     const directory = await containedPath(this.root, `${this.paperPath}/marks`, true);
     const names = await exists(directory) ? (await readdir(directory)).filter((n) => n.endsWith(".json")).sort() : [];
-    const hash2 = createHash3("sha256"), files = /* @__PURE__ */ new Map(), malformed = [];
+    const hash2 = createHash4("sha256"), files = /* @__PURE__ */ new Map(), malformed = [];
     let annotations = [], bytes = 0;
     for (const name2 of names) {
       const path = await this.path(name2);
@@ -61605,7 +63227,7 @@ var MarksStore = class {
         const bytes = Buffer.from(asset.data, "base64");
         if (bytes.length > 45e5 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new LibraryError("INVALID_ASSET", "\u533A\u57DF\u622A\u56FE\u4E0D\u662F\u6709\u6548 PNG\u3002");
         const p2 = await this.path(`assets/${id}.png`, true);
-        await mkdir3(dirname2(p2), { recursive: true });
+        await mkdir4(dirname2(p2), { recursive: true });
         await writeFile3(p2, bytes, { flag: "wx" });
         value.asset = `marks/assets/${id}.png`;
         value.page = input2.page;
@@ -61775,8 +63397,579 @@ async function annotatedPdf(bytes, marks) {
   return pdf.save();
 }
 
-// src/core/library-service.ts
+// src/infrastructure/note-workspace.ts
+import { createHash as createHash5 } from "node:crypto";
+import { lstat as lstat3, opendir as opendir2, readFile as readFile3, stat as stat3 } from "node:fs/promises";
+var NOTE_ASSOCIATION_KEY = "_codexworkbench_note";
 var MAX_NOTE_BYTES = 2 * 1024 * 1024;
+var MAX_SCAN_ENTRIES = 5e3;
+var MAX_SCAN_BYTES2 = 32 * 1024 * 1024;
+var forbiddenName = /[<>:"/\\|?*\u0000-\u001f]/u;
+var reservedName = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+function noteName(value) {
+  if (typeof value !== "string" || !value.trim() || value !== value.trim() || value.length > 120 || Buffer.byteLength(value) > 240 || value === "." || value === ".." || forbiddenName.test(value) || /[. ]$/.test(value) || reservedName.test(value)) throw new LibraryError("INVALID_PATH", "\u540D\u79F0\u5FC5\u987B\u662F Windows/macOS \u5B89\u5168\u7684\u5355\u4E2A\u6587\u4EF6\u540D\uFF08\u6700\u591A 120 \u5B57\u7B26\u3001240 \u5B57\u8282\uFF09\u3002");
+  return value;
+}
+function noteWorkspacePath(value, rootAllowed = false) {
+  const path = relativePath(value);
+  if (path === "notes" && rootAllowed) return path;
+  if (!path.startsWith("notes/")) throw new LibraryError("INVALID_PATH", "\u7B14\u8BB0\u548C\u6587\u4EF6\u5939\u5FC5\u987B\u4F4D\u4E8E notes/\uFF0C\u4E0D\u80FD\u64CD\u4F5C\u7B14\u8BB0\u6839\u76EE\u5F55\u3002");
+  for (const name2 of path.split("/")) noteName(name2);
+  return path;
+}
+async function safeNotePath(root, value, allowMissing = false, rootAllowed = false) {
+  const path = noteWorkspacePath(value, rootAllowed);
+  const parts = path.split("/");
+  for (let i = 1; i <= parts.length; i += 1) {
+    const candidate = await containedPath(root, parts.slice(0, i).join("/"), true);
+    if (!await exists(candidate)) {
+      if (allowMissing) break;
+      continue;
+    }
+    const lexical = `${root}/${parts.slice(0, i).join("/")}`;
+    if ((await lstat3(lexical)).isSymbolicLink()) throw new LibraryError("INVALID_PATH", "\u7B14\u8BB0\u5DE5\u4F5C\u533A\u4E0D\u652F\u6301\u7B26\u53F7\u94FE\u63A5\u76EE\u5F55\u6216\u6587\u4EF6\u3002");
+  }
+  return containedPath(root, path, allowMissing);
+}
+function frontmatter(content) {
+  const start = /^(?:\uFEFF)?---\r?\n/.exec(content);
+  if (!start) return void 0;
+  const ending = /^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/gm;
+  ending.lastIndex = start[0].length;
+  const end = ending.exec(content);
+  if (!end) throw new LibraryError("NOTE_FRONTMATTER_INVALID", "\u7B14\u8BB0 frontmatter \u7F3A\u5C11\u7ED3\u675F\u6807\u8BB0\uFF0C\u672A\u4FEE\u6539\u6587\u4EF6\u3002");
+  return { prefix: start[0], header: content.slice(start[0].length, end.index), suffix: content.slice(end.index), newline: start[0].includes("\r\n") ? "\r\n" : "\n" };
+}
+function readNoteAssociation(content) {
+  const header = frontmatter(content)?.header;
+  if (header === void 0) return void 0;
+  const lines = header.split(/\r?\n/).filter((line) => new RegExp(`^${NOTE_ASSOCIATION_KEY}\\s*:`).test(line));
+  if (!lines.length) return void 0;
+  let value;
+  try {
+    if (lines.length !== 1) throw new Error();
+    value = JSON.parse(lines[0].slice(lines[0].indexOf(":") + 1));
+  } catch {
+    throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u7B14\u8BB0\u4FDD\u7559\u5173\u8054\u5B57\u6BB5\u65E0\u6548\uFF0C\u672A\u4FEE\u6539\u6587\u4EF6\u3002");
+  }
+  const record4 = value && typeof value === "object" ? value : {};
+  if (record4.schemaVersion !== 1 || typeof record4.paperId !== "string" || !record4.paperId || record4.paperId.length > 512 || typeof record4.paperPath !== "string" || typeof record4.paperTitle !== "string" || record4.paperTitle.length > 1e3) throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u7B14\u8BB0\u8BBA\u6587\u5173\u8054\u683C\u5F0F\u65E0\u6548\u3002");
+  const paperPath = relativePath(record4.paperPath);
+  if (!paperPath.startsWith("papers/")) throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u7B14\u8BB0\u5173\u8054\u5FC5\u987B\u6307\u5411\u8BBA\u6587\u76EE\u5F55\u3002");
+  return { paperId: record4.paperId, paperPath, paperTitle: record4.paperTitle };
+}
+function withNoteAssociation(content, association) {
+  const parsed = frontmatter(content);
+  const line = association ? `${NOTE_ASSOCIATION_KEY}: ${JSON.stringify({ schemaVersion: 1, ...association })}` : "";
+  if (!parsed) return line ? `---
+${line}
+---
+${content}` : content;
+  const pattern = new RegExp(`^${NOTE_ASSOCIATION_KEY}[ \\t]*:[^\\r\\n]*(?:\\r?\\n|$)`, "gm");
+  const header = parsed.header.replace(pattern, "");
+  return parsed.prefix + header + (line ? `${line}${parsed.newline}` : "") + parsed.suffix;
+}
+function paperFolderSuffix(paperId) {
+  return createHash5("sha256").update(paperId).digest("hex").slice(0, 12);
+}
+function defaultPaperNoteFolder(paper2) {
+  let title = paper2.paperTitle.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, "_").trim().replace(/[. ]+$/g, "").slice(0, 70) || "\u8BBA\u6587";
+  if (reservedName.test(title)) title = `_${title}`;
+  return `notes/\u8BBA\u6587/${title}--${paperFolderSuffix(paper2.paperId)}`;
+}
+async function scanNoteWorkspace(root) {
+  const items = [];
+  let truncated = false, count = 0, bytes = 0;
+  const scan = async (directory, depth) => {
+    if (depth > 16 || count >= MAX_SCAN_ENTRIES) {
+      truncated = true;
+      return;
+    }
+    const actual = await safeNotePath(root, directory, true, true);
+    if (!await exists(actual)) return;
+    const handle = await opendir2(actual);
+    try {
+      for await (const entry of handle) {
+        count += 1;
+        if (count > MAX_SCAN_ENTRIES) {
+          truncated = true;
+          break;
+        }
+        if (entry.isSymbolicLink()) {
+          truncated = true;
+          continue;
+        }
+        const path = `${directory}/${entry.name}`;
+        try {
+          noteWorkspacePath(path);
+        } catch {
+          truncated = true;
+          continue;
+        }
+        if (entry.isDirectory()) {
+          items.push({ path, parentPath: directory, name: entry.name, kind: "directory" });
+          await scan(path, depth + 1);
+        } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+          const file2 = await safeNotePath(root, path), info = await stat3(file2);
+          if (info.size > MAX_NOTE_BYTES || bytes + info.size > MAX_SCAN_BYTES2) {
+            truncated = true;
+            continue;
+          }
+          bytes += info.size;
+          const content = await readFile3(file2, "utf8");
+          let association;
+          try {
+            association = readNoteAssociation(content);
+          } catch {
+            truncated = true;
+          }
+          items.push({ path, parentPath: directory, name: entry.name, kind: "file", revision: contentRevision(content), ...association });
+        }
+      }
+    } finally {
+      await handle.close().catch(() => void 0);
+    }
+  };
+  await scan("notes", 0);
+  return { items: items.sort((a, b) => a.path.localeCompare(b.path, void 0, { numeric: true })), truncated };
+}
+async function noteFolderRevision(root, path) {
+  const hash2 = createHash5("sha256");
+  let count = 0, bytes = 0, noteCount = 0;
+  const scan = async (current, depth) => {
+    if (depth > 16 || ++count > MAX_SCAN_ENTRIES) throw new LibraryError("NOTE_FOLDER_TOO_LARGE", "\u6587\u4EF6\u5939\u8D85\u8FC7\u5B89\u5168\u64CD\u4F5C\u8303\u56F4\uFF0C\u8BF7\u7F29\u5C0F\u76EE\u6807\u3002");
+    const actual = await safeNotePath(root, current), info = await lstat3(actual);
+    hash2.update(JSON.stringify([current.slice(path.length), info.isDirectory() ? "directory" : "file", info.isFile() ? info.size : 0]));
+    if (info.isDirectory()) {
+      const handle = await opendir2(actual), children = [];
+      try {
+        for await (const entry of handle) {
+          if (count + children.length >= MAX_SCAN_ENTRIES) throw new LibraryError("NOTE_FOLDER_TOO_LARGE", "\u6587\u4EF6\u5939\u8D85\u8FC7\u5B89\u5168\u64CD\u4F5C\u8303\u56F4\uFF0C\u8BF7\u7F29\u5C0F\u76EE\u6807\u3002");
+          if (entry.isSymbolicLink()) throw new LibraryError("INVALID_PATH", "\u6587\u4EF6\u5939\u5305\u542B\u7B26\u53F7\u94FE\u63A5\uFF0C\u672A\u6267\u884C\u64CD\u4F5C\u3002");
+          children.push(entry.name);
+        }
+      } finally {
+        await handle.close().catch(() => void 0);
+      }
+      for (const child of children.sort((a, b) => a.localeCompare(b))) await scan(`${current}/${child}`, depth + 1);
+    } else if (info.isFile()) {
+      bytes += info.size;
+      if (info.size > MAX_SCAN_BYTES2 || bytes > MAX_SCAN_BYTES2) throw new LibraryError("NOTE_FOLDER_TOO_LARGE", "\u6587\u4EF6\u5939\u8D85\u8FC7 32 MiB \u5B89\u5168\u64CD\u4F5C\u8303\u56F4\u3002");
+      const content = await readFile3(actual);
+      if (content.length !== info.size) throw new LibraryError("NOTE_CONFLICT", "\u6587\u4EF6\u5939\u5185\u5BB9\u5728\u8BFB\u53D6\u671F\u95F4\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u3002", true);
+      hash2.update(content);
+      if (current.toLowerCase().endsWith(".md")) noteCount += 1;
+    } else throw new LibraryError("INVALID_PATH", "\u6587\u4EF6\u5939\u5305\u542B\u4E0D\u652F\u6301\u7684\u6587\u4EF6\u7C7B\u578B\u3002");
+  };
+  await scan(noteWorkspacePath(path), 0);
+  return { revision: `folder:${hash2.digest("hex")}`, noteCount };
+}
+
+// src/infrastructure/reading-context.ts
+import { randomUUID as randomUUID3 } from "node:crypto";
+import { lstat as lstat4, mkdir as mkdir5, open as open3, readdir as readdir2, readFile as readFile4, stat as stat4, unlink } from "node:fs/promises";
+import { join as join6 } from "node:path";
+var validId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+var CONTEXT_MAX_BYTES = 8 * 1024 * 1024;
+var CONTEXT_CACHE_BYTES = 64 * 1024 * 1024;
+var CONTEXT_MAX_COUNT = 200;
+var CONTEXT_TTL = 7 * 24 * 60 * 60 * 1e3;
+var serializedBytes = (value) => Buffer.byteLength(`${JSON.stringify(value, null, 2)}
+`);
+function checkContextCancellation(signal) {
+  if (signal?.aborted) throw new LibraryError("OPERATION_CANCELLED", "\u9644\u52A0\u9605\u8BFB\u6765\u6E90\u5DF2\u53D6\u6D88\u3002");
+}
+function validateContextPng(asset) {
+  if (asset.mediaType !== "image/png" || typeof asset.data !== "string" || !asset.data || asset.data.length > 6e6 || !/^[A-Za-z0-9+/]+={0,2}$/.test(asset.data)) throw new LibraryError("INVALID_ASSET", "\u9605\u8BFB\u6765\u6E90\u622A\u56FE\u5FC5\u987B\u662F 4.5 MB \u4EE5\u5185\u7684 PNG\u3002");
+  const bytes = Buffer.from(asset.data, "base64");
+  if (bytes.length > 45e5 || bytes.length < 57 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new LibraryError("INVALID_ASSET", "\u9605\u8BFB\u6765\u6E90\u622A\u56FE\u4E0D\u662F\u6709\u6548 PNG\u3002");
+  const width = bytes.readUInt32BE(16), height = bytes.readUInt32BE(20);
+  if (!width || !height || width * height > 16e6) throw new LibraryError("INVALID_ASSET", "\u9605\u8BFB\u6765\u6E90\u622A\u56FE\u4E0D\u80FD\u8D85\u8FC7 1600 \u4E07\u50CF\u7D20\u3002");
+  let offset = 8, first = true, pixels = false, ended = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset), end = offset + length + 12;
+    if (end > bytes.length) throw new LibraryError("INVALID_ASSET", "PNG \u6570\u636E\u5757\u4E0D\u5B8C\u6574\u3002");
+    const kind = bytes.toString("ascii", offset + 4, offset + 8);
+    if (first && (kind !== "IHDR" || length !== 13) || !first && kind === "IHDR") throw new LibraryError("INVALID_ASSET", "PNG \u56FE\u50CF\u5934\u65E0\u6548\u3002");
+    if (first) {
+      const bitDepth = bytes[offset + 16], colorType = bytes[offset + 17];
+      const depths = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
+      if (!depths[colorType]?.includes(bitDepth) || bytes[offset + 18] !== 0 || bytes[offset + 19] !== 0 || bytes[offset + 20] > 1) throw new LibraryError("INVALID_ASSET", "PNG \u56FE\u50CF\u5934\u53C2\u6570\u65E0\u6548\u3002");
+    }
+    let crc = 4294967295;
+    for (let index = offset + 4; index < end - 4; index += 1) {
+      crc ^= bytes[index];
+      for (let bit = 0; bit < 8; bit += 1) crc = crc & 1 ? 3988292384 ^ crc >>> 1 : crc >>> 1;
+    }
+    if ((crc ^ 4294967295) >>> 0 !== bytes.readUInt32BE(end - 4)) throw new LibraryError("INVALID_ASSET", "PNG \u6821\u9A8C\u5931\u8D25\u3002");
+    if (kind === "IDAT") pixels = true;
+    if (kind === "IEND") {
+      ended = length === 0 && end === bytes.length;
+      break;
+    }
+    offset = end;
+    first = false;
+  }
+  if (!pixels || !ended) throw new LibraryError("INVALID_ASSET", "PNG \u7F3A\u5C11\u50CF\u7D20\u6570\u636E\u6216\u7ED3\u675F\u5757\u3002");
+  return { mediaType: "image/png", data: bytes.toString("base64") };
+}
+var ReadingContextStore = class {
+  constructor(dataRoot) {
+    this.dataRoot = dataRoot;
+    this.root = join6(dataRoot, "cache", "reading-context");
+  }
+  dataRoot;
+  root;
+  async safeRoot(create = false) {
+    if (create) await mkdir5(this.dataRoot, { recursive: true });
+    for (const relative2 of ["cache", "cache/reading-context"]) {
+      const path = await containedPath(this.dataRoot, relative2, create);
+      if (create) await mkdir5(path, { recursive: true });
+      if ((await lstat4(join6(this.dataRoot, relative2))).isSymbolicLink()) throw new LibraryError("INVALID_PATH", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u4E0D\u80FD\u4F7F\u7528\u7B26\u53F7\u94FE\u63A5\u3002");
+    }
+  }
+  async path(contextId, missing = false) {
+    const path = await containedPath(this.root, `${contextId}.json`, missing);
+    try {
+      if ((await lstat4(join6(this.root, `${contextId}.json`))).isSymbolicLink()) throw new LibraryError("INVALID_PATH", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u4E0D\u80FD\u4F7F\u7528\u7B26\u53F7\u94FE\u63A5\u3002");
+    } catch (error62) {
+      if (error62.code !== "ENOENT" || !missing) throw error62;
+    }
+    return path;
+  }
+  async create(input2, signal) {
+    checkContextCancellation(signal);
+    const contextId = randomUUID3(), createdAt = (/* @__PURE__ */ new Date()).toISOString(), expiresAt = new Date(Date.now() + CONTEXT_TTL).toISOString();
+    const snapshot = { ...input2, schemaVersion: 1, contextId, createdAt, expiresAt };
+    const newBytes = serializedBytes(snapshot);
+    if (newBytes > CONTEXT_MAX_BYTES) throw new LibraryError("CONTEXT_TOO_LARGE", "\u6240\u9009\u6765\u6E90\u8D85\u8FC7 8 MiB\uFF0C\u8BF7\u51CF\u5C11\u9875\u6570\u3001\u6279\u6CE8\u6216\u622A\u56FE\u540E\u518D\u9644\u52A0\u3002");
+    await this.safeRoot(true);
+    await containedPath(this.root, ".create.lock", true);
+    const lockPath = join6(this.root, ".create.lock"), deadline = Date.now() + 3e3;
+    let lock2;
+    while (true) {
+      checkContextCancellation(signal);
+      try {
+        lock2 = await open3(lockPath, "wx", 384);
+        break;
+      } catch (error62) {
+        if (error62.code !== "EEXIST") throw error62;
+        let info;
+        try {
+          info = await lstat4(lockPath);
+        } catch (error63) {
+          if (error63.code === "ENOENT") continue;
+          throw error63;
+        }
+        if (info.isSymbolicLink()) throw new LibraryError("INVALID_PATH", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u9501\u4E0D\u80FD\u4F7F\u7528\u7B26\u53F7\u94FE\u63A5\u3002");
+        if (Date.now() - info.mtimeMs > 3e4) {
+          await unlink(lockPath);
+          continue;
+        }
+        if (Date.now() >= deadline) throw new LibraryError("CONTEXT_BUSY", "\u5176\u4ED6\u5B9E\u4F8B\u6B63\u5728\u9644\u52A0\u9605\u8BFB\u6765\u6E90\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002", true);
+        await new Promise((resolve5) => setTimeout(resolve5, 25));
+      }
+    }
+    try {
+      const names = (await readdir2(this.root)).filter((name2) => name2.endsWith(".json") && validId.test(name2.slice(0, -5)));
+      if (names.length > 1e3) throw new LibraryError("CONTEXT_CACHE_FULL", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u6587\u4EF6\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u518D\u9644\u52A0\u3002");
+      let bytes = newBytes, count = 1;
+      for (const name2 of names) {
+        checkContextCancellation(signal);
+        const path = await this.path(name2.slice(0, -5)), info = await stat4(path);
+        if (Date.now() - info.mtimeMs > CONTEXT_TTL) {
+          await unlink(path);
+          continue;
+        }
+        count += 1;
+        bytes += info.size;
+      }
+      if (count > CONTEXT_MAX_COUNT || bytes > CONTEXT_CACHE_BYTES) throw new LibraryError("CONTEXT_CACHE_FULL", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u5DF2\u8FBE\u4E0A\u9650\uFF0C\u8BF7\u7A0D\u540E\u518D\u9644\u52A0\uFF0C\u5DF2\u6709\u6765\u6E90\u4E0D\u4F1A\u88AB\u8986\u76D6\u3002");
+      checkContextCancellation(signal);
+      await atomicJson(await this.path(contextId, true), snapshot);
+      return snapshot;
+    } finally {
+      await lock2.close();
+      await unlink(lockPath).catch(() => void 0);
+    }
+  }
+  async read(contextId, signal) {
+    checkContextCancellation(signal);
+    if (!validId.test(contextId)) throw new LibraryError("CONTEXT_NOT_FOUND", "\u9605\u8BFB\u6765\u6E90\u5F15\u7528\u65E0\u6548\u3002");
+    let snapshot;
+    try {
+      await this.safeRoot();
+      const path = await this.path(contextId);
+      if ((await stat4(path)).size > CONTEXT_MAX_BYTES) throw new LibraryError("CONTEXT_TOO_LARGE", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u8D85\u8FC7\u5927\u5C0F\u4E0A\u9650\u3002");
+      try {
+        snapshot = JSON.parse(await readFile4(path, "utf8"));
+      } catch {
+        throw new LibraryError("CONTEXT_INVALID", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u683C\u5F0F\u65E0\u6548\u3002");
+      }
+    } catch (error62) {
+      if (error62.code === "ENOENT") throw new LibraryError("CONTEXT_NOT_FOUND", "\u8BE5\u9605\u8BFB\u6765\u6E90\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u5E76\u9644\u52A0\u3002");
+      throw error62;
+    }
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new LibraryError("CONTEXT_INVALID", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u683C\u5F0F\u65E0\u6548\u3002");
+    const images = snapshot.images;
+    if (snapshot.schemaVersion !== 1 || snapshot.contextId !== contextId || typeof snapshot.vaultId !== "string" || typeof snapshot.vaultPath !== "string" || typeof snapshot.paperId !== "string" || typeof snapshot.paperPath !== "string" || typeof snapshot.title !== "string" || !Array.isArray(snapshot.pages) || !snapshot.pages.every((page) => Number.isInteger(page) && page > 0) || !Number.isInteger(snapshot.marksCount) || snapshot.marksCount < 0 || !["summarize", "create-note", "update-note", "revise-paper"].includes(snapshot.action) || typeof snapshot.content !== "string" || !Number.isFinite(Date.parse(snapshot.createdAt)) || !Number.isFinite(Date.parse(snapshot.expiresAt)) || !images || typeof images !== "object" || Array.isArray(images) || !Array.isArray(snapshot.imageIds) || snapshot.imageIds.length !== Object.keys(images).length || snapshot.imageIds.some((id) => typeof id !== "string" || !/^image-\d+$/.test(id) || !Object.hasOwn(images, id) || !images[id] || images[id].mediaType !== "image/png" || typeof images[id].data !== "string")) throw new LibraryError("CONTEXT_INVALID", "\u9605\u8BFB\u6765\u6E90\u7F13\u5B58\u683C\u5F0F\u65E0\u6548\u3002");
+    if (Date.parse(snapshot.expiresAt) < Date.now()) throw new LibraryError("CONTEXT_EXPIRED", "\u8BE5\u9605\u8BFB\u6765\u6E90\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u5E76\u9644\u52A0\u3002");
+    checkContextCancellation(signal);
+    return snapshot;
+  }
+};
+
+// src/infrastructure/paper-documents.ts
+import { randomUUID as randomUUID4 } from "node:crypto";
+import { lstat as lstat5, mkdir as mkdir6, open as open4, readFile as readFile5, realpath as realpath4, writeFile as writeFile4 } from "node:fs/promises";
+import { join as join7, resolve as resolve2 } from "node:path";
+var PAPER_MARKDOWN_MAX_BYTES = 2 * 1024 * 1024;
+var PAPER_HISTORY_LIMIT = 100;
+var WINDOW_LIMIT = 2e4;
+function markdownPrefix(content) {
+  return /^(?:\uFEFF)?---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(content)?.[0] ?? "";
+}
+function windowRange(offset = 0, maxChars = WINDOW_LIMIT) {
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > WINDOW_LIMIT) throw new LibraryError("INVALID_RANGE", "\u6B63\u6587\u7A97\u53E3\u5E94\u4E3A 1 \u81F3 20000 \u5B57\u7B26\uFF0C\u504F\u79FB\u4ECE0\u5F00\u59CB\u3002");
+  return { offset, maxChars };
+}
+function markdownChanges(before, proposed) {
+  if (before === proposed) return { changes: [], changesTruncated: false };
+  let prefix = 0, suffix = 0;
+  while (prefix < before.length && prefix < proposed.length && before[prefix] === proposed[prefix]) prefix++;
+  while (suffix < before.length - prefix && suffix < proposed.length - prefix && before[before.length - 1 - suffix] === proposed[proposed.length - 1 - suffix]) suffix++;
+  const removed = before.slice(prefix, before.length - suffix), added = proposed.slice(prefix, proposed.length - suffix);
+  const changes = [];
+  if (prefix) changes.push({ kind: "equal", text: before.slice(Math.max(0, prefix - 240), prefix) });
+  if (removed) changes.push({ kind: "removed", text: removed.slice(0, 9500) });
+  if (added) changes.push({ kind: "added", text: added.slice(0, 9500) });
+  if (suffix) changes.push({ kind: "equal", text: before.slice(before.length - suffix, before.length - suffix + 240) });
+  return { changes, changesTruncated: removed.length > 9500 || added.length > 9500 || prefix > 240 || suffix > 240 };
+}
+function relativeImageReferences(content) {
+  const references = /* @__PURE__ */ new Map(), result = [];
+  for (const match of content.matchAll(/^[ \t]{0,3}\[([^\]\r\n]+)\]:[ \t]*(<[^>\r\n]*>|[^\s\r\n]+)/gm)) references.set(match[1].trim().toLowerCase(), match[2].replace(/^<|>$/g, ""));
+  const add = (target) => {
+    if (target && !/^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(target)) result.push(target);
+  };
+  for (let index = 0; index < content.length - 1; index++) {
+    if (content[index] !== "!" || content[index + 1] !== "[" || index && content[index - 1] === "\\") continue;
+    if (content[index + 2] === "[") {
+      const end2 = content.indexOf("]]", index + 3);
+      if (end2 === -1) break;
+      add(content.slice(index + 3, end2).split("|")[0]);
+      index = end2 + 1;
+      continue;
+    }
+    let end = index + 2, labelDepth = 1;
+    for (; end < content.length; end++) {
+      if (content[end] === "\\") end++;
+      else if (content[end] === "[") labelDepth++;
+      else if (content[end] === "]" && --labelDepth === 0) break;
+    }
+    if (content[end] !== "]") {
+      index = end;
+      continue;
+    }
+    const label = content.slice(index + 2, end);
+    if (content[end + 1] === "(") {
+      let cursor = end + 2;
+      while (/\s/.test(content[cursor] ?? "") && cursor < content.length) cursor++;
+      const start = cursor;
+      let depth = 0;
+      if (content[cursor] === "<") {
+        const close = content.indexOf(">", cursor + 1);
+        if (close !== -1) {
+          add(content.slice(cursor + 1, close));
+          index = close;
+        }
+      } else {
+        for (; cursor < content.length; cursor++) {
+          if (content[cursor] === "\\") {
+            cursor++;
+            continue;
+          }
+          if (content[cursor] === "(") depth++;
+          else if (content[cursor] === ")") {
+            if (!depth) break;
+            depth--;
+          } else if (/\s/.test(content[cursor]) && !depth) break;
+        }
+        add(content.slice(start, cursor));
+        index = Math.max(end, cursor - 1);
+      }
+    } else if (content[end + 1] === "[") {
+      const close = content.indexOf("]", end + 2);
+      if (close !== -1) {
+        add(references.get((content.slice(end + 2, close) || label).trim().toLowerCase()) ?? "");
+        index = close;
+      }
+    } else {
+      add(references.get(label.trim().toLowerCase()) ?? "");
+      index = end;
+    }
+  }
+  for (const match of content.matchAll(/<img\b[^>]*>/gi)) {
+    const source = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(match[0]);
+    if (source) add(source[1] ?? source[2] ?? source[3]);
+  }
+  return result.sort();
+}
+function proposal(current, input2) {
+  if (Number(input2.content !== void 0) + Number(input2.edits !== void 0) !== 1) throw new LibraryError("INVALID_MARKDOWN_EDIT", "\u8BF7\u63D0\u4F9B\u5B8C\u6574\u5185\u5BB9\u6216\u4E00\u7EC4\u7CBE\u786E\u66FF\u6362\u4E2D\u7684\u4E00\u79CD\u3002");
+  let next = current;
+  if (input2.content !== void 0) {
+    if (typeof input2.content !== "string") throw new LibraryError("INVALID_MARKDOWN_EDIT", "\u8BBA\u6587 Markdown \u5FC5\u987B\u662F\u6587\u672C\u3002");
+    next = input2.content;
+  } else {
+    if (!Array.isArray(input2.edits) || !input2.edits.length || input2.edits.length > 100) throw new LibraryError("INVALID_MARKDOWN_EDIT", "\u7CBE\u786E\u66FF\u6362\u5E94\u5305\u542B1\u81F3100\u9879\u3002");
+    for (const edit of input2.edits) {
+      if (typeof edit.oldText !== "string" || !edit.oldText || typeof edit.newText !== "string") throw new LibraryError("INVALID_MARKDOWN_EDIT", "\u6BCF\u9879\u66FF\u6362\u5FC5\u987B\u63D0\u4F9B\u975E\u7A7A\u539F\u6587\u548C\u65B0\u6587\u672C\u3002");
+      const index = next.indexOf(edit.oldText);
+      if (index === -1 || next.indexOf(edit.oldText, index + 1) !== -1) throw new LibraryError("MARKDOWN_EDIT_AMBIGUOUS", "\u66FF\u6362\u539F\u6587\u5FC5\u987B\u5728\u5F53\u524D\u5185\u5BB9\u4E2D\u6070\u597D\u51FA\u73B0\u4E00\u6B21\u3002");
+      next = next.slice(0, index) + edit.newText + next.slice(index + edit.oldText.length);
+      if (Buffer.byteLength(next) > PAPER_MARKDOWN_MAX_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
+    }
+  }
+  if (Buffer.byteLength(next) > PAPER_MARKDOWN_MAX_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
+  if (markdownPrefix(current) !== markdownPrefix(next)) throw new LibraryError("MARKDOWN_HEADER_PROTECTED", "\u8BBA\u6587\u5143\u6570\u636E\u5FC5\u987B\u4FDD\u6301\u539F\u59CB\u5B57\u8282\uFF0C\u4E0D\u80FD\u968F\u6B63\u6587\u4FEE\u8BA2\u6539\u5199\u3002");
+  if (!input2.allowImageReferenceChanges && JSON.stringify(relativeImageReferences(current)) !== JSON.stringify(relativeImageReferences(next))) throw new LibraryError("MARKDOWN_IMAGES_PROTECTED", "\u76F8\u5BF9\u56FE\u7247\u5F15\u7528\u5DF2\u53D8\u5316\uFF1B\u4EC5\u5728\u7528\u6237\u660E\u786E\u8981\u6C42\u65F6\u5141\u8BB8\u4FEE\u6539\u5F15\u7528\u3002");
+  return next;
+}
+var PaperDocuments = class {
+  constructor(dataRoot, vaultPath, vaultId, paperPath) {
+    this.vaultPath = vaultPath;
+    this.vaultId = vaultId;
+    this.paperPath = paperPath;
+    const normalized = relativePath(paperPath);
+    if (!normalized.startsWith("papers/") || normalized !== paperPath) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587 Markdown \u5FC5\u987B\u5C5E\u4E8E papers/ \u4E0B\u7684\u8BBA\u6587\u76EE\u5F55\u3002");
+    this.path = `${normalized}/PAPER.md`;
+    this.historyRoot = join7(dataRoot, "state", "paper-documents");
+  }
+  vaultPath;
+  vaultId;
+  paperPath;
+  path;
+  historyRoot;
+  async snapshot() {
+    const path = await containedPath(this.vaultPath, this.path, true), expected = resolve2(await realpath4(this.vaultPath), this.path);
+    const key2 = (value) => process.platform === "win32" ? value.toLowerCase() : value;
+    if (key2(path) !== key2(expected)) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u6B63\u6587\u8DEF\u5F84\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u6307\u5411\u5176\u4ED6\u6587\u4EF6\u3002");
+    try {
+      const info = await lstat5(path);
+      if (info.isSymbolicLink() || !info.isFile()) throw new LibraryError("INVALID_PATH", "PAPER.md \u5FC5\u987B\u662F\u8BBA\u6587\u76EE\u5F55\u4E2D\u7684\u666E\u901A\u6587\u4EF6\u3002");
+      const handle = await open4(path, "r");
+      try {
+        const before = await handle.stat();
+        if (before.size > PAPER_MARKDOWN_MAX_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
+        const bytes = await handle.readFile(), after = await handle.stat();
+        if (bytes.length > PAPER_MARKDOWN_MAX_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
+        if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new LibraryError("MARKDOWN_CONFLICT", "\u8BBA\u6587 Markdown \u5728\u8BFB\u53D6\u65F6\u53D1\u751F\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u3002");
+        let content;
+        try {
+          content = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+        } catch {
+          throw new LibraryError("MARKDOWN_ENCODING", "PAPER.md \u4E0D\u662F\u6709\u6548 UTF-8\uFF0C\u4E0D\u80FD\u5B89\u5168\u6539\u5199\u3002");
+        }
+        return { content, revision: contentRevision(content), exists: true };
+      } finally {
+        await handle.close();
+      }
+    } catch (error62) {
+      if (error62.code === "ENOENT") return { content: "", revision: null, exists: false };
+      throw error62;
+    }
+  }
+  document(snapshot, offset = 0, maxChars = WINDOW_LIMIT) {
+    windowRange(offset, maxChars);
+    if (offset > snapshot.content.length) throw new LibraryError("INVALID_RANGE", "\u6B63\u6587\u504F\u79FB\u8D85\u51FA\u6587\u6863\u3002");
+    const end = Math.min(snapshot.content.length, offset + maxChars);
+    return { vaultId: this.vaultId, paperPath: this.paperPath, path: this.path, exists: snapshot.exists, revision: snapshot.revision, content: snapshot.content.slice(offset, end), offset, nextOffset: end < snapshot.content.length ? end : null, totalChars: snapshot.content.length, truncated: end < snapshot.content.length };
+  }
+  async read(input2 = {}) {
+    windowRange(input2.offset, input2.maxChars);
+    return this.document(await this.snapshot(), input2.offset, input2.maxChars);
+  }
+  async recoveries() {
+    const entries = [];
+    for (let index = 0; index < PAPER_HISTORY_LIMIT; index++) {
+      const directory = join7(this.historyRoot, `slot-${String(index).padStart(3, "0")}`);
+      try {
+        const entry = JSON.parse(await readFile5(join7(directory, "metadata.json"), "utf8"));
+        if (entry.vaultId === this.vaultId && entry.paperPath === this.paperPath && /^[a-f\d-]{36}$/.test(entry.historyId)) entries.push({ directory, entry });
+      } catch (error62) {
+        if (error62.code !== "ENOENT") throw new LibraryError("MARKDOWN_HISTORY_INVALID", "\u4FEE\u8BA2\u6062\u590D\u8BB0\u5F55\u635F\u574F\uFF0C\u5DF2\u4FDD\u7559\u539F\u6587\u4EF6\u3002");
+      }
+    }
+    return entries.sort((a, b) => b.entry.createdAt.localeCompare(a.entry.createdAt) || b.entry.historyId.localeCompare(a.entry.historyId));
+  }
+  async prepare(before, proposed, purpose) {
+    await mkdir6(this.historyRoot, { recursive: true });
+    let directory;
+    for (let index = 0; index < PAPER_HISTORY_LIMIT; index++) {
+      const candidate = join7(this.historyRoot, `slot-${String(index).padStart(3, "0")}`);
+      try {
+        await mkdir6(candidate, { mode: 448 });
+        directory = candidate;
+        break;
+      } catch (error62) {
+        if (error62.code !== "EEXIST") throw error62;
+      }
+    }
+    if (!directory) throw new LibraryError("MARKDOWN_HISTORY_FULL", "\u4FEE\u8BA2\u6062\u590D\u8BB0\u5F55\u5DF2\u8FBE100\u6761\u4E0A\u9650\uFF0C\u672A\u5220\u9664\u65E7\u8BB0\u5F55\uFF1B\u8BF7\u5148\u7BA1\u7406\u63D2\u4EF6\u6570\u636E\u76EE\u5F55\u4E2D\u7684\u6062\u590D\u8BB0\u5F55\u3002");
+    const entry = { historyId: randomUUID4(), createdAt: (/* @__PURE__ */ new Date()).toISOString(), vaultId: this.vaultId, paperPath: this.paperPath, previousRevision: before.revision, revision: contentRevision(proposed), status: "prepared", purpose };
+    await writeFile4(join7(directory, "before.md"), before.content, { encoding: "utf8", mode: 384, flag: "wx" });
+    await writeFile4(join7(directory, "proposed.md"), proposed, { encoding: "utf8", mode: 384, flag: "wx" });
+    await atomicJson(join7(directory, "metadata.json"), entry);
+    return { directory, entry };
+  }
+  async ensureBackup() {
+    const current = await this.snapshot();
+    return { recoveryId: current.exists ? (await this.prepare(current, current.content, "before-parse")).entry.historyId : null };
+  }
+  async write(input2, write, assertCurrent) {
+    if (typeof input2.revision !== "string" || !input2.revision) throw new LibraryError("REVISION_REQUIRED", "\u8BF7\u5148\u8BFB\u53D6\u8BBA\u6587 Markdown\uFF0C\u518D\u643A\u5E26 revision \u4FDD\u5B58\u3002");
+    const current = await this.snapshot();
+    if (!current.exists) throw new LibraryError("MARKDOWN_NOT_FOUND", "\u8BBA\u6587\u8FD8\u6CA1\u6709 PAPER.md\uFF0C\u4E0D\u4F1A\u987A\u5E26\u521B\u5EFA\u6216\u89E3\u6790\u3002");
+    if (current.revision !== input2.revision) throw new LibraryError("MARKDOWN_CONFLICT", "\u8BBA\u6587 Markdown \u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u6BD4\u8F83\u3002");
+    const proposed = proposal(current.content, input2), diff = markdownChanges(current.content, proposed);
+    const result = (snapshot, recoveryId, saved) => ({ ...this.document(snapshot), ...diff, saved, dryRun: input2.dryRun === true, previousRevision: current.revision, recoveryId });
+    if (input2.dryRun) return result({ content: proposed, exists: true, revision: contentRevision(proposed) }, null, false);
+    if (proposed === current.content) return result(current, null, true);
+    const recovery = await this.prepare(current, proposed, "write");
+    await assertCurrent();
+    if ((await this.snapshot()).revision !== current.revision) throw new LibraryError("MARKDOWN_CONFLICT", "\u4FDD\u5B58\u524D\u8BBA\u6587 Markdown \u5DF2\u53D8\u5316\uFF1B\u63D0\u8BAE\u7A3F\u548C\u539F\u6587\u5DF2\u4FDD\u7559\u3002", false, { recoveryId: recovery.entry.historyId });
+    try {
+      await write(proposed);
+      const saved = await this.snapshot();
+      if (saved.revision !== recovery.entry.revision) throw new LibraryError("MARKDOWN_CONFLICT", "\u5199\u5165\u540E\u7684\u5185\u5BB9\u4E0E\u63D0\u8BAE\u7A3F\u4E0D\u540C\uFF0C\u8BF7\u4FDD\u7559\u8349\u7A3F\u5E76\u6BD4\u8F83\u3002");
+      recovery.entry.status = "saved";
+      await atomicJson(join7(recovery.directory, "metadata.json"), recovery.entry);
+      return result(saved, recovery.entry.historyId, true);
+    } catch (error62) {
+      recovery.entry.status = "unconfirmed";
+      await atomicJson(join7(recovery.directory, "metadata.json"), recovery.entry).catch(() => void 0);
+      throw new LibraryError("MARKDOWN_WRITE_UNCONFIRMED", "\u4FDD\u5B58\u54CD\u5E94\u6216\u56DE\u8BFB\u672A\u786E\u8BA4\uFF1B\u539F\u6587\u4E0E\u63D0\u8BAE\u7A3F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u5148\u56DE\u8BFB\uFF0C\u4E0D\u8981\u81EA\u52A8\u91CD\u653E\u5199\u5165\u3002", false, { recoveryId: recovery.entry.historyId, cause: error62 instanceof LibraryError ? error62.code : "UPSTREAM_FAILED" });
+    }
+  }
+  async history(input2 = {}) {
+    const { offset, maxChars } = windowRange(input2.offset, input2.maxChars), entries = await this.recoveries();
+    const publicEntry = ({ historyId, createdAt, previousRevision, revision, status }) => ({ historyId, createdAt, previousRevision, revision, status });
+    const result = { items: entries.map((item) => publicEntry(item.entry)), truncated: false };
+    if (!input2.historyId) return result;
+    if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(input2.historyId)) throw new LibraryError("INVALID_PATH", "\u6062\u590D\u8BB0\u5F55\u5F15\u7528\u65E0\u6548\u3002");
+    const selected = entries.find((item) => item.entry.historyId === input2.historyId);
+    if (!selected) throw new LibraryError("MARKDOWN_HISTORY_NOT_FOUND", "\u8BE5\u6062\u590D\u8BB0\u5F55\u4E0D\u5C5E\u4E8E\u5F53\u524D\u8BBA\u6587\u6216\u5DF2\u4E0D\u53EF\u7528\u3002");
+    const before = await readFile5(join7(selected.directory, "before.md"), "utf8"), proposed = await readFile5(join7(selected.directory, "proposed.md"), "utf8");
+    const totalChars = Math.max(before.length, proposed.length), end = Math.min(totalChars, offset + maxChars);
+    if (offset > totalChars) throw new LibraryError("INVALID_RANGE", "\u6062\u590D\u8BB0\u5F55\u504F\u79FB\u8D85\u51FA\u6587\u6863\u3002");
+    result.entry = { ...publicEntry(selected.entry), before: before.slice(offset, end), proposed: proposed.slice(offset, end), offset, nextOffset: end < totalChars ? end : null, totalChars };
+    return result;
+  }
+};
+
+// src/core/library-service.ts
+var MAX_NOTE_BYTES2 = 2 * 1024 * 1024;
 var MAX_PDF_CHUNK = 1024 * 1024;
 var activeStatuses = /* @__PURE__ */ new Set(["queued", "running", "cancel_requested"]);
 var record3 = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -61784,7 +63977,7 @@ var strings = (value) => Array.isArray(value) ? value.map((item) => typeof item 
 var settingsKey = (settings) => JSON.stringify([settings.schemaVersion, settings.cliPath, settings.vaultPath, settings.pdfiumPath, settings.allowAgentPdfText, settings.vaultId]);
 var LibraryService = class {
   dataRoot;
-  instanceId = randomUUID3();
+  instanceId = randomUUID5();
   runner;
   factory;
   snapshotTtl;
@@ -61804,7 +63997,7 @@ var LibraryService = class {
   busyWrites = 0;
   closed = false;
   constructor(options = {}) {
-    this.dataRoot = resolve2(expandHome(options.dataRoot ?? join5(homedir2(), ".codexworkbench", "agentero-library")));
+    this.dataRoot = resolve3(expandHome(options.dataRoot ?? join8(homedir2(), ".codexworkbench", "agentero-library")));
     this.runner = options.cliRunner ?? new ProcessCliRunner();
     this.factory = options.nativeFactory ?? createNativeBackend;
     this.snapshotTtl = options.snapshotTtlMs ?? 3e4;
@@ -61828,7 +64021,7 @@ var LibraryService = class {
     return reading;
   }
   async loadSettings() {
-    const value = await readJson(join5(this.dataRoot, "config.json"));
+    const value = await readJson(join8(this.dataRoot, "config.json"));
     if (value === void 0) return { schemaVersion: 1, cliPath: "agentero", vaultPath: "", pdfiumPath: "", allowAgentPdfText: false, vaultId: null };
     const data = record3(value);
     if (data.schemaVersion !== 1 || typeof data.cliPath !== "string" || typeof data.vaultPath !== "string" || typeof data.pdfiumPath !== "string" || typeof data.allowAgentPdfText !== "boolean" || !(data.vaultId === null || typeof data.vaultId === "string")) {
@@ -61853,19 +64046,19 @@ var LibraryService = class {
       }
       if (next.vaultPath) next.vaultPath = await this.validateVault(next.vaultPath);
       if (next.pdfiumPath) {
-        next.pdfiumPath = resolve2(next.pdfiumPath);
-        if (await exists(next.pdfiumPath) && (await stat3(next.pdfiumPath)).isFile()) next.pdfiumPath = dirname3(next.pdfiumPath);
+        next.pdfiumPath = resolve3(next.pdfiumPath);
+        if (await exists(next.pdfiumPath) && (await stat5(next.pdfiumPath)).isFile()) next.pdfiumPath = dirname3(next.pdfiumPath);
       }
       const changed = next.vaultPath !== current.vaultPath;
       if ((changed || next.cliPath !== current.cliPath || next.pdfiumPath !== current.pdfiumPath || next.allowAgentPdfText !== current.allowAgentPdfText) && (this.busyWrites || this.activeOperationCount())) {
         throw new LibraryError("VAULT_BUSY", "\u5B58\u5728\u8FD0\u884C\u4E2D\u7684\u4EFB\u52A1\u6216\u4FDD\u5B58\u64CD\u4F5C\uFF0C\u8BF7\u5B8C\u6210\u6216\u53D6\u6D88\u540E\u518D\u4FEE\u6539\u8FDE\u63A5\u3002");
       }
-      next.vaultId = changed ? next.vaultPath ? randomUUID3() : null : next.vaultPath ? current.vaultId ?? randomUUID3() : null;
+      next.vaultId = changed ? next.vaultPath ? randomUUID5() : null : next.vaultPath ? current.vaultId ?? randomUUID5() : null;
       if (settingsKey(await this.loadSettings()) !== settingsKey(current)) {
         await this.readSettings();
         throw new LibraryError("SETTINGS_CHANGED", "\u914D\u7F6E\u5DF2\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u4FDD\u5B58\u3002", true);
       }
-      await atomicJson(join5(this.dataRoot, "config.json"), next);
+      await atomicJson(join8(this.dataRoot, "config.json"), next);
       const saved = await this.readSettings();
       if (settingsKey(saved) !== settingsKey(next)) throw new LibraryError("SETTINGS_CHANGED", "\u4FDD\u5B58\u671F\u95F4\u914D\u7F6E\u53C8\u88AB\u5176\u4ED6\u5B9E\u4F8B\u4FEE\u6539\uFF0C\u8BF7\u91CD\u65B0\u8F7D\u5165\u5F53\u524D\u503C\u3002", true);
       return saved;
@@ -61880,11 +64073,11 @@ var LibraryService = class {
     return [...this.operations.values()].filter((item) => activeStatuses.has(item.public.status)).length;
   }
   async validateVault(input2) {
-    const path = resolve2(expandHome(input2));
-    if (!await exists(path) || !(await stat3(path)).isDirectory() || !await exists(join5(path, ".agentero", "catalog.sqlite")) || !await exists(join5(path, "papers"))) {
+    const path = resolve3(expandHome(input2));
+    if (!await exists(path) || !(await stat5(path)).isDirectory() || !await exists(join8(path, ".agentero", "catalog.sqlite")) || !await exists(join8(path, "papers"))) {
       throw new LibraryError("VAULT_INVALID", "\u8BE5\u76EE\u5F55\u4E0D\u662F\u5DF2\u6709 Agentero Vault\uFF0C\u8BF7\u9009\u62E9\u5DF2\u6709\u77E5\u8BC6\u5E93\u6216\u660E\u786E\u521B\u5EFA\u65B0\u5E93\u3002");
     }
-    return realpath4(path);
+    return realpath5(path);
   }
   async context(input2) {
     this.ensureOpen();
@@ -61947,12 +64140,12 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const pending = (async () => {
       let result;
       try {
-        const directory = join5(this.dataRoot, "cache", "diagnostics", `${key2.slice(0, 16)}-${this.instanceId}`);
-        const vault2 = join5(directory, "vault");
-        await mkdir4(directory, { recursive: true });
-        if (!await exists(join5(vault2, ".agentero", "catalog.sqlite"))) await this.cli(settings, ["--json", "vault", "create", vault2], controller.signal);
-        const pdf = join5(directory, "codex-workbench-probe.pdf");
-        await writeFile4(pdf, diagnosticPdf());
+        const directory = join8(this.dataRoot, "cache", "diagnostics", `${key2.slice(0, 16)}-${this.instanceId}`);
+        const vault2 = join8(directory, "vault");
+        await mkdir7(directory, { recursive: true });
+        if (!await exists(join8(vault2, ".agentero", "catalog.sqlite"))) await this.cli(settings, ["--json", "vault", "create", vault2], controller.signal);
+        const pdf = join8(directory, "codex-workbench-probe.pdf");
+        await writeFile5(pdf, diagnosticPdf());
         const imported = record3(await this.cli(settings, ["--json", "--vault", vault2, "import", "pdf", pdf, "--no-recognize"], controller.signal));
         const papers = Array.isArray(imported.papers) ? imported.papers : [];
         const path = String(record3(papers[0]).path ?? "papers/codex-workbench-probe");
@@ -61994,7 +64187,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       ready,
       instanceId: this.instanceId,
       dataRoot: this.dataRoot,
-      defaultVaultPath: join5(this.dataRoot, "vault"),
+      defaultVaultPath: join8(this.dataRoot, "vault"),
       cli,
       vault: { configured: !!settings.vaultId, valid, vaultId: settings.vaultId, path: settings.vaultPath, name: settings.vaultPath ? basename3(settings.vaultPath) : "", ...vaultError ? { error: vaultError } : {} },
       capabilities: { metadata: ready, notes: ready, pdfRead: ready, pdfText: ready && settings.allowAgentPdfText && pdfium.available === true, pdfParse: ready && pdfium.available === true, layout: ready },
@@ -62010,8 +64203,8 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (typeof input2.path !== "string" || !input2.path.trim()) throw new LibraryError("INVALID_PATH", "\u8BF7\u660E\u786E\u6307\u5B9A\u65B0\u77E5\u8BC6\u5E93\u76EE\u5F55\u3002");
     const settings = await this.readSettings();
     await this.requireCli(settings);
-    const path = resolve2(expandHome(input2.path));
-    if (await exists(path) && (!(await stat3(path)).isDirectory() || (await readdir2(path)).length > 0)) throw new LibraryError("VAULT_EXISTS", "\u76EE\u6807\u76EE\u5F55\u4E0D\u662F\u7A7A\u76EE\u5F55\uFF0C\u8BF7\u8FDE\u63A5\u5DF2\u6709\u5E93\u6216\u9009\u62E9\u65B0\u7684\u7A7A\u76EE\u5F55\u3002");
+    const path = resolve3(expandHome(input2.path));
+    if (await exists(path) && (!(await stat5(path)).isDirectory() || (await readdir3(path)).length > 0)) throw new LibraryError("VAULT_EXISTS", "\u76EE\u6807\u76EE\u5F55\u4E0D\u662F\u7A7A\u76EE\u5F55\uFF0C\u8BF7\u8FDE\u63A5\u5DF2\u6709\u5E93\u6216\u9009\u62E9\u65B0\u7684\u7A7A\u76EE\u5F55\u3002");
     await this.cli(settings, ["--json", "vault", "create", path]);
     return this.updateSettings({ vaultPath: path });
   }
@@ -62068,7 +64261,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const path = relativePath(input2);
     if (!path.startsWith("papers/")) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u5F15\u7528\u5FC5\u987B\u662F papers/ \u4E0B\u7684\u8BBA\u6587\u76EE\u5F55\u3002");
     const actual = await containedPath(context.path, path);
-    if (!(await stat3(actual)).isDirectory()) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u5F15\u7528\u4E0D\u662F\u76EE\u5F55\u3002");
+    if (!(await stat5(actual)).isDirectory()) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587\u5F15\u7528\u4E0D\u662F\u76EE\u5F55\u3002");
     return path;
   }
   async listPapers(input2) {
@@ -62079,10 +64272,10 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       const data = await this.cli(context.settings, ["--json", "--vault", context.path, "paper", "list", "--fields", "authors,year,date,tags,is_read,publication,doi"]);
       if (!Array.isArray(data)) throw new LibraryError("UPSTREAM_INVALID", "CLI \u6587\u732E\u5217\u8868\u683C\u5F0F\u65E0\u6548\u3002");
       this.assertCurrentContext(context, await this.readSettings());
-      this.snapshot = { id: randomUUID3(), vaultId: context.id, createdAt: Date.now(), items: data.map((value) => this.normalizePaper(value)) };
+      this.snapshot = { id: randomUUID5(), vaultId: context.id, createdAt: Date.now(), items: data.map((value) => this.normalizePaper(value)) };
     }
     const snapshot = this.snapshot;
-    const fingerprint = createHash4("sha256").update(JSON.stringify([input2.query ?? "", input2.tag ?? [], input2.unread ?? false, input2.sortBy ?? "title", input2.sortDir ?? "asc"])).digest("hex");
+    const fingerprint = createHash6("sha256").update(JSON.stringify([input2.query ?? "", input2.tag ?? [], input2.unread ?? false, input2.sortBy ?? "title", input2.sortDir ?? "asc"])).digest("hex");
     let offset = 0;
     if (input2.cursor) {
       let cursor;
@@ -62116,7 +64309,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const taggedPaper = record3(record3(detail).paper);
     if (taggedPaper.path !== path || !Array.isArray(taggedPaper.tags)) throw new LibraryError("UPSTREAM_INVALID", "CLI \u5355\u7BC7\u6587\u732E\u6807\u7B7E\u683C\u5F0F\u65E0\u6548\u3002");
     const tags = this.normalizePaper(taggedPaper);
-    const hasPdf = (await readdir2(await containedPath(context.path, path))).some((name2) => name2.toLowerCase().endsWith(".pdf"));
+    const hasPdf = (await readdir3(await containedPath(context.path, path))).some((name2) => name2.toLowerCase().endsWith(".pdf"));
     const hasMarkdown = await exists(await containedPath(context.path, `${path}/PAPER.md`, true));
     const hasLayout = await exists(await containedPath(context.path, `${path}/source/layout.json`, true));
     return { vaultId: context.id, ...this.normalizePaper(metadata), tags: tags.tags, tagDetails: tags.tagDetails, paths: paths.paths, hasPdf, hasMarkdown, hasLayout };
@@ -62166,7 +64359,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       vaultId: context.id,
       hits: hits.slice(0, limit),
       truncated: upstreamTruncated || hits.length > limit,
-      diagnostics: { scopePostFiltered, upstreamTruncated, scanMayBeIncomplete: scope !== "metadata", maxDepth: 16, maxFiles: 2e4, maxFileBytes: MAX_NOTE_BYTES, semantics: "keyword-and", bodyExcluded: !context.settings.allowAgentPdfText }
+      diagnostics: { scopePostFiltered, upstreamTruncated, scanMayBeIncomplete: scope !== "metadata", maxDepth: 16, maxFiles: 2e4, maxFileBytes: MAX_NOTE_BYTES2, semantics: "keyword-and", bodyExcluded: !context.settings.allowAgentPdfText }
     };
   }
   async discover(input2) {
@@ -62175,7 +64368,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     return { vaultId: context.id, ...await this.call(context, "discover_arxiv", { keywords: input2.keywords ?? [], categories: input2.categories ?? [], ...input2.since ? { since: input2.since } : {}, ...input2.until ? { until: input2.until } : {}, ...input2.top !== void 0 ? { top: input2.top } : {}, ...input2.maxCandidates !== void 0 ? { maxCandidates: input2.maxCandidates } : {}, dedup: input2.dedup ?? true }) };
   }
   startOperation(context, type, run, paperPath) {
-    const operationId = `${this.instanceId}:${randomUUID3()}`;
+    const operationId = `${this.instanceId}:${randomUUID5()}`;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const operation2 = { operationId, instanceId: this.instanceId, vaultId: context.id, type, status: "queued", stage: "queued", createdAt: now, updatedAt: now, ...paperPath ? { paperPath } : {} };
     const controller = new AbortController();
@@ -62215,8 +64408,8 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (parent !== "papers" && !parent.startsWith("papers/")) throw new LibraryError("INVALID_PATH", "\u5BFC\u5165\u76EE\u5F55\u5FC5\u987B\u4F4D\u4E8E papers/\u3002");
     const localFiles = [];
     for (const requested of requestedFiles) {
-      const file2 = resolve2(expandHome(requested));
-      if (!file2.toLowerCase().endsWith(".pdf") || !(await stat3(file2)).isFile()) throw new LibraryError("INVALID_IMPORT", "\u8BF7\u9009\u62E9\u5DF2\u6709\u7684\u672C\u5730 PDF \u6587\u4EF6\u3002");
+      const file2 = resolve3(expandHome(requested));
+      if (!file2.toLowerCase().endsWith(".pdf") || !(await stat5(file2)).isFile()) throw new LibraryError("INVALID_IMPORT", "\u8BF7\u9009\u62E9\u5DF2\u6709\u7684\u672C\u5730 PDF \u6587\u4EF6\u3002");
       if (!localFiles.some((existing) => process.platform === "win32" ? existing.toLowerCase() === file2.toLowerCase() : existing === file2)) localFiles.push(file2);
     }
     return this.startOperation(context, "import", async (signal) => {
@@ -62231,7 +64424,17 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const context = await this.context(input2);
     const path = await this.paperPath(context, input2.paperPath);
     await this.requireCli(context.settings);
-    return this.startOperation(context, "parse", (signal) => this.cli(context.settings, ["--json", "--vault", context.path, "paper", "parse", path, ...input2.force ? ["--force"] : []], signal, 3e5), path);
+    return this.startOperation(context, "parse", (signal) => this.exclusive(context, path, () => withPaperDocumentLock(this.dataRoot, context.path, path, async (checkLock, lockSignal) => {
+      const check2 = () => {
+        if (signal.aborted) throw new LibraryError("OPERATION_CANCELLED", "\u6B63\u6587\u89E3\u6790\u5DF2\u53D6\u6D88\u3002");
+      };
+      check2();
+      checkLock();
+      await this.ensurePaperMarkdownBackup({ vaultId: context.id, paperPath: path });
+      check2();
+      checkLock();
+      return this.cli(context.settings, ["--json", "--vault", context.path, "paper", "parse", path, ...input2.force ? ["--force"] : []], AbortSignal.any([signal, lockSignal]), 3e5);
+    })), path);
   }
   async updatePaper(input2) {
     const context = await this.context(input2);
@@ -62322,15 +64525,15 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const context = await this.context(input2);
     const paperPath = await this.paperPath(context, input2.paperPath);
     const directory = await containedPath(context.path, paperPath);
-    const names = await readdir2(directory);
+    const names = await readdir3(directory);
     const preferred = `${basename3(paperPath)}.pdf`;
     const filename = names.includes(preferred) ? preferred : names.filter((name2) => name2.toLowerCase().endsWith(".pdf")).sort()[0];
     if (!filename) throw new LibraryError("PDF_MISSING", "\u8BBA\u6587\u76EE\u5F55\u4E2D\u6CA1\u6709\u672C\u5730 PDF\u3002");
     const path = await containedPath(context.path, `${paperPath}/${filename}`);
-    const handle = await open3(path, "r");
+    const handle = await open5(path, "r");
     try {
       const before = await handle.stat();
-      const revision = `pdf:${createHash4("sha256").update(JSON.stringify([before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs])).digest("hex")}`;
+      const revision = `pdf:${createHash6("sha256").update(JSON.stringify([before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs])).digest("hex")}`;
       const offset = input2.offset ?? 0;
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > before.size) throw new LibraryError("INVALID_RANGE", "PDF \u8BFB\u53D6\u504F\u79FB\u65E0\u6548\u3002");
       if (offset > 0 && !input2.revision) throw new LibraryError("PDF_REVISION_REQUIRED", "\u540E\u7EED PDF \u5206\u5757\u5FC5\u987B\u643A\u5E26\u9996\u5757\u7684 revision\u3002");
@@ -62351,15 +64554,135 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const context = await this.context(input2);
     const path = relativePath(input2.path ?? "notes");
     if (path !== "notes" && !path.startsWith("notes/")) throw new LibraryError("INVALID_PATH", "\u72EC\u7ACB\u7B14\u8BB0\u76EE\u5F55\u5FC5\u987B\u4F4D\u4E8E notes/\u3002");
-    await containedPath(context.path, path);
+    await safeNotePath(context.path, path, false, true);
     const data = await this.call(context, "file_list", { path, limit: Math.min(500, Math.max(1, input2.limit ?? 200)) });
     const entries = Array.isArray(data.entries) ? data.entries : [];
     return { vaultId: context.id, path, items: entries.map(record3).filter((item) => item.kind === "directory" || String(item.path).toLowerCase().endsWith(".md")).map((item) => ({ path: String(item.path), name: String(item.name), kind: item.kind === "directory" ? "directory" : "file" })), truncated: data.truncated === true };
   }
+  async notePaper(context, reference, expectedId) {
+    if (typeof reference !== "string" || !reference || reference.length > 1024) throw new LibraryError("INVALID_PAPER", "\u8BBA\u6587\u5F15\u7528\u65E0\u6548\u3002");
+    if (reference.startsWith("papers/")) await this.paperPath(context, reference);
+    const paper2 = this.normalizePaper(await this.call(context, "paper_get", { ref: reference }));
+    if (!paper2.id || paper2.id.length > 512 || !paper2.title || paper2.title.length > 1e3 || expectedId && paper2.id !== expectedId) throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u8BBA\u6587\u7A33\u5B9A\u6807\u8BC6\u65E0\u6548\u6216\u5DF2\u6307\u5411\u53E6\u4E00\u7BC7\u8BBA\u6587\u3002");
+    const paperPath = await this.paperPath(context, paper2.path);
+    if (reference.startsWith("papers/") && paperPath !== reference) throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u8BBA\u6587\u8DEF\u5F84\u4E0E\u8FD4\u56DE\u7684\u76EE\u5F55\u4E0D\u4E00\u81F4\u3002");
+    return { paperId: paper2.id, paperPath, paperTitle: paper2.title };
+  }
+  async paperNoteFolder(context, paper2) {
+    const parent = await safeNotePath(context.path, "notes/\u8BBA\u6587", true);
+    if (await exists(parent)) {
+      const suffix = `--${paperFolderSuffix(paper2.paperId)}`;
+      let count = 0;
+      const handle = await import("node:fs/promises").then((fs) => fs.opendir(parent));
+      try {
+        for await (const entry of handle) {
+          if (++count > 5e3) throw new LibraryError("NOTE_FOLDER_TOO_LARGE", "\u8BBA\u6587\u7B14\u8BB0\u76EE\u5F55\u8D85\u8FC7\u5B89\u5168\u626B\u63CF\u8303\u56F4\u3002");
+          if (entry.isDirectory() && entry.name.endsWith(suffix)) {
+            const path = `notes/\u8BBA\u6587/${entry.name}`;
+            await safeNotePath(context.path, path);
+            return path;
+          }
+        }
+      } finally {
+        await handle.close().catch(() => void 0);
+      }
+    }
+    return defaultPaperNoteFolder(paper2);
+  }
+  async noteTree(input2) {
+    const context = await this.context(input2);
+    if (input2.limit !== void 0 && (!Number.isInteger(input2.limit) || input2.limit < 1 || input2.limit > 1e3)) throw new LibraryError("INVALID_RANGE", "\u7B14\u8BB0\u6811 limit \u5FC5\u987B\u4E3A 1 \u81F3 1000\u3002");
+    const paper2 = input2.paperPath ? await this.notePaper(context, input2.paperPath) : void 0;
+    const paperFolderPath = paper2 ? await this.paperNoteFolder(context, paper2) : void 0;
+    const scan = await scanNoteWorkspace(context.path);
+    if (paper2) {
+      for (const item of scan.items) if (item.paperId === paper2.paperId) Object.assign(item, paper2);
+    }
+    const papers = /* @__PURE__ */ new Map();
+    if (paper2) papers.set(paperFolderSuffix(paper2.paperId), paper2);
+    for (const item of scan.items) if (item.paperId && item.paperPath && item.paperTitle) papers.set(paperFolderSuffix(item.paperId), { paperId: item.paperId, paperPath: item.paperPath, paperTitle: item.paperTitle });
+    for (const item of scan.items) if (item.kind === "directory") {
+      const match = /^notes\/论文\/[^/]+--([a-f0-9]{12})(?:\/|$)/.exec(item.path), association = match ? papers.get(match[1]) : void 0;
+      if (association) Object.assign(item, association);
+    }
+    const included = /* @__PURE__ */ new Set();
+    const include = (path) => {
+      for (let parent = path; parent !== "notes" && parent.startsWith("notes/"); parent = posix2.dirname(parent)) included.add(parent);
+    };
+    if (paper2) for (const item of scan.items) {
+      if (item.kind === "file" && item.paperId === paper2.paperId || item.kind === "directory" && item.paperId === paper2.paperId) include(item.path);
+    }
+    const all = paper2 ? scan.items.filter((item) => included.has(item.path)) : scan.items;
+    const limit = input2.limit ?? 500, items = all.slice(0, limit);
+    let truncated = scan.truncated || all.length > limit;
+    for (const item of items) if (item.kind === "directory") {
+      try {
+        Object.assign(item, await noteFolderRevision(context.path, item.path));
+      } catch (error62) {
+        if (error62 instanceof LibraryError && ["NOTE_FOLDER_TOO_LARGE", "INVALID_PATH"].includes(error62.code)) truncated = true;
+        else throw error62;
+      }
+    }
+    this.assertCurrentContext(context, await this.readSettings());
+    return { vaultId: context.id, items, truncated, ...paperFolderPath ? { paperFolderPath } : {} };
+  }
+  async createNote(input2) {
+    const context = await this.context(input2), title = noteName(input2.title);
+    const association = input2.paperPath ? await this.notePaper(context, input2.paperPath) : void 0;
+    const folder = noteWorkspacePath(input2.folderPath ?? (association ? await this.paperNoteFolder(context, association) : "notes"), true);
+    await safeNotePath(context.path, folder, true, true);
+    const filename = noteName(title.toLowerCase().endsWith(".md") ? title : `${title}.md`);
+    const path = `${folder}/${filename}`;
+    return this.saveNote({ vaultId: input2.vaultId, path, content: input2.content ?? "", revision: null }, association ?? null);
+  }
+  async createNoteFolder(input2) {
+    const context = await this.context(input2), parent = noteWorkspacePath(input2.parentPath, true), name2 = noteName(input2.name), path = `${parent}/${name2}`;
+    return this.exclusive(context, "notes-workspace", async () => {
+      const target = await safeNotePath(context.path, path, true);
+      if (await exists(target)) throw new LibraryError("FILE_EXISTS", "\u76EE\u6807\u6587\u4EF6\u5939\u5DF2\u5B58\u5728\u3002");
+      const parentTarget = await safeNotePath(context.path, parent, true, true);
+      await mkdir7(parentTarget, { recursive: true });
+      await safeNotePath(context.path, parent, false, true);
+      await mkdir7(target);
+      return { vaultId: context.id, path, parentPath: parent, name: name2, kind: "directory", ...await noteFolderRevision(context.path, path) };
+    });
+  }
+  async moveNoteFolder(input2) {
+    const context = await this.context(input2), path = noteWorkspacePath(input2.path), newPath = noteWorkspacePath(input2.newPath);
+    if (newPath === path || newPath.startsWith(`${path}/`)) throw new LibraryError("INVALID_PATH", "\u4E0D\u80FD\u628A\u6587\u4EF6\u5939\u79FB\u52A8\u5230\u81EA\u8EAB\u6216\u5176\u5B50\u76EE\u5F55\u3002");
+    return this.exclusive(context, "notes-workspace", async () => {
+      const source = await safeNotePath(context.path, path);
+      if (!(await stat5(source)).isDirectory()) throw new LibraryError("INVALID_PATH", "\u79FB\u52A8\u76EE\u6807\u5FC5\u987B\u662F\u7B14\u8BB0\u6587\u4EF6\u5939\u3002");
+      const before = await noteFolderRevision(context.path, path);
+      if (before.revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u6587\u4EF6\u5939\u5185\u5BB9\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u7B14\u8BB0\u6811\u3002", true, before);
+      const target = await safeNotePath(context.path, newPath, true);
+      if (await exists(target)) throw new LibraryError("FILE_EXISTS", "\u76EE\u6807\u6587\u4EF6\u5939\u5DF2\u5B58\u5728\u3002");
+      const result = await this.call(context, "file_move", { from: path, to: newPath });
+      return { vaultId: context.id, path: newPath, renamedFrom: path, revision: (await noteFolderRevision(context.path, newPath)).revision, updatedSources: result.updatedSources ?? [], skipped: result.skipped ?? [] };
+    });
+  }
+  async trashNote(input2) {
+    const context = await this.context(input2), path = noteWorkspacePath(input2.path);
+    return this.exclusive(context, "notes-workspace", async () => {
+      const target = await safeNotePath(context.path, path), info = await stat5(target);
+      const revision = info.isDirectory() ? (await noteFolderRevision(context.path, path)).revision : (await this.readLocatedNote(context, await this.noteLocation(context, { vaultId: context.id, path }))).revision;
+      if (!input2.revision || revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u7B14\u8BB0\u6216\u6587\u4EF6\u5939\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u79FB\u5165\u56DE\u6536\u7AD9\u3002", true, { currentRevision: revision });
+      const result = await this.call(context, "file_delete", { paths: [path], permanent: false });
+      this.trashSnapshot = void 0;
+      return { vaultId: context.id, path, trashed: true, result };
+    });
+  }
+  async associateNote(input2) {
+    const context = await this.context(input2), path = noteWorkspacePath(input2.path);
+    const association = input2.paperPath === null ? null : await this.notePaper(context, input2.paperPath);
+    const current = await this.readNote({ vaultId: context.id, path });
+    if (!current.exists || current.revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u7B14\u8BB0\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u518D\u4FEE\u6539\u5173\u8054\u3002", true);
+    return this.saveNote({ vaultId: context.id, path, content: current.content, revision: input2.revision }, association);
+  }
   async noteLocation(context, input2) {
     let path;
     let paperPath;
-    if (input2.paperPath) {
+    if (input2.paperPath && !input2.path?.startsWith("notes/")) {
       paperPath = await this.paperPath(context, input2.paperPath);
       path = `${paperPath}/NOTES.md`;
     } else {
@@ -62368,41 +64691,67 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       else if (!path.startsWith("notes/") || !path.toLowerCase().endsWith(".md")) throw new LibraryError("INVALID_PATH", "\u4EC5\u652F\u6301 notes/ \u4E0B\u7684 Markdown \u6216\u8BBA\u6587 NOTES.md\u3002");
     }
     if (input2.path && relativePath(input2.path) !== path) throw new LibraryError("INVALID_PATH", "\u7B14\u8BB0\u8DEF\u5F84\u4E0E\u8BBA\u6587\u5F15\u7528\u4E0D\u4E00\u81F4\u3002");
-    await containedPath(context.path, path, true);
+    if (path.startsWith("notes/")) await safeNotePath(context.path, path, true);
+    else await containedPath(context.path, path, true);
     return { path, ...paperPath ? { paperPath } : {} };
   }
   async readLocatedNote(context, location) {
-    const actual = await containedPath(context.path, location.path, true);
+    const actual = location.path.startsWith("notes/") ? await safeNotePath(context.path, location.path, true) : await containedPath(context.path, location.path, true);
     if (!await exists(actual)) return { vaultId: context.id, ...location, content: "", revision: null, exists: false };
-    if ((await stat3(actual)).size > MAX_NOTE_BYTES) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u8D85\u8FC7 2 MiB\uFF0C\u8BF7\u7F29\u5C0F\u6587\u4EF6\u3002");
+    if ((await stat5(actual)).size > MAX_NOTE_BYTES2) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u8D85\u8FC7 2 MiB\uFF0C\u8BF7\u7F29\u5C0F\u6587\u4EF6\u3002");
     const data = location.paperPath ? await this.call(context, "paper_notes_get", { ref: location.paperPath }) : await this.call(context, "file_read", { path: location.path });
     if (typeof data.content !== "string") throw new LibraryError("UPSTREAM_INVALID", "\u4E0A\u6E38\u7B14\u8BB0\u5185\u5BB9\u683C\u5F0F\u65E0\u6548\u3002");
-    return { vaultId: context.id, ...location, content: data.content, revision: contentRevision(data.content), exists: true };
+    let association = location.paperPath ? void 0 : readNoteAssociation(data.content);
+    if (association) {
+      try {
+        association = await this.notePaper(context, association.paperId, association.paperId);
+      } catch (error62) {
+        if (error62 instanceof LibraryError && ["VAULT_CHANGED", "SETTINGS_CHANGED", "SERVICE_CLOSED"].includes(error62.code)) throw error62;
+      }
+    }
+    return { vaultId: context.id, ...location, ...association, content: data.content, revision: contentRevision(data.content), exists: true };
   }
   async readNote(input2) {
     const context = await this.context(input2);
-    return this.readLocatedNote(context, await this.noteLocation(context, input2));
+    const result = await this.readLocatedNote(context, await this.noteLocation(context, input2));
+    if (input2.paperId && result.paperId !== input2.paperId || input2.path?.startsWith("notes/") && input2.paperPath && result.paperPath !== input2.paperPath) throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u7B14\u8BB0\u4E0D\u5C5E\u4E8E\u6307\u5B9A\u8BBA\u6587\u3002");
+    return result;
   }
   async writeNote(input2) {
+    return this.saveNote(input2);
+  }
+  async saveNote(input2, association) {
     const context = await this.context(input2);
     if (!Object.hasOwn(input2, "revision") || !(input2.revision === null || typeof input2.revision === "string")) throw new LibraryError("REVISION_REQUIRED", "\u8BF7\u5148\u8BFB\u53D6\u7B14\u8BB0\uFF0C\u518D\u5E26\u4E0A revision \u4FDD\u5B58\u3002");
     if (input2.mode && input2.mode !== "replace" && input2.mode !== "append") throw new LibraryError("INVALID_MODE", "\u4FDD\u5B58\u6A21\u5F0F\u4EC5\u652F\u6301 replace \u6216 append\u3002");
-    if (typeof input2.content !== "string" || Buffer.byteLength(input2.content) > MAX_NOTE_BYTES) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u5185\u5BB9\u5FC5\u987B\u662F 2 MiB \u4EE5\u5185\u7684\u6587\u672C\u3002");
+    if (typeof input2.content !== "string" || Buffer.byteLength(input2.content) > MAX_NOTE_BYTES2) throw new LibraryError("NOTE_TOO_LARGE", "\u7B14\u8BB0\u5185\u5BB9\u5FC5\u987B\u662F 2 MiB \u4EE5\u5185\u7684\u6587\u672C\u3002");
     const location = await this.noteLocation(context, input2);
     const key2 = `${context.id}:${location.paperPath ?? location.path}`;
-    const recoveryId = `${this.instanceId}-${createHash4("sha256").update(key2).digest("hex").slice(0, 24)}`;
-    const attemptId = randomUUID3();
-    const draftPath = join5(this.dataRoot, "state", "drafts", `${recoveryId}.draft.json`);
-    await atomicJson(draftPath, { instanceId: this.instanceId, attemptId, vaultId: context.id, ...location, revision: input2.revision, mode: input2.mode ?? "replace", content: input2.content, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
+    const recoveryId = `${this.instanceId}-${createHash6("sha256").update(key2).digest("hex").slice(0, 24)}`;
+    const attemptId = randomUUID5();
+    const draftPath = join8(this.dataRoot, "state", "drafts", `${recoveryId}.draft.json`);
+    await atomicJson(draftPath, { instanceId: this.instanceId, attemptId, vaultId: context.id, ...location, ...association !== void 0 ? { association } : {}, revision: input2.revision, mode: input2.mode ?? "replace", content: input2.content, createdAt: (/* @__PURE__ */ new Date()).toISOString() });
     this.busyWrites += 1;
-    const previous = this.queues.get(key2) ?? Promise.resolve();
-    const task = previous.catch(() => void 0).then(async () => {
+    const queueKey = location.path.startsWith("notes/") ? `${context.id}:notes-workspace` : key2;
+    const previous = this.queues.get(queueKey) ?? Promise.resolve();
+    const performSave = async (check2 = () => {
+    }) => {
+      check2();
       const current = await this.readLocatedNote(context, location);
       if (current.revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u7B14\u8BB0\u5DF2\u88AB\u5176\u4ED6\u64CD\u4F5C\u4FEE\u6539\uFF1B\u8349\u7A3F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u540E\u6BD4\u8F83\u3002", false, { currentRevision: current.revision, recoveryId });
-      await atomicJson(join5(this.dataRoot, "state", "drafts", `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
+      if (input2.paperId && current.paperId !== input2.paperId || location.path.startsWith("notes/") && input2.paperPath && current.paperPath !== input2.paperPath) throw new LibraryError("NOTE_ASSOCIATION_INVALID", "\u7B14\u8BB0\u4E0D\u5C5E\u4E8E\u6307\u5B9A\u8BBA\u6587\uFF0C\u8349\u7A3F\u5DF2\u4FDD\u7559\u3002");
+      await atomicJson(join8(this.dataRoot, "state", "drafts", `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
       try {
+        check2();
         if (location.paperPath) await this.call(context, "paper_notes_write", { ref: location.paperPath, content: input2.content, mode: input2.mode ?? "replace" });
-        else await this.call(context, "file_write", { path: location.path, content: input2.content, mode: input2.mode ?? "replace" });
+        else {
+          const currentAssociation = readNoteAssociation(current.content);
+          const content = withNoteAssociation(input2.mode === "append" ? current.content + input2.content : input2.content, association === void 0 ? currentAssociation : association);
+          if (Buffer.byteLength(content) > MAX_NOTE_BYTES2) throw new LibraryError("NOTE_TOO_LARGE", "\u4FDD\u5B58\u540E\u7B14\u8BB0\u8D85\u8FC7 2 MiB\u3002");
+          await safeNotePath(context.path, location.path, true);
+          const nativeAppend = input2.mode === "append" && association === void 0 && !currentAssociation && content === current.content + input2.content;
+          await this.call(context, "file_write", { path: location.path, content: nativeAppend ? input2.content : content, mode: nativeAppend ? "append" : "replace" });
+        }
         const saved = await this.readLocatedNote(context, location);
         const remaining = record3(await readJson(draftPath).catch(() => void 0));
         if (remaining.attemptId === attemptId) await rm3(draftPath, { force: true }).catch(() => void 0);
@@ -62410,13 +64759,14 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
       } catch (error62) {
         throw error62;
       }
-    });
-    this.queues.set(key2, task);
+    };
+    const task = previous.catch(() => void 0).then(() => location.path.startsWith("notes/") ? withPaperDocumentLock(this.dataRoot, context.path, "notes", async (check2) => performSave(check2), "\u7B14\u8BB0\u5DE5\u4F5C\u533A") : performSave());
+    this.queues.set(queueKey, task);
     try {
       return await task;
     } finally {
       this.busyWrites -= 1;
-      if (this.queues.get(key2) === task) this.queues.delete(key2);
+      if (this.queues.get(queueKey) === task) this.queues.delete(queueKey);
     }
   }
   async exclusive(context, resource, run) {
@@ -62425,6 +64775,10 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const task = (this.queues.get(key2) ?? Promise.resolve()).catch(() => void 0).then(async () => {
       this.ensureOpen();
       this.assertCurrentContext(context, await this.readSettings());
+      if (resource === "notes-workspace") return withPaperDocumentLock(this.dataRoot, context.path, "notes", async (check2) => {
+        check2();
+        return run();
+      }, "\u7B14\u8BB0\u5DE5\u4F5C\u533A");
       return run();
     });
     this.queues.set(key2, task);
@@ -62439,10 +64793,181 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
     return { context, store: new MarksStore(context.path, paperPath, context.id), paperPath };
   }
+  async contextSourcePath(context, path, allowMissing = false) {
+    const relative2 = relativePath(path), parts = relative2.split("/");
+    const target = await containedPath(context.path, relative2, allowMissing);
+    for (let index = 1; index <= parts.length; index += 1) {
+      try {
+        if ((await lstat6(join8(context.path, ...parts.slice(0, index)))).isSymbolicLink()) throw new LibraryError("INVALID_PATH", "\u9644\u52A0\u9605\u8BFB\u6765\u6E90\u4E0D\u652F\u6301\u7B26\u53F7\u94FE\u63A5\u3002");
+      } catch (error62) {
+        if (allowMissing && error62.code === "ENOENT") break;
+        throw error62;
+      }
+    }
+    return target;
+  }
+  readingContextSummary(snapshot) {
+    return { vaultId: snapshot.vaultId, contextId: snapshot.contextId, paperPath: snapshot.paperPath, paperId: snapshot.paperId, title: snapshot.title, pages: snapshot.pages, marksCount: snapshot.marksCount, action: snapshot.action, ...snapshot.targetNotePath ? { targetNotePath: snapshot.targetNotePath } : {}, ...snapshot.targetFolderPath ? { targetFolderPath: snapshot.targetFolderPath } : {}, createdAt: snapshot.createdAt, expiresAt: snapshot.expiresAt, imageIds: snapshot.imageIds };
+  }
+  async createReadingContext(input2, signal) {
+    checkContextCancellation(signal);
+    const context = await this.context(input2), paper2 = await this.notePaper(context, input2.paperPath);
+    await this.contextSourcePath(context, paper2.paperPath);
+    if (!["summarize", "create-note", "update-note", "revise-paper"].includes(input2.action)) throw new LibraryError("INVALID_CONTEXT", "\u9605\u8BFB\u4EFB\u52A1\u7C7B\u578B\u65E0\u6548\u3002");
+    if (input2.pages !== void 0 && (!Array.isArray(input2.pages) || input2.pages.length > 500 || input2.pages.some((page) => !Number.isInteger(page) || page < 1 || page > 1e6)) || input2.markIds !== void 0 && (!Array.isArray(input2.markIds) || input2.markIds.length > 500 || input2.markIds.some((id) => typeof id !== "string" || !id || id.length > 256))) throw new LibraryError("INVALID_CONTEXT", "\u6240\u9009\u6279\u6CE8\u6216\u7269\u7406\u9875\u7801\u65E0\u6548\u3002");
+    if (input2.marksRevision !== void 0 && (typeof input2.marksRevision !== "string" || input2.marksRevision.length > 256)) throw new LibraryError("INVALID_CONTEXT", "\u6279\u6CE8\u4FEE\u8BA2\u53F7\u65E0\u6548\u3002");
+    let targetNotePath, targetFolderPath;
+    if (input2.targetNotePath !== void 0) {
+      targetNotePath = noteWorkspacePath(input2.targetNotePath);
+      if (!targetNotePath.toLowerCase().endsWith(".md")) throw new LibraryError("INVALID_PATH", "\u76EE\u6807\u7B14\u8BB0\u5FC5\u987B\u662F notes/ \u4E0B\u7684 Markdown\u3002");
+      const target = await safeNotePath(context.path, targetNotePath, true);
+      if (input2.action === "update-note" && !await exists(target)) throw new LibraryError("NOTE_NOT_FOUND", "\u76EE\u6807\u7B14\u8BB0\u4E0D\u5B58\u5728\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002");
+      if (await exists(target) && !(await stat5(target)).isFile()) throw new LibraryError("INVALID_PATH", "\u76EE\u6807\u7B14\u8BB0\u4E0D\u662F\u6587\u4EF6\u3002");
+    }
+    if (input2.action === "update-note" && !targetNotePath) throw new LibraryError("INVALID_CONTEXT", "\u66F4\u65B0\u7B14\u8BB0\u9700\u8981\u660E\u786E\u76EE\u6807\u7B14\u8BB0\u3002");
+    if (input2.targetFolderPath !== void 0) {
+      targetFolderPath = noteWorkspacePath(input2.targetFolderPath, true);
+      const target = await safeNotePath(context.path, targetFolderPath, true, true);
+      if (await exists(target) && !(await stat5(target)).isDirectory()) throw new LibraryError("INVALID_PATH", "\u76EE\u6807\u76EE\u5F55\u4E0D\u662F\u6587\u4EF6\u5939\u3002");
+    }
+    const pages = new Set(input2.pages ?? []), ids = input2.markIds ? new Set(input2.markIds) : void 0;
+    const store = new MarksStore(context.path, paper2.paperPath, context.id);
+    await this.contextSourcePath(context, `${paper2.paperPath}/marks`, true);
+    const current = await store.list();
+    const selected = ids ? current.items.filter((mark) => ids.has(mark.id)) : !input2.selection && input2.pages?.length ? current.items.filter((mark) => pages.has(mark.page)) : [];
+    if (selected.length > 500) throw new LibraryError("CONTEXT_TOO_LARGE", "\u4E00\u6B21\u6700\u591A\u9644\u52A0 500 \u6761\u6279\u6CE8\uFF0C\u8BF7\u7F29\u5C0F\u9009\u62E9\u3002");
+    if (ids && selected.length !== ids.size) throw new LibraryError("MARK_NOT_FOUND", "\u6240\u9009\u6279\u6CE8\u5DF2\u88AB\u5220\u9664\u6216\u4E0D\u5B58\u5728\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002");
+    if (input2.pages?.length && selected.some((mark) => !pages.has(mark.page))) throw new LibraryError("INVALID_CONTEXT", "\u6240\u9009\u6279\u6CE8\u4E0E\u7269\u7406\u9875\u8303\u56F4\u4E0D\u4E00\u81F4\u3002");
+    if ((selected.length || input2.marksRevision !== void 0) && current.revision !== input2.marksRevision) throw new LibraryError("MARK_CONFLICT", "\u6279\u6CE8\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u540E\u518D\u9644\u52A0\u3002", true, { currentRevision: current.revision });
+    const selection = input2.selection;
+    if (selection) {
+      if (typeof selection.text !== "string" || selection.text.length > 1e6 || !Array.isArray(selection.parts) || !selection.parts.length || selection.parts.length > 100) throw new LibraryError("INVALID_CONTEXT", "\u9009\u533A\u6587\u5B57\u6216\u6765\u6E90\u9875\u65E0\u6548\u3002");
+      for (const part of selection.parts) {
+        if (!Number.isInteger(part.page) || part.page < 1 || part.page > 1e6 || typeof part.quote !== "string" || part.quote.length > 1e6) throw new LibraryError("INVALID_CONTEXT", "\u9009\u533A\u6765\u6E90\u9875\u6216\u539F\u6587\u65E0\u6548\u3002");
+        if (part.rects !== void 0 || part.pageSize !== void 0) {
+          const { width, height } = part.pageSize ?? {};
+          if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height || width <= 0 || height <= 0 || width > 1e5 || height > 1e5 || !Array.isArray(part.rects) || !part.rects.length || part.rects.length > 1e3 || part.rects.some((rect) => !rect || ![rect.x, rect.y, rect.w, rect.h].every(Number.isFinite) || rect.x < 0 || rect.y < 0 || rect.w <= 0 || rect.h <= 0 || rect.x + rect.w > width + 0.5 || rect.y + rect.h > height + 0.5)) throw new LibraryError("INVALID_CONTEXT", "\u9009\u533A\u51E0\u4F55\u8D85\u51FA\u771F\u5B9E\u9875\u9762\u8303\u56F4\u3002");
+        }
+        pages.add(part.page);
+      }
+      if (!selection.text.trim() && !selection.parts.some((part) => part.quote.trim()) && !selection.asset) throw new LibraryError("INVALID_CONTEXT", "\u6240\u9009\u6587\u5B57\u548C\u56FE\u50CF\u5747\u4E3A\u7A7A\u3002");
+    }
+    if (!selected.length && !selection) throw new LibraryError("CONTEXT_EMPTY", "\u8BF7\u5148\u9009\u62E9\u6279\u6CE8\u3001\u5907\u6CE8\u3001\u6587\u5B57\u6216\u533A\u57DF\u622A\u56FE\u3002");
+    for (const mark of selected) pages.add(mark.page);
+    const images = {}, sections = [];
+    const addImage = (asset) => {
+      const id = `image-${Object.keys(images).length + 1}`;
+      images[id] = validateContextPng(asset);
+      return id;
+    };
+    const link = (page, markId) => `workbench-paper:${encodeURIComponent(paper2.paperPath)}#page=${page}${markId ? `&mark=${encodeURIComponent(markId)}` : ""}`;
+    sections.push(`# Frozen reading sources
+Paper title: ${paper2.paperTitle}
+Stable paper ID: ${paper2.paperId}
+Paper path: ${paper2.paperPath}
+Task: ${input2.action}
+Physical PDF pages: ${[...pages].sort((a, b) => a - b).join(", ")}${selected.length ? `
+Marks revision: ${current.revision}` : ""}${targetNotePath ? `
+Target note: ${targetNotePath}` : ""}${targetFolderPath ? `
+Target folder: ${targetFolderPath}` : ""}`);
+    if (selection) {
+      sections.push(`## Reader-selected text
+${selection.text}`);
+      for (const [index, part] of selection.parts.entries()) sections.push(`### Selection part ${index + 1} \u2014 physical PDF page ${part.page}
+Source: ${link(part.page)}
+Quoted source text:
+${part.quote}${part.rects && part.pageSize ? `
+Selection geometry (page points): ${JSON.stringify({ rects: part.rects, pageSize: part.pageSize })}` : ""}`);
+      if (selection.asset) sections.push(`Reader-selected region PNG: ${addImage(selection.asset)}`);
+    }
+    for (const mark of selected) {
+      checkContextCancellation(signal);
+      sections.push(`## Mark ${mark.id} \u2014 ${mark.kind} \u2014 physical PDF page ${mark.page}
+Source: ${link(mark.page, mark.id)}
+Source revision: ${current.revision}
+Quoted source text:
+${mark.quote}
+User comment:
+${mark.comment ?? mark.note}${mark.question ? `
+User question:
+${mark.question}` : ""}${mark.result ? `
+Saved result/translation:
+${mark.result}` : ""}
+Mark geometry (${mark.space}): ${JSON.stringify(mark.rects)}`);
+      for (const message of mark.messages ?? []) sections.push(`### Mark ${mark.id} message ${String(message.id ?? "")}
+Role: ${String(message.role ?? "")}
+Created: ${String(message.createdAt ?? "")}
+Message content:
+${String(message.content ?? "")}`);
+      if (mark.kind === "visual" && mark.asset) {
+        await this.contextSourcePath(context, `${paper2.paperPath}/marks/assets/${mark.id}.png`);
+        const asset = await store.asset(mark.id);
+        sections.push(`Frozen mark ${mark.id} region PNG: ${addImage({ mediaType: asset.mediaType, data: asset.base64 })}`);
+      }
+    }
+    checkContextCancellation(signal);
+    this.ensureOpen();
+    this.assertCurrentContext(context, await this.readSettings());
+    if (selected.length && (await store.list()).revision !== current.revision) throw new LibraryError("MARK_CONFLICT", "\u6279\u6CE8\u5728\u9644\u52A0\u671F\u95F4\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002", true);
+    const snapshot = await new ReadingContextStore(this.dataRoot).create({ vaultId: context.id, vaultPath: context.path, paperId: paper2.paperId, paperPath: paper2.paperPath, title: paper2.paperTitle, pages: [...pages].sort((a, b) => a - b), marksCount: selected.length, action: input2.action, ...targetNotePath ? { targetNotePath } : {}, ...targetFolderPath ? { targetFolderPath } : {}, ...selected.length || input2.marksRevision !== void 0 ? { marksRevision: current.revision } : {}, imageIds: Object.keys(images), content: sections.join("\n\n"), images }, signal);
+    return this.readingContextSummary(snapshot);
+  }
+  async readingSnapshot(input2, signal) {
+    checkContextCancellation(signal);
+    const context = await this.context(input2), snapshot = await new ReadingContextStore(this.dataRoot).read(input2.contextId, signal);
+    if (snapshot.vaultId !== context.id || snapshot.vaultPath !== context.path) throw new LibraryError("CONTEXT_SCOPE", "\u8BE5\u9605\u8BFB\u6765\u6E90\u5C5E\u4E8E\u53E6\u4E00\u77E5\u8BC6\u5E93\uFF0C\u8BF7\u8FD4\u56DE\u539F\u77E5\u8BC6\u5E93\u6216\u91CD\u65B0\u9644\u52A0\u3002");
+    this.ensureOpen();
+    this.assertCurrentContext(context, await this.readSettings());
+    return { context, snapshot };
+  }
+  async readReadingContext(input2, signal) {
+    const { context, snapshot } = await this.readingSnapshot(input2, signal);
+    const offset = input2.offset ?? 0, maxChars = input2.maxChars ?? 2e4;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > snapshot.content.length || !Number.isInteger(maxChars) || maxChars < 1 || maxChars > 2e4) throw new LibraryError("INVALID_RANGE", "\u9605\u8BFB\u6765\u6E90\u7A97\u53E3\u65E0\u6548\uFF0CmaxChars \u5FC5\u987B\u4E3A 1 \u81F3 20000\u3002");
+    let sourceChanged = false;
+    if (snapshot.marksRevision) {
+      try {
+        const paper2 = await this.notePaper(context, snapshot.paperId, snapshot.paperId);
+        await this.contextSourcePath(context, `${paper2.paperPath}/marks`, true);
+        sourceChanged = (await new MarksStore(context.path, paper2.paperPath, context.id).list()).revision !== snapshot.marksRevision;
+      } catch (error62) {
+        if (error62 instanceof LibraryError && ["VAULT_CHANGED", "SETTINGS_CHANGED", "SERVICE_CLOSED"].includes(error62.code)) throw error62;
+        sourceChanged = true;
+      }
+    }
+    checkContextCancellation(signal);
+    const end = Math.min(snapshot.content.length, offset + maxChars), nextOffset = end < snapshot.content.length ? end : null;
+    return { ...this.readingContextSummary(snapshot), content: snapshot.content.slice(offset, end), offset, nextOffset, totalChars: snapshot.content.length, truncated: nextOffset !== null, sourceChanged };
+  }
+  async readReadingContextImage(input2, signal) {
+    const { snapshot } = await this.readingSnapshot(input2, signal);
+    if (typeof input2.imageId !== "string" || !/^image-\d+$/.test(input2.imageId) || !Object.hasOwn(snapshot.images, input2.imageId)) throw new LibraryError("CONTEXT_IMAGE_NOT_FOUND", "\u8BE5\u9605\u8BFB\u6765\u6E90\u4E0D\u5305\u542B\u6307\u5B9A\u622A\u56FE\u3002");
+    const asset = validateContextPng(snapshot.images[input2.imageId]);
+    checkContextCancellation(signal);
+    return { mediaType: asset.mediaType, base64: asset.data };
+  }
   async listMarks(input2) {
     const { store } = await this.markStore(input2), result = await store.list();
+    if (input2.limit !== void 0 && (!Number.isInteger(input2.limit) || input2.limit < 1 || input2.limit > 500) || input2.page !== void 0 && (!Number.isInteger(input2.page) || input2.page < 1) || input2.pages !== void 0 && (!Array.isArray(input2.pages) || input2.pages.length > 500 || input2.pages.some((page) => !Number.isInteger(page) || page < 1)) || input2.ids !== void 0 && (!Array.isArray(input2.ids) || input2.ids.length > 500 || input2.ids.some((id) => typeof id !== "string" || !id || id.length > 256))) throw new LibraryError("INVALID_RANGE", "\u6279\u6CE8\u7B5B\u9009\u6216\u5206\u9875\u8303\u56F4\u65E0\u6548\u3002");
     const query = (input2.query ?? "").toLocaleLowerCase();
-    return { ...result, items: result.items.filter((mark) => (!input2.kind || mark.kind === input2.kind) && (!input2.page || mark.page === input2.page) && (!query || [mark.quote, mark.note, mark.result, ...(mark.messages ?? []).map((m2) => m2.content)].some((t) => t?.toLocaleLowerCase().includes(query)))) };
+    const ids = input2.ids ? new Set(input2.ids) : void 0, pages = input2.pages ? new Set(input2.pages) : void 0;
+    const items = result.items.filter((mark) => (!input2.kind || mark.kind === input2.kind) && (!input2.page || mark.page === input2.page) && (!ids || ids.has(mark.id)) && (!pages || pages.has(mark.page)) && (!query || [mark.quote, mark.note, mark.result, ...(mark.messages ?? []).map((m2) => m2.content)].some((t) => typeof t === "string" && t.toLocaleLowerCase().includes(query))));
+    const fingerprint = createHash6("sha256").update(JSON.stringify([query, input2.kind ?? "", input2.page ?? null, input2.pages ? [...new Set(input2.pages)].sort((a, b) => a - b) : null, input2.ids ? [...new Set(input2.ids)].sort() : null])).digest("hex");
+    let offset = 0;
+    if (input2.cursor) {
+      let cursor;
+      try {
+        if (input2.cursor.length > 4096) throw new Error();
+        cursor = record3(JSON.parse(Buffer.from(input2.cursor, "base64url").toString("utf8")));
+      } catch {
+        throw new LibraryError("CURSOR_EXPIRED", "\u6279\u6CE8\u6E38\u6807\u65E0\u6548\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u7B2C\u4E00\u9875\u3002", true);
+      }
+      if (cursor.vault !== result.vaultId || cursor.paper !== result.paperPath || cursor.revision !== result.revision || cursor.query !== fingerprint || !Number.isSafeInteger(cursor.offset) || Number(cursor.offset) < 0 || Number(cursor.offset) > items.length) throw new LibraryError("CURSOR_EXPIRED", "\u6279\u6CE8\u6216\u7B5B\u9009\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u7B2C\u4E00\u9875\u3002", true);
+      offset = Number(cursor.offset);
+    }
+    const limit = input2.limit ?? 100, end = Math.min(items.length, offset + limit);
+    const nextCursor = end < items.length ? Buffer.from(JSON.stringify({ vault: result.vaultId, paper: result.paperPath, revision: result.revision, query: fingerprint, offset: end })).toString("base64url") : null;
+    return { ...result, items: input2.limit !== void 0 || input2.cursor ? items.slice(offset, end) : items, total: items.length, nextCursor, truncated: nextCursor !== null };
   }
   async addMark(input2) {
     const { context, store, paperPath } = await this.markStore(input2);
@@ -62497,19 +65022,19 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     return { text: translated.join("\n"), sourceLang: from, targetLang: to };
   }
   async pdfLocation(context, paperPath) {
-    const directory = await containedPath(context.path, paperPath), names = await readdir2(directory);
+    const directory = await containedPath(context.path, paperPath), names = await readdir3(directory);
     const filename = names.includes(`${basename3(paperPath)}.pdf`) ? `${basename3(paperPath)}.pdf` : names.filter((n) => n.toLowerCase().endsWith(".pdf")).sort()[0];
     if (!filename) throw new LibraryError("PDF_MISSING", "\u8BBA\u6587\u6CA1\u6709\u672C\u5730 PDF\u3002");
-    const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat3(path);
+    const path = await containedPath(context.path, `${paperPath}/${filename}`), info = await stat5(path);
     if (!info.isFile()) throw new LibraryError("INVALID_PDF", "\u8BBA\u6587 PDF \u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
     if (info.size > 256 * 1024 * 1024) throw new LibraryError("PDF_TOO_LARGE", "PDF \u8D85\u8FC7 256 MiB\u3002");
-    return { path, filename, revision: `pdf:${createHash4("sha256").update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest("hex")}` };
+    return { path, filename, revision: `pdf:${createHash6("sha256").update(JSON.stringify([info.dev, info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest("hex")}` };
   }
   async openPaperExternally(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
     const location = await this.pdfLocation(context, paperPath);
     if (extname2(location.path).toLowerCase() !== ".pdf") throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u672C\u5730 PDF \u6587\u4EF6\u3002");
-    const handle = await open3(location.path, "r");
+    const handle = await open5(location.path, "r");
     try {
       if (!(await handle.stat()).isFile()) throw new LibraryError("INVALID_PDF", "\u6240\u9009\u8D44\u6E90\u4E0D\u662F\u666E\u901A PDF \u6587\u4EF6\u3002");
       const header = Buffer.alloc(1024), { bytesRead } = await handle.read(header, 0, header.length, 0);
@@ -62528,9 +65053,9 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     return { requested: true, vaultId: context.id, paperPath, fileName: location.filename, handler: "system-default" };
   }
   async atomicBytes(path, bytes) {
-    const temporary = `${path}.${randomUUID3()}.tmp`;
+    const temporary = `${path}.${randomUUID5()}.tmp`;
     try {
-      await writeFile4(temporary, bytes, { flag: "wx", mode: 384 });
+      await writeFile5(temporary, bytes, { flag: "wx", mode: 384 });
       await rename2(temporary, path);
     } finally {
       await rm3(temporary, { force: true });
@@ -62541,7 +65066,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     return this.exclusive(context, paperPath, async () => {
       const location = await this.pdfLocation(context, paperPath);
       if (!input2.revision || location.revision !== input2.revision) throw new LibraryError("PDF_CHANGED", "PDF \u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u6253\u5F00\u540E\u7F16\u8F91\u76EE\u5F55\u3002", true);
-      const bytes = await editBookmarks(await readFile3(location.path), input2.nodes);
+      const bytes = await editBookmarks(await readFile6(location.path), input2.nodes);
       this.assertCurrentContext(context, await this.readSettings());
       if ((await this.pdfLocation(context, paperPath)).revision !== input2.revision) throw new LibraryError("PDF_CHANGED", "PDF \u5728\u4FDD\u5B58\u671F\u95F4\u53D1\u751F\u53D8\u5316\u3002", true);
       await this.atomicBytes(location.path, bytes);
@@ -62556,7 +65081,7 @@ ${versionResult.stderr}`.match(/\b(\d+\.\d+\.\d+(?:-[\w.-]+)?)\b/)?.[1] ?? null;
     if (input2.format === "pdf") {
       const location = await this.pdfLocation(context, paperPath);
       if (input2.revision && input2.revision !== location.revision) throw new LibraryError("PDF_CHANGED", "PDF \u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u540E\u5BFC\u51FA\u3002", true);
-      const original = await readFile3(location.path);
+      const original = await readFile6(location.path);
       bytes = Buffer.from(input2.includeMarks === false ? original : await annotatedPdf(original, marks.items));
     } else {
       content = input2.format === "json" ? `${JSON.stringify(marks, null, 2)}
@@ -62573,10 +65098,10 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     const result = { fileName: `${basename3(paperPath)}-annotated.${extension}`, mediaType: input2.format === "pdf" ? "application/pdf" : input2.format === "json" ? "application/json" : "text/markdown", totalBytes: bytes.length, ...content === void 0 ? {} : { content } };
     this.assertCurrentContext(context, await this.readSettings());
     if (input2.filePath) {
-      const path = resolve2(expandHome(input2.filePath));
+      const path = resolve3(expandHome(input2.filePath));
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u5BFC\u51FA\u76EE\u6807\u5FC5\u987B\u662F\u660E\u786E\u9009\u62E9\u7684\u7EDD\u5BF9\u8DEF\u5F84\u3002");
       const original = input2.format === "pdf" ? (await this.pdfLocation(context, paperPath)).path : "";
-      const targetCanonical = await exists(path) ? await realpath4(path) : path;
+      const targetCanonical = await exists(path) ? await realpath5(path) : path;
       const comparable = (v2) => process.platform === "win32" ? v2.toLocaleLowerCase() : v2;
       if (comparable(targetCanonical) === comparable(original)) throw new LibraryError("INVALID_PATH", "\u5BFC\u51FA\u6587\u4EF6\u4E0D\u80FD\u8986\u76D6\u77E5\u8BC6\u5E93\u539F PDF\u3002");
       await this.atomicBytes(path, bytes);
@@ -62591,19 +65116,66 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
     const path = await containedPath(context.path, `${paperPath}/source/layout.json`, true);
     if (!await exists(path)) return { regions: [] };
-    if ((await stat3(path)).size > 32 * 1024 * 1024) throw new LibraryError("LAYOUT_TOO_LARGE", "\u7248\u9762\u6587\u4EF6\u8D85\u8FC7 32 MiB\u3002");
-    return JSON.parse(await readFile3(path, "utf8"));
+    if ((await stat5(path)).size > 32 * 1024 * 1024) throw new LibraryError("LAYOUT_TOO_LARGE", "\u7248\u9762\u6587\u4EF6\u8D85\u8FC7 32 MiB\u3002");
+    return JSON.parse(await readFile6(path, "utf8"));
   }
   async readPaperMarkdown(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath), relative2 = `${paperPath}/PAPER.md`;
     const path = await containedPath(context.path, relative2, true);
     if (!await exists(path)) return { path: relative2, content: "", revision: null, exists: false };
-    if ((await stat3(path)).size > MAX_NOTE_BYTES) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
-    const content = await readFile3(path, "utf8");
+    if ((await stat5(path)).size > MAX_NOTE_BYTES2) throw new LibraryError("MARKDOWN_TOO_LARGE", "\u8BBA\u6587 Markdown \u8D85\u8FC7 2 MiB\u3002");
+    const content = await readFile6(path, "utf8");
     return { path: relative2, content, revision: contentRevision(content), exists: true };
   }
+  async readEditablePaperMarkdown(input2) {
+    const context = await this.context(input2);
+    if (!context.settings.allowAgentPdfText) throw new LibraryError("TEXT_ACCESS_DISABLED", "\u8BF7\u5148\u5141\u8BB8 Agent \u8BFB\u53D6\u8BBA\u6587\u6B63\u6587\u3002");
+    const paperPath = await this.paperPath(context, input2.paperPath);
+    return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).read(input2);
+  }
+  async writePaperMarkdown(input2) {
+    return this.savePaperMarkdown(input2, false);
+  }
+  async writePaperMarkdownFromApp(input2) {
+    return this.savePaperMarkdown(input2, true);
+  }
+  async savePaperMarkdown(input2, fromApp) {
+    const context = await this.context(input2);
+    if (!fromApp && !context.settings.allowAgentPdfText) throw new LibraryError("TEXT_ACCESS_DISABLED", "\u8BF7\u5148\u5141\u8BB8 Agent \u8BFB\u53D6\u8BBA\u6587\u6B63\u6587\u3002");
+    const paperPath = await this.paperPath(context, input2.paperPath);
+    return this.exclusive(context, paperPath, () => withPaperDocumentLock(this.dataRoot, context.path, paperPath, async (checkLock) => {
+      await this.paperPath(context, paperPath);
+      return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).write(
+        input2,
+        (content) => {
+          checkLock();
+          return this.call(context, "file_write", { path: `${paperPath}/PAPER.md`, content, mode: "replace" });
+        },
+        async () => {
+          checkLock();
+          this.assertCurrentContext(context, await this.readSettings());
+        }
+      );
+    }));
+  }
+  async paperMarkdownHistory(input2) {
+    return this.readPaperMarkdownHistory(input2, false);
+  }
+  async paperMarkdownHistoryFromApp(input2) {
+    return this.readPaperMarkdownHistory(input2, true);
+  }
+  async readPaperMarkdownHistory(input2, fromApp) {
+    const context = await this.context(input2);
+    if (!fromApp && !context.settings.allowAgentPdfText) throw new LibraryError("TEXT_ACCESS_DISABLED", "\u8BF7\u5148\u5141\u8BB8 Agent \u8BFB\u53D6\u8BBA\u6587\u6B63\u6587\u3002");
+    const paperPath = await this.paperPath(context, input2.paperPath);
+    return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).history(input2);
+  }
+  async ensurePaperMarkdownBackup(input2) {
+    const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
+    return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).ensureBackup();
+  }
   readerStatePath(context, paperPath) {
-    return join5(this.dataRoot, "state", "reader", `${createHash4("sha256").update(`${context.id}:${paperPath}`).digest("hex")}.json`);
+    return join8(this.dataRoot, "state", "reader", `${createHash6("sha256").update(`${context.id}:${paperPath}`).digest("hex")}.json`);
   }
   async readReaderState(input2) {
     const context = await this.context(input2), paperPath = await this.paperPath(context, input2.paperPath);
@@ -62658,7 +65230,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     } else if (input2.refresh || !this.trashSnapshot || this.trashSnapshot.vaultId !== context.id || Date.now() - this.trashSnapshot.createdAt > this.snapshotTtl) {
       const data = await scanTrash(context.path);
       this.assertCurrentContext(context, await this.readSettings());
-      this.trashSnapshot = { ...data, id: randomUUID3(), vaultId: context.id, createdAt: Date.now() };
+      this.trashSnapshot = { ...data, id: randomUUID5(), vaultId: context.id, createdAt: Date.now() };
     }
     const snapshot = this.trashSnapshot;
     const end = offset + limit;
@@ -62687,14 +65259,14 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     let path, temporary = false;
     if (input2.text !== void 0) {
       if (typeof input2.text !== "string" || Buffer.byteLength(input2.text) > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u6587\u732E\u683C\u5F0F\u6587\u672C\u8D85\u8FC7 8 MiB\u3002");
-      path = join5(this.dataRoot, "state", "imports", `${randomUUID3()}.bib`);
-      await mkdir4(dirname3(path), { recursive: true });
-      await writeFile4(path, input2.text, { flag: "wx", mode: 384 });
+      path = join8(this.dataRoot, "state", "imports", `${randomUUID5()}.bib`);
+      await mkdir7(dirname3(path), { recursive: true });
+      await writeFile5(path, input2.text, { flag: "wx", mode: 384 });
       temporary = true;
     } else {
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u5BFC\u5165\u6587\u4EF6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-      path = await realpath4(expandHome(input2.filePath));
-      if (!(await stat3(path)).isFile() || (await stat3(path)).size > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u5BFC\u5165\u6587\u4EF6\u8D85\u8FC7 8 MiB \u6216\u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
+      path = await realpath5(expandHome(input2.filePath));
+      if (!(await stat5(path)).isFile() || (await stat5(path)).size > 8 * 1024 * 1024) throw new LibraryError("INVALID_IMPORT", "\u5BFC\u5165\u6587\u4EF6\u8D85\u8FC7 8 MiB \u6216\u4E0D\u662F\u666E\u901A\u6587\u4EF6\u3002");
     }
     return this.startOperation(context, "bibliography", async (signal) => {
       try {
@@ -62711,19 +65283,20 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     if (typeof data.content !== "string") throw new LibraryError("UPSTREAM_INVALID", "CLI \u6CA1\u6709\u8FD4\u56DE BibTeX \u5185\u5BB9\u3002");
     if (input2.filePath) {
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u5BFC\u51FA\u6587\u4EF6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-      await this.atomicBytes(resolve2(expandHome(input2.filePath)), Buffer.from(data.content));
+      await this.atomicBytes(resolve3(expandHome(input2.filePath)), Buffer.from(data.content));
     }
-    return { ...data, content: data.content, ...input2.filePath ? { savedPath: resolve2(expandHome(input2.filePath)) } : {} };
+    return { ...data, content: data.content, ...input2.filePath ? { savedPath: resolve3(expandHome(input2.filePath)) } : {} };
   }
   async renameNote(input2) {
     const context = await this.context(input2), location = await this.noteLocation(context, { vaultId: input2.vaultId, path: input2.path });
     const destination = await this.noteLocation(context, { vaultId: input2.vaultId, path: input2.newPath });
     if (location.paperPath || destination.paperPath) throw new LibraryError("INVALID_PATH", "\u8BBA\u6587 NOTES.md \u4E0D\u80FD\u91CD\u547D\u540D\u3002");
-    return this.exclusive(context, location.path, async () => {
+    return this.exclusive(context, "notes-workspace", async () => {
       const before = await this.readLocatedNote(context, location);
       if (!before.exists || before.revision !== input2.revision) throw new LibraryError("NOTE_CONFLICT", "\u7B14\u8BB0\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5148\u91CD\u65B0\u8F7D\u5165\u3002", true);
-      const target = await containedPath(context.path, destination.path, true);
+      const target = await safeNotePath(context.path, destination.path, true);
       if (await exists(target)) throw new LibraryError("FILE_EXISTS", "\u76EE\u6807\u7B14\u8BB0\u5DF2\u5B58\u5728\u3002");
+      await safeNotePath(context.path, location.path);
       const moved = await this.call(context, "file_move", { from: location.path, to: destination.path });
       const saved = await this.readLocatedNote(context, destination);
       return { ...saved, renamedFrom: location.path, updatedSources: moved.updatedSources ?? [], skipped: moved.skipped ?? [] };
@@ -62741,10 +65314,11 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     const note2 = source.startsWith("papers/") && source.endsWith("/PAPER.md") ? { path: source, paperPath: await this.paperPath(context, source.slice(0, -"/PAPER.md".length)) } : await this.noteLocation(context, { vaultId: input2.vaultId, path: input2.notePath });
     if (typeof input2.assetPath !== "string" || /^(?:[a-z]+:|\/|\\)/i.test(input2.assetPath)) throw new LibraryError("INVALID_PATH", "\u8BF7\u4F7F\u7528\u7B14\u8BB0\u5185\u7684\u76F8\u5BF9\u56FE\u7247\u8DEF\u5F84\u3002");
     const relative2 = relativePath(posix2.normalize(posix2.join(posix2.dirname(note2.path), input2.assetPath.replaceAll("\\", "/"))));
-    if (!relative2.startsWith("notes/") && !(note2.paperPath && relative2.startsWith(`${note2.paperPath}/`))) throw new LibraryError("INVALID_PATH", "\u9644\u4EF6\u8D85\u51FA\u5F53\u524D\u7B14\u8BB0\u8303\u56F4\u3002");
-    const path = await containedPath(context.path, relative2), mimeType = this.assetMime(path), info = await stat3(path);
+    if (note2.paperPath ? !relative2.startsWith(`${note2.paperPath}/`) : !relative2.startsWith("notes/")) throw new LibraryError("INVALID_PATH", "\u9644\u4EF6\u8D85\u51FA\u5F53\u524D\u7B14\u8BB0\u8303\u56F4\u3002");
+    const path = relative2.startsWith("notes/") ? await safeNotePath(context.path, relative2) : await containedPath(context.path, relative2), mimeType = this.assetMime(path), info = await stat5(path);
+    if (note2.paperPath && !within(await realpath5(await containedPath(context.path, note2.paperPath)), path)) throw new LibraryError("INVALID_PATH", "\u56FE\u7247\u7B26\u53F7\u94FE\u63A5\u8D85\u51FA\u5F53\u524D\u8BBA\u6587\u8303\u56F4\u3002");
     if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
-    return { path: relative2, markdownPath: input2.assetPath, mimeType, totalBytes: info.size, base64: (await readFile3(path)).toString("base64") };
+    return { path: relative2, markdownPath: input2.assetPath, mimeType, totalBytes: info.size, base64: (await readFile6(path)).toString("base64") };
   }
   async importNoteAsset(input2) {
     const context = await this.context(input2), note2 = await this.noteLocation(context, { vaultId: input2.vaultId, path: input2.notePath });
@@ -62754,20 +65328,20 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     let bytes;
     if (input2.filePath) {
       if (!isAbsolute2(expandHome(input2.filePath))) throw new LibraryError("INVALID_PATH", "\u56FE\u7247\u6587\u4EF6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-      const source = await realpath4(expandHome(input2.filePath)), info = await stat3(source);
+      const source = await realpath5(expandHome(input2.filePath)), info = await stat5(source);
       if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
-      bytes = await readFile3(source);
+      bytes = await readFile6(source);
     } else {
       if (!input2.base64 || input2.base64.length > 12 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(input2.base64)) throw new LibraryError("INVALID_ASSET", "\u56FE\u7247\u7F16\u7801\u65E0\u6548\u3002");
       bytes = Buffer.from(input2.base64, "base64");
     }
     if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new LibraryError("ASSET_TOO_LARGE", "\u56FE\u7247\u9644\u4EF6\u8D85\u8FC7 8 MiB\u3002");
-    const file2 = `${randomUUID3()}-${fileName}`, path = `${posix2.dirname(note2.path)}/assets/${file2}`;
-    return this.exclusive(context, note2.paperPath ?? note2.path, async () => {
+    const file2 = `${randomUUID5()}-${fileName}`, path = `${posix2.dirname(note2.path)}/assets/${file2}`;
+    return this.exclusive(context, note2.paperPath ?? "notes-workspace", async () => {
       if (note2.paperPath) await this.paperPath(context, note2.paperPath);
-      const target = await containedPath(context.path, path, true);
-      await mkdir4(dirname3(target), { recursive: true });
-      await writeFile4(target, bytes, { flag: "wx", mode: 384 });
+      const target = path.startsWith("notes/") ? await safeNotePath(context.path, path, true) : await containedPath(context.path, path, true);
+      await mkdir7(dirname3(target), { recursive: true });
+      await writeFile5(target, bytes, { flag: "wx", mode: 384 });
       return { path, markdownPath: `assets/${file2}`, mimeType, totalBytes: bytes.length };
     });
   }
@@ -62781,7 +65355,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
       }
       const path = await containedPath(context.path, directory, true);
       if (!await exists(path)) return;
-      for (const entry of await readdir2(path, { withFileTypes: true })) {
+      for (const entry of await readdir3(path, { withFileTypes: true })) {
         if (entry.isSymbolicLink()) continue;
         const relative2 = `${directory}/${entry.name}`;
         if (entry.isDirectory() && (directory.startsWith("notes") || !["source", "marks", "assets"].includes(entry.name))) await scan(relative2, depth + 1);
@@ -62812,13 +65386,13 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     const document2 = await this.readLocatedNote(context, note2), outgoing = links(document2.content, note2.path).map((path) => ({ path, title: basename3(path, ".md") })), backlinks = [];
     let scannedBytes = 0;
     for (const path of files) {
-      const target = await containedPath(context.path, path), info = await stat3(target);
-      if (info.size > MAX_NOTE_BYTES || scannedBytes + info.size > 32 * 1024 * 1024) {
+      const target = await containedPath(context.path, path), info = await stat5(target);
+      if (info.size > MAX_NOTE_BYTES2 || scannedBytes + info.size > 32 * 1024 * 1024) {
         truncated = true;
         continue;
       }
       scannedBytes += info.size;
-      if (path !== note2.path && links(await readFile3(target, "utf8"), path).includes(note2.path)) backlinks.push({ path, title: basename3(path, ".md") });
+      if (path !== note2.path && links(await readFile6(target, "utf8"), path).includes(note2.path)) backlinks.push({ path, title: basename3(path, ".md") });
     }
     return { outgoing, backlinks, truncated };
   }
@@ -62843,7 +65417,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
   }
   async recoveryDraftCount() {
     try {
-      return (await readdir2(join5(this.dataRoot, "state", "drafts"))).filter((name2) => /^[a-f0-9-]+-[a-f0-9]{24}\.draft\.json$/.test(name2)).length;
+      return (await readdir3(join8(this.dataRoot, "state", "drafts"))).filter((name2) => /^[a-f0-9-]+-[a-f0-9]{24}\.draft\.json$/.test(name2)).length;
     } catch (error62) {
       if (error62.code === "ENOENT") return 0;
       throw error62;
@@ -62852,7 +65426,7 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
 };
 
 // src/server/server.ts
-import { readFile as readFile4 } from "node:fs/promises";
+import { readFile as readFile7 } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1_ce399f1e4e31d6809a54d35f78d374fe/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
@@ -63816,7 +66390,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve4) => setTimeout(resolve4, pollInterval));
+      await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -64476,9 +67050,9 @@ var p = "text/html;profile=mcp-app";
 
 // src/infrastructure/native-picker.ts
 import { spawn as spawnProcess } from "node:child_process";
-import { stat as stat4 } from "node:fs/promises";
+import { stat as stat6 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { basename as basename4, dirname as dirname4, extname as extname3, isAbsolute as isAbsolute3, join as join6, resolve as resolve3 } from "node:path";
+import { basename as basename4, dirname as dirname4, extname as extname3, isAbsolute as isAbsolute3, join as join9, resolve as resolve4 } from "node:path";
 var REQUEST_ENV = "CODEXWORKBENCH_PICKER_REQUEST";
 var DEFAULT_TIMEOUT_MS = 12e4;
 var MAX_TIMEOUT_MS = 3e5;
@@ -64645,10 +67219,10 @@ function validatePickerInput(value) {
 }
 async function prepare(input2) {
   const home = homedir3();
-  const documents = join6(home, "Documents");
+  const documents = join9(home, "Documents");
   let fallback = home;
   try {
-    if ((await stat4(documents)).isDirectory()) fallback = documents;
+    if ((await stat6(documents)).isDirectory()) fallback = documents;
   } catch {
   }
   const value = input2.defaultPath?.replace(/^~(?=$|[/\\])/, home) ?? "";
@@ -64656,7 +67230,7 @@ async function prepare(input2) {
   let fileName = input2.mode === "save-file" && value ? basename4(value) : "";
   for (let attempts = 0; attempts < 64; attempts++) {
     try {
-      if ((await stat4(directory)).isDirectory()) {
+      if ((await stat6(directory)).isDirectory()) {
         if (directory === value) fileName = "";
         break;
       }
@@ -64672,7 +67246,7 @@ async function prepare(input2) {
   return { ...input2, initialDirectory: directory, fileName };
 }
 function nativePickerLaunch(platform) {
-  if (platform === "win32") return { command: join6(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64")] };
+  if (platform === "win32") return { command: join9(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", Buffer.from(WINDOWS_SCRIPT, "utf16le").toString("base64")] };
   if (platform === "darwin") return { command: "/usr/bin/osascript", args: ["-l", "JavaScript", "-e", MACOS_SCRIPT] };
   throw new NativePickerError("PICKER_UNAVAILABLE", "\u539F\u751F\u9009\u62E9\u5668\u76EE\u524D\u652F\u6301 Windows \u548C macOS\u3002");
 }
@@ -64686,16 +67260,16 @@ async function validatePickerResult(value, input2) {
   const extensions = new Set(input2.filters?.flatMap((filter) => filter.extensions.map((extension) => extension.toLowerCase())) ?? []);
   for (const path of result.paths) {
     if (typeof path !== "string" || !isAbsolute3(path) || path.includes("\0") || path.length > 32768) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u9009\u62E9\u5668\u8FD4\u56DE\u7684\u8DEF\u5F84\u4E0D\u6B63\u786E\u3002");
-    const normalized = resolve3(path);
+    const normalized = resolve4(path);
     if (input2.mode === "save-file") {
-      if (!(await stat4(dirname4(normalized))).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u76EE\u5F55\u4E0D\u5B58\u5728\u3002");
+      if (!(await stat6(dirname4(normalized))).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u76EE\u5F55\u4E0D\u5B58\u5728\u3002");
       try {
-        if ((await stat4(normalized)).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u4F4D\u7F6E\u5FC5\u987B\u662F\u6587\u4EF6\u3002");
+        if ((await stat6(normalized)).isDirectory()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u4FDD\u5B58\u4F4D\u7F6E\u5FC5\u987B\u662F\u6587\u4EF6\u3002");
       } catch (error62) {
         if (error62.code !== "ENOENT") throw error62;
       }
     } else {
-      const metadata = await stat4(normalized);
+      const metadata = await stat6(normalized);
       if (input2.mode === "open-directory" ? !metadata.isDirectory() : !metadata.isFile()) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u8BF7\u9009\u62E9\u6B63\u786E\u7684\u6587\u4EF6\u6216\u76EE\u5F55\u3002");
     }
     if (input2.mode !== "open-directory" && extensions.size && !extensions.has(extname3(normalized).slice(1).toLowerCase())) throw new NativePickerError("PICKER_INVALID_SELECTION", "\u9009\u62E9\u7684\u6587\u4EF6\u7C7B\u578B\u4E0D\u7B26\u5408\u8981\u6C42\u3002");
@@ -64723,8 +67297,8 @@ async function pickNativePath(input2, options = {}) {
   let stopChild;
   let childClosed;
   let completed;
-  const completion = new Promise((resolve4) => {
-    completed = resolve4;
+  const completion = new Promise((resolve5) => {
+    completed = resolve5;
   });
   const job = { stop(error62) {
     stopped ??= error62;
@@ -64746,38 +67320,38 @@ async function pickNativePath(input2, options = {}) {
       throw new NativePickerError("PICKER_UNAVAILABLE", "\u65E0\u6CD5\u542F\u52A8\u7CFB\u7EDF\u9009\u62E9\u5668\uFF0C\u8BF7\u68C0\u67E5\u7CFB\u7EDF\u7EC4\u4EF6\u662F\u5426\u53EF\u7528\u3002");
     }
     let terminate;
-    const closed = childClosed = new Promise((resolve4) => {
-      child.once("close", () => resolve4());
+    const closed = childClosed = new Promise((resolve5) => {
+      child.once("close", () => resolve5());
     });
     async function stopProcess() {
       terminate ??= (async () => {
         if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
         if (platform === "win32") {
-          await new Promise((resolve4) => {
-            const killer = spawn3(join6(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
+          await new Promise((resolve5) => {
+            const killer = spawn3(join9(process.env.SystemRoot || "C:\\Windows", "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, shell: false, stdio: "ignore" });
             const timer = setTimeout(() => {
               killer.kill();
               child.kill();
-              resolve4();
+              resolve5();
             }, 2500);
             const finish = () => {
               clearTimeout(timer);
               if (child.exitCode === null && child.signalCode === null) child.kill();
-              resolve4();
+              resolve5();
             };
             killer.once("error", finish);
             killer.once("close", finish);
           });
         } else {
           child.kill("SIGTERM");
-          await Promise.race([closed, new Promise((resolve4) => {
+          await Promise.race([closed, new Promise((resolve5) => {
             const timer = setTimeout(() => {
               if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-              resolve4();
+              resolve5();
             }, 1500);
             void closed.then(() => {
               clearTimeout(timer);
-              resolve4();
+              resolve5();
             });
           })]);
         }
@@ -64785,7 +67359,7 @@ async function pickNativePath(input2, options = {}) {
       })();
       return terminate;
     }
-    return await new Promise((resolve4, reject) => {
+    return await new Promise((resolve5, reject) => {
       let settled = false;
       let output2 = "";
       let outputBytes = 0;
@@ -64793,7 +67367,7 @@ async function pickNativePath(input2, options = {}) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        error62 ? reject(error62) : resolve4(result);
+        error62 ? reject(error62) : resolve5(result);
       };
       stopChild = () => {
         void stopProcess().then(() => finish(stopped), () => finish(stopped));
@@ -64849,7 +67423,7 @@ async function closeNativePickers() {
 }
 
 // src/infrastructure/translation-provider.ts
-import { join as join7 } from "node:path";
+import { join as join10 } from "node:path";
 var defaults = { schemaVersion: 1, provider: "cli", baseUrl: "", model: "", targetLanguage: "zh-CN", apiKey: "" };
 function endpoint(baseUrl) {
   let value;
@@ -64865,7 +67439,7 @@ function endpoint(baseUrl) {
 var TranslationProvider = class {
   constructor(dataRoot, timeoutMs = 6e4) {
     this.timeoutMs = timeoutMs;
-    this.file = join7(dataRoot, "secrets", "translation.json");
+    this.file = join10(dataRoot, "secrets", "translation.json");
   }
   timeoutMs;
   file;
@@ -64913,10 +67487,10 @@ var TranslationProvider = class {
   }
   async slot(signal) {
     signal.throwIfAborted();
-    if (this.active >= 2) await new Promise((resolve4, reject) => {
+    if (this.active >= 2) await new Promise((resolve5, reject) => {
       const ready = () => {
         signal.removeEventListener("abort", abort);
-        resolve4();
+        resolve5();
       };
       const abort = () => {
         const index = this.queue.indexOf(ready);
@@ -65014,7 +67588,7 @@ var URI = `ui://agentero-library/app/v${PLUGIN_VERSION}`;
 var key = external_exports.string().min(1).max(4096);
 var vault = { vaultId: key };
 var paper = { ...vault, paperPath: key };
-var note = { ...vault, path: key.optional(), paperPath: key.optional() };
+var note = { ...vault, path: key.optional(), paperPath: key.optional(), paperId: key.optional() };
 var operation = { operationId: key, instanceId: key.optional(), vaultId: key.optional() };
 var patch = external_exports.object({ cliPath: external_exports.string().max(4096).optional(), vaultPath: external_exports.string().max(4096).optional(), pdfiumPath: external_exports.string().max(4096).optional(), allowAgentPdfText: external_exports.boolean().optional() }).strict();
 var errorSchema = external_exports.object({ code: external_exports.string(), message: external_exports.string(), retryable: external_exports.boolean() });
@@ -65056,7 +67630,7 @@ function createLibraryServer(service2, options = {}) {
     }, async (input2, extra) => {
       try {
         const value = await run(input2, extra.signal);
-        const data = metaKey === "picker" ? { cancelled: value.cancelled, count: value.paths.length } : metaKey === "layout" ? { regionCount: value.regions?.length ?? 0 } : metaKey === "marks" ? { ...value, items: value.items.slice(0, 100), truncated: value.items.length > 100 } : Object.fromEntries(Object.entries(value).filter(([key2]) => key2 !== "base64" && key2 !== "content"));
+        const data = metaKey === "picker" ? { cancelled: value.cancelled, count: value.paths.length } : metaKey === "layout" ? { regionCount: value.regions?.length ?? 0 } : metaKey === "marks" ? { ...value, items: value.items.slice(0, 100), truncated: value.items.length > 100 || value.truncated === true } : Object.fromEntries(Object.entries(value).filter(([key2]) => key2 !== "base64" && key2 !== "content"));
         return { content: [], structuredContent: { ok: true, data }, _meta: { [metaKey]: value } };
       } catch (error62) {
         return failure2(error62);
@@ -65078,19 +67652,50 @@ function createLibraryServer(service2, options = {}) {
   tool("note_list", "\u5217\u51FA notes \u4E0B\u7684\u4E00\u5C42\u7B14\u8BB0\u76EE\u5F55\uFF1B\u7ED3\u679C\u6709\u4E0A\u6E38\u622A\u65AD\u9650\u5236\u3002", { ...vault, path: key.optional(), limit: external_exports.number().int().min(1).max(500).optional() }, (input2) => service2.listNotes(input2));
   tool("note_read", "\u8BFB\u53D6\u72EC\u7ACB\u7B14\u8BB0\u6216\u8BBA\u6587 NOTES\uFF0C\u8FD4\u56DE\u5185\u5BB9\u548C\u4FEE\u8BA2\u6307\u7EB9\uFF1B\u7F3A\u5931\u4E0E\u7A7A\u6587\u4EF6\u5206\u5F00\u3002", note, (input2) => service2.readNote(input2));
   tool("note_write", "\u6309\u660E\u786E\u4FDD\u5B58\u4EFB\u52A1\u5199\u7B14\u8BB0\u3002\u5FC5\u987B\u5E26\u4E0A\u8BFB\u53D6\u4FEE\u8BA2\u53F7\uFF0C\u51B2\u7A81\u4FDD\u7559\u8349\u7A3F\uFF1B\u4E0D\u4FDD\u8BC1\u5916\u90E8\u8FDB\u7A0B CAS\u3002\u65B0\u8DEF\u5F84 revision \u4E3A null\uFF0Cmode \u4EC5 replace/append\u3002", { ...note, content: external_exports.string().max(2e6), revision: external_exports.string().nullable(), mode: external_exports.enum(["replace", "append"]).optional() }, (input2) => service2.writeNote(input2), false);
+  tool("note_tree", "\u8BFB\u53D6 notes \u4E0B\u6709\u754C\u76EE\u5F55\u6811\u4E0E\u7A33\u5B9A\u8BBA\u6587\u5173\u8054\u3002truncated \u8868\u793A\u626B\u63CF\u4E0D\u5B8C\u6574\uFF1BpaperPath \u53EF\u9650\u5B9A\u5F53\u524D\u8BBA\u6587\u3002", { ...vault, paperPath: key.optional(), limit: external_exports.number().int().min(1).max(1e3).optional() }, (input2) => service2.noteTree(input2));
+  tool("note_create", "\u6309\u660E\u786E\u4EFB\u52A1\u521B\u5EFA\u4E00\u7BC7\u666E\u901A Markdown \u7B14\u8BB0\uFF0C\u9009\u62E9\u8BBA\u6587\u548C\u76EE\u5F55\uFF0C\u4E0D\u8986\u76D6\u540C\u540D\u6587\u4EF6\uFF1B\u8FD4\u56DE\u5173\u8054\u548C\u4FEE\u8BA2\u53F7\u3002", { ...vault, title: external_exports.string().min(1).max(240), folderPath: key.optional(), paperPath: key.optional(), content: external_exports.string().max(2e6).optional() }, (input2) => service2.createNote(input2), false);
+  tool("note_folder_create", "\u5728 notes \u8303\u56F4\u5185\u521B\u5EFA\u5B50\u6587\u4EF6\u5939\uFF0C\u4E0D\u63A5\u53D7\u4EFB\u610F\u78C1\u76D8\u8DEF\u5F84\u3002", { ...vault, parentPath: key, name: external_exports.string().min(1).max(240) }, (input2) => service2.createNoteFolder(input2), false);
+  tool("note_folder_move", "\u6309\u76EE\u5F55\u6811\u8FD4\u56DE\u7684 revision \u79FB\u52A8\u7B14\u8BB0\u6587\u4EF6\u5939\uFF0C\u5305\u542B\u5176\u5DF2\u6709\u8D44\u6E90\uFF1B\u4E0D\u8986\u76D6\u76EE\u6807\u6216\u79FB\u52A8\u8BBA\u6587\u6587\u4EF6\u3002", { ...vault, path: key, newPath: key, revision: key }, (input2) => service2.moveNoteFolder(input2), false);
+  tool("note_move", "\u6309\u6700\u65B0 revision \u79FB\u52A8\u6216\u91CD\u547D\u540D\u666E\u901A\u7B14\u8BB0\uFF0C\u4FDD\u7559\u4E3B\u8BBA\u6587\u5173\u8054\uFF1B\u9700\u8981\u6539\u5173\u8054\u65F6\u53E6\u7528 note_associate\u3002", { ...vault, path: key, newPath: key, revision: key }, (input2) => service2.renameNote(input2), false);
+  tool("note_associate", "\u660E\u786E\u8BBE\u7F6E\u666E\u901A\u7B14\u8BB0\u7684\u4E3B\u8BBA\u6587\u5173\u8054\uFF1BpaperPath \u4E3A null \u65F6\u53D6\u6D88\u5173\u8054\uFF0C\u6765\u6E90\u5F15\u7528\u548C\u5176\u4ED6\u5143\u4FE1\u606F\u4FDD\u7559\u3002", { ...vault, path: key, paperPath: key.nullable(), revision: key }, (input2) => service2.associateNote(input2), false);
+  tool("note_trash", "\u5C06\u7528\u6237\u660E\u786E\u9009\u4E2D\u7684\u666E\u901A\u7B14\u8BB0\u6216\u76EE\u5F55\u79FB\u5165 Agentero \u56DE\u6536\u7AD9\uFF0C\u5FC5\u987B\u63D0\u4F9B\u6700\u65B0 revision\uFF1B\u4E0D\u6C38\u4E45\u5220\u9664\uFF0C\u4E0D\u5220\u9664\u8BBA\u6587 PDF\u3002", { ...vault, path: key, revision: key }, (input2) => service2.trashNote(input2), false);
+  tool("paper_markdown_read", "\u8BFB\u53D6\u53EF\u7F16\u8F91\u7684\u8BBA\u6587 PAPER.md \u6709\u754C\u7A97\u53E3\u53CA\u5B8C\u6574\u6587\u6863 revision\u3002\u9075\u5B88\u6B63\u6587\u6743\u9650\uFF1BnextOffset \u53EF\u7EE7\u7EED\u8BFB\u53D6\u3002", { ...paper, offset: external_exports.number().int().nonnegative().optional(), maxChars: external_exports.number().int().min(1).max(2e4).optional() }, (input2) => service2.readEditablePaperMarkdown(input2));
+  tool("paper_markdown_write", "\u6309\u7528\u6237\u660E\u786E\u8981\u6C42\u4FEE\u8BA2 PAPER.md\uFF0C\u5FC5\u987B\u5148\u8BFB revision\u3002content \u4E0E edits \u4E8C\u9009\u4E00\uFF1Bedits \u6BCF\u4E2A oldText \u5FC5\u987B\u552F\u4E00\u5339\u914D\u3002\u4FDD\u7559\u539F\u5934\u90E8\u3001\u56FE\u7247\u5F15\u7528\u4E0E\u4FEE\u6539\u524D\u7248\u672C\uFF1BdryRun \u53EA\u67E5\u770B\u5DEE\u5F02\u3002\u4E0D\u4F1A\u4FEE\u6539 PDF\uFF0C\u4E5F\u4E0D\u91CD\u653E\u5931\u8D25\u5199\u5165\u3002", { ...paper, revision: key, content: external_exports.string().max(2e6).optional(), edits: external_exports.array(external_exports.object({ oldText: external_exports.string().min(1).max(1e5), newText: external_exports.string().max(1e5) }).strict()).min(1).max(50).optional(), dryRun: external_exports.boolean().optional(), allowImageReferenceChanges: external_exports.boolean().optional() }, (input2) => service2.writePaperMarkdown(input2), false);
+  tool("paper_markdown_history", "\u8BFB\u53D6\u5F53\u524D\u8BBA\u6587 Markdown \u4FEE\u6539\u8BB0\u5F55\uFF0C\u6216\u6309 historyId \u5206\u7A97\u53E3\u67E5\u770B\u4FEE\u6539\u524D/\u63D0\u8BAE\u5185\u5BB9\uFF1B\u8BB0\u5F55\u72B6\u6001\u4E0D\u7B49\u4E8E\u5DF2\u4FDD\u5B58\u3002", { ...paper, historyId: external_exports.string().uuid().optional(), offset: external_exports.number().int().nonnegative().optional(), maxChars: external_exports.number().int().min(1).max(2e4).optional() }, (input2) => service2.paperMarkdownHistory(input2));
+  tool("paper_markdown_save", "\u7528\u6237\u5728\u8BBA\u6587 Markdown \u7F16\u8F91\u5668\u660E\u786E\u4FDD\u5B58\u7684\u64CD\u4F5C\uFF1B\u4FDD\u7559\u4FEE\u8BA2\u68C0\u67E5\u3001\u56FE\u7247\u5F15\u7528\u53CA\u4FEE\u6539\u524D\u5907\u4EFD\uFF0C\u4E0D\u4FEE\u6539 PDF\u3002", { ...paper, revision: key, content: external_exports.string().max(2e6).optional(), edits: external_exports.array(external_exports.object({ oldText: external_exports.string().min(1).max(1e5), newText: external_exports.string().max(1e5) }).strict()).min(1).max(50).optional(), dryRun: external_exports.boolean().optional(), allowImageReferenceChanges: external_exports.boolean().optional() }, (input2) => service2.writePaperMarkdownFromApp(input2), false, true);
+  tool("paper_markdown_history_view", "\u4EC5\u4F9B App \u67E5\u770B\u8BBA\u6587 Markdown \u4FEE\u6539\u8BB0\u5F55\u548C\u6709\u754C\u5386\u53F2\u5185\u5BB9\u3002", { ...paper, historyId: external_exports.string().uuid().optional(), offset: external_exports.number().int().nonnegative().optional(), maxChars: external_exports.number().int().min(1).max(2e4).optional() }, (input2) => service2.paperMarkdownHistoryFromApp(input2), true, true);
   tool("operation_get", "\u67E5\u8BE2\u672C\u63D2\u4EF6\u62E5\u6709\u7684\u5BFC\u5165\u6216\u89E3\u6790\u4EFB\u52A1\u53CA\u5206\u9636\u6BB5\u7ED3\u679C\u3002", operation, (input2) => service2.getOperation(input2));
   tool("operation_cancel", "\u7533\u8BF7\u53D6\u6D88\u672C\u63D2\u4EF6\u62E5\u6709\u7684\u4EFB\u52A1\uFF1B\u8FDB\u7A0B\u5B9E\u9645\u9000\u51FA\u524D\u4ECD\u4E3A\u53D6\u6D88\u7533\u8BF7\uFF0C\u5DF2\u5199\u5185\u5BB9\u4E0D\u81EA\u52A8\u56DE\u6EDA\u3002", operation, (input2) => service2.cancelOperation(input2), false);
   tool("vault_create", "\u5728\u7528\u6237\u660E\u786E\u6307\u5B9A\u7684\u4F4D\u7F6E\u521B\u5EFA\u6587\u732E\u5E93\uFF1B\u4E0D\u8986\u76D6\u5DF2\u6709\u975E\u7A7A\u76EE\u5F55\u3002", { path: key }, (input2) => service2.createVault(input2), false, true);
   const markKind = external_exports.enum(["highlight", "underline", "ask", "translate", "visual"]);
   const markColor = external_exports.enum(["yellow", "green", "blue", "pink", "purple"]);
   const rect = external_exports.object({ x: external_exports.number().finite(), y: external_exports.number().finite(), w: external_exports.number().positive(), h: external_exports.number().positive() }).strict();
-  privatePayload("mark_list", "\u8BFB\u53D6\u8BBA\u6587\u7684\u6807\u6CE8\u4E0E\u5907\u6CE8\u3002\u6A21\u578B\u7ED3\u679C\u6700\u591A100\u6761\uFF0C\u53EF\u7528query/page/kind\u6536\u7A84\uFF1BApp\u83B7\u5F97\u5B8C\u6574\u6807\u6CE8\u3002", { ...paper, query: external_exports.string().max(1e3).optional(), page: external_exports.number().int().positive().optional(), kind: markKind.optional() }, "marks", (input2) => service2.listMarks(input2), true, false);
+  privatePayload("mark_list", "\u8BFB\u53D6\u8BBA\u6587\u6807\u6CE8\u4E0E\u5907\u6CE8\u3002\u6A21\u578B\u6BCF\u6B21\u6700\u591A100\u6761\uFF0C\u7528 nextCursor \u7EE7\u7EED\uFF1B\u652F\u6301 ids\u3001\u9875\u7801\u4E0E\u5173\u952E\u8BCD\u3002\u9ED8\u8BA4 App \u83B7\u5F97\u5B8C\u6574\u6709\u754C\u96C6\u5408\u3002", { ...paper, query: external_exports.string().max(1e3).optional(), page: external_exports.number().int().positive().optional(), pages: external_exports.array(external_exports.number().int().positive()).max(500).optional(), ids: external_exports.array(key).max(2e3).optional(), kind: markKind.optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().max(8192).optional() }, "marks", (input2) => service2.listMarks(input2), true, false);
   privatePayload("mark_add", "\u6309\u660E\u786E\u64CD\u4F5C\u4FDD\u5B58\u7CBE\u786E\u9009\u533A\u6807\u6CE8\u6216\u5907\u6CE8\u3002\u5750\u6807\u4E3A\u672A\u65CB\u8F6CPDF\u88C1\u526A\u9875\u3001\u5DE6\u4E0A\u539F\u70B9\u7684pt\uFF0C\u9875\u78011-based\u3002", { ...paper, revision: key, kind: markKind, page: external_exports.number().int().positive(), rects: external_exports.array(rect).min(1).max(1e3), pageSize: external_exports.object({ width: external_exports.number().positive(), height: external_exports.number().positive() }), quote: external_exports.string().max(2e4), color: markColor.optional(), comment: external_exports.string().max(2e4).optional(), question: external_exports.string().max(2e4).optional(), result: external_exports.string().max(2e4).optional(), asset: external_exports.object({ mediaType: external_exports.literal("image/png"), data: external_exports.string().max(6e6) }).optional() }, "marks", (input2) => service2.addMark(input2), false, false);
   privatePayload("mark_update", "\u66F4\u65B0\u6807\u6CE8\u989C\u8272\u3001\u5907\u6CE8\u3001\u8BD1\u6587\u6216\u8FFD\u52A0\u56DE\u590D\u3002\u5FC5\u987B\u643A\u5E26\u6700\u65B0revision\uFF0C\u51B2\u7A81\u65F6\u91CD\u65B0\u8BFB\u53D6\u3002", { ...paper, revision: key, id: key, comment: external_exports.string().max(2e4).optional(), color: markColor.optional(), result: external_exports.string().max(2e4).optional(), reply: external_exports.object({ role: external_exports.enum(["user", "assistant"]), content: external_exports.string().max(2e4) }).optional() }, "marks", (input2) => service2.updateMark(input2), false, false);
   privatePayload("mark_delete", "\u5220\u9664\u7528\u6237\u660E\u786E\u9009\u5B9A\u7684\u4E00\u6761\u6807\u6CE8\uFF0C\u4F7F\u7528\u6700\u65B0revision\u907F\u514D\u9759\u9ED8\u8986\u76D6\u5176\u4ED6\u4FEE\u6539\u3002", { ...paper, revision: key, id: key }, "marks", (input2) => service2.deleteMark(input2), false, false);
   privatePayload("mark_asset_read", "\u4EC5\u4F9BApp\u8BFB\u53D6\u6807\u6CE8\u5DF2\u6709\u7684\u533A\u57DF\u622A\u56FE\u3002", { ...paper, id: key }, "asset", (input2) => service2.readMarkAsset(input2));
   privatePayload("paper_layout", "\u4EC5\u4F9BApp\u83B7\u53D6\u5F53\u524D\u8BBA\u6587\u7684\u5DF2\u6709\u7248\u9762\uFF0C\u7528\u4E8E\u9010\u6BB5\u4FDD\u7248\u9762\u7FFB\u8BD1\u3002\u7F3A\u5931\u65F6\u4FDD\u7559\u53EF\u7528\u539F\u6587\u3002", paper, "layout", (input2) => service2.readLayout(input2));
   privatePayload("paper_markdown", "\u4EC5\u4F9BApp\u9884\u89C8\u8BBA\u6587\u5DF2\u6709PAPER.md\uFF0C\u4E0D\u5411\u6A21\u578B\u63D0\u4F9B\u672A\u6388\u6743\u6B63\u6587\u3002", paper, "document", (input2) => service2.readPaperMarkdown(input2));
+  tool("reading_context_create", "\u4EC5\u4F9B App \u51BB\u7ED3\u672C\u6B21\u6240\u9009\u9875\u3001\u6279\u6CE8\u548C\u6587\u5B57\u9009\u533A\uFF0C\u4F9B\u7528\u6237\u9644\u52A0\u5230\u539F\u751F\u8F93\u5165\u6846\uFF1B\u4E0D\u53D1\u9001\u6D88\u606F\u6216\u5199\u7B14\u8BB0\u3002", {
+    ...paper,
+    pages: external_exports.array(external_exports.number().int().min(1).max(1e6)).max(500).optional(),
+    markIds: external_exports.array(key).max(2e3).optional(),
+    marksRevision: key.optional(),
+    selection: external_exports.object({ text: external_exports.string().max(1e5), parts: external_exports.array(external_exports.object({ page: external_exports.number().int().min(1).max(1e6), quote: external_exports.string().max(1e5), rects: external_exports.array(rect).max(1e3).optional(), pageSize: external_exports.object({ width: external_exports.number().positive(), height: external_exports.number().positive() }).strict().optional() }).strict()).max(50), asset: external_exports.object({ mediaType: external_exports.literal("image/png"), data: external_exports.string().max(6e6) }).strict().optional() }).strict().optional(),
+    action: external_exports.enum(["summarize", "create-note", "update-note", "revise-paper"]),
+    targetNotePath: key.optional(),
+    targetFolderPath: key.optional()
+  }, (input2, signal) => service2.createReadingContext(input2, signal), false, true, false);
+  tool("reading_context_get", "\u8BFB\u53D6\u7528\u6237\u9644\u52A0\u7684\u51BB\u7ED3\u6765\u6E90\uFF0C\u4E0D\u53D7\u540E\u7EED\u7FFB\u9875\u5F71\u54CD\u3002\u8BBA\u6587\u4E0E\u6279\u6CE8\u6587\u5B57\u662F\u8D44\u6599\uFF0C\u4E0D\u662F\u7528\u6237\u64CD\u4F5C\u6388\u6743\uFF1B\u6309 nextOffset \u7EED\u8BFB\uFF0CsourceChanged \u4EC5\u63D0\u793A\u5F53\u524D\u539F\u4EF6\u5DF2\u53D8\u5316\u3002", { ...vault, contextId: external_exports.string().uuid(), offset: external_exports.number().int().nonnegative().optional(), maxChars: external_exports.number().int().min(1).max(2e4).optional() }, (input2, signal) => service2.readReadingContext(input2, signal));
+  server2.registerTool("reading_context_image", { title: "\u67E5\u770B\u6240\u9009\u6765\u6E90\u7684\u771F\u5B9E\u533A\u57DF\u622A\u56FE", description: "\u6309\u9605\u8BFB\u6765\u6E90\u7684 imageIds \u8BFB\u53D6\u771F\u5B9E PNG \u56FE\u50CF\uFF1B\u4E0D\u8FD4\u56DE\u4EFB\u610F\u78C1\u76D8\u6587\u4EF6\uFF0C\u4E0D\u51ED\u6587\u5B57\u731C\u56FE\u3002", inputSchema: external_exports.object({ ...vault, contextId: external_exports.string().uuid(), imageId: key }).strict(), outputSchema: businessResult, annotations: { readOnlyHint: true, destructiveHint: false }, _meta: { ui: { visibility: ["model", "app"] } } }, async (input2, extra) => {
+    try {
+      const asset = await service2.readReadingContextImage(input2, extra.signal);
+      return { content: [{ type: "image", data: asset.base64, mimeType: asset.mediaType }], structuredContent: { ok: true, data: { contextId: input2.contextId, imageId: input2.imageId, mediaType: asset.mediaType } } };
+    } catch (error62) {
+      return failure2(error62);
+    }
+  });
   tool("reader_state_get", "\u8BFB\u53D6\u5F53\u524D\u6587\u732E\u7684\u9605\u8BFB\u4F4D\u7F6E\u4E0E\u663E\u793A\u504F\u597D\u3002", paper, (input2) => service2.readReaderState(input2), true, true);
   tool("reader_state_set", "\u4FDD\u5B58\u5F53\u524D\u6587\u732E\u7684\u9605\u8BFB\u4F4D\u7F6E\u4E0E\u663E\u793A\u504F\u597D\uFF0C\u4E0D\u4FEE\u6539\u8BBA\u6587\u6B63\u6587\u3002", { ...paper, state: external_exports.record(external_exports.string(), external_exports.unknown()) }, (input2) => service2.writeReaderState(input2), false, true);
   const bookmarkNode = external_exports.lazy(() => external_exports.object({ title: external_exports.string().max(2e3), origin: external_exports.string().nullable(), originalTitle: external_exports.string().max(2e3).optional(), pageIndex: external_exports.number().int().nonnegative().optional(), children: external_exports.array(bookmarkNode).max(2e3) }).strict());
@@ -65178,7 +67783,7 @@ function createLibraryServer(service2, options = {}) {
   server2.registerResource("agentero-library-ui", URI, { mimeType: p }, async () => ({ contents: [{
     uri: URI,
     mimeType: p,
-    text: options.html ?? await readFile4(fileURLToPath(new URL("./app.html", import.meta.url)), "utf8"),
+    text: options.html ?? await readFile7(fileURLToPath(new URL("./app.html", import.meta.url)), "utf8"),
     _meta: { ui: { csp: { connectDomains: [], resourceDomains: ["blob:", "data:"] }, prefersBorder: false }, "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["inline", "fullscreen"] } }
   }] }));
   const originalClose = server2.close.bind(server2);

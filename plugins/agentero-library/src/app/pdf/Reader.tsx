@@ -5,7 +5,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import type { LibraryOperation, Paper, PdfChunk } from '../../contracts/types';
 import type { BookmarkNode, ExportResult, MarkColor, MarkList, ReaderMark, TranslateResult, WriteBookmarksResult } from '../../contracts/reader';
 import { callTool } from '../api';
-import { openExternalLink, registerBeforeTeardown, sendSelection } from '../bridge';
+import { attachReadingContext, openExternalLink, registerBeforeTeardown } from '../bridge';
 import { formatBytes, messageOf, PDF_CHUNK_BYTES, readPdfChunks } from '../model';
 import { NotesView } from '../NotesView';
 import { createPdfWorker, pdfjs } from '../pdf-runtime';
@@ -18,15 +18,22 @@ import { abortable, MAX_CANVAS_PIXELS, MAX_IMAGE_PIXELS, timeBudget, yieldToHost
 import { PageAnchorCoordinator, pageAtOffset, pageSlots, pageWindow, type PageSize } from './virtualization';
 import { INITIAL_READER_VIEW, openReaderPanel, readingPreferences, restoreReadingPreferences, toggleReaderPanel, type ReaderViewState } from './reader-layout';
 import { ReaderHud, ReaderLanguageSetting, ReaderTools, TranslationLanguage, type ReaderToolActions, type ReaderToolState } from './ReaderTools';
+import { MARK_PIN_GUTTER } from './mark-pins';
+import { NotesSplitter, useNotesPaneLayout } from './NotesSplitter';
+import { textSelectionRects } from './NativeSelectionLayer';
+import { selectedMarkSummary } from './mark-selection';
+import type { MarkBatchAction, MarkBatchTarget } from './MarkContextTarget';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import './reader.css';
 
 interface Props {
   active: boolean; vaultId: string; paper: Paper | null; preview: boolean; canSend: boolean; canParse: boolean;
-  onNotes(paper: Paper): void; onOperation(operation: LibraryOperation): void; onBack(): void;
+  onNotes(paper: Paper, notePath?: string): void; onOperation(operation: LibraryOperation): void; onBack(): void;
+  onPaperMarkdown?(paper: Paper): void;
   onDirtyChange?(dirty: boolean): void;
   readerToolsHost?: HTMLElement | null;
   sidebarCollapsed?: boolean;
+  requestedPage?: number; requestedMarkId?: string; requestKey?: number | string;
 }
 type ReaderState = ReaderViewState;
 const initialView = INITIAL_READER_VIEW;
@@ -35,7 +42,7 @@ const editable = (target: EventTarget | null) => target instanceof Element && Bo
 const EMPTY_MARKS: ReaderMark[] = [];
 interface PdfSession { status: 'loading' | 'ready' | 'failed'; dispose(): void }
 
-export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, onNotes, onOperation, onBack, onDirtyChange, readerToolsHost = null, sidebarCollapsed = false }: Props) {
+export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, onNotes, onOperation, onBack, onDirtyChange, onPaperMarkdown, readerToolsHost = null, sidebarCollapsed = false, requestedPage, requestedMarkId, requestKey }: Props) {
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null); const [loadRevision, setLoadRevision] = useState(0);
   const [loading, setLoading] = useState(false); const [progress, setProgress] = useState(''); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const [view, setView] = useState<ReaderState>(initialView); const [viewReady, setViewReady] = useState(false);
@@ -48,6 +55,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const [failedPages, setFailedPages] = useState<ReadonlyMap<number, string>>(new Map());
   const [marks, setMarks] = useState<MarkList | null>(null); const marksRef = useRef(marks); marksRef.current = marks;
   const [markError, setMarkError] = useState(''); const [selectedMark, setSelectedMark] = useState<string | null>(null); const [busy, setBusy] = useState(false); const busyRef = useRef(false);
+  const [checkedMarks, setCheckedMarks] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<ReaderSelection | null>(null); const [translationCard, setTranslationCard] = useState<FloatingTranslation | null>(null);
   const [translationOpen, setTranslationOpen] = useState(false); const [targetLanguage, setTargetLanguage] = useState(''); const translationRun = useRef(0);
   const selectionTranslationAbort = useRef<AbortController | null>(null); const reloadNotice = useRef<string | null>(null);
@@ -59,6 +67,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const [passwordRequired, setPasswordRequired] = useState(false); const [passwordWrong, setPasswordWrong] = useState(false); const [password, setPassword] = useState('');
   const passwordUpdate = useRef<((password: string) => void) | null>(null); const searchInput = useRef<HTMLInputElement>(null);
   const host = useRef<HTMLElement>(null); const viewport = useRef<HTMLDivElement>(null); const pages = useRef(new Map<number, RegisteredPage>());
+  const body = useRef<HTMLDivElement>(null); const notesLayout = useNotesPaneLayout(body, Boolean(paper && !preview));
   const generation = useRef(0); const pdfRevision = useRef(''); const searchRun = useRef(0); const stateSave = useRef<Promise<unknown>>(Promise.resolve());
   const stateTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeRef = useRef(active); activeRef.current = active;
@@ -68,11 +77,13 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const panning = useRef<{ x: number; y: number; left: number; top: number; moved: boolean } | null>(null); const justPanned = useRef(0);
   const restore = useRef(new PageAnchorCoordinator()); const [navigationRevision, setNavigationRevision] = useState(0); const pendingAnchor = useRef<{ page: number; point: number[] } | null>(null);
   const showCards = cards && containerWidth >= 680;
-  const availablePageWidth = Math.max(1, containerWidth - (showCards ? 226 : 0));
+  const markGutter = showCards ? 226 : MARK_PIN_GUTTER;
+  const availablePageWidth = Math.max(1, containerWidth - markGutter);
   const scale = view.fit ? fitPageScale(fitPageWidth, availablePageWidth) : view.zoom;
-  const slots = useMemo(() => pageSlots(document?.numPages ?? 0, knownSizes.current, estimate, view.rotation, view.zoom, view.fit ? availablePageWidth : undefined, showCards ? 226 : 0), [document, estimate, view.rotation, view.zoom, view.fit, availablePageWidth, showCards, sizeRevision]);
+  const slots = useMemo(() => pageSlots(document?.numPages ?? 0, knownSizes.current, estimate, view.rotation, view.zoom, view.fit ? availablePageWidth : undefined, markGutter), [document, estimate, view.rotation, view.zoom, view.fit, availablePageWidth, markGutter, sizeRevision]);
   const slotsRef = useRef(slots); slotsRef.current = slots;
   const paperPath = paper?.path ?? '';
+  useEffect(() => { setCheckedMarks(new Set()); }, [vaultId, paperPath]);
   const translated = useDocumentTranslation({ document, vaultId, paperPath, open: translationOpen && active, currentPage: view.pageNumber, targetLanguage });
 
   const refreshMarks = useCallback(async () => {
@@ -182,6 +193,12 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     restore.current.navigate(next, ratio); viewRef.current = { ...viewRef.current, pageNumber: next };
     applyPageAnchor(next, ratio); setNavigationRevision(value => value + 1);
   }, [document, applyPageAnchor]);
+  useEffect(() => {
+    if (!document || !active || (!requestedPage && !requestedMarkId)) return;
+    const mark = requestedMarkId ? marksRef.current?.items.find(item => item.id === requestedMarkId) : undefined;
+    if (requestedPage || mark) goToPage(requestedPage ?? mark!.page);
+    if (requestedMarkId) { setSelectedMark(requestedMarkId); setView(value => openReaderPanel(value, 'marksOpen')); }
+  }, [document, active, requestedPage, requestedMarkId, requestKey, goToPage]);
   const layoutScale = view.fit ? availablePageWidth : view.zoom;
   useEffect(() => {
     if (!document || !active) return;
@@ -283,7 +300,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     for (const [number, entry] of [...pages.current].sort((a, b) => a[0] - b[0])) {
       const layer = entry.element.querySelector('.textLayer'); if (!layer || !range.intersectsNode(layer)) continue;
       const bounds = entry.element.getBoundingClientRect();
-      const rects = usefulRects([...range.getClientRects()].filter(rect => rect.width > .2 && rect.height > .2 && rect.right > bounds.left && rect.left < bounds.right && rect.bottom > bounds.top && rect.top < bounds.bottom).map(rect => {
+      const rects = usefulRects(textSelectionRects(range, layer).filter(rect => rect.width > .2 && rect.height > .2 && rect.right > bounds.left && rect.left < bounds.right && rect.bottom > bounds.top && rect.top < bounds.bottom).map(rect => {
         const clip = { left: Math.max(bounds.left, rect.left), top: Math.max(bounds.top, rect.top), width: Math.min(bounds.right, rect.right) - Math.max(bounds.left, rect.left), height: Math.min(bounds.bottom, rect.bottom) - Math.max(bounds.top, rect.top) };
         return screenRectToPoints(clip, bounds, entry.geometry);
       }));
@@ -314,14 +331,20 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     try { await action(() => addSelection(selected, selected.asset ? 'visual' : underline ? 'underline' : 'highlight', { color, ...(comment ? { comment } : {}) })); if (ticket === generation.current) { setSelection(null); window.getSelection()?.removeAllRanges(); setNotice('批注已保存。'); } }
     catch (cause) { if (ticket === generation.current) setNotice(`保存失败，选区仍保留：${messageOf(cause)}`); }
   }
-  async function ask(question: string) {
-    if (!selection || !paper || !question.trim() || !canSend) return;
+  async function ask() {
+    if (!selection || !paper || !canSend) return;
     const selected = selection; const ticket = generation.current;
     try { await action(async () => {
-      await sendSelection({ text: selected.text, paperPath: paper.path, vaultId, page: selected.parts[0].page, title: paper.title, question: question.trim() });
-      if (ticket === generation.current) { setSelection(null); window.getSelection()?.removeAllRanges(); setNotice('问题已发送到所属对话。'); }
-      try { await addSelection(selected, 'ask', { question: question.trim() }); } catch { if (ticket === generation.current) setNotice('问题已发送，但提问标记未保存。无需重复发送。'); }
+      await attachReadingContext({ vaultId, paperPath: paper.path, title: paper.title, pages: selected.parts.map(part => part.page), markIds: [], selection: { text: selected.text, parts: selected.parts, ...(selected.asset ? { asset: selected.asset } : {}) }, action: 'summarize' });
+      if (ticket === generation.current) { setSelection(null); window.getSelection()?.removeAllRanges(); setNotice('已附加到输入框，补充要求后发送。'); }
     }); } catch (cause) { setNotice(messageOf(cause)); }
+  }
+  async function attachMarks(task: MarkBatchAction, ids: string[], target?: MarkBatchTarget) {
+    if (!paper || !canSend || !marksRef.current) throw new Error('当前无法附加批注，请刷新后重试。');
+    const selected = selectedMarkSummary(marksRef.current.items, new Set(ids));
+    if (!selected.items.length || selected.items.length !== new Set(ids).size) throw new Error('部分所选批注已变化，请刷新并检查已选来源。');
+    const revision = marksRef.current.revision; const ticket = generation.current;
+    await action(async () => { await attachReadingContext({ vaultId, paperPath: paper.path, title: paper.title, pages: selected.pages, markIds: selected.items.map(mark => mark.id), marksRevision: revision, action: task, ...target }); if (ticket === generation.current) setNotice('已附加到输入框，补充要求后发送。'); });
   }
   async function copy(text: string, label = '内容') { try { await navigator.clipboard.writeText(text); setNotice(`${label}已复制。`); } catch { setNotice(`无法访问剪贴板，请使用系统快捷键复制${label}。`); } }
   async function translateSelection(value = selection) {
@@ -423,11 +446,12 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   }, [active, scale, goToPage]);
   function panStart(event: React.PointerEvent<HTMLDivElement>) { if (!viewport.current || editable(event.target) || (event.button !== 1 && !(space && event.button === 0))) return; event.preventDefault(); event.stopPropagation(); panning.current = { x: event.clientX, y: event.clientY, left: viewport.current.scrollLeft, top: viewport.current.scrollTop, moved: false }; event.currentTarget.setPointerCapture(event.pointerId); }
   function panMove(event: React.PointerEvent<HTMLDivElement>) { if (!panning.current || !viewport.current) return; event.preventDefault(); const value = panning.current; value.moved ||= Math.abs(event.clientX - value.x) + Math.abs(event.clientY - value.y) > 3; viewport.current.scrollLeft = value.left - (event.clientX - value.x); viewport.current.scrollTop = value.top - (event.clientY - value.y); }
-  function panEnd(event: React.PointerEvent<HTMLDivElement>) { if (panning.current) { if (panning.current.moved) justPanned.current = Date.now() + 250; panning.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); scroll(); } else captureSelection(); }
+  function panEnd(event: React.PointerEvent<HTMLDivElement>) { if (panning.current) { if (panning.current.moved) justPanned.current = Date.now() + 250; panning.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); scroll(); } else if (!(event.target instanceof Element && event.target.closest('button,input,textarea,select'))) captureSelection(); }
   const inlineNotesTarget = useRef<{ paperPath: string }>({ paperPath });
   if (inlineNotesTarget.current.paperPath !== paperPath) inlineNotesTarget.current = { paperPath };
-  const pageActions = useRef({ selectMark, navigate }); pageActions.current = { selectMark, navigate };
+  const pageActions = useRef({ selectMark, navigate, updateMark }); pageActions.current = { selectMark, navigate, updateMark };
   const onPageMark = useCallback((mark: ReaderMark) => pageActions.current.selectMark(mark), []);
+  const onPageSaveComment = useCallback((mark: ReaderMark, text: string) => pageActions.current.updateMark(mark, text, mark.color ?? 'yellow'), []);
   const onPageDestination = useCallback((destination: unknown, action?: string) => { void pageActions.current.navigate(destination, action); }, []);
   const onPageExternal = useCallback((url: string) => { void openExternalLink(url).catch(cause => setNotice(messageOf(cause))); }, []);
   const onPageVisual = useCallback((value: VisualSelection) => { setCrop(false); setSelection({ text: value.quote, parts: [{ page: value.page, quote: value.quote, rects: value.rects, pageSize: value.pageSize }], x: value.x, y: value.y, asset: value.asset }); }, []);
@@ -467,13 +491,13 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
       <button role="menuitem" onClick={() => { setMoreOpen(false); void openSystemViewer(); }}>用系统查看器打开</button>
       <button role="menuitem" disabled={!active || loading} onClick={() => { setMoreOpen(false); setLoadRevision(value => value + 1); }}>重新加载 PDF</button>
     </div>}</div></div></header>
-    <div className="reader-body pdf-parity-body">
+    <div ref={body} className={`reader-body pdf-parity-body ${notesLayout.overlay ? 'reader-notes-overlay-layout' : ''}`}>
       {view.outlineOpen && document && <OutlinePanel document={document} currentPage={view.pageNumber} busy={busy} onNavigate={(dest, page) => { void navigate(dest, undefined, page); }} onSave={saveBookmarks} onClose={() => setView(value => ({ ...value, outlineOpen: false }))} />}
       <div className="reader-stage">
         <div ref={viewport} className={'pdf-viewport parity-viewport ' + (space ? 'pan-armed' : '')} onScroll={scroll} onPointerDownCapture={panStart} onPointerMove={panMove} onPointerUp={panEnd} onPointerCancel={() => { panning.current = null; }} onKeyUp={captureSelection} onClickCapture={event => { if (Date.now() < justPanned.current) { event.preventDefault(); event.stopPropagation(); } }}>
           {loading && <div className="empty-state"><LoaderCircle className="spin" /><strong>正在读取 PDF…</strong><span>{progress}</span></div>}
           {document && <div className="pdf-continuous-pages">{slots.map((slot,index) => <div key={loadRevision+':'+index} className="pdf-page-slot" data-sheet-page={index+1} style={{height:slot.height}}>
-            {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
+            {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onSaveComment={onPageSaveComment} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
           </div>)}</div>}
         </div>
         {searchOpen && <form className="reader-search-overlay" role="search" aria-label="PDF 查找" onSubmit={event => { event.preventDefault(); void search(); }}><input ref={searchInput} aria-label="PDF 查找文字" placeholder="查找 PDF 文字" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && hits.length && query === hits[0]?.text) { event.preventDefault(); moveHit(event.shiftKey ? -1 : 1); } }} /><button disabled={searchBusy || !query.trim()}>{searchBusy ? <LoaderCircle size={14} className="spin" /> : '查找'}</button><button type="button" aria-label="上一个匹配" disabled={!hits.length} onClick={() => moveHit(-1)}><ChevronLeft size={14} /></button><span>{hits.length ? (hitIndex + 1) + '/' + hits.length + (hits.length >= 2000 ? '+' : '') : ''}</span><button type="button" aria-label="下一个匹配" disabled={!hits.length} onClick={() => moveHit(1)}><ChevronRight size={14} /></button><button type="button" className="icon-button" aria-label="关闭查找" onClick={() => { setSearchOpen(false); cancelSearch(); }}><X size={15} /></button></form>}
@@ -483,10 +507,11 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
         {passwordRequired && <form className="reader-password-overlay" onSubmit={event => { event.preventDefault(); passwordUpdate.current?.(password); setPassword(''); }}><label>PDF 密码<input type="password" autoFocus autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} /></label><button className="primary">解锁</button>{passwordWrong && <span className="error-text">密码不正确，请重试。</span>}</form>}
         {showHud && document && <ReaderHud state={toolState} actions={toolActions} />}
       </div>
-      {view.marksOpen && <MarksPanel list={marks} selectedId={selectedMark} busy={busy} error={markError} onSelect={selectMark} onSave={updateMark} onDelete={deleteMark} onReply={replyMark} onRefresh={() => { void refreshMarks(); }} onExport={format => { void exportPaper(format); }} onClose={() => setView(value => ({ ...value, marksOpen: false }))} />}
-      {notesMounted && <aside className="pdf-notes-sidebar" aria-label="论文笔记侧栏" hidden={!view.notesOpen}><header className="pdf-panel-heading"><strong>论文笔记</strong>{noteDirty && <span className="reader-note-dirty" role="status">未保存</span>}<button disabled={noteDirty} title={noteDirty ? '请先保存或处理当前草稿' : '单独打开笔记页'} onClick={() => onNotes(paper)}>单独打开</button><button className="icon-button" aria-label="关闭论文笔记" onClick={() => setView(value => ({ ...value, notesOpen: false }))}><X size={14} /></button></header><NotesView key={vaultId} active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={view.notesOpen ? inlineNotesTarget.current : null} onDirtyChange={setNoteDirty} /></aside>}
+      {view.marksOpen && <MarksPanel list={marks} selectedId={selectedMark} busy={busy} error={markError} onSelect={selectMark} onSave={updateMark} onDelete={deleteMark} onReply={replyMark} onRefresh={() => { void refreshMarks(); }} onExport={format => { void exportPaper(format); }} onClose={() => setView(value => ({ ...value, marksOpen: false }))} checkedIds={checkedMarks} onCheckedChange={setCheckedMarks} canAttach={canSend} onAttach={attachMarks} />}
+      {view.notesOpen && !notesLayout.overlay && <NotesSplitter width={notesLayout.width} min={notesLayout.min} max={notesLayout.max} onChange={width => { if (viewRef.current.fit) rememberPosition(); notesLayout.setWidth(width); }} />}
+      {notesMounted && <aside id="reader-notes-pane" className="pdf-notes-sidebar" aria-label="论文笔记侧栏" hidden={!view.notesOpen} style={{ width: notesLayout.width }}><header className="pdf-panel-heading"><strong>当前论文笔记</strong>{noteDirty && <span className="reader-note-dirty" role="status">未保存</span>}<button className="icon-button" aria-label="关闭论文笔记" onClick={() => setView(value => ({ ...value, notesOpen: false }))}><X size={14} /></button></header><NotesView key={vaultId} compact paperPath={paperPath} active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={view.notesOpen ? inlineNotesTarget.current : null} onDirtyChange={setNoteDirty} onOpenWorkspace={note => onNotes(paper, note?.path)} onOpenPaperMarkdown={onPaperMarkdown ? () => onPaperMarkdown(paper) : undefined} /></aside>}
     </div>
-    {selection && createPortal(<SelectionToolbar key={selection.parts[0]?.page + ':' + selection.x + ':' + selection.y + ':' + selection.text} selection={selection} busy={busy} canSend={canSend} onCopy={() => { void copy(selection.text, '选区'); }} onMark={(color, comment, underline) => { void highlight(color, comment, underline); }} onTranslate={() => { void translateSelection(); }} onAsk={question => { void ask(question); }} onClose={() => setSelection(null)} />, window.document.body)}
+    {selection && createPortal(<SelectionToolbar key={selection.parts[0]?.page + ':' + selection.x + ':' + selection.y + ':' + selection.text} selection={selection} busy={busy} canSend={canSend} onCopy={() => { void copy(selection.text, '选区'); }} onMark={(color, comment, underline) => { void highlight(color, comment, underline); }} onTranslate={() => { void translateSelection(); }} onAsk={() => { void ask(); }} onClose={() => setSelection(null)} />, window.document.body)}
     {translationCard && createPortal(<TranslationCard value={translationCard} busy={busy} onPin={() => { void pinTranslation(); }} onClose={() => { setTranslationCard(null); selectionTranslationAbort.current?.abort(); translationRun.current += 1; }} onRetry={() => { void translateSelection(translationCard.selection); }} onCopy={() => { void copy(translationCard.text, '译文'); }} />, window.document.body)}
   </section>;
 }

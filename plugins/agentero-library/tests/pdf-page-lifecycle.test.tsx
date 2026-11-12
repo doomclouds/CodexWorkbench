@@ -17,7 +17,7 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 async function settle() { for (let i = 0; i < 20; i++) await Promise.resolve(); }
 function setup(options: { text?: Promise<unknown>; renderError?: Error } = {}) {
   vi.stubGlobal('window', { devicePixelRatio: 1 });
-  const canvas = { width: 0, height: 0, style: {}, isConnected: true }, content = { replaceChildren: vi.fn(), isConnected: true };
+  const canvas = { width: 0, height: 0, style: {}, isConnected: true, getBoundingClientRect: () => ({ left: 0, top: 0, width: 612, height: 792 }) }, content = { replaceChildren: vi.fn(), querySelectorAll: () => [], isConnected: true };
   const sheet = { isConnected: true }, element = { isConnected: true };
   harness.nodes = [sheet, element, canvas, content];
   const cancel = vi.fn();

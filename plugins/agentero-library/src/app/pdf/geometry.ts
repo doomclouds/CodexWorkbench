@@ -36,14 +36,37 @@ export function screenRectToPoints(rect: Pick<DOMRect, 'left' | 'top' | 'width' 
   return viewportRectToPoints({ x: (rect.left - pageBounds.left) * sx, y: (rect.top - pageBounds.top) * sy, w: rect.width * sx, h: rect.height * sy }, geometry);
 }
 export function usefulRects(rects: MarkRect[]): MarkRect[] {
-  const result: MarkRect[] = [];
+  let result: MarkRect[] = [];
   for (const rect of rects) {
     if (![rect.x, rect.y, rect.w, rect.h].every(Number.isFinite) || rect.w < .2 || rect.h < .2) continue;
     if (result.some(other => Math.abs(other.x - rect.x) < .4 && Math.abs(other.y - rect.y) < .4 && Math.abs(other.w - rect.w) < .4 && Math.abs(other.h - rect.h) < .4)) continue;
-    result.push(rect);
+    // Preserve the exact union, rather than a bounding box across lines/columns.
+    // DOM ranges can include both a parent span and its nested text rectangles.
+    result = result.filter(other => !containsRect(rect, other));
+    let remaining = [rect];
+    for (const other of result) remaining = remaining.flatMap(piece => subtractRect(piece, other));
+    result.push(...remaining);
   }
   return result;
 }
+function containsRect(outer: MarkRect, inner: MarkRect) { return outer.x <= inner.x && outer.y <= inner.y && outer.x + outer.w >= inner.x + inner.w && outer.y + outer.h >= inner.y + inner.h; }
+function subtractRect(rect: MarkRect, other: MarkRect): MarkRect[] {
+  const left = Math.max(rect.x, other.x); const right = Math.min(rect.x + rect.w, other.x + other.w);
+  const top = Math.max(rect.y, other.y); const bottom = Math.min(rect.y + rect.h, other.y + other.h);
+  if (right <= left || bottom <= top) return [rect];
+  return [
+    { x: rect.x, y: rect.y, w: rect.w, h: top - rect.y },
+    { x: rect.x, y: bottom, w: rect.w, h: rect.y + rect.h - bottom },
+    { x: rect.x, y: top, w: left - rect.x, h: bottom - top },
+    { x: right, y: top, w: rect.x + rect.w - right, h: bottom - top },
+  ].filter(piece => piece.w > 0 && piece.h > 0);
+}
+export function rectEnvelope(rects: MarkRect[]): MarkRect | null {
+  if (!rects.length) return null;
+  const x = Math.min(...rects.map(rect => rect.x)); const y = Math.min(...rects.map(rect => rect.y));
+  return { x, y, w: Math.max(...rects.map(rect => rect.x + rect.w)) - x, h: Math.max(...rects.map(rect => rect.y + rect.h)) - y };
+}
+export function hasMarkContent(mark: ReaderMark): boolean { return Boolean(mark.comment?.trim() || mark.question?.trim() || mark.result?.trim() || mark.note?.trim() || mark.messages?.length || mark.asset); }
 export function markText(mark: ReaderMark) { return mark.result || mark.comment || mark.question || mark.note || ''; }
 export function safePdfUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;

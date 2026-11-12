@@ -34,15 +34,23 @@ export function remarkWikiLinks(this: RemarkProcessor) {
   };
 }
 
-export type NoteLink = { kind: 'note' | 'paper'; path: string } | { kind: 'external'; url: string } | { kind: 'anchor'; id: string };
+export type NoteLink = { kind: 'note'; path: string } | { kind: 'paper'; path: string; page?: number; markId?: string } | { kind: 'external'; url: string } | { kind: 'anchor'; id: string };
 
 export function resolveNoteLink(url: string, notePath: string): NoteLink | null {
   const raw = url.trim();
   if (/^(https?:|mailto:)/i.test(raw)) return { kind: 'external', url: raw };
   if (raw.startsWith('#')) return { kind: 'anchor', id: raw.slice(1) };
-  let path = raw; let wiki = false;
+  let path = raw; let wiki = false; let page: number | undefined; let markId: string | undefined;
   const protocol = /^(workbench-note|workbench-paper|workbench-wiki):(.+)$/.exec(raw);
-  try { if (protocol) { path = decodeURIComponent(protocol[2]); wiki = protocol[1] === 'workbench-wiki'; } else path = decodeURIComponent(raw); } catch { return null; }
+  const payload = protocol ? protocol[2] : raw;
+  const fragmentAt = payload.indexOf('#');
+  if (fragmentAt >= 0) {
+    const fragment = new URLSearchParams(payload.slice(fragmentAt + 1));
+    const pages = fragment.getAll('page'); const marks = fragment.getAll('mark');
+    if ([...fragment.keys()].some(key => key !== 'page' && key !== 'mark') || pages.length !== 1 || !/^[1-9]\d{0,5}$/.test(pages[0]) || marks.length > 1 || (marks.length === 1 && !/^[a-zA-Z0-9_-][a-zA-Z0-9._:-]{0,127}$/.test(marks[0]))) return null;
+    page = Number(pages[0]); markId = marks[0];
+  }
+  try { path = decodeURIComponent(fragmentAt >= 0 ? payload.slice(0, fragmentAt) : payload); wiki = protocol?.[1] === 'workbench-wiki'; } catch { return null; }
   path = path.replaceAll('\\', '/');
   if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith('/') || path.includes('\0') || path.includes('?') || path.includes('#')) return null;
   const explicitRoot = /^(notes|papers)\//.test(path);
@@ -51,12 +59,20 @@ export function resolveNoteLink(url: string, notePath: string): NoteLink | null 
   }
   const parts: string[] = [];
   for (const part of path.split('/')) {
-    if (part === '..') { if (parts.length <= 1) return null; parts.pop(); }
+    if (part === '..') { if (parts.length === 0) return null; parts.pop(); }
     else if (part && part !== '.') parts.push(part);
   }
   path = parts.join('/');
   if (!/^(notes|papers)\//.test(path)) return null;
-  if (protocol?.[1] === 'workbench-paper' || (path.startsWith('papers/') && !path.toLowerCase().endsWith('.md'))) return { kind: 'paper', path: path.replace(/\/$/, '') };
+  if (protocol?.[1] === 'workbench-paper' || (path.startsWith('papers/') && !path.toLowerCase().endsWith('.md'))) {
+    if (!path.startsWith('papers/')) return null;
+    let paperPath = path.replace(/\/$/, '');
+    // Agentero file_move rewrites a paper reference as a relative PDF link.
+    if (protocol?.[1] !== 'workbench-paper' && /\.pdf$/i.test(paperPath)) paperPath = paperPath.split('/').slice(0, -1).join('/');
+    if (paperPath === 'papers') return null;
+    return { kind: 'paper', path: paperPath, ...(page ? { page } : {}), ...(markId ? { markId } : {}) };
+  }
+  if (page !== undefined) return null;
   if (!path.toLowerCase().endsWith('.md')) path += '.md';
   if (path.startsWith('papers/') && !path.endsWith('/NOTES.md')) return null;
   return { kind: 'note', path };

@@ -34,6 +34,7 @@ describe('note references', () => {
   it('routes paper NOTES through the paper-note operation', () => {
     expect(noteReference('papers/group/demo/NOTES.md')).toEqual({ paperPath: 'papers/group/demo' });
     expect(noteReference('notes/reading.md')).toEqual({ path: 'notes/reading.md' });
+    expect(noteReference('notes/topic/NOTES.md')).toEqual({ path: 'notes/topic/NOTES.md' });
   });
   it('accepts normal Unicode notes while refusing traversal and unrelated roots', () => {
     expect(safeNotePath('notes/阅读记录.md')).toBe('notes/阅读记录.md');

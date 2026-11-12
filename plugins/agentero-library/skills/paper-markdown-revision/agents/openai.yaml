@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文 Markdown 修订"
+  short_description: "根据批注和备注修订已有论文 Markdown，保护原始 PDF、来源与图片资源"
+  default_prompt: "使用 $paper-markdown-revision 根据这次所选批注修订并保存论文 Markdown，保留原始 PDF 与来源。"

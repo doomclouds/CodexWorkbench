@@ -6,6 +6,7 @@ vi.mock('../src/app/api', () => ({ callTool: vi.fn(), VAULT_CHANGED_EVENT: 'test
 vi.mock('../src/app/LibraryView', () => ({ LibraryView: () => null }));
 vi.mock('../src/app/PdfReader', () => ({ PdfReader: () => null }));
 vi.mock('../src/app/NotesView', () => ({ NotesView: () => null }));
+vi.mock('../src/app/PaperMarkdownView', () => ({ PaperMarkdownView: () => null }));
 vi.mock('../src/app/TrashView', () => ({ TrashView: () => null }));
 vi.mock('../src/app/SettingsPanel', () => ({ SettingsPanel: () => null }));
 import { App, OperationBar, workspaceAccess } from '../src/app/App';

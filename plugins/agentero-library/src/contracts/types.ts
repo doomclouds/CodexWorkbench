@@ -110,11 +110,13 @@ export interface NoteList {
   items: { path: string; name: string; kind: 'file' | 'directory'; paperPath?: string }[];
   truncated: boolean;
 }
-export interface NoteInput extends VaultInput { path?: string; paperPath?: string }
+export interface NoteInput extends VaultInput { path?: string; paperPath?: string; paperId?: string }
 export interface NoteDocument {
   vaultId: string;
   path: string;
   paperPath?: string;
+  paperId?: string;
+  paperTitle?: string;
   content: string;
   revision: string | null;
   exists: boolean;

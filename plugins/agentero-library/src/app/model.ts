@@ -50,7 +50,7 @@ export async function readPdfChunks(
 }
 
 export function noteReference(path: string): { path: string } | { paperPath: string } {
-  return path.endsWith('/NOTES.md')
+  return path.startsWith('papers/') && path.endsWith('/NOTES.md')
     ? { paperPath: path.slice(0, -'/NOTES.md'.length) }
     : { path };
 }

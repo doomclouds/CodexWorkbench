@@ -10,8 +10,8 @@ export interface ReaderMark {
   quote: string; note: string; comment?: string; question?: string; result?: string;
   color?: MarkColor; asset?: string; messages?: MarkMessage[]; createdAt?: string; updatedAt?: string;
 }
-export interface MarkListInput extends PaperInput { query?: string; kind?: MarkKind; page?: number }
-export interface MarkList { vaultId: string; paperPath: string; revision: string; items: ReaderMark[] }
+export interface MarkListInput extends PaperInput { query?: string; kind?: MarkKind; page?: number; ids?: string[]; pages?: number[]; limit?: number; cursor?: string }
+export interface MarkList { vaultId: string; paperPath: string; revision: string; items: ReaderMark[]; total?: number; nextCursor?: string | null; truncated?: boolean }
 export interface AddMarkInput extends PaperInput {
   revision: string; kind: MarkKind; page: number; rects: MarkRect[];
   pageSize: { width: number; height: number }; quote: string; color?: MarkColor;
