@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "agentero-library",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "在 Codex 对话旁管理本地文献、阅读 PDF 并整理研究笔记。",
   "author": {
     "name": "doomclouds"

@@ -1,4 +1,4 @@
 interface:
   display_name: "工作台插件开发"
-  short_description: "为 Codex 工作台选择跨平台技术栈、插件入口与官方扩展能力"
-  default_prompt: "使用 $workbench-plugin-development 为当前功能选择插件形式、扩展点和实现方案，并遵循工作台开发约定。"
+  short_description: "澄清关键需求，依据项目约定选择跨平台插件方案并按范围推进"
+  default_prompt: "使用 $workbench-plugin-development 根据当前任务的目标、范围与阶段，若存在影响方案的关键歧义，先澄清，再按项目约定推荐方案或实施已授权的修改。"
