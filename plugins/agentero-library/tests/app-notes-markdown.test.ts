@@ -44,6 +44,13 @@ describe('notes Markdown editor contract', () => {
 });
 
 describe('safe note navigation', () => {
+  it('resolves native move-rewritten PDF citations across the Vault namespace without escaping it', () => {
+    const source = 'notes/论文/source--0123456789ab/笔记.md';
+    expect(resolveNoteLink('../../../papers/source/source.pdf#page=7&mark=mark-2', source)).toEqual({ kind: 'paper', path: 'papers/source', page: 7, markId: 'mark-2' });
+    expect(resolveNoteLink('papers/source/source.pdf#page=12', source)).toEqual({ kind: 'paper', path: 'papers/source', page: 12 });
+    expect(resolveNoteLink('papers/source/source.pdf#page=12&mark=_crop-1', source)).toEqual({ kind: 'paper', path: 'papers/source', page: 12, markId: '_crop-1' });
+    expect(resolveNoteLink('../../../../papers/source/source.pdf#page=7', source)).toBeNull();
+  });
   it('resolves notes, paper references, and normal relative links in the selected vault', () => {
     expect(resolveNoteLink('workbench-wiki:notes%2F方法', 'notes/current.md')).toEqual({ kind: 'note', path: 'notes/方法.md' });
     expect(resolveNoteLink('workbench-wiki:papers%2FReAct', 'notes/current.md')).toEqual({ kind: 'paper', path: 'papers/ReAct' });
@@ -56,5 +63,10 @@ describe('safe note navigation', () => {
   it('restores aliases without changing ordinary Markdown links', () => {
     expect(serializeNote(parser('[[notes/method.md|方法]] [web](https://example.com)'), '')).toContain('[[notes/method.md|方法]] [web](https://example.com)');
     expect(countLiteralMatches('foo Foo FOO', 'foo')).toBe(3); expect(countLiteralMatches('aaa', '')).toBe(0);
+  });
+  it('opens PDF citations at a validated physical page and optional mark', () => {
+    expect(resolveNoteLink('workbench-paper:papers%2F架构#page=7&mark=highlight-123', 'notes/read.md')).toEqual({ kind: 'paper', path: 'papers/架构', page: 7, markId: 'highlight-123' });
+    expect(resolveNoteLink('papers/demo#page=12', 'notes/read.md')).toEqual({ kind: 'paper', path: 'papers/demo', page: 12 });
+    for (const target of ['papers/demo#page=0', 'papers/demo#page=-1', 'papers/demo#page=1.5', 'papers/demo#page=2&page=3', 'papers/demo#page=7&mark=../bad', 'papers/demo#page=1&unknown=x', 'notes/read.md#page=7', 'workbench-paper:notes%2Fread#page=1']) expect(resolveNoteLink(target, 'notes/read.md')).toBeNull();
   });
 });

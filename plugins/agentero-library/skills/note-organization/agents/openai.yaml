@@ -1,0 +1,4 @@
+interface:
+  display_name: "笔记组织"
+  short_description: "整理普通笔记与嵌套目录，按明确任务移动、调整论文关联或移入回收站"
+  default_prompt: "使用 $note-organization 整理这些笔记的目录与论文主关联，并核实实际结果。"

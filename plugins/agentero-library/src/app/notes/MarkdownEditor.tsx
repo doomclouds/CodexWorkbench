@@ -16,10 +16,11 @@ type Mode = 'rich' | 'source' | 'preview';
 interface Props {
   value: string; onChange(value: string): void; environment: NoteEnvironment;
   onSave(): void; saveDisabled: boolean;
+  imageInsertionDisabled?: boolean;
 }
 interface InsertAction { insert(markdown: string): void }
 
-export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, environment, onSave, saveDisabled }: Props) {
+export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, environment, onSave, saveDisabled, imageInsertionDisabled = false }: Props) {
   const [mode, setMode] = useState<Mode>('rich'); const [findOpen, setFindOpen] = useState(false);
   const [linkKind, setLinkKind] = useState<'link' | 'wiki' | null>(null); const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [error, setError] = useState(''); const fileInput = useRef<HTMLInputElement>(null); const source = useRef<HTMLTextAreaElement>(null);
@@ -33,6 +34,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, en
   const insertMarkdown = (markdown: string) => { if (mode === 'source') changeSource(markdown); else insert.current?.insert(markdown); };
 
   async function importImage(file: File) {
+    if (imageInsertionDisabled) { setError('此文档暂不支持导入图片，请保留已有图片引用。'); return; }
     if (file.size > 8 * 1024 * 1024 || !/^image\/(png|jpeg|webp|gif|avif)$/.test(file.type)) { setError('请选择 8 MiB 以内的 PNG、JPEG、WebP、GIF 或 AVIF 图片。'); return; }
     setAttachmentBusy(true); setError('');
     try {
@@ -65,14 +67,14 @@ export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, en
           <select aria-label="标题级别" value="" onChange={event => { changeSource(`${event.target.value} `); }}><option value="" disabled>标题</option>{[1, 2, 3, 4, 5, 6].map(level => <option key={level} value={'#'.repeat(level)}>H{level}</option>)}</select>
           <Tool label="无序列表" onClick={() => changeSource('- ')}><List size={15} /></Tool><Tool label="有序列表" onClick={() => changeSource('1. ')}><ListOrdered size={15} /></Tool><Tool label="任务列表" onClick={() => changeSource('- [ ] ')}><ListChecks size={15} /></Tool><Tool label="引用" onClick={() => changeSource('> ')}><Quote size={15} /></Tool>
           <Tool label="代码块" onClick={() => changeSource('\n```\n', '\n```\n', 'code')}><FileCode size={15} /></Tool><Tool label="插入链接" onClick={() => setLinkKind('link')}><Link size={15} /></Tool><Tool label="插入双链或论文引用" onClick={() => setLinkKind('wiki')}>[[ ]]</Tool>
-          <Tool label="表格" onClick={() => changeSource('\n| 标题 | 内容 |\n| --- | --- |\n|  |  |\n')}><Table size={15} /></Tool><Tool label="公式" onClick={() => changeSource('\n$$\n', '\n$$\n', 'E = mc^2')}><Radical size={15} /></Tool><Tool label="图片附件" disabled={environment.preview || attachmentBusy} onClick={() => fileInput.current?.click()}><ImagePlus size={15} /></Tool>
+          <Tool label="表格" onClick={() => changeSource('\n| 标题 | 内容 |\n| --- | --- |\n|  |  |\n')}><Table size={15} /></Tool><Tool label="公式" onClick={() => changeSource('\n$$\n', '\n$$\n', 'E = mc^2')}><Radical size={15} /></Tool><Tool label="图片附件" disabled={environment.preview || attachmentBusy || imageInsertionDisabled} onClick={() => fileInput.current?.click()}><ImagePlus size={15} /></Tool>
         </div>
         {findOpen && <SourceFind text={value} onChange={onChange} textarea={source} onClose={() => setFindOpen(false)} />}
         <textarea ref={source} className="markdown-editor note-source-editor" aria-label="笔记 Markdown 内容" value={value} onChange={event => onChange(event.target.value)} spellCheck={false} placeholder="# 阅读笔记" onKeyDown={event => {
           if (event.key === 'Tab') { event.preventDefault(); changeSource('  '); }
           if ((event.ctrlKey || event.metaKey) && ['b', 'i'].includes(event.key.toLowerCase())) { event.preventDefault(); changeSource(event.key.toLowerCase() === 'b' ? '**' : '*', event.key.toLowerCase() === 'b' ? '**' : '*'); }
         }} />
-      </> : <RichNote key={mode} markdown={value} readOnly={mode === 'preview'} onMarkdown={onChange} findOpen={findOpen} onCloseFind={() => setFindOpen(false)} insert={insert} onLink={() => setLinkKind('link')} onWiki={() => setLinkKind('wiki')} onImage={() => fileInput.current?.click()} imageDisabled={environment.preview || attachmentBusy} />}
+      </> : <RichNote key={mode} markdown={value} readOnly={mode === 'preview'} onMarkdown={onChange} findOpen={findOpen} onCloseFind={() => setFindOpen(false)} insert={insert} onLink={() => setLinkKind('link')} onWiki={() => setLinkKind('wiki')} onImage={() => fileInput.current?.click()} imageDisabled={environment.preview || attachmentBusy || imageInsertionDisabled} />}
       <input ref={fileInput} type="file" className="sr-only" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" aria-label="选择笔记图片附件" onChange={event => { const file = event.target.files?.[0]; if (file) void importImage(file); }} />
       {attachmentBusy && <p className="inline-notice" role="status">正在保存图片附件…</p>}
       {linkKind && <LinkDialog wiki={linkKind === 'wiki'} notePath={environment.notePath} onClose={() => setLinkKind(null)} onInsert={(target, label) => { setLinkKind(null); insertMarkdown(linkKind === 'wiki' ? `[[${target}${label && label !== target ? `|${label}` : ''}]]` : `[${label || target}](${target})`); }} />}

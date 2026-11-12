@@ -4,12 +4,13 @@ import type { LibraryOperation, LibrarySettings, LibraryStatus, Paper } from '..
 import { callTool, VAULT_CHANGED_EVENT } from './api';
 import { getHostState, subscribeHost } from './bridge';
 import { LibraryView } from './LibraryView';
-import { NotesView, type NoteTarget } from './NotesView';
+import { NotesView, type ActiveNote, type NotesController, type NoteTarget } from './NotesView';
+import { PaperMarkdownView } from './PaperMarkdownView';
 import { PdfReader } from './PdfReader';
 import { SettingsPanel } from './SettingsPanel';
 import { AppSidebar, type WorkspaceTab } from './AppSidebar';
 import { TrashView } from './TrashView';
-import { messageOf } from './model';
+import { messageOf, noteReference } from './model';
 import { previewSettings, previewStatus } from './preview';
 import { createRefreshQueue, readSettingsStatus, sameLibrarySettings as sameSettings, useAppActivity, type RefreshRequest } from './activity';
 
@@ -32,12 +33,22 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [readerToolsHost, setReaderToolsHost] = useState<HTMLElement | null>(null);
   const [noteTarget, setNoteTarget] = useState<NoteTarget | null>(null);
+  const [activeNote, setActiveNote] = useState<ActiveNote | null>(null);
+  const [notesMode, setNotesMode] = useState<'notes' | 'paper'>('notes');
+  const [paperMarkdownPath, setPaperMarkdownPath] = useState<string | null>(null);
+  const [paperDirty, setPaperDirty] = useState(false);
+  const notesController = useRef<NotesController | null>(null);
+  const bindNotesController = useCallback((controller: NotesController | null) => { notesController.current = controller; }, []);
+  const [pdfRequest, setPdfRequest] = useState<{ page?: number; markId?: string; key: number }>({ key: 0 });
   const [notesDirty, setNotesDirty] = useState(false); const [readerDirty, setReaderDirty] = useState(false);
   const readerSession = useRef({ path: paper?.path, dirty: readerDirty });
   readerSession.current = { path: paper?.path, dirty: readerDirty };
-  const dirty = notesDirty || readerDirty; const [settingsOpen, setSettingsOpen] = useState(false);
+  const paperSession = useRef({ path: paperMarkdownPath, dirty: paperDirty });
+  paperSession.current = { path: paperMarkdownPath, dirty: paperDirty };
+  const dirty = notesDirty || readerDirty || paperDirty; const [settingsOpen, setSettingsOpen] = useState(false);
   const navigation = useRef(0);
-  function clearDirty() { setNotesDirty(false); setReaderDirty(false); }
+  function clearDirty() { setNotesDirty(false); setReaderDirty(false); setPaperDirty(false); }
+  function resetDocuments() { setPaper(null); setNoteTarget(null); setActiveNote(null); setPaperMarkdownPath(null); setNotesMode('notes'); setPdfRequest({ key: navigation.current }); clearDirty(); }
   function selectTab(next: Tab) { ++navigation.current; setTab(next); }
   const [confirmSwitch, setConfirmSwitch] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -56,6 +67,21 @@ export function App() {
     }
     return true;
   }, []);
+  const flushNotes = useCallback(async () => {
+    if (!notesController.current || await notesController.current.flush()) return true;
+    setTab('notes'); setNotesMode('notes'); setError('当前笔记草稿尚未保存，请先保存或处理冲突。'); return false;
+  }, []);
+  const openPaperMarkdown = useCallback(async (path: string) => {
+    if (paperSession.current.dirty && paperSession.current.path !== path) {
+      setTab('notes'); setNotesMode('paper'); setError('当前论文正文有未保存的修改，请先保存或核实当前版本，再打开另一篇论文正文。'); return;
+    }
+    const ticket = ++navigation.current;
+    if (!await flushNotes() || ticket !== navigation.current) return;
+    if (paperSession.current.dirty && paperSession.current.path !== path) {
+      setTab('notes'); setNotesMode('paper'); setError('当前论文正文有未保存的修改，请先处理草稿。'); return;
+    }
+    setPaperMarkdownPath(path); setNotesMode('paper'); setTab('notes'); setSettingsOpen(false); setError('');
+  }, [flushNotes]);
 
   useEffect(() => subscribeHost(setHost), []);
   useEffect(() => { document.documentElement.dataset.theme = host.theme; }, [host.theme]);
@@ -81,7 +107,7 @@ export function App() {
       setStatus(previous => sameStatus(previous, diagnosed) ? previous : diagnosed);
       setPendingBinding(null);
       if (changed || forceStatus || explicit) setError('');
-      if (explicit) { setConfirmSwitch(false); setPaper(null); setNoteTarget(null); clearDirty(); selectTab('library'); setRefreshToken(value => value + 1); }
+      if (explicit) { setConfirmSwitch(false); resetDocuments(); selectTab('library'); setRefreshToken(value => value + 1); }
     } catch (reason) { if (alive.current && generation === refreshGeneration.current) setError(messageOf(reason)); }
     finally { if (alive.current && generation === refreshGeneration.current) setLoading(false); }
   };
@@ -139,10 +165,10 @@ export function App() {
           return;
         }
         if (!canReplacePaper(value.path)) return;
-        setPaper(value); setSettingsOpen(false); setError('');
+        setPaper(value); setPdfRequest({ key: ticket }); setSettingsOpen(false); setError('');
         if (targetView === 'notes') {
           // NotesView flushes the old target first and retains its draft on failure.
-          setNoteTarget({ paperPath: value.path }); setTab('notes');
+          setNoteTarget({ paperPath: value.path }); setNotesMode('notes'); setTab('notes');
         } else setTab('reading');
       }).catch(reason => { if (!cancelled) setError(messageOf(reason)); });
     return () => { cancelled = true; };
@@ -169,27 +195,30 @@ export function App() {
     refreshGeneration.current += 1;
     const wasDifferent = binding.current?.vaultId !== next.vaultId;
     binding.current = next; setSettings(next); setPendingBinding(null);
-    if (wasDifferent) { setPaper(null); setNoteTarget(null); clearDirty(); setTab('library'); }
+    if (wasDifferent) { resetDocuments(); setTab('library'); }
     setRefreshToken(value => value + 1);
     await refresh(false, true);
   }
 
-  function openPaper(value: Paper) { ++navigation.current; if (canReplacePaper(value.path)) { setPaper(value); setTab('reading'); setError(''); } }
-  const openPaperPath = useCallback(async (path: string) => {
+  function openPaper(value: Paper) { const ticket = ++navigation.current; if (canReplacePaper(value.path)) { setPaper(value); setPdfRequest({ key: ticket }); setTab('reading'); setError(''); } }
+  const openPaperPath = useCallback(async (path: string, page?: number, markId?: string) => {
     const vaultId = binding.current?.vaultId; const ticket = ++navigation.current;
     if (!vaultId) { setError('请先连接文献库。'); return; }
     if (!canReplacePaper(path)) return;
+    if (!await flushNotes() || ticket !== navigation.current) return;
     try {
       const target = await callTool<Paper & { vaultId: string }>('paper_get', { vaultId, paperPath: path });
       if (ticket !== navigation.current || binding.current?.vaultId !== vaultId || target.vaultId !== vaultId) return;
       if (!canReplacePaper(target.path)) return;
-      setPaper(target); setTab('reading'); setError('');
+      setPaper(target); setPdfRequest({ page, markId, key: ticket }); setTab('reading'); setError('');
     } catch (reason) { if (ticket === navigation.current) setError(messageOf(reason)); }
-  }, [canReplacePaper]);
-  function openNote(path: string) { ++navigation.current; setNoteTarget(path.endsWith('/NOTES.md') ? { paperPath: path.slice(0, -'/NOTES.md'.length) } : { path }); setTab('notes'); }
+  }, [canReplacePaper, flushNotes]);
+  function openNote(path: string) { ++navigation.current; setNoteTarget(noteReference(path)); setNotesMode('notes'); setTab('notes'); }
+  function openPaperNotes(value: Paper, notePath?: string) { ++navigation.current; setNoteTarget(notePath ? { path: notePath } : { paperPath: value.path }); setNotesMode('notes'); setTab('notes'); }
   const { business: usable, vaultBound: vaultUsable } = workspaceAccess(settings, status, host.preview);
   const vaultId = settings?.vaultId ?? '';
   const workspaceActive = visible && !settingsOpen;
+  const notePaperPath = activeNote ? activeNote.paperPath : noteTarget?.paperPath || paper?.path;
   const onboarding = <div className="empty-state onboarding"><FileText size={36} /><h2>连接你的本地文献库</h2><p>设置 Agentero CLI，并选择已有 Vault 或创建默认知识库。</p><button className="primary" onClick={() => setSettingsOpen(true)}><Settings size={16} />配置与诊断</button><a href="https://github.com/poco-ai/Agentero/blob/v0.15.2/docs/backend/cli.md" target="_blank" rel="noreferrer"><CircleHelp size={14} />CLI 安装说明</a></div>;
 
   return <div ref={root} className="library-app sidebar-layout">
@@ -200,10 +229,11 @@ export function App() {
     {pendingBinding && <div className="callout warning" role="alert"><strong>知识库已在其他位置切换。</strong><p>本页仍绑定原知识库；请先处理草稿，再明确载入新配置。</p><button disabled={dirty} onClick={() => void refresh(true)}>载入新知识库</button>{dirty && <><span className="field-help">当前草稿尚未保存，请先在笔记页复制草稿。</span>{confirmSwitch ? <div className="button-row"><span>确认放弃本页尚未保存的内容？</span><button onClick={() => setConfirmSwitch(false)}>保留草稿</button><button className="danger" onClick={() => { clearDirty(); void refresh(true); }}>放弃草稿并载入</button></div> : <button onClick={() => setConfirmSwitch(true)}>放弃草稿并切换…</button>}</>}</div>}
     {error && <p className="callout error" role="alert">{error}</p>}
     <main className="app-content">
-      {loading && !settings ? <div className="empty-state"><LoaderCircle className="spin" />正在连接文献库…</div> : vaultUsable ? <>
+      {loading && !settings ? <div className="empty-state"><LoaderCircle className="spin" />正在连接文献库…</div> : vaultUsable || dirty && settings?.vaultId ? <>
         <div className={`tab-content ${tab !== 'library' || !usable ? 'is-hidden' : ''}`}><LibraryView key={vaultId} active={workspaceActive && usable && tab === 'library'} vaultId={vaultId} vaultName={status?.vault.name ?? ''} preview={host.preview} refreshToken={refreshToken} pdfParseAvailable={Boolean(status?.capabilities.pdfParse)} onOpen={openPaper} onOpenNote={openNote} onOperation={setOperation} /></div>
-        <div className={`tab-content ${tab !== 'reading' || !usable ? 'is-hidden' : ''}`}><PdfReader key={vaultId} active={workspaceActive && usable && tab === 'reading'} vaultId={vaultId} paper={paper} preview={host.preview} canSend={host.canSendSelection} canParse={Boolean(status?.capabilities.pdfParse)} readerToolsHost={readerToolsHost} sidebarCollapsed={sidebarCollapsed} onNotes={value => { ++navigation.current; setNoteTarget({ paperPath: value.path }); setTab('notes'); }} onOperation={setOperation} onDirtyChange={setReaderDirty} onBack={() => selectTab('library')} /></div>
-        <div className={`tab-content ${tab !== 'notes' || !usable ? 'is-hidden' : ''}`}><NotesView key={vaultId} active={workspaceActive && usable && tab === 'notes'} vaultId={vaultId} preview={host.preview} requestedTarget={noteTarget} onDirtyChange={setNotesDirty} onOpenPaper={openPaperPath} /></div>
+        <div className={`tab-content ${tab !== 'reading' || !usable ? 'is-hidden' : ''}`}><PdfReader key={vaultId} active={workspaceActive && usable && tab === 'reading'} vaultId={vaultId} paper={paper} preview={host.preview} canSend={host.canSendSelection} canParse={Boolean(status?.capabilities.pdfParse)} readerToolsHost={readerToolsHost} sidebarCollapsed={sidebarCollapsed} requestedPage={pdfRequest.page} requestedMarkId={pdfRequest.markId} requestKey={pdfRequest.key} onNotes={openPaperNotes} onPaperMarkdown={value => { void openPaperMarkdown(value.path); }} onOperation={setOperation} onDirtyChange={setReaderDirty} onBack={() => selectTab('library')} /></div>
+        <div className={`tab-content ${tab !== 'notes' || notesMode !== 'notes' || !usable ? 'is-hidden' : ''}`}><NotesView key={vaultId} active={workspaceActive && usable && tab === 'notes' && notesMode === 'notes'} vaultId={vaultId} preview={host.preview} requestedTarget={noteTarget} onDirtyChange={setNotesDirty} onControllerReady={bindNotesController} onActiveNoteChange={setActiveNote} onOpenPaper={openPaperPath} onOpenWorkspace={() => { setNotesMode('notes'); selectTab('notes'); }} onOpenPaperMarkdown={notePaperPath ? () => { void openPaperMarkdown(notePaperPath); } : undefined} onOpenTrash={() => selectTab('trash')} /></div>
+        {paperMarkdownPath && <div className={`tab-content ${tab !== 'notes' || notesMode !== 'paper' || !usable ? 'is-hidden' : ''}`}><PaperMarkdownView key={vaultId} active={workspaceActive && usable && tab === 'notes' && notesMode === 'paper'} vaultId={vaultId} paperPath={paperMarkdownPath} preview={host.preview} onDirtyChange={setPaperDirty} onBack={() => { setNotesMode('notes'); selectTab('notes'); }} onOpenPdf={() => { void openPaperPath(paperMarkdownPath); }} /></div>}
         <div className={`tab-content ${tab !== 'trash' ? 'is-hidden' : ''}`}><TrashView key={vaultId} active={workspaceActive && tab === 'trash'} vaultId={vaultId} preview={host.preview} /></div>
         {!usable && tab !== 'trash' && onboarding}
       </> : onboarding}

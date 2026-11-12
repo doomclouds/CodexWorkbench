@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "plugin": "agentero-library",
-  "pluginVersion": "0.3.2",
+  "pluginVersion": "0.4.0",
   "scope": "bundled-runtime-inputs",
-  "inputInventory": "artifacts/agentero-library/v0.3.2/validation/bundle-inputs.json",
+  "inputInventory": "artifacts/agentero-library/v0.4.0/validation/bundle-inputs.json",
   "packages": [
     {
       "name": "@floating-ui/core",
@@ -1002,6 +1002,24 @@
           "upstreamPath": "LICENSE",
           "source": "npm:fast-uri@3.1.9/LICENSE",
           "sourceSha256": "b010b0dfdfdb23d7396e03b82cd4621fc9bb8f95d6b0aea70b9c24e12074c786"
+        }
+      ]
+    },
+    {
+      "name": "graceful-fs",
+      "version": "4.2.11",
+      "license": "ISC",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 4,
+      "files": [
+        {
+          "path": "packages/graceful-fs/4.2.11/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:graceful-fs@4.2.11/LICENSE",
+          "sourceSha256": "f65c5d9f22a317b2a10803bd1868461ce6499c2ed7217bc80c0cc772a748789c"
         }
       ]
     },
@@ -2555,6 +2573,24 @@
       ]
     },
     {
+      "name": "proper-lockfile",
+      "version": "4.1.2",
+      "license": "MIT",
+      "scope": [
+        "server"
+      ],
+      "direct": true,
+      "inputCount": 4,
+      "files": [
+        {
+          "path": "packages/proper-lockfile/4.1.2/LICENSE",
+          "upstreamPath": "LICENSE",
+          "source": "npm:proper-lockfile@4.1.2/LICENSE",
+          "sourceSha256": "aaa78451b6fecd1b9c4594c796c133c0e90cad100372ff8bc6de615e9ef9adf1"
+        }
+      ]
+    },
+    {
       "name": "proxy-compare",
       "version": "2.6.0",
       "license": "MIT",
@@ -2737,6 +2773,24 @@
       ]
     },
     {
+      "name": "retry",
+      "version": "0.12.0",
+      "license": "MIT",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 3,
+      "files": [
+        {
+          "path": "packages/retry/0.12.0/License",
+          "upstreamPath": "License",
+          "source": "npm:retry@0.12.0/License",
+          "sourceSha256": "01ad164273e8e095abc9dbd1c21e194594a671af7d528cb43ee7b4c903ba7da3"
+        }
+      ]
+    },
+    {
       "name": "scheduler",
       "version": "0.28.0",
       "license": "MIT",
@@ -2769,6 +2823,24 @@
           "upstreamPath": "LICENSE",
           "source": "npm:scroll-into-view-if-needed@3.1.0/LICENSE",
           "sourceSha256": "62b9f69bb4ccf131e7e4cc8ce6ec5b4acf3d9848f0ac73c3c2f285d716ff1b5c"
+        }
+      ]
+    },
+    {
+      "name": "signal-exit",
+      "version": "3.0.7",
+      "license": "ISC",
+      "scope": [
+        "server"
+      ],
+      "direct": false,
+      "inputCount": 2,
+      "files": [
+        {
+          "path": "packages/signal-exit/3.0.7/LICENSE.txt",
+          "upstreamPath": "LICENSE.txt",
+          "source": "npm:signal-exit@3.0.7/LICENSE.txt",
+          "sourceSha256": "e05b1eaf5b5f99b7ad75cd1f38858ff9a311780b97715ead67936d60bf96aa7e"
         }
       ]
     },

@@ -1,9 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, posix, resolve } from 'node:path';
-import type { AddMarkInput, BibliographyInput, ChangeTagInput, DeleteMarkInput, ExportBibliographyInput, ExportPaperInput, ExportResult, MarkListInput, NoteAssetImportInput, NoteAssetReadInput, NoteLinksInput, RenameNoteInput, TranslateInput, UpdateMarkInput, WriteBookmarksInput } from '../contracts/reader.js';
+import type { AddMarkInput, BibliographyInput, ChangeTagInput, DeleteMarkInput, ExportBibliographyInput, ExportPaperInput, ExportResult, MarkList, MarkListInput, NoteAssetImportInput, NoteAssetReadInput, NoteLinksInput, RenameNoteInput, TranslateInput, UpdateMarkInput, WriteBookmarksInput } from '../contracts/reader.js';
 import type { TrashList, TrashListInput, TrashOpenInput, TrashOpenResult } from '../contracts/trash.js';
+import type { CreateReadingContextInput, ReadReadingContextInput, ReadingContextDocument, ReadingContextReference, ReadingContextSummary } from '../contracts/context.js';
+import type { AssociateNoteInput, CreateNoteFolderInput, CreateNoteInput, MoveNoteFolderInput, NoteAssociation, NoteFolderMoveResult, NoteTrashResult, NoteTree, NoteTreeEntry, NoteTreeInput, TrashNoteInput } from '../contracts/notes.js';
+import type { PaperMarkdownDocument, PaperMarkdownHistory, PaperMarkdownHistoryInput, PaperMarkdownWriteResult, ReadPaperMarkdownInput, WritePaperMarkdownInput } from '../contracts/documents.js';
 import type {
   CliRunner, DiscoverInput, ImportPaperInput, LibraryOperation, LibraryServiceOptions, LibrarySettings,
   LibraryStatus, ListNotesInput, ListPapersInput, NativeBackend, NoteDocument, NoteInput, NoteList,
@@ -12,14 +15,18 @@ import type {
 } from '../contracts/types.js';
 import { asLibraryError, LibraryError } from '../contracts/errors.js';
 import { ProcessCliRunner } from '../infrastructure/cli.js';
-import { atomicJson, containedPath, contentRevision, exists, expandHome, readJson, relativePath } from '../infrastructure/files.js';
+import { atomicJson, containedPath, contentRevision, exists, expandHome, readJson, relativePath, within } from '../infrastructure/files.js';
 import { createNativeBackend } from '../infrastructure/native-mcp.js';
+import { withPaperDocumentLock } from '../infrastructure/paper-lock.js';
 import { diagnosticPdf } from '../infrastructure/pdf-probe.js';
 import { pdfDiagnosticKey, readPdfDiagnostic, writePdfDiagnostic, type PdfDiagnosticIdentity } from '../infrastructure/pdf-diagnostic-cache.js';
 import { requestExternalPdfOpen } from '../infrastructure/external-pdf.js';
 import { scanTrash, trashOpenTarget, TRASH_RESTORE_REASON, type TrashSnapshotData } from '../infrastructure/trash-reader.js';
 import { MarksStore } from '../infrastructure/marks.js';
 import { annotatedPdf, editBookmarks } from '../infrastructure/pdf-edit.js';
+import { defaultPaperNoteFolder, noteFolderRevision, noteName, noteWorkspacePath, paperFolderSuffix, readNoteAssociation, safeNotePath, scanNoteWorkspace, withNoteAssociation } from '../infrastructure/note-workspace.js';
+import { checkContextCancellation, ReadingContextStore, validateContextPng, type ReadingSnapshot } from '../infrastructure/reading-context.js';
+import { PaperDocuments } from '../infrastructure/paper-documents.js';
 
 interface Context { id: string; path: string; settings: LibrarySettings }
 interface Snapshot { id: string; vaultId: string; createdAt: number; items: Paper[] }
@@ -459,7 +466,13 @@ export class LibraryService {
     const context = await this.context(input);
     const path = await this.paperPath(context, input.paperPath);
     await this.requireCli(context.settings);
-    return this.startOperation(context, 'parse', signal => this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'parse', path, ...(input.force ? ['--force'] : [])], signal, 300_000), path);
+    return this.startOperation(context, 'parse', signal => this.exclusive(context, path, () => withPaperDocumentLock(this.dataRoot, context.path, path, async (checkLock, lockSignal) => {
+      const check = () => { if (signal.aborted) throw new LibraryError('OPERATION_CANCELLED', '正文解析已取消。'); };
+      check(); checkLock();
+      await this.ensurePaperMarkdownBackup({ vaultId: context.id, paperPath: path });
+      check(); checkLock();
+      return this.cli(context.settings, ['--json', '--vault', context.path, 'paper', 'parse', path, ...(input.force ? ['--force'] : [])], AbortSignal.any([signal, lockSignal]), 300_000);
+    })), path);
   }
 
   async updatePaper(input: UpdatePaperInput): Promise<Record<string, unknown>> {
@@ -577,41 +590,173 @@ export class LibraryService {
     const context = await this.context(input);
     const path = relativePath(input.path ?? 'notes');
     if (path !== 'notes' && !path.startsWith('notes/')) throw new LibraryError('INVALID_PATH', '独立笔记目录必须位于 notes/。');
-    await containedPath(context.path, path);
+    await safeNotePath(context.path, path, false, true);
     const data = await this.call(context, 'file_list', { path, limit: Math.min(500, Math.max(1, input.limit ?? 200)) });
     const entries = Array.isArray(data.entries) ? data.entries : [];
     return { vaultId: context.id, path, items: entries.map(record).filter(item => item.kind === 'directory' || String(item.path).toLowerCase().endsWith('.md')).map(item => ({ path: String(item.path), name: String(item.name), kind: item.kind === 'directory' ? 'directory' : 'file' })), truncated: data.truncated === true };
   }
 
+  private async notePaper(context: Context, reference: string, expectedId?: string): Promise<NoteAssociation> {
+    if (typeof reference !== 'string' || !reference || reference.length > 1024) throw new LibraryError('INVALID_PAPER', '论文引用无效。');
+    if (reference.startsWith('papers/')) await this.paperPath(context, reference);
+    const paper = this.normalizePaper(await this.call(context, 'paper_get', { ref: reference }));
+    if (!paper.id || paper.id.length > 512 || !paper.title || paper.title.length > 1000 || expectedId && paper.id !== expectedId) throw new LibraryError('NOTE_ASSOCIATION_INVALID', '论文稳定标识无效或已指向另一篇论文。');
+    const paperPath = await this.paperPath(context, paper.path);
+    if (reference.startsWith('papers/') && paperPath !== reference) throw new LibraryError('NOTE_ASSOCIATION_INVALID', '论文路径与返回的目录不一致。');
+    return { paperId: paper.id, paperPath, paperTitle: paper.title };
+  }
+
+  private async paperNoteFolder(context: Context, paper: NoteAssociation): Promise<string> {
+    const parent = await safeNotePath(context.path, 'notes/论文', true);
+    if (await exists(parent)) {
+      const suffix = `--${paperFolderSuffix(paper.paperId)}`;
+      let count = 0;
+      const handle = await import('node:fs/promises').then(fs => fs.opendir(parent));
+      try {
+        for await (const entry of handle) {
+          if (++count > 5000) throw new LibraryError('NOTE_FOLDER_TOO_LARGE', '论文笔记目录超过安全扫描范围。');
+          if (entry.isDirectory() && entry.name.endsWith(suffix)) { const path = `notes/论文/${entry.name}`; await safeNotePath(context.path, path); return path; }
+        }
+      } finally { await handle.close().catch(() => undefined); }
+    }
+    return defaultPaperNoteFolder(paper);
+  }
+
+  async noteTree(input: NoteTreeInput): Promise<NoteTree> {
+    const context = await this.context(input);
+    if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 1000)) throw new LibraryError('INVALID_RANGE', '笔记树 limit 必须为 1 至 1000。');
+    const paper = input.paperPath ? await this.notePaper(context, input.paperPath) : undefined;
+    const paperFolderPath = paper ? await this.paperNoteFolder(context, paper) : undefined;
+    const scan = await scanNoteWorkspace(context.path);
+    if (paper) for (const item of scan.items) if (item.paperId === paper.paperId) Object.assign(item, paper);
+    const papers = new Map<string, NoteAssociation>();
+    if (paper) papers.set(paperFolderSuffix(paper.paperId), paper);
+    for (const item of scan.items) if (item.paperId && item.paperPath && item.paperTitle) papers.set(paperFolderSuffix(item.paperId), { paperId: item.paperId, paperPath: item.paperPath, paperTitle: item.paperTitle });
+    for (const item of scan.items) if (item.kind === 'directory') {
+      const match = /^notes\/论文\/[^/]+--([a-f0-9]{12})(?:\/|$)/.exec(item.path), association = match ? papers.get(match[1]) : undefined;
+      if (association) Object.assign(item, association);
+    }
+    const included = new Set<string>();
+    const include = (path: string) => { for (let parent = path; parent !== 'notes' && parent.startsWith('notes/'); parent = posix.dirname(parent)) included.add(parent); };
+    if (paper) for (const item of scan.items) {
+      if (item.kind === 'file' && item.paperId === paper.paperId || item.kind === 'directory' && item.paperId === paper.paperId) include(item.path);
+    }
+    const all = paper ? scan.items.filter(item => included.has(item.path)) : scan.items;
+    const limit = input.limit ?? 500, items = all.slice(0, limit);
+    let truncated = scan.truncated || all.length > limit;
+    for (const item of items) if (item.kind === 'directory') {
+      try { Object.assign(item, await noteFolderRevision(context.path, item.path)); } catch (error) {
+        if (error instanceof LibraryError && ['NOTE_FOLDER_TOO_LARGE', 'INVALID_PATH'].includes(error.code)) truncated = true;
+        else throw error;
+      }
+    }
+    this.assertCurrentContext(context, await this.readSettings());
+    return { vaultId: context.id, items, truncated, ...(paperFolderPath ? { paperFolderPath } : {}) };
+  }
+
+  async createNote(input: CreateNoteInput) {
+    const context = await this.context(input), title = noteName(input.title);
+    const association = input.paperPath ? await this.notePaper(context, input.paperPath) : undefined;
+    const folder = noteWorkspacePath(input.folderPath ?? (association ? await this.paperNoteFolder(context, association) : 'notes'), true);
+    await safeNotePath(context.path, folder, true, true);
+    const filename = noteName(title.toLowerCase().endsWith('.md') ? title : `${title}.md`);
+    const path = `${folder}/${filename}`;
+    // The null revision enforces no overwrite even if another creator wins the race.
+    return this.saveNote({ vaultId: input.vaultId, path, content: input.content ?? '', revision: null }, association ?? null);
+  }
+
+  async createNoteFolder(input: CreateNoteFolderInput): Promise<NoteTreeEntry & { vaultId: string }> {
+    const context = await this.context(input), parent = noteWorkspacePath(input.parentPath, true), name = noteName(input.name), path = `${parent}/${name}`;
+    return this.exclusive(context, 'notes-workspace', async () => {
+      const target = await safeNotePath(context.path, path, true);
+      if (await exists(target)) throw new LibraryError('FILE_EXISTS', '目标文件夹已存在。');
+      const parentTarget = await safeNotePath(context.path, parent, true, true);
+      await mkdir(parentTarget, { recursive: true });
+      await safeNotePath(context.path, parent, false, true);
+      await mkdir(target);
+      return { vaultId: context.id, path, parentPath: parent, name, kind: 'directory', ...await noteFolderRevision(context.path, path) };
+    });
+  }
+
+  async moveNoteFolder(input: MoveNoteFolderInput): Promise<NoteFolderMoveResult> {
+    const context = await this.context(input), path = noteWorkspacePath(input.path), newPath = noteWorkspacePath(input.newPath);
+    if (newPath === path || newPath.startsWith(`${path}/`)) throw new LibraryError('INVALID_PATH', '不能把文件夹移动到自身或其子目录。');
+    return this.exclusive(context, 'notes-workspace', async () => {
+      const source = await safeNotePath(context.path, path);
+      if (!(await stat(source)).isDirectory()) throw new LibraryError('INVALID_PATH', '移动目标必须是笔记文件夹。');
+      const before = await noteFolderRevision(context.path, path);
+      if (before.revision !== input.revision) throw new LibraryError('NOTE_CONFLICT', '文件夹内容已变化，请重新读取笔记树。', true, before);
+      const target = await safeNotePath(context.path, newPath, true);
+      if (await exists(target)) throw new LibraryError('FILE_EXISTS', '目标文件夹已存在。');
+      const result = await this.call(context, 'file_move', { from: path, to: newPath });
+      return { vaultId: context.id, path: newPath, renamedFrom: path, revision: (await noteFolderRevision(context.path, newPath)).revision, updatedSources: result.updatedSources ?? [], skipped: result.skipped ?? [] };
+    });
+  }
+
+  async trashNote(input: TrashNoteInput): Promise<NoteTrashResult> {
+    const context = await this.context(input), path = noteWorkspacePath(input.path);
+    return this.exclusive(context, 'notes-workspace', async () => {
+      const target = await safeNotePath(context.path, path), info = await stat(target);
+      const revision = info.isDirectory() ? (await noteFolderRevision(context.path, path)).revision : (await this.readLocatedNote(context, await this.noteLocation(context, { vaultId: context.id, path }))).revision;
+      if (!input.revision || revision !== input.revision) throw new LibraryError('NOTE_CONFLICT', '笔记或文件夹已变化，请重新读取后再移入回收站。', true, { currentRevision: revision });
+      const result = await this.call(context, 'file_delete', { paths: [path], permanent: false });
+      this.trashSnapshot = undefined;
+      return { vaultId: context.id, path, trashed: true, result };
+    });
+  }
+
+  async associateNote(input: AssociateNoteInput) {
+    const context = await this.context(input), path = noteWorkspacePath(input.path);
+    const association = input.paperPath === null ? null : await this.notePaper(context, input.paperPath);
+    const current = await this.readNote({ vaultId: context.id, path });
+    if (!current.exists || current.revision !== input.revision) throw new LibraryError('NOTE_CONFLICT', '笔记已变化，请重新读取后再修改关联。', true);
+    return this.saveNote({ vaultId: context.id, path, content: current.content, revision: input.revision }, association);
+  }
+
   private async noteLocation(context: Context, input: NoteInput): Promise<{ path: string; paperPath?: string }> {
     let path: string;
     let paperPath: string | undefined;
-    if (input.paperPath) { paperPath = await this.paperPath(context, input.paperPath); path = `${paperPath}/NOTES.md`; }
+    if (input.paperPath && !input.path?.startsWith('notes/')) { paperPath = await this.paperPath(context, input.paperPath); path = `${paperPath}/NOTES.md`; }
     else {
       path = relativePath(input.path ?? '');
       if (path.startsWith('papers/') && path.endsWith('/NOTES.md')) paperPath = await this.paperPath(context, path.slice(0, -'/NOTES.md'.length));
       else if (!path.startsWith('notes/') || !path.toLowerCase().endsWith('.md')) throw new LibraryError('INVALID_PATH', '仅支持 notes/ 下的 Markdown 或论文 NOTES.md。');
     }
     if (input.path && relativePath(input.path) !== path) throw new LibraryError('INVALID_PATH', '笔记路径与论文引用不一致。');
-    await containedPath(context.path, path, true);
+    if (path.startsWith('notes/')) await safeNotePath(context.path, path, true);
+    else await containedPath(context.path, path, true);
     return { path, ...(paperPath ? { paperPath } : {}) };
   }
 
   private async readLocatedNote(context: Context, location: { path: string; paperPath?: string }): Promise<NoteDocument> {
-    const actual = await containedPath(context.path, location.path, true);
+    const actual = location.path.startsWith('notes/') ? await safeNotePath(context.path, location.path, true) : await containedPath(context.path, location.path, true);
     if (!(await exists(actual))) return { vaultId: context.id, ...location, content: '', revision: null, exists: false };
     if ((await stat(actual)).size > MAX_NOTE_BYTES) throw new LibraryError('NOTE_TOO_LARGE', '笔记超过 2 MiB，请缩小文件。');
     const data = location.paperPath ? await this.call(context, 'paper_notes_get', { ref: location.paperPath }) : await this.call(context, 'file_read', { path: location.path });
     if (typeof data.content !== 'string') throw new LibraryError('UPSTREAM_INVALID', '上游笔记内容格式无效。');
-    return { vaultId: context.id, ...location, content: data.content, revision: contentRevision(data.content), exists: true };
+    let association = location.paperPath ? undefined : readNoteAssociation(data.content);
+    if (association) {
+      try { association = await this.notePaper(context, association.paperId, association.paperId); } catch (error) {
+        // A removed/unavailable paper must not make its independent note unreadable.
+        // Keep its saved stable identity; never attach a different paper by path.
+        if (error instanceof LibraryError && ['VAULT_CHANGED', 'SETTINGS_CHANGED', 'SERVICE_CLOSED'].includes(error.code)) throw error;
+      }
+    }
+    return { vaultId: context.id, ...location, ...association, content: data.content, revision: contentRevision(data.content), exists: true };
   }
 
   async readNote(input: NoteInput): Promise<NoteDocument> {
     const context = await this.context(input);
-    return this.readLocatedNote(context, await this.noteLocation(context, input));
+    const result = await this.readLocatedNote(context, await this.noteLocation(context, input));
+    if (input.paperId && result.paperId !== input.paperId || input.path?.startsWith('notes/') && input.paperPath && result.paperPath !== input.paperPath) throw new LibraryError('NOTE_ASSOCIATION_INVALID', '笔记不属于指定论文。');
+    return result;
   }
 
   async writeNote(input: WriteNoteInput): Promise<NoteDocument & { saved: true; recoveryId: string }> {
+    return this.saveNote(input);
+  }
+
+  private async saveNote(input: WriteNoteInput, association?: NoteAssociation | null): Promise<NoteDocument & { saved: true; recoveryId: string }> {
     const context = await this.context(input);
     if (!Object.hasOwn(input, 'revision') || !(input.revision === null || typeof input.revision === 'string')) throw new LibraryError('REVISION_REQUIRED', '请先读取笔记，再带上 revision 保存。');
     if (input.mode && input.mode !== 'replace' && input.mode !== 'append') throw new LibraryError('INVALID_MODE', '保存模式仅支持 replace 或 append。');
@@ -621,24 +766,38 @@ export class LibraryService {
     const recoveryId = `${this.instanceId}-${createHash('sha256').update(key).digest('hex').slice(0, 24)}`;
     const attemptId = randomUUID();
     const draftPath = join(this.dataRoot, 'state', 'drafts', `${recoveryId}.draft.json`);
-    await atomicJson(draftPath, { instanceId: this.instanceId, attemptId, vaultId: context.id, ...location, revision: input.revision, mode: input.mode ?? 'replace', content: input.content, createdAt: new Date().toISOString() });
+    await atomicJson(draftPath, { instanceId: this.instanceId, attemptId, vaultId: context.id, ...location, ...(association !== undefined ? { association } : {}), revision: input.revision, mode: input.mode ?? 'replace', content: input.content, createdAt: new Date().toISOString() });
     this.busyWrites += 1;
-    const previous = this.queues.get(key) ?? Promise.resolve();
-    const task = previous.catch(() => undefined).then(async () => {
+    const queueKey = location.path.startsWith('notes/') ? `${context.id}:notes-workspace` : key;
+    const previous = this.queues.get(queueKey) ?? Promise.resolve();
+    const performSave = async (check = () => {}) => {
+      check();
       const current = await this.readLocatedNote(context, location);
       if (current.revision !== input.revision) throw new LibraryError('NOTE_CONFLICT', '笔记已被其他操作修改；草稿已保留，请重新读取后比较。', false, { currentRevision: current.revision, recoveryId });
+      if (input.paperId && current.paperId !== input.paperId || location.path.startsWith('notes/') && input.paperPath && current.paperPath !== input.paperPath) throw new LibraryError('NOTE_ASSOCIATION_INVALID', '笔记不属于指定论文，草稿已保留。');
       await atomicJson(join(this.dataRoot, 'state', 'drafts', `${recoveryId}-before.json`), { vaultId: context.id, ...location, revision: current.revision, content: current.content, exists: current.exists });
       try {
+        check();
         if (location.paperPath) await this.call(context, 'paper_notes_write', { ref: location.paperPath, content: input.content, mode: input.mode ?? 'replace' });
-        else await this.call(context, 'file_write', { path: location.path, content: input.content, mode: input.mode ?? 'replace' });
+        else {
+          const currentAssociation = readNoteAssociation(current.content);
+          const content = withNoteAssociation(input.mode === 'append' ? current.content + input.content : input.content, association === undefined ? currentAssociation : association);
+          if (Buffer.byteLength(content) > MAX_NOTE_BYTES) throw new LibraryError('NOTE_TOO_LARGE', '保存后笔记超过 2 MiB。');
+          await safeNotePath(context.path, location.path, true);
+          const nativeAppend = input.mode === 'append' && association === undefined && !currentAssociation && content === current.content + input.content;
+          await this.call(context, 'file_write', { path: location.path, content: nativeAppend ? input.content : content, mode: nativeAppend ? 'append' : 'replace' });
+        }
         const saved = await this.readLocatedNote(context, location);
         const remaining = record(await readJson(draftPath).catch(() => undefined));
         if (remaining.attemptId === attemptId) await rm(draftPath, { force: true }).catch(() => undefined);
         return { ...saved, saved: true as const, recoveryId };
       } catch (error) { throw error; }
-    });
-    this.queues.set(key, task);
-    try { return await task; } finally { this.busyWrites -= 1; if (this.queues.get(key) === task) this.queues.delete(key); }
+    };
+    const task = previous.catch(() => undefined).then(() => location.path.startsWith('notes/')
+      ? withPaperDocumentLock(this.dataRoot, context.path, 'notes', async check => performSave(check), '笔记工作区')
+      : performSave());
+    this.queues.set(queueKey, task);
+    try { return await task; } finally { this.busyWrites -= 1; if (this.queues.get(queueKey) === task) this.queues.delete(queueKey); }
   }
 
   private async exclusive<T>(context: Context, resource: string, run: () => Promise<T>): Promise<T> {
@@ -646,6 +805,7 @@ export class LibraryService {
     this.busyWrites += 1;
     const task = (this.queues.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
       this.ensureOpen(); this.assertCurrentContext(context, await this.readSettings());
+      if (resource === 'notes-workspace') return withPaperDocumentLock(this.dataRoot, context.path, 'notes', async check => { check(); return run(); }, '笔记工作区');
       return run();
     });
     this.queues.set(key, task);
@@ -656,10 +816,147 @@ export class LibraryService {
     const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
     return { context, store: new MarksStore(context.path, paperPath, context.id), paperPath };
   }
-  async listMarks(input: MarkListInput) {
+
+  private async contextSourcePath(context: Context, path: string, allowMissing = false) {
+    const relative = relativePath(path), parts = relative.split('/');
+    const target = await containedPath(context.path, relative, allowMissing);
+    for (let index = 1; index <= parts.length; index += 1) {
+      try { if ((await lstat(join(context.path, ...parts.slice(0, index)))).isSymbolicLink()) throw new LibraryError('INVALID_PATH', '附加阅读来源不支持符号链接。'); } catch (error) { if (allowMissing && (error as NodeJS.ErrnoException).code === 'ENOENT') break; throw error; }
+    }
+    return target;
+  }
+
+  private readingContextSummary(snapshot: ReadingSnapshot): ReadingContextSummary {
+    return { vaultId: snapshot.vaultId, contextId: snapshot.contextId, paperPath: snapshot.paperPath, paperId: snapshot.paperId, title: snapshot.title, pages: snapshot.pages, marksCount: snapshot.marksCount, action: snapshot.action, ...(snapshot.targetNotePath ? { targetNotePath: snapshot.targetNotePath } : {}), ...(snapshot.targetFolderPath ? { targetFolderPath: snapshot.targetFolderPath } : {}), createdAt: snapshot.createdAt, expiresAt: snapshot.expiresAt, imageIds: snapshot.imageIds };
+  }
+
+  async createReadingContext(input: CreateReadingContextInput, signal?: AbortSignal): Promise<ReadingContextSummary> {
+    checkContextCancellation(signal);
+    const context = await this.context(input), paper = await this.notePaper(context, input.paperPath);
+    await this.contextSourcePath(context, paper.paperPath);
+    if (!['summarize', 'create-note', 'update-note', 'revise-paper'].includes(input.action)) throw new LibraryError('INVALID_CONTEXT', '阅读任务类型无效。');
+    if (input.pages !== undefined && (!Array.isArray(input.pages) || input.pages.length > 500 || input.pages.some(page => !Number.isInteger(page) || page < 1 || page > 1_000_000)) || input.markIds !== undefined && (!Array.isArray(input.markIds) || input.markIds.length > 500 || input.markIds.some(id => typeof id !== 'string' || !id || id.length > 256))) throw new LibraryError('INVALID_CONTEXT', '所选批注或物理页码无效。');
+    if (input.marksRevision !== undefined && (typeof input.marksRevision !== 'string' || input.marksRevision.length > 256)) throw new LibraryError('INVALID_CONTEXT', '批注修订号无效。');
+    let targetNotePath: string | undefined, targetFolderPath: string | undefined;
+    if (input.targetNotePath !== undefined) {
+      targetNotePath = noteWorkspacePath(input.targetNotePath);
+      if (!targetNotePath.toLowerCase().endsWith('.md')) throw new LibraryError('INVALID_PATH', '目标笔记必须是 notes/ 下的 Markdown。');
+      const target = await safeNotePath(context.path, targetNotePath, true);
+      if (input.action === 'update-note' && !(await exists(target))) throw new LibraryError('NOTE_NOT_FOUND', '目标笔记不存在，请重新选择。');
+      if (await exists(target) && !(await stat(target)).isFile()) throw new LibraryError('INVALID_PATH', '目标笔记不是文件。');
+    }
+    if (input.action === 'update-note' && !targetNotePath) throw new LibraryError('INVALID_CONTEXT', '更新笔记需要明确目标笔记。');
+    if (input.targetFolderPath !== undefined) {
+      targetFolderPath = noteWorkspacePath(input.targetFolderPath, true);
+      const target = await safeNotePath(context.path, targetFolderPath, true, true);
+      if (await exists(target) && !(await stat(target)).isDirectory()) throw new LibraryError('INVALID_PATH', '目标目录不是文件夹。');
+    }
+    const pages = new Set(input.pages ?? []), ids = input.markIds ? new Set(input.markIds) : undefined;
+    const store = new MarksStore(context.path, paper.paperPath, context.id);
+    await this.contextSourcePath(context, `${paper.paperPath}/marks`, true);
+    const current = await store.list();
+    const selected = ids ? current.items.filter(mark => ids.has(mark.id)) : !input.selection && input.pages?.length ? current.items.filter(mark => pages.has(mark.page)) : [];
+    if (selected.length > 500) throw new LibraryError('CONTEXT_TOO_LARGE', '一次最多附加 500 条批注，请缩小选择。');
+    if (ids && selected.length !== ids.size) throw new LibraryError('MARK_NOT_FOUND', '所选批注已被删除或不存在，请重新选择。');
+    if (input.pages?.length && selected.some(mark => !pages.has(mark.page))) throw new LibraryError('INVALID_CONTEXT', '所选批注与物理页范围不一致。');
+    if ((selected.length || input.marksRevision !== undefined) && current.revision !== input.marksRevision) throw new LibraryError('MARK_CONFLICT', '批注已变化，请重新选择后再附加。', true, { currentRevision: current.revision });
+    const selection = input.selection;
+    if (selection) {
+      if (typeof selection.text !== 'string' || selection.text.length > 1_000_000 || !Array.isArray(selection.parts) || !selection.parts.length || selection.parts.length > 100) throw new LibraryError('INVALID_CONTEXT', '选区文字或来源页无效。');
+      for (const part of selection.parts) {
+        if (!Number.isInteger(part.page) || part.page < 1 || part.page > 1_000_000 || typeof part.quote !== 'string' || part.quote.length > 1_000_000) throw new LibraryError('INVALID_CONTEXT', '选区来源页或原文无效。');
+        if (part.rects !== undefined || part.pageSize !== undefined) {
+          const { width, height } = part.pageSize ?? {};
+          if (!Number.isFinite(width) || !Number.isFinite(height) || !width || !height || width <= 0 || height <= 0 || width > 100_000 || height > 100_000 || !Array.isArray(part.rects) || !part.rects.length || part.rects.length > 1000 || part.rects.some(rect => !rect || ![rect.x, rect.y, rect.w, rect.h].every(Number.isFinite) || rect.x < 0 || rect.y < 0 || rect.w <= 0 || rect.h <= 0 || rect.x + rect.w > width + 0.5 || rect.y + rect.h > height + 0.5)) throw new LibraryError('INVALID_CONTEXT', '选区几何超出真实页面范围。');
+        }
+        pages.add(part.page);
+      }
+      if (!selection.text.trim() && !selection.parts.some(part => part.quote.trim()) && !selection.asset) throw new LibraryError('INVALID_CONTEXT', '所选文字和图像均为空。');
+    }
+    if (!selected.length && !selection) throw new LibraryError('CONTEXT_EMPTY', '请先选择批注、备注、文字或区域截图。');
+    for (const mark of selected) pages.add(mark.page);
+    const images: ReadingSnapshot['images'] = {}, sections: string[] = [];
+    const addImage = (asset: { mediaType: string; data: string }) => { const id = `image-${Object.keys(images).length + 1}`; images[id] = validateContextPng(asset); return id; };
+    const link = (page: number, markId?: string) => `workbench-paper:${encodeURIComponent(paper.paperPath)}#page=${page}${markId ? `&mark=${encodeURIComponent(markId)}` : ''}`;
+    sections.push(`# Frozen reading sources\nPaper title: ${paper.paperTitle}\nStable paper ID: ${paper.paperId}\nPaper path: ${paper.paperPath}\nTask: ${input.action}\nPhysical PDF pages: ${[...pages].sort((a, b) => a - b).join(', ')}${selected.length ? `\nMarks revision: ${current.revision}` : ''}${targetNotePath ? `\nTarget note: ${targetNotePath}` : ''}${targetFolderPath ? `\nTarget folder: ${targetFolderPath}` : ''}`);
+    if (selection) {
+      sections.push(`## Reader-selected text\n${selection.text}`);
+      for (const [index, part] of selection.parts.entries()) sections.push(`### Selection part ${index + 1} — physical PDF page ${part.page}\nSource: ${link(part.page)}\nQuoted source text:\n${part.quote}${part.rects && part.pageSize ? `\nSelection geometry (page points): ${JSON.stringify({ rects: part.rects, pageSize: part.pageSize })}` : ''}`);
+      if (selection.asset) sections.push(`Reader-selected region PNG: ${addImage(selection.asset)}`);
+    }
+    for (const mark of selected) {
+      checkContextCancellation(signal);
+      sections.push(`## Mark ${mark.id} — ${mark.kind} — physical PDF page ${mark.page}\nSource: ${link(mark.page, mark.id)}\nSource revision: ${current.revision}\nQuoted source text:\n${mark.quote}\nUser comment:\n${mark.comment ?? mark.note}${mark.question ? `\nUser question:\n${mark.question}` : ''}${mark.result ? `\nSaved result/translation:\n${mark.result}` : ''}\nMark geometry (${mark.space}): ${JSON.stringify(mark.rects)}`);
+      for (const message of mark.messages ?? []) sections.push(`### Mark ${mark.id} message ${String(message.id ?? '')}\nRole: ${String(message.role ?? '')}\nCreated: ${String(message.createdAt ?? '')}\nMessage content:\n${String(message.content ?? '')}`);
+      if (mark.kind === 'visual' && mark.asset) {
+        await this.contextSourcePath(context, `${paper.paperPath}/marks/assets/${mark.id}.png`);
+        const asset = await store.asset(mark.id);
+        sections.push(`Frozen mark ${mark.id} region PNG: ${addImage({ mediaType: asset.mediaType, data: asset.base64 })}`);
+      }
+    }
+    checkContextCancellation(signal);
+    this.ensureOpen(); this.assertCurrentContext(context, await this.readSettings());
+    // Recheck after image I/O; never silently substitute newer marks for the selection.
+    if (selected.length && (await store.list()).revision !== current.revision) throw new LibraryError('MARK_CONFLICT', '批注在附加期间变化，请重新选择。', true);
+    const snapshot = await new ReadingContextStore(this.dataRoot).create({ vaultId: context.id, vaultPath: context.path, paperId: paper.paperId, paperPath: paper.paperPath, title: paper.paperTitle, pages: [...pages].sort((a, b) => a - b), marksCount: selected.length, action: input.action, ...(targetNotePath ? { targetNotePath } : {}), ...(targetFolderPath ? { targetFolderPath } : {}), ...(selected.length || input.marksRevision !== undefined ? { marksRevision: current.revision } : {}), imageIds: Object.keys(images), content: sections.join('\n\n'), images }, signal);
+    return this.readingContextSummary(snapshot);
+  }
+
+  private async readingSnapshot(input: ReadingContextReference, signal?: AbortSignal) {
+    checkContextCancellation(signal);
+    const context = await this.context(input), snapshot = await new ReadingContextStore(this.dataRoot).read(input.contextId, signal);
+    if (snapshot.vaultId !== context.id || snapshot.vaultPath !== context.path) throw new LibraryError('CONTEXT_SCOPE', '该阅读来源属于另一知识库，请返回原知识库或重新附加。');
+    this.ensureOpen(); this.assertCurrentContext(context, await this.readSettings());
+    return { context, snapshot };
+  }
+
+  async readReadingContext(input: ReadReadingContextInput, signal?: AbortSignal): Promise<ReadingContextDocument> {
+    const { context, snapshot } = await this.readingSnapshot(input, signal);
+    const offset = input.offset ?? 0, maxChars = input.maxChars ?? 20_000;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > snapshot.content.length || !Number.isInteger(maxChars) || maxChars < 1 || maxChars > 20_000) throw new LibraryError('INVALID_RANGE', '阅读来源窗口无效，maxChars 必须为 1 至 20000。');
+    let sourceChanged = false;
+    if (snapshot.marksRevision) {
+      try {
+        const paper = await this.notePaper(context, snapshot.paperId, snapshot.paperId);
+        await this.contextSourcePath(context, `${paper.paperPath}/marks`, true);
+        sourceChanged = (await new MarksStore(context.path, paper.paperPath, context.id).list()).revision !== snapshot.marksRevision;
+      } catch (error) {
+        if (error instanceof LibraryError && ['VAULT_CHANGED', 'SETTINGS_CHANGED', 'SERVICE_CLOSED'].includes(error.code)) throw error;
+        sourceChanged = true;
+      }
+    }
+    checkContextCancellation(signal);
+    const end = Math.min(snapshot.content.length, offset + maxChars), nextOffset = end < snapshot.content.length ? end : null;
+    return { ...this.readingContextSummary(snapshot), content: snapshot.content.slice(offset, end), offset, nextOffset, totalChars: snapshot.content.length, truncated: nextOffset !== null, sourceChanged };
+  }
+
+  async readReadingContextImage(input: ReadingContextReference & { imageId: string }, signal?: AbortSignal): Promise<{ mediaType: 'image/png'; base64: string }> {
+    const { snapshot } = await this.readingSnapshot(input, signal);
+    if (typeof input.imageId !== 'string' || !/^image-\d+$/.test(input.imageId) || !Object.hasOwn(snapshot.images, input.imageId)) throw new LibraryError('CONTEXT_IMAGE_NOT_FOUND', '该阅读来源不包含指定截图。');
+    const asset = validateContextPng(snapshot.images[input.imageId]);
+    checkContextCancellation(signal);
+    return { mediaType: asset.mediaType, base64: asset.data };
+  }
+
+  async listMarks(input: MarkListInput): Promise<MarkList> {
     const { store } = await this.markStore(input), result = await store.list();
+    if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 500) || input.page !== undefined && (!Number.isInteger(input.page) || input.page < 1) || input.pages !== undefined && (!Array.isArray(input.pages) || input.pages.length > 500 || input.pages.some(page => !Number.isInteger(page) || page < 1)) || input.ids !== undefined && (!Array.isArray(input.ids) || input.ids.length > 500 || input.ids.some(id => typeof id !== 'string' || !id || id.length > 256))) throw new LibraryError('INVALID_RANGE', '批注筛选或分页范围无效。');
     const query = (input.query ?? '').toLocaleLowerCase();
-    return { ...result, items: result.items.filter(mark => (!input.kind || mark.kind === input.kind) && (!input.page || mark.page === input.page) && (!query || [mark.quote, mark.note, mark.result, ...(mark.messages ?? []).map(m => m.content)].some(t => t?.toLocaleLowerCase().includes(query)))) };
+    const ids = input.ids ? new Set(input.ids) : undefined, pages = input.pages ? new Set(input.pages) : undefined;
+    const items = result.items.filter(mark => (!input.kind || mark.kind === input.kind) && (!input.page || mark.page === input.page) && (!ids || ids.has(mark.id)) && (!pages || pages.has(mark.page)) && (!query || [mark.quote, mark.note, mark.result, ...(mark.messages ?? []).map(m => m.content)].some(t => typeof t === 'string' && t.toLocaleLowerCase().includes(query))));
+    const fingerprint = createHash('sha256').update(JSON.stringify([query, input.kind ?? '', input.page ?? null, input.pages ? [...new Set(input.pages)].sort((a, b) => a - b) : null, input.ids ? [...new Set(input.ids)].sort() : null])).digest('hex');
+    let offset = 0;
+    if (input.cursor) {
+      let cursor: Record<string, unknown>;
+      try { if (input.cursor.length > 4096) throw new Error(); cursor = record(JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8'))); } catch { throw new LibraryError('CURSOR_EXPIRED', '批注游标无效，请重新读取第一页。', true); }
+      if (cursor.vault !== result.vaultId || cursor.paper !== result.paperPath || cursor.revision !== result.revision || cursor.query !== fingerprint || !Number.isSafeInteger(cursor.offset) || Number(cursor.offset) < 0 || Number(cursor.offset) > items.length) throw new LibraryError('CURSOR_EXPIRED', '批注或筛选已变化，请重新读取第一页。', true);
+      offset = Number(cursor.offset);
+    }
+    const limit = input.limit ?? 100, end = Math.min(items.length, offset + limit);
+    const nextCursor = end < items.length ? Buffer.from(JSON.stringify({ vault: result.vaultId, paper: result.paperPath, revision: result.revision, query: fingerprint, offset: end })).toString('base64url') : null;
+    // The App receives the entire default collection through private _meta.
+    // Model output uses the first 100 and this cursor to continue exactly.
+    return { ...result, items: input.limit !== undefined || input.cursor ? items.slice(offset, end) : items, total: items.length, nextCursor, truncated: nextCursor !== null };
   }
   async addMark(input: AddMarkInput) { const { context, store, paperPath } = await this.markStore(input); return this.exclusive(context, paperPath, async () => { await this.paperPath(context, paperPath); return store.add(input); }); }
   async updateMark(input: UpdateMarkInput) { const { context, store, paperPath } = await this.markStore(input); return this.exclusive(context, paperPath, async () => { await this.paperPath(context, paperPath); return store.update(input); }); }
@@ -781,6 +1078,45 @@ export class LibraryService {
     const content = await readFile(path, 'utf8');
     return { path: relative, content, revision: contentRevision(content), exists: true };
   }
+  async readEditablePaperMarkdown(input: ReadPaperMarkdownInput): Promise<PaperMarkdownDocument> {
+    const context = await this.context(input);
+    if (!context.settings.allowAgentPdfText) throw new LibraryError('TEXT_ACCESS_DISABLED', '请先允许 Agent 读取论文正文。');
+    const paperPath = await this.paperPath(context, input.paperPath);
+    return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).read(input);
+  }
+  async writePaperMarkdown(input: WritePaperMarkdownInput): Promise<PaperMarkdownWriteResult> {
+    return this.savePaperMarkdown(input, false);
+  }
+  async writePaperMarkdownFromApp(input: WritePaperMarkdownInput): Promise<PaperMarkdownWriteResult> {
+    return this.savePaperMarkdown(input, true);
+  }
+  private async savePaperMarkdown(input: WritePaperMarkdownInput, fromApp: boolean): Promise<PaperMarkdownWriteResult> {
+    const context = await this.context(input);
+    if (!fromApp && !context.settings.allowAgentPdfText) throw new LibraryError('TEXT_ACCESS_DISABLED', '请先允许 Agent 读取论文正文。');
+    const paperPath = await this.paperPath(context, input.paperPath);
+    return this.exclusive(context, paperPath, () => withPaperDocumentLock(this.dataRoot, context.path, paperPath, async checkLock => {
+      await this.paperPath(context, paperPath);
+      return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).write(input,
+        content => { checkLock(); return this.call(context, 'file_write', { path: `${paperPath}/PAPER.md`, content, mode: 'replace' }); },
+        async () => { checkLock(); this.assertCurrentContext(context, await this.readSettings()); });
+    }));
+  }
+  async paperMarkdownHistory(input: PaperMarkdownHistoryInput): Promise<PaperMarkdownHistory> {
+    return this.readPaperMarkdownHistory(input, false);
+  }
+  async paperMarkdownHistoryFromApp(input: PaperMarkdownHistoryInput): Promise<PaperMarkdownHistory> {
+    return this.readPaperMarkdownHistory(input, true);
+  }
+  private async readPaperMarkdownHistory(input: PaperMarkdownHistoryInput, fromApp: boolean): Promise<PaperMarkdownHistory> {
+    const context = await this.context(input);
+    if (!fromApp && !context.settings.allowAgentPdfText) throw new LibraryError('TEXT_ACCESS_DISABLED', '请先允许 Agent 读取论文正文。');
+    const paperPath = await this.paperPath(context, input.paperPath);
+    return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).history(input);
+  }
+  async ensurePaperMarkdownBackup(input: PaperInput): Promise<{ recoveryId: string | null }> {
+    const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
+    return new PaperDocuments(this.dataRoot, context.path, context.id, paperPath).ensureBackup();
+  }
   private readerStatePath(context: Context, paperPath: string) { return join(this.dataRoot, 'state', 'reader', `${createHash('sha256').update(`${context.id}:${paperPath}`).digest('hex')}.json`); }
   async readReaderState(input: PaperInput) {
     const context = await this.context(input), paperPath = await this.paperPath(context, input.paperPath);
@@ -866,11 +1202,12 @@ export class LibraryService {
     const context = await this.context(input), location = await this.noteLocation(context, { vaultId: input.vaultId, path: input.path });
     const destination = await this.noteLocation(context, { vaultId: input.vaultId, path: input.newPath });
     if (location.paperPath || destination.paperPath) throw new LibraryError('INVALID_PATH', '论文 NOTES.md 不能重命名。');
-    return this.exclusive(context, location.path, async () => {
+    return this.exclusive(context, 'notes-workspace', async () => {
       const before = await this.readLocatedNote(context, location);
       if (!before.exists || before.revision !== input.revision) throw new LibraryError('NOTE_CONFLICT', '笔记已变化，请先重新载入。', true);
-      const target = await containedPath(context.path, destination.path, true);
+      const target = await safeNotePath(context.path, destination.path, true);
       if (await exists(target)) throw new LibraryError('FILE_EXISTS', '目标笔记已存在。');
+      await safeNotePath(context.path, location.path);
       const moved = await this.call(context, 'file_move', { from: location.path, to: destination.path });
       const saved = await this.readLocatedNote(context, destination);
       return { ...saved, renamedFrom: location.path, updatedSources: moved.updatedSources ?? [], skipped: moved.skipped ?? [] };
@@ -888,8 +1225,9 @@ export class LibraryService {
       : await this.noteLocation(context, { vaultId: input.vaultId, path: input.notePath });
     if (typeof input.assetPath !== 'string' || /^(?:[a-z]+:|\/|\\)/i.test(input.assetPath)) throw new LibraryError('INVALID_PATH', '请使用笔记内的相对图片路径。');
     const relative = relativePath(posix.normalize(posix.join(posix.dirname(note.path), input.assetPath.replaceAll('\\', '/'))));
-    if (!relative.startsWith('notes/') && !(note.paperPath && relative.startsWith(`${note.paperPath}/`))) throw new LibraryError('INVALID_PATH', '附件超出当前笔记范围。');
-    const path = await containedPath(context.path, relative), mimeType = this.assetMime(path), info = await stat(path);
+    if (note.paperPath ? !relative.startsWith(`${note.paperPath}/`) : !relative.startsWith('notes/')) throw new LibraryError('INVALID_PATH', '附件超出当前笔记范围。');
+    const path = relative.startsWith('notes/') ? await safeNotePath(context.path, relative) : await containedPath(context.path, relative), mimeType = this.assetMime(path), info = await stat(path);
+    if (note.paperPath && !within(await realpath(await containedPath(context.path, note.paperPath)), path)) throw new LibraryError('INVALID_PATH', '图片符号链接超出当前论文范围。');
     if (!info.isFile() || info.size > 8 * 1024 * 1024) throw new LibraryError('ASSET_TOO_LARGE', '图片附件超过 8 MiB。');
     return { path: relative, markdownPath: input.assetPath, mimeType, totalBytes: info.size, base64: (await readFile(path)).toString('base64') };
   }
@@ -910,7 +1248,7 @@ export class LibraryService {
     }
     if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new LibraryError('ASSET_TOO_LARGE', '图片附件超过 8 MiB。');
     const file = `${randomUUID()}-${fileName}`, path = `${posix.dirname(note.path)}/assets/${file}`;
-    return this.exclusive(context, note.paperPath ?? note.path, async () => { if (note.paperPath) await this.paperPath(context, note.paperPath); const target = await containedPath(context.path, path, true); await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes, { flag: 'wx', mode: 0o600 }); return { path, markdownPath: `assets/${file}`, mimeType, totalBytes: bytes.length }; });
+    return this.exclusive(context, note.paperPath ?? 'notes-workspace', async () => { if (note.paperPath) await this.paperPath(context, note.paperPath); const target = path.startsWith('notes/') ? await safeNotePath(context.path, path, true) : await containedPath(context.path, path, true); await mkdir(dirname(target), { recursive: true }); await writeFile(target, bytes, { flag: 'wx', mode: 0o600 }); return { path, markdownPath: `assets/${file}`, mimeType, totalBytes: bytes.length }; });
   }
   async noteLinks(input: NoteLinksInput) {
     const context = await this.context(input), note = await this.noteLocation(context, input), files: string[] = [];
