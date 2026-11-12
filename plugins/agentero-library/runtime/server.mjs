@@ -61015,9 +61015,10 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.3.1";
+var PLUGIN_VERSION = "0.3.2";
 
 // src/infrastructure/native-mcp.ts
+var replayableReads = /* @__PURE__ */ new Set(["vault_list", "paper_get", "paper_paths", "vault_search", "page_read", "paper_text_get", "file_read", "file_list", "paper_notes_get"]);
 async function freePort() {
   const server2 = createServer();
   server2.listen(0, "127.0.0.1");
@@ -61056,7 +61057,7 @@ function unwrapNative(result) {
 }
 async function createNativeBackend(context) {
   const { Client: Client2 } = await Promise.resolve().then(() => (init_client2(), client_exports));
-  const { StreamableHTTPClientTransport: StreamableHTTPClientTransport2 } = await Promise.resolve().then(() => (init_streamableHttp(), streamableHttp_exports));
+  const { StreamableHTTPClientTransport: StreamableHTTPClientTransport2, StreamableHTTPError: StreamableHTTPError2 } = await Promise.resolve().then(() => (init_streamableHttp(), streamableHttp_exports));
   let lastError;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (context.signal?.aborted) throw new LibraryError("SERVICE_CLOSED", "\u8FDE\u63A5\u5DF2\u53D6\u6D88\u3002");
@@ -61067,9 +61068,25 @@ async function createNativeBackend(context) {
     if (context.signal?.aborted) throw new LibraryError("SERVICE_CLOSED", "\u8FDE\u63A5\u5DF2\u53D6\u6D88\u3002");
     const child = spawnOwned(context.settings.cliPath, args, environment);
     let stderr = "";
-    const client = new Client2({ name: "codex-workbench-agentero-library", version: PLUGIN_VERSION }, { capabilities: {} });
+    const connections = /* @__PURE__ */ new Set();
+    let current;
+    let reconnecting;
     let closed = false;
     let closing2;
+    const ensureConnected = () => {
+      if (closed || context.signal?.aborted) throw new LibraryError("SERVICE_CLOSED", "\u8FDE\u63A5\u5DF2\u53D6\u6D88\u3002");
+      if (child.exitCode !== null || child.signalCode !== null) throw new LibraryError("UPSTREAM_CLOSED", "Agentero MCP \u5DF2\u65AD\u5F00\uFF0C\u8BF7\u91CD\u65B0\u8FDE\u63A5\u3002", true);
+    };
+    const closeConnection = (connection) => {
+      connection.closing ??= connection.client.close().finally(() => {
+        connections.delete(connection);
+      });
+      return connection.closing;
+    };
+    const release = (connection) => {
+      connection.active -= 1;
+      if (connection.retired && !connection.active) void closeConnection(connection).catch(() => void 0);
+    };
     const abort = () => {
       void close();
     };
@@ -61079,12 +61096,64 @@ async function createNativeBackend(context) {
       context.signal?.removeEventListener("abort", abort);
       closing2 = (async () => {
         try {
-          await client.close();
+          await Promise.allSettled([...connections].map(closeConnection));
+          await reconnecting?.catch(() => void 0);
         } finally {
           await stopOwnedProcess(child);
         }
       })();
       return closing2;
+    };
+    const connect = async () => {
+      ensureConnected();
+      const connection = { client: new Client2({ name: "codex-workbench-agentero-library", version: PLUGIN_VERSION }, { capabilities: {} }), active: 0, retired: false };
+      connections.add(connection);
+      const { client } = connection;
+      try {
+        await client.connect(new StreamableHTTPClientTransport2(new URL(`http://127.0.0.1:${port}/mcp`)), { timeout: 1e4 });
+        ensureConnected();
+        const info = client.getServerVersion();
+        if (info?.name !== "agentero" || info.version !== "0.15.2") throw new LibraryError("CLI_UNSUPPORTED", "\u539F\u751F MCP \u7248\u672C\u4E0E\u53D7\u652F\u6301\u7684 Agentero 0.15.2 \u4E0D\u7B26\u3002");
+        const required2 = /* @__PURE__ */ new Set(["vault_list", "paper_get", "file_read", "file_write", "paper_notes_get", "paper_notes_write", "vault_search"]);
+        let cursor;
+        do {
+          const list = await client.listTools(cursor ? { cursor } : {}, { timeout: 1e4 });
+          for (const tool of list.tools) required2.delete(tool.name);
+          cursor = list.nextCursor;
+        } while (cursor);
+        if (required2.size) throw new LibraryError("CLI_UNSUPPORTED", `\u539F\u751F MCP \u7F3A\u5C11\u5FC5\u8981\u5DE5\u5177\uFF1A${[...required2].join(", ")}`);
+        const vaults = unwrapNative(await client.callTool({ name: "vault_list", arguments: {} }, void 0, { timeout: 1e4 }));
+        if (typeof vaults.open !== "string") throw new LibraryError("UPSTREAM_INVALID", "\u539F\u751F MCP \u672A\u786E\u8BA4\u5F53\u524D\u77E5\u8BC6\u5E93\u3002");
+        const actual = normalize(await realpath2(vaults.open));
+        const expected = normalize(await realpath2(context.vaultPath));
+        if (actual !== expected) throw new LibraryError("VAULT_CHANGED", "\u539F\u751F MCP \u8FDE\u63A5\u5230\u4E0D\u540C\u7684\u77E5\u8BC6\u5E93\u3002");
+        ensureConnected();
+        return connection;
+      } catch (error62) {
+        await closeConnection(connection).catch(() => void 0);
+        ensureConnected();
+        throw error62;
+      }
+    };
+    const reconnect = async (expired) => {
+      ensureConnected();
+      if (current !== expired) return current;
+      if (!reconnecting) {
+        const pending = connect().then((next) => {
+          ensureConnected();
+          current = next;
+          expired.retired = true;
+          if (!expired.active) void closeConnection(expired).catch(() => void 0);
+          return next;
+        });
+        reconnecting = pending;
+        void pending.then(() => {
+          if (reconnecting === pending) reconnecting = void 0;
+        }, () => {
+          if (reconnecting === pending) reconnecting = void 0;
+        });
+      }
+      return reconnecting;
     };
     context.signal?.addEventListener("abort", abort, { once: true });
     try {
@@ -61106,34 +61175,37 @@ async function createNativeBackend(context) {
           }
         });
       });
-      if (child.exitCode !== null) throw new Error("Agentero process exited before initialization");
-      if (closed || context.signal?.aborted) throw new LibraryError("SERVICE_CLOSED", "\u8FDE\u63A5\u5DF2\u53D6\u6D88\u3002");
-      await client.connect(new StreamableHTTPClientTransport2(new URL(`http://127.0.0.1:${port}/mcp`)), { timeout: 1e4 });
-      const info = client.getServerVersion();
-      if (info?.name !== "agentero" || info.version !== "0.15.2") throw new LibraryError("CLI_UNSUPPORTED", "\u539F\u751F MCP \u7248\u672C\u4E0E\u53D7\u652F\u6301\u7684 Agentero 0.15.2 \u4E0D\u7B26\u3002");
-      const required2 = /* @__PURE__ */ new Set(["vault_list", "paper_get", "file_read", "file_write", "paper_notes_get", "paper_notes_write", "vault_search"]);
-      let cursor;
-      do {
-        const list = await client.listTools(cursor ? { cursor } : {});
-        for (const tool of list.tools) required2.delete(tool.name);
-        cursor = list.nextCursor;
-      } while (cursor);
-      if (required2.size) throw new LibraryError("CLI_UNSUPPORTED", `\u539F\u751F MCP \u7F3A\u5C11\u5FC5\u8981\u5DE5\u5177\uFF1A${[...required2].join(", ")}`);
+      current = await connect();
       const call = async (name2, arguments_) => {
-        if (closed || child.exitCode !== null || child.signalCode !== null) throw new LibraryError("UPSTREAM_CLOSED", "Agentero MCP \u5DF2\u65AD\u5F00\uFF0C\u8BF7\u91CD\u65B0\u8FDE\u63A5\u3002", true);
-        let result;
-        try {
-          result = await client.callTool({ name: name2, arguments: arguments_ }, void 0, { timeout: 12e4 });
-        } catch (error62) {
-          throw new LibraryError("UPSTREAM_CLOSED", `Agentero MCP \u8BF7\u6C42\u672A\u5B8C\u6210\uFF0C\u8BF7\u6838\u5B9E\u7ED3\u679C\u540E\u91CD\u8BD5\uFF1A${error62 instanceof Error ? error62.message.slice(0, 1e3) : "\u8FDE\u63A5\u4E2D\u65AD"}`, true);
+        let connection = current;
+        for (let retry = 0; ; retry += 1) {
+          ensureConnected();
+          let result;
+          let failure3;
+          connection.active += 1;
+          try {
+            result = await connection.client.callTool({ name: name2, arguments: arguments_ }, void 0, { timeout: 12e4 });
+          } catch (error62) {
+            failure3 = error62;
+          } finally {
+            release(connection);
+          }
+          if (!failure3) return unwrapNative(result);
+          ensureConnected();
+          if (failure3 instanceof StreamableHTTPError2 && failure3.code === 404) {
+            if (retry > 0) throw new LibraryError("UPSTREAM_SESSION_EXPIRED", "Agentero \u8FDE\u63A5\u6062\u590D\u540E\u4ECD\u5DF2\u5931\u6548\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002", true);
+            try {
+              connection = await reconnect(connection);
+            } catch (error62) {
+              if (error62 instanceof LibraryError) throw error62;
+              throw new LibraryError("UPSTREAM_CLOSED", "Agentero \u91CD\u65B0\u8FDE\u63A5\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002", true);
+            }
+            if (replayableReads.has(name2)) continue;
+            throw new LibraryError("UPSTREAM_SESSION_EXPIRED", "Agentero \u8FDE\u63A5\u5DF2\u8FC7\u671F\u5E76\u5DF2\u91CD\u65B0\u8FDE\u63A5\uFF1B\u672C\u6B21\u4FEE\u6539\u672A\u81EA\u52A8\u91CD\u8BD5\uFF0C\u8BF7\u6838\u5B9E\u7ED3\u679C\u540E\u91CD\u8BD5\u3002", true);
+          }
+          throw new LibraryError(connection === current && !reconnecting ? "UPSTREAM_CLOSED" : "UPSTREAM_REQUEST_FAILED", `Agentero MCP \u8BF7\u6C42\u672A\u5B8C\u6210\uFF0C\u8BF7\u6838\u5B9E\u7ED3\u679C\u540E\u91CD\u8BD5\uFF1A${failure3 instanceof Error ? failure3.message.slice(0, 1e3) : "\u8FDE\u63A5\u4E2D\u65AD"}`, true);
         }
-        return unwrapNative(result);
       };
-      const vaults = await call("vault_list", {});
-      if (typeof vaults.open !== "string") throw new LibraryError("UPSTREAM_INVALID", "\u539F\u751F MCP \u672A\u786E\u8BA4\u5F53\u524D\u77E5\u8BC6\u5E93\u3002");
-      const actual = normalize(await realpath2(vaults.open));
-      const expected = normalize(await realpath2(context.vaultPath));
-      if (actual !== expected) throw new LibraryError("VAULT_CHANGED", "\u539F\u751F MCP \u8FDE\u63A5\u5230\u4E0D\u540C\u7684\u77E5\u8BC6\u5E93\u3002");
       return { call, close };
     } catch (error62) {
       lastError = error62;

@@ -309,6 +309,24 @@ describe('library backend', () => {
     expect(natives).toHaveLength(2);
   });
 
+  it('preserves the draft and recovered backend when an expired-session write was not replayed', async () => {
+    const { service, vaultId, natives, dataRoot, vault } = await fixture();
+    await service.listNotes({ vaultId });
+    const native = natives[0], call = native.call.bind(native);
+    native.call = async (name, args) => {
+      if (name === 'file_write') throw new LibraryError('UPSTREAM_SESSION_EXPIRED', 'reconnected without replay', true);
+      return call(name, args);
+    };
+    await expect(service.writeNote({ vaultId, path: 'notes/new.md', revision: null, content: 'Preserve my draft', mode: 'append' })).rejects.toMatchObject({ code: 'UPSTREAM_SESSION_EXPIRED' });
+    expect(native.closed).toBe(false);
+    await expect(stat(join(vault, 'notes/new.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const drafts = (await readdir(join(dataRoot, 'state/drafts'))).filter(name => name.endsWith('.draft.json'));
+    expect(drafts).toHaveLength(1);
+    expect(JSON.parse(await readFile(join(dataRoot, 'state/drafts', drafts[0]), 'utf8'))).toMatchObject({ content: 'Preserve my draft', mode: 'append' });
+    await service.listNotes({ vaultId });
+    expect(natives).toHaveLength(1);
+  });
+
   it('never creates a new upstream backend after close begins', async () => {
     const { service, vaultId, cli, natives } = await fixture();
     let entered = false;
