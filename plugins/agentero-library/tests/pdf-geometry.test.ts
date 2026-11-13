@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { fitPageScale, pointsRectToViewport, safePdfUrl, screenRectToPoints, usefulRects, viewportRectToPoints, type PageGeometry } from '../src/app/pdf/geometry';
+import { fitPageScale, markVisualLayers, pointsRectToViewport, safePdfUrl, screenRectToPoints, subtractRects, usefulRects, viewportRectToPoints, type PageGeometry } from '../src/app/pdf/geometry';
+import type { MarkRect, ReaderMark } from '../src/contracts/reader';
 
 function geometry(rotation: number, scale = 1.75): PageGeometry {
   const width = 600; const height = 800; const view = [20, 30, 620, 830];
@@ -51,6 +52,20 @@ describe('PDF selection geometry', () => {
   });
   test('drops empty/invalid and duplicate DOM selection rectangles', () => {
     expect(usefulRects([{ x: 1, y: 2, w: 30, h: 9 }, { x: 1.1, y: 2.1, w: 30, h: 9 }, { x: 0, y: 0, w: 0, h: 5 }, { x: NaN, y: 0, w: 1, h: 1 }])).toEqual([{ x: 1, y: 2, w: 30, h: 9 }]);
+  });
+  test('overlapping saved records paint each area once and retain real line and column gaps', () => {
+    const rects = [{ x: 10, y: 20, w: 100, h: 12 }, { x: 200, y: 20, w: 100, h: 12 }, { x: 10, y: 45, w: 100, h: 12 }];
+    const mark = (id: string, color: ReaderMark['color'], areas = rects): ReaderMark => ({ id, color, kind: 'highlight', page: 1, space: 'pt', rects: areas, quote: '', note: '' });
+    const layers = markVisualLayers([mark('original', 'yellow'), mark('duplicate', 'yellow'), mark('overlap', 'blue', [{ x: 80, y: 22, w: 60, h: 12 }])], geometry(0));
+    const painted = layers.fills.flatMap(layer => layer.rects); const area = (items: MarkRect[]) => items.reduce((sum, rect) => sum + rect.w * rect.h, 0);
+    expect(area(painted)).toBe(4020); expect(area(usefulRects(painted))).toBe(area(painted));
+    expect(painted.some(rect => rect.x < 200 && rect.x + rect.w > 140)).toBe(false);
+    expect(painted.some(rect => rect.y < 45 && rect.y + rect.h > 34)).toBe(false);
+    expect(layers.fills.find(layer => layer.color === '#7dd3fc')?.rects).toEqual([{ x: 80, y: 22, w: 60, h: 12 }]);
+  });
+  test('live selection fill excludes saved highlight areas without bridging surrounding gaps', () => {
+    const selected = [{ x: 10, y: 20, w: 100, h: 12 }, { x: 200, y: 20, w: 100, h: 12 }, { x: 10, y: 45, w: 100, h: 12 }];
+    expect(subtractRects(selected, [{ x: 50, y: 20, w: 100, h: 12 }, selected[1]])).toEqual([{ x: 10, y: 20, w: 40, h: 12 }, selected[2]]);
   });
   test('PDF external links accept web/mail destinations and reject file/script actions', () => {
     expect(safePdfUrl('https://example.org/paper#section')).toBe('https://example.org/paper#section');

@@ -9,7 +9,7 @@ import './paper-markdown.css';
 
 export interface PaperMarkdownViewProps {
   active: boolean; vaultId: string; paperPath: string; preview: boolean;
-  onDirtyChange(dirty: boolean): void; onBack(): void; onOpenPdf?(): void;
+  onDirtyChange(dirty: boolean): void; onBack(): void; onOpenPdf?(): void; onGenerateBody?(): Promise<void>;
 }
 interface Document { path: string; content: string; revision: string | null; exists: boolean }
 interface Draft { key: string; document: Document | null; content: string }
@@ -28,7 +28,7 @@ export function PaperMarkdownComparison({ before, proposed, offset = 0, nextOffs
   </div>;
 }
 
-export function PaperMarkdownView({ active, vaultId, paperPath, preview, onDirtyChange, onBack, onOpenPdf }: PaperMarkdownViewProps) {
+export function PaperMarkdownView({ active, vaultId, paperPath, preview, onDirtyChange, onBack, onOpenPdf, onGenerateBody }: PaperMarkdownViewProps) {
   const key = `${vaultId}:${paperPath}`, visible = useRef(key); visible.current = key;
   const cache = useRef(new Map<string, Draft>()), request = useRef(0), writing = useRef(false);
   const verificationRequired = useRef(false);
@@ -39,6 +39,7 @@ export function PaperMarkdownView({ active, vaultId, paperPath, preview, onDirty
   const [external, setExternal] = useState<Document | null>(null), [lastWrite, setLastWrite] = useState<PaperMarkdownWriteResult | null>(null);
   const [allowImageChanges, setAllowImageChanges] = useState(false);
   const [unconfirmed, setUnconfirmed] = useState(false);
+  const [preparingTask, setPreparingTask] = useState(false), taskPending = useRef(false);
   const dirty = unconfirmed || draft.key === key && draft.document !== null && draft.content !== draft.document.content;
   const updateDraft = (value: Draft) => { cache.current.set(value.key, value); if (visible.current === value.key) { draftRef.current = value; setDraft(value); } };
 
@@ -83,7 +84,8 @@ export function PaperMarkdownView({ active, vaultId, paperPath, preview, onDirty
       if (visible.current !== scope) return;
       const current = draftRef.current;
       verificationRequired.current = false; setUnconfirmed(false);
-      if (document.content === current.content) { updateDraft({ ...current, document }); setExternal(null); setNotice('回读确认库中内容与当前草稿一致。'); }
+      if (!current.document?.exists) { updateDraft({ ...current, document, content: document.content }); setExternal(null); setNotice(document.exists ? '已载入生成的论文正文。' : '尚未生成 PAPER.md；请先检查并发送生成任务。'); }
+      else if (document.content === current.content) { updateDraft({ ...current, document }); setExternal(null); setNotice('回读确认库中内容与当前草稿一致。'); }
       else { setExternal(document); setHistoryOpen(false); setNotice('库中内容与草稿不同；草稿已保留，请比较后选择保存基线。'); }
     } catch (reason) { if (visible.current === scope) setError(messageOf(reason)); }
   }
@@ -110,15 +112,32 @@ export function PaperMarkdownView({ active, vaultId, paperPath, preview, onDirty
     finally { writing.current = false; setSaving(false); }
   }
 
+  async function prepareBodyTask() {
+    if (!active || preview || !onGenerateBody || taskPending.current) return;
+    const scope = key; taskPending.current = true; setPreparingTask(true); setError(''); setNotice('');
+    try {
+      await onGenerateBody();
+      if (visible.current === scope) setNotice('生成正文任务已附加到 Codex 输入框。请检查后自行发送；尚未开始解析。');
+    } catch (reason) { if (visible.current === scope) setError(messageOf(reason)); }
+    finally { taskPending.current = false; setPreparingTask(false); }
+  }
+
   const current = draft.key === key ? draft : { key, document: null, content: '' }, document = current.document;
+  const missingBody = Boolean(document && !document.exists);
+  const generationTask = `请检查文献库 ${JSON.stringify(vaultId)} 中论文 ${JSON.stringify(paperPath)} 的 PAPER.md 是否已存在。仅在缺失时，执行全文解析并创建 PAPER.md；若已存在，请直接告诉我，不覆盖正文。保留原始 PDF。`;
   return <section className={`paper-markdown-page${historyOpen ? ' paper-history-mode' : ''}`} aria-label="论文 Markdown 正文" hidden={!active}>
     <header className="paper-markdown-header"><div><h2><FileText size={20} />论文正文 · PAPER.md</h2><p>{paperPath}</p></div>{onOpenPdf && <button onClick={onOpenPdf}><ExternalLink size={15} />查看 PDF</button>}</header>
     <nav className="paper-document-tabs" aria-label="论文文档"><button onClick={onBack}>阅读笔记</button><button aria-current="page">论文正文</button></nav>
-    <div className="paper-markdown-status"><span><Check size={15} />原始 PDF 保持不变</span><span>{saving ? '正在保存…' : dirty ? '有未保存的修改' : notice || '编辑派生论文 Markdown'}</span><button disabled={preview || loading || saving} aria-expanded={historyOpen} onClick={() => { const open = !historyOpen; setHistoryOpen(open); if (open) void loadHistory(); }}><History size={15} />查看修改记录</button></div>
+    <div className="paper-markdown-status"><span><Check size={15} />原始 PDF 保持不变</span><span>{saving ? '正在保存…' : dirty ? '有未保存的修改' : missingBody ? '只读 · 正文尚未生成' : notice || '编辑派生论文 Markdown'}</span><button disabled={preview || loading || saving || missingBody} aria-expanded={historyOpen} onClick={() => { const open = !historyOpen; setHistoryOpen(open); if (open) void loadHistory(); }}><History size={15} />查看修改记录</button></div>
     {preview && <p className="callout">演示内容；保存与修改记录需要连接真实知识库。</p>}
     {error && <p className="callout error" role="alert">{error}</p>}
     {notice && <p className="inline-notice" role="status">{notice}</p>}
-    {loading ? <p role="status">正在读取论文 Markdown…</p> : document && !document.exists ? <p className="callout">此论文尚无 PAPER.md。请先按明确处理任务生成正文；这里不会自动解析或创建。</p> : document && !historyOpen && <>
+    {loading ? <p role="status">正在读取论文 Markdown…</p> : missingBody ? <section className="paper-markdown-empty" aria-label="论文正文尚未生成">
+      <FileText size={30} aria-hidden="true" /><h3>此论文尚无 PAPER.md</h3>
+      <p>当前为只读空状态。这里不会自动解析或创建正文；发送生成任务后，Codex 才会解析论文并创建 PAPER.md，原始 PDF 保持不变。</p>
+      {onGenerateBody || preview ? <><button className="primary" disabled={preview || preparingTask} onClick={() => void prepareBodyTask()}>{preparingTask ? '正在准备任务…' : '让 Codex 生成论文正文'}</button><p className="field-help">{preview ? '演示模式不能准备生成任务。' : '只附加到输入框，由你检查并决定发送。'}</p></> : <label className="paper-generation-task">当前宿主不支持附加任务。复制下面的任务，粘贴到 Codex 输入框并自行发送。<textarea aria-label="生成论文正文任务" readOnly value={generationTask} rows={5} onFocus={event => event.currentTarget.select()} /></label>}
+      <button disabled={preview || preparingTask} onClick={() => void verifyCurrent()}>重新检查正文</button>
+    </section> : document && !historyOpen && <>
       <div className="paper-editor-actions"><span>元数据与已有图片引用在保存时受保护；暂不支持向论文正文导入图片。</span><label><input type="checkbox" checked={allowImageChanges} disabled={saving || preview} onChange={event => setAllowImageChanges(event.target.checked)} />本次允许修改已有图片引用</label><button disabled={preview || saving} onClick={() => void verifyCurrent()}>核实当前版本</button></div>
       {external && <div className="paper-external-review"><PaperMarkdownComparison before={external.content} proposed={current.content} /><button onClick={() => { updateDraft({ ...draftRef.current, document: external }); setExternal(null); setNotice('已保留草稿并采用库中版本为基线；请核对后明确保存。'); }}>保留草稿并采用库中版本基线</button></div>}
       {active && <MarkdownEditor value={current.content} onChange={content => updateDraft({ ...draftRef.current, content })} environment={{ vaultId, notePath: document.path, preview, onLink() {} }} onSave={() => void save()} saveDisabled={!dirty || saving || preview || unconfirmed || external !== null} imageInsertionDisabled />}

@@ -1166,7 +1166,7 @@ export class LibraryService {
     const context = await this.context(input), target = await trashOpenTarget(context.path, input);
     this.ensureOpen(); this.assertCurrentContext(context, await this.readSettings());
     try { await this.externalPdfOpener(target); }
-    catch { throw new LibraryError('TRASH_OPEN_FAILED', '无法向系统发送回收站打开请求，请检查默认阅读器或文件管理器。'); }
+    catch (error) { throw new LibraryError('TRASH_OPEN_FAILED', error instanceof LibraryError ? error.message : '系统未接受回收站打开请求，请检查默认应用或文件管理器。'); }
     return { requested: true, target: input.target };
   }
   async downloadPaper(input: PaperInput): Promise<LibraryOperation> {

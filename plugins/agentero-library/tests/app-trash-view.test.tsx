@@ -99,6 +99,15 @@ describe('read-only trash presentation', () => {
     expect(preview).toContain('同一删除批次含 3 个项目');
     expect(preview.match(/disabled=""/g)).toHaveLength(2);
   });
+  it('matches actions to Markdown, directories and other files without irrelevant PDF buttons', () => {
+    const rows = [item({ id: 'note', kind: 'note', title: '笔记.md', pdfAvailable: false, sourceAvailable: true }), item({ id: 'folder', kind: 'directory', title: '主题目录', pdfAvailable: false, sourceAvailable: true }), item({ id: 'file', kind: 'file', title: '附件.dat', pdfAvailable: false, sourceAvailable: false })];
+    const html = contents(page({ items: rows }));
+    expect(html).toContain('Markdown 笔记'); expect(html).toContain('打开笔记：笔记.md'); expect(html).toContain('在系统关联的应用中查看');
+    expect(html).toContain('打开文件夹：主题目录'); expect(html).not.toContain('打开 PDF'); expect(html.match(/>批次目录</g)).toHaveLength(3);
+    const onOpen = vi.fn(); const tree = TrashPageContents({ page: page({ items: rows }), items: rows, loading: false, query: '', preview: false, opening: '', onOpen });
+    find(tree, node => node.props['aria-label'] === '打开笔记：笔记.md')!.props.onClick();
+    expect(onOpen).toHaveBeenCalledWith(rows[0], 'source');
+  });
 });
 
 describe('trash requests and navigation', () => {
@@ -150,6 +159,13 @@ describe('trash requests and navigation', () => {
     expect(harness.rpc.mock.calls[0].slice(0, 2)).toEqual(['trash_open', { vaultId: 'synthetic-vault', batchId: 'batch-one', storedId: 'stored-one', target: 'folder' }]);
     await vi.waitFor(() => expect(harness.setters[3]).toHaveBeenCalledWith('已请求系统打开该删除批次的目录。'));
     expect(harness.rpc.mock.calls[0][1]).not.toHaveProperty('path');
+  });
+  it('shows system rejection and never reports a successful open request for failed dispatch', async () => {
+    const current = page(); seed(current); harness.rpc.mockRejectedValue(new Error('系统未接受打开请求'));
+    const tree = TrashView({ active: true, vaultId: 'synthetic-vault', preview: false });
+    find(tree, node => node.type === TrashPageContents)!.props.onOpen(current.items[0], 'folder');
+    await vi.waitFor(() => expect(harness.setters[2]).toHaveBeenCalledWith('系统未接受打开请求'));
+    expect(harness.setters[3].mock.calls).toEqual([['']]);
   });
 
   it('does not launch real files in preview even if an action handler is invoked directly', () => {

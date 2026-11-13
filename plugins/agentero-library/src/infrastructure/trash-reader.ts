@@ -148,7 +148,8 @@ export async function scanTrash(vault: string): Promise<TrashSnapshotData> {
         seen.add(item.storedId);
         const location = await itemLocation(vault, batchId, item), pdfAvailable = !!await findPdf(vault, batchId, item);
         const kind = item.isPaper ? 'paper' : location.isDirectory ? 'directory' : extname(item.originalPath).toLowerCase() === '.pdf' ? 'pdf' : extname(item.originalPath).toLowerCase() === '.md' ? 'note' : 'file';
-        items.push({ id: `${batchId}::${item.storedId}`, batchId, storedId: item.storedId, title: item.title, kind, originalPath: item.originalPath, deletedAt: batch.deletedAt, itemsCount: batch.items.length, pdfAvailable, folderAvailable: true });
+        const sourceAvailable = location.isDirectory || (kind === 'note' && extname(location.path).toLowerCase() === '.md');
+        items.push({ id: `${batchId}::${item.storedId}`, batchId, storedId: item.storedId, title: item.title, kind, originalPath: item.originalPath, deletedAt: batch.deletedAt, itemsCount: batch.items.length, pdfAvailable, sourceAvailable, folderAvailable: true });
         if (items.length >= MAX_ENTRIES) { complete = false; warn('回收站条目较多，本次列表达到条目上限。'); break outer; }
       } catch { complete = false; diagnostics.skippedItems += 1; warn(`批次 ${batchId} 中有无法安全读取的条目，已跳过。`); }
     }
@@ -159,12 +160,16 @@ export async function scanTrash(vault: string): Promise<TrashSnapshotData> {
 
 /** Re-read the selected manifest on every explicit open; no caller-controlled path. */
 export async function trashOpenTarget(vault: string, input: Pick<TrashOpenInput, 'batchId' | 'storedId' | 'target'>): Promise<string> {
-  if (!batchName(input.batchId) || !storedName(input.storedId) || !['pdf', 'folder'].includes(input.target)) throw new LibraryError('INVALID_TRASH_PATH', '回收站打开参数无效。');
+  if (!batchName(input.batchId) || !storedName(input.storedId) || !['pdf', 'source', 'folder'].includes(input.target)) throw new LibraryError('INVALID_TRASH_PATH', '回收站打开参数无效。');
   const batch = await readBatch(vault, input.batchId, { remaining: MAX_MANIFEST_BYTES + 1 });
   const matches = batch.items.filter(raw => record(raw).stored === input.storedId);
   if (matches.length !== 1) throw new LibraryError('TRASH_ITEM_NOT_FOUND', '回收站条目不存在或存储标识重复，请刷新。');
-  const item = readItem(matches[0]); await itemLocation(vault, input.batchId, item);
+  const item = readItem(matches[0]), location = await itemLocation(vault, input.batchId, item);
   if (input.target === 'folder') return (await safePath(vault, `${TRASH_REL}/${input.batchId}`))!;
+  if (input.target === 'source') {
+    if (!location.isDirectory && !(extname(item.originalPath).toLowerCase() === '.md' && extname(location.path).toLowerCase() === '.md')) throw new LibraryError('INVALID_TRASH_PATH', '仅可打开回收站中已确认的 Markdown 笔记或文件夹；其他文件请在批次目录中查看。');
+    return location.path;
+  }
   const pdf = await findPdf(vault, input.batchId, item);
   if (!pdf) throw new LibraryError('PDF_MISSING', '该回收站条目没有已确认的 PDF，可打开批次文件夹查看。');
   const handle = await open(pdf, 'r');

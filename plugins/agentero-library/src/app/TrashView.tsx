@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, FileText, FolderOpen, Info, LoaderCircle, RefreshCw, Search, Trash2, X } from 'lucide-react';
-import type { TrashEntry, TrashList, TrashOpenResult } from '../contracts/trash';
+import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, FileText, Folder, FolderOpen, Info, LoaderCircle, RefreshCw, Search, Trash2, X } from 'lucide-react';
+import type { TrashEntry, TrashList, TrashOpenResult, TrashOpenTarget } from '../contracts/trash';
 import { callTool } from './api';
 import { codeOf, messageOf } from './model';
 import './trash-view.css';
 
 interface Props { active: boolean; vaultId: string; preview: boolean }
-type OpenTarget = 'pdf' | 'folder';
+type OpenTarget = TrashOpenTarget;
 interface Paging { vaultId: string; cursor?: string; history: (string | undefined)[] }
 
 function previewTrash(vaultId: string): TrashList {
@@ -15,8 +15,8 @@ function previewTrash(vaultId: string): TrashList {
     restoreSupported: false, restoreReason: '当前版本仅支持查看和打开回收站内容，暂不支持恢复。',
     diagnostics: { scannedBatches: 2, skippedBatches: 0, skippedItems: 0, warnings: [] },
     items: [
-      { id: 'preview-trash-1', batchId: 'preview-batch-1', storedId: 'preview-paper-1', title: '研究方法与证据整理（演示）', kind: 'paper', originalPath: 'papers/研究方法与证据整理', deletedAt: '2026-11-10T08:30:00Z', itemsCount: 1, pdfAvailable: true, folderAvailable: true },
-      { id: 'preview-trash-2', batchId: 'preview-batch-2', storedId: 'preview-paper-2', title: 'Reading notes and source material（演示）', kind: 'paper', originalPath: 'papers/reading-notes-and-source-material', deletedAt: '2026-11-09T03:15:00Z', itemsCount: 3, pdfAvailable: false, folderAvailable: true },
+      { id: 'preview-trash-1', batchId: 'preview-batch-1', storedId: 'preview-paper-1', title: '研究方法与证据整理（演示）', kind: 'paper', originalPath: 'papers/研究方法与证据整理', deletedAt: '2026-11-10T08:30:00Z', itemsCount: 1, pdfAvailable: true, sourceAvailable: true, folderAvailable: true },
+      { id: 'preview-trash-2', batchId: 'preview-batch-2', storedId: 'preview-note-2.md', title: 'Reading notes（演示）.md', kind: 'note', originalPath: 'notes/reading-notes.md', deletedAt: '2026-11-09T03:15:00Z', itemsCount: 3, pdfAvailable: false, sourceAvailable: true, folderAvailable: true },
     ],
   };
 }
@@ -30,6 +30,12 @@ function deletedTime(value: string): { label: string; dateTime?: string } {
   const date = new Date(value);
   if (!value || !Number.isFinite(date.getTime())) return { label: '删除时间未知' };
   return { label: date.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }), dateTime: date.toISOString() };
+}
+
+const kindLabels: Record<TrashEntry['kind'], string> = { paper: '论文', pdf: 'PDF 文件', note: 'Markdown 笔记', directory: '文件夹', file: '文件' };
+function sourceLabel(item: TrashEntry): string { return item.kind === 'note' ? '打开笔记' : item.kind === 'paper' ? '文献目录' : '打开文件夹'; }
+function canOpen(item: TrashEntry, target: OpenTarget): boolean {
+  return target === 'pdf' ? (item.kind === 'paper' || item.kind === 'pdf') && item.pdfAvailable : target === 'source' ? Boolean(item.sourceAvailable) && ['paper', 'note', 'directory'].includes(item.kind) : item.folderAvailable;
 }
 
 export function TrashView({ active, vaultId, preview }: Props) {
@@ -70,14 +76,14 @@ export function TrashView({ active, vaultId, preview }: Props) {
   }
 
   async function open(item: TrashEntry, target: OpenTarget) {
-    if (!active || preview || loading || openController.current || !currentPage || (target === 'pdf' ? !item.pdfAvailable : !item.folderAvailable)) return;
+    if (!active || preview || loading || openController.current || !currentPage || !canOpen(item, target)) return;
     const controller = new AbortController(); openController.current = controller;
     setOpening(`${item.id}:${target}`); setError(''); setNotice('');
     try {
       const result = await callTool<TrashOpenResult>('trash_open', { vaultId, batchId: item.batchId, storedId: item.storedId, target }, { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (result.requested !== true || result.target !== target) throw new Error('系统未确认收到打开请求，请重试。');
-      setNotice(target === 'pdf' ? '已请求系统打开所选 PDF。' : '已请求系统打开该删除批次的目录。');
+      setNotice(target === 'pdf' ? '已请求系统打开所选 PDF。' : target === 'source' ? item.kind === 'note' ? '已请求系统应用打开所选笔记。' : '已请求系统打开所选项目的文件夹。' : '已请求系统打开该删除批次的目录。');
     } catch (reason) { if (!controller.signal.aborted) setError(messageOf(reason)); }
     finally {
       if (openController.current === controller) { openController.current = null; setOpening(''); }
@@ -112,8 +118,8 @@ export function TrashPageContents({ page, items, loading, query, preview, openin
     {loading ? <div className="empty-state" role="status"><LoaderCircle className="spin" size={24} /><span>正在读取回收站…</span></div> : !page ? <div className="empty-state"><Trash2 size={28} /><span>回收站尚未读取，请刷新重试。</span></div> : !items.length ? <div className="empty-state"><Trash2 size={28} /><strong>{query ? '本页没有匹配的项目' : hasWarnings || !page.complete || page.truncated ? '本次没有可展示的项目' : '回收站为空'}</strong><span>{query ? '调整搜索文字，或翻到其他页继续查找。' : hasWarnings || !page.complete || page.truncated ? '请查看上方扫描提示；不能据此判断整个回收站为空。' : '移入回收站的文献会显示在这里。'}</span></div> : <ul className="trash-list">{items.map(item => {
       const time = deletedTime(item.deletedAt);
       return <li className="trash-row" key={item.id}>
-        <div className="trash-row-main"><strong className="trash-item-title"><FileText size={16} /><span>{item.title || '未命名项目'}</span></strong><time className="trash-item-time" dateTime={time.dateTime}>{time.label}</time><p className="trash-item-origin"><span>原位置</span><span>{item.originalPath || '未知'}</span></p>{item.itemsCount > 1 && <p className="trash-batch-size">同一删除批次含 {item.itemsCount} 个项目</p>}</div>
-        <div className="trash-row-actions"><button aria-label={`打开 PDF：${item.title || '未命名项目'}`} title={item.pdfAvailable ? '在系统查看器中打开 PDF' : '未找到可打开的 PDF'} disabled={preview || Boolean(opening) || !item.pdfAvailable} onClick={() => onOpen(item, 'pdf')}>{opening === `${item.id}:pdf` ? <LoaderCircle className="spin" size={14} /> : <ExternalLink size={14} />}打开 PDF</button><button aria-label={`打开批次目录：${item.title || '未命名项目'}`} title={item.folderAvailable ? '打开本项目所属的删除批次目录' : '批次目录不可用'} disabled={preview || Boolean(opening) || !item.folderAvailable} onClick={() => onOpen(item, 'folder')}>{opening === `${item.id}:folder` ? <LoaderCircle className="spin" size={14} /> : <FolderOpen size={14} />}批次目录</button></div>
+        <div className="trash-row-main"><strong className="trash-item-title">{item.kind === 'directory' || item.kind === 'paper' ? <Folder size={16} /> : <FileText size={16} />}<span>{item.title || '未命名项目'}</span></strong><time className="trash-item-time" dateTime={time.dateTime}>{time.label}</time><p className="trash-item-kind">{kindLabels[item.kind]}</p><p className="trash-item-origin"><span>原位置</span><span>{item.originalPath || '未知'}</span></p>{item.itemsCount > 1 && <p className="trash-batch-size">同一删除批次含 {item.itemsCount} 个项目</p>}</div>
+        <div className="trash-row-actions">{(item.kind === 'paper' || item.kind === 'pdf') && <button aria-label={`打开 PDF：${item.title || '未命名项目'}`} title={item.pdfAvailable ? '在系统查看器中打开 PDF' : '未找到可打开的 PDF'} disabled={preview || Boolean(opening) || !item.pdfAvailable} onClick={() => onOpen(item, 'pdf')}>{opening === `${item.id}:pdf` ? <LoaderCircle className="spin" size={14} /> : <ExternalLink size={14} />}打开 PDF</button>}{canOpen(item, 'source') && <button aria-label={`${sourceLabel(item)}：${item.title || '未命名项目'}`} title={item.kind === 'note' ? '在系统关联的应用中查看 Markdown 笔记' : '打开回收站内所选项目的文件夹'} disabled={preview || Boolean(opening)} onClick={() => onOpen(item, 'source')}>{opening === `${item.id}:source` ? <LoaderCircle className="spin" size={14} /> : item.kind === 'note' ? <ExternalLink size={14} /> : <FolderOpen size={14} />}{sourceLabel(item)}</button>}<button aria-label={`打开批次目录：${item.title || '未命名项目'}`} title={item.folderAvailable ? '打开本项目所属的删除批次目录，可查看批次清单与全部项目' : '批次目录不可用'} disabled={preview || Boolean(opening) || !item.folderAvailable} onClick={() => onOpen(item, 'folder')}>{opening === `${item.id}:folder` ? <LoaderCircle className="spin" size={14} /> : <FolderOpen size={14} />}批次目录</button></div>
       </li>;
     })}</ul>}
   </div>;

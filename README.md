@@ -2,7 +2,7 @@
 
 基于 Codex 桌面端的个人工作台插件集合，面向 Windows 和 macOS。通过可组合的本地工具、界面与工作流，逐步形成自己的工作环境。
 
-首个插件是 [文献库](plugins/agentero-library/README.md)，当前版本为 **0.4.0**：复用 Agentero CLI／MCP，在当前对话旁阅读 PDF、整理关联笔记和修订论文 Markdown。提供多级笔记目录、可拖动阅读分栏、多页批注附加到 Codex 原生输入框，以及明暗主题和回收站入口。
+首个插件是 [文献库](plugins/agentero-library/README.md)，当前版本为 **0.4.1**：复用 Agentero CLI／MCP，在当前对话旁阅读 PDF、整理关联笔记和修订论文 Markdown。提供多级笔记目录、可拖动阅读分栏、多页批注附加到 Codex 原生输入框，以及明暗主题和回收站入口。
 
 ## 安装插件
 

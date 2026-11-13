@@ -10,6 +10,7 @@ import { MarkdownEditor } from './notes/MarkdownEditor';
 import { resolveNoteLink } from './notes/markdown-model';
 import { startSequentialPoll } from './activity';
 import { NoteTree } from './notes/NoteTree';
+import { AnchoredMenu, type MenuAnchor } from './ui/AnchoredMenu';
 import { NewNoteDialog, NoteActionDialog, type NoteAction, type NoteActionValues, type NoteLocation } from './notes/NoteDialogs';
 import { buildWorkspaceTree, descendantNoteCount, movedPath, noteTitle, parentFolder, renamedPath, type NoteTreeItem, type WorkspaceNode } from './notes/workspace-model';
 import './notes/workspace.css';
@@ -31,10 +32,12 @@ interface Props {
   onOpenTrash?(): void;
   onActiveNoteChange?(note: ActiveNote | null): void;
   onControllerReady?(controller: NotesController | null): void;
+  onCloseCompact?(): void;
 }
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error' | 'conflict';
+type NoteMenu = { kind: 'item'; item: NoteTreeItem; anchor: MenuAnchor } | { kind: 'paper'; paperPath: string; title: string; anchor: MenuAnchor } | { kind: 'workspace'; anchor: MenuAnchor };
 
-export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyChange, onOpenPaper, compact = false, paperPath, onOpenWorkspace, onOpenPaperMarkdown, onOpenTrash, onActiveNoteChange, onControllerReady }: Props) {
+export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyChange, onOpenPaper, compact = false, paperPath, onOpenWorkspace, onOpenPaperMarkdown, onOpenTrash, onActiveNoteChange, onControllerReady, onCloseCompact }: Props) {
   const [list, setList] = useState<NoteTreeResult | null>(null);
   const [directory, setDirectory] = useState('notes');
   const [folderPaper, setFolderPaper] = useState<string | null | undefined>(undefined);
@@ -51,7 +54,7 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [listOpen, setListOpen] = useState(true);
   const [listFilter, setListFilter] = useState('');
-  const [menu, setMenu] = useState<NoteTreeItem | null>(null);
+  const [menu, setMenu] = useState<NoteMenu | null>(null);
   const [action, setAction] = useState<{ kind: NoteAction; item: NoteTreeItem } | null>(null);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [links, setLinks] = useState<NoteLinks | null>(null);
@@ -68,6 +71,7 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
   const handledPathRequest = useRef<NoteTarget | null>(null);
   const inspecting = useRef(false);
   const alive = useRef(true);
+  const workspace = useRef<HTMLElement>(null);
   const dirtyCallback = useRef(onDirtyChange); dirtyCallback.current = onDirtyChange;
   const scopePaper = paperPath || requestedTarget?.paperPath;
   const treeNodes = useMemo(() => buildWorkspaceTree(list?.items || [], listFilter), [list, listFilter]);
@@ -75,6 +79,8 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
   const activeCallback = useRef(onActiveNoteChange); activeCallback.current = onActiveNoteChange;
 
   useEffect(() => { activeCallback.current?.(document ? { path: document.path, title: noteTitle(document.path), paperPath: document.paperPath } : null); }, [document?.path, document?.paperPath]);
+  useEffect(() => { if (!active) setMenu(null); }, [active]);
+  useEffect(() => { if (notice !== '笔记已从磁盘更新。') return; const timeout = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(timeout); }, [notice]);
 
   const flush = useCallback(async (): Promise<boolean> => {
     clearTimeout(timer.current);
@@ -135,17 +141,18 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
   }, [flush]);
 
   const open = useCallback(async (target: NoteTarget) => {
-    if (!await flush()) { setNotice('请先处理当前草稿，再切换笔记。'); return; }
+    if (!await flush()) { setNotice('请先处理当前草稿，再切换笔记。'); return false; }
     const ticket = ++loadingTicket.current;
     setLoading(true); setError(''); setNotice('');
     try {
       const next = preview
         ? { vaultId, path: 'notes/界面预览.md', content: '# 阅读笔记\n\n这是演示内容，不连接或保存到真实知识库。\n\n## 核心思路\n\n- 连接论文、讨论与笔记。\n- 引用真实资料，保留待验证的问题。\n', revision: 'preview', exists: true }
         : await callTool<NoteDocument>('note_read', { vaultId, ...target });
-      if (!alive.current || ticket !== loadingTicket.current) return;
+      if (!alive.current || ticket !== loadingTicket.current) return false;
       docRef.current = next; textRef.current = next.content; blocked.current = false;
       setDocument(next); setText(next.content); setState('saved'); setRemote(null); dirtyCallback.current(false);
-    } catch (reason) { if (ticket === loadingTicket.current) setError(messageOf(reason)); }
+      return true;
+    } catch (reason) { if (ticket === loadingTicket.current) setError(messageOf(reason)); return false; }
     finally { if (ticket === loadingTicket.current) setLoading(false); }
   }, [flush, preview, vaultId]);
 
@@ -312,9 +319,22 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
       onOpenWorkspace?.(current ? { path: current.path, title: noteTitle(current.path), paperPath: current.paperPath } : undefined);
     });
   }
-  function showMenu(node: WorkspaceNode) {
+  function showMenu(node: WorkspaceNode, anchor: MenuAnchor) {
+    if (node.kind === 'group') {
+      if (node.paperPath) setMenu({ kind: 'paper', paperPath: node.paperPath, title: node.name, anchor });
+      return;
+    }
     const item = list?.items.find(entry => entry.path === node.path);
-    if (item) setMenu(item);
+    if (item) setMenu({ kind: 'item', item, anchor });
+  }
+  async function chooseNote(path: string) {
+    const item = list?.items.find(entry => entry.path === path);
+    if (!await open({ path })) return;
+    setDirectory(parentFolder(path)); setFolderPaper(item?.paperPath || null);
+    if (workspace.current && workspace.current.getBoundingClientRect().width <= 650) {
+      setListOpen(false);
+      requestAnimationFrame(() => workspace.current?.querySelector<HTMLElement>('[contenteditable="true"], textarea')?.focus());
+    }
   }
   async function beginAction(kind: NoteAction, item: NoteTreeItem) {
     setMenu(null);
@@ -358,29 +378,33 @@ export function NotesView({ active, vaultId, preview, requestedTarget, onDirtyCh
   const creationPaperTitle = list?.items.find(item => item.paperPath === creationPaper)?.paperTitle || (document?.paperPath === creationPaper ? document?.paperTitle : undefined);
   const currentItem: NoteTreeItem | null = document?.path.startsWith('notes/') ? { path: document.path, parentPath: parentFolder(document.path), name: document.path.split('/').at(-1)!, kind: 'file', revision: document.revision || undefined, paperPath: document.paperPath, paperTitle: document.paperTitle, paperId: document.paperId } : null;
   const folderItem: NoteTreeItem = list?.items.find(item => item.path === directory && item.kind === 'directory') || { path: directory, parentPath: parentFolder(directory), name: directory === 'notes' ? '全部笔记' : directory.split('/').at(-1)!, kind: 'directory' };
-  const menuActions: { kind: NoteAction; label: string; Icon: typeof Pencil }[] = [{ kind: 'rename', label: '重命名', Icon: Pencil }, { kind: 'move', label: '移动到…', Icon: FolderPlus }, ...(menu?.kind === 'file' ? [{ kind: 'associate' as const, label: '修改关联论文', Icon: Link }] : []), { kind: 'trash', label: '移入回收站', Icon: Trash2 }];
-  return <section className={`notes-view notes-workspace-view view-fill ${compact ? 'notes-compact' : ''} ${listOpen ? '' : 'note-list-collapsed'}`} aria-label={compact ? '当前论文笔记' : '笔记工作区'}>
+  const menuItem = menu?.kind === 'item' ? menu.item : null;
+  const menuActions: { kind: NoteAction; label: string; Icon: typeof Pencil }[] = [{ kind: 'rename', label: '重命名', Icon: Pencil }, { kind: 'move', label: '移动到…', Icon: FolderPlus }, ...(menuItem?.kind === 'file' ? [{ kind: 'associate' as const, label: '修改关联论文', Icon: Link }] : []), { kind: 'trash', label: '移入回收站', Icon: Trash2 }];
+  const saveStatus = <span className={`save-state ${state === 'error' || state === 'conflict' ? 'warning-text' : 'muted'}`}>{state === 'saving' ? <LoaderCircle className="spin" size={14} /> : state === 'saved' ? <Check size={14} /> : null}{preview ? '预览 · 不保存' : state === 'saving' ? '保存中…' : state === 'saved' ? '已保存' : state === 'dirty' ? '待保存' : state === 'conflict' ? '草稿有冲突' : state === 'error' ? '保存失败' : ''}</span>;
+  const currentMenuButton = (currentItem || compact && (onOpenWorkspace || onOpenPaperMarkdown)) && <button className="icon-button" aria-label={currentItem ? '当前笔记的操作' : '笔记工作区操作'} aria-haspopup="menu" disabled={mutationBusy || !!currentItem && (preview || !document?.exists)} onClick={event => { const anchor = { element: event.currentTarget }; setMenu(previous => currentItem ? previous?.kind === 'item' && previous.item.path === currentItem.path ? null : { kind: 'item', item: currentItem, anchor } : previous?.kind === 'workspace' ? null : { kind: 'workspace', anchor }); }}><MoreHorizontal size={17} /></button>;
+  return <section ref={workspace} className={`notes-view notes-workspace-view view-fill ${compact ? 'notes-compact' : ''} ${listOpen ? '' : 'note-list-collapsed'}`} aria-label={compact ? '当前论文笔记' : '笔记工作区'}>
+    {!compact && listOpen && <button className="note-tree-backdrop" aria-label="关闭笔记目录" onClick={() => setListOpen(false)} />}
     {!compact && listOpen && <aside className="notes-list"><div className="notes-list-toolbar"><h2>笔记</h2><button className="icon-button" aria-label="新建笔记" title="新建笔记" disabled={preview || mutationBusy} onClick={() => setNewOpen(true)}><Plus size={17} /></button><button className="icon-button" aria-label="新建文件夹" title="新建文件夹" disabled={preview || mutationBusy} onClick={() => setAction({ kind: 'folder', item: folderItem })}><FolderPlus size={17} /></button><button className="icon-button" aria-label="刷新笔记列表" onClick={() => setListRevision(value => value + 1)} disabled={preview}><RefreshCw size={14} /></button><button className="icon-button note-tree-close" aria-label="收起文件夹树" onClick={() => setListOpen(false)}><PanelLeftClose size={15} /></button></div>
       <input className="note-list-filter" aria-label="筛选笔记" placeholder="搜索笔记…" value={listFilter} onChange={event => setListFilter(event.target.value)} />
-      <div className="note-tree-scroll"><NoteTree nodes={treeNodes} selectedPath={document?.path} folderPath={directory} filter={listFilter} onOpen={path => { const item = list?.items.find(entry => entry.path === path); setDirectory(parentFolder(path)); setFolderPaper(item?.paperPath || null); void open({ path }); }} onFolder={(path, association) => { setDirectory(path); setFolderPaper(association || null); }} onMenu={showMenu} />
+      <div className="note-tree-scroll"><NoteTree nodes={treeNodes} selectedPath={document?.path} folderPath={directory} filter={listFilter} onOpen={path => { void chooseNote(path); }} onFolder={(path, association) => { setDirectory(path); setFolderPaper(association || null); }} onMenu={showMenu} />
       {list?.items.length === 0 && <p className="field-help notes-empty">还没有笔记。新建一篇，记录阅读中的想法。</p>}{listFilter && !treeNodes.length && <p className="field-help notes-empty">没有匹配的笔记。</p>}
       {list?.truncated && <p className="field-help warning-text notes-empty">笔记树仅显示部分结果，请在论文阅读页查看其关联笔记。</p>}</div>
       {onOpenTrash && <button className="note-trash-link" onClick={() => void navigate(onOpenTrash)}><Trash2 size={15} />回收站</button>}
     </aside>}
     <div className="note-workspace">
-      {compact && <div className="note-compact-picker"><select aria-label="当前论文的笔记" value={document && paperNotes.some(item => item.path === document.path) ? document.path : ''} disabled={loading || mutationBusy} onChange={event => { if (event.target.value) void open({ path: event.target.value }); }}><option value="" disabled>{paperNotes.length ? '选择阅读笔记' : '还没有关联笔记'}</option>{paperNotes.map(item => <option key={item.path} value={item.path}>{noteTitle(item.path)}</option>)}</select><button className="icon-button" aria-label="新建当前论文笔记" disabled={preview || mutationBusy} onClick={() => setNewOpen(true)}><Plus size={16} /></button>{onOpenWorkspace && <button title="打开完整笔记工作区" onClick={() => void openWorkspace()}>全部笔记</button>}</div>}
-      {onOpenPaperMarkdown && <div className="note-document-tabs" role="group" aria-label="论文文档"><button className="selected" aria-pressed="true">阅读笔记</button><button aria-pressed="false" onClick={() => void navigate(onOpenPaperMarkdown)}>论文正文</button></div>}
-      <div className="note-heading">{!compact && <button className="icon-button" aria-label={listOpen ? '收起笔记列表' : '展开笔记列表'} onClick={() => setListOpen(value => !value)}>{listOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}</button>}<div className="note-heading-title"><h2>{document ? noteTitle(document.path) : '阅读笔记'}</h2>{document && !compact && <p className="note-breadcrumb">{document.path.split('/').slice(1, -1).join(' / ') || '主题笔记'}</p>}</div><span className={`save-state ${state === 'error' || state === 'conflict' ? 'warning-text' : 'muted'}`}>{state === 'saving' ? <LoaderCircle className="spin" size={14} /> : state === 'saved' ? <Check size={14} /> : null}{preview ? '预览 · 不保存' : state === 'saving' ? '保存中…' : state === 'saved' ? '已保存' : state === 'dirty' ? '待保存' : state === 'conflict' ? '草稿有冲突' : state === 'error' ? '保存失败' : ''}</span>{currentItem && <button className="icon-button" aria-label="当前笔记的操作" disabled={preview || !document?.exists || mutationBusy} onClick={() => setMenu(currentItem)}><MoreHorizontal size={17} /></button>}</div>
-      {document?.paperPath && <div className="note-association"><button className="note-paper-chip" title="打开关联论文 PDF" disabled={!onOpenPaper} onClick={() => void navigate(() => onOpenPaper?.(document.paperPath!))}><Link size={14} />关联论文：<span>{document.paperTitle || document.paperPath.split('/').at(-1)}</span></button></div>}
+      {compact && <div className="note-compact-picker"><select aria-label="当前论文的笔记" value={document && paperNotes.some(item => item.path === document.path) ? document.path : ''} disabled={loading || mutationBusy} onChange={event => { if (event.target.value) void open({ path: event.target.value }); }}><option value="" disabled>{paperNotes.length ? '选择阅读笔记' : '还没有关联笔记'}</option>{paperNotes.map(item => <option key={item.path} value={item.path}>{noteTitle(item.path)}</option>)}</select>{saveStatus}<button className="icon-button" aria-label="新建当前论文笔记" title="新建当前论文笔记" disabled={preview || mutationBusy} onClick={() => setNewOpen(true)}><Plus size={16} /></button>{currentMenuButton}{onCloseCompact && <button className="icon-button" aria-label="关闭论文笔记" onClick={() => void navigate(onCloseCompact)}><X size={16} /></button>}</div>}
+      {!compact && onOpenPaperMarkdown && <div className="note-document-tabs" role="group" aria-label="论文文档"><button className="selected" aria-pressed="true">阅读笔记</button><button aria-pressed="false" onClick={() => void navigate(onOpenPaperMarkdown)}>论文正文</button></div>}
+      {!compact && <div className="note-heading"><button className="icon-button" aria-label={listOpen ? '收起笔记列表' : '展开笔记列表'} onClick={() => setListOpen(value => !value)}>{listOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}</button><div className="note-heading-title"><h2>{document ? noteTitle(document.path) : '阅读笔记'}</h2>{document && <p className="note-breadcrumb">{document.path.split('/').slice(1, -1).join(' / ') || '主题笔记'}</p>}</div>{saveStatus}{currentMenuButton}</div>}
+      {!compact && document?.paperPath && <div className="note-association"><button className="note-paper-chip" title="打开关联论文 PDF" disabled={!onOpenPaper} onClick={() => void navigate(() => onOpenPaper?.(document.paperPath!))}><Link size={14} />关联论文：<span>{document.paperTitle || document.paperPath.split('/').at(-1)}</span></button></div>}
       {error && <div className="callout error" role="alert">{error}{state === 'conflict' ? <div className="button-row"><button onClick={() => void inspectRemote()}>查看磁盘版本</button><button onClick={() => void copyDraft()}><Copy size={13} />复制草稿</button></div> : state === 'error' ? <button onClick={() => void retry()}>重试保存</button> : null}</div>}
       {notice && <p className="inline-notice" role="status">{notice}</p>}
       {loading ? <div className="empty-state"><LoaderCircle className="spin" />正在读取笔记…</div> : document ? <>
-        {active && <MarkdownEditor key={`${document.vaultId}:${document.path}`} value={text} onChange={change} environment={environment} onSave={save} saveDisabled={preview || state === 'saving' || state === 'conflict' || text === document.content} />}
+        {active && <MarkdownEditor key={`${document.vaultId}:${document.path}`} compact={compact} value={text} onChange={change} environment={environment} onSave={save} saveDisabled={preview || state === 'saving' || state === 'conflict' || text === document.content} />}
         {!preview && <details className="note-links-panel" open={linksOpen} onToggle={event => setLinksOpen(event.currentTarget.open)}><summary>引用与反向链接{links ? ` · ${links.outgoing.length} 个引用 · ${links.backlinks.length} 个反向链接${links.truncated ? '（结果截断）' : ''}` : ''}</summary>{linksError ? <p className="warning-text">{linksError}</p> : !links ? <p className="muted">正在读取链接…</p> : <>{links.outgoing.length > 0 && <div><span className="muted">引用</span>{links.outgoing.map(link => <button key={link.path} title={link.path} onClick={() => { void followLink(`workbench-wiki:${encodeURIComponent(link.path)}`); }}>{link.title}</button>)}</div>}{links.backlinks.length > 0 && <div><span className="muted">反向链接</span>{links.backlinks.map(link => <button key={link.path} title={link.path} onClick={() => { void open(noteReference(link.path)); }}>{link.title}</button>)}</div>}{!links.outgoing.length && !links.backlinks.length && <p className="muted">尚无文档链接。可以使用 [[notes/笔记.md]] 或 [[papers/论文]] 建立引用。</p>}</>}</details>}
-        <footer className="note-footer">{preview ? '演示草稿不会写入真实知识库。' : '停顿后自动保存 · 保存前检查文件变化'}</footer>
+        {!compact && <footer className="note-footer">{preview ? '演示草稿不会写入真实知识库。' : '停顿后自动保存 · 保存前检查文件变化'}</footer>}
       </> : <div className="empty-state"><FileText size={30} /><strong>{compact ? '为这篇论文创建第一篇笔记' : '选择或新建一篇笔记'}</strong><span>每篇笔记独立保存，可保留 PDF 页码与批注引用。</span><button disabled={preview || mutationBusy} onClick={() => setNewOpen(true)}><Plus size={14} />新建笔记</button></div>}
     </div>
-    {menu && <><button className="note-menu-backdrop" aria-label="关闭笔记操作菜单" onClick={() => setMenu(null)} /><div className="note-context-menu" role="menu" aria-label="笔记操作" onKeyDown={event => { if (event.key === 'Escape') setMenu(null); }}><span className="note-menu-title">{menu.paperTitle && menu.kind === 'directory' ? menu.paperTitle : noteTitle(menu.path)}</span>{menuActions.map(({ kind, label, Icon }) => <button key={kind} role="menuitem" className={kind === 'trash' ? 'danger-text' : ''} onClick={() => void beginAction(kind, menu)}><Icon size={15} />{label}</button>)}</div></>}
+    {active && menu && <AnchoredMenu anchor={menu.anchor} onClose={() => setMenu(null)} className="note-context-menu" ariaLabel={menu.kind === 'paper' ? '论文关联笔记操作' : '笔记操作'}><span className="note-menu-title">{menu.kind === 'paper' ? menu.title : menu.kind === 'workspace' ? '笔记工作区' : menu.item.kind === 'directory' ? `文件夹：${menu.item.name}` : noteTitle(menu.item.path)}</span>{menu.kind === 'paper' ? <><button role="menuitem" disabled={preview || mutationBusy} onClick={() => { setDirectory('notes'); setFolderPaper(menu.paperPath); setMenu(null); setNewOpen(true); }}><Plus size={15} />新建关联笔记</button>{onOpenPaper && <button role="menuitem" onClick={() => { setMenu(null); void navigate(() => onOpenPaper(menu.paperPath)); }}><FileText size={15} />打开关联论文</button>}</> : <>{compact && <>{onOpenWorkspace && <button role="menuitem" title="打开完整笔记工作区" onClick={() => { setMenu(null); void openWorkspace(); }}><PanelLeftOpen size={15} />全部笔记</button>}{onOpenPaperMarkdown && <button role="menuitem" onClick={() => { setMenu(null); void navigate(onOpenPaperMarkdown); }}><FileText size={15} />论文正文</button>}{document?.paperPath && onOpenPaper && <button role="menuitem" onClick={() => { setMenu(null); void navigate(() => onOpenPaper(document.paperPath!)); }}><Link size={15} />打开关联论文</button>}</>}{menu.kind === 'item' && menuActions.map(({ kind, label, Icon }) => <button key={kind} role="menuitem" className={kind === 'trash' ? 'danger-text' : ''} onClick={() => void beginAction(kind, menu.item)}><Icon size={15} />{label}</button>)}</>}</AnchoredMenu>}
     {newOpen && <NewNoteDialog vaultId={vaultId} items={list?.items || []} folderPath={compact ? list?.paperFolderPath || 'notes' : directory} paperPath={creationPaper} paperTitle={creationPaperTitle} onClose={() => setNewOpen(false)} onCreate={createNote} onCreateFolder={createFolder} />}
     {action && <NoteActionDialog action={action.kind} item={action.item} items={list?.items || []} vaultId={vaultId} affectedCount={action.item.noteCount ?? descendantNoteCount(list?.items || [], action.item.path)} onClose={() => setAction(null)} onSubmit={performAction} />}
     {copyFallback && <CopyDraftDialog content={textRef.current} onClose={() => setCopyFallback(false)} />}

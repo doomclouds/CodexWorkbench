@@ -1,0 +1,4 @@
+.anchored-menu { position: fixed; z-index: 100; display: flex; flex-direction: column; min-width: 176px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--app-bg); color: var(--text); box-shadow: 0 8px 28px #0003; }
+.anchored-menu [role='menuitem'] { width: 100%; justify-content: flex-start; min-height: 34px; padding: 6px 8px; font-size: 12px; border: 0; background: transparent; text-align: left; }
+.anchored-menu [role='menuitem']:focus-visible, .anchored-menu [role='menuitem']:hover { background: var(--accent-soft); }
+.anchored-menu .danger-text { color: var(--danger); }

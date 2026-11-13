@@ -30,6 +30,7 @@ import { NotesView, type NotesController } from '../src/app/NotesView';
 import { MarkdownEditor } from '../src/app/notes/MarkdownEditor';
 import { NewNoteDialog, NoteActionDialog } from '../src/app/notes/NoteDialogs';
 import { NoteTree } from '../src/app/notes/NoteTree';
+import { AnchoredMenu } from '../src/app/ui/AnchoredMenu';
 
 function all(node: any): any[] {
   if (!node || typeof node !== 'object') return [];
@@ -57,7 +58,7 @@ async function setup() {
   });
   let controller: NotesController | null = null;
   const props: Parameters<typeof NotesView>[0] = { active: true, vaultId: 'owned', preview: false, compact: true, paperPath: 'papers/one', requestedTarget: null, onDirtyChange: harness.dirty, onControllerReady: (value: NotesController | null) => { controller = value; } };
-  let tree!: ReactElement;
+  let tree!: ReactElement<{ className: string }>;
   const render = () => { harness.index = 0; tree = NotesView(props); const effects = harness.pending.splice(0); effects.forEach(effect => effect()); return tree; };
   render(); await settle(); render(); await settle(); render();
   return { props, documents, render, get tree() { return tree; }, get controller() { return controller!; } };
@@ -99,7 +100,7 @@ it('creates in the selected folder and trashes only the normal note with its sav
   find(ctx.tree, node => node.props?.['aria-label'] === '新建当前论文笔记').props.onClick(); ctx.render();
   await find(ctx.tree, node => node.type === NewNoteDialog).props.onCreate({ title: 'New', folderPath: 'notes/selected', paperPath: 'papers/one' }); ctx.render();
   expect(harness.call).toHaveBeenCalledWith('note_create', { vaultId: 'owned', title: 'New', folderPath: 'notes/selected', paperPath: 'papers/one' });
-  find(ctx.tree, node => node.props?.['aria-label'] === '当前笔记的操作').props.onClick(); ctx.render();
+  find(ctx.tree, node => node.props?.['aria-label'] === '当前笔记的操作').props.onClick({ currentTarget: {} }); ctx.render();
   find(ctx.tree, node => node.props?.role === 'menuitem' && node.props?.className === 'danger-text').props.onClick();
   await settle(); ctx.render();
   await find(ctx.tree, node => node.type === NoteActionDialog).props.onSubmit({ name: 'New', folderPath: 'notes/selected', paperPath: 'papers/one' }); ctx.render();
@@ -114,6 +115,17 @@ it('stops hidden polling and remounts the same saved document when the compact p
   (window.document as unknown as { visibilityState: string }).visibilityState = 'hidden'; await inspect(); expect(harness.call).not.toHaveBeenCalled();
   ctx.props.active = false; ctx.render(); expect(harness.stop).toHaveBeenCalled(); expect(all(ctx.tree).some(node => node.type === MarkdownEditor)).toBe(false);
   (window.document as unknown as { visibilityState: string }).visibilityState = 'visible'; ctx.props.active = true; ctx.render(); await settle(); ctx.render();
+  expect(find(ctx.tree, node => node.type === MarkdownEditor).props.value).toBe(first.content);
+});
+
+it.each([false, true])('disposes the portal menu when notes become inactive and does not reopen it (compact=%s)', async compact => {
+  const ctx = await setup(); ctx.props.compact = compact; ctx.render(); await settle(); ctx.render();
+  find(ctx.tree, node => node.props?.['aria-label'] === '当前笔记的操作').props.onClick({ currentTarget: {} }); ctx.render();
+  expect(all(ctx.tree).some(node => node.type === AnchoredMenu)).toBe(true);
+  ctx.props.active = false; ctx.render();
+  expect(all(ctx.tree).some(node => node.type === AnchoredMenu)).toBe(false);
+  ctx.props.active = true; ctx.render(); await settle(); ctx.render();
+  expect(all(ctx.tree).some(node => node.type === AnchoredMenu)).toBe(false);
   expect(find(ctx.tree, node => node.type === MarkdownEditor).props.value).toBe(first.content);
 });
 
@@ -147,6 +159,7 @@ it('hands the selected compact note to the full workspace after saving, even whe
   const ctx = await setup(); const onOpenWorkspace = vi.fn(); ctx.props.onOpenWorkspace = onOpenWorkspace; ctx.render();
   find(ctx.tree, node => node.props?.['aria-label'] === '当前论文的笔记').props.onChange({ target: { value: second.path } }); await settle(); ctx.render();
   find(ctx.tree, node => node.type === MarkdownEditor).props.onChange('# Selected draft\n'); ctx.render();
+  find(ctx.tree, node => node.props?.['aria-label'] === '当前笔记的操作').props.onClick({ currentTarget: {} }); ctx.render();
   find(ctx.tree, node => node.props?.title === '打开完整笔记工作区').props.onClick(); await settle(); ctx.render();
   expect(ctx.documents.get(second.path)?.content).toBe('# Selected draft\n');
   expect(onOpenWorkspace).toHaveBeenCalledWith({ path: second.path, title: 'second', paperPath: 'papers/one' });
@@ -161,7 +174,35 @@ it('does not hand a compact conflicted note to the full workspace', async () => 
   const base = harness.call.getMockImplementation()!;
   harness.call.mockImplementation((tool: string, args: unknown) => tool === 'note_write' ? Promise.reject({ code: 'NOTE_CONFLICT', message: 'Owned handoff conflict' }) : base(tool, args));
   find(ctx.tree, node => node.type === MarkdownEditor).props.onChange('# Keep compact draft\n'); ctx.render();
+  find(ctx.tree, node => node.props?.['aria-label'] === '当前笔记的操作').props.onClick({ currentTarget: {} }); ctx.render();
   find(ctx.tree, node => node.props?.title === '打开完整笔记工作区').props.onClick(); await settle(); ctx.render();
   expect(onOpenWorkspace).not.toHaveBeenCalled();
   expect(find(ctx.tree, node => node.type === MarkdownEditor).props.value).toBe('# Keep compact draft\n');
+});
+
+it('shows association actions instead of filesystem mutation actions for a logical paper group', async () => {
+  const ctx = await setup(); ctx.props.compact = false; ctx.render(); await settle(); ctx.render();
+  find(ctx.tree, node => node.type === NoteTree).props.onMenu({ kind: 'group', paperPath: 'papers/one', name: 'Paper One' }, { point: { x: 40, y: 80 } }); ctx.render();
+  const labels = all(ctx.tree).filter(node => node.props?.role === 'menuitem').map(node => all(node).filter(child => typeof child.type === 'string').map(child => child.props?.children).flat());
+  expect(JSON.stringify(labels)).not.toMatch(/重命名|移动到|移入回收站/);
+  find(ctx.tree, node => node.props?.role === 'menuitem').props.onClick(); ctx.render();
+  const dialog = find(ctx.tree, node => node.type === NewNoteDialog);
+  expect(dialog.props.paperPath).toBe('papers/one'); expect(dialog.props.folderPath).toBe('notes');
+});
+
+it('closes a narrow tree only after a note opens successfully and offers a backdrop', async () => {
+  const ctx = await setup(); ctx.props.compact = false; ctx.render(); await settle(); ctx.render();
+  const frame = { getBoundingClientRect: () => ({ width: 480 }), querySelector: () => null };
+  (ctx.tree.props as any).ref.current = frame;
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => { callback(); return 1; });
+  expect(all(ctx.tree).some(node => node.props?.['aria-label'] === '关闭笔记目录')).toBe(true);
+  find(ctx.tree, node => node.type === NoteTree).props.onOpen(second.path); await settle(); ctx.render();
+  expect(ctx.tree.props.className).toContain('note-list-collapsed');
+  expect(all(ctx.tree).some(node => node.type === NoteTree)).toBe(false);
+  find(ctx.tree, node => node.props?.['aria-label'] === '展开笔记列表').props.onClick(); ctx.render();
+  const base = harness.call.getMockImplementation()!;
+  harness.call.mockImplementation((tool: string, args: unknown) => tool === 'note_read' ? Promise.reject(new Error('Unavailable')) : base(tool, args));
+  find(ctx.tree, node => node.type === NoteTree).props.onOpen(first.path); await settle(); ctx.render();
+  expect(ctx.tree.props.className).not.toContain('note-list-collapsed');
+  expect(find(ctx.tree, node => node.type === MarkdownEditor).props.value).toBe(second.content);
 });
