@@ -90,6 +90,16 @@ it('opens the manager with compact navigation and restores the previous sidebar 
   component(ctx.tree, PdfReader).props.onManagementChange(false); ctx.render(); expect(component(ctx.tree, AppSidebar).props.collapsed).toBe(true);
 });
 
+it('clears the blocked-paper warning once the retained reader drafts are resolved', async () => {
+  const ctx = await setup(); component(ctx.tree, LibraryView).props.onOpen(paper('papers/one')); ctx.render();
+  component(ctx.tree, PdfReader).props.onDirtyChange(true); ctx.render(); component(ctx.tree, LibraryView).props.onOpen(paper('papers/two')); ctx.render();
+  expect(component(ctx.tree, PdfReader).props.paper.path).toBe('papers/one');
+  expect(nodes(ctx.tree).some(node => typeof node.props?.children === 'string' && node.props.children.startsWith('当前论文有未保存的批注'))).toBe(true);
+  component(ctx.tree, PdfReader).props.onDirtyChange(false); ctx.render();
+  expect(nodes(ctx.tree).some(node => typeof node.props?.children === 'string' && node.props.children.startsWith('当前论文有未保存的批注'))).toBe(false);
+  component(ctx.tree, LibraryView).props.onOpen(paper('papers/two')); ctx.render(); expect(component(ctx.tree, PdfReader).props.paper.path).toBe('papers/two');
+});
+
 it('keeps a dirty body bound when an external Vault switch is detected', async () => {
   const ctx = await setup(); component(ctx.tree, PdfReader).props.onPaperMarkdown(paper('papers/one')); await settle(); ctx.render();
   component(ctx.tree, PaperMarkdownView).props.onDirtyChange(true); ctx.render();

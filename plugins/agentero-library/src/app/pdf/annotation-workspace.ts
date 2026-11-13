@@ -67,10 +67,10 @@ export function parseAnnotationPageRange(input: string, pageCount: number): Anno
   };
 }
 
-/** Filtering and selection use the full result, independently of the rendered batch. */
+/** Viewing selected marks suspends other filters without changing the saved filter state. */
 export function buildAnnotationWorkspace(marks: ReaderMark[], state: AnnotationWorkspaceState, selected: ReadonlySet<string>, pageCount: number, currentPage: number) {
   const pageRange = parseAnnotationPageRange(state.pageRange, pageCount);
-  const items = pageRange.valid ? filterMarks(marks, state, selected).filter(mark =>
+  const items = state.selectedOnly ? marks.filter(mark => selected.has(mark.id)) : pageRange.valid ? filterMarks(marks, state, selected).filter(mark =>
     (state.color === 'all' || (mark.color ?? 'yellow') === state.color)
     && (!state.currentPageOnly || mark.page === currentPage)
     && (!pageRange.ranges.length || pageRange.ranges.some(range => mark.page >= range.start && mark.page <= range.end)),

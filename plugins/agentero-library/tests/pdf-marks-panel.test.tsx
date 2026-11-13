@@ -54,6 +54,30 @@ test('search and type filters retain externally owned selection and expose hidde
   const hidden = renderToStaticMarkup(panel(selected, { state: { ...state, query: 'source b' } }));
   expect(hidden).toContain('已选 2 条 / 2 页'); expect(hidden).toContain('2 条已选被筛选隐藏');
 });
+
+test('view selected reveals hidden checked marks, pauses filters and restores retained filters on return', () => {
+  const selected = new Set(['a', 'd']); const onStateChange = vi.fn();
+  const state = { ...createAnnotationWorkspaceState(), query: 'absent', kind: 'translate', color: 'purple' as const, commentsOnly: true, pageRange: '999', currentPageOnly: true, filtersOpen: true };
+  let view = panel(selected, { state, onStateChange });
+  expect(find(view, node => node.props['aria-label'] === '编辑批注 a')).toBeUndefined();
+  find(view, node => node.type === 'button' && node.props.children === '查看已选')!.props.onClick();
+  const selectedState = onStateChange.mock.calls.at(-1)![0]; expect(selectedState).toMatchObject({ ...state, selectedOnly: true });
+  view = panel(selected, { state: selectedState, onStateChange });
+  expect(find(view, node => node.props['aria-label'] === '编辑批注 a')).toBeDefined(); expect(find(view, node => node.props['aria-label'] === '编辑批注 d')).toBeDefined(); expect(find(view, node => node.props['aria-label'] === '编辑批注 b')).toBeUndefined();
+  expect(find(view, node => node.props['aria-label'] === '搜索批注')).toBeUndefined(); expect(find(view, node => node.props['aria-label'] === '筛选批注')).toBeUndefined(); expect(find(view, node => node.props.className === 'annotation-filter-options')).toBeUndefined(); expect(find(view, node => node.props.role === 'alert')).toBeUndefined();
+  expect(find(view, node => node.props.role === 'status' && node.props.children === '暂停其他筛选')).toBeDefined();
+  find(view, node => node.type === 'button' && node.props.children === '返回筛选结果')!.props.onClick();
+  const returned = onStateChange.mock.calls.at(-1)![0]; expect(returned).toMatchObject(state); expect(returned.selectedOnly).toBe(false);
+  view = panel(selected, { state: returned }); expect(find(view, node => node.props['aria-label'] === '搜索批注')!.props.value).toBe('absent'); expect(find(view, node => node.props.role === 'alert')).toBeDefined();
+});
+
+test('clear exits selected view and empty selection still offers return to retained filters', () => {
+  const state = { ...createAnnotationWorkspaceState(), selectedOnly: true, query: 'source b' }; const onStateChange = vi.fn(); const onCheckedChange = vi.fn();
+  let view = panel(new Set(['a']), { state, onStateChange, onCheckedChange }); find(view, node => node.type === 'button' && node.props.children === '清空')!.props.onClick();
+  expect(onCheckedChange).toHaveBeenCalledWith(new Set()); expect(onStateChange).toHaveBeenCalledWith(expect.objectContaining({ selectedOnly: false, query: 'source b' }));
+  view = panel(new Set(), { state, onStateChange }); expect(find(view, node => node.props.className === 'pdf-mark-batch-bar')).toBeUndefined();
+  find(view, node => node.type === 'button' && node.props.children === '返回筛选结果')!.props.onClick(); expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ selectedOnly: false, query: 'source b' }));
+});
 test('native context attachment uses selected IDs, no extra task field, and rejects repeated clicks while pending', async () => {
   let finish!: () => void; const onAttach = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
   const view = panel(new Set(['a', 'd']), { onAttach });
@@ -246,6 +270,7 @@ test('save-and-return clears cached fields already saved by an external refresh 
   const onReturn = vi.fn(); const onSave = vi.fn(); const onReply = vi.fn();
   const view = MarkEditor({ mark: currentMark, vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, commentDrafts, onSave, onReply, onDelete: vi.fn(), onReturn });
   expect(find(view, node => node.props.role === 'status')!.props.children).toBe('已保存');
+  expect(find(view, node => node.type === 'small' && node.props.children === '可返回批注列表')).toBeDefined(); expect(find(view, node => node.props.children === '草稿未保存到论文')).toBeUndefined();
   find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick();
   for (let index = 0; index < 5; index++) await Promise.resolve();
   expect(onSave).not.toHaveBeenCalled(); expect(onReply).not.toHaveBeenCalled(); expect(drafts.size).toBe(0); expect(commentDrafts.size).toBe(0); expect(onReturn).toHaveBeenCalledOnce();

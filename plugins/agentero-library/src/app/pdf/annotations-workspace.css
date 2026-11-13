@@ -7,6 +7,9 @@
 .annotation-filter-bar { display: flex; flex: none; gap: 6px; padding: 9px; }
 .annotation-filter-bar > input { flex: 1; min-width: 0; width: 0; font-size: 12px; }
 .annotation-filter-bar > button { min-height: 30px; padding: 4px 7px; gap: 4px; font-size: 11px; }
+.annotation-selected-view { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; padding: 9px; font-size: 11px; border-bottom: 1px solid var(--line); }
+.annotation-selected-view > span { color: var(--muted); }
+.annotation-selected-view > button { margin-left: auto; font-size: 11px; min-height: 27px; }
 .annotation-filter-options { flex: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0 9px 9px; border-bottom: 1px solid var(--line); }
 .annotation-filter-options label { display: flex; gap: 5px; align-items: center; font-size: 11px; }
 .annotation-filter-options label:last-child { width: 100%; }

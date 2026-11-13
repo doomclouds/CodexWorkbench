@@ -16,6 +16,7 @@ import { createRefreshQueue, readSettingsStatus, sameLibrarySettings as sameSett
 
 type Tab = WorkspaceTab;
 const sameStatus = (left: LibraryStatus | null, right: LibraryStatus) => left === right || left !== null && JSON.stringify(left) === JSON.stringify(right);
+const READER_DRAFT_WARNING = '当前论文有未保存的批注、回复、选区或侧栏笔记，请先保存或放弃草稿后再打开其他 PDF。';
 export function workspaceAccess(settings: LibrarySettings | null, status: LibraryStatus | null, preview: boolean) {
   return { business: preview || Boolean(settings?.vaultId && status?.capabilities.metadata), vaultBound: preview || Boolean(settings?.vaultId && status?.vault.valid) };
 }
@@ -47,6 +48,10 @@ export function App() {
   const bindNotesController = useCallback((controller: NotesController | null) => { notesController.current = controller; }, []);
   const [pdfRequest, setPdfRequest] = useState<{ page?: number; markId?: string; key: number }>({ key: 0 });
   const [notesDirty, setNotesDirty] = useState(false); const [readerDirty, setReaderDirty] = useState(false);
+  const readerDirtyChange = useCallback((dirty: boolean) => {
+    setReaderDirty(dirty);
+    if (!dirty) setError(previous => previous === READER_DRAFT_WARNING ? '' : previous);
+  }, []);
   const readerSession = useRef({ path: paper?.path, dirty: readerDirty });
   readerSession.current = { path: paper?.path, dirty: readerDirty };
   const paperSession = useRef({ path: paperMarkdownPath, dirty: paperDirty });
@@ -68,7 +73,7 @@ export function App() {
   const canReplacePaper = useCallback((path: string) => {
     if (readerSession.current.dirty && readerSession.current.path !== path) {
       setTab('reading');
-      setError('当前论文有未保存的批注、回复、选区或侧栏笔记，请先保存或放弃草稿后再打开其他 PDF。');
+      setError(READER_DRAFT_WARNING);
       return false;
     }
     return true;
@@ -237,7 +242,7 @@ export function App() {
     <main className="app-content">
       {loading && !settings ? <div className="empty-state"><LoaderCircle className="spin" />正在连接文献库…</div> : vaultUsable || dirty && settings?.vaultId ? <>
         <div className={`tab-content ${tab !== 'library' || !usable ? 'is-hidden' : ''}`}><LibraryView key={vaultId} active={workspaceActive && usable && tab === 'library'} vaultId={vaultId} vaultName={status?.vault.name ?? ''} preview={host.preview} refreshToken={refreshToken} pdfParseAvailable={Boolean(status?.capabilities.pdfParse)} onOpen={openPaper} onOpenNote={openNote} onOperation={setOperation} /></div>
-        <div className={`tab-content ${tab !== 'reading' || !usable ? 'is-hidden' : ''}`}><PdfReader key={vaultId} active={workspaceActive && usable && tab === 'reading'} vaultId={vaultId} paper={paper} preview={host.preview} canSend={host.canSendSelection} canParse={Boolean(status?.capabilities.pdfParse)} readerToolsHost={readerToolsHost} sidebarCollapsed={sidebarCollapsed} requestedPage={pdfRequest.page} requestedMarkId={pdfRequest.markId} requestKey={pdfRequest.key} onNotes={openPaperNotes} onPaperMarkdown={value => { void openPaperMarkdown(value.path); }} onOperation={setOperation} onDirtyChange={setReaderDirty} onManagementChange={onManagementChange} onBack={() => selectTab('library')} /></div>
+        <div className={`tab-content ${tab !== 'reading' || !usable ? 'is-hidden' : ''}`}><PdfReader key={vaultId} active={workspaceActive && usable && tab === 'reading'} vaultId={vaultId} paper={paper} preview={host.preview} canSend={host.canSendSelection} canParse={Boolean(status?.capabilities.pdfParse)} readerToolsHost={readerToolsHost} sidebarCollapsed={sidebarCollapsed} requestedPage={pdfRequest.page} requestedMarkId={pdfRequest.markId} requestKey={pdfRequest.key} onNotes={openPaperNotes} onPaperMarkdown={value => { void openPaperMarkdown(value.path); }} onOperation={setOperation} onDirtyChange={readerDirtyChange} onManagementChange={onManagementChange} onBack={() => selectTab('library')} /></div>
         <div className={`tab-content ${tab !== 'notes' || notesMode !== 'notes' || !usable ? 'is-hidden' : ''}`}><NotesView key={vaultId} active={workspaceActive && usable && tab === 'notes' && notesMode === 'notes'} vaultId={vaultId} preview={host.preview} requestedTarget={noteTarget} onDirtyChange={setNotesDirty} onControllerReady={bindNotesController} onActiveNoteChange={setActiveNote} onOpenPaper={openPaperPath} onOpenWorkspace={() => { setNotesMode('notes'); selectTab('notes'); }} onOpenPaperMarkdown={notePaperPath ? () => { void openPaperMarkdown(notePaperPath); } : undefined} onOpenTrash={() => selectTab('trash')} /></div>
         {paperMarkdownPath && <div className={`tab-content ${tab !== 'notes' || notesMode !== 'paper' || !usable ? 'is-hidden' : ''}`}><PaperMarkdownView key={vaultId} active={workspaceActive && usable && tab === 'notes' && notesMode === 'paper'} vaultId={vaultId} paperPath={paperMarkdownPath} preview={host.preview} onDirtyChange={setPaperDirty} onBack={() => { setNotesMode('notes'); selectTab('notes'); }} onOpenPdf={() => { void openPaperPath(paperMarkdownPath); }} onGenerateBody={!host.preview && host.canAttachContext ? () => appendPaperMarkdownGenerationDraft({ vaultId, paperPath: paperMarkdownPath }) : undefined} /></div>}
         <div className={`tab-content ${tab !== 'trash' ? 'is-hidden' : ''}`}><TrashView key={vaultId} active={workspaceActive && tab === 'trash'} vaultId={vaultId} preview={host.preview} /></div>

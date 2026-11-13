@@ -61,16 +61,55 @@ describe('annotation workspace selection', () => {
     expect([...checked]).toEqual(['a', 'c', 'e', 'deleted']);
   });
 
-  test('combines query, kind, color, comments, selected, current page and range filters', () => {
+  test('combines query, kind, color, comments, current page and range filters', () => {
     const state = {
       ...createAnnotationWorkspaceState(), query: 'architecture', kind: 'highlight', color: 'green' as const,
-      commentsOnly: true, selectedOnly: true, pageRange: '7–12', currentPageOnly: true,
+      commentsOnly: true, pageRange: '7–12', currentPageOnly: true,
     };
     const checked = new Set(['a', 'c', 'e']);
     expect(buildAnnotationWorkspace(items, state, checked, 20, 8).items.map(item => item.id)).toEqual(['c']);
     expect(buildAnnotationWorkspace(items, state, checked, 20, 7).items).toEqual([]);
     const defaultColor = buildAnnotationWorkspace(items, { ...createAnnotationWorkspaceState(), color: 'yellow' }, checked, 20, 7);
     expect(defaultColor.items.map(item => item.id)).toEqual(['a', 'd', 'e']);
+  });
+
+  test('view selected reveals hidden checked marks and returning restores every saved filter', () => {
+    const state = {
+      ...createAnnotationWorkspaceState(), query: 'architecture', kind: 'highlight', color: 'green' as const,
+      commentsOnly: true, pageRange: '7–12', currentPageOnly: true,
+    };
+    const savedState = structuredClone(state); const checked = new Set(['a', 'c', 'd', 'e', 'deleted']);
+    const filtered = buildAnnotationWorkspace(items, state, checked, 20, 8);
+    expect(filtered.items.map(item => item.id)).toEqual(['c']);
+    expect(filtered.selection.hiddenCount).toBe(3);
+    const selected = buildAnnotationWorkspace(items, { ...state, selectedOnly: true }, checked, 20, 8);
+    expect(selected.items.map(item => item.id)).toEqual(['a', 'c', 'd', 'e']);
+    expect(selected.selection.items).toEqual(selected.items);
+    expect(selected.selection.hiddenCount).toBe(0);
+    expect(selected.selectionState).toBe('all');
+    expect(selected.groups.every(group => group.state === 'all')).toBe(true);
+    expect(state).toEqual(savedState);
+    expect(buildAnnotationWorkspace(items, state, checked, 20, 8).items).toEqual(filtered.items);
+    expect([...checked]).toEqual(['a', 'c', 'd', 'e', 'deleted']);
+    const cleared = buildAnnotationWorkspace(items, { ...state, selectedOnly: true }, new Set(), 20, 8);
+    expect(cleared.items).toEqual([]);
+    expect(cleared.groups).toEqual([]);
+    expect(cleared.selection.hiddenCount).toBe(0);
+    expect(cleared.selectionState).toBe('none');
+  });
+
+  test('view selected suspends an invalid range and returning still reports its validation error', () => {
+    const state = { ...createAnnotationWorkspaceState(), pageRange: '7,invalid', selectedOnly: true };
+    const checked = new Set(['a', 'e']);
+    const selected = buildAnnotationWorkspace(items, state, checked, 20, 7);
+    expect(selected.items.map(item => item.id)).toEqual(['a', 'e']);
+    expect(selected.pageRange.valid).toBe(false);
+    expect(selected.selection.hiddenCount).toBe(0);
+    const restored = buildAnnotationWorkspace(items, { ...state, selectedOnly: false }, checked, 20, 7);
+    expect(restored.pageRange).toEqual(selected.pageRange);
+    expect(restored.items).toEqual([]);
+    expect(restored.selection.hiddenCount).toBe(2);
+    expect(state.pageRange).toBe('7,invalid');
   });
 
   test('invalid ranges never fall back to all marks or discard selected IDs', () => {
