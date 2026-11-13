@@ -34,7 +34,7 @@ export function AnchoredMenu({ anchor, onClose, children, ariaLabel = '操作', 
       setPosition(menuPosition(rect, menu.getBoundingClientRect(), { width: view.innerWidth, height: view.innerHeight }));
     };
     const items = () => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
-    place(); (items()[0] || menu).focus({ preventScroll: true });
+    place();
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); requestClose(); }
       else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
@@ -62,5 +62,13 @@ export function AnchoredMenu({ anchor, onClose, children, ariaLabel = '操作', 
       if (restore?.isConnected && (menu.contains(owner.activeElement) || owner.activeElement === owner.body)) restore.focus({ preventScroll: true });
     };
   }, [anchor, owner]);
+  const positioned = position !== null;
+  useLayoutEffect(() => {
+    // The measurement update must commit visibility before the browser can focus an item.
+    if (!positioned) return;
+    const menu = ref.current;
+    const first = menu?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)');
+    (first || menu)?.focus({ preventScroll: true });
+  }, [anchor, owner, positioned]);
   return createPortal(<div ref={ref} role="menu" aria-label={ariaLabel} tabIndex={-1} className={`anchored-menu ${className}`} style={{ left: position?.left ?? 0, top: position?.top ?? 0, visibility: position ? 'visible' : 'hidden' }}>{children}</div>, owner.body);
 }
