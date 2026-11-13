@@ -62592,7 +62592,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.4.1";
+var PLUGIN_VERSION = "0.5.0";
 
 // src/infrastructure/native-mcp.ts
 var replayableReads = /* @__PURE__ */ new Set(["vault_list", "paper_get", "paper_paths", "vault_search", "page_read", "paper_text_get", "file_read", "file_list", "paper_notes_get"]);
@@ -67066,6 +67066,13 @@ var FQ = external_exports.object({ method: external_exports.literal("ui/initiali
 var M = external_exports.object({ protocolVersion: external_exports.string().describe('Negotiated protocol version string (e.g., "2025-11-21").'), hostInfo: ImplementationSchema.describe("Host application identification and version."), hostCapabilities: d.describe("Features and capabilities provided by the host."), hostContext: T.describe("Rich context about the host environment.") }).passthrough();
 var p = "text/html;profile=mcp-app";
 
+// src/contracts/brand-icon.ts
+var LIBRARY_ICON = {
+  src: "data:image/png;base64,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",
+  mimeType: "image/png",
+  sizes: ["64x64"]
+};
+
 // src/infrastructure/native-picker.ts
 import { spawn as spawnProcess } from "node:child_process";
 import { stat as stat6 } from "node:fs/promises";
@@ -67618,7 +67625,7 @@ function failure2(error62) {
 }
 function createLibraryServer(service2, options = {}) {
   const translation = new TranslationProvider(service2.dataRoot);
-  const server2 = new McpServer({ name: "agentero-library", version: PLUGIN_VERSION, title: "\u6587\u732E\u5E93" }, {
+  const server2 = new McpServer({ name: "agentero-library", version: PLUGIN_VERSION, title: "\u6587\u732E\u5E93", icons: [LIBRARY_ICON] }, {
     capabilities: { experimental: { "openai/settings": { readTool: "settings_read", updateTool: "settings_update" } } }
   });
   function tool(name2, description, shape, run, readOnly = true, appOnly = false, destructive = !readOnly) {

@@ -5,6 +5,7 @@ import { RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { z } from 'zod';
 import { LibraryService } from '../core/library-service.js';
 import { PLUGIN_VERSION } from '../contracts/version.js';
+import { LIBRARY_ICON } from '../contracts/brand-icon.js';
 import { pickNativePath, cancelNativePicker, closeNativePickers } from '../infrastructure/native-picker.js';
 import { TranslationProvider } from '../infrastructure/translation-provider.js';
 
@@ -26,7 +27,7 @@ function failure(error: unknown) {
 
 export function createLibraryServer(service: LibraryService, options: { html?: string } = {}) {
   const translation = new TranslationProvider(service.dataRoot);
-  const server = new McpServer({ name: 'agentero-library', version: PLUGIN_VERSION, title: '文献库' }, {
+  const server = new McpServer({ name: 'agentero-library', version: PLUGIN_VERSION, title: '文献库', icons: [LIBRARY_ICON] }, {
     capabilities: { experimental: { 'openai/settings': { readTool: 'settings_read', updateTool: 'settings_update' } } },
   });
   function tool(name: string, description: string, shape: z.ZodRawShape, run: (input: any, signal?: AbortSignal) => Promise<unknown>, readOnly = true, appOnly = false, destructive = !readOnly) {

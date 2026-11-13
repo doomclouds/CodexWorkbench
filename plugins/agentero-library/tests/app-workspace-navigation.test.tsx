@@ -80,6 +80,16 @@ it('passes citation page and mark requests to the retained PDF reader and resets
   expect(component(ctx.tree, PdfReader).props.requestedPage).toBeUndefined(); expect(component(ctx.tree, PdfReader).props.requestedMarkId).toBeUndefined();
 });
 
+it('opens the manager with compact navigation and restores the previous sidebar preference on return', async () => {
+  const ctx = await setup(); component(ctx.tree, LibraryView).props.onOpen(paper('papers/one')); ctx.render();
+  component(ctx.tree, PdfReader).props.onManagementChange(true); ctx.render(); expect(component(ctx.tree, AppSidebar).props.collapsed).toBe(true);
+  component(ctx.tree, AppSidebar).props.onToggle(); ctx.render(); expect(component(ctx.tree, AppSidebar).props.collapsed).toBe(false);
+  component(ctx.tree, PdfReader).props.onManagementChange(false); ctx.render(); expect(component(ctx.tree, AppSidebar).props.collapsed).toBe(false);
+  component(ctx.tree, AppSidebar).props.onToggle(); ctx.render();
+  component(ctx.tree, PdfReader).props.onManagementChange(true); ctx.render(); component(ctx.tree, AppSidebar).props.onToggle(); ctx.render();
+  component(ctx.tree, PdfReader).props.onManagementChange(false); ctx.render(); expect(component(ctx.tree, AppSidebar).props.collapsed).toBe(true);
+});
+
 it('keeps a dirty body bound when an external Vault switch is detected', async () => {
   const ctx = await setup(); component(ctx.tree, PdfReader).props.onPaperMarkdown(paper('papers/one')); await settle(); ctx.render();
   component(ctx.tree, PaperMarkdownView).props.onDirtyChange(true); ctx.render();

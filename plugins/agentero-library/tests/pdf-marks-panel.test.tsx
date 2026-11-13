@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import { useLayoutEffect } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, expect, test, vi } from 'vitest';
 import type { MarkList, ReaderMark } from '../src/contracts/reader';
@@ -12,6 +13,8 @@ vi.mock('react', async original => ({
 vi.mock('../src/app/api', () => ({ callTool: vi.fn() }));
 import { ColorPicker, MarkEditor, MarksPanel, SelectionToolbar, selectionMenuPlacement, type MarkEditorDraft } from '../src/app/pdf/ReaderPanels';
 import { NotesSplitter, notesPaneLayout } from '../src/app/pdf/NotesSplitter';
+import { createAnnotationWorkspaceState } from '../src/app/pdf/annotation-workspace';
+import { savePendingAnnotationDrafts } from '../src/app/pdf/AnnotationsWorkspace';
 
 afterEach(() => { harness.states = []; harness.index = 0; harness.setters = []; });
 function find(node: ReactNode, predicate: (node: ReactElement<Record<string, any>>) => boolean): ReactElement<Record<string, any>> | undefined {
@@ -40,14 +43,16 @@ test('page and individual handlers support noncontiguous selection, partial grou
   expect(reopened).toContain('pdf-mark-page-select'); expect(reopened).toContain('pdf-mark-page-children');
   expect(reopened).not.toContain('pdf-mark-pages'); expect(reopened).toContain('对话来源');
 });
-test('search, type and paging retain externally owned selection', () => {
+test('search and type filters retain externally owned selection and expose hidden selected count', () => {
   const selected = new Set(['a', 'd']); const onCheckedChange = vi.fn();
-  const view = panel(selected, { onCheckedChange });
+  const onStateChange = vi.fn(); const state = { ...createAnnotationWorkspaceState(), filtersOpen: true, listScrollTop: 480, managerScrollTop: 900 };
+  const view = panel(selected, { onCheckedChange, onStateChange, state });
   find(view, node => node.props['aria-label'] === '搜索批注')!.props.onChange({ target: { value: 'absent' } });
   find(view, node => node.props['aria-label'] === '批注类型')!.props.onChange({ target: { value: 'translate' } });
   expect(onCheckedChange).not.toHaveBeenCalled(); expect([...selected]).toEqual(['a', 'd']);
-  harness.states = ['', 'all', false, false, 1];
-  expect(renderToStaticMarkup(panel(selected, { onCheckedChange }))).toContain('已选 2 条 / 2 页');
+  expect(onStateChange).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'absent', kind: 'translate', listScrollTop: 0, managerScrollTop: 0 }));
+  const hidden = renderToStaticMarkup(panel(selected, { state: { ...state, query: 'source b' } }));
+  expect(hidden).toContain('已选 2 条 / 2 页'); expect(hidden).toContain('2 条已选被筛选隐藏');
 });
 test('native context attachment uses selected IDs, no extra task field, and rejects repeated clicks while pending', async () => {
   let finish!: () => void; const onAttach = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
@@ -58,10 +63,87 @@ test('native context attachment uses selected IDs, no extra task field, and reje
   expect(find(view, node => node.type === 'textarea')).toBeUndefined(); finish(); await Promise.resolve();
 });
 test('write actions collect an explicit target before attaching', () => {
-  harness.states = ['', 'all', false, false, 0, true]; const onAttach = vi.fn();
+  harness.states[2] = 'attach'; const onAttach = vi.fn();
   const view = panel(new Set(['a']), { onAttach });
   find(view, node => node.props.role === 'menuitem' && node.props.children === '整理并更新已有笔记…')!.props.onClick();
-  expect(harness.setters[6]).toHaveBeenCalledWith({ action: 'update-note', ids: ['a'] }); expect(onAttach).not.toHaveBeenCalled();
+  expect(harness.setters[3]).toHaveBeenCalledWith({ action: 'update-note', ids: ['a'] }); expect(onAttach).not.toHaveBeenCalled();
+});
+
+test('list and editor are exclusive, return and Escape preserve drafts, close has its own callback', () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { reply: 'pending reply', color: 'pink' }]]); const onEndEdit = vi.fn(); const onClose = vi.fn();
+  const view = panel(new Set(['a']), { selectedId: 'a', drafts, onEndEdit, onClose });
+  expect(find(view, node => node.props.className === 'pdf-marks-list annotation-main-list')).toBeUndefined();
+  expect(find(view, node => node.type === MarkEditor)).toBeDefined();
+  find(view, node => node.type === 'button' && Array.isArray(node.props.children) && node.props.children.includes('返回批注'))!.props.onClick();
+  expect(onEndEdit).toHaveBeenCalledOnce(); expect(onClose).not.toHaveBeenCalled(); expect(drafts.get('a')?.reply).toBe('pending reply');
+  const preventDefault = vi.fn(); const stopPropagation = vi.fn();
+  find(view, node => node.props['aria-label'] === '论文批注')!.props.onKeyDown({ key: 'Escape', preventDefault, stopPropagation });
+  expect(onEndEdit).toHaveBeenCalledTimes(2); expect(stopPropagation).toHaveBeenCalledOnce(); expect(preventDefault).toHaveBeenCalledOnce();
+  find(view, node => node.props['aria-label'] === '关闭批注侧栏')!.props.onClick(); expect(onClose).toHaveBeenCalledOnce();
+  const reopened = renderToStaticMarkup(panel(new Set(['a']), { drafts })); expect(reopened).toContain('草稿'); expect(reopened).not.toContain('编辑批注</');
+});
+
+test('zero selection has a minimal footer and exports only appear in more menu', () => {
+  const html = renderToStaticMarkup(panel()); expect(html).toContain('勾选批注后可带到对话'); expect(html).not.toContain('pdf-mark-batch-bar'); expect(html).not.toContain('导出 Markdown');
+  harness.states[2] = 'more'; const onExport = vi.fn(); const view = panel(new Set(), { onExport });
+  find(view, node => node.props.role === 'menuitem' && Array.isArray(node.props.children) && node.props.children.includes(' Markdown'))!.props.onClick();
+  expect(onExport).toHaveBeenCalledWith('markdown');
+});
+
+test('select all covers filtered records beyond the rendered batch and manager page states use the same set', () => {
+  const largeList = { ...list, items: Array.from({ length: 254 }, (_, index) => mark(String(index), index < 220 ? 7 : 8)) };
+  const onCheckedChange = vi.fn(); let view = panel(new Set(), { list: largeList, onCheckedChange });
+  expect(find(view, node => node.props['aria-label'] === '编辑批注 150')).toBeUndefined();
+  find(view, node => node.props.label === '全选筛选结果')!.props.onChange(); expect(onCheckedChange.mock.calls[0][0].size).toBe(254);
+  view = panel(new Set(['0']), { list: largeList, mode: 'manager' });
+  expect(find(view, node => node.props.label === '页导航选择第 7 页筛选批注')!.props.state).toBe('some');
+  expect(find(view, node => node.props.label === '选择物理第 7 页的筛选批注')!.props.state).toBe('some');
+});
+
+test('selection, preview and edit actions remain separate', () => {
+  const onSelect = vi.fn(); const onPreviewMark = vi.fn(); const onLocate = vi.fn(); const onCheckedChange = vi.fn();
+  const view = panel(new Set(), { mode: 'manager', onSelect, onPreviewMark, onLocate, onCheckedChange });
+  find(view, node => node.props['aria-label'] === '选择第 7 页批注 source a')!.props.onChange(); expect(onSelect).not.toHaveBeenCalled(); expect(onPreviewMark).not.toHaveBeenCalled();
+  find(view, node => node.props['aria-label'] === '预览批注 a 原文')!.props.onClick(); expect(onPreviewMark).toHaveBeenCalledWith(list.items[0]); expect(onLocate).not.toHaveBeenCalled();
+  find(view, node => node.props['aria-label'] === '编辑批注 a')!.props.onClick(); expect(onSelect).toHaveBeenCalledWith(list.items[0]);
+});
+
+test('manager navigation renders the requested page using sorted expanded groups rather than storage order', () => {
+  vi.stubGlobal('requestAnimationFrame', vi.fn());
+  const unsorted = { ...list, items: [mark('last-page-first', 20), ...Array.from({ length: 150 }, (_, index) => mark(`first-${index}`, 1))] }; const onStateChange = vi.fn();
+  const view = panel(new Set(), { list: unsorted, mode: 'manager', onStateChange });
+  find(view, node => node.type === 'button' && Array.isArray(node.props.children) && node.props.children[1] === 20)!.props.onClick();
+  expect(onStateChange).toHaveBeenCalledWith(expect.objectContaining({ renderedLimit: 151 })); vi.unstubAllGlobals();
+});
+
+test('inactive workspaces pause source preview and keep draft confirmation closed until active again', () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { reply: 'retained reply' }]]); const pending = { action: 'summarize', ids: ['a'] }; harness.states[4] = pending;
+  let view = panel(new Set(['a']), { mode: 'manager', active: false, drafts }); expect(view.props.preview.props.active).toBe(false);
+  const nativeDialog = { showModal: vi.fn(), close: vi.fn() }; find(view, node => node.type === 'dialog')!.props.ref.current = nativeDialog;
+  const inactiveEffect = vi.mocked(useLayoutEffect).mock.calls.findLast(([, deps]) => deps?.length === 2 && deps[0] === true && deps[1] === false)![0]; inactiveEffect(); expect(nativeDialog.showModal).not.toHaveBeenCalled();
+  view = panel(new Set(['a']), { mode: 'manager', active: true, drafts }); expect(view.props.preview.props.active).toBe(true); find(view, node => node.type === 'dialog')!.props.ref.current = nativeDialog;
+  const activeEffect = vi.mocked(useLayoutEffect).mock.calls.findLast(([, deps]) => deps?.length === 2 && deps[0] === true && deps[1] === true)![0]; const cleanup = activeEffect(); expect(nativeDialog.showModal).toHaveBeenCalledOnce(); if (typeof cleanup === 'function') cleanup(); expect(nativeDialog.close).toHaveBeenCalledOnce(); expect(drafts.get('a')?.reply).toBe('retained reply');
+});
+
+test('selected drafts require a choice, saved versions attach without clearing pending edits', async () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { reply: 'pending reply' }]]); const onAttach = vi.fn().mockResolvedValue(undefined); const onSave = vi.fn();
+  let view = panel(new Set(['a']), { drafts, onAttach, onSave });
+  find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick();
+  expect(onAttach).not.toHaveBeenCalled(); harness.states[4] = harness.setters[4].mock.calls.at(-1)![0];
+  view = panel(new Set(['a']), { drafts, onAttach, onSave });
+  find(view, node => node.type === 'button' && node.props.children === '使用已保存版本')!.props.onClick();
+  await Promise.resolve(); expect(onAttach).toHaveBeenCalledWith('summarize', ['a'], undefined); expect(onSave).not.toHaveBeenCalled(); expect(drafts.get('a')?.reply).toBe('pending reply');
+});
+
+test('save before attachment performs ordered writes and stops without attaching on failure', async () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { text: 'new note', reply: 'new reply' }], ['d', { color: 'pink' }]]); const comments = new Map([['a', 'new note']]); const events: string[] = [];
+  const onSave = vi.fn(async (mark: ReaderMark) => { events.push(`save ${mark.id}`); }); const onReply = vi.fn(async () => { events.push('reply a'); throw new Error('reply failed'); }); const onAttach = vi.fn();
+  let view = panel(new Set(['a', 'd']), { drafts, commentDrafts: comments, onSave, onReply, onAttach });
+  find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick(); harness.states[4] = harness.setters[4].mock.calls.at(-1)![0];
+  view = panel(new Set(['a', 'd']), { drafts, commentDrafts: comments, onSave, onReply, onAttach });
+  find(view, node => node.type === 'button' && node.props.children === '保存后附加')!.props.onClick();
+  for (let index = 0; index < 10; index++) await Promise.resolve();
+  expect(events).toEqual(['save a', 'reply a']); expect(onAttach).not.toHaveBeenCalled(); expect(drafts.get('a')).toEqual({ reply: 'new reply' }); expect(drafts.get('d')).toEqual({ color: 'pink' }); expect(comments.has('a')).toBe(false); expect(harness.setters[5]).toHaveBeenCalledWith('reply failed');
 });
 test('splitter supports keyboard resizing and narrow containers use an overlay', () => {
   const onChange = vi.fn(); const view = NotesSplitter({ width: 360, min: 300, max: 600, onChange });
@@ -129,20 +211,74 @@ test('editing drafts survive switching marks and closing the panel, including fa
   expect(drafts.get('a').text).toBe('unsaved A');
 });
 
-test.each(['', 'pending reply'])('saved editor fields cannot overwrite a later preview save; pending reply: %s', async reply => {
+test.each(['', 'pending reply'])('saved editor fields and replies clear before a later preview save; pending reply: %s', async reply => {
   const drafts = new Map<string, MarkEditorDraft>([['a', { text: 'saved A', color: 'green', ...(reply ? { reply } : {}) }]]);
-  const commentDrafts = new Map([['a', 'saved A']]); const onSave = vi.fn().mockResolvedValue(undefined);
-  const props = { mark: list.items[0], vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, commentDrafts, onSave, onDelete: vi.fn(), onReply: vi.fn() };
+  const commentDrafts = new Map([['a', 'saved A']]); const onSave = vi.fn().mockResolvedValue(undefined); const onReply = vi.fn().mockResolvedValue(undefined);
+  const props = { mark: list.items[0], vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, commentDrafts, onSave, onDelete: vi.fn(), onReply };
   const view = MarkEditor(props);
   find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick();
   for (let index = 0; index < 5; index++) await Promise.resolve();
   expect(onSave).toHaveBeenCalledWith(props.mark, 'saved A', 'green');
-  expect(drafts.get('a')).toEqual(reply ? { reply } : undefined); expect(commentDrafts.has('a')).toBe(false);
+  expect(drafts.get('a')).toBeUndefined(); expect(commentDrafts.has('a')).toBe(false);
+  if (reply) expect(onReply).toHaveBeenCalledWith(props.mark, reply); else expect(onReply).not.toHaveBeenCalled();
   // Closing the sidebar and saving B through the preview must seed a reopened editor from B.
   const updated = { ...props.mark, comment: 'saved B', color: 'pink' as const }; commentDrafts.delete('a');
   harness.index = 0; const reopened = MarkEditor({ ...props, mark: updated });
   expect(find(reopened, node => node.props['aria-label'] === '批注内容')!.props.value).toBe('saved B');
   expect(find(reopened, node => node.type === ColorPicker)!.props.value).toBe('pink');
-  expect(find(reopened, node => node.props['aria-label'] === '批注回复')!.props.value).toBe(reply);
+  expect(find(reopened, node => node.props['aria-label'] === '批注回复')).toBeUndefined();
   expect(find(reopened, node => node.type === 'button' && node.props.className === 'primary')!.props.disabled).toBe(true);
+});
+
+test('reply-only drafts are dirty and save-and-return waits for the reply write', async () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { reply: 'reply only' }]]); const onReturn = vi.fn(); const onSave = vi.fn(); let finish!: () => void;
+  const onReply = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+  const view = MarkEditor({ mark: list.items[0], vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, onSave, onReply, onDelete: vi.fn(), onReturn });
+  expect(find(view, node => node.props.role === 'status')!.props.children).toContain('修改未保存');
+  find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick();
+  expect(onSave).not.toHaveBeenCalled(); expect(onReply).toHaveBeenCalledWith(list.items[0], 'reply only'); expect(onReturn).not.toHaveBeenCalled();
+  finish(); for (let index = 0; index < 5; index++) await Promise.resolve(); expect(onReturn).toHaveBeenCalledOnce(); expect(drafts.size).toBe(0);
+});
+
+test('save-and-return clears cached fields already saved by an external refresh without another write', async () => {
+  const currentMark = { ...list.items[0], comment: 'externally saved text', color: 'green' as const };
+  const drafts = new Map<string, MarkEditorDraft>([['a', { text: currentMark.comment, color: 'green' }]]); const commentDrafts = new Map([['a', currentMark.comment]]);
+  const onReturn = vi.fn(); const onSave = vi.fn(); const onReply = vi.fn();
+  const view = MarkEditor({ mark: currentMark, vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, commentDrafts, onSave, onReply, onDelete: vi.fn(), onReturn });
+  expect(find(view, node => node.props.role === 'status')!.props.children).toBe('已保存');
+  find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick();
+  for (let index = 0; index < 5; index++) await Promise.resolve();
+  expect(onSave).not.toHaveBeenCalled(); expect(onReply).not.toHaveBeenCalled(); expect(drafts.size).toBe(0); expect(commentDrafts.size).toBe(0); expect(onReturn).toHaveBeenCalledOnce();
+});
+
+test('failed save-and-return retains reply and color and does not return; discard explicitly removes them', async () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { color: 'green', reply: 'pending reply' }]]); const onReturn = vi.fn(); const onDraftsChange = vi.fn();
+  const view = MarkEditor({ mark: list.items[0], vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, onSave: vi.fn().mockRejectedValue(new Error('save failed')), onReply: vi.fn(), onDelete: vi.fn(), onReturn, onDraftsChange });
+  find(view, node => node.type === 'button' && node.props.className === 'primary')!.props.onClick(); for (let index = 0; index < 5; index++) await Promise.resolve();
+  expect(onReturn).not.toHaveBeenCalled(); expect(drafts.get('a')).toEqual({ color: 'green', reply: 'pending reply' }); expect(harness.setters[3]).toHaveBeenCalledWith('save failed');
+  find(view, node => node.props.children === '放弃修改')!.props.onClick(); expect(drafts.size).toBe(0); expect(onReturn).toHaveBeenCalledOnce(); expect(onDraftsChange).toHaveBeenCalled();
+});
+
+test('draft cache retains multiple edits including reply and color across returning and reopening', () => {
+  const drafts = new Map<string, MarkEditorDraft>(); const props = { mark: list.items[0], vaultId: list.vaultId, paperPath: list.paperPath, busy: false, drafts, onSave: vi.fn(), onDelete: vi.fn(), onReply: vi.fn(), onReturn: vi.fn() };
+  const view = MarkEditor(props); find(view, node => node.props['aria-label'] === '批注内容')!.props.onChange({ target: { value: 'retained note' } }); find(view, node => node.type === ColorPicker)!.props.onChange('purple');
+  // Opening the reply field does not itself create a draft.
+  harness.index = 0; harness.states[6] = true; const withReply = MarkEditor(props); find(withReply, node => node.props['aria-label'] === '批注回复')!.props.onChange({ target: { value: 'retained reply' } });
+  expect(drafts.get('a')).toEqual({ text: 'retained note', color: 'purple', reply: 'retained reply' });
+  const stopPropagation = vi.fn(); withReply.props.onKeyDown({ key: 'Escape', preventDefault: vi.fn(), stopPropagation }); expect(stopPropagation).toHaveBeenCalledOnce();
+  harness.index = 0; harness.states = []; const reopened = MarkEditor(props); expect(find(reopened, node => node.props['aria-label'] === '批注内容')!.props.value).toBe('retained note'); expect(find(reopened, node => node.props['aria-label'] === '批注回复')!.props.value).toBe('retained reply'); expect(find(reopened, node => node.type === ColorPicker)!.props.value).toBe('purple');
+});
+
+test('attachment saves a selected draft set sequentially without revisiting successfully saved fields', async () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { text: 'A', color: 'green', reply: 'reply A' }], ['d', { text: 'D' }]]); const commentDrafts = new Map([['a', 'A'], ['d', 'D']]); const events: string[] = [];
+  const onSave = vi.fn(async (mark: ReaderMark) => { events.push(`save ${mark.id}`); }); const onReply = vi.fn(async (mark: ReaderMark) => { events.push(`reply ${mark.id}`); });
+  await savePendingAnnotationDrafts([list.items[0], list.items[3]], drafts, commentDrafts, onSave, onReply); expect(events).toEqual(['save a', 'reply a', 'save d']); expect(drafts.size).toBe(0); expect(commentDrafts.size).toBe(0);
+});
+
+test('draft changes while a write is pending are retained and block attachment completion', async () => {
+  const drafts = new Map<string, MarkEditorDraft>([['a', { text: 'old submitted note', reply: 'submitted reply' }]]); const comments = new Map([['a', 'old submitted note']]); let finish!: () => void;
+  const onSave = vi.fn(() => new Promise<void>(resolve => { finish = resolve; })); const onReply = vi.fn(async () => { drafts.set('a', { ...drafts.get('a'), reply: 'new reply' }); });
+  const saving = savePendingAnnotationDrafts([list.items[0]], drafts, comments, onSave, onReply);
+  drafts.set('a', { text: 'newer note', color: 'purple', reply: 'submitted reply' }); comments.set('a', 'newer note'); finish();
+  await expect(saving).rejects.toThrow('保存期间草稿已更新'); expect(drafts.get('a')).toEqual({ text: 'newer note', color: 'purple', reply: 'new reply' }); expect(comments.get('a')).toBe('newer note');
 });

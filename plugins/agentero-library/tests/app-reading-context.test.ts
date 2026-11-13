@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReadingContextSummary } from '../src/contracts/context';
 import { paperMarkdownGenerationDraft, readingDraft } from '../src/app/reading-context-client';
+import { LIBRARY_ICON } from '../src/contracts/brand-icon';
 
 const state = vi.hoisted(() => ({ apps: [] as any[], supported: true, draft: '用户原来的问题。', attachments: [] as unknown[], submitted: 0 }));
 vi.mock('@modelcontextprotocol/ext-apps', () => ({
@@ -10,6 +11,7 @@ vi.mock('@modelcontextprotocol/ext-apps', () => ({
     getHostContext = () => ({ theme: 'dark' });
     getHostCapabilities = () => ({ message: { text: {} }, experimental: state.supported ? { 'openai/message': {} } : {} });
     callServerTool = vi.fn();
+    updateModelContext = vi.fn();
     sendMessage = vi.fn(async (params: any) => {
       if (params._meta?.['openai/message']?.send !== false) state.submitted += 1;
       for (const item of params.content) {
@@ -46,6 +48,7 @@ describe('native composer reading context', () => {
     expect(JSON.stringify(state.attachments)).toContain(context.paperPath);
     expect(JSON.stringify(state.attachments)).toContain('没有开始解析');
     expect(app.sendMessage.mock.calls[0][0]._meta).toEqual({ 'openai/message': { target: 'active', send: false } });
+    expect(app.sendMessage.mock.calls[0][0].content[1]._meta).toEqual({ 'openai/title': `生成论文正文 · ${context.title}`, 'openai/thumbnail': LIBRARY_ICON });
   });
 
   it('does not append a generation task for a changed paper or an unsupported composer', async () => {
@@ -83,6 +86,27 @@ describe('native composer reading context', () => {
     expect(state.attachments).toHaveLength(1); expect(JSON.stringify(state.attachments)).toContain(context.contextId);
     expect(JSON.stringify(state.attachments)).toContain('Source 中文 · 6 条批注 · 3 页');
     expect(JSON.stringify(state.attachments)).not.toContain('untrusted visual title');
+    expect(app.sendMessage.mock.calls[0][0].content[1]._meta).toEqual({ 'openai/title': `${context.title} · 6 条批注 · 3 页`, 'openai/thumbnail': LIBRARY_ICON });
+  });
+
+  it('preserves thumbnail metadata through the extension schema while appending multiple distinct draft items', async () => {
+    const { api, app } = await bridge();
+    app.callServerTool.mockResolvedValueOnce({ structuredContent: { ok: true, data: context } });
+    await api.attachReadingContext({ vaultId: context.vaultId, paperPath: context.paperPath, title: context.title, action: 'summarize', pages: [7] });
+    app.callServerTool.mockResolvedValueOnce({ structuredContent: { ok: true, data: { vaultId: context.vaultId, path: context.paperPath, title: context.title } } });
+    await api.appendPaperMarkdownGenerationDraft({ vaultId: context.vaultId, paperPath: context.paperPath });
+    expect(app.sendMessage).toHaveBeenCalledTimes(2);
+    for (const [message] of app.sendMessage.mock.calls) {
+      expect(message).toMatchObject({ role: 'user', _meta: { 'openai/message': { target: 'active', send: false } } });
+      expect(message.content[0]).not.toHaveProperty('_meta');
+      expect(message.content[1]._meta['openai/thumbnail']).toEqual(LIBRARY_ICON);
+    }
+    expect(state.attachments).toHaveLength(2);
+    expect(state.draft).toMatch(/^用户原来的问题。/);
+    expect(state.draft).toContain('总结');
+    expect(state.draft).toContain('生成派生正文 PAPER.md');
+    expect(state.submitted).toBe(0);
+    expect(app.updateModelContext).not.toHaveBeenCalled();
   });
 
   it('never falls back to immediate sending when the host does not advertise draft extensions', async () => {

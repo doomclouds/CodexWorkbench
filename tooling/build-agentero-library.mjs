@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { collectLicenses } from './collect-agentero-licenses.mjs';
 import { sdkProtocolDebugPlugin } from './app-sdk-debug.mjs';
+import { inlineLibraryFaviconPlugin } from './build-agentero-branding.mjs';
 
 const root = fileURLToPath(new URL('../plugins/agentero-library/', import.meta.url));
 const packageInfo = JSON.parse(await readFile(`${root}package.json`, 'utf8'));
@@ -32,7 +33,7 @@ let appInputs = [];
 await viteBuild({
   configFile: false,
   root: `${root}src/app`,
-  plugins: [sdkProtocolDebugPlugin(transformScript), viteSingleFile(), { name: 'record-runtime-inputs', generateBundle() { appInputs = [...this.getModuleIds()]; } }],
+  plugins: [inlineLibraryFaviconPlugin(`${root}assets/icon64.png`), sdkProtocolDebugPlugin(transformScript), viteSingleFile(), { name: 'record-runtime-inputs', generateBundle() { appInputs = [...this.getModuleIds()]; } }],
   build: { outDir: runtime, emptyOutDir: false, target: 'es2023', minify: true, sourcemap: false, reportCompressedSize: false },
 });
 const html = await readFile(`${runtime}/index.html`, 'utf8');

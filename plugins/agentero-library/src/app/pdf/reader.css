@@ -209,6 +209,12 @@ button.pdf-color.selected { background: var(--swatch); color: #202020; outline: 
 .pdf-mark-popover button { font-size: 11px; }
 .pdf-context-target { width: min(460px, calc(100vw - 24px)); }
 .pdf-context-target form { display: flex; flex-direction: column; gap: 12px; padding: 18px; }
+.reader-manager-layout > .reader-document-header { display: none; }
+.reader-manager-layout > .reader-body > .reader-stage,
+.reader-manager-layout > .reader-body > .pdf-outline-panel,
+.reader-manager-layout > .reader-body > .pdf-notes-sidebar,
+.reader-manager-layout > .reader-body > .pdf-notes-splitter { visibility: hidden; pointer-events: none; }
+.reader-manager-layout > .reader-body > .annotation-manager-frame { position: absolute; z-index: 60; inset: 0; }
 .pdf-context-target label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
 .pdf-context-target .button-row { justify-content: flex-end; }
 @media (prefers-reduced-motion: reduce) { .parity-reader *, .pdf-selection-menu *, .pdf-translation-card * { scroll-behavior: auto !important; } }

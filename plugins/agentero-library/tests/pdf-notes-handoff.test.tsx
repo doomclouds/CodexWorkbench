@@ -24,6 +24,62 @@ import { ReaderTools } from '../src/app/pdf/ReaderTools';
 import { MarksPanel, SelectionToolbar } from '../src/app/pdf/ReaderPanels';
 import { PageView } from '../src/app/pdf/PageView';
 import { INITIAL_READER_VIEW } from '../src/app/pdf/reader-layout';
+import { callTool } from '../src/app/api';
+import type { MarkList, ReaderMark } from '../src/contracts/reader';
+
+it('ignores an older refresh after a successful annotation write advances the revision', async () => {
+  const mark: ReaderMark = { id: 'remark', kind: 'highlight', page: 1, space: 'pt', rects: [], quote: 'source', note: '', color: 'yellow' };
+  const initial: MarkList = { vaultId: 'owned', paperPath: 'papers/one', revision: 'r1', items: [mark], total: 1 };
+  const saved: MarkList = { ...initial, revision: 'r2', items: [{ ...mark, comment: 'saved' }] };
+  let resolveRefresh!: (value: MarkList) => void; const delayed = new Promise<MarkList>(resolve => { resolveRefresh = resolve; });
+  vi.mocked(callTool).mockImplementation(async (tool: string) => { if (tool === 'mark_list') return delayed; if (tool === 'mark_update') return saved; throw new Error(tool); });
+  harness.states[15] = initial; harness.states[6] = { ...INITIAL_READER_VIEW, marksOpen: true };
+  const paper: Paper = { id: 'one', path: 'papers/one', title: 'One', authors: [], tags: [], isRead: false };
+  const render = () => { harness.index = 0; harness.refIndex = 0; return PdfReader({ active: true, vaultId: 'owned', paper, preview: false, canSend: false, canParse: false, onNotes: vi.fn(), onOperation: vi.fn(), onBack: vi.fn() }); };
+  let tree = render(); const panel = find(tree, MarksPanel); panel.props.onRefresh(); await panel.props.onSave(mark, 'saved', 'yellow');
+  resolveRefresh(initial); for (let i = 0; i < 12; i++) await Promise.resolve(); tree = render();
+  expect(find(tree, MarksPanel).props.list.revision).toBe('r2');
+  expect(callTool).toHaveBeenCalledWith('mark_list', expect.objectContaining({ limit: 100 })); vi.mocked(callTool).mockReset();
+});
+
+it('page popover saves acknowledge obsolete shared text while retaining color and reply drafts', async () => {
+  const mark: ReaderMark = { id: 'remark', kind: 'highlight', page: 1, space: 'pt', rects: [], quote: 'source', note: 'A', color: 'yellow' };
+  const initial: MarkList = { vaultId: 'owned', paperPath: 'papers/one', revision: 'r1', items: [mark] };
+  vi.mocked(callTool).mockResolvedValue({ ...initial, revision: 'r2', items: [{ ...mark, comment: 'C' }] });
+  harness.states[0] = { numPages: 1 }; harness.states[15] = initial; harness.states[6] = { ...INITIAL_READER_VIEW, marksOpen: true };
+  const paper: Paper = { id: 'one', path: 'papers/one', title: 'One', authors: [], tags: [], isRead: false };
+  const render = () => { harness.index = 0; harness.refIndex = 0; return PdfReader({ active: true, vaultId: 'owned', paper, preview: false, canSend: false, canParse: false, onNotes: vi.fn(), onOperation: vi.fn(), onBack: vi.fn() }); };
+  let tree = render(); const panel = find(tree, MarksPanel); panel.props.drafts.set(mark.id, { text: 'B', color: 'green', reply: 'keep reply' }); panel.props.commentDrafts.set(mark.id, 'C');
+  await find(tree, PageView).props.onSaveComment(mark, 'C'); tree = render();
+  expect(find(tree, MarksPanel).props.drafts.get(mark.id)).toEqual({ color: 'green', reply: 'keep reply' }); expect(panel.props.commentDrafts.has(mark.id)).toBe(false); vi.mocked(callTool).mockReset();
+});
+
+it('preserves annotation state, checks and drafts across edit, manager and sidebar returns', () => {
+  const paper: Paper = { id: 'one', path: 'papers/one', title: 'One', authors: [], tags: [], isRead: false };
+  harness.states[0] = { numPages: 20 }; harness.states[6] = { ...INITIAL_READER_VIEW, pageNumber: 7, marksOpen: true };
+  const render = () => { harness.index = 0; harness.refIndex = 0; return PdfReader({ active: true, vaultId: 'owned', paper, preview: false, canSend: false, canParse: false, onNotes: vi.fn(), onOperation: vi.fn(), onBack: vi.fn(), readerToolsHost: {} as HTMLElement }); };
+  let tree = render(); let panel = find(tree, MarksPanel);
+  panel.props.onStateChange({ ...panel.props.state, query: 'source', listScrollTop: 321, managerScrollTop: 654 });
+  panel.props.onCheckedChange(new Set(['remark'])); panel.props.drafts.set('remark', { text: 'draft', reply: 'reply draft', color: 'green' }); panel.props.onDraftsChange();
+  panel.props.onSelect({ id: 'remark', page: 8 }); tree = render(); panel = find(tree, MarksPanel); expect(panel.props.selectedId).toBe('remark');
+  panel.props.onEndEdit(); tree = render(); panel = find(tree, MarksPanel); expect(panel.props.selectedId).toBeNull();
+  panel.props.onManage(); tree = render(); panel = find(tree, MarksPanel); expect(panel.props.mode).toBe('manager'); expect(find(tree, PageView)).toBeUndefined();
+  expect(panel.props.pdfDocument).toBe(harness.states[0]); expect(panel.props.currentPage).toBe(7);
+  panel.props.onReturnToReader(); tree = render(); panel = find(tree, MarksPanel); expect(panel.props.mode).toBe('sidebar');
+  panel.props.onClose(); tree = render(); expect(find(tree, MarksPanel)).toBeUndefined();
+  find(tree, ReaderTools).props.actions.toggleMarks(); tree = render(); panel = find(tree, MarksPanel);
+  expect(panel.props.state).toMatchObject({ query: 'source', listScrollTop: 321, managerScrollTop: 654 });
+  expect([...panel.props.checkedIds]).toEqual(['remark']); expect(panel.props.drafts.get('remark')).toEqual({ text: 'draft', reply: 'reply draft', color: 'green' });
+});
+
+it('reports reply drafts as dirty even after the editor and sidebar are closed', () => {
+  const paper: Paper = { id: 'one', path: 'papers/one', title: 'One', authors: [], tags: [], isRead: false }; const onDirtyChange = vi.fn();
+  harness.states[6] = { ...INITIAL_READER_VIEW, marksOpen: true };
+  const render = () => { harness.index = 0; harness.refIndex = 0; harness.effects = []; return PdfReader({ active: true, vaultId: 'owned', paper, preview: false, canSend: false, canParse: false, onNotes: vi.fn(), onOperation: vi.fn(), onBack: vi.fn(), onDirtyChange }); };
+  let tree = render(); const panel = find(tree, MarksPanel); panel.props.drafts.set('remark', { reply: 'unfinished reply' }); panel.props.onDraftsChange(); panel.props.onClose(); tree = render();
+  expect(find(tree, MarksPanel)).toBeUndefined();
+  harness.effects.find(value => value.dependencies[2] === onDirtyChange)!.effect(); expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+});
 
 function find(node: any, type: unknown): any {
   if (!node || typeof node !== 'object') return;

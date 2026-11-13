@@ -15,7 +15,7 @@
   },
   "scripts": {
     "check": "node tooling/check-repository.mjs && pnpm --filter @codexworkbench/agentero-library typecheck",
-    "test": "node --test tooling/check-repository.test.mjs tooling/collect-agentero-licenses.test.mjs tooling/app-sdk-debug.test.mjs && pnpm --filter @codexworkbench/agentero-library test",
+    "test": "node --test tooling/check-repository.test.mjs tooling/collect-agentero-licenses.test.mjs tooling/app-sdk-debug.test.mjs tooling/build-agentero-branding.test.mjs && pnpm --filter @codexworkbench/agentero-library test",
     "build": "pnpm --filter @codexworkbench/agentero-library build"
   }
 }
