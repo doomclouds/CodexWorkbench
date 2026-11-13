@@ -87,6 +87,48 @@ describe('explicit paper Markdown editing', () => {
     expect(renderToStaticMarkup(tree)).toContain('不会自动解析或创建'); expect(harness.rpc).not.toHaveBeenCalled();
   });
 
+  it('prepares a missing-body task only on request, leaving parsing and sending to Codex', async () => {
+    seed('', { document: { ...before, content: '', revision: null as unknown as string, exists: false } });
+    let complete!: () => void; const onGenerateBody = vi.fn(() => new Promise<void>(resolve => { complete = resolve; }));
+    const tree = PaperMarkdownView({ ...props, onGenerateBody });
+    const html = renderToStaticMarkup(tree);
+    expect(html).toContain('只读 · 正文尚未生成'); expect(html).toContain('由你检查并决定发送');
+    expect(onGenerateBody).not.toHaveBeenCalled(); expect(harness.rpc).not.toHaveBeenCalled();
+    const generate = find(tree, node => node.type === 'button' && node.props.children === '让 Codex 生成论文正文')!;
+    generate.props.onClick(); generate.props.onClick(); expect(onGenerateBody).toHaveBeenCalledTimes(1);
+    complete(); await vi.waitFor(() => expect(harness.setters[4]).toHaveBeenCalledWith(expect.stringContaining('尚未开始解析')));
+    expect(harness.rpc).not.toHaveBeenCalled();
+  });
+
+  it('offers a copyable task when the host cannot attach a draft and blocks preview execution', () => {
+    seed('', { document: { ...before, content: '', revision: null as unknown as string, exists: false } });
+    let tree = PaperMarkdownView(props);
+    const task = find(tree, node => node.type === 'textarea' && node.props['aria-label'] === '生成论文正文任务')!;
+    expect(task.props.readOnly).toBe(true); expect(task.props.value).toContain('"synthetic-vault"'); expect(task.props.value).toContain('"papers/a"');
+    expect(task.props.value).toContain('仅在缺失时'); expect(task.props.value).toContain('不覆盖正文');
+    expect(renderToStaticMarkup(tree)).toContain('粘贴到 Codex 输入框并自行发送');
+    const onGenerateBody = vi.fn(); harness.stateIndex = 0; tree = PaperMarkdownView({ ...props, preview: true, onGenerateBody });
+    const generate = find(tree, node => node.type === 'button' && node.props.children === '让 Codex 生成论文正文')!;
+    expect(generate.props.disabled).toBe(true); generate.props.onClick(); expect(onGenerateBody).not.toHaveBeenCalled(); expect(harness.rpc).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed draft attachment without claiming the task was prepared', async () => {
+    seed('', { document: { ...before, content: '', revision: null as unknown as string, exists: false } });
+    const onGenerateBody = vi.fn().mockRejectedValue(new Error('Synthetic host attachment failure'));
+    const tree = PaperMarkdownView({ ...props, onGenerateBody });
+    find(tree, node => node.type === 'button' && node.props.children === '让 Codex 生成论文正文')!.props.onClick();
+    await vi.waitFor(() => expect(harness.setters[3]).toHaveBeenCalledWith('Synthetic host attachment failure'));
+    expect(harness.setters[4]).not.toHaveBeenCalledWith(expect.stringContaining('已附加')); expect(harness.rpc).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a missing body and loads the generated document without a write', async () => {
+    seed('', { document: { ...before, content: '', revision: null as unknown as string, exists: false } }); harness.rpc.mockResolvedValue(before);
+    const tree = PaperMarkdownView(props);
+    find(tree, node => node.type === 'button' && node.props.children === '重新检查正文')!.props.onClick();
+    await vi.waitFor(() => expect(harness.setters[0]).toHaveBeenCalledWith({ key: 'synthetic-vault:papers/a', document: before, content: before.content }));
+    expect(harness.rpc.mock.calls.map(call => call[0])).toEqual(['paper_markdown']);
+  });
+
   it('unmounts the heavy editor while hidden and retains the unsaved Markdown draft', () => {
     seed('Unsaved body retained across tabs.');
     const hidden = PaperMarkdownView({ ...props, active: false });

@@ -12,6 +12,8 @@ export interface TrashEntry {
   /** Number of recorded top-level items in the same delete batch. */
   itemsCount: number;
   pdfAvailable: boolean;
+  /** A stored directory or Markdown file that is safe to open explicitly. */
+  sourceAvailable?: boolean;
   folderAvailable: boolean;
 }
 export interface TrashDiagnostics {
@@ -32,5 +34,6 @@ export interface TrashList {
   restoreSupported: false;
   restoreReason: string;
 }
-export interface TrashOpenInput extends VaultInput { batchId: string; storedId: string; target: 'pdf' | 'folder' }
-export interface TrashOpenResult { requested: true; target: 'pdf' | 'folder' }
+export type TrashOpenTarget = 'pdf' | 'source' | 'folder';
+export interface TrashOpenInput extends VaultInput { batchId: string; storedId: string; target: TrashOpenTarget }
+export interface TrashOpenResult { requested: true; target: TrashOpenTarget }

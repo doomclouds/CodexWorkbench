@@ -2,7 +2,7 @@ import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables 
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
 import { PLUGIN_VERSION } from '../contracts/version';
 import type { AttachReadingContextInput, ReadingContextSummary, ReadingSelectionPart } from '../contracts/context';
-import { readingDraft } from './reading-context-client';
+import { paperMarkdownGenerationDraft, readingDraft } from './reading-context-client';
 import { createPickerClient } from './picker-client';
 import { mergeHostPatch } from './activity';
 
@@ -121,6 +121,16 @@ export async function openLink(value: string): Promise<void> {
   if (result.isError) throw new Error('宿主未能打开此链接，请复制地址后重试。');
 }
 export const openExternalLink = openLink;
+
+export async function appendPaperMarkdownGenerationDraft(input: { vaultId: string; paperPath: string }): Promise<void> {
+  await connect();
+  const message = extensions.message;
+  if (!state.canAttachContext || !message) throw new Error('当前宿主不支持附加任务草稿，请复制任务后手动发送；尚未解析论文。');
+  const paper = await callTool<{ vaultId: string; path: string; title: string }>('paper_get', input);
+  if (paper.vaultId !== input.vaultId || paper.path !== input.paperPath || !paper.title?.trim()) throw new Error('论文引用已变化，请重新打开论文后再附加任务。');
+  const response = await message.send(paperMarkdownGenerationDraft({ ...input, title: paper.title }));
+  if (response.isError) throw new Error('宿主未确认附加任务草稿，请检查输入框后再重试；尚未解析论文。');
+}
 
 export async function attachReadingContext(input: AttachReadingContextInput): Promise<{ contextId: string; attached: true }> {
   await connect();

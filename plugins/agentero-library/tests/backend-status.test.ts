@@ -3,7 +3,7 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, win32 } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CliRequest, CliRunner } from '../src/contracts/types.js';
 import { LibraryService } from '../src/core/library-service.js';
 import { externalPdfCommand, requestExternalPdfOpen } from '../src/infrastructure/external-pdf.js';
@@ -112,17 +112,31 @@ describe('lightweight status and explicit PDF diagnostics', () => {
 describe('explicit system PDF opening', () => {
   it('builds Windows/macOS argv and sends a shell-free request without claiming a visible window', async () => {
     const windows = 'C:\\Vault 中文\\Paper.pdf', mac = '/Users/test/Vault 中文/Paper.pdf';
-    expect(externalPdfCommand(windows, 'win32')).toEqual({ command: win32.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), args: [windows] });
+    const windowsCommand = externalPdfCommand(windows, 'win32');
+    expect(windowsCommand.command).toBe(win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    expect(Buffer.from(windowsCommand.args.at(-1)!, 'base64').toString('utf16le')).toContain('Start-Process -FilePath $env:CODEXWORKBENCH_OPEN_PATH -ErrorAction Stop');
+    expect(windowsCommand.args.join(' ')).not.toContain(windows);
     expect(externalPdfCommand(mac, 'darwin')).toEqual({ command: '/usr/bin/open', args: [mac] });
     const calls: { command: string; args: string[]; options: SpawnOptions }[] = [];
-    let unref = false;
     await requestExternalPdfOpen(windows, { platform: 'win32', spawn(command, args, options) {
       calls.push({ command, args, options }); const child = new EventEmitter() as ChildProcess;
-      child.unref = () => { unref = true; }; queueMicrotask(() => child.emit('spawn')); return child;
+      queueMicrotask(() => { child.emit('spawn'); child.emit('close', 0, null); }); return child;
     } });
-    expect(calls[0]).toMatchObject({ command: win32.join(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe'), args: [windows], options: { shell: false, windowsHide: true, stdio: 'ignore' } }); expect(unref).toBe(true);
+    expect(calls[0]).toMatchObject({ ...windowsCommand, options: { shell: false, windowsHide: true, stdio: 'ignore', env: { CODEXWORKBENCH_OPEN_PATH: windows } } });
     await expect(requestExternalPdfOpen(mac, { platform: 'darwin', spawn() { const child = new EventEmitter() as ChildProcess; queueMicrotask(() => child.emit('error', new Error('ENOENT'))); return child; } })).rejects.toMatchObject({ code: 'EXTERNAL_OPEN_FAILED' });
     expect(() => externalPdfCommand('relative.pdf', 'win32')).toThrow(); expect(() => externalPdfCommand('/tmp/file.pdf', 'linux')).toThrow();
+  });
+  it('waits for dispatch acknowledgment and rejects launcher failures after a successful spawn', async () => {
+    const child = new EventEmitter() as ChildProcess;
+    let accepted = false;
+    const pending = requestExternalPdfOpen('C:\\Vault 中文\\.agentero\\.trash\\batch-one', { platform: 'win32', spawn: () => child }).then(() => { accepted = true; });
+    child.emit('spawn'); await Promise.resolve(); expect(accepted).toBe(false);
+    child.emit('close', 1, null);
+    await expect(pending).rejects.toMatchObject({ code: 'EXTERNAL_OPEN_FAILED' });
+    expect(accepted).toBe(false);
+    const waiting = new EventEmitter() as ChildProcess; waiting.kill = vi.fn(() => true);
+    await expect(requestExternalPdfOpen('/Users/test/Vault 中文', { platform: 'darwin', spawn: () => waiting, timeoutMs: 1 })).rejects.toMatchObject({ code: 'EXTERNAL_OPEN_FAILED', message: expect.stringContaining('超时') });
+    expect(waiting.kill).toHaveBeenCalledOnce();
   });
   it('opens only a validated PDF from the current Vault and never launches during status', async () => {
     const { service, vault, root, vaultId, opened } = await fixture();

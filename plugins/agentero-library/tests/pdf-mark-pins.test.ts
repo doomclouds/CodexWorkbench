@@ -29,16 +29,19 @@ test('text collisions move pins into the reserved page margin and colliding pins
   expect(groups).toHaveLength(2); expect(groups[0].x).toBe(604); expect(groups[0].marks.map(item => item.id)).toEqual(['one', 'two']);
   expect(groups[1].y).toBe(474);
 });
-test('popover flips to available space, stays inside viewport and falls back when selected text leaves no space', () => {
+test('popover flips to available space and dense pages keep an inline preview away from the active source', () => {
   const boundary = { left: 10, top: 20, right: 610, bottom: 800 };
   const source = { left: 50, top: 300, right: 500, bottom: 400 };
   const placed = placeMarkPopover({ left: 510, top: 274, right: 532, bottom: 296 }, boundary, 280, 200, source);
   expect(placed).toEqual({ left: 252, top: 66 });
-  expect(placeMarkPopover({ left: 510, top: 274, right: 532, bottom: 296 }, boundary, 280, 200, source, [{ left: 10, top: 20, right: 610, bottom: 800 }])).toBeNull();
-  expect(placeMarkPopover({ left: 500, top: 300, right: 522, bottom: 322 }, boundary, 300, 400, { left: 10, top: 20, right: 610, bottom: 800 })).toBeNull();
+  const dense = placeMarkPopover({ left: 510, top: 274, right: 532, bottom: 296 }, boundary, 280, 200, source, [boundary]);
+  expect(dense.left).toBeGreaterThanOrEqual(boundary.left); expect(dense.left + 280).toBeLessThanOrEqual(boundary.right);
+  expect(dense.top + 200 <= source.top || dense.top >= source.bottom).toBe(true);
+  const fullSource = placeMarkPopover({ left: 500, top: 300, right: 522, bottom: 322 }, boundary, 300, 400, boundary);
+  expect(fullSource.top).toBeGreaterThanOrEqual(boundary.top); expect(fullSource.top + 400).toBeLessThanOrEqual(boundary.bottom);
 });
 
-test('popover uses nearby free space beyond adjacent lines before falling back to the panel', () => {
+test('popover uses nearby free space beyond adjacent lines', () => {
   const boundary = { left: 10, top: 20, right: 610, bottom: 800 };
   const source = { left: 50, top: 300, right: 500, bottom: 350 };
   const text = [{ left: 10, top: 20, right: 610, bottom: 290 }, { left: 10, top: 300, right: 610, bottom: 420 }];
@@ -46,4 +49,9 @@ test('popover uses nearby free space beyond adjacent lines before falling back t
   expect(placed).not.toBeNull();
   expect(placed!.top).toBeGreaterThanOrEqual(428);
   expect(placed!.top + 210).toBeLessThanOrEqual(boundary.bottom);
+});
+
+test('narrow viewports clamp popup geometry even when no empty text area exists', () => {
+  const boundary = { left: 50, top: 100, right: 260, bottom: 310 };
+  expect(placeMarkPopover({ left: 230, top: 190, right: 252, bottom: 212 }, boundary, 310, 400, boundary, [boundary])).toEqual({ left: 50, top: 100 });
 });

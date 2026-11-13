@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../src/app/api', () => ({ callTool: vi.fn() }));
 import { buildWorkspaceTree, descendantNoteCount, movedPath, renamedPath, validEntryName, type NoteTreeItem } from '../src/app/notes/workspace-model';
-import { FolderPicker, NewNoteDialog } from '../src/app/notes/NoteDialogs';
+import { FolderPicker, NewNoteDialog, NoteActionDialog } from '../src/app/notes/NoteDialogs';
 
 const association = { paperId: 'paper-id', paperPath: 'papers/architecture', paperTitle: '架构整洁之道' };
 const entries: NoteTreeItem[] = [
@@ -21,7 +21,7 @@ describe('paper-linked note tree', () => {
     const [papers, themes] = buildWorkspaceTree(entries);
     expect(papers.name).toBe('论文笔记'); expect(papers.count).toBe(2);
     const paper = papers.children[0]; expect(paper.name).toBe('架构整洁之道');
-    expect(paper.path).toBe('notes/论文/architecture--abc');
+    expect(paper.path).toBeUndefined(); expect(paper.revision).toBeUndefined();
     expect(paper.children.map(node => node.name)).toEqual(['架构原则', '依赖规则']);
     expect(paper.children[0].children[0].path).toBe(entries[3].path);
     expect(themes.children[0].name).toBe('软件设计'); expect(themes.count).toBe(1);
@@ -36,6 +36,15 @@ describe('paper-linked note tree', () => {
   it('does not infer a paper association from a directory name', () => {
     const tree = buildWorkspaceTree([{ path: 'notes/论文/unknown/read.md', parentPath: 'notes/论文/unknown', name: 'read.md', kind: 'file' }]);
     expect(tree[0].children).toEqual([]); expect(tree[1].count).toBe(1);
+  });
+  it('keeps paper groups logical when an associated note lives outside an empty default folder', () => {
+    const folder = entries[1];
+    const note = { ...entries[3], path: 'notes/其他位置/关联笔记.md', parentPath: 'notes/其他位置' };
+    const [papers] = buildWorkspaceTree([folder, note]);
+    const group = papers.children[0];
+    expect(group.count).toBe(1); expect(descendantNoteCount([folder, note], folder.path)).toBe(0);
+    expect(group.path).toBeUndefined(); expect(group.revision).toBeUndefined();
+    expect(group.children[0].children[0].path).toBe(note.path);
   });
 });
 
@@ -55,5 +64,10 @@ describe('note organization dialogs', () => {
     expect(movedPath('notes/topic', 'notes/topic/sub')).toBeNull();
     expect(movedPath('notes/topic/read.md', 'notes/other')).toBe('notes/other/read.md');
     for (const name of ['../bad', 'bad/name', 'CON', 'lpt1.md', 'bad.', '']) expect(validEntryName(name)).toBeNull();
+  });
+  it('identifies the real folder and explains that in-app trash restore is unavailable', () => {
+    const html = renderToStaticMarkup(<NoteActionDialog action="trash" item={entries[2]} items={entries} vaultId="test" affectedCount={1} onClose={vi.fn()} onSubmit={vi.fn()} />);
+    expect(html).toContain('文件夹：架构原则'); expect(html).toContain(entries[2].path);
+    expect(html).toContain('此实际文件夹包含 1 篇笔记'); expect(html).toContain('尚不支持从回收站恢复');
   });
 });

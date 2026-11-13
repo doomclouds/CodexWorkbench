@@ -7,7 +7,9 @@
 .reader-more__menu { position: absolute; top: calc(100% + 7px); right: 0; z-index: 80; display: flex; flex-direction: column; width: 190px; max-width: calc(100cqw - 16px); padding: 5px; border: 1px solid var(--line); border-radius: 9px; background: var(--app-bg); box-shadow: 0 8px 28px #0003; }
 .reader-more__menu > button { justify-content: flex-start; border: 0; border-radius: 5px; padding: 7px 9px; min-height: 31px; font-size: 12px; text-align: left; }
 .reader-more__menu > button[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); }
-.reader-stage { display: flex; position: relative; flex: 1; min-width: 0; min-height: 0; container-type: inline-size; container-name: reader-stage; }
+.reader-stage { display: flex; flex-direction: column; position: relative; flex: 1; min-width: 0; min-height: 0; container-type: inline-size; container-name: reader-stage; }
+.reader-canvas-stage { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; }
+.reader-canvas-stage > .pdf-viewport { min-height: 0; }
 .reader-menu-language { display: flex; flex-direction: column; gap: 6px; padding: 8px 9px; margin: 3px 0; border-block: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .reader-menu-language select { width: 100%; min-width: 0; padding: 5px; font-size: 11px; }
 .parity-reader.reader-sidebar-layout .parity-viewport { padding: 8px; background: var(--panel-bg); }
@@ -75,6 +77,11 @@
 .parity-reader .pdf-parity-footer > button:last-child { font-size: 11px; min-height: 26px; padding: 3px 6px; }
 .parity-reader .pdf-parity-footer > span { margin-left: 2px; }
 .pdf-selection-menu { position: fixed; z-index: 100; color: var(--text); background: var(--app-bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px #0003; max-height: calc(100vh - 16px); overflow: auto; padding: 7px; }
+.pdf-selection-menu--docked { position: relative; z-index: 26; flex: 0 1 auto; width: 100%; min-height: 0; max-height: 48%; border-radius: 0; box-shadow: 0 -3px 14px #0002; }
+.pdf-selection-source { margin: 5px 0; padding-left: 8px; border-left: 2px solid var(--line); color: var(--muted); max-height: 3em; overflow: auto; font-size: 11px; line-height: 1.5; }
+.pdf-selection-resume { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 9px; border-top: 1px solid var(--line); background: var(--app-bg); font-size: 11px; }
+.pdf-selection-resume > span { margin-right: auto; color: var(--muted); }
+.pdf-selection-resume button { font-size: 11px; padding: 4px 7px; }
 .pdf-selection-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }
 .pdf-selection-buttons { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
 .pdf-selection-buttons > button { min-height: 28px; padding: 3px 6px; font-size: 11px; border-color: transparent; }
@@ -83,9 +90,9 @@
 .pdf-selection-submit > span { color: var(--muted); font-size: 10px; }
 .pdf-selection-submit button { min-height: 29px; font-size: 12px; }
 .pdf-colors { display: inline-flex; align-items: center; gap: 3px; }
-button.pdf-color { width: 19px; height: 19px; min-width: 19px; min-height: 19px; padding: 0; border: 0; border-radius: 50%; background: var(--swatch); color: #202020; box-shadow: inset 0 0 0 1px #0002; }
+button.pdf-color { width: 23px; height: 23px; min-width: 23px; min-height: 23px; padding: 0; border: 3px solid var(--app-bg); border-radius: 50%; background: var(--swatch); color: #202020; box-shadow: inset 0 0 0 1px #0002; }
 button.pdf-color:hover { background: var(--swatch); filter: brightness(.95); }
-button.pdf-color.selected { background: var(--swatch); color: #202020; outline: 1px solid var(--muted); outline-offset: 1px; }
+button.pdf-color.selected { background: var(--swatch); color: #202020; outline: 2px solid var(--text); outline-offset: -1px; }
 .pdf-crop-preview { display: block; max-width: 100%; max-height: 140px; margin: 5px auto; object-fit: contain; border: 1px solid var(--line); }
 .pdf-translation-card { position: fixed; z-index: 110; background: var(--app-bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 36px #0004; display: flex; flex-direction: column; max-height: calc(100vh - 16px); }
 .pdf-translation-card > header { display: flex; align-items: center; gap: 5px; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
@@ -142,12 +149,14 @@ button.pdf-color.selected { background: var(--swatch); color: #202020; outline: 
 .pdf-export-actions > span { width: 100%; font-size: 11px; color: var(--muted); }
 .pdf-export-actions button { font-size: 10px; min-height: 26px; padding: 3px 5px; }
 .pdf-notes-sidebar { flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--app-bg); color: var(--text); border-left: 1px solid var(--line); }
-.pdf-notes-splitter { position: relative; flex: 0 0 8px; width: 8px; cursor: col-resize; touch-action: none; background: var(--app-bg); }
+.pdf-notes-splitter { position: relative; flex: 0 0 8px; width: 8px; display: flex; align-items: center; justify-content: center; cursor: col-resize; touch-action: none; background: var(--app-bg); }
 .pdf-notes-splitter::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: var(--line); }
 .pdf-notes-splitter:hover::after, .pdf-notes-splitter:focus-visible::after { background: var(--accent); }
+.pdf-notes-splitter-grip { position: relative; z-index: 1; display: block; width: 6px; height: 38px; border: 1px solid var(--muted); border-radius: 4px; background: var(--app-bg); }
+.pdf-notes-splitter-grip::after { content: ''; position: absolute; inset: 8px 1px; background: repeating-linear-gradient(to bottom, var(--muted) 0 2px, transparent 2px 5px); }
+.pdf-notes-splitter:hover .pdf-notes-splitter-grip, .pdf-notes-splitter:focus-visible .pdf-notes-splitter-grip { border-color: var(--accent); }
 .pdf-notes-splitter:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .reader-notes-overlay-layout .pdf-notes-sidebar { position: absolute; z-index: 50; inset: 0 0 0 auto; max-width: calc(100% - 16px); height: 100%; max-height: none; box-shadow: -8px 0 28px #0003; }
-.pdf-notes-sidebar .note-heading { padding: 12px; }
 .pdf-notes-sidebar .markdown-editor { font-size: 12px; }
 .pdf-notes-sidebar .notes-view { flex: 1; min-height: 0; }
 .pdf-notes-sidebar .note-workspace { min-height: 0; }
@@ -165,13 +174,18 @@ button.pdf-color.selected { background: var(--swatch); color: #202020; outline: 
 .pdf-mark-select-tools { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px 8px; font-size: 11px; }
 .pdf-mark-select-tools label { display: flex; align-items: center; gap: 4px; }
 .pdf-mark-select-tools button, .pdf-marks-pagination button { min-height: 25px; padding: 3px 6px; font-size: 10px; }
-.pdf-mark-pages { display: flex; flex-wrap: wrap; gap: 4px; max-height: 86px; overflow: auto; padding: 0 8px 8px; border-bottom: 1px solid var(--line); }
-.pdf-mark-pages button { min-height: 24px; padding: 3px 6px; font-size: 10px; }
-.pdf-mark-page-group > header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 7px; padding: 7px 3px; background: var(--panel-bg); font-size: 11px; }
-.pdf-mark-page-group > header small { margin-left: auto; color: var(--muted); }
+.pdf-mark-page-group { margin-bottom: 10px; }
+.pdf-mark-page-group > header { position: sticky; top: 0; z-index: 1; background: var(--panel-bg); border: 1px solid var(--line); border-radius: 5px; font-size: 11px; }
+.pdf-mark-page-select { display: flex; align-items: center; gap: 7px; width: 100%; min-height: 34px; padding: 5px 8px; cursor: pointer; }
+.pdf-mark-page-select small { margin-left: auto; color: var(--muted); }
+.pdf-mark-page-children { margin: 4px 0 0 14px; padding-left: 9px; border-left: 1px solid var(--line); }
 .pdf-mark-choice { display: flex; align-items: flex-start; gap: 4px; }
-.pdf-mark-choice > input { margin-top: 13px; flex: none; }
+.pdf-mark-check { display: flex; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; min-height: 34px; margin-top: 2px; border-radius: 5px; cursor: pointer; }
+.pdf-mark-check:hover, .pdf-mark-choice.checked .pdf-mark-check { background: var(--accent-soft); }
+.pdf-mark-page-select input, .pdf-mark-check input { margin: 0; cursor: pointer; }
 .pdf-mark-choice .pdf-mark-entry { flex: 1; min-width: 0; }
+.pdf-mark-entry.editing { border-color: var(--line); box-shadow: inset 2px 0 var(--accent); background: var(--panel-bg); }
+.pdf-mark-editing { color: var(--accent); }
 .pdf-marks-panel > .pdf-mark-editor { flex: 0 1 35%; min-height: 0; max-height: 35%; }
 .pdf-marks-panel > .pdf-export-actions { display: block; padding-block: 6px; }
 .pdf-export-actions summary { color: var(--muted); font-size: 10px; cursor: pointer; }

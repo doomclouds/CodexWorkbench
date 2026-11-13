@@ -57,6 +57,7 @@ export function buildWorkspaceTree(items: NoteTreeItem[], filter = ''): Workspac
   const papers: WorkspaceNode = { key: 'papers', name: '论文笔记', kind: 'group', children: [], count: 0 };
   const themes: WorkspaceNode = { key: 'themes', name: '主题笔记', kind: 'group', children: [], count: 0 };
   const groups = new Map<string, WorkspaceNode>();
+  const groupFolders = new Map<string, string>();
   for (const item of items) {
     if (!item.paperPath) continue;
     let group = groups.get(item.paperPath);
@@ -64,16 +65,18 @@ export function buildWorkspaceTree(items: NoteTreeItem[], filter = ''): Workspac
       group = { key: `paper:${item.paperPath}`, name: item.paperTitle || item.paperPath.split('/').at(-1)!, paperPath: item.paperPath, kind: 'group', children: [], count: 0 };
       groups.set(item.paperPath, group); papers.children.push(group);
     }
-    if (item.kind === 'directory' && item.parentPath === 'notes/论文') { group.path = item.path; group.revision = item.revision ?? undefined; }
+    // A paper group is a logical association, never a physical operation target.
+    if (item.kind === 'directory' && item.parentPath === 'notes/论文') groupFolders.set(item.paperPath, item.path);
   }
   for (const item of items) {
     const root = item.paperPath ? groups.get(item.paperPath)! : themes;
-    if (item.kind === 'directory' && (item.path === 'notes/论文' || item.path === 'notes/主题' || item.path === root.path)) continue;
+    const groupFolder = item.paperPath ? groupFolders.get(item.paperPath) : undefined;
+    if (item.kind === 'directory' && (item.path === 'notes/论文' || item.path === 'notes/主题' || item.path === groupFolder)) continue;
     // Directories already represented under a paper are not repeated as theme folders.
     if (!item.paperPath && item.kind === 'directory' && items.some(child => child.path.startsWith(`${item.path}/`) && child.paperPath)) {
       if (!items.some(child => child.kind === 'file' && !child.paperPath && child.path.startsWith(`${item.path}/`))) continue;
     }
-    const base = root.path && item.path.startsWith(`${root.path}/`) ? root.path : !item.paperPath && item.path.startsWith('notes/主题/') ? 'notes/主题' : 'notes';
+    const base = groupFolder && item.path.startsWith(`${groupFolder}/`) ? groupFolder : !item.paperPath && item.path.startsWith('notes/主题/') ? 'notes/主题' : 'notes';
     addPath(root, item, base, map);
   }
   const roots = [papers, themes]; roots.forEach(finish);

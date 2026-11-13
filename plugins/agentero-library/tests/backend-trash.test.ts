@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { LibraryError } from '../src/contracts/errors.js';
 import { LibraryService } from '../src/core/library-service.js';
 import type { TrashOpenInput } from '../src/contracts/trash.js';
 import { diagnosticPdf } from '../src/infrastructure/pdf-probe.js';
@@ -14,7 +15,7 @@ async function temporary() {
   cleanup.push(async () => { expect(dirname(root)).toBe(parent); expect(basename(root).startsWith('codex-trash-owned-')).toBe(true); await rm(root, { recursive: true, force: true }); });
   return root;
 }
-async function fixture(options: { snapshotTtlMs?: number } = {}) {
+async function fixture(options: { snapshotTtlMs?: number; externalPdfOpener?: (path: string) => Promise<void> } = {}) {
   const root = await temporary(), vault = join(root, 'Vault 中文'), opened: string[] = [];
   for (const part of ['.agentero', 'papers', 'notes']) await mkdir(join(vault, part), { recursive: true });
   await writeFile(join(vault, '.agentero/catalog.sqlite'), 'owned mock catalog');
@@ -66,6 +67,27 @@ describe('read-only Agentero v0.15.2 trash', () => {
     await expect(service.openTrash({ ...input, storedId: '../outside.pdf', target: 'pdf' })).rejects.toMatchObject({ code: 'INVALID_TRASH_PATH' });
     await expect(service.openTrash({ ...input, storedId: 'not-registered', target: 'folder' })).rejects.toMatchObject({ code: 'TRASH_ITEM_NOT_FOUND' });
     await expect(service.openTrash({ ...input, target: 'file' } as unknown as TrashOpenInput)).rejects.toMatchObject({ code: 'INVALID_TRASH_PATH' }); expect(opened).toHaveLength(2);
+  });
+  it('opens registered Markdown and directory sources, never an executable disguised by the original name', async () => {
+    const { service, vault, vaultId, opened } = await fixture();
+    const path = await batch(vault, 'batch-sources', [{ rel: 'notes/中文 & reading.md', stored: '0__中文 & reading.md' }, { rel: 'notes/Chapter', stored: '1__Chapter' }, { rel: 'notes/looks-like-note.md', stored: '2__program.exe' }]);
+    await writeFile(join(path, '0__中文 & reading.md'), '# synthetic note'); await mkdir(join(path, '1__Chapter')); await writeFile(join(path, '2__program.exe'), 'owned fake executable');
+    const before = await readFile(join(path, 'manifest.json'));
+    const list = await service.listTrash({ vaultId });
+    expect(list.items.find(item => item.storedId === '0__中文 & reading.md')).toMatchObject({ kind: 'note', sourceAvailable: true, pdfAvailable: false });
+    expect(list.items.find(item => item.storedId === '1__Chapter')).toMatchObject({ kind: 'directory', sourceAvailable: true });
+    expect(list.items.find(item => item.storedId === '2__program.exe')).toMatchObject({ sourceAvailable: false });
+    const input = { vaultId, batchId: 'batch-sources', target: 'source' as const };
+    expect(await service.openTrash({ ...input, storedId: '0__中文 & reading.md' })).toEqual({ requested: true, target: 'source' });
+    await service.openTrash({ ...input, storedId: '1__Chapter' });
+    await expect(service.openTrash({ ...input, storedId: '2__program.exe' })).rejects.toMatchObject({ code: 'INVALID_TRASH_PATH' });
+    expect(opened).toEqual([join(path, '0__中文 & reading.md'), join(path, '1__Chapter')]);
+    expect(await readFile(join(path, 'manifest.json'))).toEqual(before);
+  });
+  it('reports a rejected system launch instead of claiming the trash directory opened', async () => {
+    const { service, vault, vaultId } = await fixture({ externalPdfOpener: async () => { throw new LibraryError('EXTERNAL_OPEN_FAILED', '系统未接受打开请求'); } });
+    await paperBatch(vault, 'batch-open-failure');
+    await expect(service.openTrash({ vaultId, batchId: 'batch-open-failure', storedId: '0__deleted-paper', target: 'folder' })).rejects.toMatchObject({ code: 'TRASH_OPEN_FAILED', message: '系统未接受打开请求' });
   });
   it('skips corrupt, oversized and excessive-item manifests with bounded diagnostics', async () => {
     const { service, vault, vaultId } = await fixture(); await paperBatch(vault, 'batch-valid');

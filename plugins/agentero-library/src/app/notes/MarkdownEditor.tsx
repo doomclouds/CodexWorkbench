@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Bold, Code, FileCode, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Quote, Radical, Search, Strikethrough, Table, X } from 'lucide-react';
+import { Bold, Code, FileCode, ImagePlus, Italic, Link, List, ListChecks, ListOrdered, Quote, Radical, Search, SlidersHorizontal, Strikethrough, Table, X } from 'lucide-react';
 import { ListStyleType, toggleList } from '@platejs/list';
 import { insertTable } from '@platejs/table';
 import { ElementApi, KEYS, NodeApi, type TRange } from 'platejs';
@@ -17,11 +17,13 @@ interface Props {
   value: string; onChange(value: string): void; environment: NoteEnvironment;
   onSave(): void; saveDisabled: boolean;
   imageInsertionDisabled?: boolean;
+  compact?: boolean;
 }
 interface InsertAction { insert(markdown: string): void }
 
-export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, environment, onSave, saveDisabled, imageInsertionDisabled = false }: Props) {
+export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, environment, onSave, saveDisabled, imageInsertionDisabled = false, compact = false }: Props) {
   const [mode, setMode] = useState<Mode>('rich'); const [findOpen, setFindOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [linkKind, setLinkKind] = useState<'link' | 'wiki' | null>(null); const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [error, setError] = useState(''); const fileInput = useRef<HTMLInputElement>(null); const source = useRef<HTMLTextAreaElement>(null);
   const insert = useRef<InsertAction | null>(null); const parts = splitNoteMarkdown(value);
@@ -58,23 +60,23 @@ export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, en
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setFindOpen(true); }
       if (event.key === 'Escape') setFindOpen(false);
     }}>
-      <div className="note-editor-modes"><div className="note-mode-switch" role="group" aria-label="Markdown 显示方式">{([['rich', '编辑'], ['source', 'Markdown'], ['preview', '预览']] as const).map(([key, label]) => <button key={key} className={mode === key ? 'selected' : ''} disabled={attachmentBusy} aria-pressed={mode === key} onClick={() => { setMode(key); setError(''); }}>{label}</button>)}</div><span className="toolbar-spacer" /><button onClick={() => setFindOpen(value => !value)} aria-label="查找和替换"><Search size={15} /></button><button disabled={saveDisabled} onClick={onSave}>保存</button></div>
-      {parts.prefix && mode !== 'source' && <details className="note-metadata"><summary>文档元数据（保持原样）</summary><pre>{parts.prefix}</pre></details>}
+      <div className="note-editor-modes">{compact ? <><select aria-label="Markdown 显示方式" value={mode} disabled={attachmentBusy} onChange={event => { setMode(event.target.value as Mode); setError(''); }}><option value="rich">编辑</option><option value="source">Markdown</option><option value="preview">预览</option></select><button aria-label="格式与文档信息" title="格式与文档信息" aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}><SlidersHorizontal size={15} /></button></> : <div className="note-mode-switch" role="group" aria-label="Markdown 显示方式">{([['rich', '编辑'], ['source', 'Markdown'], ['preview', '预览']] as const).map(([key, label]) => <button key={key} className={mode === key ? 'selected' : ''} disabled={attachmentBusy} aria-pressed={mode === key} onClick={() => { setMode(key); setError(''); }}>{label}</button>)}</div>}<span className="toolbar-spacer" /><button onClick={() => setFindOpen(value => !value)} aria-label="查找和替换" title="查找和替换"><Search size={15} /></button><button disabled={saveDisabled} onClick={onSave}>保存</button></div>
+      {parts.prefix && mode !== 'source' && (!compact || toolsOpen) && <details className="note-metadata"><summary>文档元数据（保持原样）</summary><pre>{parts.prefix}</pre></details>}
       {error && <p className="callout error" role="alert">{error}</p>}
       {mode === 'source' ? <>
-        <div className="note-rich-toolbar" role="toolbar" aria-label="Markdown 格式">
+        {(!compact || toolsOpen) && <div className="note-rich-toolbar" role="toolbar" aria-label="Markdown 格式">
           <Tool label="加粗" onClick={() => changeSource('**', '**', '文字')}><Bold size={15} /></Tool><Tool label="斜体" onClick={() => changeSource('*', '*', '文字')}><Italic size={15} /></Tool><Tool label="删除线" onClick={() => changeSource('~~', '~~', '文字')}><Strikethrough size={15} /></Tool><Tool label="行内代码" onClick={() => changeSource('`', '`', 'code')}><Code size={15} /></Tool>
           <select aria-label="标题级别" value="" onChange={event => { changeSource(`${event.target.value} `); }}><option value="" disabled>标题</option>{[1, 2, 3, 4, 5, 6].map(level => <option key={level} value={'#'.repeat(level)}>H{level}</option>)}</select>
           <Tool label="无序列表" onClick={() => changeSource('- ')}><List size={15} /></Tool><Tool label="有序列表" onClick={() => changeSource('1. ')}><ListOrdered size={15} /></Tool><Tool label="任务列表" onClick={() => changeSource('- [ ] ')}><ListChecks size={15} /></Tool><Tool label="引用" onClick={() => changeSource('> ')}><Quote size={15} /></Tool>
           <Tool label="代码块" onClick={() => changeSource('\n```\n', '\n```\n', 'code')}><FileCode size={15} /></Tool><Tool label="插入链接" onClick={() => setLinkKind('link')}><Link size={15} /></Tool><Tool label="插入双链或论文引用" onClick={() => setLinkKind('wiki')}>[[ ]]</Tool>
           <Tool label="表格" onClick={() => changeSource('\n| 标题 | 内容 |\n| --- | --- |\n|  |  |\n')}><Table size={15} /></Tool><Tool label="公式" onClick={() => changeSource('\n$$\n', '\n$$\n', 'E = mc^2')}><Radical size={15} /></Tool><Tool label="图片附件" disabled={environment.preview || attachmentBusy || imageInsertionDisabled} onClick={() => fileInput.current?.click()}><ImagePlus size={15} /></Tool>
-        </div>
+        </div>}
         {findOpen && <SourceFind text={value} onChange={onChange} textarea={source} onClose={() => setFindOpen(false)} />}
         <textarea ref={source} className="markdown-editor note-source-editor" aria-label="笔记 Markdown 内容" value={value} onChange={event => onChange(event.target.value)} spellCheck={false} placeholder="# 阅读笔记" onKeyDown={event => {
           if (event.key === 'Tab') { event.preventDefault(); changeSource('  '); }
           if ((event.ctrlKey || event.metaKey) && ['b', 'i'].includes(event.key.toLowerCase())) { event.preventDefault(); changeSource(event.key.toLowerCase() === 'b' ? '**' : '*', event.key.toLowerCase() === 'b' ? '**' : '*'); }
         }} />
-      </> : <RichNote key={mode} markdown={value} readOnly={mode === 'preview'} onMarkdown={onChange} findOpen={findOpen} onCloseFind={() => setFindOpen(false)} insert={insert} onLink={() => setLinkKind('link')} onWiki={() => setLinkKind('wiki')} onImage={() => fileInput.current?.click()} imageDisabled={environment.preview || attachmentBusy || imageInsertionDisabled} />}
+      </> : <RichNote key={mode} markdown={value} readOnly={mode === 'preview'} toolbarVisible={!compact || toolsOpen} onMarkdown={onChange} findOpen={findOpen} onCloseFind={() => setFindOpen(false)} insert={insert} onLink={() => setLinkKind('link')} onWiki={() => setLinkKind('wiki')} onImage={() => fileInput.current?.click()} imageDisabled={environment.preview || attachmentBusy || imageInsertionDisabled} />}
       <input ref={fileInput} type="file" className="sr-only" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" aria-label="选择笔记图片附件" onChange={event => { const file = event.target.files?.[0]; if (file) void importImage(file); }} />
       {attachmentBusy && <p className="inline-notice" role="status">正在保存图片附件…</p>}
       {linkKind && <LinkDialog wiki={linkKind === 'wiki'} notePath={environment.notePath} onClose={() => setLinkKind(null)} onInsert={(target, label) => { setLinkKind(null); insertMarkdown(linkKind === 'wiki' ? `[[${target}${label && label !== target ? `|${label}` : ''}]]` : `[${label || target}](${target})`); }} />}
@@ -87,9 +89,10 @@ export function MarkdownPreview({ markdown, environment }: { markdown: string; e
   return <NoteEnvironmentContext.Provider value={environment}><div className="note-editor-shell"><RichNote markdown={markdown} readOnly onMarkdown={() => {}} findOpen={false} onCloseFind={() => {}} insert={insert} onLink={() => {}} onWiki={() => {}} onImage={() => {}} imageDisabled /></div></NoteEnvironmentContext.Provider>;
 }
 
-function RichNote({ markdown, readOnly, onMarkdown, findOpen, onCloseFind, insert, onLink, onWiki, onImage, imageDisabled }: {
+function RichNote({ markdown, readOnly, onMarkdown, findOpen, onCloseFind, insert, onLink, onWiki, onImage, imageDisabled, toolbarVisible = true }: {
   markdown: string; readOnly: boolean; onMarkdown(value: string): void; findOpen: boolean; onCloseFind(): void;
   insert: React.RefObject<InsertAction | null>; onLink(): void; onWiki(): void; onImage(): void; imageDisabled: boolean;
+  toolbarVisible?: boolean;
 }) {
   const editor = usePlateEditor({ plugins: notePlugins, value: instance => deserializeNote(instance, markdown), shouldNormalizeEditor: true }, []);
   const published = useRef(markdown); const prefix = useRef(splitNoteMarkdown(markdown).prefix); const baseline = useRef<string | null>(null); const resetting = useRef(false);
@@ -108,7 +111,7 @@ function RichNote({ markdown, readOnly, onMarkdown, findOpen, onCloseFind, inser
     const next = serializeNote(editor, prefix.current); if (next === baseline.current) return;
     baseline.current = next; published.current = next; onMarkdown(next);
   }}>
-    {!readOnly && <RichToolbar onLink={onLink} onWiki={onWiki} onImage={onImage} imageDisabled={imageDisabled} />}
+    {!readOnly && toolbarVisible && <RichToolbar onLink={onLink} onWiki={onWiki} onImage={onImage} imageDisabled={imageDisabled} />}
     {findOpen && <RichFind readOnly={readOnly} onClose={onCloseFind} />}
     <div className="note-rich-scroll"><PlateContent aria-label={readOnly ? '笔记 Markdown 预览' : '笔记富文本内容'} className="note-rich-content" readOnly={readOnly} placeholder="开始记录想法，或输入 Markdown…" spellCheck={false} /></div>
   </Plate>;

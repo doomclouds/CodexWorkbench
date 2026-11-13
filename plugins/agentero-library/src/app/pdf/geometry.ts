@@ -49,6 +49,33 @@ export function usefulRects(rects: MarkRect[]): MarkRect[] {
   }
   return result;
 }
+/** Subtract occupied areas without bridging any line or column gaps. */
+export function subtractRects(rects: MarkRect[], occupied: MarkRect[]): MarkRect[] {
+  let remaining = usefulRects(rects);
+  for (const other of occupied) remaining = remaining.flatMap(rect => subtractRect(rect, other));
+  return remaining;
+}
+export function markPointRects(mark: ReaderMark, geometry: PageGeometry): MarkRect[] {
+  return usefulRects(mark.rects.map(rect => mark.space === 'norm' ? { x: rect.x * geometry.width, y: rect.y * geometry.height, w: rect.w * geometry.width, h: rect.h * geometry.height } : rect));
+}
+export interface MarkVisualLayer { color: string; opacity: number; rects: MarkRect[] }
+/** A saved area is painted once, even when several records cover it. */
+export function markVisualLayers(marks: ReaderMark[], geometry: PageGeometry): { fills: MarkVisualLayer[]; underlines: MarkVisualLayer[] } {
+  const fills = new Map<string, MarkVisualLayer>(); const underlines = new Map<string, MarkVisualLayer>(); const occupied: MarkRect[] = [];
+  // Later records supply the visible color where differently colored marks overlap.
+  for (const mark of [...marks].reverse()) {
+    const color = mark.kind === 'translate' ? '#60a5fa' : mark.kind === 'ask' ? '#4ade80' : COLOR_HEX[mark.color ?? 'yellow'];
+    const opacity = mark.kind === 'visual' ? .12 : .35; const points = markPointRects(mark, geometry);
+    const target = mark.kind === 'underline' ? underlines : fills; const key = `${color}:${opacity}`;
+    const rects = mark.kind === 'underline' ? points : subtractRects(points, occupied);
+    if (!rects.length) continue;
+    const layer = target.get(key) ?? { color, opacity, rects: [] }; layer.rects.push(...rects); target.set(key, layer);
+    if (mark.kind !== 'underline') occupied.push(...rects);
+  }
+  return { fills: [...fills.values()], underlines: [...underlines.values()].map(layer => ({ ...layer, rects: usefulRects(layer.rects) })) };
+}
+export function rectsPath(rects: MarkRect[]): string { return rects.map(rect => `M${rect.x} ${rect.y}h${rect.w}v${rect.h}h${-rect.w}Z`).join(' '); }
+export function rectsUnderlinePath(rects: MarkRect[]): string { return rects.map(rect => `M${rect.x} ${rect.y + rect.h}h${rect.w}`).join(' '); }
 function containsRect(outer: MarkRect, inner: MarkRect) { return outer.x <= inner.x && outer.y <= inner.y && outer.x + outer.w >= inner.x + inner.w && outer.y + outer.h >= inner.y + inner.h; }
 function subtractRect(rect: MarkRect, other: MarkRect): MarkRect[] {
   const left = Math.max(rect.x, other.x); const right = Math.min(rect.x + rect.w, other.x + other.w);

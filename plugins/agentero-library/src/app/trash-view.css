@@ -15,18 +15,19 @@
 .trash-item-title svg { color: var(--muted); flex-shrink: 0; margin-top: 2px; }
 .trash-item-title span { min-width: 0; overflow-wrap: anywhere; }
 .trash-item-time { color: var(--muted); font-size: 11px; line-height: 1.8; white-space: nowrap; }
+.trash-item-kind { grid-column: 1 / -1; color: var(--muted); font-size: 11px; padding-left: 23px; }
 .trash-item-origin { display: flex; gap: 8px; grid-column: 1 / -1; min-width: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .trash-item-origin > span:first-child { flex-shrink: 0; }
 .trash-item-origin > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .trash-batch-size { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
-.trash-row-actions { display: flex; flex-wrap: wrap; gap: 5px; flex-shrink: 0; }
+.trash-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; flex: 0 1 auto; max-width: 45%; }
 .trash-row-actions button { font-size: 12px; }
 .trash-footer { flex-wrap: wrap; }
 .trash-footer > span { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 760px) {
   .trash-row { align-items: flex-start; flex-direction: column; gap: 10px; }
   .trash-row-main { width: 100%; }
-  .trash-row-actions { padding-left: 22px; }
+  .trash-row-actions { padding-left: 22px; justify-content: flex-start; max-width: 100%; }
 }
 @media (max-width: 420px) {
   .trash-search { flex-wrap: wrap; gap: 4px; }

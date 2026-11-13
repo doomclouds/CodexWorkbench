@@ -62592,7 +62592,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.4.0";
+var PLUGIN_VERSION = "0.4.1";
 
 // src/infrastructure/native-mcp.ts
 var replayableReads = /* @__PURE__ */ new Set(["vault_list", "paper_get", "paper_paths", "vault_search", "page_read", "paper_text_get", "file_read", "file_list", "paper_notes_get"]);
@@ -62902,23 +62902,37 @@ async function writePdfDiagnostic(dataRoot, identity, result) {
 import { spawn as spawn2 } from "node:child_process";
 import { posix, win32 } from "node:path";
 function externalPdfCommand(path, platform = process.platform) {
-  if (!(platform === "win32" ? win32.isAbsolute(path) : posix.isAbsolute(path)) || path.includes("\0")) throw new LibraryError("INVALID_PATH", "\u7CFB\u7EDF\u9605\u8BFB\u5668\u9700\u8981\u672C\u5730 PDF \u7684\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-  if (platform === "win32") return { command: win32.join(process.env.SystemRoot || "C:\\Windows", "explorer.exe"), args: [path] };
+  if (!(platform === "win32" ? win32.isAbsolute(path) : posix.isAbsolute(path)) || path.includes("\0")) throw new LibraryError("INVALID_PATH", "\u7CFB\u7EDF\u6253\u5F00\u64CD\u4F5C\u9700\u8981\u672C\u5730\u6587\u4EF6\u6216\u76EE\u5F55\u7684\u7EDD\u5BF9\u8DEF\u5F84\u3002");
+  if (platform === "win32") {
+    const script = "try { Start-Process -FilePath $env:CODEXWORKBENCH_OPEN_PATH -ErrorAction Stop; exit 0 } catch { exit 1 }";
+    return { command: win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), args: ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")] };
+  }
   if (platform === "darwin") return { command: "/usr/bin/open", args: [path] };
-  throw new LibraryError("PLATFORM_UNSUPPORTED", "\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u5DF2\u914D\u7F6E\u7684\u7CFB\u7EDF PDF \u6253\u5F00\u65B9\u5F0F\u3002");
+  throw new LibraryError("PLATFORM_UNSUPPORTED", "\u5F53\u524D\u5E73\u53F0\u6CA1\u6709\u5DF2\u914D\u7F6E\u7684\u7CFB\u7EDF\u6253\u5F00\u65B9\u5F0F\u3002");
 }
 async function requestExternalPdfOpen(path, options = {}) {
   const launch = externalPdfCommand(path, options.platform);
   await new Promise((resolve5, reject) => {
+    let child;
+    let settled = false;
+    const fail = () => new LibraryError("EXTERNAL_OPEN_FAILED", "\u7CFB\u7EDF\u672A\u63A5\u53D7\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u5E94\u7528\u6216\u6587\u4EF6\u7BA1\u7406\u5668\u3002");
+    const finish = (error62) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error62) reject(error62);
+      else resolve5();
+    };
+    const timer = setTimeout(() => {
+      finish(new LibraryError("EXTERNAL_OPEN_FAILED", "\u7CFB\u7EDF\u6253\u5F00\u8BF7\u6C42\u8D85\u65F6\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u5E94\u7528\u6216\u6587\u4EF6\u7BA1\u7406\u5668\u540E\u91CD\u8BD5\u3002"));
+      child?.kill();
+    }, options.timeoutMs ?? 1e4);
     try {
-      const child = (options.spawn ?? spawn2)(launch.command, launch.args, { shell: false, windowsHide: true, detached: true, stdio: "ignore" });
-      child.once("error", () => reject(new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002")));
-      child.once("spawn", () => {
-        child.unref();
-        resolve5();
-      });
+      child = (options.spawn ?? spawn2)(launch.command, launch.args, { shell: false, windowsHide: true, stdio: "ignore", env: { ...process.env, CODEXWORKBENCH_OPEN_PATH: path } });
+      child.once("error", () => finish(fail()));
+      child.once("close", (code, signal) => finish(code === 0 && !signal ? void 0 : fail()));
     } catch {
-      reject(new LibraryError("EXTERNAL_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF PDF \u9605\u8BFB\u5668\u53D1\u9001\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u3002"));
+      finish(fail());
     }
   });
 }
@@ -63077,7 +63091,8 @@ async function scanTrash(vault2) {
         seen.add(item.storedId);
         const location = await itemLocation(vault2, batchId, item), pdfAvailable = !!await findPdf(vault2, batchId, item);
         const kind = item.isPaper ? "paper" : location.isDirectory ? "directory" : extname(item.originalPath).toLowerCase() === ".pdf" ? "pdf" : extname(item.originalPath).toLowerCase() === ".md" ? "note" : "file";
-        items.push({ id: `${batchId}::${item.storedId}`, batchId, storedId: item.storedId, title: item.title, kind, originalPath: item.originalPath, deletedAt: batch.deletedAt, itemsCount: batch.items.length, pdfAvailable, folderAvailable: true });
+        const sourceAvailable = location.isDirectory || kind === "note" && extname(location.path).toLowerCase() === ".md";
+        items.push({ id: `${batchId}::${item.storedId}`, batchId, storedId: item.storedId, title: item.title, kind, originalPath: item.originalPath, deletedAt: batch.deletedAt, itemsCount: batch.items.length, pdfAvailable, sourceAvailable, folderAvailable: true });
         if (items.length >= MAX_ENTRIES) {
           complete = false;
           warn("\u56DE\u6536\u7AD9\u6761\u76EE\u8F83\u591A\uFF0C\u672C\u6B21\u5217\u8868\u8FBE\u5230\u6761\u76EE\u4E0A\u9650\u3002");
@@ -63094,13 +63109,16 @@ async function scanTrash(vault2) {
   return { items, complete, diagnostics };
 }
 async function trashOpenTarget(vault2, input2) {
-  if (!batchName(input2.batchId) || !storedName(input2.storedId) || !["pdf", "folder"].includes(input2.target)) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u6253\u5F00\u53C2\u6570\u65E0\u6548\u3002");
+  if (!batchName(input2.batchId) || !storedName(input2.storedId) || !["pdf", "source", "folder"].includes(input2.target)) throw new LibraryError("INVALID_TRASH_PATH", "\u56DE\u6536\u7AD9\u6253\u5F00\u53C2\u6570\u65E0\u6548\u3002");
   const batch = await readBatch(vault2, input2.batchId, { remaining: MAX_MANIFEST_BYTES + 1 });
   const matches = batch.items.filter((raw) => record2(raw).stored === input2.storedId);
   if (matches.length !== 1) throw new LibraryError("TRASH_ITEM_NOT_FOUND", "\u56DE\u6536\u7AD9\u6761\u76EE\u4E0D\u5B58\u5728\u6216\u5B58\u50A8\u6807\u8BC6\u91CD\u590D\uFF0C\u8BF7\u5237\u65B0\u3002");
-  const item = readItem(matches[0]);
-  await itemLocation(vault2, input2.batchId, item);
+  const item = readItem(matches[0]), location = await itemLocation(vault2, input2.batchId, item);
   if (input2.target === "folder") return await safePath(vault2, `${TRASH_REL}/${input2.batchId}`);
+  if (input2.target === "source") {
+    if (!location.isDirectory && !(extname(item.originalPath).toLowerCase() === ".md" && extname(location.path).toLowerCase() === ".md")) throw new LibraryError("INVALID_TRASH_PATH", "\u4EC5\u53EF\u6253\u5F00\u56DE\u6536\u7AD9\u4E2D\u5DF2\u786E\u8BA4\u7684 Markdown \u7B14\u8BB0\u6216\u6587\u4EF6\u5939\uFF1B\u5176\u4ED6\u6587\u4EF6\u8BF7\u5728\u6279\u6B21\u76EE\u5F55\u4E2D\u67E5\u770B\u3002");
+    return location.path;
+  }
   const pdf = await findPdf(vault2, input2.batchId, item);
   if (!pdf) throw new LibraryError("PDF_MISSING", "\u8BE5\u56DE\u6536\u7AD9\u6761\u76EE\u6CA1\u6709\u5DF2\u786E\u8BA4\u7684 PDF\uFF0C\u53EF\u6253\u5F00\u6279\u6B21\u6587\u4EF6\u5939\u67E5\u770B\u3002");
   const handle = await open2(pdf, "r");
@@ -65242,8 +65260,8 @@ ${mark.quote ? `> ${mark.quote.replaceAll("\n", "\n> ")}
     this.assertCurrentContext(context, await this.readSettings());
     try {
       await this.externalPdfOpener(target);
-    } catch {
-      throw new LibraryError("TRASH_OPEN_FAILED", "\u65E0\u6CD5\u5411\u7CFB\u7EDF\u53D1\u9001\u56DE\u6536\u7AD9\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u9605\u8BFB\u5668\u6216\u6587\u4EF6\u7BA1\u7406\u5668\u3002");
+    } catch (error62) {
+      throw new LibraryError("TRASH_OPEN_FAILED", error62 instanceof LibraryError ? error62.message : "\u7CFB\u7EDF\u672A\u63A5\u53D7\u56DE\u6536\u7AD9\u6253\u5F00\u8BF7\u6C42\uFF0C\u8BF7\u68C0\u67E5\u9ED8\u8BA4\u5E94\u7528\u6216\u6587\u4EF6\u7BA1\u7406\u5668\u3002");
     }
     return { requested: true, target: input2.target };
   }
@@ -67643,7 +67661,7 @@ function createLibraryServer(service2, options = {}) {
   tool("paper_get", "\u8BFB\u53D6\u5355\u7BC7\u8BBA\u6587\u5143\u6570\u636E\u4E0E\u53EF\u7528\u8D44\u6E90\uFF0C\u4E0D\u8FD4\u56DE PDF \u5B57\u8282\u3002", paper, (input2) => service2.getPaper(input2));
   tool("paper_open_external", "\u7528\u6237\u70B9\u51FB\u540E\u5728\u7CFB\u7EDF PDF \u67E5\u770B\u5668\u4E2D\u6253\u5F00\u5F53\u524D\u77E5\u8BC6\u5E93\u7684\u539F\u6587\uFF0C\u4E0D\u81EA\u52A8\u542F\u52A8\u3002", paper, (input2) => service2.openPaperExternally(input2), false, true, false);
   tool("trash_list", "\u6309\u7528\u6237\u8981\u6C42\u67E5\u770B\u5F53\u524D\u77E5\u8BC6\u5E93\u56DE\u6536\u7AD9\u7684\u6709\u754C\u5143\u6570\u636E\u5217\u8868\uFF1B\u4E0D\u6062\u590D\u6216\u5220\u9664\u5185\u5BB9\u3002", { ...vault, limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().max(4096).optional(), refresh: external_exports.boolean().optional() }, (input2) => service2.listTrash(input2));
-  tool("trash_open", "\u7528\u6237\u70B9\u51FB\u540E\u6253\u5F00\u56DE\u6536\u7AD9\u6761\u76EE\u7684 PDF \u6216\u6240\u5728\u6279\u6B21\u6587\u4EF6\u5939\uFF1B\u4E0D\u6062\u590D\u6216\u66F4\u6539\u77E5\u8BC6\u5E93\u3002", { ...vault, batchId: key, storedId: key, target: external_exports.enum(["pdf", "folder"]) }, (input2) => service2.openTrash(input2), false, true, false);
+  tool("trash_open", "\u7528\u6237\u70B9\u51FB\u540E\u5728\u7CFB\u7EDF\u5E94\u7528\u4E2D\u67E5\u770B\u56DE\u6536\u7AD9\u6761\u76EE\u7684 PDF\u3001\u7B14\u8BB0\u3001\u6587\u4EF6\u5939\u6216\u6240\u5728\u6279\u6B21\uFF1B\u4E0D\u6062\u590D\u6216\u66F4\u6539\u77E5\u8BC6\u5E93\u3002", { ...vault, batchId: key, storedId: key, target: external_exports.enum(["pdf", "folder", "source"]) }, (input2) => service2.openTrash(input2), false, true, false);
   tool("library_search", "\u641C\u7D22\u672C\u5730\u5143\u6570\u636E\u3001\u7B14\u8BB0\u6216\u5DF2\u6709\u6B63\u6587\u3002\u5173\u952E\u8BCD\u5339\u914D\uFF0C\u4E0D\u662F\u8BED\u4E49\u68C0\u7D22\uFF1B\u6B63\u6587\u8303\u56F4\u9700\u8981\u5F00\u542F Agent \u6B63\u6587\u8BBF\u95EE\u3002", { ...vault, query: external_exports.string().min(1).max(1e3), scope: external_exports.enum(["all", "metadata", "notes", "body"]).optional(), limit: external_exports.number().int().min(1).max(200).optional(), year: external_exports.number().int().optional(), publication: key.optional(), doi: key.optional(), isRead: external_exports.boolean().optional() }, (input2) => service2.search(input2));
   tool("paper_import", "\u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u7684\u6807\u8BC6\u7B26\u6216\u672C\u5730 PDF\uFF0C\u8FD4\u56DE\u540E\u53F0\u4EFB\u52A1\uFF1B\u5BFC\u5165\u4E0E\u89E3\u6790\u7ED3\u679C\u5206\u5F00\u3002", { ...vault, text: key.optional(), filePath: key.optional(), filePaths: external_exports.array(key).min(1).max(100).optional(), parent: key.optional(), noRecognize: external_exports.boolean().optional() }, (input2) => service2.importPaper(input2), false);
   tool("paper_parse", "\u6309\u660E\u786E\u5904\u7406\u4EFB\u52A1\u89E3\u6790\u5DF2\u6709 PDF\uFF1B\u5199\u5165\u6D3E\u751F\u6B63\u6587\uFF0C\u4E0D\u4FDD\u8BC1\u4EA7\u751F\u7248\u9762 layout\u3002\u4E0D\u5F97\u56E0\u666E\u901A\u95EE\u7B54\u81EA\u52A8\u89E3\u6790\u3002", { ...paper, force: external_exports.boolean().optional() }, (input2) => service2.parsePaper(input2), false);

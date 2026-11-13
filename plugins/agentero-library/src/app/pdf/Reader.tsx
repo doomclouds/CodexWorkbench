@@ -10,7 +10,7 @@ import { formatBytes, messageOf, PDF_CHUNK_BYTES, readPdfChunks } from '../model
 import { NotesView } from '../NotesView';
 import { createPdfWorker, pdfjs } from '../pdf-runtime';
 import { PageView, type RegisteredPage, type VisualSelection } from './PageView';
-import { MarksPanel, OutlinePanel, SelectionToolbar, TranslationCard, type FloatingTranslation, type ReaderSelection } from './ReaderPanels';
+import { MarksPanel, OutlinePanel, SelectionToolbar, TranslationCard, type FloatingTranslation, type MarkEditorDraft, type ReaderSelection, type SelectionDraft } from './ReaderPanels';
 import { fitPageScale, screenRectToPoints, usefulRects } from './geometry';
 import { textLayerMatches, textMatches } from './search';
 import { useDocumentTranslation } from './translation/useDocumentTranslation';
@@ -57,6 +57,10 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const [markError, setMarkError] = useState(''); const [selectedMark, setSelectedMark] = useState<string | null>(null); const [busy, setBusy] = useState(false); const busyRef = useRef(false);
   const [checkedMarks, setCheckedMarks] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<ReaderSelection | null>(null); const [translationCard, setTranslationCard] = useState<FloatingTranslation | null>(null);
+  const [selectionDraft, setSelectionDraft] = useState<SelectionDraft | undefined>(); const [selectionSuspended, setSelectionSuspended] = useState(false); const [selectionDocked, setSelectionDocked] = useState(false);
+  const selectionRef = useRef(selection); selectionRef.current = selection; const selectionDockedRef = useRef(selectionDocked); selectionDockedRef.current = selectionDocked;
+  const selectionSuspendedRef = useRef(selectionSuspended); selectionSuspendedRef.current = selectionSuspended;
+  const markEditorDrafts = useRef(new Map<string, MarkEditorDraft>()); const commentDrafts = useRef(new Map<string, string>());
   const [translationOpen, setTranslationOpen] = useState(false); const [targetLanguage, setTargetLanguage] = useState(''); const translationRun = useRef(0);
   const selectionTranslationAbort = useRef<AbortController | null>(null); const reloadNotice = useRef<string | null>(null);
   const [cards, setCards] = useState(false); const [crop, setCrop] = useState(false); const [noteDirty, setNoteDirty] = useState(false); const [space, setSpace] = useState(false);
@@ -98,7 +102,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     session.current?.dispose(); session.current = null;
     setLoading(false); setViewReady(false); setError(''); setNotice(reloadNotice.current ?? ''); reloadNotice.current = null; setDocument(null); setMarks(null); marksRef.current = null;
     knownSizes.current.clear(); restore.current.clear(); pendingAnchor.current = null; setFailedPages(new Map()); setSizeRevision(value => value + 1);
-    setSelection(null); setTranslationCard(null); setTranslationOpen(false); setHits([]); setHitIndex(-1); setSelectedMark(null); setPasswordRequired(false); pages.current.clear();
+    setSelection(null); setSelectionDraft(undefined); setSelectionSuspended(false); setSelectionDocked(false); markEditorDrafts.current.clear(); commentDrafts.current.clear(); setTranslationCard(null); setTranslationOpen(false); setHits([]); setHitIndex(-1); setSelectedMark(null); setPasswordRequired(false); pages.current.clear();
     translationRun.current += 1; searchRun.current += 1; selectionTranslationAbort.current?.abort(); searchAbort.current?.abort();
     const start = () => {
       if (closed || !activeRef.current || !paperPath || preview || session.current) return;
@@ -243,6 +247,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   }
 
   function scroll() {
+    if (!selectionDockedRef.current) suspendSelection();
     if (scrollFrame.current) return;
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = 0;
@@ -291,9 +296,19 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     return () => { window.document.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape); };
   }, [moreOpen]);
 
+  function suspendSelection() { if (selectionRef.current) setSelectionSuspended(true); }
+  useEffect(() => { if (!selectionDockedRef.current) suspendSelection(); }, [view.zoom, view.fit, view.rotation, containerWidth, view.outlineOpen, view.marksOpen, view.notesOpen, cards, active]);
+  useEffect(() => { if (!active) return; const resize = () => { if (!selectionDockedRef.current) suspendSelection(); }; window.addEventListener('resize', resize); return () => window.removeEventListener('resize', resize); }, [active]);
+  function beginSelection(value: ReaderSelection) {
+    if (selectionDraft?.text.trim()) { setSelectionSuspended(true); setNotice('选区备注草稿已保留，请先继续编辑或放弃。'); return; }
+    const bounds = viewport.current?.getBoundingClientRect();
+    setSelection({ ...value, ...(bounds ? { viewportBounds: { left: Math.max(0, bounds.left), top: Math.max(0, bounds.top), right: Math.min(window.innerWidth, bounds.right), bottom: Math.min(window.innerHeight, bounds.bottom) } } : {}) });
+    setSelectionDraft(undefined); setSelectionSuspended(false); setSelectionDocked(false);
+  }
+
   function captureSelection() {
     if (crop || panning.current || Date.now() < justPanned.current) return;
-    const selected = window.getSelection(); if (!selected || !selected.rangeCount || selected.isCollapsed || !viewport.current) { setSelection(null); return; }
+    const selected = window.getSelection(); if (!selected || !selected.rangeCount || selected.isCollapsed || !viewport.current) { suspendSelection(); return; }
     const range = selected.getRangeAt(0); const quote = selected.toString().trim();
     if (!quote || !viewport.current.contains(range.startContainer) || !viewport.current.contains(range.endContainer)) return;
     const parts: ReaderSelection['parts'] = [];
@@ -309,7 +324,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
       while ((node = walker.nextNode())) if (range.intersectsNode(node)) { const value = node.textContent ?? ''; text += value.slice(node === range.startContainer ? range.startOffset : 0, node === range.endContainer ? range.endOffset : value.length) + ' '; }
       parts.push({ page: number, rects, pageSize: { width: entry.geometry.width, height: entry.geometry.height }, quote: text.trim() || quote });
     }
-    if (parts.length) { const rect = range.getBoundingClientRect(); setSelection({ text: quote, parts, x: rect.left, y: rect.top }); }
+    if (parts.length) { const rect = range.getBoundingClientRect(); beginSelection({ text: quote, parts, x: rect.left, y: rect.top, bounds: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } }); }
   }
 
   async function action(work: () => Promise<void>) {
@@ -328,7 +343,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   }
   async function highlight(color: MarkColor, comment: string, underline?: boolean) {
     if (!selection) return; const selected = selection; const ticket = generation.current;
-    try { await action(() => addSelection(selected, selected.asset ? 'visual' : underline ? 'underline' : 'highlight', { color, ...(comment ? { comment } : {}) })); if (ticket === generation.current) { setSelection(null); window.getSelection()?.removeAllRanges(); setNotice('批注已保存。'); } }
+    try { await action(() => addSelection(selected, selected.asset ? 'visual' : underline ? 'underline' : 'highlight', { color, ...(comment ? { comment } : {}) })); if (ticket === generation.current) { setSelection(null); setSelectionDraft(undefined); window.getSelection()?.removeAllRanges(); setNotice('批注已保存。'); } }
     catch (cause) { if (ticket === generation.current) setNotice(`保存失败，选区仍保留：${messageOf(cause)}`); }
   }
   async function ask() {
@@ -336,7 +351,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     const selected = selection; const ticket = generation.current;
     try { await action(async () => {
       await attachReadingContext({ vaultId, paperPath: paper.path, title: paper.title, pages: selected.parts.map(part => part.page), markIds: [], selection: { text: selected.text, parts: selected.parts, ...(selected.asset ? { asset: selected.asset } : {}) }, action: 'summarize' });
-      if (ticket === generation.current) { setSelection(null); window.getSelection()?.removeAllRanges(); setNotice('已附加到输入框，补充要求后发送。'); }
+      if (ticket === generation.current) { if (selectionDraft?.text.trim()) setSelectionSuspended(true); else { setSelection(null); setSelectionDraft(undefined); } window.getSelection()?.removeAllRanges(); setNotice('已附加到输入框，补充要求后发送。'); }
     }); } catch (cause) { setNotice(messageOf(cause)); }
   }
   async function attachMarks(task: MarkBatchAction, ids: string[], target?: MarkBatchTarget) {
@@ -350,7 +365,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   async function translateSelection(value = selection) {
     if (!value) return; const ticket = ++translationRun.current; const documentTicket = generation.current;
     selectionTranslationAbort.current?.abort(); const controller = new AbortController(); selectionTranslationAbort.current = controller;
-    setSelection(null); setTranslationCard({ selection: value, loading: true, text: '', error: '', pinned: false });
+    if (selectionDraft?.text.trim()) setSelectionSuspended(true); else { setSelection(null); setSelectionDraft(undefined); } setTranslationCard({ selection: value, loading: true, text: '', error: '', pinned: false });
     try { const result = await callTool<TranslateResult>('translate_text', { vaultId, text: value.text, to: targetLanguage || undefined }, { signal: controller.signal }); if (!controller.signal.aborted && ticket === translationRun.current && documentTicket === generation.current) setTranslationCard({ selection: value, loading: false, text: result.text, error: '', pinned: false }); }
     catch (cause) { if (!controller.signal.aborted && ticket === translationRun.current && documentTicket === generation.current) setTranslationCard({ selection: value, loading: false, text: '', error: messageOf(cause), pinned: false }); }
     finally { if (selectionTranslationAbort.current === controller) selectionTranslationAbort.current = null; }
@@ -360,13 +375,10 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     try { await action(() => addSelection(card.selection, 'translate', { result: card.text })); if (ticket === generation.current) setTranslationCard({ ...card, pinned: true }); }
     catch (cause) { setNotice(messageOf(cause)); }
   }
-  function selectMark(mark: ReaderMark) {
-    setSelectedMark(mark.id); setView(value => openReaderPanel(value, 'marksOpen')); goToPage(mark.page);
-    if (mark.kind === 'translate' && (mark.result || mark.note)) {
-      selectionTranslationAbort.current?.abort(); translationRun.current += 1;
-      const entry = pages.current.get(mark.page); const bounds = entry?.element.getBoundingClientRect();
-      setTranslationCard({ selection: { text: mark.quote, parts: [{ page: mark.page, quote: mark.quote, rects: mark.rects, pageSize: { width: entry?.geometry.width ?? 612, height: entry?.geometry.height ?? 792 } }], x: bounds?.left ?? 30, y: bounds?.top ?? 160 }, loading: false, text: mark.result || mark.note, error: '', pinned: true, markId: mark.id });
-    }
+  function selectMark(mark: ReaderMark, draft?: string) {
+    if (draft !== undefined) commentDrafts.current.set(mark.id, draft);
+    if (!viewRef.current.marksOpen) rememberPosition();
+    setSelectedMark(mark.id); setView(value => openReaderPanel(value, 'marksOpen'));
   }
   async function updateMark(mark: ReaderMark, text: string, color: MarkColor) { const ticket = generation.current; await action(async () => { const next = await callTool<MarkList>('mark_update', { vaultId, paperPath, revision: marksRef.current!.revision, id: mark.id, color, ...(mark.kind === 'translate' ? { result: text } : { comment: text }) }); if (ticket === generation.current) { marksRef.current = next; setMarks(next); setNotice('批注已更新。'); } }); }
   async function deleteMark(mark: ReaderMark) { const ticket = generation.current; await action(async () => { const next = await callTool<MarkList>('mark_delete', { vaultId, paperPath, revision: marksRef.current!.revision, id: mark.id }); if (ticket === generation.current) { marksRef.current = next; setMarks(next); setSelectedMark(null); if (translationCard?.markId === mark.id) setTranslationCard(null); } }); }
@@ -433,7 +445,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     const keydown = (event: KeyboardEvent) => {
       if (event.target instanceof Element && event.target.closest('.pdf-notes-sidebar')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); requestAnimationFrame(() => searchInput.current?.focus()); return; }
-      if (event.key === 'Escape') { setSelection(null); setTranslationCard(null); selectionTranslationAbort.current?.abort(); setCrop(false); setSearchOpen(false); cancelSearch(); translationRun.current += 1; return; }
+      if (event.key === 'Escape') { if (selectionRef.current && !selectionSuspendedRef.current) { event.preventDefault(); event.stopPropagation(); suspendSelection(); return; } setTranslationCard(null); setTranslationOpen(false); selectionTranslationAbort.current?.abort(); setCrop(false); setSearchOpen(false); cancelSearch(); translationRun.current += 1; return; }
       if (editable(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key)) { event.preventDefault(); zoom(event.key === '0' ? 1 : scale + (event.key === '-' ? -.1 : .1), event.key === '0'); return; }
       if ((event.key === ' ' || event.code === 'Space') && !(event.target instanceof Element && event.target.closest('button,a,[role="button"]'))) { event.preventDefault(); setSpace(true); }
@@ -450,11 +462,12 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const inlineNotesTarget = useRef<{ paperPath: string }>({ paperPath });
   if (inlineNotesTarget.current.paperPath !== paperPath) inlineNotesTarget.current = { paperPath };
   const pageActions = useRef({ selectMark, navigate, updateMark }); pageActions.current = { selectMark, navigate, updateMark };
-  const onPageMark = useCallback((mark: ReaderMark) => pageActions.current.selectMark(mark), []);
+  const onPageMark = useCallback((mark: ReaderMark, draft?: string) => pageActions.current.selectMark(mark, draft), []);
   const onPageSaveComment = useCallback((mark: ReaderMark, text: string) => pageActions.current.updateMark(mark, text, mark.color ?? 'yellow'), []);
   const onPageDestination = useCallback((destination: unknown, action?: string) => { void pageActions.current.navigate(destination, action); }, []);
   const onPageExternal = useCallback((url: string) => { void openExternalLink(url).catch(cause => setNotice(messageOf(cause))); }, []);
-  const onPageVisual = useCallback((value: VisualSelection) => { setCrop(false); setSelection({ text: value.quote, parts: [{ page: value.page, quote: value.quote, rects: value.rects, pageSize: value.pageSize }], x: value.x, y: value.y, asset: value.asset }); }, []);
+  const selectionActions = useRef({ beginSelection }); selectionActions.current = { beginSelection };
+  const onPageVisual = useCallback((value: VisualSelection) => { setCrop(false); selectionActions.current.beginSelection({ text: value.quote, parts: [{ page: value.page, quote: value.quote, rects: value.rects, pageSize: value.pageSize }], x: value.x, y: value.y, asset: value.asset }); }, []);
   const onPageFailure = useCallback((number: number, message: string) => { setFailedPages(value => new Map(value).set(number, message)); setError(message); }, []);
   async function openSystemViewer() { try { await callTool('paper_open_external', { vaultId, paperPath }); setNotice('已向系统默认查看器发送打开请求。'); } catch (cause) { setNotice(messageOf(cause)); } }
 
@@ -468,7 +481,7 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   const toolActions: ReaderToolActions = {
     toggleOutline: () => setView(value => toggleReaderPanel(value, 'outlineOpen')), toggleSearch,
     toggleMarks: () => setView(value => toggleReaderPanel(value, 'marksOpen')), toggleNotes,
-    toggleTranslation: () => { setSelection(null); setTranslationOpen(value => !value); },
+    toggleTranslation: () => { suspendSelection(); setTranslationOpen(value => !value); },
     toggleCards: () => { if (viewRef.current.fit) rememberPosition(); setCards(value => !value); },
     pageInput: setPageInput, goToPage: () => goToPage(Number.parseInt(pageInput, 10) || viewRef.current.pageNumber),
     previous: () => goToPage(view.pageNumber - 1), next: () => goToPage(view.pageNumber + 1), zoom: value => zoom(value), fit: () => zoom(1, true),
@@ -480,11 +493,12 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   if (preview) return <>{toolsPortal}<div className="empty-state reader-empty"><FileText size={30} /><strong>{paper.title}</strong><span>这是界面预览，不连接真实 PDF 或标注数据。</span><button onClick={onBack}>返回演示列表</button></div></>;
   const leaf = paper.path.split('/').at(-1) || paper.title; const documentName = leaf.toLowerCase().endsWith('.pdf') ? leaf : leaf + '.pdf';
   const showHud = sidebarCollapsed || !readerToolsHost;
+  const selectionEditor = active && selection && !selectionSuspended ? <SelectionToolbar key={selection.parts[0]?.page + ':' + selection.x + ':' + selection.y + ':' + selection.text} selection={selection} busy={busy} canSend={canSend} initialDraft={selectionDraft} onDraftChange={setSelectionDraft} docked={selectionDocked} onDock={() => setSelectionDocked(true)} onCopy={() => { void copy(selection.text, '选区'); }} onMark={(color, comment, underline) => { void highlight(color, comment, underline); }} onTranslate={() => { void translateSelection(); }} onAsk={() => { void ask(); }} onClose={suspendSelection} /> : null;
   return <section ref={host} className="reader-view view-fill parity-reader reader-sidebar-layout" aria-label="PDF 阅读器">
     {toolsPortal}
     <header className="reader-document-header" data-reader-header="true"><strong title={paper.title}>{documentName}</strong><div className="reader-document-header__actions"><button aria-label="导出 PDF" disabled={busy} onClick={() => void exportPaper('pdf')}><Upload size={14} aria-hidden="true" /><span>导出</span></button><div ref={moreRoot} className="reader-more"><button className="icon-button" aria-label="更多阅读操作" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(value => !value)}><MoreHorizontal size={18} /></button>{moreOpen && <div className="reader-more__menu" role="menu" aria-label="更多阅读操作">
       <button role="menuitem" disabled={!canParse || busy} title={canParse ? '写入派生正文，作为独立任务执行' : '原生解析需要 PDFium'} onClick={() => { setMoreOpen(false); void callTool<LibraryOperation>('paper_parse', { vaultId, paperPath }).then(onOperation).catch(cause => setNotice(messageOf(cause))); }}>解析正文</button>
-      <button role="menuitemcheckbox" aria-checked={crop} disabled={!document} onClick={() => { setMoreOpen(false); setCrop(value => !value); setSelection(null); }}><Crop size={14} />截取区域</button>
+      <button role="menuitemcheckbox" aria-checked={crop} disabled={!document} onClick={() => { setMoreOpen(false); setCrop(value => !value); suspendSelection(); }}><Crop size={14} />截取区域</button>
       <ReaderLanguageSetting value={targetLanguage} onChange={setTargetLanguage} />
       <button role="menuitem" disabled={busy} onClick={() => { setMoreOpen(false); void exportPaper('markdown'); }}>导出 Markdown 批注</button>
       <button role="menuitem" disabled={busy} onClick={() => { setMoreOpen(false); void exportPaper('json'); }}>导出 JSON 批注</button>
@@ -494,10 +508,11 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     <div ref={body} className={`reader-body pdf-parity-body ${notesLayout.overlay ? 'reader-notes-overlay-layout' : ''}`}>
       {view.outlineOpen && document && <OutlinePanel document={document} currentPage={view.pageNumber} busy={busy} onNavigate={(dest, page) => { void navigate(dest, undefined, page); }} onSave={saveBookmarks} onClose={() => setView(value => ({ ...value, outlineOpen: false }))} />}
       <div className="reader-stage">
+        <div className="reader-canvas-stage">
         <div ref={viewport} className={'pdf-viewport parity-viewport ' + (space ? 'pan-armed' : '')} onScroll={scroll} onPointerDownCapture={panStart} onPointerMove={panMove} onPointerUp={panEnd} onPointerCancel={() => { panning.current = null; }} onKeyUp={captureSelection} onClickCapture={event => { if (Date.now() < justPanned.current) { event.preventDefault(); event.stopPropagation(); } }}>
           {loading && <div className="empty-state"><LoaderCircle className="spin" /><strong>正在读取 PDF…</strong><span>{progress}</span></div>}
           {document && <div className="pdf-continuous-pages">{slots.map((slot,index) => <div key={loadRevision+':'+index} className="pdf-page-slot" data-sheet-page={index+1} style={{height:slot.height}}>
-            {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onSaveComment={onPageSaveComment} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
+            {active && index >= windowRange.start && index <= windowRange.end && !failedPages.has(index+1) ? <PageView document={document} number={index+1} active={active} scale={scale} fitWidth={view.fit ? availablePageWidth : undefined} rotation={view.rotation} tone={view.tone} estimate={estimate} viewportRef={viewport} marks={marks?.items ?? EMPTY_MARKS} selectedMark={selectedMark} cards={showCards} crop={crop} commentDrafts={commentDrafts.current} translated={translationOpen ? translated.pages.get(index+1) : undefined} onReady={registerPage} onRendered={onPageRendered} onMark={onPageMark} onSaveComment={onPageSaveComment} onDestination={onPageDestination} onExternal={onPageExternal} onVisual={onPageVisual} onFailure={onPageFailure} /> : <div className="pdf-page-placeholder" style={{width:slot.width,height:slot.height}}>{failedPages.get(index+1) || '第 '+(index+1)+' 页'}</div>}
           </div>)}</div>}
         </div>
         {searchOpen && <form className="reader-search-overlay" role="search" aria-label="PDF 查找" onSubmit={event => { event.preventDefault(); void search(); }}><input ref={searchInput} aria-label="PDF 查找文字" placeholder="查找 PDF 文字" value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && hits.length && query === hits[0]?.text) { event.preventDefault(); moveHit(event.shiftKey ? -1 : 1); } }} /><button disabled={searchBusy || !query.trim()}>{searchBusy ? <LoaderCircle size={14} className="spin" /> : '查找'}</button><button type="button" aria-label="上一个匹配" disabled={!hits.length} onClick={() => moveHit(-1)}><ChevronLeft size={14} /></button><span>{hits.length ? (hitIndex + 1) + '/' + hits.length + (hits.length >= 2000 ? '+' : '') : ''}</span><button type="button" aria-label="下一个匹配" disabled={!hits.length} onClick={() => moveHit(1)}><ChevronRight size={14} /></button><button type="button" className="icon-button" aria-label="关闭查找" onClick={() => { setSearchOpen(false); cancelSearch(); }}><X size={15} /></button></form>}
@@ -506,12 +521,15 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
         {error && <div className="reader-error-overlay" role="alert"><p>{error}</p><div className="button-row"><button onClick={() => void openSystemViewer()}>用系统查看器打开</button><button disabled={!active || loading} onClick={() => setLoadRevision(value => value + 1)}>重新加载 PDF</button></div></div>}
         {passwordRequired && <form className="reader-password-overlay" onSubmit={event => { event.preventDefault(); passwordUpdate.current?.(password); setPassword(''); }}><label>PDF 密码<input type="password" autoFocus autoComplete="off" value={password} onChange={event => setPassword(event.target.value)} /></label><button className="primary">解锁</button>{passwordWrong && <span className="error-text">密码不正确，请重试。</span>}</form>}
         {showHud && document && <ReaderHud state={toolState} actions={toolActions} />}
+        </div>
+        {selectionDocked && selectionEditor}
+        {active && selection && selectionSuspended && <div className="pdf-selection-resume" role="status"><span>{selectionDraft?.text.trim() ? '选区备注草稿已保留' : '选区操作已收起'}</span><button onClick={() => { setSelectionDocked(true); setSelectionSuspended(false); }}>继续编辑</button><button disabled={busy} onClick={() => { setSelection(null); setSelectionDraft(undefined); window.getSelection()?.removeAllRanges(); }}>放弃选区</button></div>}
       </div>
-      {view.marksOpen && <MarksPanel list={marks} selectedId={selectedMark} busy={busy} error={markError} onSelect={selectMark} onSave={updateMark} onDelete={deleteMark} onReply={replyMark} onRefresh={() => { void refreshMarks(); }} onExport={format => { void exportPaper(format); }} onClose={() => setView(value => ({ ...value, marksOpen: false }))} checkedIds={checkedMarks} onCheckedChange={setCheckedMarks} canAttach={canSend} onAttach={attachMarks} />}
+      {view.marksOpen && <MarksPanel list={marks} selectedId={selectedMark} busy={busy} error={markError} onSelect={selectMark} onLocate={mark => goToPage(mark.page)} drafts={markEditorDrafts.current} commentDrafts={commentDrafts.current} onSave={updateMark} onDelete={deleteMark} onReply={replyMark} onRefresh={() => { void refreshMarks(); }} onExport={format => { void exportPaper(format); }} onClose={() => setView(value => ({ ...value, marksOpen: false }))} checkedIds={checkedMarks} onCheckedChange={setCheckedMarks} canAttach={canSend} onAttach={attachMarks} />}
       {view.notesOpen && !notesLayout.overlay && <NotesSplitter width={notesLayout.width} min={notesLayout.min} max={notesLayout.max} onChange={width => { if (viewRef.current.fit) rememberPosition(); notesLayout.setWidth(width); }} />}
-      {notesMounted && <aside id="reader-notes-pane" className="pdf-notes-sidebar" aria-label="论文笔记侧栏" hidden={!view.notesOpen} style={{ width: notesLayout.width }}><header className="pdf-panel-heading"><strong>当前论文笔记</strong>{noteDirty && <span className="reader-note-dirty" role="status">未保存</span>}<button className="icon-button" aria-label="关闭论文笔记" onClick={() => setView(value => ({ ...value, notesOpen: false }))}><X size={14} /></button></header><NotesView key={vaultId} compact paperPath={paperPath} active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={view.notesOpen ? inlineNotesTarget.current : null} onDirtyChange={setNoteDirty} onOpenWorkspace={note => onNotes(paper, note?.path)} onOpenPaperMarkdown={onPaperMarkdown ? () => onPaperMarkdown(paper) : undefined} /></aside>}
+      {notesMounted && <aside id="reader-notes-pane" className="pdf-notes-sidebar" aria-label="论文笔记侧栏" hidden={!view.notesOpen} style={{ width: notesLayout.width }}><NotesView key={vaultId} compact paperPath={paperPath} active={active && view.notesOpen} vaultId={vaultId} preview={preview} requestedTarget={view.notesOpen ? inlineNotesTarget.current : null} onCloseCompact={() => setView(value => ({ ...value, notesOpen: false }))} onDirtyChange={setNoteDirty} onOpenWorkspace={note => onNotes(paper, note?.path)} onOpenPaperMarkdown={onPaperMarkdown ? () => onPaperMarkdown(paper) : undefined} /></aside>}
     </div>
-    {selection && createPortal(<SelectionToolbar key={selection.parts[0]?.page + ':' + selection.x + ':' + selection.y + ':' + selection.text} selection={selection} busy={busy} canSend={canSend} onCopy={() => { void copy(selection.text, '选区'); }} onMark={(color, comment, underline) => { void highlight(color, comment, underline); }} onTranslate={() => { void translateSelection(); }} onAsk={() => { void ask(); }} onClose={() => setSelection(null)} />, window.document.body)}
+    {!selectionDocked && selectionEditor && createPortal(selectionEditor, window.document.body)}
     {translationCard && createPortal(<TranslationCard value={translationCard} busy={busy} onPin={() => { void pinTranslation(); }} onClose={() => { setTranslationCard(null); selectionTranslationAbort.current?.abort(); translationRun.current += 1; }} onRetry={() => { void translateSelection(translationCard.selection); }} onCopy={() => { void copy(translationCard.text, '译文'); }} />, window.document.body)}
   </section>;
 }

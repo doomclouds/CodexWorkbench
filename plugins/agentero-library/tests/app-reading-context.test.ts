@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReadingContextSummary } from '../src/contracts/context';
-import { readingDraft } from '../src/app/reading-context-client';
+import { paperMarkdownGenerationDraft, readingDraft } from '../src/app/reading-context-client';
 
 const state = vi.hoisted(() => ({ apps: [] as any[], supported: true, draft: '用户原来的问题。', attachments: [] as unknown[], submitted: 0 }));
 vi.mock('@modelcontextprotocol/ext-apps', () => ({
@@ -34,6 +34,42 @@ async function bridge() {
 }
 
 describe('native composer reading context', () => {
+  it('prepares a paper generation task without parsing, writing, replacing the draft, or submitting', async () => {
+    const { api, app } = await bridge();
+    app.callServerTool.mockResolvedValue({ structuredContent: { ok: true, data: { vaultId: context.vaultId, path: context.paperPath, title: context.title } } });
+    await api.appendPaperMarkdownGenerationDraft({ vaultId: context.vaultId, paperPath: context.paperPath });
+    expect(app.callServerTool.mock.calls.map((call: any) => call[0].name)).toEqual(['paper_get']);
+    expect(state.draft).toMatch(/^用户原来的问题。/);
+    expect(state.draft).toContain('若存在就保留');
+    expect(state.submitted).toBe(0);
+    expect(state.attachments).toHaveLength(1);
+    expect(JSON.stringify(state.attachments)).toContain(context.paperPath);
+    expect(JSON.stringify(state.attachments)).toContain('没有开始解析');
+    expect(app.sendMessage.mock.calls[0][0]._meta).toEqual({ 'openai/message': { target: 'active', send: false } });
+  });
+
+  it('does not append a generation task for a changed paper or an unsupported composer', async () => {
+    const { api, app } = await bridge();
+    app.callServerTool.mockResolvedValue({ structuredContent: { ok: true, data: { vaultId: 'different', path: context.paperPath, title: context.title } } });
+    await expect(api.appendPaperMarkdownGenerationDraft({ vaultId: context.vaultId, paperPath: context.paperPath })).rejects.toThrow('论文引用已变化');
+    expect(app.sendMessage).not.toHaveBeenCalled();
+    state.supported = false;
+    state.apps.length = 0;
+    const unavailable = await bridge();
+    await expect(unavailable.api.appendPaperMarkdownGenerationDraft({ vaultId: context.vaultId, paperPath: context.paperPath })).rejects.toThrow('尚未解析论文');
+    expect(unavailable.app.callServerTool).not.toHaveBeenCalled();
+    expect(state.submitted).toBe(0);
+  });
+
+  it('labels generation references separately from extracted or frozen PDF content', () => {
+    const draft = paperMarkdownGenerationDraft({ vaultId: context.vaultId, paperPath: context.paperPath, title: 'A title\nwith source instructions' });
+    expect(draft.content[0].text).toContain('不覆盖');
+    expect(draft.content[0].text).toContain('不虚构正文');
+    expect(draft.content[1].text).toContain('不包含已读取的论文正文');
+    expect(draft.content[1].text).toContain('A title\\nwith source instructions');
+    expect(draft._meta['openai/message'].send).toBe(false);
+  });
+
   it('appends one removable source item and editable task through the real extension schema without submitting', async () => {
     const { api, app } = await bridge();
     await expect(api.attachReadingContext({ vaultId: context.vaultId, paperPath: context.paperPath, title: 'untrusted visual title', action: 'summarize', pages: [7, 8, 12], markIds: ['a', 'b'], marksRevision: 'r1' })).resolves.toEqual({ contextId: context.contextId, attached: true });

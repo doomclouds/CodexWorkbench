@@ -1,9 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { MessageCircle } from 'lucide-react';
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist';
 import type { MarkRect, ReaderMark } from '../../contracts/reader';
 import { pdfjs } from '../pdf-runtime';
 import { messageOf } from '../model';
-import { COLOR_HEX, fitPageScale, markText, pageGeometry, pointsRectToViewport, rectEnvelope, safePdfUrl, screenRectToPoints, usefulRects, type PageGeometry } from './geometry';
+import { COLOR_HEX, fitPageScale, markPointRects, markText, markVisualLayers, pageGeometry, pointsRectToViewport, rectEnvelope, rectsPath, rectsUnderlinePath, safePdfUrl, screenRectToPoints, type MarkVisualLayer, type PageGeometry } from './geometry';
 import { NativeSelectionLayer } from './NativeSelectionLayer';
 import { layoutMarkPins, MARK_PIN_GUTTER, type MarkPinGroup } from './mark-pins';
 import { MarkPopover } from './MarkPopover';
@@ -11,6 +12,7 @@ import { TranslationOverlay } from './translation/TranslationOverlay';
 import type { TranslatedPage } from './translation/useDocumentTranslation';
 import { abortable, canvasBudget, pdfRenderScheduler, releasePageResources, yieldToHost } from './scheduling';
 import { latestPageIntersection, PAGE_PREFETCH_MARGIN, pageIsNearViewport } from './page-visibility';
+import './annotation-overlays.css';
 
 export interface RegisteredPage { element: HTMLDivElement; canvas: HTMLCanvasElement; geometry: PageGeometry; page: PDFPageProxy }
 export interface VisualSelection { page: number; rects: MarkRect[]; pageSize: { width: number; height: number }; quote: string; x: number; y: number; asset: { mediaType: 'image/png'; data: string } }
@@ -18,12 +20,13 @@ interface Props {
   document: PDFDocumentProxy; number: number; active: boolean; scale: number; fitWidth?: number; rotation: number; tone: 'white' | 'dark';
   estimate: { width: number; height: number }; viewportRef: RefObject<HTMLDivElement | null>; marks: ReaderMark[];
   selectedMark: string | null; cards: boolean; crop: boolean; translated?: TranslatedPage;
-  onReady(number: number, page: RegisteredPage | null): void; onMark(mark: ReaderMark): void;
+  onReady(number: number, page: RegisteredPage | null): void; onMark(mark: ReaderMark, draft?: string): void;
   onDestination(destination: unknown, action?: string): void; onExternal(url: string): void;
   onVisual(selection: VisualSelection): void;
   onRendered(number: number): void;
   onFailure?(number: number, message: string): void;
   onSaveComment?(mark: ReaderMark, text: string): Promise<void>;
+  commentDrafts?: Map<string, string>;
 }
 interface Link { id: string; rect: number[]; url?: string; dest?: unknown; action?: string }
 
@@ -34,10 +37,11 @@ function PageViewComponent(props: Props) {
   const [links, setLinks] = useState<Link[]>([]);
   const [rendering, setRendering] = useState(false); const [error, setError] = useState('');
   const [cropRect, setCropRect] = useState<MarkRect | null>(null); const drag = useRef<{ x: number; y: number } | null>(null);
-  const [textRects, setTextRects] = useState<MarkRect[]>([]); const [openPin, setOpenPin] = useState<{ group: MarkPinGroup; anchor: HTMLElement } | null>(null);
+  const [textRects, setTextRects] = useState<MarkRect[]>([]); const [openPin, setOpenPin] = useState<{ group: MarkPinGroup; anchor: HTMLElement; activeId: string } | null>(null);
   const chain = useRef<Promise<void>>(Promise.resolve());
   const failed = useRef(false);
   const renderEpoch = useRef(0); const pageRef = useRef(page); pageRef.current = page;
+  const localCommentDrafts = useRef(new Map<string, string>());
   const baseSize = page ? page.getViewport({ scale: 1, rotation: (page.rotate + rotation) % 360 }) : { width: rotation % 180 ? estimate.height : estimate.width, height: rotation % 180 ? estimate.width : estimate.height };
   const renderedScale = fitWidth === undefined ? scale : fitPageScale(baseSize.width, fitWidth);
   const geometry = useMemo(() => page ? pageGeometry(page, renderedScale, (page.rotate + rotation) % 360) : null, [page, renderedScale, rotation]);
@@ -131,6 +135,9 @@ function PageViewComponent(props: Props) {
   }, []);
 
   const pageMarks = useMemo(() => marks.filter(mark => mark.page === number), [marks, number]);
+  const visualLayers = useMemo(() => geometry ? markVisualLayers(pageMarks, geometry) : { fills: [], underlines: [] }, [pageMarks, geometry]);
+  const savedRects = useMemo(() => geometry ? visualLayers.fills.flatMap(layer => layer.rects.map(rect => pointsRectToViewport(rect, geometry))) : [], [visualLayers, geometry]);
+  const activeMark = pageMarks.find(mark => mark.id === (openPin?.activeId ?? selectedMark));
   const pins = useMemo(() => geometry ? layoutMarkPins(pageMarks, geometry, textRects) : [], [pageMarks, geometry, textRects]);
   const commentCards = useMemo(() => {
     if (!geometry || !cards) return [];
@@ -168,9 +175,9 @@ function PageViewComponent(props: Props) {
   return <div ref={sheet} className={`pdf-sheet ${cards ? 'with-comment-cards' : ''}`} style={{ minHeight: geometry?.viewport.height ?? placeholder.height, width: (geometry?.viewport.width ?? placeholder.width) + (cards ? 226 : MARK_PIN_GUTTER) }}>
     <div ref={element} className={`pdf-page parity-pdf-page ${tone === 'dark' ? 'paper-dark' : ''} ${crop ? 'crop-mode' : ''}`} data-pdf-page={number} style={{ width: geometry?.viewport.width ?? placeholder.width, height: geometry?.viewport.height ?? placeholder.height, '--scale-factor': renderedScale, '--total-scale-factor': renderedScale * (page?.userUnit ?? 1) } as React.CSSProperties}>
       <canvas ref={canvas} />
-      {geometry && <MarkOverlays marks={pageMarks} geometry={geometry} selected={selectedMark} />}
+      {geometry && <MarkOverlays layers={visualLayers} geometry={geometry} activeMark={activeMark} />}
       <div className="textLayer" ref={text} />
-      {geometry && active && near && <NativeSelectionLayer pageRef={element} width={geometry.viewport.width} height={geometry.viewport.height} />}
+      {geometry && active && near && <NativeSelectionLayer pageRef={element} width={geometry.viewport.width} height={geometry.viewport.height} savedRects={savedRects} />}
       {geometry && translated && <TranslationOverlay state={translated} geometry={geometry} dark={tone === 'dark'} />}
       {geometry && <div className="pdf-native-links">{links.map(link => {
         const a = geometry.viewport.convertToViewportPoint(link.rect[0], link.rect[1]); const b = geometry.viewport.convertToViewportPoint(link.rect[2], link.rect[3]);
@@ -178,11 +185,12 @@ function PageViewComponent(props: Props) {
       })}</div>}
       {geometry && <div className="pdf-mark-pins">{pins.map(group => {
         const mark = group.marks[0];
-        return <button key={mark.id} className={`pdf-mark-pin ${group.marks.some(item => selectedMark === item.id) ? 'selected' : ''}`} style={{ left: group.x, top: group.y, '--mark-color': COLOR_HEX[mark.color ?? 'yellow'] } as React.CSSProperties} title={group.marks.length > 1 ? `${group.marks.length} 条批注` : markText(mark) || '查看批注'} aria-label={`查看第 ${number} 页${group.marks.length > 1 ? `${group.marks.length} 条批注` : mark.kind === 'translate' ? '翻译' : '批注'}`} aria-expanded={openPin?.group.marks[0].id === mark.id} onClick={event => { event.stopPropagation(); setOpenPin(value => value?.group.marks[0].id === mark.id ? null : { group, anchor: event.currentTarget }); }}>{group.marks.length > 1 ? group.marks.length : mark.kind === 'translate' ? '译' : mark.kind === 'ask' ? '?' : '•'}</button>;
+        return <button key={mark.id} className={`pdf-mark-pin ${group.marks.some(item => activeMark?.id === item.id) ? 'selected' : ''}`} style={{ left: group.x, top: group.y, '--mark-color': COLOR_HEX[mark.color ?? 'yellow'] } as React.CSSProperties} title={group.marks.length > 1 ? `${group.marks.length} 条批注` : markText(mark) || '查看批注'} aria-label={`查看第 ${number} 页${group.marks.length > 1 ? `${group.marks.length} 条批注` : mark.kind === 'translate' ? '翻译' : '批注'}`} aria-expanded={openPin?.group.marks[0].id === mark.id} onClick={event => { event.stopPropagation(); const anchor = event.currentTarget; setOpenPin(value => value?.group.marks[0].id === mark.id ? null : { group, anchor, activeId: mark.id }); }}><MessageCircle size={22} aria-hidden="true" />{group.marks.length > 1 && <span className="pdf-mark-pin-count" aria-hidden="true">{group.marks.length}</span>}</button>;
       })}</div>}
-      {openPin && active && near && <MarkPopover marks={openPin.group.marks.map(mark => pageMarks.find(current => current.id === mark.id) ?? mark)} anchor={openPin.anchor} viewport={viewportRef.current} sourceBounds={() => {
+      {openPin && active && near && <MarkPopover key={openPin.group.marks[0].id} marks={openPin.group.marks.map(mark => pageMarks.find(current => current.id === mark.id) ?? mark)} anchor={openPin.anchor} viewport={viewportRef.current} drafts={props.commentDrafts ?? localCommentDrafts.current} sourceBounds={id => {
         if (!geometry || !element.current) return undefined;
-        const envelope = rectEnvelope(openPin.group.marks.flatMap(mark => mark.rects.map(rect => pointsRectToViewport(rect, geometry, mark.space === 'norm'))));
+        const source = pageMarks.find(mark => mark.id === id); if (!source) return undefined;
+        const envelope = rectEnvelope(source.rects.map(rect => pointsRectToViewport(rect, geometry, source.space === 'norm')));
         if (!envelope) return undefined;
         const bounds = element.current.getBoundingClientRect(); const sx = bounds.width / geometry.viewport.width; const sy = bounds.height / geometry.viewport.height;
         return { left: bounds.left + envelope.x * sx, top: bounds.top + envelope.y * sy, right: bounds.left + (envelope.x + envelope.w) * sx, bottom: bounds.top + (envelope.y + envelope.h) * sy };
@@ -190,7 +198,7 @@ function PageViewComponent(props: Props) {
         if (!geometry || !element.current) return [];
         const bounds = element.current.getBoundingClientRect(); const sx = bounds.width / geometry.viewport.width; const sy = bounds.height / geometry.viewport.height;
         return textRects.map(rect => ({ left: bounds.left + rect.x * sx, top: bounds.top + rect.y * sy, right: bounds.left + (rect.x + rect.w) * sx, bottom: bounds.top + (rect.y + rect.h) * sy }));
-      }} onSelect={mark => { setOpenPin(null); onMark(mark); }} onSave={props.onSaveComment} onClose={() => setOpenPin(null)} />}
+      }} onActiveChange={id => setOpenPin(value => value ? { ...value, activeId: id } : null)} onSelect={(mark, draft) => { setOpenPin(null); onMark(mark, draft); }} onSave={props.onSaveComment} onClose={() => setOpenPin(null)} />}
       {crop && <div className="pdf-crop-surface" onPointerDown={cropStart} onPointerMove={cropMove} onPointerUp={cropEnd} onPointerCancel={() => { drag.current = null; setCropRect(null); }}>{cropRect && <div className="pdf-crop-rect" style={{ left: cropRect.x, top: cropRect.y, width: cropRect.w, height: cropRect.h }} />}</div>}
       {!near && !geometry && <span className="pdf-placeholder">第 {number} 页</span>}
       {rendering && <span className="render-indicator">正在绘制第 {number} 页</span>}
@@ -202,13 +210,13 @@ function PageViewComponent(props: Props) {
 
 export const PageView = memo(PageViewComponent);
 
-function MarkOverlays({ marks, geometry, selected }: { marks: ReaderMark[]; geometry: PageGeometry; selected: string | null }) {
+function MarkOverlays({ layers, geometry, activeMark }: { layers: { fills: MarkVisualLayer[]; underlines: MarkVisualLayer[] }; geometry: PageGeometry; activeMark?: ReaderMark }) {
   const point = (x: number, y: number) => geometry.viewport.convertToViewportPoint(geometry.view[0] + x, geometry.view[3] - y);
   const o = point(0, 0); const a = point(1, 0); const b = point(0, 1);
   const transform = `matrix(${a[0] - o[0]},${a[1] - o[1]},${b[0] - o[0]},${b[1] - o[1]},${o[0]},${o[1]})`;
-  return <svg className="pdf-mark-overlay" width={geometry.viewport.width} height={geometry.viewport.height} aria-hidden><g transform={transform}>{marks.map(mark => {
-    const rects = usefulRects(mark.rects.map(raw => mark.space === 'norm' ? { x: raw.x * geometry.width, y: raw.y * geometry.height, w: raw.w * geometry.width, h: raw.h * geometry.height } : raw));
-    const color = mark.kind === 'translate' ? '#60a5fa' : mark.kind === 'ask' ? '#4ade80' : COLOR_HEX[mark.color ?? 'yellow'];
-    return mark.kind === 'underline' ? <path key={mark.id} d={rects.map(r => `M${r.x} ${r.y + r.h}h${r.w}`).join(' ')} fill="none" stroke={color} strokeWidth={selected === mark.id ? 3 : 1.5} vectorEffect="non-scaling-stroke" /> : <path key={mark.id} d={rects.map(r => `M${r.x} ${r.y}h${r.w}v${r.h}h${-r.w}Z`).join(' ')} fill={color} fillOpacity={mark.kind === 'visual' ? .12 : .35} stroke={selected === mark.id ? color : 'none'} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />;
-  })}</g></svg>;
+  return <svg className="pdf-mark-overlay" width={geometry.viewport.width} height={geometry.viewport.height} aria-hidden><g transform={transform}>
+    {layers.fills.map(layer => <path key={`${layer.color}:${layer.opacity}`} d={rectsPath(layer.rects)} fill={layer.color} fillOpacity={layer.opacity} />)}
+    {layers.underlines.map(layer => <path key={`underline:${layer.color}`} d={rectsUnderlinePath(layer.rects)} fill="none" stroke={layer.color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />)}
+    {activeMark && <path className="pdf-active-mark-source" d={rectsUnderlinePath(markPointRects(activeMark, geometry))} fill="none" strokeWidth={2.5} vectorEffect="non-scaling-stroke" />}
+  </g></svg>;
 }
