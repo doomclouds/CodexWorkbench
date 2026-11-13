@@ -1,12 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown, Copy, Download, Highlighter, Languages, LoaderCircle, LocateFixed, MessageSquare, Pencil, Pin, Plus, Save, Send, Trash2, Underline, X } from 'lucide-react';
+import { Copy, Highlighter, Languages, LoaderCircle, MessageSquare, Pencil, Pin, Plus, Save, Send, Trash2, Underline, X } from 'lucide-react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import type { BookmarkNode, MarkColor, MarkList, ReaderMark } from '../../contracts/reader';
-import { callTool } from '../api';
+import type { BookmarkNode, MarkColor } from '../../contracts/reader';
 import { messageOf } from '../model';
-import { COLORS, COLOR_HEX, COLOR_LABEL, KIND_LABEL, markText } from './geometry';
-import { filterMarks, markGroupState, marksByPage, selectedMarkSummary, toggleMarkGroup } from './mark-selection';
-import { MarkContextTarget, type MarkBatchAction, type MarkBatchTarget } from './MarkContextTarget';
+import { COLORS, COLOR_HEX, COLOR_LABEL } from './geometry';
 
 export interface SelectionPart { page: number; rects: { x: number; y: number; w: number; h: number }[]; pageSize: { width: number; height: number }; quote: string }
 export interface ScreenBounds { left: number; top: number; right: number; bottom: number }
@@ -68,70 +65,7 @@ export function TranslationCard({ value, busy, onPin, onClose, onRetry, onCopy }
   </section>;
 }
 
-export function MarksPanel({ list, selectedId, busy, error, onSelect, onLocate, onSave, onDelete, onReply, onRefresh, onExport, onClose, checkedIds, onCheckedChange, canAttach, onAttach, drafts, commentDrafts }: {
-  list: MarkList | null; selectedId: string | null; busy: boolean; error: string;
-  onSelect(mark: ReaderMark): void; onSave(mark: ReaderMark, text: string, color: MarkColor): Promise<void>;
-  onLocate?(mark: ReaderMark): void; drafts?: Map<string, MarkEditorDraft>; commentDrafts?: Map<string, string>;
-  onDelete(mark: ReaderMark): Promise<void>; onReply(mark: ReaderMark, text: string): Promise<void>;
-  onRefresh(): void; onExport(format: 'pdf' | 'markdown' | 'json'): void; onClose(): void;
-  checkedIds: ReadonlySet<string>; onCheckedChange(ids: Set<string>): void; canAttach: boolean;
-  onAttach(action: MarkBatchAction, ids: string[], target?: MarkBatchTarget): Promise<void>;
-}) {
-  const [filter, setFilter] = useState(''); const [kind, setKind] = useState('all'); const [commentsOnly, setCommentsOnly] = useState(false);
-  const [selectedOnly, setSelectedOnly] = useState(false); const [page, setPage] = useState(0); const [menu, setMenu] = useState(false);
-  const [target, setTarget] = useState<{ action: 'create-note' | 'update-note'; ids: string[] } | null>(null); const [attachError, setAttachError] = useState(''); const [attaching, setAttaching] = useState(false); const attachLock = useRef(false); const menuRoot = useRef<HTMLDivElement>(null);
-  const localDrafts = useRef(new Map<string, MarkEditorDraft>());
-  const selected = list?.items.find(mark => mark.id === selectedId);
-  const items = filterMarks(list?.items ?? [], selectedOnly ? { query: '', kind: 'all', commentsOnly: false, selectedOnly: true } : { query: filter, kind, commentsOnly }, checkedIds);
-  const groups = marksByPage(items); const summary = selectedMarkSummary(list?.items ?? [], checkedIds); const totalPages = Math.max(1, Math.ceil(groups.length / 6)); const currentPage = Math.min(page, totalPages - 1);
-  useEffect(() => { if (!menu) return; const outside = (event: PointerEvent) => { if (event.target instanceof Node && !menuRoot.current?.contains(event.target)) setMenu(false); }; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenu(false); }; document.addEventListener('pointerdown', outside); document.addEventListener('keydown', escape); return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); }; }, [menu]);
-  async function attach(action: MarkBatchAction, ids: string[], target?: MarkBatchTarget) { if (attachLock.current) return; attachLock.current = true; setAttaching(true); setAttachError(''); try { await onAttach(action, ids, target); } catch (cause) { setAttachError(messageOf(cause)); throw cause; } finally { attachLock.current = false; setAttaching(false); } }
-  function chooseAction(action: MarkBatchAction) { setMenu(false); const ids = summary.items.map(mark => mark.id); if (action === 'create-note' || action === 'update-note') setTarget({ action, ids }); else void attach(action, ids).catch(() => {}); }
-  return <aside className="pdf-marks-panel" aria-label="论文批注"><header className="pdf-panel-heading"><strong>批注 <span className="count">{list?.items.length ?? 0}</span></strong><button className="icon-button" aria-label="关闭批注列表" onClick={onClose}><X size={15} /></button></header><div className="pdf-mark-filters"><input aria-label="搜索批注" placeholder="查找引用或备注" value={filter} onChange={event => setFilter(event.target.value)} /><select aria-label="批注类型" value={kind} onChange={event => setKind(event.target.value)}><option value="all">全部类型</option>{Object.entries(KIND_LABEL).map(([value, text]) => <option key={value} value={value}>{text}</option>)}</select><button disabled={busy} onClick={onRefresh}>刷新</button></div>
-    <div className="pdf-mark-select-tools"><label><input type="checkbox" checked={commentsOnly} onChange={event => { setCommentsOnly(event.target.checked); setPage(0); }} />含备注或回复</label><button disabled={!items.length || busy} onClick={() => onCheckedChange(toggleMarkGroup(checkedIds, items))}>{markGroupState(items, checkedIds) === 'all' ? '取消筛选结果' : '选择筛选结果'}</button></div>
-    {error && <p className="callout error" role="alert">{error}</p>}
-    <div className="pdf-marks-list">{groups.slice(currentPage * 6, currentPage * 6 + 6).map(group => <section key={group.page} className="pdf-mark-page-group" aria-label={`物理第 ${group.page} 页批注`}><header><label className="pdf-mark-page-select"><GroupCheckbox label={`选择物理第 ${group.page} 页的筛选批注`} state={markGroupState(group.marks, checkedIds)} onChange={() => onCheckedChange(toggleMarkGroup(checkedIds, group.marks))} /><strong>物理第 {group.page} 页</strong><small>{group.marks.length} 条{markGroupState(group.marks, checkedIds) === 'some' ? ' · 部分已选' : markGroupState(group.marks, checkedIds) === 'all' ? ' · 全部已选' : ''}</small></label></header><div className="pdf-mark-page-children">{group.marks.map(mark => <div key={mark.id} className={`pdf-mark-choice ${checkedIds.has(mark.id) ? 'checked' : ''}`}><label className="pdf-mark-check" title="选择为对话来源"><input type="checkbox" aria-label={`选择第 ${mark.page} 页批注 ${mark.quote.slice(0, 30) || mark.id}`} checked={checkedIds.has(mark.id)} onChange={() => onCheckedChange(toggleMarkGroup(checkedIds, [mark]))} /></label><button className={`pdf-mark-entry ${selectedId === mark.id ? 'editing' : ''}`} aria-pressed={selectedId === mark.id} onClick={() => onSelect(mark)}><small>{KIND_LABEL[mark.kind]}{selectedId === mark.id && <span className="pdf-mark-editing"> · 正在编辑</span>}</small><blockquote>{mark.quote || '区域标注'}</blockquote>{markText(mark) && <span>{markText(mark)}</span>}{Boolean(mark.messages?.length) && <small>{mark.messages!.length} 条回复</small>}</button></div>)}</div></section>)}{!items.length && <p className="field-help">{selectedOnly ? '尚未选择批注。' : '没有匹配的批注。选中文字或框选区域后添加。'}</p>}</div>
-    {totalPages > 1 && <nav className="pdf-marks-pagination" aria-label="批注列表分页"><button aria-label="上一组批注页" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一组</button><span>{currentPage + 1} / {totalPages}</span><button aria-label="下一组批注页" disabled={currentPage + 1 === totalPages} onClick={() => setPage(currentPage + 1)}>下一组</button></nav>}
-    {selected && list && <MarkEditor key={selected.id} mark={selected} vaultId={list.vaultId} paperPath={list.paperPath} busy={busy} onSave={onSave} onDelete={onDelete} onReply={onReply} onLocate={onLocate ? () => onLocate(selected) : undefined} drafts={drafts ?? localDrafts.current} commentDrafts={commentDrafts} />}
-    <div className="pdf-mark-batch-bar"><div><strong>对话来源 · 已选 {summary.items.length} 条 / {summary.pages.length} 页</strong><button aria-pressed={selectedOnly} disabled={!summary.items.length && !selectedOnly} onClick={() => { setSelectedOnly(value => !value); setPage(0); }}>{selectedOnly ? '返回全部' : '查看已选'}</button><button disabled={!checkedIds.size} onClick={() => onCheckedChange(new Set())}>清空</button></div>{!canAttach && <span className="field-help">当前宿主不支持附加到对话输入框。</span>}{attachError && <p className="error-text" role="alert">{attachError}</p>}<div ref={menuRoot} className="pdf-mark-batch-actions"><button className="primary" disabled={!canAttach || !summary.items.length || busy || attaching} onClick={() => chooseAction('summarize')}><Send size={13} />{attaching ? '附加中…' : '带到对话'}</button><button aria-label="选择批注对话操作" aria-haspopup="menu" aria-expanded={menu} disabled={!canAttach || !summary.items.length || busy || attaching} onClick={() => setMenu(value => !value)}><ChevronDown size={15} /></button>{menu && <div role="menu" aria-label="批注对话操作"><button role="menuitem" onClick={() => chooseAction('summarize')}>在对话中总结</button><button role="menuitem" onClick={() => chooseAction('create-note')}>整理并保存为新笔记…</button><button role="menuitem" onClick={() => chooseAction('update-note')}>整理并更新已有笔记…</button><button role="menuitem" onClick={() => chooseAction('revise-paper')}>根据批注修订论文正文 Markdown</button></div>}</div></div>
-    <details className="pdf-export-actions"><summary>导出批注</summary><div><button disabled={busy} onClick={() => onExport('markdown')}><Download size={13} />Markdown</button><button disabled={busy} onClick={() => onExport('json')}>JSON</button><button disabled={busy} onClick={() => onExport('pdf')}>带批注 PDF</button></div></details>
-    {target && list && <MarkContextTarget action={target.action} vaultId={list.vaultId} paperPath={list.paperPath} onSubmit={value => attach(target.action, target.ids, value)} onClose={() => setTarget(null)} />}
-  </aside>;
-}
-function GroupCheckbox({ label, state, onChange }: { label: string; state: 'none' | 'some' | 'all'; onChange(): void }) {
-  const ref = useRef<HTMLInputElement>(null); useEffect(() => { if (ref.current) ref.current.indeterminate = state === 'some'; }, [state]);
-  return <input ref={ref} type="checkbox" aria-label={label} aria-checked={state === 'some' ? 'mixed' : state === 'all'} checked={state === 'all'} onChange={onChange} />;
-}
-
-export function MarkEditor({ mark, vaultId, paperPath, busy, onSave, onDelete, onReply, onLocate, drafts, commentDrafts }: { mark: ReaderMark; vaultId: string; paperPath: string; busy: boolean; onSave(mark: ReaderMark, text: string, color: MarkColor): Promise<void>; onDelete(mark: ReaderMark): Promise<void>; onReply(mark: ReaderMark, text: string): Promise<void>; onLocate?(): void; drafts: Map<string, MarkEditorDraft>; commentDrafts?: Map<string, string> }) {
-  const savedText = mark.kind === 'translate' ? mark.result ?? mark.note : mark.comment ?? mark.note;
-  const cached = drafts.get(mark.id); const [text, setText] = useState(commentDrafts?.get(mark.id) ?? cached?.text ?? savedText); const [color, setColor] = useState<MarkColor>(cached?.color ?? mark.color ?? 'yellow');
-  const [reply, setReply] = useState(cached?.reply ?? ''); const [error, setError] = useState(''); const [confirmDelete, setConfirmDelete] = useState(false);
-  const [asset, setAsset] = useState<string | null>(null);
-  const dirty = text !== savedText || color !== (mark.color ?? 'yellow');
-  function cacheDraft(next: { text: string; color: MarkColor; reply: string }, baselineText = savedText, baselineColor = mark.color ?? 'yellow') {
-    const pending: MarkEditorDraft = { ...(next.text !== baselineText ? { text: next.text } : {}), ...(next.color !== baselineColor ? { color: next.color } : {}), ...(next.reply ? { reply: next.reply } : {}) };
-    if (Object.keys(pending).length) drafts.set(mark.id, pending); else drafts.delete(mark.id);
-    if (pending.text !== undefined) commentDrafts?.set(mark.id, pending.text); else commentDrafts?.delete(mark.id);
-  }
-  const changeDraft = (change: Partial<{ text: string; color: MarkColor; reply: string }>) => { const next = { text, color, reply, ...change }; cacheDraft(next); setText(next.text); setColor(next.color); setReply(next.reply); };
-  useEffect(() => { const pending = drafts.get(mark.id); setText(commentDrafts?.get(mark.id) ?? pending?.text ?? savedText); setColor(pending?.color ?? mark.color ?? 'yellow'); setReply(pending?.reply ?? ''); }, [mark.id, savedText, mark.color]);
-  useEffect(() => {
-    if (!mark.asset) return;
-    let cancelled = false;
-    // The backend resolves the asset by mark id and bounds it to this paper.
-    void callTool<{ base64: string; mediaType?: string; mimeType?: string }>('mark_asset_read', { vaultId, paperPath, id: mark.id }).then(value => { if (!cancelled) setAsset(`data:${value.mediaType ?? value.mimeType ?? 'image/png'};base64,${value.base64}`); }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [mark]);
-  async function run(action: () => Promise<void>) { setError(''); try { await action(); } catch (cause) { setError(messageOf(cause)); } }
-  return <section className="pdf-mark-editor" aria-label="编辑批注"><div className="section-heading"><strong>正在编辑 · {KIND_LABEL[mark.kind]}</strong><span>第 {mark.page} 页</span>{onLocate && <button onClick={onLocate}><LocateFixed size={13} />定位原文</button>}</div>{asset && <img src={asset} alt="区域批注截图" />}
-    {mark.question && <p className="field-help">问题：{mark.question}</p>}<label>{mark.kind === 'translate' ? '译文' : '备注'}<textarea aria-label="批注内容" value={text} maxLength={20_000} onChange={event => changeDraft({ text: event.target.value })} disabled={busy} /></label><ColorPicker value={color} disabled={busy} onChange={value => changeDraft({ color: value })} />
-    <div className="button-row"><button className="primary" disabled={busy || !dirty} onClick={() => void run(async () => { await onSave(mark, text, color); cacheDraft({ text, color, reply }, text, color); })}><Save size={13} />保存修改</button><span className="field-help" role="status">{dirty ? '修改未保存 · 收起后保留草稿' : '已保存'}</span><button className="danger" disabled={busy} onClick={() => setConfirmDelete(value => !value)}><Trash2 size={13} />删除</button></div>
-    {confirmDelete && <div className="pdf-delete-confirm"><span>删除此批注及其备注？</span><button className="danger" disabled={busy} onClick={() => void run(() => onDelete(mark))}>确认删除</button><button onClick={() => setConfirmDelete(false)}>取消</button></div>}
-    {Boolean(mark.messages?.length) && <ol className="pdf-mark-thread">{mark.messages!.map(message => <li key={message.id}><small>{message.role === 'assistant' ? '模型' : '用户'} · {new Date(message.createdAt).toLocaleString()}</small><p>{message.content}</p></li>)}</ol>}
-    <label>追加回复<textarea aria-label="批注回复" value={reply} maxLength={10_000} onChange={event => changeDraft({ reply: event.target.value })} disabled={busy} /></label><button disabled={busy || !reply.trim()} onClick={() => void run(async () => { await onReply(mark, reply); changeDraft({ reply: '' }); })}><Save size={13} />保存回复</button>{error && <p className="error-text" role="alert">{error}</p>}
-  </section>;
-}
+export { AnnotationsWorkspace as MarksPanel, MarkEditor } from './AnnotationsWorkspace';
 
 interface EditableBookmark extends BookmarkNode { id: string; destination?: unknown; children: EditableBookmark[] }
 export function outlineToEditable(items: { title: string; dest?: unknown; items?: unknown[] }[], prefix = ''): EditableBookmark[] {

@@ -1,4 +1,5 @@
 import { BookOpen, FileText, Layers, NotebookPen, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, Trash2 } from 'lucide-react';
+import { LIBRARY_ICON } from '../contracts/brand-icon';
 import './app-sidebar.css';
 
 export type WorkspaceTab = 'library' | 'reading' | 'notes' | 'trash';
@@ -24,7 +25,7 @@ export function AppSidebar({ tab, collapsed, vaultName, connectionLabel, connect
   const settingsTitle = settingsDisabled ? '处理草稿并重新载入知识库后再修改设置' : '配置与诊断';
   return <aside id="agentero-sidebar" className="app-sidebar" data-collapsed={collapsed} aria-label="文献库侧栏">
     <header className="app-sidebar__heading">
-      <div className="app-sidebar__brand" title="文献库"><BookOpen size={20} aria-hidden="true" /><h1 className="app-sidebar__label">文献库</h1></div>
+      <div className="app-sidebar__brand" title="文献库"><img src={LIBRARY_ICON.src} width={24} height={24} alt="" aria-hidden="true" /><h1 className="app-sidebar__label">文献库</h1></div>
       <button className="app-sidebar__fold" aria-label={collapsed ? '展开侧栏' : '收起侧栏'} title={collapsed ? '展开侧栏' : '收起侧栏'} aria-expanded={!collapsed} aria-controls="agentero-sidebar" onClick={onToggle}>{collapsed ? <PanelLeftOpen size={17} aria-hidden="true" /> : <PanelLeftClose size={17} aria-hidden="true" />}</button>
     </header>
     <div className="app-sidebar__main">

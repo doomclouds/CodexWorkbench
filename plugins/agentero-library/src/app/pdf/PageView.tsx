@@ -27,6 +27,7 @@ interface Props {
   onFailure?(number: number, message: string): void;
   onSaveComment?(mark: ReaderMark, text: string): Promise<void>;
   commentDrafts?: Map<string, string>;
+  onDraftsChange?(): void;
 }
 interface Link { id: string; rect: number[]; url?: string; dest?: unknown; action?: string }
 
@@ -187,7 +188,7 @@ function PageViewComponent(props: Props) {
         const mark = group.marks[0];
         return <button key={mark.id} className={`pdf-mark-pin ${group.marks.some(item => activeMark?.id === item.id) ? 'selected' : ''}`} style={{ left: group.x, top: group.y, '--mark-color': COLOR_HEX[mark.color ?? 'yellow'] } as React.CSSProperties} title={group.marks.length > 1 ? `${group.marks.length} 条批注` : markText(mark) || '查看批注'} aria-label={`查看第 ${number} 页${group.marks.length > 1 ? `${group.marks.length} 条批注` : mark.kind === 'translate' ? '翻译' : '批注'}`} aria-expanded={openPin?.group.marks[0].id === mark.id} onClick={event => { event.stopPropagation(); const anchor = event.currentTarget; setOpenPin(value => value?.group.marks[0].id === mark.id ? null : { group, anchor, activeId: mark.id }); }}><MessageCircle size={22} aria-hidden="true" />{group.marks.length > 1 && <span className="pdf-mark-pin-count" aria-hidden="true">{group.marks.length}</span>}</button>;
       })}</div>}
-      {openPin && active && near && <MarkPopover key={openPin.group.marks[0].id} marks={openPin.group.marks.map(mark => pageMarks.find(current => current.id === mark.id) ?? mark)} anchor={openPin.anchor} viewport={viewportRef.current} drafts={props.commentDrafts ?? localCommentDrafts.current} sourceBounds={id => {
+      {openPin && active && near && <MarkPopover key={openPin.group.marks[0].id} marks={openPin.group.marks.map(mark => pageMarks.find(current => current.id === mark.id) ?? mark)} anchor={openPin.anchor} viewport={viewportRef.current} drafts={props.commentDrafts ?? localCommentDrafts.current} onDraftsChange={props.onDraftsChange} sourceBounds={id => {
         if (!geometry || !element.current) return undefined;
         const source = pageMarks.find(mark => mark.id === id); if (!source) return undefined;
         const envelope = rectEnvelope(source.rects.map(rect => pointsRectToViewport(rect, geometry, source.space === 'norm')));

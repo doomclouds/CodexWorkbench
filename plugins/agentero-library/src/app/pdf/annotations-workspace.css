@@ -1,0 +1,93 @@
+.annotation-sidebar > .annotation-workspace { width: 100%; }
+.annotation-workspace { display: flex; flex: 1; min-width: 0; min-height: 0; flex-direction: column; position: relative; color: var(--text); background: var(--panel-bg); }
+.annotation-workspace .pdf-panel-heading { gap: 6px; flex: none; }
+.annotation-workspace .pdf-panel-heading > .icon-button:last-child { margin-left: auto; }
+.annotation-workspace .pdf-panel-heading button { font-size: 11px; }
+.annotation-back { border: none; padding-inline: 0; background: transparent; }
+.annotation-filter-bar { display: flex; flex: none; gap: 6px; padding: 9px; }
+.annotation-filter-bar > input { flex: 1; min-width: 0; width: 0; font-size: 12px; }
+.annotation-filter-bar > button { min-height: 30px; padding: 4px 7px; gap: 4px; font-size: 11px; }
+.annotation-selected-view { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; padding: 9px; font-size: 11px; border-bottom: 1px solid var(--line); }
+.annotation-selected-view > span { color: var(--muted); }
+.annotation-selected-view > button { margin-left: auto; font-size: 11px; min-height: 27px; }
+.annotation-filter-options { flex: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 0 9px 9px; border-bottom: 1px solid var(--line); }
+.annotation-filter-options label { display: flex; gap: 5px; align-items: center; font-size: 11px; }
+.annotation-filter-options label:last-child { width: 100%; }
+.annotation-filter-options select, .annotation-filter-options input:not([type="checkbox"]) { min-width: 0; max-width: 100%; flex: 1; padding: 4px; font-size: 11px; }
+.annotation-filter-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: none; padding: 0 9px 7px; }
+.annotation-filter-chips button { font-size: 10px; min-height: 23px; padding: 2px 6px; }
+.annotation-filter-error { padding: 0 9px; font-size: 11px; }
+.annotation-list-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 10px 7px; flex: none; font-size: 10px; color: var(--muted); }
+.annotation-list-toolbar label { display: flex; align-items: center; gap: 6px; }
+.annotation-list-toolbar > span { text-align: right; }
+.annotation-workspace .annotation-main-list { min-height: 0; padding: 3px 8px; overscroll-behavior: contain; }
+.annotation-main-list .pdf-mark-page-group > header { display: flex; align-items: center; border: none; border-bottom: 1px solid var(--line); border-radius: 0; }
+.annotation-main-list .pdf-mark-page-select { flex: 1; min-width: 0; padding: 6px 2px; }
+.annotation-main-list .pdf-mark-page-select small { font-size: 9px; white-space: nowrap; }
+.annotation-main-list .pdf-mark-page-children { margin: 0 0 0 24px; padding-left: 0; border: none; }
+.annotation-main-list .pdf-mark-choice { gap: 3px; border-bottom: 1px solid var(--line); padding: 4px 0; }
+.annotation-main-list .pdf-mark-choice.previewing { background: var(--accent-soft); }
+.annotation-main-list .pdf-mark-check { flex-basis: 20px; width: 20px; min-height: 28px; }
+.annotation-main-list .pdf-mark-entry { gap: 5px; padding: 4px 3px; margin: 0; border: none; border-radius: 0; }
+.annotation-entry-heading { display: flex; width: 100%; align-items: center; gap: 4px; flex-wrap: wrap; }
+.annotation-entry-heading > small { display: inline-flex; align-items: center; gap: 4px; }
+.annotation-entry-heading i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.annotation-entry-actions { display: flex; align-items: center; gap: 3px; margin-left: auto; }
+.annotation-entry-actions button { border: none; background: transparent; font-size: 10px; min-height: 23px; padding: 1px 3px; gap: 2px; }
+.annotation-draft-badge { color: var(--accent); }
+.annotation-empty-footer { flex: none; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; padding: 11px; }
+.annotation-more { position: relative; }
+.annotation-more [role="menu"] { display: flex; flex-direction: column; position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; min-width: 170px; padding: 5px; border: 1px solid var(--line); background: var(--app-bg); box-shadow: 0 5px 20px #0003; border-radius: 7px; }
+.annotation-more [role="menuitem"] { justify-content: flex-start; border: none; font-size: 11px; }
+.annotation-load-more { width: 100%; margin: 5px 0; font-size: 11px; }
+.annotation-workspace > .annotation-single-editor { flex: 1; min-height: 0; max-height: none; overflow: hidden; border: none; padding: 0; gap: 0; background: var(--panel-bg); }
+.annotation-editor-scroll { min-height: 0; flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.annotation-editor-scroll .section-heading { flex-wrap: wrap; gap: 5px; }
+.annotation-editor-source { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.65; border-left: 2px solid var(--line); padding: 8px 10px; background: var(--app-bg); border-radius: 4px; }
+.annotation-editor-scroll > label textarea { min-height: 160px; }
+.annotation-editor-scroll > img { max-width: 100%; max-height: 180px; object-fit: contain; background: #fff; }
+.annotation-replies-heading { display: flex; align-items: flex-start; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+.annotation-replies-heading details { flex: 1; min-width: 0; }
+.annotation-replies-heading summary { font-size: 12px; cursor: pointer; padding-block: 5px; }
+.annotation-replies-heading button { background: transparent; border: none; color: var(--accent); }
+.annotation-editor-footer { flex: none; border-top: 1px solid var(--line); padding: 11px; display: flex; flex-direction: column; gap: 9px; }
+.annotation-editor-footer > div:not(.pdf-delete-confirm) { display: flex; gap: 6px; align-items: center; }
+.annotation-editor-footer .primary { flex: 1; }
+.annotation-editor-more { position: relative; }
+.annotation-editor-more summary { list-style: none; cursor: pointer; padding: 5px; }
+.annotation-editor-more > button { position: absolute; right: 0; bottom: 100%; width: max-content; z-index: 3; box-shadow: 0 3px 10px #0002; }
+.annotation-manager-content { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.annotation-page-navigation { display: flex; flex-direction: column; gap: 3px; flex: 0 0 145px; min-height: 0; overflow: auto; border-right: 1px solid var(--line); padding: 12px 8px; font-size: 11px; }
+.annotation-page-navigation > strong { padding: 3px 4px 8px; }
+.annotation-page-navigation > div, .annotation-page-navigation > label { display: flex; gap: 6px; align-items: center; min-height: 32px; }
+.annotation-page-navigation button { min-width: 0; padding: 4px; border: none; font-size: 11px; background: transparent; }
+.annotation-page-navigation small { margin-left: auto; color: var(--muted); }
+.annotation-workspace--manager .annotation-main-list .pdf-mark-entry > span { -webkit-line-clamp: 2; }
+.annotation-workspace--manager .annotation-empty-footer { padding: 12px; }
+.annotation-workspace--manager { container-type: inline-size; container-name: annotation-list; }
+.annotation-manager-column-head { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 48px 54px; gap: 9px; flex: none; padding: 7px 14px 7px 58px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.annotation-main-list .annotation-table-entry { position: relative; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) 48px 54px; column-gap: 9px; row-gap: 2px; align-items: start; min-height: 32px; padding-block: 5px; }
+.annotation-table-entry .annotation-entry-heading { display: contents; }
+.annotation-table-entry > blockquote { grid-column: 1; grid-row: 1; min-width: 0; padding-left: 0; border: none; max-height: none; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-size: 11px; line-height: 1.8; }
+.annotation-main-list .annotation-table-entry > .annotation-entry-note { grid-column: 2; grid-row: 1; display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; line-height: 1.8; }
+.annotation-entry-note--empty { color: var(--muted); }
+.annotation-table-entry .annotation-entry-kind { grid-column: 3; grid-row: 1; display: flex; flex-wrap: wrap; gap: 3px; padding-top: 3px; }
+.annotation-table-entry > .annotation-entry-source { grid-column: 4; grid-row: 1; white-space: nowrap; padding-top: 3px; }
+.annotation-table-entry > .annotation-entry-reply-count { grid-column: 2; grid-row: 2; font-size: 9px; }
+.annotation-table-entry .annotation-entry-actions { position: absolute; right: 0; top: -3px; z-index: 2; padding: 2px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel-bg); box-shadow: 0 2px 6px #0002; opacity: 0; pointer-events: none; }
+.pdf-mark-choice:hover .annotation-table-entry .annotation-entry-actions, .pdf-mark-choice:focus-within .annotation-table-entry .annotation-entry-actions { opacity: 1; pointer-events: auto; }
+@container annotation-list (max-width: 479px) {
+  .annotation-manager-column-head { display: none; }
+  .annotation-main-list .annotation-table-entry { display: flex; flex-direction: column; gap: 5px; padding-block: 4px; }
+  .annotation-table-entry .annotation-entry-heading { display: flex; }
+  .annotation-table-entry .annotation-entry-actions { position: static; padding: 0; border: none; background: transparent; box-shadow: none; opacity: 1; pointer-events: auto; }
+  .annotation-table-entry > blockquote { padding-left: 7px; border-left: 2px solid var(--line); white-space: normal; max-height: 52px; line-height: 1.5; }
+  .annotation-main-list .annotation-table-entry > .annotation-entry-note { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: pre-wrap; font-size: 12px; line-height: 1.6; }
+  .annotation-table-entry > .annotation-entry-source { display: none; }
+}
+.annotation-draft-dialog { position: fixed; inset: auto 16px 16px auto; margin: 0; width: min(420px, calc(100% - 32px)); color: var(--text); gap: 8px; z-index: 40; border: 1px solid var(--line); border-radius: 9px; padding: 14px; background: var(--app-bg); box-shadow: 0 3px 25px #0005; font-size: 12px; }
+.annotation-draft-dialog[open] { display: flex; flex-wrap: wrap; }
+.annotation-draft-dialog::backdrop { background: #0005; }
+.annotation-draft-dialog > strong, .annotation-draft-dialog > p { width: 100%; margin: 0; line-height: 1.6; }
+.annotation-draft-dialog button { font-size: 11px; }
+@container (max-width: 650px) { .annotation-page-navigation { display: none; } }

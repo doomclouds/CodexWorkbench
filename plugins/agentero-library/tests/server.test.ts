@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, test } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { IconSchema } from '@modelcontextprotocol/sdk/types.js';
 import { LibraryService } from '../src/core/library-service.js';
 import { createLibraryServer } from '../src/server/server.js';
 
@@ -41,6 +42,28 @@ test('unconfigured server exposes native settings and Thread app without requiri
   const html = await client.readResource({ uri: resources.resources[0].uri });
   expect(html.contents[0]).toMatchObject({ mimeType: 'text/html;profile=mcp-app', text: '<!doctype html><title>Library</title>' });
   expect(html.contents[0]._meta).toMatchObject({ ui: { csp: { connectDomains: [], resourceDomains: ['blob:', 'data:'] } } });
+});
+
+test('initialize carries a compact portable brand icon for the standard App entrypoint fallback', async () => {
+  const { client } = await connect();
+  const tools = (await client.listTools()).tools;
+  const declaration = client.getServerVersion();
+  const asset = await readFile(new URL('../assets/icon64.png', import.meta.url));
+  expect(declaration?.icons).toHaveLength(1);
+  const icon = IconSchema.parse(declaration!.icons![0]);
+  expect(icon.mimeType).toBe('image/png');
+  expect(icon.src).toMatch(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/);
+  const bytes = Buffer.from(icon.src.split(',')[1], 'base64');
+  expect(bytes).toEqual(asset);
+  expect(bytes.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  expect(icon.sizes).toEqual([`${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`]);
+  expect(bytes.length).toBeLessThan(10_000);
+  expect(Buffer.byteLength(JSON.stringify(declaration!.icons))).toBeLessThan(10_000);
+  for (const name of ['library_open', 'settings_open']) {
+    const tool = tools.find(tool => tool.name === name);
+    expect(tool?._meta?.ui).toMatchObject({ resourceUri: expect.stringMatching(/^ui:\/\/agentero-library\/app\//) });
+    expect(tool?.icons).toBeUndefined();
+  }
 });
 
 test('keeps native diagnostics and external viewer actions explicit and App-only', async () => {

@@ -6,7 +6,7 @@
 .app-sidebar__heading { min-height: 54px; padding: 10px 10px 8px 14px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .app-sidebar__brand { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; }
 .app-sidebar__brand h1 { font-size: 14px; font-weight: 620; white-space: nowrap; }
-.app-sidebar__brand > svg { flex-shrink: 0; }
+.app-sidebar__brand > img { flex-shrink: 0; object-fit: contain; }
 .app-sidebar__fold { min-width: 28px; min-height: 28px; padding: 4px; border-color: transparent; }
 .app-sidebar__main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
 .app-sidebar__navigation { flex-shrink: 0; display: flex; flex-direction: column; gap: 3px; padding: 3px 8px 12px; }
