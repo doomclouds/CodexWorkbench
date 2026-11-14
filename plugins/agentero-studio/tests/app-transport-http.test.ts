@@ -61,4 +61,15 @@ describe('UI requests through the real connected authority', () => {
     expect(reply.size).toBe(expected.length); expect(reply.size).toBeGreaterThan(0);
     expect(Buffer.from(reply.body!, 'base64')).toEqual(expected);
   });
+
+  it('creates a scoped region reader through the real connected authority', async () => {
+    const created = await ui('artifact_manage', { action: 'create', title: 'Reader source', elements: [{ id: 'source-region', type: 'html', html: '<h1>Live region</h1>' }] });
+    const reply = await transport.execute({ action: 'request', path: '/api/region-view', method: 'POST', headers: { 'content-type': 'application/json' }, body: Buffer.from(JSON.stringify({ artifactId: created.artifact.id, regionId: 'source-region', viewId: 'reader-view' })).toString('base64') }) as AppResponse;
+    expect(reply.status).toBe(200);
+    const link = JSON.parse(Buffer.from(reply.body!, 'base64').toString()).data.url as string;
+    expect(link).not.toContain(host.token);
+    const url = new URL(link), capability = new URLSearchParams(url.hash.slice(1)).get('cap');
+    const source = await fetch(`${host.origin}/api/region-reader/${created.artifact.id}/source-region`, { headers: { Authorization: `Bearer ${capability}` } });
+    expect(source.status).toBe(200); expect((await source.json()).data.element.html).toBe('<h1>Live region</h1>');
+  });
 });

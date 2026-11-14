@@ -10,7 +10,13 @@ export async function downloadStudioFile(client: StudioClient, path: string, fil
   const url = new URL(path, client.baseUrl || location.href);
   const response = await studioRequest(client, url, { headers: client.token ? { Authorization: `Bearer ${client.token}` } : {} });
   if (!response.ok) throw new Error(`作品导出读取失败（${response.status}）。`);
-  const blob = await response.blob(), objectUrl = URL.createObjectURL(blob);
+  await downloadStudioBlob(client, await response.blob(), filename);
+}
+
+export async function downloadStudioBlob(client: StudioClient, blob: Blob, filename: string): Promise<void> {
+  if (client.downloadFile) { await client.downloadFile(blob, filename); return; }
+  if (client.embedded) throw new Error('当前宿主未提供文件下载能力，请更新宿主或在浏览器中导出。');
+  const objectUrl = URL.createObjectURL(blob);
   const link = document.createElement('a'); link.href = objectUrl; link.download = filename; link.hidden = true;
   document.body.append(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);

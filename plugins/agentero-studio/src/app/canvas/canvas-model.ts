@@ -1,5 +1,6 @@
-import { DEFAULT_STYLE, type BoardElement, type ElementType, type Operation, type StudioClient, type StyleProfile } from '../../contracts/studio.js';
+import { DEFAULT_STYLE, type Anchor, type BoardElement, type ElementType, type Operation, type StudioClient, type StyleProfile } from '../../contracts/studio.js';
 import { DARK_THEME, LIGHT_THEME } from '../../core/theme.js';
+import { arrowGeometry } from '../../core/products/whiteboard-geometry.js';
 export { arrowGeometry, arrowEnd, arrowHeads } from '../../core/products/whiteboard-geometry.js';
 export { safeHttpLink } from '../../core/shared/rich-text.js';
 
@@ -38,6 +39,36 @@ export function boundsOf(elements: readonly Rect[]): Rect | null {
   const right = Math.max(...elements.map((e) => e.x + Math.max(e.w, 1)));
   const bottom = Math.max(...elements.map((e) => e.y + Math.max(e.h, 1)));
   return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+export function elementBounds(element: BoardElement, elements: readonly BoardElement[]): Rect {
+  return element.type === 'arrow' ? boundsOf(arrowGeometry(element, elements).points.map(point => ({ ...point, w: 0, h: 0 })))! : element;
+}
+
+/** Relative anchors stay attached when the object is moved or resized. */
+export function relativeElementPoint(element: BoardElement, point: Point): Point {
+  const angle = -(element.rotation ?? 0) * Math.PI / 180;
+  const dx = point.x - element.x - element.w / 2, dy = point.y - element.y - element.h / 2;
+  return { x: clamp((dx * Math.cos(angle) - dy * Math.sin(angle)) / Math.max(1, element.w) + .5, 0, 1), y: clamp((dx * Math.sin(angle) + dy * Math.cos(angle)) / Math.max(1, element.h) + .5, 0, 1) };
+}
+
+export function anchorBounds(anchor: Anchor, elements: readonly BoardElement[]): Rect | null {
+  const target = elements.find(element => element.id === (anchor.regionId ?? anchor.elementIds?.[0]));
+  const positioned = Number.isFinite(anchor.x) && Number.isFinite(anchor.y);
+  if (positioned && anchor.coordinateSpace === 'element') {
+    if (!target) return null;
+    const bounds = elementBounds(target, elements);
+    const angle = (target.rotation ?? 0) * Math.PI / 180;
+    const dx = (anchor.x! - .5) * bounds.w, dy = (anchor.y! - .5) * bounds.h;
+    return { x: bounds.x + bounds.w / 2 + dx * Math.cos(angle) - dy * Math.sin(angle), y: bounds.y + bounds.h / 2 + dx * Math.sin(angle) + dy * Math.cos(angle), w: (anchor.w ?? 0) * bounds.w, h: (anchor.h ?? 0) * bounds.h };
+  }
+  if (positioned && (anchor.coordinateSpace === 'html' || !anchor.coordinateSpace && anchor.regionId)) {
+    if (!target) return null;
+    return { x: target.x + anchor.x!, y: target.y + anchor.y!, w: anchor.w ?? 0, h: anchor.h ?? 0 };
+  }
+  if (positioned) return { x: anchor.x!, y: anchor.y!, w: anchor.w ?? 0, h: anchor.h ?? 0 };
+  const ids = [...(anchor.elementIds ?? []), ...(anchor.regionId ? [anchor.regionId] : [])];
+  return boundsOf(elements.filter(element => ids.includes(element.id)).map(element => elementBounds(element, elements)));
 }
 
 export function fitViewport(elements: readonly Rect[], width: number, height: number, padding = 72): Viewport {
@@ -84,7 +115,7 @@ export function makeElement(type: ElementType, point: Point, overrides: Partial<
     container: { w: 600, h: 360, text: '分区', fill: 'transparent', stroke: '#9ca3af', fontSize: 18 },
     stroke: { w: 1, h: 1, points: [0, 0, 1, 1], stroke: 'muted', strokeWidth: 3 },
     arrow: { w: 180, h: 1, from: [point.x, point.y], to: [point.x + 180, point.y], color: 'muted', head: 'end' },
-    html: { w: 1000, h: 680, text: 'HTML 图解', html: '' },
+    html: { w: 1440, h: 1120, text: 'HTML 图解', html: '' },
     image: { w: 360, h: 240 },
     table: { w: 480, h: 180, data: { rows: [['名称', '说明', '状态'], ['项目 A', '双击编辑表格', '进行中'], ['项目 B', '待补充', '待处理']] }, fill: '#ffffff', color: '#2d3142' },
     link: { w: 320, h: 94, text: '链接', href: 'https://example.com', fill: '#ffffff' },

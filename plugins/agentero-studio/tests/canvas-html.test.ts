@@ -1,14 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { buildHtmlRegionDocument, validateHtmlSelectionMessage, validateHtmlStateMessage } from '../src/app/shared/html-region/runtime.js';
+import { buildHtmlRegionDocument, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage } from '../src/app/shared/html-region/runtime.js';
+import { COMMENT_CURSOR } from '../src/app/shared/comments/cursor.js';
 
-const options = { channel: 'unique-frame-channel', regionId: 'region-one', sourceRevision: 7, annotation: true, mode: 'element' as const };
+const options = { channel: 'unique-frame-channel', regionId: 'region-one', sourceRevision: 7, annotation: true };
 const windows: JSDOM[] = [];
 afterEach(() => { windows.forEach((dom) => dom.window.close()); windows.length = 0; vi.unstubAllGlobals(); });
 
 function parser() {
   const dom = new JSDOM(); windows.push(dom);
   vi.stubGlobal('DOMParser', dom.window.DOMParser);
+}
+
+async function runtime(source: string, overrides = {}) {
+  parser();
+  const sent: Record<string, unknown>[] = [];
+  const dom = new JSDOM(buildHtmlRegionDocument(source, { ...options, ...overrides }), { runScripts: 'dangerously', beforeParse(window) {
+    Object.defineProperty(window, 'CSS', { value: { escape: (value: string) => value } });
+    window.postMessage = (message: Record<string, unknown>) => { sent.push(message); };
+  } }); windows.push(dom);
+  await new Promise<void>((resolve) => dom.window.addEventListener('load', () => resolve(), { once: true }));
+  return { dom, sent, select: () => sent.filter((message) => message.type === 'studio-html-selection') };
 }
 
 describe('HTML region rendering copy', () => {
@@ -24,9 +36,32 @@ describe('HTML region rendering copy', () => {
     expect(doc.querySelector('iframe,script[src],link')).toBeNull();
     expect(doc.querySelector('a')?.hasAttribute('href')).toBe(false);
     expect(doc.querySelector('form')?.hasAttribute('action')).toBe(false);
-    expect(doc.head.firstElementChild?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
+    expect(doc.head.firstElementChild?.getAttribute('charset')).toBe('utf-8');
+    expect(doc.head.children[1]?.getAttribute('http-equiv')).toBe('Content-Security-Policy');
     expect(source).toContain('<iframe src="https://example.com">');
     expect(source).not.toContain('studio-html-selection');
+  });
+
+  it.each(['', '<meta charset="UTF-8">', '<meta charset="gbk"><meta charset="windows-1252"><meta http-equiv="Content-Type" content="text/html;charset=gb2312">'])('decodes Chinese as UTF-8 before the injected bridge with source declarations %s', (declarations) => {
+    parser();
+    const chinese = '中文图解：文字拖选与区域批注。';
+    const source = `<html lang="zh-CN"><head>${declarations}<title>阅读中文 HTML</title></head><body><p>${chinese}</p></body></html>`;
+    const savedSource = source;
+    const rendered = buildHtmlRegionDocument(source, options);
+    const charset = '<meta charset="utf-8">';
+    const charsetEnd = rendered.indexOf(charset) + charset.length;
+    expect(rendered.indexOf(charset)).toBeGreaterThan(0);
+    expect(new TextEncoder().encode(rendered.slice(0, charsetEnd)).byteLength).toBeLessThanOrEqual(1024);
+    expect(charsetEnd).toBeLessThan(rendered.indexOf('<script'));
+    const dom = new JSDOM(Buffer.from(rendered, 'utf8')); windows.push(dom);
+    expect(dom.window.document.characterSet).toBe('UTF-8');
+    expect(dom.window.document.querySelector('p')?.textContent).toBe(chinese);
+    expect(dom.window.document.title).toBe('阅读中文 HTML');
+    expect(dom.window.document.querySelectorAll('meta[charset]')).toHaveLength(1);
+    expect(dom.window.document.head.firstElementChild?.outerHTML).toBe(charset);
+    expect(source).toBe(savedSource);
+    expect(source).toContain(declarations);
+    expect(source).not.toContain('data-studio-runtime');
   });
 
   it('captures the clicked SVG object with its source revision and a DOM excerpt', async () => {
@@ -45,6 +80,100 @@ describe('HTML region rendering copy', () => {
     expect(accepted?.excerpt).toContain('data-studio-id="gateway"');
     expect(accepted?.selector).toBe('[data-studio-id="gateway"]');
   });
+
+  it('intercepts source button, pointer and form handlers while annotating', async () => {
+    const { dom, select } = await runtime('<form><button data-studio-id="vote">Vote</button></form><script>window.executed=[];for(const name of ["pointerdown","mousedown","click","submit"]){window.addEventListener(name,()=>window.executed.push(name),true);}</script>');
+    const button = dom.window.document.querySelector('button')!;
+    const pointer = new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 12, clientY: 18 });
+    button.dispatchEvent(pointer);
+    expect(pointer.defaultPrevented).toBe(false);
+    button.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    const click = new dom.window.MouseEvent('click', { bubbles: true, cancelable: true, clientX: 12, clientY: 18 });
+    button.dispatchEvent(click);
+    const submit = new dom.window.Event('submit', { bubbles: true, cancelable: true });
+    dom.window.document.querySelector('form')!.dispatchEvent(submit);
+    expect(click.defaultPrevented).toBe(true);
+    expect(submit.defaultPrevented).toBe(true);
+    expect(dom.window.eval('window.executed')).toEqual([]);
+    expect(select()).toHaveLength(1);
+    expect(select()[0]).toMatchObject({ targetIds: ['vote'], point: { x: 12, y: 18 } });
+  });
+
+  it('captures a natural text drag and suppresses the trailing node click', async () => {
+    const { dom, select } = await runtime('<p data-studio-id="paragraph">Hello selected text</p>');
+    const paragraph = dom.window.document.querySelector('p')!;
+    paragraph.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 20, clientY: 30 }));
+    const range = dom.window.document.createRange();
+    range.setStart(paragraph.firstChild!, 6);
+    range.setEnd(paragraph.firstChild!, 14);
+    Object.defineProperty(range, 'getBoundingClientRect', { value: () => ({ x: 20, y: 30, width: 70, height: 18 }) });
+    dom.window.getSelection()!.addRange(range);
+    paragraph.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 90, clientY: 48 }));
+    paragraph.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true, clientX: 90, clientY: 48 }));
+    expect(select()).toHaveLength(1);
+    expect(select()[0]).toMatchObject({ targetIds: ['paragraph'], quote: 'selected', rect: { x: 20, y: 30, w: 70, h: 18 }, point: { x: 90, y: 48 } });
+  });
+
+  it('captures Shift drag areas in document CSS pixels without a mode switch', async () => {
+    const { dom, select } = await runtime('<section data-studio-id="container"><p data-studio-id="child">Child</p></section>');
+    Object.defineProperty(dom.window, 'scrollX', { value: 80 });
+    Object.defineProperty(dom.window, 'scrollY', { value: 120 });
+    for (const element of dom.window.document.querySelectorAll('[data-studio-id]')) Object.defineProperty(element, 'getBoundingClientRect', { value: () => ({ x: 10, y: 20, left: 10, right: 70, top: 20, bottom: 80, width: 60, height: 60 }) });
+    const child = dom.window.document.querySelector('p')!;
+    const down = new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true, shiftKey: true, clientX: 10, clientY: 20 });
+    child.dispatchEvent(down);
+    child.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 50, clientY: 60 }));
+    child.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 50, clientY: 60 }));
+    child.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientX: 50, clientY: 60 }));
+    expect(down.defaultPrevented).toBe(true);
+    expect(select()).toHaveLength(1);
+    expect(select()[0]).toMatchObject({ targetIds: ['child'], quote: 'Child', rect: { x: 90, y: 140, w: 40, h: 40 }, point: { x: 50, y: 60 } });
+  });
+
+  it('keeps normal source button interaction when annotation is disabled', async () => {
+    const { dom, select } = await runtime('<button>Vote</button><script>window.votes=0;document.querySelector("button").addEventListener("click",()=>window.votes++);</script>', { annotation: false });
+    dom.window.document.querySelector('button')!.click();
+    expect(dom.window.eval('window.votes')).toBe(1);
+    expect(select()).toHaveLength(0);
+  });
+
+  it('changes annotation state only for its authenticated parent, region and source', async () => {
+    const { dom, sent, select } = await runtime('<button data-studio-id="vote">Vote</button><script>window.votes=0;document.querySelector("button").addEventListener("click",()=>window.votes++);</script>', { annotation: false });
+    expect(sent.find((message) => message.type === 'studio-html-ready')).toMatchObject({ channel: options.channel, regionId: options.regionId, sourceRevision: options.sourceRevision });
+    const mode = { type: 'studio-html-mode', ...options, enabled: true };
+    for (const invalid of [{ regionId: 'other' }, { channel: 'other' }, { sourceRevision: 6 }]) dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { ...mode, ...invalid } }));
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: null, data: mode }));
+    dom.window.document.querySelector('button')!.click();
+    expect(dom.window.eval('window.votes')).toBe(1);
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: mode }));
+    dom.window.document.querySelector('button')!.click();
+    expect(dom.window.eval('window.votes')).toBe(1);
+    expect(select()).toHaveLength(1);
+  });
+
+  it('uses the shared bubble cursor for all annotation targets and restores source cursors on exit', async () => {
+    const source = '<html style="cursor:help"><head><style>#button{cursor:pointer}</style></head><body><button id="button" style="cursor:pointer">Click</button><p>Selectable text</p></body></html>';
+    const { dom } = await runtime(source, { annotation: false });
+    const button = dom.window.document.querySelector('button')!;
+    const paragraph = dom.window.document.querySelector('p')!;
+    const cursorStyle = dom.window.document.querySelector<HTMLStyleElement>('[data-studio-runtime="annotation-cursor"]')!;
+    expect(cursorStyle.textContent).toBe('');
+    expect(dom.window.getComputedStyle(button).cursor).toBe('pointer');
+    const mode = { type: 'studio-html-mode', ...options, enabled: true };
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: mode }));
+    expect(dom.window.getComputedStyle(paragraph).cursor).toBe(COMMENT_CURSOR);
+    expect(dom.window.getComputedStyle(button).cursor).toBe(COMMENT_CURSOR);
+    const rule = cursorStyle.sheet!.cssRules[0] as CSSStyleRule;
+    expect(rule.selectorText).toBe(':root, :root *');
+    expect(rule.style.getPropertyValue('cursor')).toBe(COMMENT_CURSOR);
+    expect(rule.style.getPropertyPriority('cursor')).toBe('important');
+    expect(button.getAttribute('style')).toBe('cursor:pointer');
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { ...mode, enabled: false } }));
+    expect(cursorStyle.textContent).toBe('');
+    expect(dom.window.getComputedStyle(button).cursor).toBe('pointer');
+    expect(dom.window.document.documentElement.style.cursor).toBe('help');
+    expect(source).not.toContain('data-studio-runtime');
+  });
 });
 
 describe('frame message boundary', () => {
@@ -55,6 +184,8 @@ describe('frame message boundary', () => {
     expect(validateHtmlSelectionMessage({ ...valid, sourceRevision: 6 }, options)).toBeNull();
     expect(validateHtmlSelectionMessage({ ...valid, rect: { x: 0, y: 0, w: -1, h: 30 } }, options)).toBeNull();
     expect(validateHtmlSelectionMessage({ ...valid, rect: { x: Number.NaN, y: 0, w: 100, h: 30 } }, options)).toBeNull();
+    expect(validateHtmlSelectionMessage({ ...valid, point: { x: Infinity, y: 10 } }, options)).toBeNull();
+    expect(validateHtmlSelectionMessage({ ...valid, point: { x: 10, y: 1e8 } }, options)).toBeNull();
   });
   it('bounds untrusted excerpts and exposes no mutation operation from frame messages', () => {
     expect(validateHtmlSelectionMessage({ ...valid, excerpt: 'x'.repeat(16001) }, options)).toBeNull();
@@ -62,6 +193,35 @@ describe('frame message boundary', () => {
     expect(accepted).not.toHaveProperty('operation');
     expect(accepted).not.toHaveProperty('token');
     expect(accepted).toMatchObject({ regionId: 'region-one', sourceRevision: 7, targetIds: ['gateway'] });
+  });
+
+  it('validates internal client points and discards frame-supplied host screen points', () => {
+    const accepted = validateHtmlSelectionMessage({ ...valid, point: { x: 20, y: 40 }, screenPoint: { x: 900, y: 900 } }, options);
+    expect(accepted?.point).toEqual({ x: 20, y: 40 });
+    expect(accepted).not.toHaveProperty('screenPoint');
+  });
+
+  it('rejects unauthenticated or malformed scroll positions and bounds', () => {
+    const scroll = { type: 'studio-html-scroll', ...options, x: 20, y: 300, maxX: 100, maxY: 900 };
+    expect(validateHtmlScrollMessage(scroll, options)).toEqual({ x: 20, y: 300, maxX: 100, maxY: 900 });
+    for (const invalid of [{ channel: 'other' }, { regionId: 'other' }, { sourceRevision: 6 }, { x: -1 }, { y: 901 }, { maxX: NaN }, { maxY: Infinity }, { maxY: 1e8 }]) expect(validateHtmlScrollMessage({ ...scroll, ...invalid }, options)).toBeNull();
+  });
+});
+
+describe('HTML reader scroll bridge', () => {
+  it('reports scroll and restores only authenticated, finite coordinates clamped to new content', async () => {
+    const { dom, sent } = await runtime('<p>Long document</p>', { preserveScroll: true });
+    Object.defineProperties(dom.window.document.documentElement, { scrollWidth: { value: 800 }, scrollHeight: { value: 1800 } });
+    Object.defineProperties(dom.window, { innerWidth: { value: 300 }, innerHeight: { value: 600 }, scrollX: { value: 30 }, scrollY: { value: 250 } });
+    const scroll = vi.spyOn(dom.window, 'scrollTo').mockImplementation(() => {});
+    dom.window.dispatchEvent(new dom.window.Event('scroll'));
+    expect(sent.find((message) => message.type === 'studio-html-scroll')).toMatchObject({ channel: options.channel, regionId: options.regionId, sourceRevision: 7, x: 30, y: 250, maxX: 500, maxY: 1200 });
+    const restore = { type: 'studio-html-scroll-restore', ...options, x: 600, y: 1500 };
+    for (const invalid of [{ channel: 'other' }, { regionId: 'other' }, { sourceRevision: 6 }, { x: -1 }, { y: Infinity }, { y: 1e8 }]) dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { ...restore, ...invalid } }));
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: null, data: restore }));
+    expect(scroll).not.toHaveBeenCalled();
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: restore }));
+    expect(scroll).toHaveBeenCalledWith(500, 1200);
   });
 });
 

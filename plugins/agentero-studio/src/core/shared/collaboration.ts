@@ -63,5 +63,6 @@ export class StudioCollaboration {
     const cutoff = Date.now() - 45_000; for (const [key, peer] of group) if (Date.parse(peer.updatedAt) < cutoff) group.delete(key);
     return copy([...group.values()]);
   }
+  forget(artifactId: string): void { this.peers.delete(artifactId); this.timers.delete(artifactId); }
   close(): void { this.listeners.clear(); this.peers.clear(); this.timers.clear(); }
 }

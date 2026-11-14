@@ -28,13 +28,14 @@ export function validateUiRequest(request: UiHttpRequest): UiHttpRequest {
   const allowed = tool ? method === 'POST' && TOOL_NAMES.includes(tool[1] as typeof TOOL_NAMES[number])
     : url.pathname === '/api/presence' ? true
     : url.pathname === '/api/session' ? method === 'GET'
+    : url.pathname === '/api/region-view' ? true
     : ['/api/import', '/api/assets'].includes(url.pathname) ? method === 'POST'
     : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url.pathname) && method === 'GET';
   if (!allowed) throw failure('FORBIDDEN', '此地址不能通过作品界面访问。');
   const thumbnail = method === 'GET' && /^\/api\/thumbnails\/[^/]+$/.test(url.pathname);
   const seen = new Set<string>();
   for (const [key, value] of url.searchParams) {
-    if (seen.has(key) || (thumbnail ? key !== 'revision' : key !== 'artifactId')) throw failure('FORBIDDEN', '作品请求不能指定连接凭据、重复或未知查询参数。');
+    if (seen.has(key) || (thumbnail ? key !== 'revision' : url.pathname === '/api/region-view' ? !['artifactId', 'viewId'].includes(key) : key !== 'artifactId')) throw failure('FORBIDDEN', '作品请求不能指定连接凭据、重复或未知查询参数。');
     if (key === 'revision' && (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw failure('INVALID_ARGUMENT', '作品缩略图版本号无效。');
     seen.add(key);
   }

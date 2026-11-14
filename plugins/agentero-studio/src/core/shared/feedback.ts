@@ -1,6 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Actor } from '../../contracts/studio.js';
-import { assertAlive, copy, object, requireRole, StudioError, text } from './common.js';
+import { assertAlive, copy, object, requireRole, safeId, StudioError, text } from './common.js';
 import { makeHistory } from './history.js';
 import type { ArtifactState, ContentOperation, FeedbackRecord, ProductAdapter } from './model.js';
 import { feedbackVisible, visibleFeedback } from './proposals.js';
@@ -13,8 +13,19 @@ export function updateFeedback<C, O extends ContentOperation, A, S>(state: Artif
     const content = text(args.text).trim(); if (!content) throw new StudioError('INVALID_ARGUMENT', '备注内容不能为空。');
     const anchor = object(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor)) > 32 * 1024) throw new StudioError('TOO_LARGE', '备注定位信息过大。');
-    const id = randomUUID(), snapshot = adapter.snapshotFeedback(state.artifact.id, id, [state, ...state.history.slice().reverse()], anchor);
+    if (args.versions !== undefined && (!object(args.versions) || Object.values(args.versions).some(value => !Number.isInteger(value) || Number(value) < 1))) throw new StudioError('INVALID_ARGUMENT', '备注选区的对象版本无效。');
+    const versions = args.versions === undefined ? undefined : copy(args.versions) as Record<string, number>;
+    if (versions && Buffer.byteLength(JSON.stringify(versions)) > 32 * 1024) throw new StudioError('TOO_LARGE', '备注选区的版本信息过大。');
+    const operationId = args.operationId === undefined ? undefined : safeId(args.operationId, '操作 ID');
+    const fingerprint = createHash('sha256').update(JSON.stringify({ actor: actor.id, type: args.type === 'request' ? 'request' : 'comment', text: content, anchor, versions })).digest('hex');
+    const duplicate = operationId && state.feedback.find(entry => entry.creationReceipt?.operationId === operationId);
+    if (duplicate) {
+      if (duplicate.creationReceipt!.fingerprint !== fingerprint) throw new StudioError('OPERATION_REUSED', '同一个操作 ID 不能提交不同的备注。');
+      return { feedback: visibleFeedback(state.feedback, actor), contextId: duplicate.id };
+    }
+    const id = randomUUID(), snapshot = adapter.snapshotFeedback(state.artifact.id, id, [state, ...state.history.slice().reverse()], anchor, versions);
     item = { id, artifactId: state.artifact.id, type: args.type === 'request' ? 'request' : 'comment', anchor: snapshot.anchor, author: copy(actor), text: content, status: 'open', createdAt: now, updatedAt: now, replies: [], versions: copy(snapshot.versions) };
+    if (operationId) item.creationReceipt = { operationId, fingerprint };
     state.feedback.push(item); state.sources[id] = copy(snapshot.sources); contextId = id;
   } else {
     const found = state.feedback.find(entry => entry.id === args.feedbackId && feedbackVisible(entry, actor)); if (!found) throw new StudioError('NOT_FOUND', '备注不存在。'); item = found;

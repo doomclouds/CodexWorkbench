@@ -1,6 +1,7 @@
 import type { Board, BoardElement } from '../contracts/studio.js';
 import { contrastRatio, readableText, semanticColor } from './theme.js';
 import { arrowGeometry, arrowHeads, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
+import { boardStickerMarkup } from './products/whiteboard-stickers.js';
 import { parseRichText, safeHttpLink, type RichTextSegment } from './shared/rich-text.js';
 
 export interface ExportOptions { regionId?: string; elementId?: string; ids?: string[]; padding?: number; scale?: number; [key: string]: unknown }
@@ -135,7 +136,8 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
       const safe = computed ?? (styles + body).replace(/<script\b[^>]*>[^]*?<\/script\s*>/gi, '').replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^>]*?)(?<!\/)\s*>/gi, '<$1$2/>').replace(/&nbsp;/gi, '&#160;').replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);)/gi, '&amp;');
       markup = `<foreignObject x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden">${safe}</div></foreignObject>`;
     }
-  } else if (e.type === 'text' || e.type === 'sticker') markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
+  } else if (e.type === 'sticker' && boardStickerMarkup(e.data?.stickerIconId)) markup = `<svg x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" viewBox="0 0 24 24" data-sticker-icon-id="${escapeXml(e.data?.stickerIconId)}">${boardStickerMarkup(e.data?.stickerIconId)}</svg>`;
+  else if (e.type === 'text' || e.type === 'sticker') markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
   else if (e.type === 'stroke') {
     markup = `<path d="${strokePath(e.points, e)}" fill="none" stroke="${escapeXml(semanticColor(e.stroke ?? e.color, style, style.muted))}" stroke-width="${scalar(e.strokeWidth ?? e.width, 3)}"${e.dash ? ' stroke-dasharray="6 5"' : ''} stroke-linecap="round" stroke-linejoin="round"/>`;
   } else if (e.type === 'arrow') {

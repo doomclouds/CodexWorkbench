@@ -114,8 +114,10 @@ describe('native canvas parity', () => {
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="编辑文字"]')!.value).toBe('my local draft');
     await event([...host.querySelectorAll('button')].find(node => node.textContent === '重试保存文字')!, 'click');
     expect(call.mock.calls[1]![1].expectedVersions).toEqual({ one: 2 });
+    call.mockResolvedValueOnce({ board: board([element('one', { version: 3, text: 'my local draft' })], 3) });
     await act(async () => { host.querySelector('[aria-label="编辑文字"]')!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })); });
     await select('one');
+    await event(host.querySelector('[aria-label="更多元素属性"]')!, 'click');
     const property = host.querySelector<HTMLTextAreaElement>('[aria-label="属性文字"]')!;
     await input(property, 'property draft');
     await act(async () => { property.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });

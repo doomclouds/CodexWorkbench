@@ -21,7 +21,7 @@ if (process.argv.includes('--serve')) {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { void close().finally(() => process.exit(0)); });
   if (process.argv.includes('--managed')) {
     let lastActive = Date.now();
-    setInterval(() => { void hasActiveLeases(root).then(active => { if (active) lastActive = Date.now(); else if (Date.now() - lastActive > 45_000) void close().finally(() => process.exit(0)); }); }, 10_000).unref();
+    setInterval(() => { void hasActiveLeases(root).then(active => { if (active || host.hasActiveReaders()) lastActive = Date.now(); else if (Date.now() - lastActive > 45_000) void close().finally(() => process.exit(0)); }); }, 10_000).unref();
   }
   process.stderr.write(`Agentero Studio: ${host.origin}\n`);
 } else {

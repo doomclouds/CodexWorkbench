@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { AlertCircle, ArrowLeft, Check, CheckCheck, ChevronDown, Clock3, Copy, Download, FileCode2, LayoutGrid, Loader2, MessageSquare, Moon, MoreHorizontal, Pin, Plus, RefreshCw, RotateCcw, Send, Share2, Sun, Trash2, Users, X } from 'lucide-react';
-import type { Actor, Artifact, Feedback, HistoryEntry, Operation, Presence, RoomTimer, StudioClient, ViewContext } from '../contracts/studio';
-import { getProduct, products, type ProductActivity, type ProductAnnotation, type StudioDocument } from './products';
+import { AlertCircle, ArrowLeft, Check, CheckCheck, ChevronDown, Clock3, Copy, FileCode2, LayoutGrid, Loader2, MessageSquare, Moon, MoreHorizontal, Pin, Plus, RefreshCw, RotateCcw, Send, Share2, Sun, Trash2, Users, X } from 'lucide-react';
+import type { Actor, Anchor, Artifact, Feedback, HistoryEntry, Operation, Presence, RoomTimer, StudioClient, ViewContext } from '../contracts/studio';
+import { getProduct, products, type ProductActivity, type ProductAnnotation, type StudioDocument, type Viewport } from './products';
 import { StudioDialog } from './products/dialog';
 import { studioRequest, downloadStudioFile } from './transport';
 import './studio.css';
+import './editor-shell.css';
 import { SuggestionPanel } from './SuggestionPanel';
 import { LibraryToolbar } from './LibraryToolbar';
+import { LibraryArtifactMenu } from './LibraryArtifactMenu';
 import type { ProposalOperation } from '../contracts/proposals';
+import { EditorPopover, HistoryPanel, SharePanel, TimerControl } from './shared/editor-panels';
+import { CommentComposer, CommentPopover } from './shared/comments/CommentPopover';
+import { createRegionReaderLink, watchRegionReaderReturn } from './region-reader';
 
 export interface StudioAppProps {
   client: StudioClient;
@@ -26,6 +31,9 @@ interface ShareState { enabled: boolean; links?: Partial<Record<'editor' | 'comm
 interface VersionDiff { changes?: { id: string; before?: unknown; after?: unknown }[]; [key: string]: unknown }
 interface ListResult { artifacts: Artifact[]; nextCursor?: string }
 interface ManageResult { artifact: Artifact; board?: StudioDocument }
+interface PurgeFailure { artifactId: string; code: string; message: string }
+interface PurgeResult { deletedIds: string[]; failures: PurgeFailure[] }
+interface PurgeConfirmation { targets: { id: string; title: string }[]; all: boolean }
 
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -49,20 +57,6 @@ function newId(prefix: string): string { return `${prefix}-${globalThis.crypto?.
 function emptyActivity(): ProductActivity { return { editingIds: [], movingIds: [], dirty: false, issues: [] }; }
 function initialPresence() { return { selectedIds: [] as string[], viewport: { x: 0, y: 0, zoom: 1 }, cursor: undefined as { x: number; y: number } | undefined, chat: '', following: '', ...emptyActivity() }; }
 type TimerAction = 'start' | 'pause' | 'resume' | 'reset';
-function SharedTimer({ timer, canEdit, busy, onAction }: { timer: RoomTimer | null; canEdit: boolean; busy: boolean; onAction: (action: TimerAction, durationSeconds?: number) => void }) {
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    let interval: number | undefined;
-    const update = () => { setNow(Date.now()); if (timer?.deadline !== null && timer?.deadline !== undefined && timer.deadline <= Date.now()) { window.clearInterval(interval); interval = undefined; } };
-    const visibility = () => { window.clearInterval(interval); interval = undefined; if (document.visibilityState === 'hidden') return; update(); if (timer && !timer.paused && timer.deadline !== null && timer.deadline > Date.now()) interval = window.setInterval(update, 1000); };
-    visibility(); document.addEventListener('visibilitychange', visibility);
-    return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', visibility); };
-  }, [timer?.deadline, timer?.paused, timer?.remainingMs]);
-  const remaining = timer ? Math.max(0, timer.paused || timer.deadline === null ? timer.remainingMs : timer.deadline - now) : 0;
-  const seconds = Math.ceil(remaining / 1000), label = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
-  return <section className="studio-room-timer" aria-label="共享计时器"><div className="studio-timer-heading"><strong><Clock3 size={14} />共享计时器</strong>{timer && <span>{remaining === 0 ? '已结束' : timer.paused ? '已暂停' : '计时中'}</span>}</div>{timer ? <><output className="studio-timer-countdown" aria-label="剩余时间">{label}</output><small>{timer.source.name || '协作者'}{timer.paused ? '暂停了计时' : '设置了计时'}</small>{canEdit && <div className="studio-timer-actions"><button className="studio-button studio-compact" disabled={busy || remaining === 0} onClick={() => onAction(timer.paused ? 'resume' : 'pause')}>{timer.paused ? '继续' : '暂停'}</button><button className="studio-link-button" disabled={busy} onClick={() => onAction('reset')}>重置</button></div>}</> : <p>为所有协作者设置倒计时。</p>}{canEdit && <div className="studio-timer-presets">{[1, 5, 10, 15].map(minutes => <button className="studio-button studio-compact" key={minutes} disabled={busy} onClick={() => onAction('start', minutes * 60)}>{minutes} 分钟</button>)}</div>}</section>;
-}
-
 function ArtifactPreview({ artifact, cached, client }: { artifact: Artifact; cached?: StudioDocument; client: StudioClient }) {
   const Preview = getProduct(artifact.type)?.Preview;
   return Preview ? <Preview artifact={artifact} cached={cached} client={client} /> : <div className="studio-artifact-preview studio-blank-preview">暂无预览</div>;
@@ -94,20 +88,37 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
   const [busy, setBusy] = useState('');
   const [sync, setSync] = useState<'loading' | 'saved' | 'reconnecting'>('loading');
   const [menuId, setMenuId] = useState('');
+  const [trashSelection, setTrashSelection] = useState<string[]>([]);
+  const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
+  const [purgeFailures, setPurgeFailures] = useState<(PurgeFailure & { title: string })[]>([]);
+  const [purgeError, setPurgeError] = useState('');
+  const purgeRunning = useRef(false);
   const [rename, setRename] = useState<{ artifact: Artifact; title: string } | null>(null);
   const [titleDraft, setTitleDraft] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
   const [feedbackText, setFeedbackText] = useState('');
-  const [feedbackType, setFeedbackType] = useState<'comment' | 'request'>('comment');
   const [annotation, setAnnotation] = useState<ProductAnnotation | null>(null);
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [annotationActive, setAnnotationActive] = useState(false);
+  const [attachComment, setAttachComment] = useState(false);
+  const [commentError, setCommentError] = useState('');
+  const [savedComment, setSavedComment] = useState<Feedback | null>(null);
+  const [selectedFeedback, setSelectedFeedback] = useState<{ id: string; point?: { x: number; y: number } } | null>(null);
+  const commentPending = useRef<{ fingerprint: string; args: Record<string, unknown>; created?: Feedback } | null>(null);
+  const commentSubmitting = useRef(false);
+  const canvasArea = useRef<HTMLDivElement>(null);
+  const historyButton = useRef<HTMLButtonElement>(null), shareButton = useRef<HTMLButtonElement>(null), commentsButton = useRef<HTMLButtonElement>(null);
+  const [targetViewport, setTargetViewport] = useState<Viewport>();
+  const [targetSelection, setTargetSelection] = useState<string[]>();
+  const [readerSession, setReaderSession] = useState<{ artifactId: string; expiresAt: number } | null>(null);
+  const [readerFallback, setReaderFallback] = useState<{ artifactId: string; url: string; expiresAt: number } | null>(null);
   const [replies, setReplies] = useState<Record<string, string>>({});
   const [showResolved, setShowResolved] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [preview, setPreview] = useState<{ board: StudioDocument; version: HistoryEntry; diff: VersionDiff | null } | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [share, setShare] = useState<ShareState | null>(null);
-  const [exportMenu, setExportMenu] = useState(false);
   const listSequence = useRef(0);
   const versionSequence = useRef(0);
   const retryRef = useRef<(() => void) | null>(null);
@@ -169,8 +180,8 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
   }, [theme]);
 
   useEffect(() => {
-    const close = (event: PointerEvent) => { if (!(event.target as Element | null)?.closest('.studio-menu-anchor')) { setMenuId(''); setExportMenu(false); } };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setMenuId(''); setExportMenu(false); } };
+    const close = (event: PointerEvent) => { if (!(event.target as Element | null)?.closest('.studio-menu-anchor, .studio-library-floating-menu')) setMenuId(''); };
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuId(''); };
     document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
   }, []);
@@ -213,6 +224,12 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
     const timer = window.setTimeout(() => { void loadLibrary(); }, query ? 180 : 0);
     return () => { window.clearTimeout(timer); listSequence.current += 1; };
   }, [activeId, canManage, loadLibrary, query]);
+
+  useEffect(() => { setTrashSelection([]); setPurgeFailures([]); setPurgeError(''); setPurgeConfirmation(null); }, [activeId, filter, query]);
+  useEffect(() => {
+    const retained = new Set([...artifacts.filter(item => item.trashedAt).map(item => item.id), ...purgeFailures.map(item => item.artifactId)]);
+    setTrashSelection(previous => { const next = previous.filter(id => retained.has(id)); return next.length === previous.length ? previous : next; });
+  }, [artifacts, purgeFailures]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -321,9 +338,10 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
   }, [client, fail]);
   const loadShare = useCallback(async () => {
     const id = activeRef.current; if (!id) return;
+    if (!canManage) { setShare({ enabled: !!boardRef.current?.artifact.sharing }); return; }
     try { const result = await client.call<ShareState>('artifact_share', { action: 'status', artifactId: id }); if (activeRef.current === id && mounted.current) setShare(result); }
     catch (cause) { fail(cause, () => { void loadShare(); }); }
-  }, [client, fail]);
+  }, [client, fail, canManage]);
   useEffect(() => { if (panel === 'history') void loadHistory(); }, [panel, board?.artifact.revision, loadHistory]);
   useEffect(() => { if (panel === 'share') void loadShare(); }, [panel, loadShare]);
 
@@ -331,6 +349,7 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
     versionSequence.current += 1; activeRef.current = id; boardRef.current = null;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
     setRoomTimer(null); setTimerBusy(false); publishViewContext();
+    resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReaderSession(null); setReaderFallback(null); setShare(null); setHistory([]);
     setActiveId(id); setBoard(null); setFeedback([]); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setSelectedIds([]); setAnnotation(null); setError(''); setMenuId(''); setPeers([]); setFollowing(''); setPresenceOpen(false);
     if (ready) acceptBoard(ready);
   }
@@ -338,6 +357,7 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
     activeRef.current = ''; boardRef.current = null; versionSequence.current += 1;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
     setRoomTimer(null); setTimerBusy(false); publishViewContext();
+    resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReaderSession(null); setReaderFallback(null);
     setActiveId(''); setBoard(null); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setAnnotation(null); setSelectedIds([]); setError(''); setPeers([]); setFollowing(''); setPresenceOpen(false);
   }
   async function importArchive(file: File) {
@@ -378,30 +398,136 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
     } catch (cause) { fail(cause, () => { void manageArtifact(action, artifact, extra); }); }
     finally { if (mounted.current) setBusy(''); }
   }
+  function confirmPurge(ids: string[]) {
+    if (busy || !canManage) return;
+    const unique = [...new Set(ids)]; if (!unique.length) return;
+    setPurgeError('');
+    setPurgeConfirmation({ targets: unique.map(id => ({ id, title: artifacts.find(item => item.id === id)?.title || purgeFailures.find(item => item.artifactId === id)?.title || id })), all: false });
+  }
+  async function prepareEmptyTrash() {
+    if (busy || !canManage) return;
+    setBusy('prepare-purge'); setPurgeError('');
+    try {
+      const targets = new Map<string, { id: string; title: string }>(); let cursor: string | undefined;
+      do {
+        const result = await client.call<ListResult>('artifact_list', { trashed: true, limit: 100, ...(cursor ? { cursor } : {}) });
+        result.artifacts.forEach(item => targets.set(item.id, { id: item.id, title: item.title }));
+        cursor = result.nextCursor;
+      } while (cursor);
+      if (mounted.current) {
+        if (targets.size) setPurgeConfirmation({ targets: [...targets.values()], all: true });
+        else inform('回收站已经为空。');
+      }
+    } catch (cause) { if (mounted.current) setPurgeError(errorText(cause)); }
+    finally { if (mounted.current) setBusy(''); }
+  }
+  async function purgeArtifacts() {
+    const confirmation = purgeConfirmation;
+    if (!confirmation || busy || purgeRunning.current || !canManage) return;
+    purgeRunning.current = true; setBusy('purge'); setPurgeError('');
+    const deleted = new Set<string>(), failures: PurgeFailure[] = [];
+    try {
+      for (let offset = 0; offset < confirmation.targets.length; offset += 100) {
+        const ids = confirmation.targets.slice(offset, offset + 100).map(item => item.id);
+        try {
+          const result = await client.call<PurgeResult>('artifact_manage', { action: 'purge', ...(ids.length === 1 ? { artifactId: ids[0] } : { artifactIds: ids }) });
+          result.deletedIds.forEach(id => deleted.add(id)); failures.push(...result.failures);
+        } catch (cause) { failures.push(...ids.map(artifactId => ({ artifactId, code: 'REQUEST_FAILED', message: errorText(cause) }))); }
+      }
+      if (!mounted.current) return;
+      setPurgeFailures(failures.map(item => ({ ...item, title: confirmation.targets.find(target => target.id === item.artifactId)?.title || item.artifactId })));
+      setTrashSelection(previous => [...new Set([...previous.filter(id => !deleted.has(id)), ...failures.map(item => item.artifactId)])]);
+      setArtifacts(previous => previous.filter(item => !deleted.has(item.id)));
+      setPurgeConfirmation(null);
+      if (deleted.size) inform(`已永久删除 ${deleted.size} 项作品。`);
+      await loadLibrary();
+    } finally { purgeRunning.current = false; if (mounted.current) setBusy(''); }
+  }
   async function applyOperations(operations: Operation[], expectedVersions?: Record<string, number>) {
     const current = boardRef.current; if (!current) return;
     const result = await client.call<{ board: StudioDocument }>('artifact_apply', { artifactId: current.artifact.id, operationId: newId('op'), expectedRevision: current.artifact.revision, expectedVersions, operations });
     acceptBoard(result.board); return result.board;
   }
   function togglePanel(next: Panel) { setPanel(previous => previous === next ? null : next); }
-  function annotate(selection: ProductAnnotation) { setAnnotation(selection); setFeedbackType('comment'); setPanel('feedback'); }
+  function resetComment() { setAnnotation(null); setCommentOpen(false); setFeedbackText(''); setAttachComment(false); setCommentError(''); setSavedComment(null); setSelectedFeedback(null); commentPending.current = null; }
+  function annotate(selection: ProductAnnotation) {
+    if (!canComment || preview || suggestionPreview) return;
+    setPanel(null); setSelectedFeedback(null);
+    if (annotation && (feedbackText.trim() || savedComment)) { setCommentOpen(true); inform('先保存当前备注，再选择其他目标。'); return; }
+    setAnnotation(selection); setCommentOpen(true); setCommentError(''); setAttachComment(false); commentPending.current = null;
+  }
+  function locateAnchor(anchor: Anchor, document = boardRef.current): { x: number; y: number } | undefined {
+    if (!document) return;
+    const location = getProduct(document.artifact.type)?.locateAnchor?.(document, anchor);
+    if (!location) return;
+    const rect = canvasArea.current?.getBoundingClientRect(), width = rect?.width || 900, height = rect?.height || 600;
+    const { bounds } = location;
+    const zoom = Math.max(.12, Math.min(1, (width - 100) / Math.max(1, bounds.w), (height - 120) / Math.max(1, bounds.h)));
+    setFollowing(''); setTargetSelection([...location.ids]);
+    setTargetViewport({ x: width / 2 - (bounds.x + bounds.w / 2) * zoom, y: height / 2 - (bounds.y + bounds.h / 2) * zoom, zoom });
+    return { x: (rect?.left || 0) + width / 2, y: (rect?.top || 60) + height / 2 };
+  }
+  function selectFeedback(item: Feedback, point?: { x: number; y: number }) {
+    setCommentOpen(false); setSelectedFeedback({ id: item.id, point: point || locateAnchor(item.anchor) }); setPanel(null);
+  }
+  async function openHtmlReader(regionId: string) {
+    const id = activeRef.current; if (!id || busy) return;
+    setBusy('reader');
+    try {
+      const link = await createRegionReaderLink(client, { artifactId: id, regionId, viewId: peerId });
+      if (activeRef.current !== id || !mounted.current) return;
+      setReaderFallback({ artifactId: id, ...link });
+      try {
+        if (client.openLink) await client.openLink(link.url);
+        else { const opened = window.open(link.url, '_blank'); if (!opened) throw new Error('浏览器拦截了新标签。'); opened.opener = null; }
+        if (activeRef.current === id) { setReaderSession({ artifactId: id, expiresAt: link.expiresAt }); setReaderFallback(null); }
+      } catch { /* A fresh explicit link preserves browser user activation after an async request. */ }
+    } catch (cause) { if (activeRef.current === id) fail(cause); }
+    finally { if (mounted.current) setBusy(''); }
+  }
+  useEffect(() => {
+    if (!readerSession || readerSession.artifactId !== activeId || readerSession.expiresAt <= Date.now()) return;
+    return watchRegionReaderReturn(client, { artifactId: activeId, viewId: peerId }, target => {
+      if (activeRef.current !== target.artifactId || target.viewId !== peerId) return;
+      const point = locateAnchor({ regionId: target.regionId });
+      if (!point) { inform('原区域已移除，请在白板中选择其他区域。'); return; }
+      versionSequence.current += 1; suggestionSequence.current += 1; setPreview(null); setSuggestionPreview(null);
+      setPanel(null); setCommentOpen(false); setSelectedFeedback(null);
+      setAnnotationActive(target.annotate && canComment); inform(target.annotate && canComment ? '已定位原区域，点击图解中的目标添加备注。' : '已定位原区域。');
+    });
+  }, [readerSession, activeId, client, peerId, canComment]);
 
   async function createFeedback(event: FormEvent) {
     event.preventDefault(); const current = boardRef.current;
-    if (!current || !feedbackText.trim() || busy) return;
+    if (!current || !annotation || !feedbackText.trim() || busy || commentSubmitting.current) return;
     const id = current.artifact.id;
-    const target = annotation || getProduct(current.artifact.type)?.selectionContext(current, selectedIds) || { anchor: { elementIds: selectedIds } };
-    const anchor = target.anchor; const versions = 'versions' in target ? target.versions : undefined;
-    setBusy('feedback'); setError('');
+    const fingerprint = JSON.stringify({ id, text: feedbackText.trim(), anchor: annotation.anchor });
+    if (commentPending.current?.fingerprint !== fingerprint) commentPending.current = { fingerprint, args: { action: 'create', operationId: newId('comment'), artifactId: id, type: 'comment', text: feedbackText.trim(), anchor: annotation.anchor, versions: annotation.versions, targetViewId: peerId } };
+    const pending = commentPending.current;
+    commentSubmitting.current = true; setBusy('feedback'); setCommentError('');
     try {
-      const existing = new Set(feedback.map(item => item.id));
-      let result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'create', artifactId: id, type: feedbackType, text: feedbackText.trim(), anchor, versions, targetViewId: peerId });
-      const created = result.feedback.find(item => !existing.has(item.id));
-      if (feedbackType === 'request' && created) result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'send', artifactId: id, feedbackId: created.id });
-      if (activeRef.current === id) { setFeedback(result.feedback); setFeedbackText(''); setAnnotation(null); }
-      inform(feedbackType === 'request' ? attachContext ? '请求已保存，可附加到当前对话。' : '请求已提交，等待房主附加到对话。' : '批注已保存。');
-    } catch (cause) { fail(cause); }
-    finally { if (mounted.current) setBusy(''); }
+      if (!pending.created) {
+        const result = await client.call<{ feedback: Feedback[]; contextId?: string }>('artifact_feedback', pending.args);
+        const created = result.feedback.find(item => item.id === result.contextId);
+        if (!created) throw new Error('备注已提交，但未取得保存结果，请重试。');
+        pending.created = created;
+        if (activeRef.current === id) { setFeedback(result.feedback); setSavedComment(created); }
+      }
+      if (activeRef.current !== id || !mounted.current) return;
+      if (attachComment) {
+        if (attachContext) await attachContext(pending.created, current);
+        else {
+          const result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'send', artifactId: id, feedbackId: pending.created.id, targetViewId: peerId });
+          if (activeRef.current === id) setFeedback(result.feedback);
+        }
+      }
+      if (activeRef.current !== id || !mounted.current) return;
+      const created = pending.created, point = annotation.screenPoint;
+      resetComment();
+      if (!attachComment) setSelectedFeedback({ id: created.id, point });
+      inform(attachComment ? attachContext ? '已附加到对话草稿，请在对话中发送。' : '备注已提交，等待房主附加到对话。' : '备注已保存。');
+    } catch (cause) { if (mounted.current && activeRef.current === id) setCommentError(errorText(cause)); }
+    finally { commentSubmitting.current = false; if (mounted.current) setBusy(''); }
   }
   async function feedbackAction(action: 'reply' | 'resolve' | 'reopen' | 'send', item: Feedback) {
     if (busy) return;
@@ -432,13 +558,14 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
       if (activeRef.current !== id || serial !== versionSequence.current || !mounted.current) return;
       if (results[0].status === 'rejected') throw results[0].reason;
       setPreview({ board: results[0].value.board, version, diff: results[1].status === 'fulfilled' ? results[1].value : null });
+      return results[0].value.board;
     } catch (cause) { fail(cause); }
     finally { if (mounted.current && serial === versionSequence.current) setBusy(''); }
   }
-  async function restoreVersion() {
-    if (!preview || busy) return;
+  async function restoreVersion(version = preview?.version) {
+    if (!version || busy || !canManage) return;
     setBusy('restore-version'); setError('');
-    try { await applyOperations([{ op: 'restore', versionId: preview.version.id }]); setPreview(null); await refreshBoard(); await loadHistory(); inform('已恢复此版本，并保留后续历史记录。'); }
+    try { await applyOperations([{ op: 'restore', versionId: version.id }]); setPreview(null); await refreshBoard(); await loadHistory(); inform('已恢复此版本，并保留后续历史记录。'); }
     catch (cause) { fail(cause); }
     finally { if (mounted.current) setBusy(''); }
   }
@@ -469,7 +596,7 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
   async function exportBoard(format: 'png' | 'svg' | 'html' | 'json' | 'zip') {
     const current = boardRef.current; if (!current || busy) return;
     const product = getProduct(current.artifact.type); if (!product) return;
-    setExportMenu(false); setBusy('export'); setError('');
+    setBusy('export'); setError('');
     try {
       if (format === 'zip') {
         const result = await client.call<{ filename: string; downloadPath: string }>('artifact_export', { artifactId: current.artifact.id, format });
@@ -482,6 +609,7 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
   }
 
   const visibleArtifacts = useMemo(() => [...artifacts].filter(item => (!query.trim() || item.title.toLowerCase().includes(query.trim().toLowerCase())) && (filter !== 'pinned' || item.pinned)).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt)), [artifacts, filter, query]);
+  const selectedTrash = new Set(trashSelection), selectedVisible = visibleArtifacts.filter(item => selectedTrash.has(item.id)).length;
   async function previewSuggestion(item: Feedback, operations: ProposalOperation[] | null) {
     const sequence = ++suggestionSequence.current;
     if (!operations) { setSuggestionPreview(null); return; }
@@ -494,24 +622,34 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
   }
   const visibleFeedback = feedback.filter(item => showResolved || item.status !== 'resolved');
   const product = getProduct(board?.artifact.type || products[0]!.id)!;
-  const ProductEditor = product.Editor; const ProductToolbar = product.Toolbar; const ProductDifference = product.Difference;
+  const ProductEditor = product.Editor; const ProductDifference = product.Difference;
   const otherPeers = peers.filter(peer => peer.peerId !== peerId);
   const followedPeer = peers.find(peer => peer.peerId === following);
-  const collaboration = client.baseUrl && <div className="studio-presence"><button className="studio-icon-button" aria-label="在线协作" aria-expanded={presenceOpen} onClick={() => setPresenceOpen(previous => !previous)}><Users size={18} />{otherPeers.length > 0 && <small>{otherPeers.length + 1}</small>}</button>{presenceOpen && <div className="studio-presence-menu"><h3>在线协作</h3><p>{otherPeers.length ? `你和 ${otherPeers.length} 位协作者正在这里` : '目前只有你在白板上'}</p>{otherPeers.map(peer => <div className="studio-peer-row" key={peer.peerId}><span className="studio-peer-avatar">{peer.actor.name.slice(0, 1)}</span><span>{peer.actor.name}</span><button className="studio-link-button" disabled={!peer.context?.viewport} onClick={() => { setFollowing(following === peer.peerId ? '' : peer.peerId); setPresenceOpen(false); }}>{following === peer.peerId ? '停止跟随' : '跟随'}</button></div>)}<SharedTimer timer={roomTimer} canEdit={canEdit} busy={timerBusy} onAction={(action, duration) => { void changeTimer(action, duration); }} /><form className="studio-cursor-chat" onSubmit={sendCursorChat}><label htmlFor="studio-cursor-chat">光标聊天</label><div><input id="studio-cursor-chat" value={cursorChat} onChange={event => setCursorChat(event.target.value)} maxLength={240} placeholder="在光标旁说句话…" /><button className="studio-icon-button" aria-label="发送光标消息" disabled={!cursorChat.trim()}><Send size={14} /></button></div><button type="button" className="studio-link-button" onClick={() => { presenceRef.current.chat = ''; requestPresence.current?.(); }}>清除我的消息</button></form></div>}</div>;
+  const collaboration = client.baseUrl && <div className="studio-presence"><button className="studio-icon-button" aria-label="在线协作" aria-expanded={presenceOpen} onClick={() => setPresenceOpen(previous => !previous)}><Users size={18} />{otherPeers.length > 0 && <small>{otherPeers.length + 1}</small>}</button>{presenceOpen && <div className="studio-presence-menu"><h3>在线协作</h3><p>{otherPeers.length ? `你和 ${otherPeers.length} 位协作者正在这里` : '目前只有你在白板上'}</p>{otherPeers.map(peer => <div className="studio-peer-row" key={peer.peerId}><span className="studio-peer-avatar">{peer.actor.name.slice(0, 1)}</span><span>{peer.actor.name}</span><button className="studio-link-button" disabled={!peer.context?.viewport} onClick={() => { setFollowing(following === peer.peerId ? '' : peer.peerId); setPresenceOpen(false); }}>{following === peer.peerId ? '停止跟随' : '跟随'}</button></div>)}<form className="studio-cursor-chat" onSubmit={sendCursorChat}><label htmlFor="studio-cursor-chat">光标聊天</label><div><input id="studio-cursor-chat" value={cursorChat} onChange={event => setCursorChat(event.target.value)} maxLength={240} placeholder="在光标旁说句话…" /><button className="studio-icon-button" aria-label="发送光标消息" disabled={!cursorChat.trim()}><Send size={14} /></button></div><button type="button" className="studio-link-button" onClick={() => { presenceRef.current.chat = ''; requestPresence.current?.(); }}>清除我的消息</button></form></div>}</div>;
+
+  const activeFeedback = feedback.find(item => item.id === selectedFeedback?.id);
+  const closePreview = () => { versionSequence.current += 1; setPreview(null); };
+  const historyContent = <div aria-label="版本历史面板"><HistoryPanel history={history} currentRevision={board?.artifact.revision || 0} actor={actor} loading={historyLoading} busy={!!busy} previewId={preview?.version.id} canRestore={canManage} onRefresh={() => void loadHistory()} onPreview={entry => void previewVersion(entry)} onRestore={entry => void restoreVersion(entry)} onReturnToCurrent={closePreview} onInspectChange={(entry, id) => { void previewVersion(entry).then(document => { if (document) locateAnchor({ elementIds: [id] }, document); }); }} />{preview && board && ProductDifference && <ProductDifference current={board} previous={preview.board} diff={preview.diff} />}</div>;
+  const shareContent = <div aria-label="分享面板"><SharePanel title={board?.artifact.title || '作品'} actor={actor} owner={peers.find(peer => peer.actor.role === 'owner')?.actor} peers={peers} selfPeerId={peerId} share={share} busy={!!busy} exportFormats={product.exportFormats} canBackup={canManage} onStart={() => void changeSharing('start')} onReset={role => void changeSharing('reset', role)} onStop={() => void changeSharing('stop')} onCopy={link => void copyLink(link)} onExport={format => void exportBoard(format)} extraContent={<div className="studio-editor-secondary"><button className="studio-button studio-text-button" aria-label={resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题'} onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>{resolvedTheme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}切换为{resolvedTheme === 'dark' ? '明亮' : '暗色'}主题</button>{collaboration}</div>} /></div>;
+  const commentsContent = <div className="studio-comment-list" aria-label="备注列表面板"><div className="studio-comment-list-tools"><label><input type="checkbox" checked={showResolved} onChange={event => setShowResolved(event.target.checked)} />显示已解决</label>{canComment && board && !preview && <button className="studio-link-button" onClick={() => annotate(product.selectionContext(board, selectedIds))}><Plus size={14} />添加备注</button>}</div>{!visibleFeedback.length && <div className="studio-panel-empty"><MessageSquare size={24} /><p>还没有{showResolved ? '' : '待处理的'}备注</p><small>点击顶部备注图标，再选择要讨论的目标。</small></div>}{visibleFeedback.map(item => item.proposal ? <SuggestionPanel key={item.id} feedback={item} client={client} artifactId={activeId} onChanged={acceptBoard} onPreview={operations => void previewSuggestion(item, operations)} onRefresh={() => void refreshBoard()} onError={fail} /> : <button type="button" className="studio-comment-list-item" key={item.id} data-status={item.status} onClick={() => selectFeedback(item)}><strong>{authorName(item.author)}{item.status === 'pending' ? ' · 待房主处理' : item.status === 'resolved' ? ' · 已解决' : ''}</strong><p>{item.text}</p><small>{new Date(item.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></button>)}</div>;
 
   return <div className={`studio ${activeId ? 'studio-editor' : 'studio-library'}`} data-studio-theme={resolvedTheme}>
     {error && <div className="studio-error" role="alert"><AlertCircle size={17} /><span>{error}</span>{retryRef.current && <button onClick={() => { setError(''); retryRef.current?.(); }}>重试</button>}<button className="studio-icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15} /></button></div>}
     {notice && <div className="studio-notice" role="status"><Check size={15} />{notice}<button className="studio-icon-button" aria-label="关闭通知" onClick={() => setNotice('')}><X size={14} /></button></div>}
+    {readerFallback?.artifactId === activeId && <div className="studio-reader-fallback" role="status"><span>请点击链接打开 HTML 阅读页。</span><a href={readerFallback.url} target="_blank" rel="noopener noreferrer" onClick={() => { setReaderSession({ artifactId: activeId, expiresAt: readerFallback.expiresAt }); setReaderFallback(null); }}>在新标签打开</a><button className="studio-icon-button" aria-label="关闭阅读页链接" onClick={() => setReaderFallback(null)}><X size={14} /></button></div>}
     {!activeId ? <main className="studio-library-main">
-      <header className="studio-library-header"><h1>作品</h1>{canManage && <LibraryToolbar query={query} filter={filter} layout={layout} resolvedTheme={resolvedTheme} busy={!!busy} creating={busy === 'create'} onQueryChange={setQuery} onFilterChange={value => { setFilter(value); setMenuId(''); }} onLayoutChange={value => { setLayout(value); try { localStorage.setItem('agentero-studio-view', value); } catch { /* optional preference */ } }} onThemeChange={setTheme} onCreate={() => void createBoard()} onImport={() => archiveInput.current?.click()} />}</header>
+      <header className="studio-library-header"><div className="studio-library-title">{filter !== 'recent' && <button type="button" className="studio-icon-button" aria-label="返回最近作品" title="返回最近作品" disabled={!!busy} onClick={() => { setFilter('recent'); setQuery(''); }}><ArrowLeft size={21} /></button>}<h1>{filter === 'trash' ? '回收站' : filter === 'pinned' ? '已固定' : '作品'}</h1></div>{canManage && <LibraryToolbar query={query} filter={filter} layout={layout} resolvedTheme={resolvedTheme} busy={!!busy} creating={busy === 'create'} onQueryChange={setQuery} onFilterChange={value => { setFilter(value); setMenuId(''); }} onLayoutChange={value => { setLayout(value); try { localStorage.setItem('agentero-studio-view', value); } catch { /* optional preference */ } }} onThemeChange={setTheme} onCreate={() => void createBoard()} onImport={() => archiveInput.current?.click()} onEmptyTrash={() => void prepareEmptyTrash()} />}</header>
       {canManage ? <>
         {filter !== 'trash' && <section className="studio-create-section" aria-label="新建作品"><h2>新建</h2><div className="studio-product-cards">{products.map(product => <button key={product.id} className="studio-create-card" aria-label={`新建${product.label}`} onClick={() => void createBoard(product.id)} disabled={!!busy}><div className="studio-create-art"><product.Icon size={36} strokeWidth={1.3} /><span className="studio-create-dot studio-create-dot-one" /><span className="studio-create-dot studio-create-dot-two" /></div><span className="studio-create-label">{product.label} <Plus size={16} /></span></button>)}</div></section>}
         <input ref={archiveInput} type="file" accept=".zip,application/zip" hidden aria-label="导入作品" onChange={event => { const file = event.target.files?.[0]; if (file) void importArchive(file); event.target.value = ""; }} />
-        <section className="studio-works-section" aria-label="作品管理">{filter !== 'recent' && <div className="studio-library-scope"><span>{filter === 'pinned' ? <Pin size={14} /> : <Trash2 size={14} />}{filter === 'pinned' ? '已固定' : '回收站'}</span><button className="studio-link-button" onClick={() => setFilter('recent')}>返回最近作品</button></div>}
+        <section className="studio-works-section" aria-label={filter === 'trash' ? '回收站作品' : '作品管理'}>
+          {filter === 'trash' && (visibleArtifacts.length > 0 || trashSelection.length > 0) && <div className="studio-trash-selection" role="group" aria-label="回收站选择"><label><input type="checkbox" aria-label="全选当前页" disabled={!!busy || !visibleArtifacts.length} checked={visibleArtifacts.length > 0 && selectedVisible === visibleArtifacts.length} ref={node => { if (node) node.indeterminate = selectedVisible > 0 && selectedVisible < visibleArtifacts.length; }} onChange={event => setTrashSelection(previous => event.target.checked ? [...new Set([...previous, ...visibleArtifacts.map(item => item.id)])] : previous.filter(id => !visibleArtifacts.some(item => item.id === id)))} />全选当前页</label><span>{trashSelection.length} 项已选</span><button type="button" className="studio-icon-button" aria-label="永久删除所选作品" title="永久删除所选作品" disabled={!!busy || !trashSelection.length} onClick={() => confirmPurge(trashSelection)}><Trash2 size={17} /></button>{trashSelection.length > 0 && <button type="button" className="studio-icon-button" aria-label="清除选择" title="清除选择" disabled={!!busy} onClick={() => setTrashSelection([])}><X size={15} /></button>}</div>}
+          {(purgeError || purgeFailures.length > 0) && <div className="studio-trash-errors" role="alert">{purgeError && <p>{purgeError}</p>}{purgeFailures.length > 0 && <><strong>{purgeFailures.length} 项作品未删除，已保留选择。</strong><ul>{purgeFailures.map(item => <li key={item.artifactId}><span>{item.title}</span><span>{item.message}</span></li>)}</ul></>}</div>}
           {libraryLoading && !libraryLoaded ? <div className="studio-empty"><Loader2 size={26} className="studio-spin" /><p>正在读取作品</p></div> : libraryLoaded && visibleArtifacts.length === 0 ? <div className="studio-empty">{filter === 'trash' ? <Trash2 size={32} /> : <LayoutGrid size={32} />}<h3>{query ? '没有找到匹配的作品' : filter === 'trash' ? '回收站为空' : filter === 'pinned' ? '还没有固定作品' : '从第一块白板开始'}</h3><p>{query ? '试试其他名称。' : filter === 'trash' ? '移入回收站的作品可以在这里恢复。' : filter === 'pinned' ? '把常用作品固定在这里，方便再次打开。' : '先创建一块空白白板，再与 Codex 一起整理思路。'}</p>{!query && filter === 'recent' && <button className="studio-button" onClick={() => void createBoard()} disabled={!!busy}><Plus size={16} />新建白板</button>}</div> : <div className={`studio-artifacts studio-artifacts-${layout}`} aria-busy={libraryLoading}>
-            {visibleArtifacts.map(artifact => <article className={`studio-artifact ${artifact.trashedAt ? 'studio-artifact-trashed' : ''}`} key={artifact.id}>
-              <button className="studio-artifact-open" aria-label={`打开${getProduct(artifact.type)?.label || "作品"}：${artifact.title}`} disabled={!!artifact.trashedAt} onClick={() => openArtifact(artifact.id)}>{layout === 'grid' && <ArtifactPreview artifact={artifact} cached={cachedBoards[artifact.id]} client={client} />}<div className="studio-artifact-details"><span className="studio-artifact-icon"><ProductGlyph type={artifact.type} /></span><div><h3>{artifact.title}</h3><p>{filter === 'trash' ? `移入时间 ${new Date(artifact.trashedAt || artifact.updatedAt).toLocaleDateString('zh-CN')}` : relativeTime(artifact.updatedAt)}</p></div></div></button>
-              <div className="studio-artifact-actions">{artifact.trashedAt ? <button className="studio-button studio-compact" onClick={() => void manageArtifact('restore', artifact)} disabled={!!busy}><RotateCcw size={15} />恢复</button> : <>{artifact.pinned && <Pin size={15} className="studio-pin-mark" aria-label="已固定" />}<div className="studio-menu-anchor"><button className="studio-icon-button" aria-label={`管理作品：${artifact.title}`} aria-expanded={menuId === artifact.id} onClick={() => setMenuId(previous => previous === artifact.id ? '' : artifact.id)}><MoreHorizontal size={20} /></button>{menuId === artifact.id && <div className="studio-menu" role="menu"><button role="menuitem" onClick={() => void manageArtifact('pin', artifact, { pinned: !artifact.pinned })}><Pin size={16} />{artifact.pinned ? '取消固定' : '固定'}</button><button role="menuitem" onClick={() => { setRename({ artifact, title: artifact.title }); setMenuId(''); }}><FileCode2 size={16} />重命名</button><button role="menuitem" onClick={() => void copyArtifactLink(artifact)}><Share2 size={16} />复制链接</button><button role="menuitem" onClick={() => void manageArtifact('duplicate', artifact)}><Copy size={16} />复制作品</button><div className="studio-menu-rule" /><button role="menuitem" className="studio-danger-text" onClick={() => void manageArtifact('trash', artifact)}><Trash2 size={16} />移入回收站</button></div>}</div></>}
+            {visibleArtifacts.map(artifact => <article className={`studio-artifact ${artifact.trashedAt ? 'studio-artifact-trashed' : ''}${selectedTrash.has(artifact.id) ? ' is-selected' : ''}`} key={artifact.id}>
+              {artifact.trashedAt && <label className="studio-trash-select"><input type="checkbox" aria-label={`选择作品：${artifact.title}`} checked={selectedTrash.has(artifact.id)} disabled={!!busy} onChange={event => setTrashSelection(previous => event.target.checked ? [...new Set([...previous, artifact.id])] : previous.filter(id => id !== artifact.id))} /></label>}
+              <button className="studio-artifact-open" aria-label={`打开${getProduct(artifact.type)?.label || "作品"}：${artifact.title}`} disabled={!!artifact.trashedAt} onClick={() => openArtifact(artifact.id)}>{layout === 'grid' && <ArtifactPreview artifact={artifact} cached={cachedBoards[artifact.id]} client={client} />}<div className="studio-artifact-details"><span className="studio-artifact-icon"><ProductGlyph type={artifact.type} /></span><div className="studio-artifact-copy"><h3 title={artifact.title}>{artifact.title}</h3><p>{filter === 'trash' ? `移入时间 ${new Date(artifact.trashedAt || artifact.updatedAt).toLocaleDateString('zh-CN')}` : relativeTime(artifact.updatedAt)}</p></div></div></button>
+              <div className="studio-artifact-actions">{artifact.trashedAt ? <><button type="button" className="studio-icon-button" aria-label={`恢复作品：${artifact.title}`} title="恢复" onClick={() => void manageArtifact('restore', artifact)} disabled={!!busy}><RotateCcw size={17} /></button><button type="button" className="studio-icon-button" aria-label={`永久删除作品：${artifact.title}`} title="永久删除" disabled={!!busy} onClick={() => confirmPurge([artifact.id])}><Trash2 size={17} /></button></> : <>{artifact.pinned && <Pin size={15} className="studio-pin-mark" aria-label="已固定" />}<LibraryArtifactMenu artifact={artifact} open={menuId === artifact.id} busy={!!busy} onOpenChange={open => setMenuId(open ? artifact.id : '')} onPin={() => void manageArtifact('pin', artifact, { pinned: !artifact.pinned })} onRename={() => { setRename({ artifact, title: artifact.title }); setMenuId(''); }} onCopyLink={() => void copyArtifactLink(artifact)} onDuplicate={() => void manageArtifact('duplicate', artifact)} onTrash={() => void manageArtifact('trash', artifact)} /></>}
               </div>
             </article>)}
           </div>}
@@ -519,18 +657,17 @@ export default function StudioApp({ client, actor, initialArtifactId, initialVie
         </section>
       </> : <div className="studio-empty"><Share2 size={30} /><h3>从分享链接打开白板</h3><p>此页面仅显示你获准访问的作品。</p></div>}
     </main> : <>
-      <header className="studio-editor-header"><div className="studio-editor-title">{canManage ? <button className="studio-icon-button" aria-label="返回作品中心" onClick={goHome}><ArrowLeft size={20} /></button> : <Share2 size={22} className="studio-guest-brand" />}<input aria-label={`${product.label}名称`} value={titleDraft} readOnly={!canManage || !!preview} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { skipTitleBlur.current = true; setTitleDraft(boardRef.current?.artifact.title || ''); event.currentTarget.blur(); } }} onBlur={() => { if (skipTitleBlur.current) { skipTitleBlur.current = false; return; } const title = titleDraft.trim(); if (board && title && title !== board.artifact.title) void manageArtifact('rename', board.artifact, { title }); else if (!title) setTitleDraft(board?.artifact.title || ''); }} /><span className={`studio-save-status ${sync === 'reconnecting' ? 'studio-save-warning' : ''}`} role="status">{sync === 'loading' ? <Loader2 size={13} className="studio-spin" /> : sync === 'reconnecting' ? <RefreshCw size={13} /> : <Check size={13} />}{sync === 'loading' ? '加载中' : sync === 'reconnecting' ? '正在重连' : canEdit ? '已保存' : '只读'}</span></div><div className="studio-editor-actions">{collaboration}{canEdit && board && ProductToolbar && <ProductToolbar key={board.artifact.id} document={board} client={client} actor={actor} selectedIds={selectedIds} disabled={!!busy || !!preview || !!suggestionPreview} onChanged={acceptBoard} onError={fail} onNotice={inform} onActivityChange={toolbarActivityChanged} />}<button className={`studio-icon-button${panel === 'history' ? ' is-active' : ''}`} aria-label="版本历史" aria-pressed={panel === 'history'} onClick={() => togglePanel('history')}><Clock3 size={20} /></button><button className={`studio-icon-button${panel === 'feedback' ? ' is-active' : ''}`} aria-label="批注与请求" aria-pressed={panel === 'feedback'} onClick={() => togglePanel('feedback')}><MessageSquare size={20} />{feedback.some(item => item.status !== 'resolved') && <span className="studio-unread-dot" />}</button>{canManage && <button className={`studio-button studio-text-button${panel === 'share' ? ' is-active' : ''}`} onClick={() => togglePanel('share')}><Share2 size={17} /><span>分享</span></button>}<div className="studio-menu-anchor"><button className="studio-button studio-text-button" disabled={!board || !!busy} aria-label={`导出${product.label}`} aria-expanded={exportMenu} onClick={() => setExportMenu(previous => !previous)}><Download size={17} /><span>导出</span><ChevronDown size={13} /></button>{exportMenu && <div className="studio-menu" role="menu">{[...product.exportFormats, ...(canManage ? [{ format: "zip" as const, label: "\u5b8c\u6574\u4f5c\u54c1\u5907\u4efd (.zip)" }] : [])].map(({ format, label }) => <button role="menuitem" key={format} onClick={() => void exportBoard(format)}><Download size={15} />{label}</button>)}</div>}</div><button className="studio-icon-button studio-editor-theme" aria-label={resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题'} title={resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题'} onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>{resolvedTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button></div></header>
+      <header className="studio-editor-header"><div className="studio-editor-title">{canManage ? <button className="studio-icon-button" aria-label="返回作品中心" onClick={goHome}><ArrowLeft size={20} /></button> : <Share2 size={22} className="studio-guest-brand" />}<input aria-label={`${product.label}名称`} value={titleDraft} readOnly={!canManage || !!preview} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { skipTitleBlur.current = true; setTitleDraft(boardRef.current?.artifact.title || ''); event.currentTarget.blur(); } }} onBlur={() => { if (skipTitleBlur.current) { skipTitleBlur.current = false; return; } const title = titleDraft.trim(); if (board && title && title !== board.artifact.title) void manageArtifact('rename', board.artifact, { title }); else if (!title) setTitleDraft(board?.artifact.title || ''); }} /><span className={`studio-save-status ${sync === 'reconnecting' ? 'studio-save-warning' : ''}`} role="status">{sync === 'loading' ? <Loader2 size={13} className="studio-spin" /> : sync === 'reconnecting' ? <RefreshCw size={13} /> : <Check size={13} />}{sync === 'loading' ? '加载中' : sync === 'reconnecting' ? '正在重连' : canEdit ? '已保存' : '只读'}</span></div><div className="studio-editor-actions">
+        <div className="studio-editor-popover-anchor"><button ref={historyButton} className={`studio-icon-button${panel === 'history' ? ' is-active' : ''}`} aria-label="版本历史" title="版本历史" aria-expanded={panel === 'history'} onClick={() => togglePanel('history')}><Clock3 size={20} /></button>{panel === 'history' && <EditorPopover title="版本历史" anchorRef={historyButton} onClose={() => setPanel(null)}>{historyContent}</EditorPopover>}</div>
+        <div className="studio-editor-popover-anchor"><button ref={shareButton} className={`studio-button studio-text-button${panel === 'share' ? ' is-active' : ''}`} aria-label="分享" aria-expanded={panel === 'share'} onClick={() => togglePanel('share')}><Share2 size={19} /><span>分享</span></button>{panel === 'share' && <EditorPopover title={board?.artifact.title || '分享作品'} anchorRef={shareButton} onClose={() => setPanel(null)}>{shareContent}</EditorPopover>}</div>
+        <div className="studio-comment-mode-control"><button className={`studio-icon-button${annotationActive ? ' is-active' : ''}`} aria-label="备注" title="点击目标添加备注" aria-pressed={annotationActive} disabled={!board || !canComment || !!preview || !!suggestionPreview} onClick={() => { setPanel(null); setAnnotationActive(previous => !previous); if (annotation && feedbackText.trim()) setCommentOpen(true); }}><MessageSquare size={20} fill={annotationActive ? 'currentColor' : 'none'} /></button><div className="studio-editor-popover-anchor"><button ref={commentsButton} className="studio-icon-button studio-comment-dropdown" aria-label="备注列表" title="备注列表" aria-expanded={panel === 'feedback'} onClick={() => togglePanel('feedback')}><ChevronDown size={15} />{feedback.some(item => item.status !== 'resolved') && <span className="studio-unread-dot" />}</button>{panel === 'feedback' && <EditorPopover title="备注" anchorRef={commentsButton} onClose={() => setPanel(null)}>{commentsContent}</EditorPopover>}</div></div>
+      </div></header>
       {preview && <div className="studio-preview-banner"><Clock3 size={16} /><span>正在预览版本 {preview.version.revision}，当前白板未改变。</span><button className="studio-button studio-compact" onClick={() => { versionSequence.current += 1; setPreview(null); }}>退出预览</button>{canManage && <button className="studio-button studio-primary studio-compact" disabled={!!busy} onClick={() => void restoreVersion()}><RotateCcw size={14} />恢复此版本</button>}</div>}
       {following && <div className="studio-follow-banner"><Users size={14} /><span>正在跟随 {followedPeer?.actor.name || "协作者"} 的视角</span><button className="studio-link-button" onClick={() => setFollowing('')}>停止跟随</button></div>}
-      <div className="studio-workspace"><div className="studio-canvas-area">{board ? <ProductEditor key={board.artifact.id} document={preview?.board || suggestionPreview || board} client={client} actor={actor} onChanged={acceptBoard} onAnnotate={annotate} readOnly={!canEdit || !!preview || !!suggestionPreview} onSelectionChange={selectionChanged} onActivityChange={editorActivityChanged} activities={feedback.filter(item => item.status === 'processing' && !item.proposal)} onViewportChange={viewportChanged} onCursorMove={cursorMoved} presence={peers} selfPeerId={peerId} externalViewport={followedPeer?.context?.viewport} /> : <div className="studio-empty"><Loader2 size={28} className="studio-spin" /><p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>{error && <button className="studio-button" onClick={() => void refreshBoard()}><RefreshCw size={16} />重新加载</button>}</div>}</div>
-        {panel && <aside className="studio-side-panel" aria-label={panel === 'feedback' ? '批注与请求面板' : panel === 'history' ? '版本历史面板' : '分享面板'}><div className="studio-panel-heading"><h2>{panel === 'feedback' ? '批注与请求' : panel === 'history' ? '版本历史' : '分享白板'}</h2><button className="studio-icon-button" aria-label="关闭侧面板" onClick={() => setPanel(null)}><X size={18} /></button></div>
-          {panel === 'feedback' && <div className="studio-panel-body studio-feedback-panel">{canComment && !preview && <form className="studio-feedback-compose" onSubmit={event => void createFeedback(event)}>{annotation ? <div className="studio-anchor-preview"><div><MessageSquare size={14} /><strong>{annotation.label}</strong><button type="button" className="studio-icon-button" aria-label="取消选区批注" onClick={() => setAnnotation(null)}><X size={13} /></button></div><blockquote>{annotation.anchor.quote || annotation.anchor.excerpt || annotation.anchor.targetIds?.join('、') || annotation.anchor.elementIds?.join('、')}</blockquote><small>{annotation.sourceLabel || '保存时冻结选区上下文'}</small></div> : <div className="studio-compose-target">{selectedIds.length ? `关于选中的 ${selectedIds.length} 个对象` : '关于整块白板'}</div>}<textarea aria-label="批注内容" placeholder={annotation ? '描述希望调整的部分…' : '添加批注或说明希望 Agent 完成的事情…'} value={feedbackText} onChange={event => setFeedbackText(event.target.value)} rows={3} /><div className="studio-compose-footer"><select aria-label="反馈类型" value={feedbackType} onChange={event => setFeedbackType(event.target.value as 'comment' | 'request')}><option value="comment">批注</option><option value="request">Agent 请求</option></select><button className="studio-button studio-primary studio-compact" disabled={!feedbackText.trim() || !!busy} type="submit">{busy === 'feedback' ? <Loader2 size={14} className="studio-spin" /> : <Plus size={14} />}{feedbackType === 'request' ? '提交请求' : '添加批注'}</button></div></form>}<label className="studio-resolved-toggle"><input type="checkbox" checked={showResolved} onChange={event => setShowResolved(event.target.checked)} />显示已解决</label>{!visibleFeedback.length && <div className="studio-panel-empty"><MessageSquare size={24} /><p>还没有{showResolved ? '' : '待处理的'}批注</p><small>选择作品对象，或标注需要讨论的局部内容。</small></div>}{visibleFeedback.map(item => item.proposal ? <SuggestionPanel key={item.id} feedback={item} client={client} artifactId={activeId} onChanged={acceptBoard} onPreview={operations => { void previewSuggestion(item, operations); }} onRefresh={() => { void refreshBoard(); }} onError={fail} /> : <article className="studio-feedback-item" key={item.id} data-feedback-id={item.id}><div className="studio-feedback-meta"><strong>{authorName(item.author)}</strong><span className={`studio-feedback-status studio-feedback-status-${item.status}`}>{item.status === 'resolved' ? '已解决' : item.status === 'pending' ? '待房主处理' : item.status === 'processing' ? '处理中' : item.type === 'request' ? '请求' : '批注'}</span></div>{(item.anchor.quote || item.anchor.excerpt) && <blockquote className="studio-feedback-quote">{item.anchor.quote || item.anchor.excerpt}</blockquote>}<p className="studio-feedback-message">{item.text}</p>{item.anchor.regionId && <small className="studio-source-version">区域选区 · 来源版本 {item.anchor.sourceRevision ?? '—'}</small>}{item.replies.map(reply => <div className="studio-feedback-reply" key={reply.id}><strong>{authorName(reply.author)}</strong><p>{reply.text}</p></div>)}{canComment && <><div className="studio-feedback-actions"><button className="studio-link-button" disabled={!!busy} onClick={() => void attachFeedback(item)}><Send size={13} />{attachContext ? '附加到对话' : '提交给房主'}</button><button className="studio-link-button" disabled={!!busy} onClick={() => void feedbackAction(item.status === 'resolved' ? 'reopen' : 'resolve', item)}>{item.status === 'resolved' ? <RotateCcw size={13} /> : <CheckCheck size={13} />}{item.status === 'resolved' ? '重新打开' : '解决'}</button></div>{item.status !== 'resolved' && <form className="studio-reply-form" onSubmit={event => { event.preventDefault(); if (replies[item.id]?.trim()) void feedbackAction('reply', item); }}><input aria-label={`回复批注：${item.text}`} value={replies[item.id] || ''} onChange={event => setReplies(previous => ({ ...previous, [item.id]: event.target.value }))} placeholder="回复…" /><button className="studio-icon-button" aria-label="发送回复" disabled={!replies[item.id]?.trim() || !!busy}><Send size={14} /></button></form>}</>}</article>)}</div>}
-          {panel === 'history' && <div className="studio-panel-body"><p className="studio-panel-intro">每次修改都留下记录。预览旧版本不会改变当前白板。</p><button className="studio-link-button" onClick={() => void loadHistory()} disabled={historyLoading}><RefreshCw size={13} className={historyLoading ? 'studio-spin' : ''} />刷新记录</button>{historyLoading && !history.length && <div className="studio-panel-empty"><Loader2 className="studio-spin" size={23} /></div>}{history.map(version => <button className={`studio-history-item${preview?.version.id === version.id ? ' is-active' : ''}`} key={version.id} onClick={() => void previewVersion(version)} disabled={!!busy}><span className="studio-history-marker" /><span><strong>版本 {version.revision}</strong><span>{version.summary || '白板更新'}</span><small>{authorName(version.actor)} · {new Date(version.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>{version.restoredFrom && <small>从历史版本恢复</small>}</span>{busy === `version:${version.id}` && <Loader2 className="studio-spin" size={15} />}</button>)}{!historyLoading && !history.length && <div className="studio-panel-empty"><Clock3 size={25} /><p>还没有历史记录</p></div>}{preview && board && <>{ProductDifference ? <ProductDifference current={board} previous={preview.board} diff={preview.diff} /> : <p className="studio-small-note">可在画布中预览此版本。</p>}</>}</div>}
-          {panel === 'share' && <div className="studio-panel-body">{!share ? <div className="studio-panel-empty"><Loader2 size={23} className="studio-spin" /></div> : <><div className="studio-share-status"><span className={`studio-presence-dot${share.enabled ? ' is-online' : ''}`} /><strong>{share.enabled ? '局域网分享已开启' : '仅自己可访问'}</strong></div><p className="studio-panel-intro">{share.enabled ? '同一局域网中的人可以使用对应链接进入白板，实时查看和共同编辑。' : '开启后，可把不同权限的链接发给同一局域网中的协作者。'}</p>{!share.enabled ? <button className="studio-button studio-primary studio-full-width" disabled={!!busy} onClick={() => void changeSharing('start')}><Share2 size={16} />开启局域网分享</button> : <><div className="studio-share-links">{([['editor', '可编辑', '可以修改白板并参与批注'], ['commenter', '可批注', '可以查看并留下批注或请求'], ['viewer', '仅查看', '可以查看白板内容']] as const).map(([role, label, description]) => <div className="studio-share-role" key={role}><div><strong>{label}</strong><small>{description}</small></div><div className="studio-share-link-field"><input readOnly aria-label={`${label}分享链接`} value={share.links?.[role] || ''} onFocus={event => event.currentTarget.select()} /><button className="studio-icon-button" aria-label={`复制${label}链接`} disabled={!share.links?.[role]} onClick={() => void copyLink(share.links![role]!)}><Copy size={15} /></button></div><button className="studio-link-button" disabled={!!busy} onClick={() => void changeSharing('reset', role)}><RefreshCw size={12} />重置此链接</button></div>)}</div><button className="studio-button studio-full-width studio-danger-text" disabled={!!busy} onClick={() => void changeSharing('stop')}>关闭分享</button><p className="studio-small-note">重置链接后，原链接将失效。关闭分享会停止访客访问。</p></>}</>}
-          </div>}
-        </aside>}
-      </div>
-    </>}
+      <div className="studio-workspace"><div ref={canvasArea} className="studio-canvas-area">{board ? <ProductEditor key={board.artifact.id} document={preview?.board || suggestionPreview || board} client={client} actor={actor} onChanged={acceptBoard} onAnnotate={annotate} onError={fail} onNotice={inform} readOnly={!canEdit || !!preview || !!suggestionPreview} annotationActive={annotationActive && !preview && !suggestionPreview} onAnnotationModeChange={setAnnotationActive} onSelectionChange={selectionChanged} onActivityChange={editorActivityChanged} activities={feedback.filter(item => item.status !== 'resolved' || showResolved)} onFeedbackSelect={selectFeedback} onOpenHtml={regionId => void openHtmlReader(regionId)} documentControls={client.baseUrl && <TimerControl timer={roomTimer} canEdit={canEdit && !preview && !suggestionPreview} busy={timerBusy} onAction={(action, duration) => void changeTimer(action, duration)} />} onViewportChange={viewportChanged} onCursorMove={cursorMoved} presence={peers} selfPeerId={peerId} externalViewport={followedPeer?.context?.viewport || targetViewport} externalSelectedIds={targetSelection} /> : <div className="studio-empty"><Loader2 size={28} className="studio-spin" /><p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>{error && <button className="studio-button" onClick={() => void refreshBoard()}><RefreshCw size={16} />重新加载</button>}</div>}</div></div>
+      {commentOpen && annotation && <CommentPopover point={annotation.screenPoint} label={annotation.anchor.quote || annotation.anchor.excerpt || annotation.label} onClose={() => setCommentOpen(false)}><CommentComposer text={feedbackText} attach={attachComment} busy={busy === 'feedback'} saved={!!savedComment} error={commentError} onTextChange={setFeedbackText} onAttachChange={setAttachComment} onSubmit={event => void createFeedback(event)} /></CommentPopover>}
+      {activeFeedback && selectedFeedback && <CommentPopover point={selectedFeedback.point} label={activeFeedback.anchor.quote || activeFeedback.anchor.excerpt || '对象备注'} onClose={() => setSelectedFeedback(null)}><div className="studio-comment-thread"><article className="studio-feedback-item" data-feedback-id={activeFeedback.id}><div className="studio-feedback-meta"><strong>{authorName(activeFeedback.author)}</strong><span className={`studio-feedback-status studio-feedback-status-${activeFeedback.status}`}>{activeFeedback.status === 'resolved' ? '已解决' : activeFeedback.status === 'pending' ? '待房主处理' : activeFeedback.status === 'processing' ? '处理中' : '备注'}</span></div><p className="studio-feedback-message">{activeFeedback.text}</p>{activeFeedback.replies.map(reply => <div className="studio-feedback-reply" key={reply.id}><strong>{authorName(reply.author)}</strong><p>{reply.text}</p></div>)}{canComment && <><div className="studio-feedback-actions"><button className="studio-link-button" disabled={!!busy} onClick={() => void attachFeedback(activeFeedback)}><Send size={13} />{attachContext ? '附加到对话' : '提交给房主'}</button>{(canEdit || activeFeedback.author.id === actor.id) && <button className="studio-link-button" disabled={!!busy} onClick={() => void feedbackAction(activeFeedback.status === 'resolved' ? 'reopen' : 'resolve', activeFeedback)}>{activeFeedback.status === 'resolved' ? <RotateCcw size={13} /> : <CheckCheck size={13} />}{activeFeedback.status === 'resolved' ? '重新打开' : '解决'}</button>}</div>{activeFeedback.status !== 'resolved' && <form className="studio-reply-form" onSubmit={event => { event.preventDefault(); if (replies[activeFeedback.id]?.trim()) void feedbackAction('reply', activeFeedback); }}><input aria-label={`回复批注：${activeFeedback.text}`} value={replies[activeFeedback.id] || ''} onChange={event => setReplies(previous => ({ ...previous, [activeFeedback.id]: event.target.value }))} placeholder="回复…" /><button className="studio-icon-button" aria-label="发送回复" disabled={!replies[activeFeedback.id]?.trim() || !!busy}><Send size={14} /></button></form>}</>}</article></div></CommentPopover>}    </>}
+    {purgeConfirmation && <StudioDialog title={purgeConfirmation.all ? '清空回收站' : '永久删除作品'} onClose={() => { if (!purgeRunning.current) setPurgeConfirmation(null); }}><p>将永久删除 {purgeConfirmation.targets.length} 项作品，此操作无法恢复。</p>{purgeConfirmation.targets.length === 1 && <p className="studio-purge-target">{purgeConfirmation.targets[0]!.title}</p>}<div className="studio-modal-footer"><button type="button" className="studio-button" disabled={!!busy} onClick={() => setPurgeConfirmation(null)}>取消</button><button type="button" className="studio-button studio-purge-confirm" disabled={!!busy} onClick={() => void purgeArtifacts()}>{busy === 'purge' ? <Loader2 className="studio-spin" size={15} /> : <Trash2 size={15} />}{busy === 'purge' ? '正在删除…' : purgeConfirmation.all ? '清空回收站' : '永久删除'}</button></div></StudioDialog>}
     {rename && <StudioDialog title="重命名作品" onClose={() => setRename(null)}><form onSubmit={event => { event.preventDefault(); if (rename.title.trim()) void manageArtifact('rename', rename.artifact, { title: rename.title.trim() }); }}><label className="studio-field-label" htmlFor="studio-rename-title">作品名称</label><input className="studio-text-field" id="studio-rename-title" maxLength={200} value={rename.title} onChange={event => setRename(previous => previous ? { ...previous, title: event.target.value } : null)} /><div className="studio-modal-footer"><button type="button" className="studio-button" onClick={() => setRename(null)}>取消</button><button className="studio-button studio-primary" type="submit" disabled={!rename.title.trim() || !!busy}>保存</button></div></form></StudioDialog>}
 
   </div>;

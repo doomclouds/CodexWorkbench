@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type Feedback, type RoomTimer, type StudioClient } from '../src/contracts/studio';
 import type { ProductActivity } from '../src/app/products';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
-  default: ({ board, onActivityChange, onSelectionChange, activities }: { board: Board; onActivityChange?: (state: ProductActivity) => void; onSelectionChange?: (ids: string[]) => void; activities?: Feedback[] }) => <section aria-label="测试画布" data-artifact={board.artifact.id} data-activities={activities?.map(item => item.id).join(',')}><button onClick={() => { onSelectionChange?.(['region']); onActivityChange?.({ editingIds: ['region'], movingIds: [], dirty: true, issues: [{ type: 'save', message: '待保存', ids: ['region'] }] }); }}>编辑区域</button></section>,
+  default: ({ board, onActivityChange, onSelectionChange, onEditHtml, activities, documentControls }: { board: Board; onActivityChange?: (state: ProductActivity) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; activities?: Feedback[]; documentControls?: ReactNode }) => <section aria-label="测试画布" data-artifact={board.artifact.id} data-activities={activities?.map(item => item.id).join(',')}>{documentControls}<button onClick={() => { onSelectionChange?.(['region']); onActivityChange?.({ editingIds: ['region'], movingIds: [], dirty: true, issues: [{ type: 'save', message: '待保存', ids: ['region'] }] }); }}>编辑区域</button><button onClick={() => onEditHtml?.(board.elements.find(element => element.id === 'region'))}>编辑 HTML</button></section>,
 }));
 import StudioApp from '../src/app/StudioApp';
 import { whiteboardProduct } from '../src/app/products/whiteboard';
@@ -15,7 +15,7 @@ const makeBoard = (id: string): Board => ({ artifact: { id, type: 'whiteboard', 
 let container: HTMLDivElement, root: Root;
 beforeEach(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); });
-function button(label: string) { const found = [...container.querySelectorAll('button')].find(element => element.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found; }
+function button(label: string) { const found = [...container.querySelectorAll('button')].find(element => element.getAttribute('aria-label') === label || element.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found; }
 async function click(label: string) { await act(async () => button(label).click()); }
 async function change(textarea: HTMLTextAreaElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, value); textarea.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function waitUntil(check: () => boolean) { for (let i = 0; i < 40; i++) { if (check()) return; await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); }); } throw new Error('UI did not settle'); }
@@ -43,8 +43,8 @@ it('reports source editing and preserves the dirty draft and failure until a suc
     if (++attempts === 1) throw new Error('连接断开');
     return { board };
   }) as StudioClient['call'] };
-  const Toolbar = whiteboardProduct.Toolbar!;
-  await act(async () => root.render(<Toolbar document={board} actor={LOCAL_ACTOR} client={client} selectedIds={['region']} disabled={false} onChanged={onChanged} onError={onError} onNotice={() => {}} onActivityChange={onActivity} />));
+  const Editor = whiteboardProduct.Editor;
+  await act(async () => root.render(<Editor document={board} actor={LOCAL_ACTOR} client={client} onChanged={onChanged} onError={onError} onNotice={() => {}} onActivityChange={onActivity} onAnnotate={() => {}} onSelectionChange={() => {}} onViewportChange={() => {}} onCursorMove={() => {}} presence={[]} selfPeerId="test" />));
   await click('编辑 HTML');
   expect(onActivity.mock.calls.at(-1)?.[0]).toMatchObject({ editingIds: ['region'], dirty: false });
   const draft = '<h1>保留我的草稿</h1>';
@@ -70,11 +70,11 @@ it('uses the shared presence channel to start, pause, resume and reset the room 
   const client: StudioClient = { embedded: true, baseUrl: 'http://studio.test', token: 'test-token', call: vi.fn(async name => name === 'artifact_feedback' ? { feedback: [] } : makeBoard('timer-board')) as StudioClient['call'] };
   await act(async () => root.render(<StudioApp client={client} actor={LOCAL_ACTOR} initialArtifactId="timer-board" />));
   await waitUntil(() => !!container.querySelector('[aria-label="测试画布"]'));
-  await act(async () => (container.querySelector('[aria-label="在线协作"]') as HTMLButtonElement).click());
-  await click('5 分钟');
+  await click('共享计时器');
+  await click('开始');
   expect(container.querySelector('[aria-label="剩余时间"]')?.textContent).toBe('05:00');
-  await click('暂停'); expect(container.querySelector('.studio-timer-heading')?.textContent).toContain('已暂停');
-  await click('继续'); expect(container.querySelector('.studio-timer-heading')?.textContent).toContain('计时中');
+  await click('暂停'); expect(container.querySelector('.studio-timer-footer')?.textContent).toContain('已暂停');
+  await click('继续'); expect(container.querySelector('.studio-timer-footer')?.textContent).toContain('计时中');
   await click('重置'); expect(container.querySelector('[aria-label="剩余时间"]')).toBeNull();
   const actions = request.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).timer).filter(Boolean);
   expect(actions).toEqual([{ action: 'start', durationSeconds: 300 }, { action: 'pause' }, { action: 'resume' }, { action: 'reset' }]);

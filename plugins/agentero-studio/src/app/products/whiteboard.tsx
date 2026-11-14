@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Code2, FileCode2, Loader2, Share2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { FileCode2, Loader2, Share2 } from 'lucide-react';
 import type { Artifact, Board, HtmlSelection, Operation, StudioClient } from '../../contracts/studio';
-import type { ProductAnnotation, ProductDescriptor, ProductDifferenceProps, ProductEditorProps, ProductPreviewProps, ProductToolbarProps } from '../products';
+import type { ProductActivity, ProductAnnotation, ProductDescriptor, ProductDifferenceProps, ProductEditorProps, ProductPreviewProps, ProductToolbarProps } from '../products';
 import WhiteboardCanvas from '../canvas/WhiteboardCanvas';
 import { StudioDialog } from './dialog';
-import { downloadStudioFile, studioRequest } from '../transport';
+import { downloadStudioBlob, downloadStudioFile, studioRequest } from '../transport';
 
 function newId(prefix: string) { return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`; }
 function downloadableUrl(client: StudioClient, path: string): string {
@@ -57,15 +57,26 @@ function WhiteboardDifference({ current: currentDocument, previous: previousDocu
 
 function whiteboardAnnotation(board: Board, selection: HtmlSelection): ProductAnnotation {
   const region = board.elements.find(element => element.id === selection.regionId);
-  return { label: 'HTML 内部选区', sourceLabel: `选区来源版本 ${selection.sourceRevision} · 保存时冻结上下文`, anchor: { regionId: selection.regionId, targetIds: selection.targetIds, sourceRevision: selection.sourceRevision, quote: selection.quote, excerpt: selection.excerpt, selector: selection.selector, ...selection.rect }, versions: region ? { [region.id]: region.version } : undefined };
+  return { label: 'HTML 内部选区', sourceLabel: `选区来源版本 ${selection.sourceRevision} · 保存时冻结上下文`, screenPoint: selection.screenPoint, anchor: { coordinateSpace: 'html', regionId: selection.regionId, targetIds: selection.targetIds, sourceRevision: selection.sourceRevision, quote: selection.quote, excerpt: selection.excerpt, selector: selection.selector, ...selection.rect }, versions: region ? { [region.id]: region.version } : undefined };
 }
 function WhiteboardEditor(props: ProductEditorProps) {
-  const { document, onChanged, onAnnotate, ...rest } = props;
+  const { document, onChanged, onAnnotate, onOpenHtml, onActivityChange, onError, onNotice, ...rest } = props;
   const board = document as Board;
-  return <WhiteboardCanvas {...rest} board={board} onChanged={onChanged} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} />;
+  const [sourceRequest, setSourceRequest] = useState<{ id: string; regionId?: string } | null>(null);
+  const activities = useRef<Record<'canvas' | 'source', ProductActivity>>({ canvas: { editingIds: [], movingIds: [], dirty: false }, source: { editingIds: [], movingIds: [], dirty: false } });
+  const report = useCallback((origin: 'canvas' | 'source', activity: ProductActivity) => {
+    activities.current[origin] = activity;
+    const values = Object.values(activities.current);
+    onActivityChange?.({ editingIds: [...new Set(values.flatMap(value => value.editingIds))], movingIds: [...new Set(values.flatMap(value => value.movingIds))], dirty: values.some(value => value.dirty), issues: values.flatMap(value => value.issues || []) });
+  }, [onActivityChange]);
+  const canvasActivity = useCallback((activity: ProductActivity) => report('canvas', activity), [report]);
+  const sourceActivity = useCallback((activity: ProductActivity) => report('source', activity), [report]);
+  return <><WhiteboardCanvas {...rest} board={board} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onOpenHtml={element => onOpenHtml?.(element.id)} onEditHtml={element => setSourceRequest({ id: newId('source'), regionId: element?.id })} />
+    <WhiteboardToolbar document={board} client={props.client} actor={props.actor} selectedIds={[]} disabled={!!props.readOnly} onChanged={onChanged} onError={error => onError?.(error)} onNotice={message => onNotice?.(message)} onActivityChange={sourceActivity} request={sourceRequest} />
+  </>;
 }
 interface SourceDraft { regionId?: string; version?: number; title: string; html: string }
-function WhiteboardToolbar({ document: opaqueDocument, client, selectedIds, disabled, onChanged, onError, onNotice, onActivityChange }: ProductToolbarProps) {
+function WhiteboardToolbar({ document: opaqueDocument, client, selectedIds, disabled, onChanged, onError, onNotice, onActivityChange, request }: ProductToolbarProps & { request?: { id: string; regionId?: string } | null }) {
   const board = opaqueDocument as Board;
   const [source, setSource] = useState<SourceDraft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -83,52 +94,69 @@ function WhiteboardToolbar({ document: opaqueDocument, client, selectedIds, disa
   useEffect(() => () => onActivityChange?.({ editingIds: [], movingIds: [], dirty: false, issues: [] }), [onActivityChange]);
   function openSource(draft: SourceDraft) { sourceBaseline.current = JSON.stringify(draft); setSourceError(''); setSource(draft); }
   const selectedRegion = board.elements.find(element => selectedIds.includes(element.id) && element.type === 'html');
-  async function editSource() {
+  async function editSource(regionId = selectedRegion?.id) {
+    if (disabled || busy) return;
     pendingSave.current = null;
-    if (!selectedRegion) { openSource({ title: 'HTML 图解', html: '' }); return; }
+    const region = boardRef.current.elements.find(element => element.id === regionId && element.type === 'html');
+    if (!region) { openSource({ title: 'HTML 图解', html: '' }); return; }
     const id = board.artifact.id; setBusy(true);
     try {
-      const result = await client.call<{ html: string }>('artifact_read', { artifactId: id, mode: 'source', regionId: selectedRegion.id });
-      if (mounted.current && boardRef.current.artifact.id === id) openSource({ regionId: selectedRegion.id, version: selectedRegion.version, title: selectedRegion.text || 'HTML 图解', html: result.html });
+      const result = await client.call<{ html: string }>('artifact_read', { artifactId: id, mode: 'source', regionId: region.id });
+      if (mounted.current && boardRef.current.artifact.id === id) openSource({ regionId: region.id, version: region.version, title: region.text || 'HTML 图解', html: result.html });
     } catch (error) { onError(error); } finally { if (mounted.current) setBusy(false); }
   }
+  useEffect(() => { if (request) void editSource(request.regionId); }, [request?.id]);
   async function importFile(file: File) {
+    if (busy) return;
     const artifactId = boardRef.current.artifact.id;
+    setBusy(true);
     try { const html = await file.text(); if (mounted.current && boardRef.current.artifact.id === artifactId) { setSourceError(''); setSource(previous => ({ ...previous, title: previous?.regionId ? previous.title : file.name.replace(/\.html?$/i, ''), html })); } }
     catch (error) { onError(error); }
+    finally { if (mounted.current) setBusy(false); }
   }
   async function saveSource(event: FormEvent) {
-    event.preventDefault(); if (!source || !source.html.trim() || busy) return;
+    event.preventDefault(); if (!source || !source.html.trim() || busy || disabled) return;
     const current = boardRef.current; setBusy(true);
     try {
       const fingerprint = JSON.stringify(source);
       if (pendingSave.current?.fingerprint !== fingerprint) {
-        const operation: Operation = source.regionId ? { op: 'update', id: source.regionId, changes: { html: source.html, text: source.title } } : { op: 'add', element: { id: newId('html'), type: 'html', x: current.elements.length ? Math.max(...current.elements.map(element => element.x + element.w)) + 80 : 80, y: 80, w: 1000, h: 700, text: source.title || 'HTML 图解', html: source.html } };
+        const operation: Operation = source.regionId ? { op: 'update', id: source.regionId, changes: { html: source.html, text: source.title } } : { op: 'add', element: { id: newId('html'), type: 'html', x: current.elements.length ? Math.max(...current.elements.map(element => element.x + element.w)) + 80 : 80, y: 80, w: 1440, h: 1120, text: source.title || 'HTML 图解', html: source.html } };
         pendingSave.current = { fingerprint, args: { artifactId: current.artifact.id, operationId: newId('op'), expectedRevision: current.artifact.revision, expectedVersions: source.regionId && source.version !== undefined ? { [source.regionId]: source.version } : undefined, operations: [operation] } };
       }
       const result = await client.call<{ board: Board }>('artifact_apply', pendingSave.current.args);
       if (mounted.current && boardRef.current.artifact.id === current.artifact.id) { onChanged(result.board); pendingSave.current = null; setSource(null); onNotice(source.regionId ? 'HTML 源码已保存。' : 'HTML 图解已加入白板。'); }
     } catch (error) { if (mounted.current && boardRef.current.artifact.id === current.artifact.id) setSourceError(error instanceof Error ? error.message : String(error)); onError(error); } finally { if (mounted.current) setBusy(false); }
   }
-  return <><button className="studio-button studio-text-button" onClick={() => void editSource()} disabled={disabled || busy} title={selectedRegion ? '编辑选中区域的 HTML 源码' : '添加 HTML 图解'}>{busy ? <Loader2 className="studio-spin" size={17} /> : <Code2 size={17} />}<span>{selectedRegion ? '编辑 HTML' : '导入 HTML'}</span></button>{source && <StudioDialog title={source.regionId ? '编辑 HTML 源码' : '导入 HTML 图解'} onClose={() => setSource(null)} wide><form onSubmit={event => void saveSource(event)}><div className="studio-source-heading"><label className="studio-field-label">区域名称<input className="studio-text-field" aria-label="HTML 区域名称" value={source.title} onChange={event => setSource(previous => previous ? { ...previous, title: event.target.value } : null)} /></label><button type="button" className="studio-button" onClick={() => fileInput.current?.click()}><FileCode2 size={16} />选择 HTML 文件</button><input ref={fileInput} type="file" accept=".html,.htm,text/html" aria-label="选择 HTML 文件" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importFile(file); event.target.value = ''; }} /></div><label className="studio-field-label" htmlFor="studio-html-source">HTML 源码</label><textarea id="studio-html-source" className="studio-source-editor" spellCheck={false} value={source.html} onChange={event => setSource(previous => previous ? { ...previous, html: event.target.value } : null)} placeholder="粘贴完整 HTML 或选择文件…" /><p className="studio-small-note">HTML 会作为独立区域显示在白板上，保留自己的样式。可以标注区域内部的文字与图形，并附加到对话。</p><div className="studio-modal-footer"><button type="button" className="studio-button" onClick={() => setSource(null)}>取消</button><button type="submit" className="studio-button studio-primary" disabled={!source.html.trim() || busy}>{busy && <Loader2 className="studio-spin" size={15} />}{source.regionId ? '保存源码' : '添加到白板'}</button></div></form></StudioDialog>}</>;
+  return <>{source && <StudioDialog title={source.regionId ? '编辑 HTML 源码' : '导入 HTML 图解'} onClose={() => { if (!busy) setSource(null); }} wide><form onSubmit={event => void saveSource(event)}><div className="studio-source-heading"><label className="studio-field-label">区域名称<input className="studio-text-field" aria-label="HTML 区域名称" disabled={busy} value={source.title} onChange={event => setSource(previous => previous ? { ...previous, title: event.target.value } : null)} /></label><button type="button" className="studio-button" disabled={busy} onClick={() => fileInput.current?.click()}><FileCode2 size={16} />选择 HTML 文件</button><input ref={fileInput} type="file" accept=".html,.htm,text/html" aria-label="选择 HTML 文件" disabled={busy} hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importFile(file); event.target.value = ''; }} /></div><label className="studio-field-label" htmlFor="studio-html-source">HTML 源码</label><textarea id="studio-html-source" className="studio-source-editor" spellCheck={false} disabled={busy} value={source.html} onChange={event => setSource(previous => previous ? { ...previous, html: event.target.value } : null)} placeholder="粘贴完整 HTML 或选择文件…" /><p className="studio-small-note">HTML 会作为独立区域显示在白板上，保留自己的样式。可以标注区域内部的文字与图形，并附加到对话。</p>{sourceError && <p role="alert" className="studio-danger-text">{sourceError}</p>}<div className="studio-modal-footer"><button type="button" className="studio-button" disabled={busy} onClick={() => setSource(null)}>取消</button><button type="submit" className="studio-button studio-primary" disabled={!source.html.trim() || busy || disabled}>{busy && <Loader2 className="studio-spin" size={15} />}{source.regionId ? '保存源码' : '添加到白板'}</button></div></form></StudioDialog>}</>;
 }
 async function exportWhiteboard(document: unknown, format: 'png' | 'svg' | 'html' | 'json', client: StudioClient) {
   const board = document as Board;
   try {
-    if (format === 'png') { const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token, request: (url: string | URL) => studioRequest(client, url) }); return; }
+    if (format === 'png') { const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token, request: (url: string | URL) => studioRequest(client, url) }, (blob, filename) => downloadStudioBlob(client, blob, filename)); return; }
     const result = await client.call<{ filename: string; downloadPath: string }>('artifact_export', { artifactId: board.artifact.id, format });
     await downloadStudioFile(client, result.downloadPath, result.filename);
   } catch (error) {
     if (!((error as { code?: string })?.code === 'EXPORT_BROWSER_REQUIRED' || error instanceof Error && error.message.includes('EXPORT_BROWSER_REQUIRED'))) throw error;
-    const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token, request: (url: string | URL) => studioRequest(client, url) });
+    const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token, request: (url: string | URL) => studioRequest(client, url) }, (blob, filename) => downloadStudioBlob(client, blob, filename));
   }
 }
 export const whiteboardProduct: ProductDescriptor = {
   id: 'whiteboard', label: '白板', defaultTitle: '未命名白板', Icon: Share2,
-  Editor: WhiteboardEditor, Toolbar: WhiteboardToolbar,
+  Editor: WhiteboardEditor,
   Preview: (props: ProductPreviewProps) => <WhiteboardPreview {...props} cached={props.cached as Board | undefined} />,
   Difference: WhiteboardDifference,
   selectionContext(document, selectedIds) { const board = document as Board; return { label: selectedIds.length ? `关于选中的 ${selectedIds.length} 个对象` : '关于整块白板', anchor: { elementIds: selectedIds }, versions: Object.fromEntries(board.elements.filter(element => selectedIds.includes(element.id)).map(element => [element.id, element.version])) }; },
+  locateAnchor(document, anchor) {
+    const board = document as Board;
+    const ids = anchor.regionId ? [anchor.regionId] : anchor.elementIds || [];
+    const elements = board.elements.filter(element => ids.includes(element.id));
+    if (elements.length) {
+      const x = Math.min(...elements.map(element => element.x)), y = Math.min(...elements.map(element => element.y));
+      return { ids: elements.map(element => element.id), bounds: { x, y, w: Math.max(...elements.map(element => element.x + element.w)) - x, h: Math.max(...elements.map(element => element.y + element.h)) - y } };
+    }
+    if (anchor.coordinateSpace === 'board' && typeof anchor.x === 'number' && typeof anchor.y === 'number') return { ids: [], bounds: { x: anchor.x, y: anchor.y, w: anchor.w || 200, h: anchor.h || 120 } };
+    return undefined;
+  },
   exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'svg', label: 'SVG 图片' }, { format: 'html', label: '交互页面 (.html)' }, { format: 'json', label: '白板文件 (.json)' }],
   exportDocument: exportWhiteboard,
 };

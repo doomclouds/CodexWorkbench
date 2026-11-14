@@ -2324,11 +2324,11 @@ var require_resolve = __commonJS({
           }
           return ref;
         }
-        function addAnchor(anchor2) {
-          if (typeof anchor2 == "string") {
-            if (!ANCHOR.test(anchor2))
-              throw new Error(`invalid anchor "${anchor2}"`);
-            addRef.call(this, `#${anchor2}`);
+        function addAnchor(anchor3) {
+          if (typeof anchor3 == "string") {
+            if (!ANCHOR.test(anchor3))
+              throw new Error(`invalid anchor "${anchor3}"`);
+            addRef.call(this, `#${anchor3}`);
           }
         }
       });
@@ -3288,8 +3288,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path) {
-      let input2 = path;
+    function removeDotSegments(path2) {
+      let input2 = path2;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -3363,11 +3363,11 @@ var require_utils = __commonJS({
       }
       return output2.join("");
     }
-    function removeDotSegmentsRelative(path) {
-      if (path === "" || path[0] === "/") {
-        return removeDotSegments(path);
+    function removeDotSegmentsRelative(path2) {
+      if (path2 === "" || path2[0] === "/") {
+        return removeDotSegments(path2);
       }
-      const segments = path.split("/");
+      const segments = path2.split("/");
       const last = segments.length - 1;
       const output2 = [];
       let trailingDirectory = false;
@@ -3730,8 +3730,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path && path !== "/" ? path : void 0;
+        const path2 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path2 && path2 !== "/" ? path2 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -7371,6 +7371,124 @@ var init_products = __esm({
   }
 });
 
+// src/core/products/whiteboard-geometry.ts
+function strokePath(coordinates = [], offset = { x: 0, y: 0 }) {
+  const points = [];
+  for (let index = 0; index + 1 < coordinates.length; index += 2) points.push({ x: coordinates[index] + offset.x, y: coordinates[index + 1] + offset.y });
+  if (!points.length) return "";
+  let path2 = `M ${points[0].x} ${points[0].y}`;
+  for (let index = 1; index < points.length - 1; index++) {
+    const point = points[index], next = points[index + 1];
+    path2 += ` Q ${point.x} ${point.y} ${(point.x + next.x) / 2} ${(point.y + next.y) / 2}`;
+  }
+  const last = points.at(-1);
+  return `${path2} L ${last.x} ${last.y}`;
+}
+function arrowHeads(arrow) {
+  const heads = arrow.heads;
+  if (Array.isArray(heads) && heads.length === 2 && heads.every((head) => ["none", "arrow", "circle"].includes(head))) return heads;
+  return [arrow.head === "both" ? "arrow" : "none", arrow.head === "none" ? "none" : "arrow"];
+}
+function arrowEnd(element, side, other, fallback) {
+  if (!element) return fallback;
+  const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
+  const resolved = side ?? (Math.abs(other.x - center.x) > Math.abs(other.y - center.y) ? other.x >= center.x ? "right" : "left" : other.y >= center.y ? "bottom" : "top");
+  if (resolved === "left") return { x: element.x, y: center.y };
+  if (resolved === "right") return { x: element.x + element.w, y: center.y };
+  if (resolved === "top") return { x: center.x, y: element.y };
+  return { x: center.x, y: element.y + element.h };
+}
+function roundedPolyline(points, radius = 8) {
+  if (!points.length) return "";
+  let path2 = `M ${points[0].x} ${points[0].y}`;
+  for (let index = 1; index < points.length - 1; index++) {
+    const previous = points[index - 1], current = points[index], next = points[index + 1];
+    const beforeLength = Math.hypot(current.x - previous.x, current.y - previous.y), afterLength = Math.hypot(next.x - current.x, next.y - current.y);
+    const r = Math.min(radius, beforeLength / 2, afterLength / 2);
+    if (!r) {
+      path2 += ` L ${current.x} ${current.y}`;
+      continue;
+    }
+    const before = { x: current.x + (previous.x - current.x) / beforeLength * r, y: current.y + (previous.y - current.y) / beforeLength * r };
+    const after = { x: current.x + (next.x - current.x) / afterLength * r, y: current.y + (next.y - current.y) / afterLength * r };
+    path2 += ` L ${before.x} ${before.y} Q ${current.x} ${current.y} ${after.x} ${after.y}`;
+  }
+  return `${path2} L ${points.at(-1).x} ${points.at(-1).y}`;
+}
+function arrowGeometry(arrow, elements) {
+  const fromElement = typeof arrow.from === "string" ? elements.find((e) => e.id === arrow.from) : void 0;
+  const toElement = typeof arrow.to === "string" ? elements.find((e) => e.id === arrow.to) : void 0;
+  const center = (e, value, fallback) => e ? { x: e.x + e.w / 2, y: e.y + e.h / 2 } : Array.isArray(value) ? { x: value[0], y: value[1] } : fallback;
+  const fromCenter = center(fromElement, arrow.from, { x: arrow.x, y: arrow.y });
+  const toCenter = center(toElement, arrow.to, { x: arrow.x + arrow.w, y: arrow.y + arrow.h });
+  let from = arrowEnd(fromElement, arrow.fromSide, toCenter, fromCenter), to = arrowEnd(toElement, arrow.toSide, fromCenter, toCenter);
+  let points;
+  const bends = Array.isArray(arrow.bends) ? arrow.bends : [];
+  if ((bends[0] === "h" || bends[0] === "v") && bends.length > 1 && bends.length <= 13 && bends.slice(1).every((value) => typeof value === "number" && Number.isFinite(value))) {
+    const firstHorizontal = bends[0] === "h";
+    const offsets = bends.slice(1);
+    const at = offsets.map((offset, index) => {
+      const origin = index < Math.ceil(offsets.length / 2) ? fromCenter : toCenter;
+      return offset + (firstHorizontal === (index % 2 === 0) ? origin.x : origin.y);
+    });
+    const firstOther = firstHorizontal ? { x: at[0], y: fromCenter.y } : { x: fromCenter.x, y: at[0] };
+    const nextHorizontal = firstHorizontal === (offsets.length % 2 === 0);
+    const lastOther = nextHorizontal ? { x: toCenter.x, y: at.at(-1) } : { x: at.at(-1), y: toCenter.y };
+    from = arrowEnd(fromElement, arrow.fromSide ?? (firstHorizontal ? firstOther.x >= fromCenter.x ? "right" : "left" : firstOther.y >= fromCenter.y ? "bottom" : "top"), firstOther, fromCenter);
+    to = arrowEnd(toElement, arrow.toSide ?? (nextHorizontal ? lastOther.y >= toCenter.y ? "bottom" : "top" : lastOther.x >= toCenter.x ? "right" : "left"), lastOther, toCenter);
+    points = [from];
+    let cursor = from;
+    at.forEach((coordinate2, index) => {
+      cursor = firstHorizontal === (index % 2 === 0) ? { x: coordinate2, y: cursor.y } : { x: cursor.x, y: coordinate2 };
+      points.push(cursor);
+    });
+    points.push(nextHorizontal ? { x: to.x, y: cursor.y } : { x: cursor.x, y: to.y }, to);
+    const clearsEnd = (element, endpoint2, neighbor, side) => {
+      if (!element) return true;
+      if (side === "left" || endpoint2.x === element.x && endpoint2.y === element.y + element.h / 2) return neighbor.y === endpoint2.y && neighbor.x < endpoint2.x;
+      if (side === "right" || endpoint2.x === element.x + element.w && endpoint2.y === element.y + element.h / 2) return neighbor.y === endpoint2.y && neighbor.x > endpoint2.x;
+      if (side === "top" || endpoint2.y === element.y) return neighbor.x === endpoint2.x && neighbor.y < endpoint2.y;
+      return neighbor.x === endpoint2.x && neighbor.y > endpoint2.y;
+    };
+    if (!clearsEnd(fromElement, from, points[1], arrow.fromSide) || !clearsEnd(toElement, to, points.at(-2), arrow.toSide) || points.some((point, index) => index > 0 && point.x !== points[index - 1].x && point.y !== points[index - 1].y)) points = void 0;
+  } else if (bends.length >= 2 && bends.length % 2 === 0 && bends.every((value) => typeof value === "number" && Number.isFinite(value))) {
+    points = [from];
+    for (let index = 0; index < bends.length; index += 2) points.push({ x: bends[index], y: bends[index + 1] });
+    points.push(to);
+  }
+  if (!points) {
+    from = arrowEnd(fromElement, arrow.fromSide, toCenter, fromCenter);
+    to = arrowEnd(toElement, arrow.toSide, fromCenter, toCenter);
+    if (Math.abs(from.x - to.x) < 1 || Math.abs(from.y - to.y) < 1) points = [from, to];
+    else {
+      const horizontal = arrow.fromSide === "left" || arrow.fromSide === "right" || !arrow.fromSide && Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
+      points = horizontal ? [from, { x: (from.x + to.x) / 2, y: from.y }, { x: (from.x + to.x) / 2, y: to.y }, to] : [from, { x: from.x, y: (from.y + to.y) / 2 }, { x: to.x, y: (from.y + to.y) / 2 }, to];
+    }
+  }
+  points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
+  const middle = Math.floor((points.length - 1) / 2), left = points[middle], right = points[middle + 1] ?? left;
+  return { path: roundedPolyline(points), points, label: { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 } };
+}
+function shapePath(element) {
+  const { w, h, kind = "rounded" } = element;
+  if (kind === "person") {
+    const r = Math.min(w * 0.19, h * 0.16), cx = w / 2, cy = h * 0.17;
+    return `M ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} Z M ${w * 0.12} ${h} V ${h * 0.55} C ${w * 0.12} ${h * 0.3} ${w * 0.88} ${h * 0.3} ${w * 0.88} ${h * 0.55} V ${h} Z`;
+  }
+  if (kind === "diamond") return `M ${w / 2} 0 L ${w} ${h / 2} L ${w / 2} ${h} L 0 ${h / 2} Z`;
+  if (kind === "hexagon") return `M ${w * 0.18} 0 H ${w * 0.82} L ${w} ${h / 2} L ${w * 0.82} ${h} H ${w * 0.18} L 0 ${h / 2} Z`;
+  if (kind === "parallelogram") return `M ${w * 0.18} 0 H ${w} L ${w * 0.82} ${h} H 0 Z`;
+  if (kind === "database") return `M 0 18 C 0 -6 ${w} -6 ${w} 18 V ${h - 18} C ${w} ${h + 6} 0 ${h + 6} 0 ${h - 18} Z M 0 18 C 0 42 ${w} 42 ${w} 18`;
+  if (kind === "document") return `M 0 0 H ${w} V ${h - 15} Q ${w * 0.75} ${h - 35} ${w / 2} ${h - 15} Q ${w * 0.25} ${h + 5} 0 ${h - 15} Z`;
+  if (kind === "cloud") return `M ${w * 0.2} ${h * 0.8} C ${-w * 0.08} ${h * 0.8} ${-w * 0.03} ${h * 0.25} ${w * 0.25} ${h * 0.28} C ${w * 0.27} ${-h * 0.03} ${w * 0.7} ${-h * 0.03} ${w * 0.75} ${h * 0.3} C ${w * 1.07} ${h * 0.25} ${w * 1.09} ${h * 0.8} ${w * 0.8} ${h * 0.8} Z`;
+  return "";
+}
+var init_whiteboard_geometry = __esm({
+  "src/core/products/whiteboard-geometry.ts"() {
+    "use strict";
+  }
+});
+
 // ../../node_modules/.pnpm/@resvg+resvg-wasm@2.6.2/node_modules/@resvg/resvg-wasm/index.mjs
 function addHeapObject(obj) {
   if (heap_next === heap.length)
@@ -8024,121 +8142,75 @@ var init_theme = __esm({
   }
 });
 
-// src/core/products/whiteboard-geometry.ts
-function strokePath(coordinates = [], offset = { x: 0, y: 0 }) {
-  const points = [];
-  for (let index = 0; index + 1 < coordinates.length; index += 2) points.push({ x: coordinates[index] + offset.x, y: coordinates[index + 1] + offset.y });
-  if (!points.length) return "";
-  let path = `M ${points[0].x} ${points[0].y}`;
-  for (let index = 1; index < points.length - 1; index++) {
-    const point = points[index], next = points[index + 1];
-    path += ` Q ${point.x} ${point.y} ${(point.x + next.x) / 2} ${(point.y + next.y) / 2}`;
-  }
-  const last = points.at(-1);
-  return `${path} L ${last.x} ${last.y}`;
+// src/core/products/whiteboard-stickers.ts
+function getBoardSticker(id2) {
+  return typeof id2 === "string" ? byId.get(id2) : void 0;
 }
-function arrowHeads(arrow) {
-  const heads = arrow.heads;
-  if (Array.isArray(heads) && heads.length === 2 && heads.every((head) => ["none", "arrow", "circle"].includes(head))) return heads;
-  return [arrow.head === "both" ? "arrow" : "none", arrow.head === "none" ? "none" : "arrow"];
+function boardStickerMarkup(id2) {
+  const value = getBoardSticker(id2);
+  if (!value) return void 0;
+  return `<g stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="4">${value.body}</g><g stroke="#273443" stroke-width="1.3">${value.body}</g></g>`;
 }
-function arrowEnd(element, side, other, fallback) {
-  if (!element) return fallback;
-  const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
-  const resolved = side ?? (Math.abs(other.x - center.x) > Math.abs(other.y - center.y) ? other.x >= center.x ? "right" : "left" : other.y >= center.y ? "bottom" : "top");
-  if (resolved === "left") return { x: element.x, y: center.y };
-  if (resolved === "right") return { x: element.x + element.w, y: center.y };
-  if (resolved === "top") return { x: center.x, y: element.y };
-  return { x: center.x, y: element.y + element.h };
-}
-function roundedPolyline(points, radius = 8) {
-  if (!points.length) return "";
-  let path = `M ${points[0].x} ${points[0].y}`;
-  for (let index = 1; index < points.length - 1; index++) {
-    const previous = points[index - 1], current = points[index], next = points[index + 1];
-    const beforeLength = Math.hypot(current.x - previous.x, current.y - previous.y), afterLength = Math.hypot(next.x - current.x, next.y - current.y);
-    const r = Math.min(radius, beforeLength / 2, afterLength / 2);
-    if (!r) {
-      path += ` L ${current.x} ${current.y}`;
-      continue;
-    }
-    const before = { x: current.x + (previous.x - current.x) / beforeLength * r, y: current.y + (previous.y - current.y) / beforeLength * r };
-    const after = { x: current.x + (next.x - current.x) / afterLength * r, y: current.y + (next.y - current.y) / afterLength * r };
-    path += ` L ${before.x} ${before.y} Q ${current.x} ${current.y} ${after.x} ${after.y}`;
-  }
-  return `${path} L ${points.at(-1).x} ${points.at(-1).y}`;
-}
-function arrowGeometry(arrow, elements) {
-  const fromElement = typeof arrow.from === "string" ? elements.find((e) => e.id === arrow.from) : void 0;
-  const toElement = typeof arrow.to === "string" ? elements.find((e) => e.id === arrow.to) : void 0;
-  const center = (e, value, fallback) => e ? { x: e.x + e.w / 2, y: e.y + e.h / 2 } : Array.isArray(value) ? { x: value[0], y: value[1] } : fallback;
-  const fromCenter = center(fromElement, arrow.from, { x: arrow.x, y: arrow.y });
-  const toCenter = center(toElement, arrow.to, { x: arrow.x + arrow.w, y: arrow.y + arrow.h });
-  let from = arrowEnd(fromElement, arrow.fromSide, toCenter, fromCenter), to = arrowEnd(toElement, arrow.toSide, fromCenter, toCenter);
-  let points;
-  const bends = Array.isArray(arrow.bends) ? arrow.bends : [];
-  if ((bends[0] === "h" || bends[0] === "v") && bends.length > 1 && bends.length <= 13 && bends.slice(1).every((value) => typeof value === "number" && Number.isFinite(value))) {
-    const firstHorizontal = bends[0] === "h";
-    const offsets = bends.slice(1);
-    const at = offsets.map((offset, index) => {
-      const origin = index < Math.ceil(offsets.length / 2) ? fromCenter : toCenter;
-      return offset + (firstHorizontal === (index % 2 === 0) ? origin.x : origin.y);
-    });
-    const firstOther = firstHorizontal ? { x: at[0], y: fromCenter.y } : { x: fromCenter.x, y: at[0] };
-    const nextHorizontal = firstHorizontal === (offsets.length % 2 === 0);
-    const lastOther = nextHorizontal ? { x: toCenter.x, y: at.at(-1) } : { x: at.at(-1), y: toCenter.y };
-    from = arrowEnd(fromElement, arrow.fromSide ?? (firstHorizontal ? firstOther.x >= fromCenter.x ? "right" : "left" : firstOther.y >= fromCenter.y ? "bottom" : "top"), firstOther, fromCenter);
-    to = arrowEnd(toElement, arrow.toSide ?? (nextHorizontal ? lastOther.y >= toCenter.y ? "bottom" : "top" : lastOther.x >= toCenter.x ? "right" : "left"), lastOther, toCenter);
-    points = [from];
-    let cursor = from;
-    at.forEach((coordinate, index) => {
-      cursor = firstHorizontal === (index % 2 === 0) ? { x: coordinate, y: cursor.y } : { x: cursor.x, y: coordinate };
-      points.push(cursor);
-    });
-    points.push(nextHorizontal ? { x: to.x, y: cursor.y } : { x: cursor.x, y: to.y }, to);
-    const clearsEnd = (element, endpoint2, neighbor, side) => {
-      if (!element) return true;
-      if (side === "left" || endpoint2.x === element.x && endpoint2.y === element.y + element.h / 2) return neighbor.y === endpoint2.y && neighbor.x < endpoint2.x;
-      if (side === "right" || endpoint2.x === element.x + element.w && endpoint2.y === element.y + element.h / 2) return neighbor.y === endpoint2.y && neighbor.x > endpoint2.x;
-      if (side === "top" || endpoint2.y === element.y) return neighbor.x === endpoint2.x && neighbor.y < endpoint2.y;
-      return neighbor.x === endpoint2.x && neighbor.y > endpoint2.y;
-    };
-    if (!clearsEnd(fromElement, from, points[1], arrow.fromSide) || !clearsEnd(toElement, to, points.at(-2), arrow.toSide) || points.some((point, index) => index > 0 && point.x !== points[index - 1].x && point.y !== points[index - 1].y)) points = void 0;
-  } else if (bends.length >= 2 && bends.length % 2 === 0 && bends.every((value) => typeof value === "number" && Number.isFinite(value))) {
-    points = [from];
-    for (let index = 0; index < bends.length; index += 2) points.push({ x: bends[index], y: bends[index + 1] });
-    points.push(to);
-  }
-  if (!points) {
-    from = arrowEnd(fromElement, arrow.fromSide, toCenter, fromCenter);
-    to = arrowEnd(toElement, arrow.toSide, fromCenter, toCenter);
-    if (Math.abs(from.x - to.x) < 1 || Math.abs(from.y - to.y) < 1) points = [from, to];
-    else {
-      const horizontal = arrow.fromSide === "left" || arrow.fromSide === "right" || !arrow.fromSide && Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
-      points = horizontal ? [from, { x: (from.x + to.x) / 2, y: from.y }, { x: (from.x + to.x) / 2, y: to.y }, to] : [from, { x: from.x, y: (from.y + to.y) / 2 }, { x: to.x, y: (from.y + to.y) / 2 }, to];
-    }
-  }
-  points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
-  const middle = Math.floor((points.length - 1) / 2), left = points[middle], right = points[middle + 1] ?? left;
-  return { path: roundedPolyline(points), points, label: { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 } };
-}
-function shapePath(element) {
-  const { w, h, kind = "rounded" } = element;
-  if (kind === "person") {
-    const r = Math.min(w * 0.19, h * 0.16), cx = w / 2, cy = h * 0.17;
-    return `M ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} Z M ${w * 0.12} ${h} V ${h * 0.55} C ${w * 0.12} ${h * 0.3} ${w * 0.88} ${h * 0.3} ${w * 0.88} ${h * 0.55} V ${h} Z`;
-  }
-  if (kind === "diamond") return `M ${w / 2} 0 L ${w} ${h / 2} L ${w / 2} ${h} L 0 ${h / 2} Z`;
-  if (kind === "hexagon") return `M ${w * 0.18} 0 H ${w * 0.82} L ${w} ${h / 2} L ${w * 0.82} ${h} H ${w * 0.18} L 0 ${h / 2} Z`;
-  if (kind === "parallelogram") return `M ${w * 0.18} 0 H ${w} L ${w * 0.82} ${h} H 0 Z`;
-  if (kind === "database") return `M 0 18 C 0 -6 ${w} -6 ${w} 18 V ${h - 18} C ${w} ${h + 6} 0 ${h + 6} 0 ${h - 18} Z M 0 18 C 0 42 ${w} 42 ${w} 18`;
-  if (kind === "document") return `M 0 0 H ${w} V ${h - 15} Q ${w * 0.75} ${h - 35} ${w / 2} ${h - 15} Q ${w * 0.25} ${h + 5} 0 ${h - 15} Z`;
-  if (kind === "cloud") return `M ${w * 0.2} ${h * 0.8} C ${-w * 0.08} ${h * 0.8} ${-w * 0.03} ${h * 0.25} ${w * 0.25} ${h * 0.28} C ${w * 0.27} ${-h * 0.03} ${w * 0.7} ${-h * 0.03} ${w * 0.75} ${h * 0.3} C ${w * 1.07} ${h * 0.25} ${w * 1.09} ${h * 0.8} ${w * 0.8} ${h * 0.8} Z`;
-  return "";
-}
-var init_whiteboard_geometry = __esm({
-  "src/core/products/whiteboard-geometry.ts"() {
+var yellow, orange, red, blue, green, pink, purple, path, circle, rect, sticker, BOARD_STICKERS, byId;
+var init_whiteboard_stickers = __esm({
+  "src/core/products/whiteboard-stickers.ts"() {
     "use strict";
+    yellow = "#f5c75e";
+    orange = "#e99662";
+    red = "#e87970";
+    blue = "#8eb5dc";
+    green = "#b3c894";
+    pink = "#e9a9c7";
+    purple = "#bab0da";
+    path = (d, fill = "none") => `<path d="${d}" fill="${fill}"/>`;
+    circle = (cx, cy, r, fill) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
+    rect = (x2, y, w, h, fill, rx = 1) => `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}"/>`;
+    sticker = (id2, label, keywords, body2) => ({ id: id2, label, keywords, body: body2 });
+    BOARD_STICKERS = [
+      sticker("smile", "\u7B11\u8138", "smile happy \u5F00\u5FC3 \u8868\u60C5", circle(12, 12, 9, yellow) + path("M7 10q1-3 3 0m4 0q1-3 3 0M7 13h10q-1 6-5 6t-5-6Z", "#fff1be")),
+      sticker("plus", "\u52A0\u53F7", "plus add \u6DFB\u52A0 \u6B63\u5411", path("M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z", green)),
+      sticker("thumbs-up", "\u8D5E\u540C", "thumbs up agree good like \u8D5E \u70B9\u8D5E", path("M8 10c3-1 4-4 5-7 3 0 3 3 1 6h5q3 0 2 3l-2 8H8ZM3 10h5v10H3Z", yellow) + path("M16 12h5m-6 4h5")),
+      sticker("thumbs-down", "\u4E0D\u8D5E\u540C", "thumbs down disagree \u4E0D\u540C\u610F \u53CD\u5BF9", path("M8 14c3 1 4 4 5 7 3 0 3-3 1-6h5q3 0 2-3l-2-8H8ZM3 4h5v10H3Z", yellow) + path("M16 12h5m-6-4h5")),
+      sticker("heart", "\u7231\u5FC3", "heart love \u559C\u6B22 \u5173\u5FC3", path("M12 21C8 18 3 14 3 9 3 3 9 2 12 7c3-5 9-4 9 2 0 5-5 9-9 12Z", red)),
+      sticker("wave", "\u6325\u624B", "wave hand hello \u4F60\u597D \u62DB\u547C", path("m7 20-3-8q0-2 2-1l2 3-2-8q0-2 2-1l2 7V4q1-2 2 0v8l2-7q2-1 2 1l-1 7 2-4q2-1 2 1l-2 8q-3 5-10 2Z", yellow) + path("M3 5 5 3m14 1 2 2M2 8H1")),
+      sticker("clap", "\u9F13\u638C", "clap applause hands \u652F\u6301 \u62CD\u624B", path("M4 20V9q1-2 2 0v5-8q1-2 2 0v7-9q1-2 2 0v9-7q1-2 2 0v9l2-3q2-1 2 1l-3 7Z", yellow) + path("m14 20 4-7V7q2-2 2 0v13ZM5 2 4 1m10 2 1-2m6 3 1-1", "#f7d98b")),
+      sticker("handshake", "\u63E1\u624B", "handshake agree partnership \u5408\u4F5C \u5171\u8BC6", path("m2 9 5-5 5 2 5-2 5 5-4 7-5 4-8-5Z", yellow) + path("m8 9 4-3 4 3q0 3-3 2l-2-1-3 3m1 4 2-2m1 4 2-2m1 0 2-2")),
+      sticker("heart-hand", "\u7528\u5FC3\u652F\u6301", "care heart support \u5173\u6000 \u611F\u8C22", path("M11 12C7 10 5 8 5 5q2-4 6 0 4-4 6 0 1 3-6 7Z", red) + path("M3 15h4l4 2h6q2-1 1-3l3-1q2 4-3 7H6l-3 1Z", pink)),
+      sticker("bulb", "\u60F3\u6CD5", "lightbulb idea insight \u7075\u611F \u70B9\u5B50", path("M8 16c0-3-4-4-3-8 1-7 13-7 14 0 1 4-3 5-3 8ZM8 17h8v4H8Z", "#f8dda0") + path("m10 15-1-6 3 2 3-2-1 6M9 19h6")),
+      sticker("question", "\u95EE\u9898", "question help why \u7591\u95EE \u5E2E\u52A9", circle(12, 12, 9, purple) + path("M9 8q0-4 4-3 5 2 0 6-2 1-1 4m0 3h.1")),
+      sticker("alert", "\u63D0\u9192", "alert warning caution \u6CE8\u610F \u98CE\u9669 \u8B66\u544A", path("M12 3 22 21H2Z", yellow) + path("M12 8v6") + circle(12, 17.5, 0.65, "#273443")),
+      sticker("check", "\u5B8C\u6210", "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE", rect(4, 4, 16, 16, green, 2) + path("m7 11 4 4L22 5")),
+      sticker("cross", "\u53D6\u6D88", "cross no cancel stop \u62D2\u7EDD \u9519\u8BEF \u5173\u95ED", circle(12, 12, 9, red) + path("m8 8 8 8m0-8-8 8")),
+      sticker("flag", "\u65D7\u5E1C", "flag milestone mark \u91CC\u7A0B\u7891 \u6807\u8BB0", path("M5 21V3m1 1h15l-4 6 4 5H6Z", red) + circle(5, 3, 1.5, "#f7eee7")),
+      sticker("bolt", "\u95EA\u7535", "bolt lightning zap fast \u5FEB\u901F \u80FD\u91CF", path("m14 2-11 12h7l-1 8L22 9h-8Z", yellow)),
+      sticker("pin", "\u5730\u70B9", "pin location map \u5B9A\u4F4D \u4F4D\u7F6E", path("M12 22C8 16 4 13 4 9a8 8 0 0 1 16 0c0 4-4 7-8 13Z", red) + circle(12, 9, 3, "#f4aa9f")),
+      sticker("search", "\u53D1\u73B0", "search find discover \u641C\u7D22 \u67E5\u627E \u653E\u5927\u955C", circle(9, 9, 6.5, blue) + path("m14 13 8 7-3 3-7-8Z", "#b9d5ec")),
+      sticker("key", "\u94A5\u5319", "key access important \u5173\u952E \u6743\u9650", path("M14 11a6 6 0 1 0-5 4v6h4v-3h3v-3h-3Z", yellow) + circle(8, 8, 2.5, "#f8e1aa")),
+      sticker("party", "\u5E86\u795D", "party celebrate confetti \u5F69\u5E26 \u795D\u8D3A", path("M4 21 7 7l10 10Z", pink) + path("m11 5 2-3m4 7 4-1m-7 5 5-6m1 9 3 2M7 3l1 1") + circle(18, 3, 1, yellow) + circle(22, 12, 1, blue)),
+      sticker("trophy", "\u5956\u676F", "trophy win award \u51A0\u519B \u5956\u52B1", path("M7 3h10v9q-1 5-5 5t-5-5Zm3 14h4v3h-4ZM7 21h10M7 5H3q0 8 5 7M17 5h4q0 8-5 7", yellow)),
+      sticker("crown", "\u7687\u51A0", "crown royal best \u7B2C\u4E00 \u4F18\u79C0", path("M5 20 3 7l6 5 3-9 3 9 6-5-2 13Z", yellow) + circle(3, 6, 1.4, "#f8e1aa") + circle(12, 3, 1.4, "#f8e1aa") + circle(21, 6, 1.4, "#f8e1aa")),
+      sticker("gift", "\u793C\u7269", "gift present thanks \u8D60\u793C \u60CA\u559C", rect(4, 10, 16, 11, red) + rect(3, 7, 18, 4, "#f2a79b") + path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")),
+      sticker("clock", "\u65F6\u949F", "clock time deadline \u65F6\u95F4 \u622A\u6B62", circle(12, 12, 9, blue) + path("M12 6v7h5")),
+      sticker("calendar", "\u65E5\u5386", "calendar date plan \u65E5\u671F \u8BA1\u5212", rect(3, 5, 18, 16, red, 2) + path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")),
+      sticker("hourglass", "\u6C99\u6F0F", "hourglass wait patience \u7B49\u5F85 \u5012\u8BA1\u65F6", path("M5 3h14c0 6-2 6-5 9 3 3 5 3 5 9H5c0-6 2-6 5-9-3-3-5-3-5-9Z", "#f9e8ba") + path("M6 6h12l-6 5Zm0 13 6-6 6 6Z", yellow) + path("M4 2h16M4 22h16")),
+      sticker("messages", "\u8BA8\u8BBA", "messages chat discuss \u5BF9\u8BDD \u6C9F\u901A", path("M14 17H7l-4 3v-7a7 7 0 1 1 11 4Z", blue) + path("M14 10q8-2 8 5v7l-4-2q-7 1-8-5Z", "#aecbe5")),
+      sticker("megaphone", "\u516C\u544A", "megaphone announce broadcast \u5BA3\u5E03 \u901A\u77E5", path("m3 10 13-6v16L3 14Zm3 5 2 6h4l-2-7Z", orange) + path("M18 8q4 4 0 8m2-10q6 6 0 12")),
+      sticker("pencil", "\u94C5\u7B14", "pencil edit write \u7F16\u8F91 \u4E66\u5199", path("m4 15 11-12q2-2 5 1t1 4L9 20l-7 2Z", yellow) + path("m14 4 6 6M4 15l5 5m-6 1 2-5") + path("m3 22 5-1 4 1 3-2 4 1 3-2")),
+      sticker("chart", "\u589E\u957F\u56FE\u8868", "chart growth graph mountain \u6570\u636E \u8FDB\u5C55", path("M3 21V4h3v14h15v3Z", purple) + path("m7 15 4-5 4 2 6-8v14H7Z", green) + path("m16 4 5-1 1 5")),
+      sticker("trending-up", "\u5411\u4E0A\u8D8B\u52BF", "trending up progress improve \u63D0\u5347 \u8D8B\u52BF", path("M3 21V13h5v-4h5V5h6V2l4 5-4 5V9h-3v5h-5v4H7v3Z", purple)),
+      sticker("send", "\u7EB8\u98DE\u673A", "send paper plane launch \u53D1\u9001 \u51FA\u53D1", path("M2 8 22 2l-6 20-5-8Z", blue) + path("m3 8 8 6L22 2M11 14l-1 7 6-5")),
+      sticker("sun", "\u592A\u9633", "sun bright day \u9633\u5149 \u660E\u4EAE", path("m12 1 2 5 4-3-1 5 5 1-4 4 4 3-5 1 1 5-5-3-3 4-1-5-5 1 3-5-4-3 5-1-1-5 5 3Z", "#f7dc8a") + circle(12, 12, 4.5, yellow)),
+      sticker("sprout", "\u840C\u82BD", "sprout plant grow \u65B0\u82BD \u6210\u957F", path("M12 22V11M12 13C1 13 1 3 6 5c6 0 6 8 6 8Zm0-2C12 0 23 1 22 6c-1 6-10 5-10 5Z", green) + path("M5 22h14")),
+      sticker("flower", "\u82B1\u6735", "flower bloom beauty \u9C9C\u82B1 \u7EFD\u653E", path("M12 22V9m0 8q-9 0-9-6 7-1 9 6Zm0 3q9-1 9-7-7-1-9 7Z", green) + path("M12 3q4-4 5 1 5-1 3 4 2 4-4 4-3 4-5-1-6 0-4-4-3-4 1-5Z", pink) + circle(13, 6.5, 2, "#f6d58a")),
+      sticker("coffee", "\u5496\u5561", "coffee break cup \u4F11\u606F \u5496\u5561\u676F", path("M4 8h13v9q-1 4-6 4t-7-4Zm13 1h3q4 5-3 7Z", "#c8a589") + path("M2 22h18M7 5q-2-2 0-4m5 4q-2-2 0-4")),
+      sticker("piggy-bank", "\u50A8\u84C4\u7F50", "piggy bank save money \u5B58\u94B1 \u9884\u7B97", path("M6 7q-2-5 3-3l2 2q9-2 9 5l3 1v5l-4 1v4h-4v-3H9v3H5v-5Q0 15 3 10L1 8q3-2 5-1Z", pink) + path("M10 8h5") + circle(18, 11, 0.6, "#273443")),
+      sticker("arrow-right", "\u5411\u53F3", "arrow right next forward \u4E0B\u4E00\u6B65 \u524D\u8FDB", path("M3 9h11V3l8 9-8 9v-6H3Z", blue)),
+      sticker("arrow-up", "\u5411\u4E0A", "arrow up top \u4E0A\u5347 \u9876\u90E8", path("M9 22V11H3l9-9 9 9h-6v11Z", green)),
+      sticker("repeat", "\u5FAA\u73AF", "repeat loop cycle \u8FED\u4EE3 \u5FAA\u73AF", path("M5 9q1-7 10-5l2-2v6h-6l2-2q-5-1-6 4ZM19 15q-1 7-10 5l-2 2v-6h6l-2 2q5 1 6-4Z", green)),
+      sticker("target", "\u76EE\u6807", "target aim focus \u4E13\u6CE8 \u9776\u5FC3", circle(12, 12, 9, red) + circle(12, 12, 6, "#f9e8db") + circle(12, 12, 3, red) + path("m12 12 9-9m-5 0h5v5")),
+      sticker("rocket", "\u706B\u7BAD", "rocket launch release \u53D1\u5E03 \u542F\u52A8", path("M9 16 5 19l-1-7 4-3m7 6 0 5-6 1 3-4", orange) + path("M7 15Q7 3 21 2q1 13-11 15Z", blue) + circle(15, 8, 2.5, "#dcebf5") + path("m7 17-4 4 5-1", yellow))
+    ];
+    byId = new Map(BOARD_STICKERS.map((value) => [value.id, value]));
   }
 });
 
@@ -8305,8 +8377,8 @@ function shapeSvg(e, fill, stroke) {
   const common = `fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}"${e.dash ? ' stroke-dasharray="6 5"' : ""}`;
   const { x: x2, y, w, h } = e;
   if (e.kind === "ellipse" || e.kind === "circle") return `<ellipse cx="${x2 + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" ${common}/>`;
-  const path = shapePath(e);
-  if (path) return `<path transform="translate(${x2} ${y})" d="${path}" ${common}/>`;
+  const path2 = shapePath(e);
+  if (path2) return `<path transform="translate(${x2} ${y})" d="${path2}" ${common}/>`;
   return `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${e.kind === "pill" ? h / 2 : e.kind === "rect" || e.kind === "queue" ? 0 : 7}" ${common}/>` + (e.kind === "queue" ? `<path d="M${x2 + 14},${y}V${y + h} M${x2 + w - 14},${y}V${y + h}" fill="none" stroke="${escapeXml(stroke)}"/>` : "");
 }
 function endpoint(value, elements) {
@@ -8339,7 +8411,8 @@ function elementSvg(e, board, options = {}) {
       const safe = computed ?? (styles + body2).replace(/<script\b[^>]*>[^]*?<\/script\s*>/gi, "").replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^>]*?)(?<!\/)\s*>/gi, "<$1$2/>").replace(/&nbsp;/gi, "&#160;").replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);)/gi, "&amp;");
       markup = `<foreignObject x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden">${safe}</div></foreignObject>`;
     }
-  } else if (e.type === "text" || e.type === "sticker") markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
+  } else if (e.type === "sticker" && boardStickerMarkup(e.data?.stickerIconId)) markup = `<svg x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" viewBox="0 0 24 24" data-sticker-icon-id="${escapeXml(e.data?.stickerIconId)}">${boardStickerMarkup(e.data?.stickerIconId)}</svg>`;
+  else if (e.type === "text" || e.type === "sticker") markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
   else if (e.type === "stroke") {
     markup = `<path d="${strokePath(e.points, e)}" fill="none" stroke="${escapeXml(semanticColor(e.stroke ?? e.color, style, style.muted))}" stroke-width="${scalar(e.strokeWidth ?? e.width, 3)}"${e.dash ? ' stroke-dasharray="6 5"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
   } else if (e.type === "arrow") {
@@ -8403,6 +8476,7 @@ var init_serialization = __esm({
     "use strict";
     init_theme();
     init_whiteboard_geometry();
+    init_whiteboard_stickers();
     init_rich_text();
     ExportError = class extends Error {
       constructor(code, message) {
@@ -8453,9 +8527,9 @@ async function initializeRenderer() {
 async function systemFontBuffers() {
   fonts ??= (async () => {
     const candidates = process.platform === "win32" ? ["segoeui.ttf", "msyh.ttc", "consola.ttf"].map((name) => join3(process.env.WINDIR ?? "C:\\Windows", "Fonts", name)) : process.platform === "darwin" ? ["/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Menlo.ttc"] : ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"];
-    const found = await Promise.all(candidates.map(async (path) => {
+    const found = await Promise.all(candidates.map(async (path2) => {
       try {
-        return await readFile2(path);
+        return await readFile2(path2);
       } catch {
         return void 0;
       }
@@ -8533,6 +8607,7 @@ function normalizeElement(input2, id2) {
   if (result.type === "html") result.sourceRevision = typeof input2.sourceRevision === "number" ? input2.sourceRevision : 1;
   if (result.points !== void 0 && (!Array.isArray(result.points) || result.points.length > 4e4 || result.points.some((n) => typeof n !== "number" || !Number.isFinite(n)))) throw new StudioError("INVALID_ARGUMENT", "\u7B14\u8FF9\u5750\u6807\u65E0\u6548\u3002");
   if (result.type === "shape" && result.kind !== void 0 && !["rect", "rounded", "ellipse", "diamond", "pill", "hexagon", "parallelogram", "database", "queue", "document", "cloud", "person"].includes(result.kind)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u6B64\u539F\u751F\u5F62\u72B6\u7C7B\u578B\u3002");
+  if (result.locked !== void 0 && typeof result.locked !== "boolean") throw new StudioError("INVALID_ARGUMENT", "locked \u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
   for (const key of ["hollow", "dash"]) if (result[key] !== void 0 && typeof result[key] !== "boolean") throw new StudioError("INVALID_ARGUMENT", `${key} \u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002`);
   for (const key of ["strokeWidth", "width"]) if (result[key] !== void 0 && (typeof result[key] !== "number" || !Number.isFinite(result[key]) || result[key] <= 0 || result[key] > 100)) throw new StudioError("INVALID_ARGUMENT", "\u7EBF\u6761\u5BBD\u5EA6\u987B\u5927\u4E8E 0 \u4E14\u4E0D\u8D85\u8FC7 100\u3002");
   if (result.type === "arrow") {
@@ -8571,10 +8646,25 @@ function restoredElement(saved, current) {
   if (restored.type === "html") restored.sourceRevision = current?.html === restored.html ? current?.sourceRevision ?? 1 : Number(current?.sourceRevision ?? saved.sourceRevision ?? 0) + 1;
   return restored;
 }
-function deletedIds(content, operation) {
-  const ids = operation.ids ?? [safeId(operation.id, "\u5143\u7D20 ID")];
+function deletedIds(content, operation2) {
+  const ids = operation2.ids ?? [safeId(operation2.id, "\u5143\u7D20 ID")];
   if (!Array.isArray(ids) || ids.some((id2) => typeof id2 !== "string")) throw new StudioError("INVALID_ARGUMENT", "\u5143\u7D20 ID \u5217\u8868\u65E0\u6548\u3002");
   return content.elements.filter((element) => ids.includes(element.id) || element.type === "arrow" && (typeof element.from === "string" && ids.includes(element.from) || typeof element.to === "string" && ids.includes(element.to))).map((element) => element.id);
+}
+function assertLockedGeometry(before, after, baseline) {
+  const protectedIds = new Set([...baseline.elements, ...before.elements].filter((element) => element.locked).map((element) => element.id));
+  if (!protectedIds.size) return;
+  const beforeById = new Map(before.elements.map((element) => [element.id, element])), afterById = new Map(after.elements.map((element) => [element.id, element]));
+  const bounds = (element) => element && [element.x, element.y, element.w, element.h];
+  for (const current of before.elements) {
+    if (!protectedIds.has(current.id)) continue;
+    const next = afterById.get(current.id);
+    const removedParent = current.parentId && beforeById.has(current.parentId) && !afterById.has(current.parentId);
+    const endpointMoved = current.type === "arrow" && [current.from, current.to].some((id2) => typeof id2 === "string" && !same(bounds(beforeById.get(id2)), bounds(afterById.get(id2))));
+    if (!next || removedParent || LOCKED_GEOMETRY.some((key) => !same(current[key], next[key])) || endpointMoved && !same(arrowGeometry(current, before.elements).points, arrowGeometry(next, after.elements).points)) {
+      throw new StudioError("LOCKED", "\u5BF9\u8C61\u7684\u4F4D\u7F6E\u4E0E\u5C3A\u5BF8\u5DF2\u9501\u5B9A\uFF0C\u8BF7\u5148\u5355\u72EC\u89E3\u9501\u540E\u4FEE\u6539\u51E0\u4F55\u6216\u5220\u9664\u3002", { elementId: current.id });
+    }
+  }
 }
 function decodeWhiteboardState(value) {
   if (object3(value) && value.schemaVersion === 1 && object3(value.board)) {
@@ -8587,13 +8677,15 @@ function decodeWhiteboardState(value) {
   }
   return;
 }
-var TYPES, whiteboardAdapter, whiteboardProduct;
+var TYPES, LOCKED_GEOMETRY, whiteboardAdapter, whiteboardProduct;
 var init_whiteboard = __esm({
   "src/core/products/whiteboard.ts"() {
     "use strict";
     init_studio();
     init_common();
+    init_whiteboard_geometry();
     TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "table", "link", "note", "sticker", "diagram", "chart"]);
+    LOCKED_GEOMETRY = ["type", "x", "y", "w", "h", "rotation", "parentId", "groupId", "from", "to", "fromSide", "toSide", "points", "bends", "crop"];
     whiteboardAdapter = {
       type: "whiteboard",
       validate(content) {
@@ -8601,61 +8693,64 @@ var init_whiteboard = __esm({
         if (content.elements.length > 2e3 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError("TOO_LARGE", "\u767D\u677F\u5185\u5BB9\u8D85\u8FC7\u5F53\u524D\u5BB9\u91CF\uFF0C\u8BF7\u5206\u6210\u591A\u4E2A\u4F5C\u54C1\u3002");
       },
       versionOf: (content, id2) => content.elements.find((item) => item.id === id2)?.version ?? 0,
-      targets(content, operation) {
-        if (["style", "motion", "restore"].includes(operation.op)) return;
-        if (operation.op === "layout") return operation.ids ?? content.elements.map((element) => element.id);
-        if (operation.op === "delete") return [.../* @__PURE__ */ new Set([...operation.ids ?? [safeId(operation.id, "\u5143\u7D20 ID")], ...deletedIds(content, operation)])];
-        if (operation.op === "update") return [safeId(operation.id, "\u5143\u7D20 ID")];
+      targets(content, operation2) {
+        if (["style", "motion", "restore"].includes(operation2.op)) return;
+        if (operation2.op === "layout") return operation2.ids ?? content.elements.map((element) => element.id);
+        if (operation2.op === "delete") return [.../* @__PURE__ */ new Set([...operation2.ids ?? [safeId(operation2.id, "\u5143\u7D20 ID")], ...deletedIds(content, operation2)])];
+        if (operation2.op === "update") return [safeId(operation2.id, "\u5143\u7D20 ID")];
         return [];
       },
-      apply(content, operation) {
-        if (operation.op === "add") {
-          const element = normalizeElement(operation.element ?? {}, operation.id ?? operation.element?.id);
+      apply(content, operation2, baseline = content) {
+        if (operation2.op === "add") {
+          const element = normalizeElement(operation2.element ?? {}, operation2.id ?? operation2.element?.id);
           if (element.type === "html") element.sourceRevision = 1;
           if (content.elements.some((item) => item.id === element.id)) throw new StudioError("CONFLICT", "\u5143\u7D20 ID \u5DF2\u5B58\u5728\u3002", { elementId: element.id });
+          assertLockedGeometry(content, { ...content, elements: [...content.elements, element] }, baseline);
           content.elements.push(element);
           return [element.id];
         }
-        if (operation.op === "update") {
-          const id2 = safeId(operation.id, "\u5143\u7D20 ID"), index = content.elements.findIndex((item) => item.id === id2), current = content.elements[index];
+        if (operation2.op === "update") {
+          const id2 = safeId(operation2.id, "\u5143\u7D20 ID"), index = content.elements.findIndex((item) => item.id === id2), current = content.elements[index];
           if (!current) throw new StudioError("NOT_FOUND", "\u8981\u4FEE\u6539\u7684\u5143\u7D20\u4E0D\u5B58\u5728\u3002");
-          if (!object3(operation.changes)) throw new StudioError("INVALID_ARGUMENT", "\u4FEE\u6539\u5B57\u6BB5\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
-          if (current.locked && !(Object.keys(operation.changes).length === 1 && operation.changes.locked === false)) throw new StudioError("LOCKED", "\u5BF9\u8C61\u5DF2\u9501\u5B9A\uFF0C\u8BF7\u5148\u660E\u786E\u89E3\u9501\u540E\u4FEE\u6539\u3002", { elementId: id2 });
-          const { id: _id, version: _version, ...changes } = operation.changes;
+          if (!object3(operation2.changes)) throw new StudioError("INVALID_ARGUMENT", "\u4FEE\u6539\u5B57\u6BB5\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
+          if (Object.hasOwn(operation2.changes, "locked") && typeof operation2.changes.locked !== "boolean") throw new StudioError("INVALID_ARGUMENT", "locked \u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
+          if (current.locked && operation2.changes.locked === false && Object.keys(operation2.changes).length !== 1) throw new StudioError("LOCKED", "\u8BF7\u901A\u8FC7\u5355\u72EC\u7684\u9501\u5B9A\u64CD\u4F5C\u660E\u786E\u89E3\u9501\u3002", { elementId: id2 });
+          const { id: _id, version: _version, ...changes } = operation2.changes;
           const next = normalizeElement({ ...current, ...copy(changes) }, id2);
           next.version = current.version + 1;
           if (next.type === "html") next.sourceRevision = current.html === next.html ? current.sourceRevision ?? 1 : Number(current.sourceRevision ?? 0) + 1;
+          assertLockedGeometry(content, { ...content, elements: content.elements.map((element) => element.id === id2 ? next : element) }, baseline);
           content.elements[index] = next;
           return [id2];
         }
-        if (operation.op === "delete") {
-          const ids = deletedIds(content, operation);
-          const locked = content.elements.find((element) => ids.includes(element.id) && element.locked);
-          if (locked) throw new StudioError("LOCKED", "\u5BF9\u8C61\u6216\u5173\u8054\u7EBF\u5DF2\u9501\u5B9A\uFF0C\u8BF7\u5148\u89E3\u9501\u3002", { elementId: locked.id });
-          content.elements = content.elements.filter((element) => !ids.includes(element.id));
+        if (operation2.op === "delete") {
+          const ids = deletedIds(content, operation2), elements = content.elements.filter((element) => !ids.includes(element.id));
+          assertLockedGeometry(content, { ...content, elements }, baseline);
+          content.elements = elements;
           return ids;
         }
-        if (operation.op === "style") {
-          const patch = operation.style ?? {};
+        if (operation2.op === "style") {
+          const patch = operation2.style ?? {};
           if (!object3(patch) || Object.values(patch).some((value) => typeof value !== "string" || value.length > 500)) throw new StudioError("INVALID_ARGUMENT", "\u6837\u5F0F\u5B57\u6BB5\u5FC5\u987B\u662F\u6587\u5B57\u3002");
           content.style = { ...content.style, ...copy(patch) };
           return ["$style"];
         }
-        if (operation.op === "motion") {
-          content.motion = copy(operation.data ?? {});
+        if (operation2.op === "motion") {
+          content.motion = copy(operation2.data ?? {});
           return ["$motion"];
         }
-        if (operation.op === "layout") {
-          const elements = content.elements.filter((item) => !operation.ids || operation.ids.includes(item.id));
-          const locked = elements.find((item) => item.locked);
-          if (locked) throw new StudioError("LOCKED", "\u6574\u7406\u8303\u56F4\u5305\u542B\u9501\u5B9A\u5BF9\u8C61\uFF0C\u8BF7\u5148\u89E3\u9501\u6216\u7F29\u5C0F\u8303\u56F4\u3002", { elementId: locked.id });
-          const columns = operation.preset === "column" ? 1 : operation.preset === "row" ? Math.max(1, elements.length) : Math.max(1, Math.ceil(Math.sqrt(elements.length)));
+        if (operation2.op === "layout") {
+          const elements = content.elements.filter((item) => !operation2.ids || operation2.ids.includes(item.id)).map((item) => ({ ...item }));
+          const columns = operation2.preset === "column" ? 1 : operation2.preset === "row" ? Math.max(1, elements.length) : Math.max(1, Math.ceil(Math.sqrt(elements.length)));
           const width = Math.max(220, ...elements.map((item) => item.w)), height = Math.max(120, ...elements.map((item) => item.h));
           elements.forEach((item, index) => {
-            item.x = finite(operation.data?.x, 80) + index % columns * (width + 64);
-            item.y = finite(operation.data?.y, 80) + Math.floor(index / columns) * (height + 64);
+            item.x = finite(operation2.data?.x, 80) + index % columns * (width + 64);
+            item.y = finite(operation2.data?.y, 80) + Math.floor(index / columns) * (height + 64);
             item.version++;
           });
+          const updates = new Map(elements.map((element) => [element.id, element])), next = { ...content, elements: content.elements.map((element) => updates.get(element.id) ?? element) };
+          assertLockedGeometry(content, next, baseline);
+          content.elements = next.elements;
           return elements.map((item) => item.id);
         }
         throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u767D\u677F\u4FEE\u6539\u64CD\u4F5C\u3002");
@@ -8685,13 +8780,37 @@ var init_whiteboard = __esm({
       restore(current, saved) {
         return { elements: saved.elements.map((item) => restoredElement(item, current.elements.find((element) => element.id === item.id))), style: copy(saved.style), motion: copy(saved.motion) };
       },
-      snapshotFeedback(artifactId, feedbackId, snapshots, value) {
-        const anchor2 = object3(value) ? copy(value) : {};
-        if (anchor2.elementIds !== void 0 && (!Array.isArray(anchor2.elementIds) || anchor2.elementIds.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5143\u7D20\u5B9A\u4F4D\u65E0\u6548\u3002");
-        const ids = [.../* @__PURE__ */ new Set([...anchor2.regionId ? [safeId(anchor2.regionId, "\u533A\u57DF ID")] : [], ...anchor2.elementIds ?? []])];
-        const source = anchor2.regionId ? htmlSource(snapshots, anchor2.regionId, anchor2.sourceRevision).snapshot : snapshots[0];
-        const regions = source.content.elements.filter((element) => ids.includes(element.id) && typeof element.html === "string");
-        return { anchor: anchor2, versions: Object.fromEntries(source.content.elements.filter((element) => ids.includes(element.id)).map((element) => [element.id, element.version])), sources: regions.map((region) => ({ artifactId, feedbackId, html: region.html, regionId: region.id, sourceRevision: Number(region.sourceRevision ?? 1), version: Number(region.sourceRevision ?? 1) })) };
+      snapshotFeedback(artifactId, feedbackId, snapshots, value, versions) {
+        const anchor3 = object3(value) ? copy(value) : {};
+        if (anchor3.elementIds !== void 0 && (!Array.isArray(anchor3.elementIds) || anchor3.elementIds.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5143\u7D20\u5B9A\u4F4D\u65E0\u6548\u3002");
+        if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
+        for (const key of ["x", "y", "w", "h"]) if (anchor3[key] !== void 0) finite(anchor3[key], 0);
+        if ((anchor3.w ?? 0) < 0 || (anchor3.h ?? 0) < 0) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u8303\u56F4\u5C3A\u5BF8\u4E0D\u80FD\u4E3A\u8D1F\u6570\u3002");
+        if (anchor3.coordinateSpace === "element" && (!anchor3.elementIds?.length || [anchor3.x, anchor3.y].some((value2) => value2 !== void 0 && (value2 < 0 || value2 > 1)))) throw new StudioError("INVALID_ARGUMENT", "\u5BF9\u8C61\u5907\u6CE8\u9700\u8981\u5B9A\u4F4D\u5BF9\u8C61\uFF0C\u4E14\u76F8\u5BF9\u5750\u6807\u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
+        if (anchor3.coordinateSpace === "html" && !anchor3.regionId) throw new StudioError("INVALID_ARGUMENT", "HTML \u5907\u6CE8\u9700\u8981\u533A\u57DF ID\u3002");
+        if (anchor3.sourceRevision !== void 0 && (!Number.isInteger(anchor3.sourceRevision) || anchor3.sourceRevision < 1 || !anchor3.regionId)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6E90\u7801\u7248\u672C\u65E0\u6548\u3002");
+        if (anchor3.targetIds !== void 0 && (!Array.isArray(anchor3.targetIds) || anchor3.targetIds.length > 100 || anchor3.targetIds.some((id2) => typeof id2 !== "string" || id2.length > 160 || /[\u0000-\u001f]/.test(id2)))) throw new StudioError("INVALID_ARGUMENT", "HTML \u5907\u6CE8\u76EE\u6807\u65E0\u6548\u3002");
+        for (const [key, limit] of [["quote", 4e3], ["excerpt", 16e3], ["selector", 1200]]) if (anchor3[key] !== void 0 && (typeof anchor3[key] !== "string" || anchor3[key].length > limit)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6765\u6E90\u6587\u5B57\u65E0\u6548\u6216\u8FC7\u957F\u3002");
+        const ids = [.../* @__PURE__ */ new Set([...anchor3.regionId !== void 0 ? [safeId(anchor3.regionId, "\u533A\u57DF ID")] : [], ...(anchor3.elementIds ?? []).map((id2) => safeId(id2, "\u5143\u7D20 ID"))])];
+        if (versions && (ids.some((id2) => !Object.hasOwn(versions, id2)) || Object.keys(versions).some((id2) => !ids.includes(id2)))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u9009\u533A\u9700\u8981\u63D0\u4F9B\u5168\u90E8\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002");
+        const current = snapshots[0];
+        if (ids.some((id2) => !current.content.elements.some((element) => element.id === id2))) throw new StudioError("NOT_FOUND", "\u5907\u6CE8\u5B9A\u4F4D\u7684\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\u3002");
+        const source = anchor3.regionId ? htmlSource(snapshots, anchor3.regionId, anchor3.sourceRevision).snapshot : snapshots[0];
+        const elements = ids.map((id2) => {
+          if (!versions) return source.content.elements.find((element) => element.id === id2) ?? current.content.elements.find((element) => element.id === id2);
+          let selected;
+          let ambiguous = false;
+          for (const snapshot of snapshots) {
+            const candidate = snapshot.content.elements.find((element) => element.id === id2 && element.version === versions[id2]);
+            if (!candidate || id2 === anchor3.regionId && anchor3.sourceRevision !== void 0 && candidate.sourceRevision !== anchor3.sourceRevision) continue;
+            if (selected && !same(selected, candidate)) ambiguous = true;
+            selected = candidate;
+          }
+          if (!selected || ambiguous) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: id2, version: versions[id2] });
+          return selected;
+        });
+        const sources = elements.map((element) => typeof element.html === "string" ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) } : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });
+        return { anchor: anchor3, versions: Object.fromEntries(elements.map((element) => [element.id, element.version])), sources };
       }
     };
     whiteboardProduct = {
@@ -8717,7 +8836,7 @@ var init_whiteboard = __esm({
         }
         if (mode === "source") {
           if (args.feedbackId) {
-            const snapshots = state.sources[safeId(args.feedbackId, "\u53CD\u9988 ID")], snapshot = snapshots?.find((item) => args.regionId === void 0 || item.regionId === args.regionId);
+            const snapshots = state.sources[safeId(args.feedbackId, "\u53CD\u9988 ID")], snapshot = snapshots?.find((item) => (args.regionId === void 0 || item.regionId === args.regionId) && (args.elementId === void 0 || item.element?.id === args.elementId));
             if (!snapshot) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u6CA1\u6709\u5BF9\u5E94\u7684\u51BB\u7ED3\u6E90\u7801\u3002");
             return { ...copy(snapshot), sources: copy(snapshots) };
           }
@@ -8832,14 +8951,14 @@ var require_polyfills = __commonJS({
       fs.fstatSync = statFixSync(fs.fstatSync);
       fs.lstatSync = statFixSync(fs.lstatSync);
       if (fs.chmod && !fs.lchmod) {
-        fs.lchmod = function(path, mode, cb) {
+        fs.lchmod = function(path2, mode, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchmodSync = function() {
         };
       }
       if (fs.chown && !fs.lchown) {
-        fs.lchown = function(path, uid, gid, cb) {
+        fs.lchown = function(path2, uid, gid, cb) {
           if (cb) process.nextTick(cb);
         };
         fs.lchownSync = function() {
@@ -8906,9 +9025,9 @@ var require_polyfills = __commonJS({
         };
       })(fs.readSync);
       function patchLchmod(fs2) {
-        fs2.lchmod = function(path, mode, callback) {
+        fs2.lchmod = function(path2, mode, callback) {
           fs2.open(
-            path,
+            path2,
             constants.O_WRONLY | constants.O_SYMLINK,
             mode,
             function(err2, fd2) {
@@ -8924,8 +9043,8 @@ var require_polyfills = __commonJS({
             }
           );
         };
-        fs2.lchmodSync = function(path, mode) {
-          var fd2 = fs2.openSync(path, constants.O_WRONLY | constants.O_SYMLINK, mode);
+        fs2.lchmodSync = function(path2, mode) {
+          var fd2 = fs2.openSync(path2, constants.O_WRONLY | constants.O_SYMLINK, mode);
           var threw = true;
           var ret;
           try {
@@ -8946,8 +9065,8 @@ var require_polyfills = __commonJS({
       }
       function patchLutimes(fs2) {
         if (constants.hasOwnProperty("O_SYMLINK") && fs2.futimes) {
-          fs2.lutimes = function(path, at, mt, cb) {
-            fs2.open(path, constants.O_SYMLINK, function(er, fd2) {
+          fs2.lutimes = function(path2, at, mt, cb) {
+            fs2.open(path2, constants.O_SYMLINK, function(er, fd2) {
               if (er) {
                 if (cb) cb(er);
                 return;
@@ -8959,8 +9078,8 @@ var require_polyfills = __commonJS({
               });
             });
           };
-          fs2.lutimesSync = function(path, at, mt) {
-            var fd2 = fs2.openSync(path, constants.O_SYMLINK);
+          fs2.lutimesSync = function(path2, at, mt) {
+            var fd2 = fs2.openSync(path2, constants.O_SYMLINK);
             var ret;
             var threw = true;
             try {
@@ -9078,11 +9197,11 @@ var require_legacy_streams = __commonJS({
         ReadStream,
         WriteStream
       };
-      function ReadStream(path, options) {
-        if (!(this instanceof ReadStream)) return new ReadStream(path, options);
+      function ReadStream(path2, options) {
+        if (!(this instanceof ReadStream)) return new ReadStream(path2, options);
         Stream.call(this);
         var self = this;
-        this.path = path;
+        this.path = path2;
         this.fd = null;
         this.readable = true;
         this.paused = false;
@@ -9127,10 +9246,10 @@ var require_legacy_streams = __commonJS({
           self._read();
         });
       }
-      function WriteStream(path, options) {
-        if (!(this instanceof WriteStream)) return new WriteStream(path, options);
+      function WriteStream(path2, options) {
+        if (!(this instanceof WriteStream)) return new WriteStream(path2, options);
         Stream.call(this);
-        this.path = path;
+        this.path = path2;
         this.fd = null;
         this.writable = true;
         this.flags = "w";
@@ -9273,14 +9392,14 @@ var require_graceful_fs = __commonJS({
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
       fs2.readFile = readFile7;
-      function readFile7(path, options, cb) {
+      function readFile7(path2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$readFile(path, options, cb);
-        function go$readFile(path2, options2, cb2, startTime) {
-          return fs$readFile(path2, options2, function(err2) {
+        return go$readFile(path2, options, cb);
+        function go$readFile(path3, options2, cb2, startTime) {
+          return fs$readFile(path3, options2, function(err2) {
             if (err2 && (err2.code === "EMFILE" || err2.code === "ENFILE"))
-              enqueue([go$readFile, [path2, options2, cb2], err2, startTime || Date.now(), Date.now()]);
+              enqueue([go$readFile, [path3, options2, cb2], err2, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -9290,14 +9409,14 @@ var require_graceful_fs = __commonJS({
       }
       var fs$writeFile = fs2.writeFile;
       fs2.writeFile = writeFile4;
-      function writeFile4(path, data, options, cb) {
+      function writeFile4(path2, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$writeFile(path, data, options, cb);
-        function go$writeFile(path2, data2, options2, cb2, startTime) {
-          return fs$writeFile(path2, data2, options2, function(err2) {
+        return go$writeFile(path2, data, options, cb);
+        function go$writeFile(path3, data2, options2, cb2, startTime) {
+          return fs$writeFile(path3, data2, options2, function(err2) {
             if (err2 && (err2.code === "EMFILE" || err2.code === "ENFILE"))
-              enqueue([go$writeFile, [path2, data2, options2, cb2], err2, startTime || Date.now(), Date.now()]);
+              enqueue([go$writeFile, [path3, data2, options2, cb2], err2, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -9308,14 +9427,14 @@ var require_graceful_fs = __commonJS({
       var fs$appendFile = fs2.appendFile;
       if (fs$appendFile)
         fs2.appendFile = appendFile;
-      function appendFile(path, data, options, cb) {
+      function appendFile(path2, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        return go$appendFile(path, data, options, cb);
-        function go$appendFile(path2, data2, options2, cb2, startTime) {
-          return fs$appendFile(path2, data2, options2, function(err2) {
+        return go$appendFile(path2, data, options, cb);
+        function go$appendFile(path3, data2, options2, cb2, startTime) {
+          return fs$appendFile(path3, data2, options2, function(err2) {
             if (err2 && (err2.code === "EMFILE" || err2.code === "ENFILE"))
-              enqueue([go$appendFile, [path2, data2, options2, cb2], err2, startTime || Date.now(), Date.now()]);
+              enqueue([go$appendFile, [path3, data2, options2, cb2], err2, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -9344,33 +9463,33 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs2.readdir;
-      fs2.readdir = readdir3;
+      fs2.readdir = readdir4;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir3(path, options, cb) {
+      function readdir4(path2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
-        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path2, options2, cb2, startTime) {
-          return fs$readdir(path2, fs$readdirCallback(
-            path2,
+        var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path3, options2, cb2, startTime) {
+          return fs$readdir(path3, fs$readdirCallback(
+            path3,
             options2,
             cb2,
             startTime
           ));
-        } : function go$readdir2(path2, options2, cb2, startTime) {
-          return fs$readdir(path2, options2, fs$readdirCallback(
-            path2,
+        } : function go$readdir2(path3, options2, cb2, startTime) {
+          return fs$readdir(path3, options2, fs$readdirCallback(
+            path3,
             options2,
             cb2,
             startTime
           ));
         };
-        return go$readdir(path, options, cb);
-        function fs$readdirCallback(path2, options2, cb2, startTime) {
+        return go$readdir(path2, options, cb);
+        function fs$readdirCallback(path3, options2, cb2, startTime) {
           return function(err2, files) {
             if (err2 && (err2.code === "EMFILE" || err2.code === "ENFILE"))
               enqueue([
                 go$readdir,
-                [path2, options2, cb2],
+                [path3, options2, cb2],
                 err2,
                 startTime || Date.now(),
                 Date.now()
@@ -9441,7 +9560,7 @@ var require_graceful_fs = __commonJS({
         enumerable: true,
         configurable: true
       });
-      function ReadStream(path, options) {
+      function ReadStream(path2, options) {
         if (this instanceof ReadStream)
           return fs$ReadStream.apply(this, arguments), this;
         else
@@ -9461,7 +9580,7 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function WriteStream(path, options) {
+      function WriteStream(path2, options) {
         if (this instanceof WriteStream)
           return fs$WriteStream.apply(this, arguments), this;
         else
@@ -9479,22 +9598,22 @@ var require_graceful_fs = __commonJS({
           }
         });
       }
-      function createReadStream(path, options) {
-        return new fs2.ReadStream(path, options);
+      function createReadStream(path2, options) {
+        return new fs2.ReadStream(path2, options);
       }
-      function createWriteStream(path, options) {
-        return new fs2.WriteStream(path, options);
+      function createWriteStream(path2, options) {
+        return new fs2.WriteStream(path2, options);
       }
       var fs$open = fs2.open;
       fs2.open = open4;
-      function open4(path, flags, mode, cb) {
+      function open4(path2, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
-        return go$open(path, flags, mode, cb);
-        function go$open(path2, flags2, mode2, cb2, startTime) {
-          return fs$open(path2, flags2, mode2, function(err2, fd2) {
+        return go$open(path2, flags, mode, cb);
+        function go$open(path3, flags2, mode2, cb2, startTime) {
+          return fs$open(path3, flags2, mode2, function(err2, fd2) {
             if (err2 && (err2.code === "EMFILE" || err2.code === "ENFILE"))
-              enqueue([go$open, [path2, flags2, mode2, cb2], err2, startTime || Date.now(), Date.now()]);
+              enqueue([go$open, [path3, flags2, mode2, cb2], err2, startTime || Date.now(), Date.now()]);
             else {
               if (typeof cb2 === "function")
                 cb2.apply(this, arguments);
@@ -10023,7 +10142,7 @@ var require_mtime_precision = __commonJS({
 var require_lockfile = __commonJS({
   "../../node_modules/.pnpm/proper-lockfile@4.1.2/node_modules/proper-lockfile/lib/lockfile.js"(exports, module) {
     "use strict";
-    var path = __require("path");
+    var path2 = __require("path");
     var fs = require_graceful_fs();
     var retry = require_retry2();
     var onExit = require_signal_exit();
@@ -10034,7 +10153,7 @@ var require_lockfile = __commonJS({
     }
     function resolveCanonicalPath(file2, options, callback) {
       if (!options.realpath) {
-        return callback(null, path.resolve(file2));
+        return callback(null, path2.resolve(file2));
       }
       options.fs.realpath(file2, callback);
     }
@@ -10170,14 +10289,14 @@ var require_lockfile = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        const operation = retry.operation(options.retries);
-        operation.attempt(() => {
+        const operation2 = retry.operation(options.retries);
+        operation2.attempt(() => {
           acquireLock(file3, options, (err3, mtime, mtimePrecision2) => {
-            if (operation.retry(err3)) {
+            if (operation2.retry(err3)) {
               return;
             }
             if (err3) {
-              return callback(operation.mainError());
+              return callback(operation2.mainError());
             }
             const lock3 = locks[file3] = {
               lockfilePath: getLockFile(file3, options),
@@ -10358,15 +10477,23 @@ var require_proper_lockfile = __commonJS({
 });
 
 // src/core/shared/store.ts
-import { mkdir as mkdir3, readFile as readFile3, readdir as readdir2 } from "node:fs/promises";
+import { lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, realpath, rm as rm2, rmdir } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join4, resolve as resolve2 } from "node:path";
-var import_proper_lockfile, ArtifactStore;
+async function validateDeletionTree(path2) {
+  const info = await lstat(path2);
+  if (info.isSymbolicLink() || !samePath(await realpath(path2), path2)) throw resourceScope();
+  if (info.isDirectory()) for (const entry of await readdir2(path2)) await validateDeletionTree(join4(path2, entry));
+  else if (!info.isFile()) throw resourceScope();
+}
+var import_proper_lockfile, samePath, resourceScope, ArtifactStore;
 var init_store = __esm({
   "src/core/shared/store.ts"() {
     "use strict";
     import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
     init_common();
+    samePath = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    resourceScope = () => new StudioError("RESOURCE_SCOPE", "\u5220\u9664\u8DEF\u5F84\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u7684\u771F\u5B9E\u76EE\u5F55\u4E2D\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u8BBF\u95EE\u5176\u4ED6\u4F4D\u7F6E\u3002");
     ArtifactStore = class {
       constructor(root2, decode4, validateState2) {
         this.decode = decode4;
@@ -10423,6 +10550,45 @@ var init_store = __esm({
       async transaction(id2, run) {
         const folder = this.folder(id2);
         await mkdir3(folder, { recursive: true });
+        return this.withLock(folder, async (assertLocked) => {
+          const state = await this.read(id2), result = await run(state);
+          assertLocked();
+          await this.write(state);
+          return result;
+        });
+      }
+      /** Delete only a trashed artifact while retaining the same lock used by restore/save. */
+      async purge(id2, beforeDelete) {
+        const folder = this.folder(id2);
+        let canonical;
+        try {
+          canonical = await realpath(folder);
+          if (!samePath(canonical, join4(await realpath(this.root), "artifacts", safeId(id2)))) throw resourceScope();
+        } catch (error62) {
+          if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
+          throw error62;
+        }
+        await this.withLock(canonical, async (assertLocked) => {
+          const state = await this.read(id2);
+          if (!state.artifact.trashedAt) throw new StudioError("NOT_TRASHED", "\u4EC5\u80FD\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u4E2D\u7684\u4F5C\u54C1\uFF0C\u8BF7\u5148\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
+          const entries = (await readdir2(canonical)).filter((entry) => entry !== "write.lock");
+          for (const entry of entries) await validateDeletionTree(join4(canonical, entry));
+          assertLocked();
+          await beforeDelete();
+          for (const entry of entries.filter((entry2) => entry2 !== "artifact.json")) {
+            assertLocked();
+            await rm2(join4(canonical, entry), { recursive: true, force: true });
+          }
+          assertLocked();
+          await rm2(join4(canonical, "artifact.json"));
+        });
+        try {
+          await rmdir(canonical);
+        } catch (error62) {
+          if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error62.code ?? "")) throw error62;
+        }
+      }
+      async withLock(folder, run) {
         let lost, release;
         try {
           release = await (0, import_proper_lockfile.lock)(join4(folder, "write"), { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: (error62) => {
@@ -10430,13 +10596,14 @@ var init_store = __esm({
           } });
         } catch (error62) {
           if (error62.code === "ELOCKED") throw new StudioError("BUSY", "\u53E6\u4E00\u4E2A\u8FDB\u7A0B\u6B63\u5728\u4FDD\u5B58\u4F5C\u54C1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+          if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
           throw error62;
         }
-        try {
-          const state = await this.read(id2), result = await run(state);
+        const assertLocked = () => {
           if (lost) throw new StudioError("LOCK_LOST", "\u4F5C\u54C1\u5199\u9501\u5DF2\u5931\u6548\uFF0C\u4FEE\u6539\u672A\u88AB\u63D0\u4EA4\u3002");
-          await this.write(state);
-          return result;
+        };
+        try {
+          return await run(assertLocked);
         } finally {
           if (!lost) await release();
         }
@@ -10495,17 +10662,17 @@ function applyMutation(state, args, actor, adapter) {
   const expected = object3(args.expectedVersions) ? args.expectedVersions : void 0;
   if (args.expectedRevision !== void 0 && (!Number.isInteger(args.expectedRevision) || Number(args.expectedRevision) < 0)) throw new StudioError("INVALID_ARGUMENT", "\u9884\u671F\u4F5C\u54C1\u7248\u672C\u65E0\u6548\u3002");
   if (args.expectedRevision === void 0) {
-    for (const operation of operations) {
-      if (!object3(operation)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-      const targets = operation.op === "restore" ? void 0 : adapter.targets(state.content, operation);
+    for (const operation2 of operations) {
+      if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+      const targets = operation2.op === "restore" ? void 0 : adapter.targets(state.content, operation2);
       if (!targets || targets.some((id2) => !expected || !Object.hasOwn(expected, id2))) throw new StudioError("VERSION_REQUIRED", "\u4FEE\u6539\u5DF2\u6709\u5185\u5BB9\u524D\uFF0C\u8BF7\u63D0\u4F9B\u4F5C\u54C1\u7248\u672C\u6216\u5168\u90E8\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002");
     }
   }
   if (args.expectedRevision !== void 0 && args.expectedRevision !== state.artifact.revision) {
     if (!expected || !Object.keys(expected).length) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
-    for (const operation of operations) {
-      if (!object3(operation)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-      const targets = operation.op === "restore" ? void 0 : adapter.targets(state.content, operation);
+    for (const operation2 of operations) {
+      if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+      const targets = operation2.op === "restore" ? void 0 : adapter.targets(state.content, operation2);
       if (!targets) throw new StudioError("CONFLICT", "\u6574\u4F53\u64CD\u4F5C\u9700\u8981\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
       if (targets.some((id2) => typeof id2 !== "string" || !Object.hasOwn(expected, id2))) throw new StudioError("CONFLICT", "\u8FC7\u671F\u63D0\u4EA4\u5FC5\u987B\u6838\u5BF9\u6240\u6709\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002", { revision: state.artifact.revision });
     }
@@ -10515,15 +10682,15 @@ function applyMutation(state, args, actor, adapter) {
     const currentVersion = adapter.versionOf(state.content, id2);
     if (currentVersion !== expectedVersion) throw new StudioError("CONFLICT", "\u76EE\u6807\u5BF9\u8C61\u5DF2\u88AB\u4FEE\u6539\uFF0C\u672A\u8986\u76D6\u4ED6\u4EBA\u7684\u7F16\u8F91\u3002", { elementId: id2, expectedVersion, currentVersion, revision: state.artifact.revision });
   }
-  const changedIds = [];
+  const baseline = copy(state.content), changedIds = [];
   let restoredFrom;
-  for (const operation of operations) {
-    if (!object3(operation)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-    if (operation.op === "restore") {
-      const saved = version2(state, operation.versionId);
-      changedIds.push(...restoreVersion(state, saved, actor, adapter, operation.data?.mode === "undo" || operation.data?.undo === true || operation.preset === "undo"));
+  for (const operation2 of operations) {
+    if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+    if (operation2.op === "restore") {
+      const saved = version2(state, operation2.versionId);
+      changedIds.push(...restoreVersion(state, saved, actor, adapter, operation2.data?.mode === "undo" || operation2.data?.undo === true || operation2.preset === "undo"));
       restoredFrom = saved.entry.id;
-    } else changedIds.push(...adapter.apply(state.content, operation));
+    } else changedIds.push(...adapter.apply(state.content, operation2, baseline));
   }
   adapter.validate(state.content);
   const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? "\u6062\u590D\u4F5C\u54C1\u5185\u5BB9" : "\u4FEE\u6539\u4F5C\u54C1", 500), changedIds, restoredFrom);
@@ -10608,7 +10775,7 @@ function feedbackVisible(item, actor) {
   return !item.proposal || actor.role === "owner" && !proposalExpired(item);
 }
 function visibleFeedback(items, actor) {
-  return copy(items.filter((item) => feedbackVisible(item, actor)));
+  return copy(items.filter((item) => feedbackVisible(item, actor)).map(({ creationReceipt: _receipt, ...item }) => item));
 }
 function clearExpiredProposals(state) {
   for (const item of state.feedback) if (proposalExpired(item)) delete state.sources[item.id];
@@ -10622,17 +10789,17 @@ function captureOption(state, raw, args, adapter) {
   if (Buffer.byteLength(JSON.stringify(raw.operations)) > 24 * 1024) throw new StudioError("TOO_LARGE", "\u5355\u4E2A\u5EFA\u8BAE\u65B9\u6848\u8D85\u8FC7 24 KB\u3002");
   const operations = copy(raw.operations), draft = copy(state.content), explicitIds = /* @__PURE__ */ new Set();
   let wholeContent = false;
-  for (const operation of operations) {
-    const targets = adapter.targets(draft, operation);
+  for (const operation2 of operations) {
+    const targets = adapter.targets(draft, operation2);
     if (targets === void 0) wholeContent = true;
     else for (const id2 of targets) explicitIds.add(id2);
-    adapter.apply(draft, operation);
+    adapter.apply(draft, operation2, state.content);
   }
   adapter.validate(draft);
   const changes = adapter.diff(state.content, draft), targetIds = [.../* @__PURE__ */ new Set([...explicitIds, ...changes.map((change) => change.id)])];
   if (!changes.length) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u5E94\u4EA7\u751F\u53EF\u5E94\u7528\u7684\u5185\u5BB9\u53D8\u5316\u3002");
   const repeat = copy(state.content);
-  for (const operation of operations) adapter.apply(repeat, operation);
+  for (const operation2 of operations) adapter.apply(repeat, operation2, state.content);
   if (!same(draft, repeat)) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u4E2D\u7684\u65B0\u5185\u5BB9\u9700\u8981\u7A33\u5B9A ID\uFF0C\u4E0D\u80FD\u5728\u6BCF\u6B21\u5E94\u7528\u65F6\u968F\u673A\u751F\u6210\u3002");
   const supplied = object3(args.expectedVersions) ? args.expectedVersions : {};
   if (args.expectedRevision !== void 0 && (!Number.isInteger(args.expectedRevision) || args.expectedRevision !== state.artifact.revision)) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u5148\u8BFB\u53D6\u5F53\u524D\u4F5C\u54C1\u518D\u63D0\u4F9B\u5EFA\u8BAE\u3002", { revision: state.artifact.revision });
@@ -10669,7 +10836,8 @@ function previewProposal(saved, args, actor, adapter) {
   }
   if (option2.wholeContent && option2.baselineRevision !== state.artifact.revision) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u6839\u636E\u6700\u65B0\u5185\u5BB9\u91CD\u65B0\u63D0\u4F9B\u6574\u4F53\u65B9\u6848\u3002");
   for (const id2 of option2.targetIds) if (adapter.versionOf(state.content, id2) !== option2.versions[id2] || !same(unit(adapter, state.content, id2), option2.baseline[id2])) throw new StudioError("CONFLICT", "\u5EFA\u8BAE\u76EE\u6807\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u6839\u636E\u6700\u65B0\u5185\u5BB9\u91CD\u65B0\u5EFA\u8BAE\u3002", { targetId: id2 });
-  for (const operation of option2.operations) adapter.apply(state.content, operation);
+  const baseline = copy(state.content);
+  for (const operation2 of option2.operations) adapter.apply(state.content, operation2, baseline);
   adapter.validate(state.content);
   return { artifact: state.artifact, content: state.content };
 }
@@ -10691,9 +10859,9 @@ function updateProposal(state, args, actor, adapter) {
     }
     const options = args.options.map((option3) => captureOption(state, option3, args, adapter));
     if (new Set(options.map((option3) => option3.id)).size !== options.length || new Set(options.map((option3) => option3.label)).size !== options.length || new Set(options.map((option3) => digest(option3.operations))).size !== options.length) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u7684 ID\u3001\u540D\u79F0\u548C\u5185\u5BB9\u5FC5\u987B\u5404\u4E0D\u76F8\u540C\u3002");
-    const id2 = randomUUID7(), anchor2 = object3(args.anchor) ? copy(args.anchor) : {};
-    if (Buffer.byteLength(JSON.stringify(anchor2)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
-    const frozen = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor2);
+    const id2 = randomUUID7(), anchor3 = object3(args.anchor) ? copy(args.anchor) : {};
+    if (Buffer.byteLength(JSON.stringify(anchor3)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
+    const frozen = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3);
     const proposal2 = { audience: "owner", expiresAt: new Date(Date.now() + LIFETIME).toISOString(), options, ...creationId ? { creationId } : {}, fingerprint: fingerprint2, receipts: [] };
     if (Buffer.byteLength(JSON.stringify(proposal2)) > 256 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u53CA\u76EE\u6807\u5FEB\u7167\u8D85\u8FC7 256 KB\uFF0C\u8BF7\u7F29\u5C0F\u5EFA\u8BAE\u8303\u56F4\u3002");
     state.feedback.push({ id: id2, artifactId: state.artifact.id, type: "comment", anchor: frozen.anchor, author: copy(actor), text: message, status: "open", createdAt: now, updatedAt: now, replies: [], versions: copy(frozen.versions), proposal: proposal2 });
@@ -10773,7 +10941,7 @@ var init_proposals = __esm({
 });
 
 // src/core/shared/feedback.ts
-import { randomUUID as randomUUID8 } from "node:crypto";
+import { createHash as createHash3, randomUUID as randomUUID8 } from "node:crypto";
 function updateFeedback(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor", "commenter"]);
   assertAlive(state.artifact);
@@ -10782,10 +10950,21 @@ function updateFeedback(state, args, actor, adapter) {
   if (action === "create") {
     const content = text(args.text).trim();
     if (!content) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-    const anchor2 = object3(args.anchor) ? copy(args.anchor) : {};
-    if (Buffer.byteLength(JSON.stringify(anchor2)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
-    const id2 = randomUUID8(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor2);
+    const anchor3 = object3(args.anchor) ? copy(args.anchor) : {};
+    if (Buffer.byteLength(JSON.stringify(anchor3)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
+    if (args.versions !== void 0 && (!object3(args.versions) || Object.values(args.versions).some((value) => !Number.isInteger(value) || Number(value) < 1))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u65E0\u6548\u3002");
+    const versions = args.versions === void 0 ? void 0 : copy(args.versions);
+    if (versions && Buffer.byteLength(JSON.stringify(versions)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u9009\u533A\u7684\u7248\u672C\u4FE1\u606F\u8FC7\u5927\u3002");
+    const operationId = args.operationId === void 0 ? void 0 : safeId(args.operationId, "\u64CD\u4F5C ID");
+    const fingerprint = createHash3("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
+    const duplicate = operationId && state.feedback.find((entry) => entry.creationReceipt?.operationId === operationId);
+    if (duplicate) {
+      if (duplicate.creationReceipt.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
+      return { feedback: visibleFeedback(state.feedback, actor), contextId: duplicate.id };
+    }
+    const id2 = randomUUID8(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, versions);
     item = { id: id2, artifactId: state.artifact.id, type: args.type === "request" ? "request" : "comment", anchor: snapshot.anchor, author: copy(actor), text: content, status: "open", createdAt: now, updatedAt: now, replies: [], versions: copy(snapshot.versions) };
+    if (operationId) item.creationReceipt = { operationId, fingerprint };
     state.feedback.push(item);
     state.sources[id2] = copy(snapshot.sources);
     contextId = id2;
@@ -10966,6 +11145,10 @@ var init_collaboration = __esm({
         for (const [key, peer] of group) if (Date.parse(peer.updatedAt) < cutoff) group.delete(key);
         return copy([...group.values()]);
       }
+      forget(artifactId) {
+        this.peers.delete(artifactId);
+        this.timers.delete(artifactId);
+      }
       close() {
         this.listeners.clear();
         this.peers.clear();
@@ -10977,26 +11160,26 @@ var init_collaboration = __esm({
 
 // src/core/shared/files.ts
 import { randomUUID as randomUUID9 } from "node:crypto";
-import { cp, lstat, mkdir as mkdir4, open as open2, readFile as readFile4, realpath, rename as rename3 } from "node:fs/promises";
+import { cp, lstat as lstat2, mkdir as mkdir4, open as open2, readFile as readFile4, readdir as readdir3, realpath as realpath2, rename as rename3, rm as rm3 } from "node:fs/promises";
 import { basename, extname, isAbsolute, join as join5, resolve as resolve3 } from "node:path";
 async function assetDirectory(store, artifactId, directory, create = false) {
-  const root2 = await realpath(store.root), folder = await realpath(store.folder(artifactId));
-  if (!samePath(folder, join5(root2, "artifacts", safeId(artifactId)))) throw resourceScope();
-  const path = join5(folder, directory);
-  if (create) await mkdir4(path, { recursive: true });
-  if (!samePath(await realpath(path), path)) throw resourceScope();
-  return path;
+  const root2 = await realpath2(store.root), folder = await realpath2(store.folder(artifactId));
+  if (!samePath2(folder, join5(root2, "artifacts", safeId(artifactId)))) throw resourceScope2();
+  const path2 = join5(folder, directory);
+  if (create) await mkdir4(path2, { recursive: true });
+  if (!samePath2(await realpath2(path2), path2)) throw resourceScope2();
+  return path2;
 }
-async function regularFile(path) {
-  const info = await lstat(path);
-  if (info.isSymbolicLink() || !info.isFile() || !samePath(await realpath(path), path)) throw resourceScope();
+async function regularFile(path2) {
+  const info = await lstat2(path2);
+  if (info.isSymbolicLink() || !info.isFile() || !samePath2(await realpath2(path2), path2)) throw resourceScope2();
   return info;
 }
-async function readBoundedAsset(path) {
-  const before = await regularFile(path), file2 = await open2(path, "r");
+async function readBoundedAsset(path2) {
+  const before = await regularFile(path2), file2 = await open2(path2, "r");
   try {
     const info = await file2.stat();
-    if (!info.isFile() || info.dev !== before.dev || info.ino !== before.ino) throw resourceScope();
+    if (!info.isFile() || info.dev !== before.dev || info.ino !== before.ino) throw resourceScope2();
     if (info.size > MAX_ASSET_BYTES) throw new StudioError("TOO_LARGE", "\u8D44\u6E90\u5E94\u5C0F\u4E8E 20 MB\u3002");
     const chunks = [];
     let size = 0;
@@ -11032,10 +11215,10 @@ function assetMimeType(data, filename) {
 }
 async function importAsset(store, artifactId, assetPath, actor, validateMimeType) {
   requireRole(actor, ["owner"]);
-  const path = text(assetPath, "", 4096);
-  if (!path || !isAbsolute(path)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u660E\u786E\u7684\u8D44\u6E90\u6587\u4EF6\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-  const canonical = await realpath(path);
-  if (!samePath(canonical, resolve3(path))) throw new StudioError("RESOURCE_SCOPE", "\u8BF7\u63D0\u4F9B\u8D44\u6E90\u6587\u4EF6\u7684\u771F\u5B9E\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u5BFC\u5165\u3002");
+  const path2 = text(assetPath, "", 4096);
+  if (!path2 || !isAbsolute(path2)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u660E\u786E\u7684\u8D44\u6E90\u6587\u4EF6\u7EDD\u5BF9\u8DEF\u5F84\u3002");
+  const canonical = await realpath2(path2);
+  if (!samePath2(canonical, resolve3(path2))) throw new StudioError("RESOURCE_SCOPE", "\u8BF7\u63D0\u4F9B\u8D44\u6E90\u6587\u4EF6\u7684\u771F\u5B9E\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u5BFC\u5165\u3002");
   const data = await readBoundedAsset(canonical), filename = basename(canonical), mimeType = assetMimeType(data, filename);
   return putAsset(store, artifactId, data, { filename, mimeType }, actor, validateMimeType);
 }
@@ -11070,7 +11253,7 @@ async function deleteAsset(store, artifactId, assetId, actor) {
       }
       if (activeExists) {
         try {
-          await lstat(recycled);
+          await lstat2(recycled);
           throw new StudioError("RESOURCE_STATE", "\u8D44\u6E90\u5DF2\u6709\u5185\u90E8\u56DE\u6536\u526F\u672C\uFF0C\u8BF7\u4FDD\u7559\u6587\u4EF6\u5E76\u68C0\u67E5\u4F5C\u54C1\u6570\u636E\u3002");
         } catch (error62) {
           if (error62.code !== "ENOENT") throw error62;
@@ -11151,15 +11334,55 @@ async function getExport(root2, exportId) {
     throw error62;
   }
 }
-var MAX_ASSET_BYTES, assetReference, samePath, resourceScope, EXTENSION_MIMES, MEDIA_MIMES;
+async function purgeExports(root2, artifactId) {
+  const directory = join5(await realpath2(root2), "exports");
+  let entries;
+  try {
+    const info = await lstat2(directory);
+    if (!info.isDirectory() || info.isSymbolicLink() || !samePath2(await realpath2(directory), directory)) throw resourceScope2();
+    entries = await readdir3(directory);
+  } catch (error62) {
+    if (error62.code === "ENOENT") return;
+    throw error62;
+  }
+  const owned = [];
+  for (const name of entries) {
+    const match = /^([A-Za-z0-9][A-Za-z0-9_-]{0,119})\.json$/.exec(name);
+    if (!match) continue;
+    const metadata = join5(directory, name);
+    let record3;
+    try {
+      await regularFile(metadata);
+      record3 = JSON.parse(await readFile4(metadata, "utf8"));
+    } catch (error62) {
+      if (error62.code === "ENOENT") continue;
+      if (error62 instanceof SyntaxError) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
+      throw error62;
+    }
+    if (!record3 || typeof record3 !== "object" || !("artifactId" in record3) || record3.artifactId !== artifactId) continue;
+    if (!("exportId" in record3) || record3.exportId !== match[1]) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u4E0E\u6587\u4EF6\u540D\u4E0D\u7B26\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
+    const data = join5(directory, match[1]);
+    try {
+      await regularFile(data);
+    } catch (error62) {
+      if (error62.code !== "ENOENT") throw error62;
+    }
+    owned.push({ metadata, data });
+  }
+  for (const entry of owned) {
+    await rm3(entry.data, { force: true });
+    await rm3(entry.metadata, { force: true });
+  }
+}
+var MAX_ASSET_BYTES, assetReference, samePath2, resourceScope2, EXTENSION_MIMES, MEDIA_MIMES;
 var init_files = __esm({
   "src/core/shared/files.ts"() {
     "use strict";
     init_common();
     MAX_ASSET_BYTES = 20 * 1024 * 1024;
     assetReference = (artifactId, asset) => ({ ...asset, url: `/assets/${artifactId}/${asset.id}`, src: `/assets/${artifactId}/${asset.id}` });
-    samePath = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
-    resourceScope = () => new StudioError("RESOURCE_SCOPE", "\u8D44\u6E90\u8DEF\u5F84\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u7684\u771F\u5B9E\u76EE\u5F55\u4E2D\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u8BBF\u95EE\u5176\u4ED6\u4F4D\u7F6E\u3002");
+    samePath2 = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    resourceScope2 = () => new StudioError("RESOURCE_SCOPE", "\u8D44\u6E90\u8DEF\u5F84\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u7684\u771F\u5B9E\u76EE\u5F55\u4E2D\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u8BBF\u95EE\u5176\u4ED6\u4F4D\u7F6E\u3002");
     EXTENSION_MIMES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv", ".html": "text/html", ".htm": "text/html" };
     MEDIA_MIMES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "video/mp4", "video/quicktime", "video/webm"]);
   }
@@ -11188,6 +11411,9 @@ var init_thumbnails = __esm({
         this.entries.set(id2, { revision, promise: promise2 });
         while (this.entries.size > 24) this.entries.delete(this.entries.keys().next().value);
         return promise2;
+      }
+      delete(id2) {
+        this.entries.delete(id2);
       }
       clear() {
         this.entries.clear();
@@ -12373,7 +12599,7 @@ var init_esm = __esm({
 
 // src/core/shared/archive.ts
 import { randomUUID as randomUUID10 } from "node:crypto";
-import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rename as rename4, rm as rm2, writeFile as writeFile3 } from "node:fs/promises";
+import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rename as rename4, rm as rm4, writeFile as writeFile3 } from "node:fs/promises";
 import { basename as basename2, join as join6 } from "node:path";
 async function readArchiveInput(args) {
   if (args.archivePath !== void 0 === (args.archiveBase64 !== void 0)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u4E00\u4E2A\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u6216\u5907\u4EFD\u5185\u5BB9\u3002");
@@ -12386,9 +12612,9 @@ async function readArchiveInput(args) {
     if (data.length > MAX_ARCHIVE_BYTES) throw tooLarge();
     return data;
   }
-  const path = text(args.archivePath, "", 4096);
-  if (!path.trim()) throw new StudioError("INVALID_ARGUMENT", "\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-  const file2 = await open3(path, "r");
+  const path2 = text(args.archivePath, "", 4096);
+  if (!path2.trim()) throw new StudioError("INVALID_ARGUMENT", "\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u4E0D\u80FD\u4E3A\u7A7A\u3002");
+  const file2 = await open3(path2, "r");
   try {
     const info = await file2.stat();
     if (!info.isFile()) throw invalid("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
@@ -12625,7 +12851,7 @@ async function importArchive(store, products, data, actor, title) {
     await mkdir5(join6(store.root, "artifacts"), { recursive: true });
     await rename4(staging, store.folder(id2));
   } catch (error62) {
-    await rm2(staging, { recursive: true, force: true });
+    await rm4(staging, { recursive: true, force: true });
     throw error62;
   }
   return state;
@@ -12723,6 +12949,7 @@ var init_service = __esm({
       async manage(args, actor) {
         requireRole(actor, ["owner"]);
         const action = text(args.action, "create");
+        if (action === "purge") return this.purge(args);
         if (action === "import") return this.importArchive(await readArchiveInput(args), actor, args.title);
         if (action === "create" || action === "duplicate") {
           const base = action === "duplicate" ? await this.store.read(safeId(args.artifactId)) : void 0;
@@ -12759,6 +12986,26 @@ var init_service = __esm({
           await this.shareHandler?.(false);
         }
         return result;
+      }
+      async purge(args) {
+        const multiple = args.artifactIds !== void 0;
+        if (multiple === (args.artifactId !== void 0) || multiple && (!Array.isArray(args.artifactIds) || !args.artifactIds.length || args.artifactIds.length > 100)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u5355\u4E2A\u4F5C\u54C1 ID\uFF0C\u6216 1 \u5230 100 \u4E2A\u4F5C\u54C1 ID \u7684\u5217\u8868\uFF0C\u4E24\u8005\u4E0D\u80FD\u540C\u65F6\u63D0\u4F9B\u3002");
+        const ids = [...new Set((multiple ? args.artifactIds : [args.artifactId]).map((id2) => safeId(id2)))];
+        const deletedIds2 = [], failures = [];
+        for (const id2 of ids) {
+          try {
+            await this.store.purge(id2, () => purgeExports(this.dataRoot, id2));
+          } catch (error62) {
+            failures.push({ artifactId: id2, code: error62 instanceof StudioError ? error62.code : "PURGE_FAILED", message: error62 instanceof StudioError ? error62.message : `\u6C38\u4E45\u5220\u9664\u672A\u5B8C\u6210\uFF0C\u53EF\u80FD\u5DF2\u79FB\u9664\u90E8\u5206\u6240\u5C5E\u8D44\u6E90\uFF1B\u8BF7\u68C0\u67E5\u5B58\u50A8\u72B6\u6001\u540E\u91CD\u8BD5\u3002${error62 instanceof Error ? ` ${error62.message}` : ""}` });
+            continue;
+          }
+          deletedIds2.push(id2);
+          this.collaboration.forget(id2);
+          this.thumbnails.delete(id2);
+          this.emit({ type: "share", artifactId: id2, enabled: false, revokedRoles: [...SHARE_ROLES] });
+          this.emit({ type: "purged", artifactId: id2 });
+        }
+        return { deletedIds: deletedIds2, failures };
       }
       async importArchive(data, actor = LOCAL_ACTOR, title) {
         if (this.closing) throw new StudioError("CLOSED", "Studio \u670D\u52A1\u5DF2\u7ECF\u5173\u95ED\u3002");
@@ -12805,12 +13052,12 @@ var init_service = __esm({
       async apply(id2, args, actor) {
         const result = await this.store.transaction(id2, (state) => {
           const adapter = this.products.get(state.artifact.type).adapter;
-          if (actor.kind === "agent" && !state.operations.some((operation) => operation.id === args.operationId) && Array.isArray(args.operations)) {
+          if (actor.kind === "agent" && !state.operations.some((operation2) => operation2.id === args.operationId) && Array.isArray(args.operations)) {
             const editing = new Set(this.getPresence(id2).filter((peer) => ["owner", "editor"].includes(peer.actor.role) && (!args.viewId || peer.context?.viewId !== args.viewId)).flatMap((peer) => [...peer.context?.editingIds ?? [], ...Array.isArray(peer.context?.movingIds) ? peer.context.movingIds : []]));
             const conflicts = /* @__PURE__ */ new Set();
-            for (const operation of args.operations) {
-              if (!object3(operation) || typeof operation.op !== "string" || !editing.size) continue;
-              const targets = operation.op === "restore" ? void 0 : adapter.targets(state.content, { ...operation, op: operation.op });
+            for (const operation2 of args.operations) {
+              if (!object3(operation2) || typeof operation2.op !== "string" || !editing.size) continue;
+              const targets = operation2.op === "restore" ? void 0 : adapter.targets(state.content, { ...operation2, op: operation2.op });
               for (const target of targets ?? editing) if (editing.has(target)) conflicts.add(target);
             }
             if (conflicts.size) throw new StudioError("EDIT_IN_PROGRESS", "\u76EE\u6807\u5185\u5BB9\u6B63\u5728\u5176\u4ED6\u89C6\u56FE\u4E2D\u7F16\u8F91\uFF0C\u8BF7\u7B49\u5F85\u7F16\u8F91\u5B8C\u6210\u540E\u91CD\u8BD5\u3002", { ids: [...conflicts] });
@@ -12902,9 +13149,9 @@ var init_service = __esm({
       async getAsset(artifactId, assetId) {
         return getAsset(this.store, artifactId, assetId);
       }
-      async getThumbnail(artifactId) {
+      async getThumbnail(artifactId, actor = LOCAL_ACTOR) {
         const state = await this.store.read(safeId(artifactId));
-        assertAlive(state.artifact);
+        if (state.artifact.trashedAt) requireRole(actor, ["owner"]);
         const product = this.products.get(state.artifact.type);
         if (!product.thumbnail) throw new StudioError("NO_PREVIEW", "\u6B64\u4EA7\u54C1\u672A\u63D0\u4F9B\u9884\u89C8\uFF0C\u8BF7\u76F4\u63A5\u6253\u5F00\u4F5C\u54C1\u3002");
         return this.thumbnails.get(artifactId, state.artifact.revision, () => product.thumbnail(state, exportResources(this.store, artifactId)));
@@ -12933,7 +13180,10 @@ var init_service = __esm({
           if (error62 instanceof Error && "code" in error62 && typeof error62.code === "string") throw new StudioError(error62.code, error62.message);
           throw error62;
         }
-        return saveExport(this.dataRoot, id2, result);
+        return this.store.transaction(id2, (current) => {
+          assertAlive(current.artifact);
+          return saveExport(this.dataRoot, id2, result);
+        });
       }
       async getExport(exportId) {
         return getExport(this.dataRoot, exportId);
@@ -12949,10 +13199,10 @@ var init_service = __esm({
 });
 
 // src/server/guest-session.ts
-import { createHash as createHash3, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash as createHash4, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 function createGuestSessions(dataRoot) {
   const secret = randomBytes2(32);
-  const cookieName = `studio-guest-${createHash3("sha256").update(dataRoot).update(secret).digest("hex").slice(0, 24)}`;
+  const cookieName = `studio-guest-${createHash4("sha256").update(dataRoot).update(secret).digest("hex").slice(0, 24)}`;
   const sign = (id2) => createHmac("sha256", secret).update(id2).digest("base64url");
   return (request, response) => {
     const value = request.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
@@ -12969,12 +13219,115 @@ var init_guest_session = __esm({
   }
 });
 
+// src/server/region-reader.ts
+import { randomBytes as randomBytes3 } from "node:crypto";
+function createRegionReaders(service, now = () => Date.now()) {
+  const grants = /* @__PURE__ */ new Map();
+  const sweep = () => {
+    for (const [key, grant] of grants) if (grant.expiresAt <= now()) grants.delete(key);
+  };
+  const unsubscribe = service.subscribe("*", (event) => {
+    if (event.type === "purged") {
+      for (const [key, grant] of grants) if (grant.artifactId === event.artifactId) grants.delete(key);
+      return;
+    }
+    if (event.type !== "share") return;
+    for (const [key, grant] of grants) if (!grant.source.owner && grant.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role))) grants.delete(key);
+  });
+  async function read(grant) {
+    if (!grant.source.owner && !await service.shareRole(grant.artifactId, grant.source.token)) throw new StudioError("UNAUTHORIZED", "\u539F\u5206\u4EAB\u5DF2\u5173\u95ED\u6216\u94FE\u63A5\u5DF2\u91CD\u7F6E\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
+    const result = await service.execute("artifact_read", { artifactId: grant.artifactId, mode: "objects", ids: [grant.regionId] }, grant.source.actor);
+    if (result.artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
+    const element = result.elements?.find((value) => value.id === grant.regionId && value.type === "html");
+    if (!element) throw new StudioError("NOT_FOUND", "\u539F HTML \u533A\u57DF\u4E0D\u5B58\u5728\uFF0C\u8BF7\u8FD4\u56DE\u767D\u677F\u67E5\u770B\u3002");
+    return {
+      artifactId: grant.artifactId,
+      artifactTitle: result.artifact.title,
+      regionId: grant.regionId,
+      title: element.text || "HTML \u56FE\u89E3",
+      sourceRevision: element.sourceRevision ?? element.version,
+      version: element.version,
+      width: element.w,
+      height: element.h,
+      canAnnotate: grant.source.actor.role !== "viewer",
+      element: { id: element.id, text: element.text, html: element.html ?? "", sourceRevision: element.sourceRevision ?? element.version, version: element.version, state: element.state ?? null }
+    };
+  }
+  async function grantFor(capability, artifactId, regionId) {
+    sweep();
+    const grant = grants.get(capability);
+    if (!grant) throw new StudioError("UNAUTHORIZED", "\u9605\u8BFB\u94FE\u63A5\u5DF2\u5931\u6548\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
+    if (grant.artifactId !== artifactId || grant.regionId !== regionId) throw new StudioError("FORBIDDEN", "\u9605\u8BFB\u94FE\u63A5\u53EA\u80FD\u8BBF\u95EE\u539F HTML \u533A\u57DF\u3002");
+    try {
+      return { grant, content: await read(grant) };
+    } catch (error62) {
+      delete grant.activeUntil;
+      throw error62;
+    }
+  }
+  return {
+    async create(source, input2, origin) {
+      sweep();
+      const artifactId = safeId(input2.artifactId), regionId = safeId(input2.regionId, "\u533A\u57DF ID"), viewId = safeId(input2.viewId, "\u89C6\u56FE ID");
+      if (!source.owner && source.artifactId !== artifactId) throw new StudioError("FORBIDDEN", "\u5206\u4EAB\u94FE\u63A5\u53EA\u80FD\u8BBF\u95EE\u5BF9\u5E94\u7684\u4F5C\u54C1\u3002");
+      if (grants.size >= MAX_GRANTS) throw new StudioError("BUSY", "\u6253\u5F00\u7684\u9605\u8BFB\u9875\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+      const grant = { artifactId, regionId, viewId, source, expiresAt: now() + LIFETIME_MS };
+      await read(grant);
+      const capability = randomBytes3(32).toString("base64url");
+      grants.set(capability, grant);
+      return { url: `${origin}/region/${encodeURIComponent(artifactId)}/${encodeURIComponent(regionId)}#cap=${capability}`, expiresAt: grant.expiresAt };
+    },
+    async source(capability, artifactId, regionId, metadataOnly) {
+      const { grant, content } = await grantFor(capability, artifactId, regionId);
+      grant.activeUntil = Math.min(grant.expiresAt, now() + 45e3);
+      const { element, ...metadata } = content;
+      return metadataOnly ? metadata : { ...metadata, element };
+    },
+    async returnToBoard(capability, artifactId, regionId, annotate) {
+      const { grant, content } = await grantFor(capability, artifactId, regionId);
+      if (annotate && !content.canAnnotate) throw new StudioError("FORBIDDEN", "\u5F53\u524D\u9605\u8BFB\u6743\u9650\u4E0D\u80FD\u521B\u5EFA\u5907\u6CE8\u3002");
+      grant.returned = { artifactId: grant.artifactId, regionId: grant.regionId, viewId: grant.viewId, annotate };
+      return { requested: true };
+    },
+    async takeReturn(source, artifactId, viewId) {
+      safeId(artifactId);
+      safeId(viewId, "\u89C6\u56FE ID");
+      sweep();
+      for (const grant of grants.values()) if (grant.artifactId === artifactId && grant.viewId === viewId && grant.source.token === source.token && grant.returned) {
+        await read(grant);
+        const navigation = grant.returned;
+        delete grant.returned;
+        return { navigation };
+      }
+      return {};
+    },
+    hasActiveReaders() {
+      sweep();
+      return [...grants.values()].some((grant) => (grant.activeUntil ?? 0) > now());
+    },
+    close() {
+      unsubscribe();
+      grants.clear();
+    }
+  };
+}
+var LIFETIME_MS, MAX_GRANTS;
+var init_region_reader = __esm({
+  "src/server/region-reader.ts"() {
+    "use strict";
+    init_service();
+    init_common();
+    LIFETIME_MS = 15 * 6e4;
+    MAX_GRANTS = 128;
+  }
+});
+
 // src/server/http.ts
 var http_exports = {};
 __export(http_exports, {
   startStudioHost: () => startStudioHost
 });
-import { randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { createServer } from "node:http";
 import { networkInterfaces } from "node:os";
 function equal(a, b) {
@@ -13043,9 +13396,14 @@ function header(request, key) {
   const value = request.headers[key];
   return typeof value === "string" ? value : "";
 }
+function exportContentType(mimeType) {
+  const mediaType = mimeType.split(";", 1)[0].trim().toLowerCase();
+  return mediaType.startsWith("text/") || mediaType === "image/svg+xml" || mediaType === "application/json" ? `${mediaType}; charset=utf-8` : mimeType;
+}
 async function startStudioHost(options = {}) {
-  const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes3(32).toString("base64url");
+  const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes4(32).toString("base64url");
   const guestSession = createGuestSessions(service.dataRoot);
+  const regionReaders = createRegionReaders(service);
   const lives = /* @__PURE__ */ new Set(), servers = /* @__PURE__ */ new Set(), sockets = /* @__PURE__ */ new Set();
   let origin = "", lan, sharingOrigin = "", startingLan, stopping = false;
   function server() {
@@ -13134,11 +13492,43 @@ async function startStudioHost(options = {}) {
       response.end();
       return;
     }
+    if (url2.pathname === "/api/region-view" && (request.method === "POST" || request.method === "GET")) {
+      const input2 = request.method === "POST" ? await readJson(request) : {}, artifactId = typeof input2.artifactId === "string" ? input2.artifactId : url2.searchParams.get("artifactId") ?? "";
+      const auth = await authorize(request, response, url2, artifactId);
+      scope(auth, artifactId);
+      const readerOrigin = request.socket.localPort === local.address()?.port ? origin : sharingOrigin;
+      const data = request.method === "POST" ? await regionReaders.create(auth, input2, readerOrigin) : await regionReaders.takeReturn(auth, artifactId, url2.searchParams.get("viewId") ?? "");
+      json2(response, 200, { ok: true, data });
+      return;
+    }
+    const reader = /^\/api\/region-reader\/([^/]+)\/([^/]+)(\/return)?$/.exec(url2.pathname);
+    if (reader && (request.method === "GET" && !reader[3] || request.method === "POST" && reader[3])) {
+      const capability = header(request, "authorization").replace(/^Bearer\s+/i, "");
+      const artifactId = decodeURIComponent(reader[1]), regionId = decodeURIComponent(reader[2]);
+      if ([...url2.searchParams.keys()].some((key) => key !== "metadata") || url2.searchParams.has("metadata") && url2.searchParams.get("metadata") !== "1") throw new StudioError("INVALID_ARGUMENT", "\u9605\u8BFB\u8BF7\u6C42\u53C2\u6570\u65E0\u6548\u3002");
+      let data;
+      if (reader[3]) {
+        const input2 = await readJson(request);
+        if (Object.keys(input2).some((key) => key !== "annotate") || typeof input2.annotate !== "boolean") throw new StudioError("INVALID_ARGUMENT", "\u8FD4\u56DE\u767D\u677F\u8BF7\u6C42\u65E0\u6548\u3002");
+        data = await regionReaders.returnToBoard(capability, artifactId, regionId, input2.annotate);
+      } else data = await regionReaders.source(capability, artifactId, regionId, url2.searchParams.get("metadata") === "1");
+      json2(response, 200, { ok: true, data });
+      return;
+    }
+    const readerPage = /^\/region\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})$/.exec(url2.pathname);
+    if (readerPage && request.method === "GET") {
+      const boot = JSON.stringify({ artifactId: readerPage[1], regionId: readerPage[2] }).replace(/</g, "\\u003c");
+      const script = `<script>window.__STUDIO_READER_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
+      const html2 = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, (opening) => opening + script) : `${script}${raw}`;
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(html2) });
+      response.end(html2);
+      return;
+    }
     if (request.method === "GET" && url2.pathname.startsWith("/api/thumbnails/")) {
       const artifactId = decodeURIComponent(url2.pathname.slice("/api/thumbnails/".length));
       const auth = await authorize(request, response, url2, artifactId);
       scope(auth, artifactId);
-      const thumbnail = await service.getThumbnail(artifactId);
+      const thumbnail = await service.getThumbnail(artifactId, auth.actor);
       response.writeHead(200, { "Content-Type": thumbnail.mimeType, "Content-Length": thumbnail.data.byteLength, "Cache-Control": "private, max-age=0", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-src 'none'; sandbox" });
       response.end(thumbnail.data);
       return;
@@ -13234,7 +13624,7 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
       const result = await service.getExport(decodeURIComponent(exported[1])), auth = await authorize(request, response, url2, result.artifactId);
       scope(auth, result.artifactId);
       if (result.mimeType === "application/zip" && !auth.owner) throw new StudioError("FORBIDDEN", "\u53EA\u6709\u6240\u6709\u8005\u53EF\u4EE5\u4E0B\u8F7D\u5305\u542B\u5386\u53F2\u548C\u53CD\u9988\u7684\u4F5C\u54C1\u5907\u4EFD\u3002");
-      response.writeHead(200, { "Content-Type": result.mimeType, "Content-Length": result.size, "Cache-Control": "no-store", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`, "X-Content-Type-Options": "nosniff" });
+      response.writeHead(200, { "Content-Type": exportContentType(result.mimeType), "Content-Length": result.size, "Cache-Control": "no-store", "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`, "X-Content-Type-Options": "nosniff" });
       response.end(result.data);
       return;
     }
@@ -13257,9 +13647,10 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
     await service.close();
     throw error62;
   }
-  return { service, origin, token, async close() {
+  return { service, origin, token, hasActiveReaders: regionReaders.hasActiveReaders, async close() {
     if (stopping) return;
     stopping = true;
+    regionReaders.close();
     for (const live of [...lives]) endLive(live, "Studio \u670D\u52A1\u5DF2\u9000\u51FA\u3002");
     await Promise.all([...servers].map(closeServer));
     for (const socket of sockets) socket.destroy();
@@ -13275,6 +13666,7 @@ var init_http = __esm({
     init_service();
     init_archive();
     init_guest_session();
+    init_region_reader();
     MAX_BODY = 21 * 1024 * 1024;
     json2 = (response, status, value) => {
       const body2 = JSON.stringify(value);
@@ -14110,10 +14502,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path) {
-  if (!path)
+function getElementAtPath(obj, path2) {
+  if (!path2)
     return obj;
-  return path.reduce((acc, key) => acc?.[key], obj);
+  return path2.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -14453,11 +14845,11 @@ function explicitlyAborted(x2, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path, issues) {
+function prefixIssues(path2, issues) {
   return issues.map((iss) => {
     var _a4;
     (_a4 = iss).path ?? (_a4.path = []);
-    iss.path.unshift(path);
+    iss.path.unshift(path2);
     return iss;
   });
 }
@@ -14919,16 +15311,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path = []) => {
+  const processError = (error63, path2 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
       } else {
-        const fullpath = [...path, ...issue2.path];
+        const fullpath = [...path2, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -14967,17 +15359,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path = []) => {
+  const processError = (error63, path2 = []) => {
     var _a4;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path2, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path2, ...issue2.path]);
       } else {
-        const fullpath = [...path, ...issue2.path];
+        const fullpath = [...path2, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -15016,8 +15408,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path) {
+  const path2 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path2) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -32155,13 +32547,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path = ref.slice(1).split("/").filter(Boolean);
-  if (path.length === 0) {
+  const path2 = ref.slice(1).split("/").filter(Boolean);
+  if (path2.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path[0] === defsKey) {
-    const key = path[1] === void 0 ? void 0 : decodeJSONPointerSegment(path[1]);
+  if (path2[0] === defsKey) {
+    const key = path2[1] === void 0 ? void 0 : decodeJSONPointerSegment(path2[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -34682,18 +35074,18 @@ function failure2(code, message) {
   return Object.assign(new Error(message), { code });
 }
 function validateUiRequest(request) {
-  const { path, method } = request;
-  if (typeof path !== "string" || path.length > 8192 || !path.startsWith("/") || path.startsWith("//") || /[\\#\u0000-\u0020]/.test(path) || /%(?:2e|2f|5c|25)/i.test(path)) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
-  const url2 = new URL(path, "http://studio.invalid");
-  if (url2.origin !== "http://studio.invalid" || url2.pathname.split("/").some((segment) => segment === "." || segment === "..") || path.split("?")[0] !== url2.pathname) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
+  const { path: path2, method } = request;
+  if (typeof path2 !== "string" || path2.length > 8192 || !path2.startsWith("/") || path2.startsWith("//") || /[\\#\u0000-\u0020]/.test(path2) || /%(?:2e|2f|5c|25)/i.test(path2)) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
+  const url2 = new URL(path2, "http://studio.invalid");
+  if (url2.origin !== "http://studio.invalid" || url2.pathname.split("/").some((segment) => segment === "." || segment === "..") || path2.split("?")[0] !== url2.pathname) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
   if (method !== "GET" && method !== "POST") throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u65B9\u6CD5\u65E0\u6548\u3002");
   const tool = /^\/api\/tools\/([^/]+)$/.exec(url2.pathname);
-  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/session" ? method === "GET" : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
+  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/session" ? method === "GET" : url2.pathname === "/api/region-view" ? true : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
   if (!allowed) throw failure2("FORBIDDEN", "\u6B64\u5730\u5740\u4E0D\u80FD\u901A\u8FC7\u4F5C\u54C1\u754C\u9762\u8BBF\u95EE\u3002");
   const thumbnail = method === "GET" && /^\/api\/thumbnails\/[^/]+$/.test(url2.pathname);
   const seen = /* @__PURE__ */ new Set();
   for (const [key, value] of url2.searchParams) {
-    if (seen.has(key) || (thumbnail ? key !== "revision" : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
+    if (seen.has(key) || (thumbnail ? key !== "revision" : url2.pathname === "/api/region-view" ? !["artifactId", "viewId"].includes(key) : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
     if (key === "revision" && (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u7F29\u7565\u56FE\u7248\u672C\u53F7\u65E0\u6548\u3002");
     seen.add(key);
   }
@@ -34907,8 +35299,8 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
           const pid = Number(await readFile(join(lock2, "owner"), "utf8"));
           if (pid && !isAlive(pid)) {
             await unlink(join(lock2, "owner"));
-            const { rmdir } = await import("node:fs/promises");
-            await rmdir(lock2);
+            const { rmdir: rmdir2 } = await import("node:fs/promises");
+            await rmdir2(lock2);
           }
         } catch {
         }
@@ -34933,8 +35325,8 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
       } finally {
         await unlink(join(lock2, "owner")).catch(() => {
         });
-        const { rmdir } = await import("node:fs/promises");
-        await rmdir(lock2).catch(() => {
+        const { rmdir: rmdir2 } = await import("node:fs/promises");
+        await rmdir2(lock2).catch(() => {
         });
       }
     }
@@ -35372,8 +35764,8 @@ function getErrorMap2() {
 
 // ../../node_modules/.pnpm/zod@4.6.7/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path, errorMaps, issueData } = params;
-  const fullPath = [...path, ...issueData.path || []];
+  const { data, path: path2, errorMaps, issueData } = params;
+  const fullPath = [...path2, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -35488,11 +35880,11 @@ var errorUtil;
 
 // ../../node_modules/.pnpm/zod@4.6.7/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path, key) {
+  constructor(parent, value, path2, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path;
+    this._path = path2;
     this._key = key;
   }
   get path() {
@@ -39043,11 +39435,11 @@ function normalizeObjectSchema(schema) {
   }
   return void 0;
 }
-function getDotPath(path) {
-  if (path.length === 0) {
+function getDotPath(path2) {
+  if (path2.length === 0) {
     return "object root";
   }
-  return path.reduce((acc, seg, index) => {
+  return path2.reduce((acc, seg, index) => {
     if (index === 0) {
       return String(seg);
     }
@@ -43050,34 +43442,64 @@ var STUDIO_ICON = {
 };
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.1.1";
+var PLUGIN_VERSION = "0.1.2";
 
 // src/server/protocol.ts
 init_studio();
 var id = external_exports.string().min(1).max(200);
-var loose = external_exports.record(external_exports.string(), external_exports.unknown());
+var coordinate = external_exports.number().min(-1e7).max(1e7);
+var anchor2 = external_exports.object({
+  coordinateSpace: external_exports.enum(["board", "element", "html"]).optional().describe("board: x/y/w/h \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement: x/y \u4E3A elementIds[0] \u5185\u7684 0..1 \u76F8\u5BF9\u5750\u6807\uFF1Bhtml: x/y/w/h \u4E3A regionId \u5185\u90E8 CSS \u50CF\u7D20\u3002\u7701\u7565\u65F6\u6CBF\u7528\u65E7\u951A\u70B9\u542B\u4E49\u3002"),
+  elementIds: external_exports.array(id).optional().describe("\u5DF2\u5B58\u5728\u5BF9\u8C61\u7684\u7A33\u5B9A ID\uFF1Belement \u5750\u6807\u4EE5\u9996\u4E2A\u5BF9\u8C61\u4E3A\u57FA\u51C6\u3002"),
+  regionId: id.optional().describe("HTML \u533A\u57DF ID\uFF1Bhtml \u5750\u6807\u7A7A\u95F4\u5FC5\u586B\u3002"),
+  targetIds: external_exports.array(external_exports.string().max(160)).max(100).optional(),
+  sourceRevision: external_exports.number().int().positive().optional().describe("HTML \u539F\u59CB\u9009\u533A\u7684\u6E90\u7801\u7248\u672C\uFF0C\u9700\u8981 regionId\uFF1B\u4E0D\u80FD\u7528\u4F5C\u5BF9\u8C61 CAS \u7248\u672C\u3002"),
+  quote: external_exports.string().max(4e3).optional(),
+  excerpt: external_exports.string().max(16e3).optional(),
+  selector: external_exports.string().max(1200).optional(),
+  x: coordinate.optional(),
+  y: coordinate.optional(),
+  w: coordinate.min(0).optional(),
+  h: coordinate.min(0).optional()
+}).passthrough();
+var elementPatch = external_exports.object({
+  locked: external_exports.boolean().optional().describe("\u4EC5\u9501\u5B9A\u4F4D\u7F6E\u3001\u5C3A\u5BF8\u3001\u65CB\u8F6C\u3001\u8FDE\u63A5\u51E0\u4F55\u548C\u88C1\u526A\u3002\u9501\u540E\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u4ECD\u53EF\u66F4\u65B0\u3002\u89E3\u9501\u987B\u5355\u72EC\u63D0\u4EA4 changes:{locked:false}\uFF0C\u4E14\u4E0D\u80FD\u5728\u540C\u4E00\u4E8B\u52A1\u5185\u7EE7\u7EED\u79FB\u52A8\u6216\u5220\u9664\u3002")
+}).passthrough();
+var operation = external_exports.object({
+  op: external_exports.string().min(1).max(64),
+  id: id.optional(),
+  ids: external_exports.array(id).optional(),
+  element: elementPatch.optional(),
+  changes: elementPatch.optional()
+}).passthrough();
 var schemas = {
   studio_open: external_exports.object({ view: external_exports.enum(["library", "editor", "board", "trash"]).optional(), artifactId: id.optional() }),
   artifact_list: external_exports.object({ query: external_exports.string().optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().optional(), sort: external_exports.string().optional() }),
-  artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
-  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), regionId: id.optional(), feedbackId: id.optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
-  artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), operations: external_exports.array(external_exports.object({ op: external_exports.string().min(1).max(64) }).passthrough()).min(1).max(200), summary: external_exports.string().max(500).optional() }),
-  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: loose.optional(), targetViewId: id.optional(), operationId: id.optional(), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(loose).max(60) })).min(2).max(4).optional() }),
+  artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "purge", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), artifactIds: external_exports.array(id).min(1).max(100).optional().describe("purge \u6279\u91CF\u6C38\u4E45\u5220\u9664\u7684\u4F5C\u54C1 ID\uFF0C1..100 \u4E2A\u3002\u4E0E\u5355\u4E2A artifactId \u4E8C\u9009\u4E00\uFF1B\u53EA\u5141\u8BB8\u623F\u4E3B\u5220\u9664\u56DE\u6536\u7AD9\u5185\u4F5C\u54C1\uFF0C\u8FD4\u56DE deletedIds \u548C\u9010\u9879 failures\u3002"), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
+  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
+  artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
+  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
   artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset"]), role: external_exports.enum(["editor", "commenter", "viewer"]).optional() }),
   artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() })
 };
 var descriptions = {
   studio_open: "\u6253\u5F00 Agentero \u521B\u4F5C\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
   artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
-  artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
-  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bsource \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1BfeedbackId \u8BFB\u53D6\u6279\u6CE8\u65F6\u7684\u539F\u59CB\u6E90\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
-  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002restore \u5F62\u6210\u65B0\u7248\u672C\uFF0Cdata.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
-  artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u5BF9\u8C61/HTML\u5143\u7D20\u951A\u70B9\u7684\u6279\u6CE8\u53CAAgent\u8BF7\u6C42\uFF0C\u56DE\u590D\u548C\u89E3\u51B3\u3002\u53CD\u9988\u4FDD\u7559\u53D1\u9001\u65F6\u6E90\u7801\u5FEB\u7167\uFF1B\u666E\u901A\u8BC4\u8BBA\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
+  artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
+  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
+  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002restore \u5F62\u6210\u65B0\u7248\u672C\uFF0Cdata.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
+  artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
   artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5C40\u57DF\u7F51\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u5F00\u542F\u672C\u673A\u5C40\u57DF\u7F51\u8BBF\u95EE\uFF1Bstop/reset \u64A4\u9500\u73B0\u6709\u94FE\u63A5\u548C\u8FDE\u63A5\u3002",
   artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002"
 };
 function record2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function modelSource(value) {
+  const source = record2(value) || {}, { html: html2, element, ...metadata } = source, frozen = record2(element);
+  const { html: nestedHtml, ...elementMetadata } = frozen || {};
+  const sourceHtml = typeof html2 === "string" ? html2 : typeof nestedHtml === "string" ? nestedHtml : void 0;
+  return { ...metadata, ...frozen ? { element: elementMetadata } : {}, ...sourceHtml !== void 0 ? { htmlLength: sourceHtml.length, readWith: "artifact_read source + feedbackId + regionId" } : {} };
 }
 function modelResult(name, args, value) {
   const result = record2(value);
@@ -43098,13 +43520,13 @@ function modelResult(name, args, value) {
       let end = Math.min(result.html.length, offset + Math.min(2e5, Math.max(1, Math.floor(Number(args.limit) || 64e3))));
       if (end < result.html.length && /[\uD800-\uDBFF]/.test(result.html[end - 1]) && /[\uDC00-\uDFFF]/.test(result.html[end])) end += end - offset === 1 ? 1 : -1;
       const { sources: _sources, html: html2, ...metadata } = result;
-      return { ...metadata, html: html2.slice(offset, end), offset, totalLength: html2.length, ...end < html2.length ? { nextOffset: end } : {}, complete: end === html2.length };
+      return { ...modelSource(metadata), html: html2.slice(offset, end), offset, totalLength: html2.length, ...end < html2.length ? { nextOffset: end } : {}, complete: end === html2.length };
     }
-    if (args.mode === "context" && Array.isArray(result.sources)) return { ...result, sources: result.sources.map((source) => {
-      const item = record2(source) || {};
-      const { html: html2, ...metadata } = item;
-      return { ...metadata, ...typeof html2 === "string" ? { htmlLength: html2.length, readWith: "artifact_read source + feedbackId + regionId" } : {} };
-    }) };
+    if (args.mode === "source") {
+      const { sources: _sources, ...source } = result;
+      return modelSource(source);
+    }
+    if (args.mode === "context" && Array.isArray(result.sources)) return { ...result, sources: result.sources.map(modelSource) };
   }
   if (name === "artifact_feedback" && Array.isArray(result.feedback)) {
     const id2 = args.feedbackId || result.contextId;
@@ -43132,7 +43554,7 @@ function createStudioServer(executor, html2) {
       title: name === "studio_open" ? "Agentero \u521B\u4F5C" : descriptions[name].split("\u3002")[0],
       description: descriptions[name],
       inputSchema: schemas[name],
-      annotations: { readOnlyHint: ["studio_open", "artifact_list", "artifact_read"].includes(name), destructiveHint: false, openWorldHint: name === "artifact_share" },
+      annotations: { readOnlyHint: ["studio_open", "artifact_list", "artifact_read"].includes(name), destructiveHint: name === "artifact_manage", openWorldHint: name === "artifact_share" },
       ...name === "studio_open" ? { _meta: { ui: { resourceUri: uri }, "openai/ui": { entrypoints: [{ type: "thread" }] } } } : {}
     }, async (input2) => {
       try {
@@ -43203,7 +43625,7 @@ if (process.argv.includes("--serve")) {
     let lastActive = Date.now();
     setInterval(() => {
       void hasActiveLeases(root).then((active) => {
-        if (active) lastActive = Date.now();
+        if (active || host.hasActiveReaders()) lastActive = Date.now();
         else if (Date.now() - lastActive > 45e3) void close().finally(() => process.exit(0));
       });
     }, 1e4).unref();

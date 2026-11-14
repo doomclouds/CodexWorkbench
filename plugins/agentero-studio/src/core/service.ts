@@ -10,7 +10,7 @@ import { studioProducts } from './products/index.js';
 import type { ProductRegistry } from './shared/products.js';
 import type { ContentOperation } from './shared/model.js';
 import { StudioCollaboration } from './shared/collaboration.js';
-import { duplicateAssets, importAsset, deleteAsset, listAssets, putAsset, getAsset, saveExport, getExport, exportResources, type ExportRecord } from './shared/files.js';
+import { duplicateAssets, importAsset, deleteAsset, listAssets, putAsset, getAsset, saveExport, getExport, exportResources, purgeExports, type ExportRecord } from './shared/files.js';
 import { ThumbnailCache } from './shared/thumbnails.js';
 import { exportArchive, importArchive as importArtifactArchive, readArchiveInput } from './shared/archive.js';
 
@@ -52,6 +52,7 @@ export class StudioService {
   }
   private async manage(args: Record<string, unknown>, actor: Actor) {
     requireRole(actor, ['owner']); const action = text(args.action, 'create');
+    if (action === 'purge') return this.purge(args);
     if (action === 'import') return this.importArchive(await readArchiveInput(args), actor, args.title);
     if (action === 'create' || action === 'duplicate') {
       const base = action === 'duplicate' ? await this.store.read(safeId(args.artifactId)) : undefined;
@@ -80,6 +81,23 @@ export class StudioService {
     this.emit({ type: 'artifact', artifactId: id, artifact: result.artifact });
     if (action === 'trash') { this.emit({ type: 'share', artifactId: id, enabled: false, revokedRoles: [...SHARE_ROLES] }); await this.shareHandler?.(false); }
     return result;
+  }
+  private async purge(args: Record<string, unknown>) {
+    const multiple = args.artifactIds !== undefined;
+    if (multiple === (args.artifactId !== undefined) || multiple && (!Array.isArray(args.artifactIds) || !args.artifactIds.length || args.artifactIds.length > 100)) throw new StudioError('INVALID_ARGUMENT', '请提供单个作品 ID，或 1 到 100 个作品 ID 的列表，两者不能同时提供。');
+    const ids = [...new Set((multiple ? args.artifactIds as unknown[] : [args.artifactId]).map(id => safeId(id)))];
+    const deletedIds: string[] = [], failures: { artifactId: string; code: string; message: string }[] = [];
+    for (const id of ids) {
+      try { await this.store.purge(id, () => purgeExports(this.dataRoot, id)); }
+      catch (error) {
+        failures.push({ artifactId: id, code: error instanceof StudioError ? error.code : 'PURGE_FAILED', message: error instanceof StudioError ? error.message : `永久删除未完成，可能已移除部分所属资源；请检查存储状态后重试。${error instanceof Error ? ` ${error.message}` : ''}` });
+        continue;
+      }
+      deletedIds.push(id); this.collaboration.forget(id); this.thumbnails.delete(id);
+      this.emit({ type: 'share', artifactId: id, enabled: false, revokedRoles: [...SHARE_ROLES] });
+      this.emit({ type: 'purged', artifactId: id });
+    }
+    return { deletedIds, failures };
   }
   async importArchive(data: Uint8Array, actor: Actor = LOCAL_ACTOR, title?: unknown) {
     if (this.closing) throw new StudioError('CLOSED', 'Studio 服务已经关闭。');
@@ -190,8 +208,9 @@ export class StudioService {
   }
   async putAsset(artifactId: string, data: Uint8Array, input: { filename?: string; mimeType?: string }, actor: Actor) { const state = await this.store.read(artifactId); return putAsset(this.store, artifactId, data, input, actor, this.products.get(state.artifact.type).validateAsset); }
   async getAsset(artifactId: string, assetId: string) { return getAsset(this.store, artifactId, assetId); }
-  async getThumbnail(artifactId: string) {
-    const state = await this.store.read(safeId(artifactId)); assertAlive(state.artifact);
+  async getThumbnail(artifactId: string, actor: Actor = LOCAL_ACTOR) {
+    const state = await this.store.read(safeId(artifactId));
+    if (state.artifact.trashedAt) requireRole(actor, ['owner']);
     const product = this.products.get(state.artifact.type);
     if (!product.thumbnail) throw new StudioError('NO_PREVIEW', '此产品未提供预览，请直接打开作品。');
     return this.thumbnails.get(artifactId, state.artifact.revision, () => product.thumbnail!(state, exportResources(this.store, artifactId)));
@@ -207,7 +226,7 @@ export class StudioService {
     const resources = exportResources(this.store, id);
     try { result = format === 'zip' ? await exportArchive(this.store, state, actor) : await this.products.get(state.artifact.type).export(state, format, options, resources); }
     catch (error) { if (error instanceof Error && 'code' in error && typeof error.code === 'string') throw new StudioError(error.code, error.message); throw error; }
-    return saveExport(this.dataRoot, id, result);
+    return this.store.transaction(id, current => { assertAlive(current.artifact); return saveExport(this.dataRoot, id, result); });
   }
   async getExport(exportId: string) { return getExport(this.dataRoot, exportId); }
   async close() { this.closing = true; await Promise.allSettled([...this.tasks]); this.collaboration.close(); this.thumbnails.clear(); }

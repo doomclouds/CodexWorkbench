@@ -9,28 +9,50 @@ import { appTransportSchema, createAppTransport } from './app-transport.js';
 
 export interface StudioExecutor { execute(name: ToolName, args: Record<string, unknown>): Promise<unknown>; connection(): Promise<Connection>; requestUi?: UiRequester }
 const id = z.string().min(1).max(200);
-const loose = z.record(z.string(), z.unknown());
+const coordinate = z.number().min(-10_000_000).max(10_000_000);
+const anchor = z.object({
+  coordinateSpace: z.enum(['board', 'element', 'html']).optional().describe('board: x/y/w/h 为白板世界坐标；element: x/y 为 elementIds[0] 内的 0..1 相对坐标；html: x/y/w/h 为 regionId 内部 CSS 像素。省略时沿用旧锚点含义。'),
+  elementIds: z.array(id).optional().describe('已存在对象的稳定 ID；element 坐标以首个对象为基准。'),
+  regionId: id.optional().describe('HTML 区域 ID；html 坐标空间必填。'),
+  targetIds: z.array(z.string().max(160)).max(100).optional(),
+  sourceRevision: z.number().int().positive().optional().describe('HTML 原始选区的源码版本，需要 regionId；不能用作对象 CAS 版本。'),
+  quote: z.string().max(4000).optional(), excerpt: z.string().max(16000).optional(), selector: z.string().max(1200).optional(),
+  x: coordinate.optional(), y: coordinate.optional(), w: coordinate.min(0).optional(), h: coordinate.min(0).optional(),
+}).passthrough();
+const elementPatch = z.object({
+  locked: z.boolean().optional().describe('仅锁定位置、尺寸、旋转、连接几何和裁剪。锁后文字、样式、HTML 和 state 仍可更新。解锁须单独提交 changes:{locked:false}，且不能在同一事务内继续移动或删除。'),
+}).passthrough();
+const operation = z.object({
+  op: z.string().min(1).max(64), id: id.optional(), ids: z.array(id).optional(),
+  element: elementPatch.optional(), changes: elementPatch.optional(),
+}).passthrough();
 const schemas = {
   studio_open: z.object({ view: z.enum(['library', 'editor', 'board', 'trash']).optional(), artifactId: id.optional() }),
   artifact_list: z.object({ query: z.string().optional(), trashed: z.boolean().optional(), pinned: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), sort: z.string().optional() }),
-  artifact_manage: z.object({ action: z.enum(['create', 'rename', 'pin', 'trash', 'restore', 'duplicate', 'import', 'asset-import', 'asset-delete']), artifactId: id.optional(), type: id.optional(), title: z.string().max(200).optional(), pinned: z.boolean().optional(), archivePath: z.string().max(4096).optional(), assetPath: z.string().max(4096).optional(), assetId: id.optional() }),
-  artifact_read: z.object({ artifactId: id, mode: z.string().min(1).max(64).optional(), ids: z.array(id).optional(), regionId: id.optional(), feedbackId: id.optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), viewId: id.optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200000).optional() }).passthrough(),
-  artifact_apply: z.object({ artifactId: id, operationId: id.optional(), expectedRevision: z.number().int().optional(), expectedVersions: z.record(z.string(), z.number().int()).optional(), operations: z.array(z.object({ op: z.string().min(1).max(64) }).passthrough()).min(1).max(200), summary: z.string().max(500).optional() }),
-  artifact_feedback: z.object({ artifactId: id, action: z.enum(['list', 'get', 'create', 'reply', 'resolve', 'reopen', 'send', 'processing', 'suggest', 'preview', 'choose', 'withdraw']), feedbackId: id.optional(), type: z.enum(['comment', 'request']).optional(), text: z.string().max(20000).optional(), anchor: loose.optional(), targetViewId: id.optional(), operationId: id.optional(), optionId: id.optional(), expectedRevision: z.number().int().optional(), expectedVersions: z.record(z.string(), z.number().int()).optional(), options: z.array(z.object({ id: id.optional(), label: z.string().max(60), description: z.string().max(160).optional(), operations: z.array(loose).max(60) })).min(2).max(4).optional() }),
+  artifact_manage: z.object({ action: z.enum(['create', 'rename', 'pin', 'trash', 'restore', 'purge', 'duplicate', 'import', 'asset-import', 'asset-delete']), artifactId: id.optional(), artifactIds: z.array(id).min(1).max(100).optional().describe('purge 批量永久删除的作品 ID，1..100 个。与单个 artifactId 二选一；只允许房主删除回收站内作品，返回 deletedIds 和逐项 failures。'), type: id.optional(), title: z.string().max(200).optional(), pinned: z.boolean().optional(), archivePath: z.string().max(4096).optional(), assetPath: z.string().max(4096).optional(), assetId: id.optional() }),
+  artifact_read: z.object({ artifactId: id, mode: z.string().min(1).max(64).optional(), ids: z.array(id).optional(), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: z.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), viewId: id.optional(), offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(200000).optional() }).passthrough(),
+  artifact_apply: z.object({ artifactId: id, operationId: id.optional(), expectedRevision: z.number().int().optional(), expectedVersions: z.record(z.string(), z.number().int()).optional(), operations: z.array(operation).min(1).max(200), summary: z.string().max(500).optional() }),
+  artifact_feedback: z.object({ artifactId: id, action: z.enum(['list', 'get', 'create', 'reply', 'resolve', 'reopen', 'send', 'processing', 'suggest', 'preview', 'choose', 'withdraw']), feedbackId: id.optional(), type: z.enum(['comment', 'request']).optional(), text: z.string().max(20000).optional(), anchor: anchor.optional(), versions: z.record(id, z.number().int().positive()).optional().describe('create 时提供全部锚点对象在选取时的 element.version；按该版本冻结原始对象/HTML。缺失、歧义或过期版本会拒绝；省略时兼容保存时快照。不同于修改用 expectedVersions。'), targetViewId: id.optional(), operationId: id.optional().describe('create/choose 的稳定操作 ID；重试保留同一 ID 与内容。create 返回原 contextId，不重复创建；改变内容或选区版本须使用新 ID。'), optionId: id.optional(), expectedRevision: z.number().int().optional(), expectedVersions: z.record(z.string(), z.number().int()).optional(), options: z.array(z.object({ id: id.optional(), label: z.string().max(60), description: z.string().max(160).optional(), operations: z.array(operation).max(60) })).min(2).max(4).optional() }),
   artifact_share: z.object({ artifactId: id, action: z.enum(['status', 'start', 'stop', 'reset']), role: z.enum(['editor', 'commenter', 'viewer']).optional() }),
   artifact_export: z.object({ artifactId: id, format: z.enum(['json', 'html', 'svg', 'png', 'zip']), regionId: id.optional(), ids: z.array(id).optional(), scale: z.number().min(.1).max(4).optional() }),
 };
 const descriptions: Record<ToolName, string> = {
   studio_open: '打开 Agentero 创作作品中心或指定白板。仅导航，不隐式创建。',
   artifact_list: '按名称、固定或回收状态查找作品；分页返回摘要。',
-  artifact_manage: '创建、重命名、固定、回收、恢复或复制作品。import 导入用户指定的本机 ZIP；asset-import 导入用户明确指定或当前任务生成的本机媒体绝对路径，返回稳定资源引用；asset-delete 仅移除未被内容、历史或反馈引用的资源并保留内部回收副本。',
-  artifact_read: '读取作品概要、对象、HTML 原始源码、冻结反馈、资产元数据或历史。默认 summary；source 按 offset/limit 分段，有 nextOffset 时继续；feedbackId 读取批注时的原始源。assets 仅房主查询。不要把 DOM 摘录当原始源码。',
-  artifact_apply: '以稳定对象 ID 批量局部修改白板。更改 HTML 使用 update.changes.html 并提供 expectedVersions；冲突后重读，不覆盖。restore 形成新版本，data.mode=undo 安全撤回所选事务。',
-  artifact_feedback: '创建或读取带对象/HTML元素锚点的批注及Agent请求，回复和解决。反馈保留发送时源码快照；普通评论不自动授权修改。',
+  artifact_manage: '创建、重命名、固定、回收、恢复或复制作品。purge 由房主永久删除已在回收站的作品，artifactId 或 1..100 个 artifactIds 二选一；先校验全部参数，再逐项返回 deletedIds/failures，不删除活跃作品。import 导入用户指定的本机 ZIP；asset-import 导入用户明确指定或当前任务生成的本机媒体绝对路径，返回稳定资源引用；asset-delete 仅移除未被内容、历史或反馈引用的资源并保留内部回收副本。',
+  artifact_read: '读取作品概要、对象、HTML 原始源码、冻结反馈、资产元数据或历史。默认 summary；context+feedbackId/contextId 返回冻结原生 element 与版本、HTML 来源引用；source+feedbackId+elementId/regionId 读取对应冻结对象/源码。HTML 按 offset/limit 分段，有 nextOffset 时继续；当前对象 CAS 版本从 objects 读取。assets 仅房主查询。不要把 DOM 摘录当原始源码。',
+  artifact_apply: '以稳定对象 ID 批量局部修改白板。更改 HTML 使用 update.changes.html 并提供 expectedVersions；冲突后重读，不覆盖。locked 仅锁定几何，允许文字、样式、HTML 和 state 更新；移动、裁剪、删除及改变关联锁线前须独立明确解锁，同批解锁绕过会拒绝。restore 形成新版本，data.mode=undo 安全撤回所选事务。',
+  artifact_feedback: '创建或读取带原生对象、白板区域或 HTML 内部锚点的备注，支持回复、解决及私人建议。create 用 versions 冻结选取时的原始对象/HTML，稳定 operationId 保证重试不重复；contextId 用于读取冻结来源。普通备注不自动授权修改。',
   artifact_share: '查询或管理局域网分享及角色链接。start 开启本机局域网访问；stop/reset 撤销现有链接和连接。',
   artifact_export: '按范围导出 JSON、HTML、SVG 或 PNG，或由房主导出包含资源、历史和反馈的 ZIP 备份；返回下载资源引用。富 HTML PNG 可能需要在白板界面导出。',
 };
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
+function modelSource(value: unknown): Record<string, unknown> {
+  const source = record(value) || {}, { html, element, ...metadata } = source, frozen = record(element);
+  const { html: nestedHtml, ...elementMetadata } = frozen || {};
+  const sourceHtml = typeof html === 'string' ? html : typeof nestedHtml === 'string' ? nestedHtml : undefined;
+  return { ...metadata, ...(frozen ? { element: elementMetadata } : {}), ...(sourceHtml !== undefined ? { htmlLength: sourceHtml.length, readWith: 'artifact_read source + feedbackId + regionId' } : {}) };
+}
 /** UI keeps full documents on its private transport; model results carry bounded references. */
 function modelResult(name: ToolName, args: Record<string, unknown>, value: unknown): unknown {
   const result = record(value); if (!result) return value;
@@ -48,9 +70,10 @@ function modelResult(name: ToolName, args: Record<string, unknown>, value: unkno
       let end = Math.min(result.html.length, offset + Math.min(200000, Math.max(1, Math.floor(Number(args.limit) || 64000))));
       if (end < result.html.length && /[\uD800-\uDBFF]/.test(result.html[end - 1]) && /[\uDC00-\uDFFF]/.test(result.html[end])) end += end - offset === 1 ? 1 : -1;
       const { sources: _sources, html, ...metadata } = result;
-      return { ...metadata, html: html.slice(offset, end), offset, totalLength: html.length, ...(end < html.length ? { nextOffset: end } : {}), complete: end === html.length };
+      return { ...modelSource(metadata), html: html.slice(offset, end), offset, totalLength: html.length, ...(end < html.length ? { nextOffset: end } : {}), complete: end === html.length };
     }
-    if (args.mode === 'context' && Array.isArray(result.sources)) return { ...result, sources: result.sources.map(source => { const item = record(source) || {}; const { html, ...metadata } = item; return { ...metadata, ...(typeof html === 'string' ? { htmlLength: html.length, readWith: 'artifact_read source + feedbackId + regionId' } : {}) }; }) };
+    if (args.mode === 'source') { const { sources: _sources, ...source } = result; return modelSource(source); }
+    if (args.mode === 'context' && Array.isArray(result.sources)) return { ...result, sources: result.sources.map(modelSource) };
   }
   if (name === 'artifact_feedback' && Array.isArray(result.feedback)) {
     const id = args.feedbackId || result.contextId;
@@ -73,7 +96,7 @@ export function createStudioServer(executor: StudioExecutor, html: string) {
   for (const name of TOOL_NAMES) {
     server.registerTool(name, {
       title: name === 'studio_open' ? 'Agentero 创作' : descriptions[name].split('。')[0], description: descriptions[name], inputSchema: schemas[name],
-      annotations: { readOnlyHint: ['studio_open', 'artifact_list', 'artifact_read'].includes(name), destructiveHint: false, openWorldHint: name === 'artifact_share' },
+      annotations: { readOnlyHint: ['studio_open', 'artifact_list', 'artifact_read'].includes(name), destructiveHint: name === 'artifact_manage', openWorldHint: name === 'artifact_share' },
       ...(name === 'studio_open' ? { _meta: { ui: { resourceUri: uri }, 'openai/ui': { entrypoints: [{ type: 'thread' }] } } } : {}),
     }, async (input: unknown) => {
       try {

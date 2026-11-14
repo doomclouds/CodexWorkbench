@@ -10,6 +10,7 @@
 @media(prefers-reduced-motion:reduce){.studio *{transition:none!important;animation-duration:2s!important}}
 
 .studio-product-cards{display:flex;flex-wrap:wrap;gap:20px}
+.studio-library-main{flex:1;min-height:0}
 .studio-suggestion-options { display: grid; gap: 8px; margin-top: 12px; }
 .studio-suggestion-option { display: flex; flex-direction: column; align-items: flex-start; text-align: left; white-space: normal; gap: 4px; }
 .studio-suggestion-option.is-active { border-color: var(--studio-accent, #eb6c36); background: rgba(235, 108, 54, .12); }
