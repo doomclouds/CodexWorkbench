@@ -45,7 +45,7 @@ export function normalizeElement(input: Partial<BoardElement>, id?: string): Boa
   return result;
 }
 export function initialWhiteboard(elements: unknown, base?: WhiteboardContent): WhiteboardContent {
-  return { elements: (base?.elements ?? (Array.isArray(elements) ? elements : [])).map(item => normalizeElement(item as BoardElement)), style: copy(base?.style ?? DEFAULT_STYLE), ...(base?.motion ? { motion: copy(base.motion) } : {}) };
+  return { elements: (base?.elements ?? (Array.isArray(elements) ? elements : [])).map(item => normalizeElement(item as BoardElement)), style: copy(base?.style ?? DEFAULT_STYLE), orderVersion: 0, ...(base?.motion ? { motion: copy(base.motion) } : {}) };
 }
 export function htmlSource(snapshots: readonly Snapshot<WhiteboardContent>[], regionId: string, requested?: unknown) {
   for (const snapshot of requested === undefined ? snapshots.slice(0, 1) : snapshots) {
@@ -58,10 +58,15 @@ function elementChanges(before: WhiteboardContent, after: WhiteboardContent): Co
   const a = new Map(before.elements.map(item => [item.id, item])), b = new Map(after.elements.map(item => [item.id, item]));
   return [...new Set([...a.keys(), ...b.keys()])].flatMap(id => same(a.get(id), b.get(id)) ? [] : [{ id, before: a.get(id) ?? null, after: b.get(id) ?? null }]);
 }
+function orderUnit(content: WhiteboardContent) { return { version: content.orderVersion ?? 0, ids: content.elements.map(element => element.id) }; }
+function orderChanged(before: WhiteboardContent, after: WhiteboardContent): boolean {
+  const a = new Set(before.elements.map(element => element.id)), b = new Set(after.elements.map(element => element.id));
+  return !same(before.elements.filter(element => b.has(element.id)).map(element => element.id), after.elements.filter(element => a.has(element.id)).map(element => element.id));
+}
 export function compareBoards(before: Board, after: Board) { return elementChanges(before, after); }
-function restoredElement(saved: BoardElement, current?: BoardElement): BoardElement {
-  const restored = { ...copy(saved), version: Math.max(current?.version ?? 0, saved.version) + 1 };
-  if (restored.type === 'html') restored.sourceRevision = current?.html === restored.html ? current?.sourceRevision ?? 1 : Number(current?.sourceRevision ?? saved.sourceRevision ?? 0) + 1;
+function restoredElement(saved: BoardElement, current?: BoardElement, historical?: Pick<BoardElement, 'version' | 'sourceRevision'>): BoardElement {
+  const restored = { ...copy(saved), version: Math.max(current?.version ?? 0, historical?.version ?? 0, saved.version) + 1 };
+  if (restored.type === 'html') restored.sourceRevision = current && current.html === restored.html ? current.sourceRevision ?? 1 : Math.max(Number(current?.sourceRevision ?? 0), Number(historical?.sourceRevision ?? 0), Number(saved.sourceRevision ?? 0)) + 1;
   return restored;
 }
 function deletedIds(content: WhiteboardContent, operation: Operation): string[] {
@@ -75,7 +80,7 @@ function assertLockedGeometry(before: WhiteboardContent, after: WhiteboardConten
   const protectedIds = new Set([...baseline.elements, ...before.elements].filter(element => element.locked).map(element => element.id));
   if (!protectedIds.size) return;
   const beforeById = new Map(before.elements.map(element => [element.id, element])), afterById = new Map(after.elements.map(element => [element.id, element]));
-  const bounds = (element: BoardElement | undefined) => element && [element.x, element.y, element.w, element.h];
+  const bounds = (element: BoardElement | undefined) => element && [element.x, element.y, element.w, element.h, element.rotation];
   for (const current of before.elements) {
     if (!protectedIds.has(current.id)) continue;
     const next = afterById.get(current.id);
@@ -90,12 +95,14 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
   type: 'whiteboard',
   validate(content) {
     if (!object(content) || !Array.isArray(content.elements) || !object(content.style)) throw new StudioError('INVALID_ARGUMENT', '白板内容无效。');
+    if (content.orderVersion !== undefined && (!Number.isSafeInteger(content.orderVersion) || content.orderVersion < 0)) throw new StudioError('INVALID_ARGUMENT', '白板层级版本无效。');
     if (content.elements.length > 2000 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError('TOO_LARGE', '白板内容超过当前容量，请分成多个作品。');
   },
-  versionOf: (content, id) => content.elements.find(item => item.id === id)?.version ?? 0,
+  versionOf: (content, id) => id === '$order' ? content.orderVersion ?? 0 : content.elements.find(item => item.id === id)?.version ?? 0,
   targets(content, operation) {
-    if (['style', 'motion', 'restore'].includes(operation.op)) return;
-    if (operation.op === 'layout') return operation.ids ?? content.elements.map(element => element.id);
+    if (operation.op === 'restore') { const ids = operation.ids ?? (operation.id === undefined ? undefined : [operation.id]); return ids?.some(id => id.startsWith('$') && id !== '$order') ? undefined : ids; }
+    if (['style', 'motion'].includes(operation.op)) return;
+    if (operation.op === 'layout') { const ids = operation.ids ?? content.elements.map(element => element.id); return ['front', 'back', 'forward', 'backward'].includes(operation.preset ?? '') ? [...ids, '$order'] : ids; }
     // Deleting a node also deletes attached arrows; CAS covers those indirect edits.
     if (operation.op === 'delete') return [...new Set([...(operation.ids ?? [safeId(operation.id, '元素 ID')]), ...deletedIds(content, operation)])];
     if (operation.op === 'update') return [safeId(operation.id, '元素 ID')];
@@ -107,7 +114,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (element.type === 'html') element.sourceRevision = 1;
       if (content.elements.some(item => item.id === element.id)) throw new StudioError('CONFLICT', '元素 ID 已存在。', { elementId: element.id });
       assertLockedGeometry(content, { ...content, elements: [...content.elements, element] }, baseline);
-      content.elements.push(element); return [element.id];
+      content.elements.push(element); content.orderVersion = (content.orderVersion ?? 0) + 1; return [element.id];
     }
     if (operation.op === 'update') {
       const id = safeId(operation.id, '元素 ID'), index = content.elements.findIndex(item => item.id === id), current = content.elements[index];
@@ -121,7 +128,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       assertLockedGeometry(content, { ...content, elements: content.elements.map(element => element.id === id ? next : element) }, baseline);
       content.elements[index] = next; return [id];
     }
-    if (operation.op === 'delete') { const ids = deletedIds(content, operation), elements = content.elements.filter(element => !ids.includes(element.id)); assertLockedGeometry(content, { ...content, elements }, baseline); content.elements = elements; return ids; }
+    if (operation.op === 'delete') { const ids = deletedIds(content, operation), elements = content.elements.filter(element => !ids.includes(element.id)); assertLockedGeometry(content, { ...content, elements }, baseline); content.elements = elements; if (ids.length) content.orderVersion = (content.orderVersion ?? 0) + 1; return ids; }
     if (operation.op === 'style') {
       const patch = operation.style ?? {};
       if (!object(patch) || Object.values(patch).some(value => typeof value !== 'string' || value.length > 500)) throw new StudioError('INVALID_ARGUMENT', '样式字段必须是文字。');
@@ -129,6 +136,22 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     }
     if (operation.op === 'motion') { content.motion = copy(operation.data ?? {}); return ['$motion']; }
     if (operation.op === 'layout') {
+      if (['front', 'back', 'forward', 'backward'].includes(operation.preset ?? '')) {
+        const selected = new Set(operation.ids ?? content.elements.map(element => element.id));
+        const locked = content.elements.find(element => selected.has(element.id) && (element.locked || baseline.elements.find(item => item.id === element.id)?.locked));
+        if (locked) throw new StudioError('LOCKED', '对象已锁定，请先单独解锁后调整层级。', { elementId: locked.id });
+        const elements = [...content.elements];
+        if (operation.preset === 'front' || operation.preset === 'back') {
+          const picked = elements.filter(element => selected.has(element.id)), rest = elements.filter(element => !selected.has(element.id));
+          elements.splice(0, elements.length, ...(operation.preset === 'front' ? [...rest, ...picked] : [...picked, ...rest]));
+        } else if (operation.preset === 'forward') {
+          for (let index = elements.length - 2; index >= 0; index--) if (selected.has(elements[index]!.id) && !selected.has(elements[index + 1]!.id)) [elements[index], elements[index + 1]] = [elements[index + 1]!, elements[index]!];
+        } else for (let index = 1; index < elements.length; index++) if (selected.has(elements[index]!.id) && !selected.has(elements[index - 1]!.id)) [elements[index], elements[index - 1]] = [elements[index - 1]!, elements[index]!];
+        const changed = elements.filter((element, index) => selected.has(element.id) && content.elements[index]?.id !== element.id).map(element => element.id);
+        content.elements = elements.map(element => changed.includes(element.id) ? { ...element, version: element.version + 1 } : element);
+        if (changed.length) content.orderVersion = (content.orderVersion ?? 0) + 1;
+        return changed.length ? [...changed, '$order'] : changed;
+      }
       const elements = content.elements.filter(item => !operation.ids || operation.ids.includes(item.id)).map(item => ({ ...item }));
       const columns = operation.preset === 'column' ? 1 : operation.preset === 'row' ? Math.max(1, elements.length) : Math.max(1, Math.ceil(Math.sqrt(elements.length)));
       const width = Math.max(220, ...elements.map(item => item.w)), height = Math.max(120, ...elements.map(item => item.h));
@@ -140,18 +163,52 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     throw new StudioError('INVALID_ARGUMENT', '不支持的白板修改操作。');
   },
   diff(before, after) {
-    return [...elementChanges(before, after), ...(['style', 'motion'] as const).flatMap(key => same(before[key], after[key]) ? [] : [{ id: `$${key}`, before: before[key], after: after[key] }])];
+    return [...elementChanges(before, after), ...(orderChanged(before, after) ? [{ id: '$order', before: orderUnit(before), after: orderUnit(after) }] : []), ...(['style', 'motion'] as const).flatMap(key => same(before[key], after[key]) ? [] : [{ id: `$${key}`, before: before[key], after: after[key] }])];
   },
-  readUnit(content, id) { return id === '$style' ? content.style : id === '$motion' ? content.motion : content.elements.find(item => item.id === id) ?? null; },
-  restoreUnit(content, change) {
+  readUnit(content, id) { return id === '$style' ? content.style : id === '$motion' ? content.motion : id === '$order' ? orderUnit(content) : content.elements.find(item => item.id === id) ?? null; },
+  restoreUnit(content, change, history = []) {
     if (change.id === '$style') { content.style = copy(change.before) as WhiteboardContent['style']; return; }
     if (change.id === '$motion') { content.motion = copy(change.before) as WhiteboardContent['motion']; return; }
+    if (change.id === '$order') {
+      const saved = change.before as ReturnType<typeof orderUnit>, byId = new Map(content.elements.map(element => [element.id, element]));
+      const elements = [...saved.ids.flatMap(id => byId.has(id) ? [byId.get(id)!] : []), ...content.elements.filter(element => !saved.ids.includes(element.id))];
+      if (!same(content.elements.map(element => element.id), elements.map(element => element.id))) {
+        content.elements = elements; content.orderVersion = Math.max(content.orderVersion ?? 0, ...history.map(snapshot => snapshot.orderVersion ?? 0)) + 1;
+      }
+      return;
+    }
     const index = content.elements.findIndex(item => item.id === change.id);
-    if (change.before) { const restored = restoredElement(change.before as BoardElement, change.after as BoardElement | undefined); if (index >= 0) content.elements[index] = restored; else content.elements.push(restored); }
-    else if (index >= 0) content.elements.splice(index, 1);
+    if (change.before) {
+      const historical = { version: 0, sourceRevision: 0 };
+      for (const snapshot of history) {
+        const element = snapshot.elements.find(item => item.id === change.id); if (!element) continue;
+        historical.version = Math.max(historical.version, element.version); historical.sourceRevision = Math.max(historical.sourceRevision, Number(element.sourceRevision ?? 0));
+      }
+      const restored = restoredElement(change.before as BoardElement, content.elements[index], historical);
+      if (index >= 0) content.elements[index] = restored;
+      else {
+        const source = history.slice().reverse().find(snapshot => snapshot.elements.some(element => same(element, change.before)));
+        const sourceIndex = source?.elements.findIndex(element => element.id === change.id) ?? -1;
+        const successor = source?.elements.slice(sourceIndex + 1).find(element => content.elements.some(current => current.id === element.id));
+        const insertAt = successor ? content.elements.findIndex(element => element.id === successor.id) : content.elements.length;
+        content.elements.splice(insertAt, 0, restored); content.orderVersion = Math.max(content.orderVersion ?? 0, ...history.map(snapshot => snapshot.orderVersion ?? 0)) + 1;
+      }
+    }
+    else if (index >= 0) { content.elements.splice(index, 1); content.orderVersion = Math.max(content.orderVersion ?? 0, ...history.map(snapshot => snapshot.orderVersion ?? 0)) + 1; }
   },
-  restore(current, saved) {
-    return { elements: saved.elements.map(item => restoredElement(item, current.elements.find(element => element.id === item.id))), style: copy(saved.style), motion: copy(saved.motion) };
+  restore(current, saved, history = []) {
+    const historical = new Map<string, Pick<BoardElement, 'version' | 'sourceRevision'>>();
+    for (const snapshot of history) for (const element of snapshot.elements) {
+      const previous = historical.get(element.id);
+      historical.set(element.id, { version: Math.max(previous?.version ?? 0, element.version), sourceRevision: Math.max(Number(previous?.sourceRevision ?? 0), Number(element.sourceRevision ?? 0)) });
+    }
+    const changedOrder = !same(current.elements.map(element => element.id), saved.elements.map(element => element.id));
+    return { elements: saved.elements.map(item => restoredElement(item, current.elements.find(element => element.id === item.id), historical.get(item.id))), style: copy(saved.style), motion: copy(saved.motion), orderVersion: Math.max(current.orderVersion ?? 0, ...history.map(snapshot => snapshot.orderVersion ?? 0)) + (changedOrder ? 1 : 0) };
+  },
+  validateRestore(current, restored, baseline) {
+    assertLockedGeometry(current, restored, baseline);
+    const unlocked = current.elements.find(element => element.locked && restored.elements.some(next => next.id === element.id && !next.locked));
+    if (unlocked) throw new StudioError('LOCKED', '恢复历史不能隐式解锁对象，请先单独明确解锁。', { elementId: unlocked.id });
   },
   snapshotFeedback(artifactId, feedbackId, snapshots, value, versions) {
     const anchor: Anchor = object(value) ? copy(value) : {};
@@ -211,9 +268,9 @@ export const whiteboardProduct: ProductDefinition<WhiteboardContent, Operation, 
     if (mode === 'summary') {
       const offset = Math.max(0, Math.floor(Number(args.offset) || 0)), limit = Math.min(200, Math.max(1, Math.floor(Number(args.limit) || 100)));
       const items = state.content.elements.slice(offset, offset + limit).map(item => ({ id: item.id, type: item.type, label: item.text?.slice(0, 200), version: item.version, sourceRevision: item.sourceRevision, x: item.x, y: item.y, w: item.w, h: item.h }));
-      return { artifact: state.artifact, counts: state.content.elements.reduce<Record<string, number>>((out, item) => { out[item.type] = (out[item.type] ?? 0) + 1; return out; }, {}), items, totalCount: state.content.elements.length, offset, ...(offset + limit < state.content.elements.length ? { nextOffset: offset + limit } : {}), feedback: state.feedback.filter(item => item.status !== 'resolved').length };
+      return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, counts: state.content.elements.reduce<Record<string, number>>((out, item) => { out[item.type] = (out[item.type] ?? 0) + 1; return out; }, {}), items, totalCount: state.content.elements.length, offset, ...(offset + limit < state.content.elements.length ? { nextOffset: offset + limit } : {}), feedback: state.feedback.filter(item => item.status !== 'resolved').length };
     }
-    if (mode === 'objects') { const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : undefined; return { artifact: state.artifact, elements: state.content.elements.filter(item => !ids || ids.includes(item.id)) }; }
+    if (mode === 'objects') { const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : undefined; return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, elements: state.content.elements.filter(item => !ids || ids.includes(item.id)), ...(ids?.includes('$order') ? { units: [{ id: '$order', value: orderUnit(state.content) }] } : {}) }; }
     if (mode === 'source') {
       if (args.feedbackId) {
         const snapshots = state.sources[safeId(args.feedbackId, '反馈 ID')], snapshot = snapshots?.find(item => (args.regionId === undefined || item.regionId === args.regionId) && (args.elementId === undefined || item.element?.id === args.elementId));
@@ -226,7 +283,7 @@ export const whiteboardProduct: ProductDefinition<WhiteboardContent, Operation, 
     throw new StudioError('INVALID_ARGUMENT', '不支持的白板读取方式。');
   },
   diff(before, after) {
-    return { changes: elementChanges(before.content, after.content), style: same(before.content.style, after.content.style) ? undefined : { before: before.content.style, after: after.content.style } };
+    return { changes: elementChanges(before.content, after.content), order: orderChanged(before.content, after.content) ? { before: orderUnit(before.content), after: orderUnit(after.content) } : undefined, style: same(before.content.style, after.content.style) ? undefined : { before: before.content.style, after: after.content.style } };
   },
   rewriteAssetReferences(content, from, to) {
     for (const element of content.elements) for (const key of ['src', 'video'] as const) if (typeof element[key] === 'string') element[key] = element[key]!.replace(`/assets/${from}/`, `/assets/${to}/`);

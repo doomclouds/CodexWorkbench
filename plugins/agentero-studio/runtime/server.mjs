@@ -7285,6 +7285,7 @@ var require_dist = __commonJS({
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, rename as rename2, rm, writeFile as writeFile2 } from "node:fs/promises";
 import { dirname, join as join2 } from "node:path";
+import { setTimeout as delay2 } from "node:timers/promises";
 function safeId(value, label = "\u4F5C\u54C1 ID") {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) throw new StudioError("INVALID_ARGUMENT", `${label}\u65E0\u6548\u3002`);
   return value;
@@ -7310,7 +7311,15 @@ async function atomicWrite(file2, content) {
   const temporary = join2(dirname(file2), `.${randomUUID3()}.tmp`);
   try {
     await writeFile2(temporary, content, { flag: "wx" });
-    await rename2(temporary, file2);
+    for (let retry = 0; ; retry++) {
+      try {
+        await rename2(temporary, file2);
+        break;
+      } catch (error62) {
+        if (process.platform !== "win32" || retry === 5 || !["EPERM", "EBUSY", "EACCES"].includes(error62.code ?? "")) throw error62;
+        await delay2(50 * (retry + 1));
+      }
+    }
   } finally {
     await rm(temporary, { force: true });
   }
@@ -7389,14 +7398,19 @@ function arrowHeads(arrow) {
   if (Array.isArray(heads) && heads.length === 2 && heads.every((head) => ["none", "arrow", "circle"].includes(head))) return heads;
   return [arrow.head === "both" ? "arrow" : "none", arrow.head === "none" ? "none" : "arrow"];
 }
+function rotatePoint(point, center, degrees) {
+  const angle = degrees % 360 * Math.PI / 180;
+  if (!angle) return point;
+  const cosine = Math.cos(angle), sine = Math.sin(angle), dx = point.x - center.x, dy = point.y - center.y;
+  return { x: center.x + dx * cosine - dy * sine, y: center.y + dx * sine + dy * cosine };
+}
 function arrowEnd(element, side, other, fallback) {
   if (!element) return fallback;
   const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
-  const resolved = side ?? (Math.abs(other.x - center.x) > Math.abs(other.y - center.y) ? other.x >= center.x ? "right" : "left" : other.y >= center.y ? "bottom" : "top");
-  if (resolved === "left") return { x: element.x, y: center.y };
-  if (resolved === "right") return { x: element.x + element.w, y: center.y };
-  if (resolved === "top") return { x: center.x, y: element.y };
-  return { x: center.x, y: element.y + element.h };
+  const localOther = rotatePoint(other, center, -(element.rotation ?? 0));
+  const resolved = side ?? (Math.abs(localOther.x - center.x) > Math.abs(localOther.y - center.y) ? localOther.x >= center.x ? "right" : "left" : localOther.y >= center.y ? "bottom" : "top");
+  const anchor3 = resolved === "left" ? { x: element.x, y: center.y } : resolved === "right" ? { x: element.x + element.w, y: center.y } : resolved === "top" ? { x: center.x, y: element.y } : { x: center.x, y: element.y + element.h };
+  return rotatePoint(anchor3, center, element.rotation ?? 0);
 }
 function roundedPolyline(points, radius = 8) {
   if (!points.length) return "";
@@ -7434,8 +7448,8 @@ function arrowGeometry(arrow, elements) {
     const firstOther = firstHorizontal ? { x: at[0], y: fromCenter.y } : { x: fromCenter.x, y: at[0] };
     const nextHorizontal = firstHorizontal === (offsets.length % 2 === 0);
     const lastOther = nextHorizontal ? { x: toCenter.x, y: at.at(-1) } : { x: at.at(-1), y: toCenter.y };
-    from = arrowEnd(fromElement, arrow.fromSide ?? (firstHorizontal ? firstOther.x >= fromCenter.x ? "right" : "left" : firstOther.y >= fromCenter.y ? "bottom" : "top"), firstOther, fromCenter);
-    to = arrowEnd(toElement, arrow.toSide ?? (nextHorizontal ? lastOther.y >= toCenter.y ? "bottom" : "top" : lastOther.x >= toCenter.x ? "right" : "left"), lastOther, toCenter);
+    from = arrowEnd(fromElement, arrow.fromSide ?? ((fromElement?.rotation ?? 0) % 360 ? void 0 : firstHorizontal ? firstOther.x >= fromCenter.x ? "right" : "left" : firstOther.y >= fromCenter.y ? "bottom" : "top"), firstOther, fromCenter);
+    to = arrowEnd(toElement, arrow.toSide ?? ((toElement?.rotation ?? 0) % 360 ? void 0 : nextHorizontal ? lastOther.y >= toCenter.y ? "bottom" : "top" : lastOther.x >= toCenter.x ? "right" : "left"), lastOther, toCenter);
     points = [from];
     let cursor = from;
     at.forEach((coordinate2, index) => {
@@ -7445,6 +7459,11 @@ function arrowGeometry(arrow, elements) {
     points.push(nextHorizontal ? { x: to.x, y: cursor.y } : { x: cursor.x, y: to.y }, to);
     const clearsEnd = (element, endpoint2, neighbor, side) => {
       if (!element) return true;
+      if ((element.rotation ?? 0) % 360) {
+        const center2 = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
+        const localEnd = rotatePoint(endpoint2, center2, -element.rotation), localNeighbor = rotatePoint(neighbor, center2, -element.rotation);
+        return (localNeighbor.x - localEnd.x) * (localEnd.x - center2.x) + (localNeighbor.y - localEnd.y) * (localEnd.y - center2.y) > 0;
+      }
       if (side === "left" || endpoint2.x === element.x && endpoint2.y === element.y + element.h / 2) return neighbor.y === endpoint2.y && neighbor.x < endpoint2.x;
       if (side === "right" || endpoint2.x === element.x + element.w && endpoint2.y === element.y + element.h / 2) return neighbor.y === endpoint2.y && neighbor.x > endpoint2.x;
       if (side === "top" || endpoint2.y === element.y) return neighbor.x === endpoint2.x && neighbor.y < endpoint2.y;
@@ -8223,28 +8242,84 @@ function safeHttpLink(href) {
     return void 0;
   }
 }
-function parseInlineText(text2) {
+function parseInlineText(text2, inherited = {}) {
   const segments = [];
-  const pattern = /\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|`([^`\n]+)`|\[([^\[\]\n]+)\]\(([^\s)]+)\)/g;
-  let previous = 0;
-  for (const match of text2.matchAll(pattern)) {
-    if (match.index > previous) segments.push({ type: "text", text: text2.slice(previous, match.index) });
-    if (match[1] !== void 0) segments.push({ type: "bold", text: match[1] });
-    else if (match[2] !== void 0) segments.push({ type: "italic", text: match[2] });
-    else if (match[3] !== void 0) segments.push({ type: "code", text: match[3] });
-    else {
-      const href = safeHttpLink(match[5]);
-      segments.push(href ? { type: "link", text: match[4], href } : { type: "text", text: match[0] });
+  const push = (value, code = false) => {
+    const type = inherited.href ? "link" : code ? "code" : inherited.bold ? "bold" : inherited.italic ? "italic" : "text";
+    const next = { type, text: value, ...inherited.href ? { href: inherited.href } : {}, ...inherited.bold && type !== "bold" ? { bold: true } : {}, ...inherited.italic && type !== "italic" ? { italic: true } : {}, ...code && type !== "code" ? { code: true } : {} };
+    const previous = segments.at(-1);
+    if (previous && previous.type === next.type && previous.href === next.href && previous.bold === next.bold && previous.italic === next.italic && previous.code === next.code) previous.text += value;
+    else segments.push(next);
+  };
+  let index = 0;
+  while (index < text2.length) {
+    if (text2[index] === "\\" && index + 1 < text2.length && /[\\*_`\[\]]/.test(text2[index + 1])) {
+      push(text2[index + 1]);
+      index += 2;
+      continue;
     }
-    previous = match.index + match[0].length;
+    if (text2[index] === "`") {
+      const end = text2.indexOf("`", index + 1);
+      if (end > index + 1 && !text2.slice(index, end).includes("\n")) {
+        push(text2.slice(index + 1, end), true);
+        index = end + 1;
+        continue;
+      }
+    }
+    if (text2[index] === "[") {
+      let close = index + 1;
+      while (close < text2.length) {
+        if (text2[close] === "\\") {
+          close += 2;
+          continue;
+        }
+        if (text2[close] === "]") break;
+        close++;
+      }
+      if (text2[close + 1] === "(") {
+        const end = text2.indexOf(")", close + 2);
+        if (end > close + 2) {
+          const raw = text2.slice(index, end + 1), href = safeHttpLink(text2.slice(close + 2, end));
+          if (href) segments.push(...parseInlineText(text2.slice(index + 1, close), { ...inherited, href }));
+          else push(raw);
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+    if (text2[index] === "*" || text2[index] === "_") {
+      const opening = /^(?:\*+|_+)/.exec(text2.slice(index))[0], length = opening.length;
+      if (length <= 3) {
+        const runs = text2[index] === "_" ? /_+/g : /\*+/g;
+        runs.lastIndex = index + length;
+        let closing;
+        while (closing = runs.exec(text2)) {
+          if (text2.slice(index + length, closing.index).includes("\n")) break;
+          let escapes = 0;
+          for (let at = closing.index - 1; at >= 0 && text2[at] === "\\"; at--) escapes++;
+          if (escapes % 2 || closing[0].length !== length) continue;
+          if (closing.index > index + length) {
+            segments.push(...parseInlineText(text2.slice(index + length, closing.index), { ...inherited, ...length >= 2 ? { bold: true } : {}, ...length === 1 || length === 3 ? { italic: true } : {} }));
+            index = closing.index + length;
+            break;
+          }
+        }
+        if (closing && index === closing.index + length) continue;
+      }
+      push(opening);
+      index += length;
+      continue;
+    }
+    push(text2[index]);
+    index++;
   }
-  if (previous < text2.length || !segments.length) segments.push({ type: "text", text: text2.slice(previous) });
+  if (!segments.length) push("");
   return segments;
 }
 function parseRichText(text2) {
   return text2.split(/\r?\n/).map((line) => {
-    const list = /^(- |(\d+)\. )(.*)$/.exec(line);
-    return list ? { type: list[2] ? "ordered" : "bullet", marker: list[2] ? `${list[2]}.` : "\u2022", segments: parseInlineText(list[3]) } : { type: "paragraph", segments: parseInlineText(line) };
+    const list = /^(\s*)(- |(\d+)\. )(.*)$/.exec(line);
+    return list ? { type: list[3] ? "ordered" : "bullet", marker: list[3] ? `${list[3]}.` : "\u2022", ...list[1].length ? { indent: Math.floor(list[1].length / 2) } : {}, segments: parseInlineText(list[4]) } : { type: "paragraph", segments: parseInlineText(line) };
   });
 }
 var init_rich_text = __esm({
@@ -8342,18 +8417,18 @@ function extractRegionSvg(html2, prefix) {
 function wrap(text2, width, size) {
   const rows = [];
   for (const line of parseRichText(text2)) {
-    const segments = [...line.marker ? [{ type: "text", text: `${line.marker} ` }] : [], ...line.segments];
+    const segments = [...line.marker ? [{ type: "text", text: `${"  ".repeat(line.indent ?? 0)}${line.marker} ` }] : [], ...line.segments];
     let row = [];
     let used = 0;
     for (const segment of segments) for (const character of segment.text) {
-      const cost = /[\u2e80-\uffff]/u.test(character) ? size : size * (segment.type === "code" ? 0.62 : 0.6);
+      const cost = /[\u2e80-\uffff]/u.test(character) ? size : size * (segment.type === "code" || segment.code ? 0.62 : 0.6);
       if (used && used + cost > width) {
         rows.push(row);
         row = [];
         used = 0;
       }
       const previous = row.at(-1);
-      if (previous?.type === segment.type && previous.href === segment.href) previous.text += character;
+      if (previous?.type === segment.type && previous.href === segment.href && previous.bold === segment.bold && previous.italic === segment.italic && previous.code === segment.code) previous.text += character;
       else row.push({ ...segment, text: character });
       used += cost;
     }
@@ -8368,7 +8443,7 @@ function textSvg(e, board, color, center = false) {
   const x2 = aligned === "center" ? e.x + e.w / 2 : aligned === "right" ? e.x + e.w - 12 : e.x + (center ? 12 : 0);
   const y = center ? e.y + Math.max(16, (e.h - (lines.length - 1) * size * 1.45) / 2) + size * 0.35 : e.y + size;
   const segment = (part) => {
-    const span = `<tspan${part.type === "bold" ? ' font-weight="700"' : ""}${part.type === "italic" ? ' font-style="italic"' : ""}${part.type === "code" ? ` font-family="${escapeXml(board.style.monoFont)}"` : ""}>${escapeXml(part.text)}</tspan>`;
+    const span = `<tspan${part.type === "bold" || part.bold ? ' font-weight="700"' : ""}${part.type === "italic" || part.italic ? ' font-style="italic"' : ""}${part.type === "code" || part.code ? ` font-family="${escapeXml(board.style.monoFont)}"` : ""}>${escapeXml(part.text)}</tspan>`;
     return part.type === "link" && part.href ? `<a href="${escapeXml(part.href)}" fill="${escapeXml(board.style.link)}">${span}</a>` : span;
   };
   return `<text fill="${escapeXml(color)}" font-family="${escapeXml(e.fontFamily ?? board.style.fontFamily)}" font-size="${size}" font-weight="${e.bold ? 700 : 400}" font-style="${e.italic ? "italic" : "normal"}" text-anchor="${aligned === "center" ? "middle" : aligned === "right" ? "end" : "start"}">${lines.map((line, i2) => `<tspan x="${x2}" y="${y + i2 * size * 1.45}">${line.map(segment).join("")}</tspan>`).join("")}</text>`;
@@ -8440,10 +8515,15 @@ function elementSvg(e, board, options = {}) {
     const href = !e.video && safeHttpLink(e.href);
     if (href) markup = `<a href="${escapeXml(href)}" target="_blank" rel="noopener noreferrer">${markup}</a>`;
   } else if (e.type === "table") {
-    const rows = Array.isArray(e.data?.rows) ? e.data.rows : [];
+    const storedRows = e.data?.rows;
+    const rows = Array.isArray(storedRows) && storedRows.every(Array.isArray) && storedRows.length ? storedRows : typeof e.text === "string" && e.text.length ? e.text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").map((row) => row.split("	")) : [[""]];
     const cols = Math.max(1, ...rows.map((row) => Array.isArray(row) ? row.length : 1));
     const rowHeight = e.h / Math.max(1, rows.length);
-    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + ci * e.w / cols}" y="${e.y + ri * rowHeight}" width="${e.w / cols}" height="${rowHeight}" fill="${escapeXml(ri ? style.paper : style["paper-2"] ?? style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + ci * e.w / cols + 8, y: e.y + ri * rowHeight, w: e.w / cols - 16, h: rowHeight, text: String(cell), fontSize: 14 }, board, style.ink, true)}`).join("")).join("");
+    const stored = e.data?.columnWidths;
+    const proportions = Array.isArray(stored) && stored.length === cols && stored.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0) ? stored : Array.from({ length: cols }, () => 1);
+    const total = proportions.reduce((sum, value) => sum + value, 0), widths = proportions.map((value) => value / total * e.w), offsets = [0];
+    for (const width of widths) offsets.push(offsets.at(-1) + width);
+    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri === 0 && e.data?.head !== false ? semanticColor(e.fill, style, style["paper-2"] ?? style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + offsets[ci] + 8, y: e.y + ri * rowHeight, w: widths[ci] - 16, h: rowHeight, text: String(cell), fontSize: e.fontSize ?? 14, bold: ri === 0 && e.data?.head !== false ? true : e.bold }, board, semanticColor(e.color, style, style.ink), true)}`).join("")).join("");
   } else {
     const fill = e.type === "container" || e.hollow ? "none" : semanticColor(e.fill, style, e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
     let textColor = semanticColor(e.color, style, style.ink);
@@ -8628,7 +8708,7 @@ function normalizeElement(input2, id2) {
   return result;
 }
 function initialWhiteboard(elements, base) {
-  return { elements: (base?.elements ?? (Array.isArray(elements) ? elements : [])).map((item) => normalizeElement(item)), style: copy(base?.style ?? DEFAULT_STYLE), ...base?.motion ? { motion: copy(base.motion) } : {} };
+  return { elements: (base?.elements ?? (Array.isArray(elements) ? elements : [])).map((item) => normalizeElement(item)), style: copy(base?.style ?? DEFAULT_STYLE), orderVersion: 0, ...base?.motion ? { motion: copy(base.motion) } : {} };
 }
 function htmlSource(snapshots, regionId, requested) {
   for (const snapshot of requested === void 0 ? snapshots.slice(0, 1) : snapshots) {
@@ -8641,9 +8721,16 @@ function elementChanges(before, after) {
   const a = new Map(before.elements.map((item) => [item.id, item])), b = new Map(after.elements.map((item) => [item.id, item]));
   return [.../* @__PURE__ */ new Set([...a.keys(), ...b.keys()])].flatMap((id2) => same(a.get(id2), b.get(id2)) ? [] : [{ id: id2, before: a.get(id2) ?? null, after: b.get(id2) ?? null }]);
 }
-function restoredElement(saved, current) {
-  const restored = { ...copy(saved), version: Math.max(current?.version ?? 0, saved.version) + 1 };
-  if (restored.type === "html") restored.sourceRevision = current?.html === restored.html ? current?.sourceRevision ?? 1 : Number(current?.sourceRevision ?? saved.sourceRevision ?? 0) + 1;
+function orderUnit(content) {
+  return { version: content.orderVersion ?? 0, ids: content.elements.map((element) => element.id) };
+}
+function orderChanged(before, after) {
+  const a = new Set(before.elements.map((element) => element.id)), b = new Set(after.elements.map((element) => element.id));
+  return !same(before.elements.filter((element) => b.has(element.id)).map((element) => element.id), after.elements.filter((element) => a.has(element.id)).map((element) => element.id));
+}
+function restoredElement(saved, current, historical) {
+  const restored = { ...copy(saved), version: Math.max(current?.version ?? 0, historical?.version ?? 0, saved.version) + 1 };
+  if (restored.type === "html") restored.sourceRevision = current && current.html === restored.html ? current.sourceRevision ?? 1 : Math.max(Number(current?.sourceRevision ?? 0), Number(historical?.sourceRevision ?? 0), Number(saved.sourceRevision ?? 0)) + 1;
   return restored;
 }
 function deletedIds(content, operation2) {
@@ -8655,7 +8742,7 @@ function assertLockedGeometry(before, after, baseline) {
   const protectedIds = new Set([...baseline.elements, ...before.elements].filter((element) => element.locked).map((element) => element.id));
   if (!protectedIds.size) return;
   const beforeById = new Map(before.elements.map((element) => [element.id, element])), afterById = new Map(after.elements.map((element) => [element.id, element]));
-  const bounds = (element) => element && [element.x, element.y, element.w, element.h];
+  const bounds = (element) => element && [element.x, element.y, element.w, element.h, element.rotation];
   for (const current of before.elements) {
     if (!protectedIds.has(current.id)) continue;
     const next = afterById.get(current.id);
@@ -8690,12 +8777,20 @@ var init_whiteboard = __esm({
       type: "whiteboard",
       validate(content) {
         if (!object3(content) || !Array.isArray(content.elements) || !object3(content.style)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5185\u5BB9\u65E0\u6548\u3002");
+        if (content.orderVersion !== void 0 && (!Number.isSafeInteger(content.orderVersion) || content.orderVersion < 0)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5C42\u7EA7\u7248\u672C\u65E0\u6548\u3002");
         if (content.elements.length > 2e3 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError("TOO_LARGE", "\u767D\u677F\u5185\u5BB9\u8D85\u8FC7\u5F53\u524D\u5BB9\u91CF\uFF0C\u8BF7\u5206\u6210\u591A\u4E2A\u4F5C\u54C1\u3002");
       },
-      versionOf: (content, id2) => content.elements.find((item) => item.id === id2)?.version ?? 0,
+      versionOf: (content, id2) => id2 === "$order" ? content.orderVersion ?? 0 : content.elements.find((item) => item.id === id2)?.version ?? 0,
       targets(content, operation2) {
-        if (["style", "motion", "restore"].includes(operation2.op)) return;
-        if (operation2.op === "layout") return operation2.ids ?? content.elements.map((element) => element.id);
+        if (operation2.op === "restore") {
+          const ids = operation2.ids ?? (operation2.id === void 0 ? void 0 : [operation2.id]);
+          return ids?.some((id2) => id2.startsWith("$") && id2 !== "$order") ? void 0 : ids;
+        }
+        if (["style", "motion"].includes(operation2.op)) return;
+        if (operation2.op === "layout") {
+          const ids = operation2.ids ?? content.elements.map((element) => element.id);
+          return ["front", "back", "forward", "backward"].includes(operation2.preset ?? "") ? [...ids, "$order"] : ids;
+        }
         if (operation2.op === "delete") return [.../* @__PURE__ */ new Set([...operation2.ids ?? [safeId(operation2.id, "\u5143\u7D20 ID")], ...deletedIds(content, operation2)])];
         if (operation2.op === "update") return [safeId(operation2.id, "\u5143\u7D20 ID")];
         return [];
@@ -8707,6 +8802,7 @@ var init_whiteboard = __esm({
           if (content.elements.some((item) => item.id === element.id)) throw new StudioError("CONFLICT", "\u5143\u7D20 ID \u5DF2\u5B58\u5728\u3002", { elementId: element.id });
           assertLockedGeometry(content, { ...content, elements: [...content.elements, element] }, baseline);
           content.elements.push(element);
+          content.orderVersion = (content.orderVersion ?? 0) + 1;
           return [element.id];
         }
         if (operation2.op === "update") {
@@ -8727,6 +8823,7 @@ var init_whiteboard = __esm({
           const ids = deletedIds(content, operation2), elements = content.elements.filter((element) => !ids.includes(element.id));
           assertLockedGeometry(content, { ...content, elements }, baseline);
           content.elements = elements;
+          if (ids.length) content.orderVersion = (content.orderVersion ?? 0) + 1;
           return ids;
         }
         if (operation2.op === "style") {
@@ -8740,6 +8837,22 @@ var init_whiteboard = __esm({
           return ["$motion"];
         }
         if (operation2.op === "layout") {
+          if (["front", "back", "forward", "backward"].includes(operation2.preset ?? "")) {
+            const selected = new Set(operation2.ids ?? content.elements.map((element) => element.id));
+            const locked = content.elements.find((element) => selected.has(element.id) && (element.locked || baseline.elements.find((item) => item.id === element.id)?.locked));
+            if (locked) throw new StudioError("LOCKED", "\u5BF9\u8C61\u5DF2\u9501\u5B9A\uFF0C\u8BF7\u5148\u5355\u72EC\u89E3\u9501\u540E\u8C03\u6574\u5C42\u7EA7\u3002", { elementId: locked.id });
+            const elements2 = [...content.elements];
+            if (operation2.preset === "front" || operation2.preset === "back") {
+              const picked = elements2.filter((element) => selected.has(element.id)), rest = elements2.filter((element) => !selected.has(element.id));
+              elements2.splice(0, elements2.length, ...operation2.preset === "front" ? [...rest, ...picked] : [...picked, ...rest]);
+            } else if (operation2.preset === "forward") {
+              for (let index = elements2.length - 2; index >= 0; index--) if (selected.has(elements2[index].id) && !selected.has(elements2[index + 1].id)) [elements2[index], elements2[index + 1]] = [elements2[index + 1], elements2[index]];
+            } else for (let index = 1; index < elements2.length; index++) if (selected.has(elements2[index].id) && !selected.has(elements2[index - 1].id)) [elements2[index], elements2[index - 1]] = [elements2[index - 1], elements2[index]];
+            const changed = elements2.filter((element, index) => selected.has(element.id) && content.elements[index]?.id !== element.id).map((element) => element.id);
+            content.elements = elements2.map((element) => changed.includes(element.id) ? { ...element, version: element.version + 1 } : element);
+            if (changed.length) content.orderVersion = (content.orderVersion ?? 0) + 1;
+            return changed.length ? [...changed, "$order"] : changed;
+          }
           const elements = content.elements.filter((item) => !operation2.ids || operation2.ids.includes(item.id)).map((item) => ({ ...item }));
           const columns = operation2.preset === "column" ? 1 : operation2.preset === "row" ? Math.max(1, elements.length) : Math.max(1, Math.ceil(Math.sqrt(elements.length)));
           const width = Math.max(220, ...elements.map((item) => item.w)), height = Math.max(120, ...elements.map((item) => item.h));
@@ -8756,12 +8869,12 @@ var init_whiteboard = __esm({
         throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u767D\u677F\u4FEE\u6539\u64CD\u4F5C\u3002");
       },
       diff(before, after) {
-        return [...elementChanges(before, after), ...["style", "motion"].flatMap((key) => same(before[key], after[key]) ? [] : [{ id: `$${key}`, before: before[key], after: after[key] }])];
+        return [...elementChanges(before, after), ...orderChanged(before, after) ? [{ id: "$order", before: orderUnit(before), after: orderUnit(after) }] : [], ...["style", "motion"].flatMap((key) => same(before[key], after[key]) ? [] : [{ id: `$${key}`, before: before[key], after: after[key] }])];
       },
       readUnit(content, id2) {
-        return id2 === "$style" ? content.style : id2 === "$motion" ? content.motion : content.elements.find((item) => item.id === id2) ?? null;
+        return id2 === "$style" ? content.style : id2 === "$motion" ? content.motion : id2 === "$order" ? orderUnit(content) : content.elements.find((item) => item.id === id2) ?? null;
       },
-      restoreUnit(content, change) {
+      restoreUnit(content, change, history = []) {
         if (change.id === "$style") {
           content.style = copy(change.before);
           return;
@@ -8770,15 +8883,52 @@ var init_whiteboard = __esm({
           content.motion = copy(change.before);
           return;
         }
+        if (change.id === "$order") {
+          const saved = change.before, byId2 = new Map(content.elements.map((element) => [element.id, element]));
+          const elements = [...saved.ids.flatMap((id2) => byId2.has(id2) ? [byId2.get(id2)] : []), ...content.elements.filter((element) => !saved.ids.includes(element.id))];
+          if (!same(content.elements.map((element) => element.id), elements.map((element) => element.id))) {
+            content.elements = elements;
+            content.orderVersion = Math.max(content.orderVersion ?? 0, ...history.map((snapshot) => snapshot.orderVersion ?? 0)) + 1;
+          }
+          return;
+        }
         const index = content.elements.findIndex((item) => item.id === change.id);
         if (change.before) {
-          const restored = restoredElement(change.before, change.after);
+          const historical = { version: 0, sourceRevision: 0 };
+          for (const snapshot of history) {
+            const element = snapshot.elements.find((item) => item.id === change.id);
+            if (!element) continue;
+            historical.version = Math.max(historical.version, element.version);
+            historical.sourceRevision = Math.max(historical.sourceRevision, Number(element.sourceRevision ?? 0));
+          }
+          const restored = restoredElement(change.before, content.elements[index], historical);
           if (index >= 0) content.elements[index] = restored;
-          else content.elements.push(restored);
-        } else if (index >= 0) content.elements.splice(index, 1);
+          else {
+            const source = history.slice().reverse().find((snapshot) => snapshot.elements.some((element) => same(element, change.before)));
+            const sourceIndex = source?.elements.findIndex((element) => element.id === change.id) ?? -1;
+            const successor = source?.elements.slice(sourceIndex + 1).find((element) => content.elements.some((current) => current.id === element.id));
+            const insertAt = successor ? content.elements.findIndex((element) => element.id === successor.id) : content.elements.length;
+            content.elements.splice(insertAt, 0, restored);
+            content.orderVersion = Math.max(content.orderVersion ?? 0, ...history.map((snapshot) => snapshot.orderVersion ?? 0)) + 1;
+          }
+        } else if (index >= 0) {
+          content.elements.splice(index, 1);
+          content.orderVersion = Math.max(content.orderVersion ?? 0, ...history.map((snapshot) => snapshot.orderVersion ?? 0)) + 1;
+        }
       },
-      restore(current, saved) {
-        return { elements: saved.elements.map((item) => restoredElement(item, current.elements.find((element) => element.id === item.id))), style: copy(saved.style), motion: copy(saved.motion) };
+      restore(current, saved, history = []) {
+        const historical = /* @__PURE__ */ new Map();
+        for (const snapshot of history) for (const element of snapshot.elements) {
+          const previous = historical.get(element.id);
+          historical.set(element.id, { version: Math.max(previous?.version ?? 0, element.version), sourceRevision: Math.max(Number(previous?.sourceRevision ?? 0), Number(element.sourceRevision ?? 0)) });
+        }
+        const changedOrder = !same(current.elements.map((element) => element.id), saved.elements.map((element) => element.id));
+        return { elements: saved.elements.map((item) => restoredElement(item, current.elements.find((element) => element.id === item.id), historical.get(item.id))), style: copy(saved.style), motion: copy(saved.motion), orderVersion: Math.max(current.orderVersion ?? 0, ...history.map((snapshot) => snapshot.orderVersion ?? 0)) + (changedOrder ? 1 : 0) };
+      },
+      validateRestore(current, restored, baseline) {
+        assertLockedGeometry(current, restored, baseline);
+        const unlocked = current.elements.find((element) => element.locked && restored.elements.some((next) => next.id === element.id && !next.locked));
+        if (unlocked) throw new StudioError("LOCKED", "\u6062\u590D\u5386\u53F2\u4E0D\u80FD\u9690\u5F0F\u89E3\u9501\u5BF9\u8C61\uFF0C\u8BF7\u5148\u5355\u72EC\u660E\u786E\u89E3\u9501\u3002", { elementId: unlocked.id });
       },
       snapshotFeedback(artifactId, feedbackId, snapshots, value, versions) {
         const anchor3 = object3(value) ? copy(value) : {};
@@ -8825,14 +8975,14 @@ var init_whiteboard = __esm({
         if (mode === "summary") {
           const offset = Math.max(0, Math.floor(Number(args.offset) || 0)), limit = Math.min(200, Math.max(1, Math.floor(Number(args.limit) || 100)));
           const items = state.content.elements.slice(offset, offset + limit).map((item) => ({ id: item.id, type: item.type, label: item.text?.slice(0, 200), version: item.version, sourceRevision: item.sourceRevision, x: item.x, y: item.y, w: item.w, h: item.h }));
-          return { artifact: state.artifact, counts: state.content.elements.reduce((out, item) => {
+          return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, counts: state.content.elements.reduce((out, item) => {
             out[item.type] = (out[item.type] ?? 0) + 1;
             return out;
           }, {}), items, totalCount: state.content.elements.length, offset, ...offset + limit < state.content.elements.length ? { nextOffset: offset + limit } : {}, feedback: state.feedback.filter((item) => item.status !== "resolved").length };
         }
         if (mode === "objects") {
           const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : void 0;
-          return { artifact: state.artifact, elements: state.content.elements.filter((item) => !ids || ids.includes(item.id)) };
+          return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, elements: state.content.elements.filter((item) => !ids || ids.includes(item.id)), ...ids?.includes("$order") ? { units: [{ id: "$order", value: orderUnit(state.content) }] } : {} };
         }
         if (mode === "source") {
           if (args.feedbackId) {
@@ -8846,7 +8996,7 @@ var init_whiteboard = __esm({
         throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u767D\u677F\u8BFB\u53D6\u65B9\u5F0F\u3002");
       },
       diff(before, after) {
-        return { changes: elementChanges(before.content, after.content), style: same(before.content.style, after.content.style) ? void 0 : { before: before.content.style, after: after.content.style } };
+        return { changes: elementChanges(before.content, after.content), order: orderChanged(before.content, after.content) ? { before: orderUnit(before.content), after: orderUnit(after.content) } : void 0, style: same(before.content.style, after.content.style) ? void 0 : { before: before.content.style, after: after.content.style } };
       },
       rewriteAssetReferences(content, from, to) {
         for (const element of content.elements) for (const key of ["src", "video"]) if (typeof element[key] === "string") element[key] = element[key].replace(`/assets/${from}/`, `/assets/${to}/`);
@@ -10623,6 +10773,26 @@ function version2(state, value) {
   if (!found) throw new StudioError("NOT_FOUND", "\u5386\u53F2\u7248\u672C\u4E0D\u5B58\u5728\u6216\u5DF2\u8D85\u8FC7\u4FDD\u7559\u8303\u56F4\u3002");
   return found;
 }
+function historyBatches(history) {
+  const batches = [];
+  for (const [index, entry] of history.entries()) {
+    const previous = batches.at(-1), at = Date.parse(entry.createdAt);
+    const joins = previous && previous.firstRevision > 0 && entry.revision > 0 && previous.actor.id === entry.actor.id && previous.actor.kind === entry.actor.kind && !previous.restoredFrom && !entry.restoredFrom && at >= Date.parse(previous.createdAt) && at - Date.parse(previous.createdAt) < 3e4 && at - Date.parse(previous.firstCreatedAt) < 3e5;
+    if (joins) {
+      batches[batches.length - 1] = { ...previous, ...copy(entry), changedIds: [.../* @__PURE__ */ new Set([...previous.changedIds, ...entry.changedIds])], versionIds: [...previous.versionIds, entry.id] };
+    } else batches.push({ ...copy(entry), firstVersionId: entry.id, firstRevision: entry.revision, firstCreatedAt: entry.createdAt, ...index ? { beforeVersionId: history[index - 1].id } : {}, versionIds: [entry.id] });
+  }
+  return batches;
+}
+function restoreUnitIds(operation2) {
+  if (operation2.id === void 0 && operation2.ids === void 0) return;
+  if (operation2.id !== void 0 && operation2.ids !== void 0 || operation2.ids !== void 0 && (!Array.isArray(operation2.ids) || !operation2.ids.length || operation2.ids.length > 200)) throw new StudioError("INVALID_ARGUMENT", "\u5386\u53F2\u6062\u590D\u8BF7\u63D0\u4F9B\u4E00\u4E2A\u5BF9\u8C61 ID\uFF0C\u6216 1 \u81F3 200 \u4E2A\u5BF9\u8C61 ID \u7684\u5217\u8868\u3002");
+  return [...new Set((operation2.ids ?? [operation2.id]).map((value) => typeof value === "string" && value.startsWith("$") ? `$${safeId(value.slice(1), "\u5185\u5BB9\u5355\u5143 ID")}` : safeId(value, "\u5185\u5BB9\u5355\u5143 ID")))];
+}
+function mutationTargets(content, operation2, adapter) {
+  if (operation2.op === "restore" && !restoreUnitIds(operation2)) return;
+  return adapter.targets(content, operation2);
+}
 function makeHistory(state, actor, summary, changedIds, restoredFrom) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   state.artifact.revision++;
@@ -10632,11 +10802,26 @@ function makeHistory(state, actor, summary, changedIds, restoredFrom) {
   if (state.history.length > 200) state.history.splice(0, state.history.length - 200);
   return entry;
 }
-function restoreVersion(state, saved, actor, adapter, undo = false) {
+function restoreVersion(state, saved, actor, adapter, undo = false, ids, baseline = state.content) {
+  const current = state.content, history = state.history.map((item) => item.content);
+  if (ids && undo) throw new StudioError("INVALID_ARGUMENT", "\u5B89\u5168\u64A4\u56DE\u4E8B\u52A1\u4E0D\u80FD\u540C\u65F6\u6307\u5B9A\u5C40\u90E8\u6062\u590D\u5BF9\u8C61\u3002");
+  if (ids) {
+    const restored2 = copy(current);
+    for (const id2 of [...ids.filter((id3) => !id3.startsWith("$")), ...ids.filter((id3) => id3.startsWith("$"))]) {
+      const before2 = adapter.readUnit(saved.content, id2), after = adapter.readUnit(current, id2);
+      if (before2 == null && after == null) throw new StudioError("NOT_FOUND", "\u8BE5\u5185\u5BB9\u5355\u5143\u5728\u5F53\u524D\u4F5C\u54C1\u548C\u6240\u9009\u7248\u672C\u4E2D\u5747\u4E0D\u5B58\u5728\u3002", { id: id2 });
+      adapter.restoreUnit(restored2, { id: id2, before: before2, after }, history);
+    }
+    adapter.validateRestore?.(current, restored2, baseline);
+    const changedIds = adapter.diff(current, restored2).map((change) => change.id);
+    state.content = restored2;
+    return changedIds;
+  }
   if (!undo) {
-    const restored = adapter.restore(state.content, saved.content);
-    const changedIds = adapter.diff(state.content, restored).map((change) => change.id);
-    state.content = restored;
+    const restored2 = adapter.restore(current, saved.content, history);
+    adapter.validateRestore?.(current, restored2, baseline);
+    const changedIds = adapter.diff(current, restored2).map((change) => change.id);
+    state.content = restored2;
     state.artifact.title = saved.artifact.title;
     return changedIds;
   }
@@ -10644,7 +10829,10 @@ function restoreVersion(state, saved, actor, adapter, undo = false) {
   if (saved.entry.actor.id !== actor.id || !before) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u64A4\u56DE\u81EA\u5DF1\u63D0\u4EA4\u7684\u5185\u5BB9\u4FEE\u6539\u3002");
   const differences = adapter.diff(before.content, saved.content);
   for (const difference of differences) if (!same(adapter.readUnit(state.content, difference.id), difference.after)) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: difference.id });
-  for (const difference of differences) adapter.restoreUnit(state.content, difference);
+  const restored = copy(current);
+  for (const difference of differences) adapter.restoreUnit(restored, difference, history);
+  adapter.validateRestore?.(current, restored, baseline);
+  state.content = restored;
   return differences.map((change) => change.id);
 }
 function applyMutation(state, args, actor, adapter) {
@@ -10664,7 +10852,7 @@ function applyMutation(state, args, actor, adapter) {
   if (args.expectedRevision === void 0) {
     for (const operation2 of operations) {
       if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-      const targets = operation2.op === "restore" ? void 0 : adapter.targets(state.content, operation2);
+      const targets = mutationTargets(state.content, operation2, adapter);
       if (!targets || targets.some((id2) => !expected || !Object.hasOwn(expected, id2))) throw new StudioError("VERSION_REQUIRED", "\u4FEE\u6539\u5DF2\u6709\u5185\u5BB9\u524D\uFF0C\u8BF7\u63D0\u4F9B\u4F5C\u54C1\u7248\u672C\u6216\u5168\u90E8\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002");
     }
   }
@@ -10672,7 +10860,7 @@ function applyMutation(state, args, actor, adapter) {
     if (!expected || !Object.keys(expected).length) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
     for (const operation2 of operations) {
       if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-      const targets = operation2.op === "restore" ? void 0 : adapter.targets(state.content, operation2);
+      const targets = mutationTargets(state.content, operation2, adapter);
       if (!targets) throw new StudioError("CONFLICT", "\u6574\u4F53\u64CD\u4F5C\u9700\u8981\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
       if (targets.some((id2) => typeof id2 !== "string" || !Object.hasOwn(expected, id2))) throw new StudioError("CONFLICT", "\u8FC7\u671F\u63D0\u4EA4\u5FC5\u987B\u6838\u5BF9\u6240\u6709\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002", { revision: state.artifact.revision });
     }
@@ -10688,7 +10876,7 @@ function applyMutation(state, args, actor, adapter) {
     if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
     if (operation2.op === "restore") {
       const saved = version2(state, operation2.versionId);
-      changedIds.push(...restoreVersion(state, saved, actor, adapter, operation2.data?.mode === "undo" || operation2.data?.undo === true || operation2.preset === "undo"));
+      changedIds.push(...restoreVersion(state, saved, actor, adapter, operation2.data?.mode === "undo" || operation2.data?.undo === true || operation2.preset === "undo", restoreUnitIds(operation2), baseline));
       restoredFrom = saved.entry.id;
     } else changedIds.push(...adapter.apply(state.content, operation2, baseline));
   }
@@ -10957,6 +11145,11 @@ function updateFeedback(state, args, actor, adapter) {
     if (versions && Buffer.byteLength(JSON.stringify(versions)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u9009\u533A\u7684\u7248\u672C\u4FE1\u606F\u8FC7\u5927\u3002");
     const operationId = args.operationId === void 0 ? void 0 : safeId(args.operationId, "\u64CD\u4F5C ID");
     const fingerprint = createHash3("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
+    const deleted = operationId && state.deletedFeedbackReceipts?.find((receipt) => receipt.operationId === operationId);
+    if (deleted) {
+      if (deleted.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
+      throw new StudioError("NOT_FOUND", "\u8BE5\u5907\u6CE8\u5DF2\u88AB\u5220\u9664\uFF0C\u4E0D\u80FD\u901A\u8FC7\u91CD\u8BD5\u91CD\u65B0\u521B\u5EFA\u3002", { contextId: deleted.contextId });
+    }
     const duplicate = operationId && state.feedback.find((entry) => entry.creationReceipt?.operationId === operationId);
     if (duplicate) {
       if (duplicate.creationReceipt.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
@@ -10977,10 +11170,22 @@ function updateFeedback(state, args, actor, adapter) {
       const content = text(args.text).trim();
       if (!content) throw new StudioError("INVALID_ARGUMENT", "\u56DE\u590D\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
       item.replies.push({ id: randomUUID8(), author: copy(actor), text: content, createdAt: now });
-      if (item.status === "processing") {
+      if (item.status === "processing" || item.status === "resolved") {
         item.status = "open";
         delete item.processingBy;
       }
+    } else if (action === "edit") {
+      const message = args.replyId === void 0 ? item : item.replies.find((reply) => reply.id === args.replyId);
+      if (!message) throw new StudioError("NOT_FOUND", "\u56DE\u590D\u4E0D\u5B58\u5728\u3002");
+      if (message.author.id !== actor.id) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u64B0\u5199\u7684\u6D88\u606F\u3002");
+      const content = text(args.text).trim();
+      if (!content) throw new StudioError("INVALID_ARGUMENT", "\u6D88\u606F\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
+      message.text = content;
+    } else if (action === "delete") {
+      if (actor.role !== "owner" && item.author.id !== actor.id) throw new StudioError("FORBIDDEN", "\u53EA\u6709\u6240\u6709\u8005\u6216\u5907\u6CE8\u4F5C\u8005\u53EF\u4EE5\u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u3002");
+      if (item.creationReceipt) state.deletedFeedbackReceipts = [...state.deletedFeedbackReceipts ?? [], { ...item.creationReceipt, contextId: item.id }].slice(-500);
+      state.feedback = state.feedback.filter((entry) => entry.id !== item.id);
+      delete state.sources[item.id];
     } else if (action === "resolve" || action === "reopen") {
       if (actor.role === "commenter" && item.author.id !== actor.id) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u66F4\u6539\u81EA\u5DF1\u5907\u6CE8\u7684\u72B6\u6001\u3002");
       item.status = action === "resolve" ? "resolved" : "open";
@@ -10997,7 +11202,7 @@ function updateFeedback(state, args, actor, adapter) {
     } else throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5907\u6CE8\u64CD\u4F5C\u3002");
     item.updatedAt = now;
   }
-  makeHistory(state, actor, action === "create" ? "\u6DFB\u52A0\u5907\u6CE8" : action === "send" ? "\u63D0\u4EA4 Codex \u8BF7\u6C42\uFF08\u7B49\u5F85\u5904\u7406\uFF09" : "\u66F4\u65B0\u5907\u6CE8", [`$feedback:${item.id}`]);
+  makeHistory(state, actor, action === "create" ? "\u6DFB\u52A0\u5907\u6CE8" : action === "delete" ? "\u5220\u9664\u5907\u6CE8\u8BA8\u8BBA" : action === "edit" ? "\u7F16\u8F91\u5907\u6CE8\u6D88\u606F" : action === "send" ? "\u63D0\u4EA4 Codex \u8BF7\u6C42\uFF08\u7B49\u5F85\u5904\u7406\uFF09" : "\u66F4\u65B0\u5907\u6CE8", [`$feedback:${item.id}`]);
   return { feedback: visibleFeedback(state.feedback, actor), ...contextId ? { contextId } : {} };
 }
 var init_feedback = __esm({
@@ -11011,52 +11216,117 @@ var init_feedback = __esm({
 
 // src/core/shared/sharing.ts
 import { randomBytes, timingSafeEqual } from "node:crypto";
-function shareInfo(artifactId, sharing, origin) {
-  return { enabled: sharing.enabled, generation: sharing.generation, links: sharing.enabled ? Object.fromEntries(SHARE_ROLES.map((role) => [role, `${origin}/?${new URLSearchParams({ artifactId, share: sharing.tokens[role] ?? "" })}`])) : {}, roles: [...SHARE_ROLES] };
+function checkedRole(role) {
+  if (!SHARE_ROLES.includes(role)) throw new StudioError("INVALID_ARGUMENT", "\u5206\u4EAB\u89D2\u8272\u65E0\u6548\u3002");
+  return role;
 }
-function updateSharing(artifact, sharing, action, actor, role) {
+function shareInfo(artifactId, sharing, origin, peers = []) {
+  const roleEnabled = Object.fromEntries(SHARE_ROLES.map((role) => [role, roleOn(sharing, role)]));
+  const members2 = Object.values(sharing.members ?? {}).filter((member) => !member.removed && sharing.tokens[member.role] === member.roleToken).map(({ credential: _credential, roleToken: _roleToken, ownerAssigned: _ownerAssigned, removed: _removed, ...member }) => ({
+    ...copy(member),
+    active: sharing.enabled && roleOn(sharing, member.role),
+    online: sharing.enabled && roleOn(sharing, member.role) && peers.some((peer) => peer.actor.id === member.id && peer.actor.role === member.role)
+  })).sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeenAt.localeCompare(a.lastSeenAt));
+  return { enabled: sharing.enabled, generation: sharing.generation, links: sharing.enabled ? Object.fromEntries(SHARE_ROLES.filter((role) => roleOn(sharing, role)).map((role) => [role, `${origin}/?${new URLSearchParams({ artifactId, share: sharing.tokens[role] ?? "" })}`])) : {}, roles: [...SHARE_ROLES], roleEnabled, members: members2, owner: copy(LOCAL_ACTOR) };
+}
+function updateSharing(artifact, sharing, action, actor, args) {
   requireRole(actor, ["owner"]);
   assertAlive(artifact);
+  const result = { revokedRoles: [], revokedMemberIds: [] };
   if (action === "start") {
     if (!sharing.enabled) {
-      sharing.tokens = Object.fromEntries(SHARE_ROLES.map((value) => [value, randomBytes(24).toString("base64url")]));
+      sharing.tokens = Object.fromEntries(SHARE_ROLES.map((role) => [role, newToken()]));
+      sharing.members = {};
       sharing.generation++;
     }
     sharing.enabled = true;
-    return [];
+    return result;
   }
   if (action === "stop") {
-    sharing.enabled = false;
+    revokeSharing(sharing);
+    result.revokedRoles = [...SHARE_ROLES];
+    return result;
+  }
+  if (action === "link") {
+    const role = checkedRole(args.role);
+    if (typeof args.on !== "boolean") throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u6307\u5B9A\u94FE\u63A5\u542F\u7528\u72B6\u6001\u3002");
+    sharing.tokens[role] ??= newToken();
+    sharing.roleEnabled ??= {};
+    sharing.roleEnabled[role] = args.on;
     sharing.generation++;
-    return SHARE_ROLES;
+    if (!args.on) result.revokedRoles = [role];
+    return result;
   }
   if (action === "reset") {
-    const roles = role === void 0 || role === "all" ? SHARE_ROLES : SHARE_ROLES.filter((value) => value === role);
-    if (!roles.length) throw new StudioError("INVALID_ARGUMENT", "\u5206\u4EAB\u89D2\u8272\u65E0\u6548\u3002");
-    for (const value of roles) sharing.tokens[value] = randomBytes(24).toString("base64url");
+    const roles = args.role === void 0 || args.role === "all" ? [...SHARE_ROLES] : [checkedRole(args.role)];
+    for (const role of roles) sharing.tokens[role] = newToken();
     sharing.generation++;
-    return roles;
+    result.revokedRoles = roles;
+    return result;
+  }
+  if (action === "role" || action === "remove") {
+    const id2 = safeId(args.memberId, "\u6210\u5458 ID"), member = sharing.members && Object.hasOwn(sharing.members, id2) ? sharing.members[id2] : void 0;
+    if (!member || member.removed || sharing.tokens[member.role] !== member.roleToken) throw new StudioError("NOT_FOUND", "\u6210\u5458\u4E0D\u5B58\u5728\u3002");
+    if (action === "role") {
+      const role = checkedRole(args.role);
+      if (!roleOn(sharing, role) || !sharing.tokens[role]) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u5148\u542F\u7528\u8BE5\u89D2\u8272\u7684\u9080\u8BF7\u94FE\u63A5\u3002");
+      member.role = role;
+      member.roleToken = sharing.tokens[role];
+      member.ownerAssigned = true;
+    } else member.removed = true;
+    sharing.generation++;
+    result.revokedMemberIds = [id2];
+    return result;
   }
   throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
 }
-function shareRole(artifact, sharing, token) {
+function shareRole(artifact, sharing, token, memberId) {
   if (!sharing.enabled || artifact.trashedAt || token.length > 200) return;
+  const member = memberId ? sharing.members?.[memberId] : void 0;
+  if (member?.removed) return;
+  let invitedRole;
   for (const role of SHARE_ROLES) {
     const expected = sharing.tokens[role];
-    if (expected && Buffer.byteLength(expected) === Buffer.byteLength(token) && timingSafeEqual(Buffer.from(expected), Buffer.from(token))) return role;
+    if (roleOn(sharing, role) && expected && Buffer.byteLength(expected) === Buffer.byteLength(token) && timingSafeEqual(Buffer.from(expected), Buffer.from(token))) {
+      invitedRole = role;
+      break;
+    }
   }
+  if (member?.ownerAssigned) return roleOn(sharing, member.role) && sharing.tokens[member.role] === member.roleToken && (member.credential === token || invitedRole !== void 0) ? member.role : void 0;
+  return invitedRole;
+}
+function joinSharingMember(artifact, sharing, token, id2, name) {
+  const role = shareRole(artifact, sharing, token, id2);
+  if (!role) return;
+  sharing.members ??= {};
+  const current = sharing.members[id2], now = (/* @__PURE__ */ new Date()).toISOString();
+  if (!current) sharing.members[id2] = { id: id2, name, role, credential: token, roleToken: sharing.tokens[role], joinedAt: now, lastSeenAt: now };
+  else {
+    if (!current.ownerAssigned) {
+      current.role = role;
+      current.roleToken = sharing.tokens[role];
+      current.credential = token;
+    }
+    current.name = name;
+    current.lastSeenAt = now;
+  }
+  return { id: id2, name, kind: "human", role };
 }
 function revokeSharing(sharing) {
   sharing.enabled = false;
   sharing.tokens = {};
+  sharing.members = {};
   sharing.generation++;
 }
-var SHARE_ROLES;
+var SHARE_ROLES, newToken, roleOn;
 var init_sharing = __esm({
   "src/core/shared/sharing.ts"() {
     "use strict";
+    init_studio();
     init_common();
     SHARE_ROLES = ["editor", "commenter", "viewer"];
+    newToken = () => randomBytes(24).toString("base64url");
+    roleOn = (sharing, role) => sharing.roleEnabled?.[role] !== false;
   }
 });
 
@@ -11122,16 +11392,36 @@ var init_collaboration = __esm({
         requireRole(actor, ["owner", "editor"]);
         if (!object3(input2)) throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u5668\u64CD\u4F5C\u65E0\u6548\u3002");
         const current = this.getTimer(artifactId), now = Date.now();
-        if (input2.action === "reset") return null;
+        const duration3 = () => {
+          if (!Number.isInteger(input2.durationSeconds) || Number(input2.durationSeconds) < 1 || Number(input2.durationSeconds) > 5999) throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u65F6\u957F\u5E94\u4E3A 1 \u79D2\u81F3 99 \u5206 59 \u79D2\u3002");
+          return Number(input2.durationSeconds) * 1e3;
+        };
+        if (input2.action === "reset") {
+          const durationMs = current?.durationMs ?? 3e5;
+          return { durationMs, deadline: null, remainingMs: durationMs, paused: false, source: copy(actor) };
+        }
+        if (input2.action === "set-duration") {
+          if (current && current.deadline !== null && !current.paused && current.remainingMs > 0) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u5148\u6682\u505C\u8BA1\u65F6\u5668\u518D\u8BBE\u7F6E\u65F6\u957F\u3002");
+          const durationMs = duration3();
+          return { durationMs, deadline: null, remainingMs: durationMs, paused: false, source: copy(actor) };
+        }
         if (input2.action === "start") {
-          if (!Number.isInteger(input2.durationSeconds) || Number(input2.durationSeconds) < 1 || Number(input2.durationSeconds) > 86400) throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u65F6\u957F\u5E94\u4E3A 1 \u79D2\u81F3 24 \u5C0F\u65F6\u3002");
-          const remainingMs = Number(input2.durationSeconds) * 1e3;
-          return { deadline: now + remainingMs, remainingMs, paused: false, source: copy(actor) };
+          const durationMs = input2.durationSeconds === void 0 && current ? current.durationMs : duration3();
+          const remainingMs2 = input2.durationSeconds === void 0 && current && current.remainingMs > 0 ? current.remainingMs : durationMs;
+          return { durationMs, deadline: now + remainingMs2, remainingMs: remainingMs2, paused: false, source: copy(actor) };
+        }
+        if (input2.action === "adjust") {
+          if (input2.deltaSeconds !== 60 && input2.deltaSeconds !== -60) throw new StudioError("INVALID_ARGUMENT", "\u8FD0\u884C\u4E2D\u6BCF\u6B21\u53EA\u80FD\u589E\u52A0\u6216\u51CF\u5C11 1 \u5206\u949F\u3002");
+          if (!current || current.deadline === null || current.paused || current.remainingMs <= 0) throw new StudioError("INVALID_ARGUMENT", "\u53EA\u80FD\u8C03\u6574\u8FD0\u884C\u4E2D\u7684\u8BA1\u65F6\u5668\u3002");
+          const remainingMs2 = current.remainingMs + Number(input2.deltaSeconds) * 1e3;
+          if (remainingMs2 < 1e3 || remainingMs2 > 5999e3) throw new StudioError("INVALID_ARGUMENT", "\u8C03\u6574\u540E\u7684\u5269\u4F59\u65F6\u95F4\u987B\u4E3A 1 \u79D2\u81F3 99 \u5206 59 \u79D2\u3002");
+          return { ...current, deadline: now + remainingMs2, remainingMs: remainingMs2, source: copy(actor) };
         }
         if (input2.action !== "pause" && input2.action !== "resume") throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u5668\u64CD\u4F5C\u65E0\u6548\u3002");
         if (!current) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u5148\u542F\u52A8\u8BA1\u65F6\u5668\u3002");
         if (input2.action === "pause") return { ...current, deadline: null, paused: true, source: copy(actor) };
-        return { ...current, deadline: now + current.remainingMs, paused: false, source: copy(actor) };
+        const remainingMs = current.remainingMs > 0 ? current.remainingMs : current.durationMs;
+        return { ...current, deadline: now + remainingMs, remainingMs, paused: false, source: copy(actor) };
       }
       getTimer(artifactId) {
         const timer = this.timers.get(artifactId);
@@ -11144,6 +11434,12 @@ var init_collaboration = __esm({
         const cutoff = Date.now() - 45e3;
         for (const [key, peer] of group) if (Date.parse(peer.updatedAt) < cutoff) group.delete(key);
         return copy([...group.values()]);
+      }
+      revokeMembers(artifactId, memberIds) {
+        const group = this.peers.get(artifactId), revoked = new Set(memberIds);
+        if (!group) return;
+        for (const [peerId, peer] of group) if (revoked.has(peer.actor.id)) group.delete(peerId);
+        this.emit({ type: "presence", artifactId, peers: this.getPresence(artifactId), timer: this.getTimer(artifactId) });
       }
       forget(artifactId) {
         this.peers.delete(artifactId);
@@ -13023,6 +13319,7 @@ var init_service = __esm({
       }
       async read(id2, args, actor) {
         const mode = text(args.mode, "document");
+        if (mode === "source" && args.contextId !== void 0 && args.feedbackId === void 0) args = { ...args, feedbackId: safeId(args.contextId, "\u53CD\u9988 ID") };
         if (mode === "assets") requireRole(actor, ["owner"]);
         const state = await this.store.read(id2), product = this.products.get(state.artifact.type);
         if (mode === "assets") return listAssets(state, args, actor);
@@ -13031,12 +13328,20 @@ var init_service = __esm({
         for (const item of hidden) delete state.sources[item.id];
         state.feedback = visibleFeedback(state.feedback, actor);
         if (mode === "document" || mode === "board") return product.project(state);
-        if (mode === "history") return { history: state.history.map((item) => item.entry) };
+        if (mode === "history") {
+          const history = state.history.map((item) => item.entry);
+          return { history, batches: historyBatches(history) };
+        }
         if (mode === "version") return product.result(version2(state, args.versionId ?? args.revision));
         if (mode === "diff") {
-          const before = version2(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
-          const after = args.toVersionId !== void 0 || args.to !== void 0 ? version2(state, args.toVersionId ?? args.to) : state;
-          return { ...product.diff(before, after), fromRevision: before.artifact.revision, toRevision: after.artifact.revision };
+          const adjacent = args.adjacent === true;
+          const selected = adjacent ? version2(state, args.versionId ?? args.revision) : void 0;
+          const before = selected ? state.history[state.history.indexOf(selected) - 1] : version2(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
+          const after = selected ?? (args.toVersionId !== void 0 || args.to !== void 0 ? version2(state, args.toVersionId ?? args.to) : state);
+          if (args.ids !== void 0 && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some((id3) => typeof id3 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5DEE\u5F02\u5185\u5BB9\u5355\u5143 ID \u5217\u8868\u65E0\u6548\u3002");
+          const requestedIds = args.ids;
+          const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map((id3) => ({ id: id3, before: null, after: product.adapter.readUnit(after.content, id3) }));
+          return { ...before ? product.diff(before, after) : { changes: units }, units: requestedIds ? units.filter((unit2) => requestedIds.includes(unit2.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
         }
         if (mode === "context") {
           if (args.feedbackId || args.contextId) {
@@ -13057,7 +13362,7 @@ var init_service = __esm({
             const conflicts = /* @__PURE__ */ new Set();
             for (const operation2 of args.operations) {
               if (!object3(operation2) || typeof operation2.op !== "string" || !editing.size) continue;
-              const targets = operation2.op === "restore" ? void 0 : adapter.targets(state.content, { ...operation2, op: operation2.op });
+              const targets = mutationTargets(state.content, { ...operation2, op: operation2.op }, adapter);
               for (const target of targets ?? editing) if (editing.has(target)) conflicts.add(target);
             }
             if (conflicts.size) throw new StudioError("EDIT_IN_PROGRESS", "\u76EE\u6807\u5185\u5BB9\u6B63\u5728\u5176\u4ED6\u89C6\u56FE\u4E2D\u7F16\u8F91\uFF0C\u8BF7\u7B49\u5F85\u7F16\u8F91\u5B8C\u6210\u540E\u91CD\u8BD5\u3002", { ids: [...conflicts] });
@@ -13100,8 +13405,8 @@ var init_service = __esm({
         requireRole(actor, ["owner"]);
         const action = text(args.action, "status");
         const current = await this.store.read(id2);
-        if (action === "status") return shareInfo(id2, current.sharing, this.sharingOrigin);
-        if (!["start", "stop", "reset"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
+        if (action === "status") return shareInfo(id2, current.sharing, this.sharingOrigin, this.getPresence(id2));
+        if (!["start", "stop", "reset", "link", "role", "remove"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
         assertAlive(current.artifact);
         let opened = false;
         try {
@@ -13111,10 +13416,12 @@ var init_service = __esm({
             if (origin) this.sharingOrigin = origin;
           }
           const committed = await this.store.transaction(id2, (state) => {
-            const revokedRoles = updateSharing(state.artifact, state.sharing, action, actor, args.role);
-            return { info: shareInfo(id2, state.sharing, this.sharingOrigin), revokedRoles };
+            const revoked = updateSharing(state.artifact, state.sharing, action, actor, args);
+            return { info: shareInfo(id2, state.sharing, this.sharingOrigin, this.getPresence(id2)), ...revoked };
           });
-          this.emit({ type: "share", artifactId: id2, enabled: committed.info.enabled, generation: committed.info.generation, revokedRoles: [...committed.revokedRoles] });
+          const revokedMembers = [...committed.revokedMemberIds, ...this.getPresence(id2).filter((peer) => committed.revokedRoles.includes(peer.actor.role)).map((peer) => peer.actor.id)];
+          if (revokedMembers.length) this.collaboration.revokeMembers(id2, revokedMembers);
+          this.emit({ type: "share", artifactId: id2, enabled: committed.info.enabled, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
           if (action === "stop") await this.shareHandler?.(false);
           return committed.info;
         } catch (error62) {
@@ -13122,14 +13429,27 @@ var init_service = __esm({
           throw error62;
         }
       }
-      async shareRole(artifactId, token) {
+      async shareRole(artifactId, token, memberId) {
         let state;
         try {
           state = await this.store.read(artifactId);
         } catch {
           return;
         }
-        return shareRole(state.artifact, state.sharing, token);
+        return shareRole(state.artifact, state.sharing, token, memberId);
+      }
+      async guestActor(artifactId, token, id2, name) {
+        let state;
+        try {
+          state = await this.store.read(artifactId);
+        } catch {
+          return;
+        }
+        const role = shareRole(state.artifact, state.sharing, token, id2);
+        if (!role) return;
+        const member = state.sharing.members?.[id2];
+        if (member && (member.ownerAssigned || member.credential === token) && member.name === name && Date.now() - Date.parse(member.lastSeenAt) < 6e4) return { id: id2, name, kind: "human", role };
+        return this.store.transaction(artifactId, (current) => joinSharingMember(current.artifact, current.sharing, token, id2, name));
       }
       async hasShares() {
         return (await this.store.list()).some((state) => state.sharing.enabled && !state.artifact.trashedAt);
@@ -13232,10 +13552,10 @@ function createRegionReaders(service, now = () => Date.now()) {
       return;
     }
     if (event.type !== "share") return;
-    for (const [key, grant] of grants) if (!grant.source.owner && grant.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role))) grants.delete(key);
+    for (const [key, grant] of grants) if (!grant.source.owner && grant.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(grant.source.actor.id))) grants.delete(key);
   });
   async function read(grant) {
-    if (!grant.source.owner && !await service.shareRole(grant.artifactId, grant.source.token)) throw new StudioError("UNAUTHORIZED", "\u539F\u5206\u4EAB\u5DF2\u5173\u95ED\u6216\u94FE\u63A5\u5DF2\u91CD\u7F6E\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
+    if (!grant.source.owner && await service.shareRole(grant.artifactId, grant.source.token, grant.source.actor.id) !== grant.source.actor.role) throw new StudioError("UNAUTHORIZED", "\u539F\u5206\u4EAB\u6743\u9650\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
     const result = await service.execute("artifact_read", { artifactId: grant.artifactId, mode: "objects", ids: [grant.regionId] }, grant.source.actor);
     if (result.artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
     const element = result.elements?.find((value) => value.id === grant.regionId && value.type === "html");
@@ -13322,6 +13642,24 @@ var init_region_reader = __esm({
   }
 });
 
+// src/server/lan-addresses.ts
+import { networkInterfaces } from "node:os";
+function lanAddresses(interfaces = networkInterfaces()) {
+  const addresses = Object.entries(interfaces).flatMap(([name, entries]) => virtualInterface.test(name) ? [] : (entries ?? []).filter(
+    (entry) => entry.family === "IPv4" && !entry.internal && !/^(0\.|127\.|169\.254\.|198\.1[89]\.)/.test(entry.address) && !tailnetAddress(entry.address)
+  ).map((entry) => entry.address));
+  return [...new Set(addresses)].sort((left, right) => Number(privateAddress(right)) - Number(privateAddress(left)));
+}
+var virtualInterface, privateAddress, tailnetAddress;
+var init_lan_addresses = __esm({
+  "src/server/lan-addresses.ts"() {
+    "use strict";
+    virtualInterface = /vpn|tunnel|wintun|tailscale|zerotier|wireguard|docker|virtual|veth|vmnet|vmware|vbox|hyper-v|wsl|(^|[^a-z0-9])(utun|tun|tap|wg|ppp|ipsec)\d*($|[^a-z0-9])/i;
+    privateAddress = (address) => /^10\.|^192\.168\./.test(address) || /^172\.(1[6-9]|2\d|3[01])\./.test(address);
+    tailnetAddress = (address) => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address);
+  }
+});
+
 // src/server/http.ts
 var http_exports = {};
 __export(http_exports, {
@@ -13329,7 +13667,6 @@ __export(http_exports, {
 });
 import { randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { createServer } from "node:http";
-import { networkInterfaces } from "node:os";
 function equal(a, b) {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual3(left, right);
@@ -13369,15 +13706,20 @@ async function readJson(request) {
   }
 }
 async function listen(server, port, host) {
-  await new Promise((resolve4, reject) => {
-    const failed = (error62) => reject(error62);
-    server.once("error", failed);
-    server.listen(port, host, () => {
-      server.removeListener("error", failed);
-      resolve4();
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await new Promise((resolve4, reject) => {
+      const failed = (error62) => reject(error62);
+      server.once("error", failed);
+      server.listen(port, host, () => {
+        server.removeListener("error", failed);
+        resolve4();
+      });
     });
-  });
-  return server.address().port;
+    const assigned = server.address().port;
+    if (!BROWSER_BLOCKED_PORTS.has(assigned)) return assigned;
+    await closeServer(server);
+  }
+  throw new StudioError("NO_NETWORK", "\u65E0\u6CD5\u5206\u914D\u6D4F\u89C8\u5668\u53EF\u8BBF\u95EE\u7684\u7AEF\u53E3\uFF0C\u8BF7\u91CD\u8BD5\u3002");
 }
 function closeServer(server) {
   if (!server?.listening) return Promise.resolve();
@@ -13387,10 +13729,9 @@ function closeServer(server) {
   });
 }
 function lanAddress() {
-  const addresses = Object.entries(networkInterfaces()).flatMap(([name, entries]) => (entries ?? []).filter((entry) => entry.family === "IPv4" && !entry.internal && !entry.address.startsWith("169.254.")).map((entry) => ({ name, address: entry.address })));
-  addresses.sort((a, b) => Number(/vpn|tun|docker|virtual|veth|wsl/i.test(a.name)) - Number(/vpn|tun|docker|virtual|veth|wsl/i.test(b.name)));
-  if (!addresses.length) throw new StudioError("NO_NETWORK", "\u6CA1\u6709\u53EF\u7528\u4E8E\u5C40\u57DF\u7F51\u5206\u4EAB\u7684\u7F51\u5361\uFF0C\u8BF7\u8FDE\u63A5\u7F51\u7EDC\u540E\u91CD\u8BD5\u3002");
-  return addresses[0].address;
+  const addresses = lanAddresses();
+  if (!addresses.length) throw new StudioError("NO_NETWORK", "\u6CA1\u6709\u53EF\u7528\u4E8E\u5C40\u57DF\u7F51\u5206\u4EAB\u7684\u666E\u901A\u7F51\u5361\uFF0C\u8BF7\u8FDE\u63A5 Wi-Fi \u6216\u4EE5\u592A\u7F51\u540E\u91CD\u8BD5\u3002");
+  return addresses[0];
 }
 function header(request, key) {
   const value = request.headers[key];
@@ -13401,6 +13742,7 @@ function exportContentType(mimeType) {
   return mediaType.startsWith("text/") || mediaType === "image/svg+xml" || mediaType === "application/json" ? `${mediaType}; charset=utf-8` : mimeType;
 }
 async function startStudioHost(options = {}) {
+  if (options.port && BROWSER_BLOCKED_PORTS.has(options.port)) throw new StudioError("INVALID_ARGUMENT", `\u6D4F\u89C8\u5668\u7981\u6B62\u8BBF\u95EE\u7AEF\u53E3 ${options.port}\uFF0C\u8BF7\u9009\u62E9\u5176\u4ED6\u7AEF\u53E3\u3002`);
   const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes4(32).toString("base64url");
   const guestSession = createGuestSessions(service.dataRoot);
   const regionReaders = createRegionReaders(service);
@@ -13428,11 +13770,8 @@ async function startStudioHost(options = {}) {
     }
     const scope2 = artifactId ?? url2.searchParams.get("artifactId") ?? void 0;
     if (scope2 && provided) {
-      const role = await service.shareRole(scope2, provided);
-      if (role) {
-        const id2 = guestSession(request, response);
-        return { actor: { id: `guest-${id2}`, name: (header(request, "x-studio-name") || `\u8BBF\u5BA2 ${id2.slice(0, 6)}`).slice(0, 60), kind: "human", role }, token: provided, artifactId: scope2, owner: false };
-      }
+      const id2 = guestSession(request, response), actor = await service.guestActor(scope2, provided, `guest-${id2}`, (header(request, "x-studio-name") || `\u8BBF\u5BA2 ${id2.slice(0, 6)}`).slice(0, 60));
+      if (actor) return { actor, token: provided, artifactId: scope2, owner: false };
     }
     throw new StudioError("UNAUTHORIZED", "\u8FDE\u63A5\u51ED\u636E\u65E0\u6548\uFF0C\u6216\u5206\u4EAB\u5DF2\u5173\u95ED\u3002");
   }
@@ -13449,7 +13788,7 @@ async function startStudioHost(options = {}) {
   }
   service.subscribe("*", (event) => {
     if (event.type !== "share") return;
-    for (const live of [...lives]) if (!live.auth.owner && live.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(live.auth.actor.role))) endLive(live, "\u5206\u4EAB\u5DF2\u5173\u95ED\u6216\u94FE\u63A5\u5DF2\u91CD\u7F6E\u3002");
+    for (const live of [...lives]) if (!live.auth.owner && live.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(live.auth.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(live.auth.actor.id))) endLive(live, "\u5206\u4EAB\u6743\u9650\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u8FDE\u63A5\u3002");
   });
   service.configureSharing(async (enabled) => {
     if (enabled) {
@@ -13658,7 +13997,7 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
     await service.close();
   } };
 }
-var MAX_BODY, json2;
+var MAX_BODY, BROWSER_BLOCKED_PORTS, json2;
 var init_http = __esm({
   "src/server/http.ts"() {
     "use strict";
@@ -13667,7 +14006,93 @@ var init_http = __esm({
     init_archive();
     init_guest_session();
     init_region_reader();
+    init_lan_addresses();
     MAX_BODY = 21 * 1024 * 1024;
+    BROWSER_BLOCKED_PORTS = /* @__PURE__ */ new Set([
+      0,
+      1,
+      7,
+      9,
+      11,
+      13,
+      15,
+      17,
+      19,
+      20,
+      21,
+      22,
+      23,
+      25,
+      37,
+      42,
+      43,
+      53,
+      69,
+      77,
+      79,
+      87,
+      95,
+      101,
+      102,
+      103,
+      104,
+      109,
+      110,
+      111,
+      113,
+      115,
+      117,
+      119,
+      123,
+      135,
+      137,
+      139,
+      143,
+      161,
+      179,
+      389,
+      427,
+      465,
+      512,
+      513,
+      514,
+      515,
+      526,
+      530,
+      531,
+      532,
+      540,
+      548,
+      554,
+      556,
+      563,
+      587,
+      601,
+      636,
+      989,
+      990,
+      993,
+      995,
+      1719,
+      1720,
+      1723,
+      2049,
+      3659,
+      4045,
+      4190,
+      5060,
+      5061,
+      6e3,
+      6566,
+      6665,
+      6666,
+      6667,
+      6668,
+      6669,
+      6679,
+      6697,
+      10080
+    ]);
     json2 = (response, status, value) => {
       const body2 = JSON.stringify(value);
       response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(body2) });
@@ -43442,7 +43867,7 @@ var STUDIO_ICON = {
 };
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.1.2";
+var PLUGIN_VERSION = "0.1.3";
 
 // src/server/protocol.ts
 init_studio();
@@ -43469,6 +43894,7 @@ var operation = external_exports.object({
   op: external_exports.string().min(1).max(64),
   id: id.optional(),
   ids: external_exports.array(id).optional(),
+  versionId: id.optional().describe("restore \u7684\u5386\u53F2\u7248\u672C ID\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\u3002"),
   element: elementPatch.optional(),
   changes: elementPatch.optional()
 }).passthrough();
@@ -43476,10 +43902,10 @@ var schemas = {
   studio_open: external_exports.object({ view: external_exports.enum(["library", "editor", "board", "trash"]).optional(), artifactId: id.optional() }),
   artifact_list: external_exports.object({ query: external_exports.string().optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().optional(), sort: external_exports.string().optional() }),
   artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "purge", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), artifactIds: external_exports.array(id).min(1).max(100).optional().describe("purge \u6279\u91CF\u6C38\u4E45\u5220\u9664\u7684\u4F5C\u54C1 ID\uFF0C1..100 \u4E2A\u3002\u4E0E\u5355\u4E2A artifactId \u4E8C\u9009\u4E00\uFF1B\u53EA\u5141\u8BB8\u623F\u4E3B\u5220\u9664\u56DE\u6536\u7AD9\u5185\u4F5C\u54C1\uFF0C\u8FD4\u56DE deletedIds \u548C\u9010\u9879 failures\u3002"), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
-  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
+  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
   artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
-  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
-  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset"]), role: external_exports.enum(["editor", "commenter", "viewer"]).optional() }),
+  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("edit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF1B\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
+  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove"]), role: external_exports.enum(["editor", "commenter", "viewer"]).optional(), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u6307\u5B9A\u5DF2\u52A0\u5165\u6210\u5458 ID\uFF1B\u6539\u89D2\u8272\u548C\u79FB\u9664\u4F1A\u64A4\u9500\u8BE5\u6210\u5458\u73B0\u6709\u8FDE\u63A5\u4E0E\u9605\u8BFB\u9875\u3002") }),
   artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() })
 };
 var descriptions = {
@@ -43487,9 +43913,9 @@ var descriptions = {
   artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
   artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
   artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
-  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002restore \u5F62\u6210\u65B0\u7248\u672C\uFF0Cdata.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
-  artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
-  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5C40\u57DF\u7F51\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u5F00\u542F\u672C\u673A\u5C40\u57DF\u7F51\u8BBF\u95EE\uFF1Bstop/reset \u64A4\u9500\u73B0\u6709\u94FE\u63A5\u548C\u8FDE\u63A5\u3002",
+  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
+  artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
+  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5C40\u57DF\u7F51\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u5F00\u542F\u672C\u673A\u5C40\u57DF\u7F51\u8BBF\u95EE\uFF1Bstop \u5173\u95ED\u5C40\u57DF\u7F51\u8BBF\u95EE\uFF1Blink \u72EC\u7ACB\u542F\u7528/\u5173\u95ED\u89D2\u8272\u94FE\u63A5\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u4E0E\u5BF9\u5E94\u6210\u5458\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u5E76\u7ACB\u5373\u64A4\u9500\u539F\u8FDE\u63A5\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
   artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002"
 };
 function record2(value) {

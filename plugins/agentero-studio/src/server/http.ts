@@ -1,17 +1,26 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { networkInterfaces } from 'node:os';
 import type { AddressInfo, Socket } from 'node:net';
 import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Role, type ToolName } from '../contracts/studio.js';
 import { StudioError, StudioService } from '../core/service.js';
 import { MAX_ARCHIVE_BYTES } from '../core/shared/archive.js';
 import { createGuestSessions } from './guest-session.js';
 import { createRegionReaders } from './region-reader.js';
+import { lanAddresses } from './lan-addresses.js';
 
 interface Auth { actor: Actor; token: string; artifactId?: string; owner: boolean }
 interface Live { response: ServerResponse; auth: Auth; artifactId: string; dispose: () => void }
 export interface StudioHost { service: StudioService; origin: string; token: string; hasActiveReaders(): boolean; close(): Promise<void> }
 const MAX_BODY = 21 * 1024 * 1024;
+// A listening socket on one of these ports is still rejected by browser Fetch.
+// https://fetch.spec.whatwg.org/#port-blocking
+const BROWSER_BLOCKED_PORTS = new Set([
+  0, 1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95,
+  101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179,
+  389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601,
+  636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000,
+  6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
 const json = (response: ServerResponse, status: number, value: unknown) => {
   const body = JSON.stringify(value);
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Length': Buffer.byteLength(body) }); response.end(body);
@@ -34,18 +43,22 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   catch (error) { if (error instanceof StudioError) throw error; throw new StudioError('INVALID_ARGUMENT', '请求必须是 JSON 对象。'); }
 }
 async function listen(server: Server, port: number, host: string) {
-  await new Promise<void>((resolve, reject) => { const failed = (error: Error) => reject(error); server.once('error', failed); server.listen(port, host, () => { server.removeListener('error', failed); resolve(); }); });
-  return (server.address() as AddressInfo).port;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await new Promise<void>((resolve, reject) => { const failed = (error: Error) => reject(error); server.once('error', failed); server.listen(port, host, () => { server.removeListener('error', failed); resolve(); }); });
+    const assigned = (server.address() as AddressInfo).port;
+    if (!BROWSER_BLOCKED_PORTS.has(assigned)) return assigned;
+    await closeServer(server);
+  }
+  throw new StudioError('NO_NETWORK', '无法分配浏览器可访问的端口，请重试。');
 }
 function closeServer(server: Server | undefined): Promise<void> {
   if (!server?.listening) return Promise.resolve();
   return new Promise(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
 }
 function lanAddress() {
-  const addresses = Object.entries(networkInterfaces()).flatMap(([name, entries]) => (entries ?? []).filter(entry => entry.family === 'IPv4' && !entry.internal && !entry.address.startsWith('169.254.')).map(entry => ({ name, address: entry.address })));
-  addresses.sort((a, b) => Number(/vpn|tun|docker|virtual|veth|wsl/i.test(a.name)) - Number(/vpn|tun|docker|virtual|veth|wsl/i.test(b.name)));
-  if (!addresses.length) throw new StudioError('NO_NETWORK', '没有可用于局域网分享的网卡，请连接网络后重试。');
-  return addresses[0]!.address;
+  const addresses = lanAddresses();
+  if (!addresses.length) throw new StudioError('NO_NETWORK', '没有可用于局域网分享的普通网卡，请连接 Wi-Fi 或以太网后重试。');
+  return addresses[0]!;
 }
 function header(request: IncomingMessage, key: string) { const value = request.headers[key]; return typeof value === 'string' ? value : ''; }
 function exportContentType(mimeType: string) {
@@ -53,6 +66,7 @@ function exportContentType(mimeType: string) {
   return mediaType.startsWith('text/') || mediaType === 'image/svg+xml' || mediaType === 'application/json' ? `${mediaType}; charset=utf-8` : mimeType;
 }
 export async function startStudioHost(options: { dataRoot?: string; html?: string; port?: number } = {}): Promise<StudioHost> {
+  if (options.port && BROWSER_BLOCKED_PORTS.has(options.port)) throw new StudioError('INVALID_ARGUMENT', `浏览器禁止访问端口 ${options.port}，请选择其他端口。`);
   const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes(32).toString('base64url');
   const guestSession = createGuestSessions(service.dataRoot);
   const regionReaders = createRegionReaders(service);
@@ -74,8 +88,8 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     }
     const scope = artifactId ?? url.searchParams.get('artifactId') ?? undefined;
     if (scope && provided) {
-      const role = await service.shareRole(scope, provided);
-      if (role) { const id = guestSession(request, response); return { actor: { id: `guest-${id}`, name: (header(request, 'x-studio-name') || `访客 ${id.slice(0, 6)}`).slice(0, 60), kind: 'human', role }, token: provided, artifactId: scope, owner: false }; }
+      const id = guestSession(request, response), actor = await service.guestActor(scope, provided, `guest-${id}`, (header(request, 'x-studio-name') || `访客 ${id.slice(0, 6)}`).slice(0, 60));
+      if (actor) return { actor, token: provided, artifactId: scope, owner: false };
     }
     throw new StudioError('UNAUTHORIZED', '连接凭据无效，或分享已关闭。');
   }
@@ -86,7 +100,7 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
   }
   service.subscribe('*', event => {
     if (event.type !== 'share') return;
-    for (const live of [...lives]) if (!live.auth.owner && live.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(live.auth.actor.role))) endLive(live, '分享已关闭或链接已重置。');
+    for (const live of [...lives]) if (!live.auth.owner && live.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(live.auth.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(live.auth.actor.id))) endLive(live, '分享权限已变更，请重新连接。');
   });
   service.configureSharing(async enabled => {
     if (enabled) {

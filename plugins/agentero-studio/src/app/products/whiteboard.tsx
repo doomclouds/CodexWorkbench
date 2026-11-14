@@ -5,8 +5,8 @@ import type { ProductActivity, ProductAnnotation, ProductDescriptor, ProductDiff
 import WhiteboardCanvas from '../canvas/WhiteboardCanvas';
 import { StudioDialog } from './dialog';
 import { downloadStudioBlob, downloadStudioFile, studioRequest } from '../transport';
+import { newClientId } from '../shared/client-id.js';
 
-function newId(prefix: string) { return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`; }
 function downloadableUrl(client: StudioClient, path: string): string {
   const url = new URL(path, client.baseUrl || window.location.href);
   if (client.token && client.baseUrl && url.origin === new URL(client.baseUrl).origin) url.searchParams.set('token', client.token);
@@ -71,7 +71,7 @@ function WhiteboardEditor(props: ProductEditorProps) {
   }, [onActivityChange]);
   const canvasActivity = useCallback((activity: ProductActivity) => report('canvas', activity), [report]);
   const sourceActivity = useCallback((activity: ProductActivity) => report('source', activity), [report]);
-  return <><WhiteboardCanvas {...rest} board={board} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onOpenHtml={element => onOpenHtml?.(element.id)} onEditHtml={element => setSourceRequest({ id: newId('source'), regionId: element?.id })} />
+  return <><WhiteboardCanvas {...rest} board={board} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onOpenHtml={element => onOpenHtml?.(element.id)} onEditHtml={element => setSourceRequest({ id: newClientId('source'), regionId: element?.id })} />
     <WhiteboardToolbar document={board} client={props.client} actor={props.actor} selectedIds={[]} disabled={!!props.readOnly} onChanged={onChanged} onError={error => onError?.(error)} onNotice={message => onNotice?.(message)} onActivityChange={sourceActivity} request={sourceRequest} />
   </>;
 }
@@ -120,8 +120,8 @@ function WhiteboardToolbar({ document: opaqueDocument, client, selectedIds, disa
     try {
       const fingerprint = JSON.stringify(source);
       if (pendingSave.current?.fingerprint !== fingerprint) {
-        const operation: Operation = source.regionId ? { op: 'update', id: source.regionId, changes: { html: source.html, text: source.title } } : { op: 'add', element: { id: newId('html'), type: 'html', x: current.elements.length ? Math.max(...current.elements.map(element => element.x + element.w)) + 80 : 80, y: 80, w: 1440, h: 1120, text: source.title || 'HTML 图解', html: source.html } };
-        pendingSave.current = { fingerprint, args: { artifactId: current.artifact.id, operationId: newId('op'), expectedRevision: current.artifact.revision, expectedVersions: source.regionId && source.version !== undefined ? { [source.regionId]: source.version } : undefined, operations: [operation] } };
+        const operation: Operation = source.regionId ? { op: 'update', id: source.regionId, changes: { html: source.html, text: source.title } } : { op: 'add', element: { id: newClientId('html'), type: 'html', x: current.elements.length ? Math.max(...current.elements.map(element => element.x + element.w)) + 80 : 80, y: 80, w: 1440, h: 1120, text: source.title || 'HTML 图解', html: source.html } };
+        pendingSave.current = { fingerprint, args: { artifactId: current.artifact.id, operationId: newClientId('op'), expectedRevision: current.artifact.revision, expectedVersions: source.regionId && source.version !== undefined ? { [source.regionId]: source.version } : undefined, operations: [operation] } };
       }
       const result = await client.call<{ board: Board }>('artifact_apply', pendingSave.current.args);
       if (mounted.current && boardRef.current.artifact.id === current.artifact.id) { onChanged(result.board); pendingSave.current = null; setSource(null); onNotice(source.regionId ? 'HTML 源码已保存。' : 'HTML 图解已加入白板。'); }

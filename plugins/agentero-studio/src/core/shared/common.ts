@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Actor, Role } from '../../contracts/studio.js';
 
 export class StudioError extends Error {
@@ -32,6 +33,16 @@ export function assertAlive(artifact: { trashedAt?: string }): void {
 export async function atomicWrite(file: string, content: string | Uint8Array): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const temporary = join(dirname(file), `.${randomUUID()}.tmp`);
-  try { await writeFile(temporary, content, { flag: 'wx' }); await rename(temporary, file); }
+  try {
+    await writeFile(temporary, content, { flag: 'wx' });
+    for (let retry = 0; ; retry++) {
+      try { await rename(temporary, file); break; }
+      catch (error) {
+        // An open Windows read handle can briefly prevent replacement; retry only that atomic step.
+        if (process.platform !== 'win32' || retry === 5 || !['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+        await delay(50 * (retry + 1));
+      }
+    }
+  }
   finally { await rm(temporary, { force: true }); }
 }

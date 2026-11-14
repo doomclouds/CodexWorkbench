@@ -43,16 +43,33 @@ export class StudioCollaboration {
     requireRole(actor, ['owner', 'editor']);
     if (!object(input)) throw new StudioError('INVALID_ARGUMENT', '计时器操作无效。');
     const current = this.getTimer(artifactId), now = Date.now();
-    if (input.action === 'reset') return null;
+    const duration = () => {
+      if (!Number.isInteger(input.durationSeconds) || Number(input.durationSeconds) < 1 || Number(input.durationSeconds) > 5999) throw new StudioError('INVALID_ARGUMENT', '计时时长应为 1 秒至 99 分 59 秒。');
+      return Number(input.durationSeconds) * 1000;
+    };
+    if (input.action === 'reset') { const durationMs = current?.durationMs ?? 300_000; return { durationMs, deadline: null, remainingMs: durationMs, paused: false, source: copy(actor) }; }
+    if (input.action === 'set-duration') {
+      if (current && current.deadline !== null && !current.paused && current.remainingMs > 0) throw new StudioError('INVALID_ARGUMENT', '请先暂停计时器再设置时长。');
+      const durationMs = duration();
+      return { durationMs, deadline: null, remainingMs: durationMs, paused: false, source: copy(actor) };
+    }
     if (input.action === 'start') {
-      if (!Number.isInteger(input.durationSeconds) || Number(input.durationSeconds) < 1 || Number(input.durationSeconds) > 86400) throw new StudioError('INVALID_ARGUMENT', '计时时长应为 1 秒至 24 小时。');
-      const remainingMs = Number(input.durationSeconds) * 1000;
-      return { deadline: now + remainingMs, remainingMs, paused: false, source: copy(actor) };
+      const durationMs = input.durationSeconds === undefined && current ? current.durationMs : duration();
+      const remainingMs = input.durationSeconds === undefined && current && current.remainingMs > 0 ? current.remainingMs : durationMs;
+      return { durationMs, deadline: now + remainingMs, remainingMs, paused: false, source: copy(actor) };
+    }
+    if (input.action === 'adjust') {
+      if (input.deltaSeconds !== 60 && input.deltaSeconds !== -60) throw new StudioError('INVALID_ARGUMENT', '运行中每次只能增加或减少 1 分钟。');
+      if (!current || current.deadline === null || current.paused || current.remainingMs <= 0) throw new StudioError('INVALID_ARGUMENT', '只能调整运行中的计时器。');
+      const remainingMs = current.remainingMs + Number(input.deltaSeconds) * 1000;
+      if (remainingMs < 1000 || remainingMs > 5_999_000) throw new StudioError('INVALID_ARGUMENT', '调整后的剩余时间须为 1 秒至 99 分 59 秒。');
+      return { ...current, deadline: now + remainingMs, remainingMs, source: copy(actor) };
     }
     if (input.action !== 'pause' && input.action !== 'resume') throw new StudioError('INVALID_ARGUMENT', '计时器操作无效。');
     if (!current) throw new StudioError('INVALID_ARGUMENT', '请先启动计时器。');
     if (input.action === 'pause') return { ...current, deadline: null, paused: true, source: copy(actor) };
-    return { ...current, deadline: now + current.remainingMs, paused: false, source: copy(actor) };
+    const remainingMs = current.remainingMs > 0 ? current.remainingMs : current.durationMs;
+    return { ...current, deadline: now + remainingMs, remainingMs, paused: false, source: copy(actor) };
   }
   getTimer(artifactId: string): RoomTimer | null {
     const timer = this.timers.get(artifactId); if (!timer) return null;
@@ -62,6 +79,11 @@ export class StudioCollaboration {
     const group = this.peers.get(artifactId); if (!group) return [];
     const cutoff = Date.now() - 45_000; for (const [key, peer] of group) if (Date.parse(peer.updatedAt) < cutoff) group.delete(key);
     return copy([...group.values()]);
+  }
+  revokeMembers(artifactId: string, memberIds: readonly string[]): void {
+    const group = this.peers.get(artifactId), revoked = new Set(memberIds); if (!group) return;
+    for (const [peerId, peer] of group) if (revoked.has(peer.actor.id)) group.delete(peerId);
+    this.emit({ type: 'presence', artifactId, peers: this.getPresence(artifactId), timer: this.getTimer(artifactId) });
   }
   forget(artifactId: string): void { this.peers.delete(artifactId); this.timers.delete(artifactId); }
   close(): void { this.listeners.clear(); this.peers.clear(); this.timers.clear(); }

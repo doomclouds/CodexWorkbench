@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import WhiteboardCanvas, { type NativeAnnotation, type WhiteboardCanvasProps } from '../src/app/canvas/WhiteboardCanvas.js';
-import { anchorBounds, makeElement, relativeElementPoint } from '../src/app/canvas/canvas-model.js';
+import { anchorBounds, arrowGeometry, makeElement, relativeElementPoint } from '../src/app/canvas/canvas-model.js';
 import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type BoardElement, type Feedback, type Operation, type StudioClient, type ToolName } from '../src/contracts/studio.js';
 import { StudioService } from '../src/core/service.js';
 import { boardStickerMarkup, BOARD_STICKERS } from '../src/core/products/whiteboard-stickers.js';
@@ -48,7 +48,7 @@ async function click(label: string) { await event(query(label), 'click'); }
 async function pointer(x: number, y: number, end = { x, y }) { await event(query('白板画布'), 'pointerdown', x, y); if (x !== end.x || y !== end.y) await event(query('白板画布'), 'pointermove', end.x, end.y); await event(query('白板画布'), 'pointerup', end.x, end.y); }
 async function select(id: string) { await event(host.querySelector(`[data-element-id="${id}"]`)!, 'pointerdown'); await event(query('白板画布'), 'pointerup'); }
 async function input(node: HTMLInputElement | HTMLTextAreaElement, value: string) {
-  await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => { if(node.getAttribute('contenteditable')!==null)node.textContent=value;else Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })); });
 }
 async function key(node: Element, value: string, options: KeyboardEventInit = {}) { await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: value, ...options }))); }
 
@@ -101,7 +101,7 @@ describe('whiteboard direct interaction', () => {
   it('creates an adjacent item with Ctrl Enter and ends a section title with Enter', async () => {
     const call = await editable(); await click('便签'); await pointer(120, 160);
     await input(query('编辑文字') as HTMLTextAreaElement, 'First'); await key(query('编辑文字'), 'Enter', { ctrlKey: true });
-    expect(call.mock.calls[2]![1].operations[0]!.element).toMatchObject({ type: 'note', x: 120, y: 368, text: '' });
+    expect(call.mock.calls[2]![1].operations[0]!.element).toMatchObject({ type: 'note', x: 352, y: 160, text: '' });
     await key(query('编辑文字'), 'Escape'); await click('分区'); await pointer(600, 200); await input(query('编辑文字') as HTMLTextAreaElement, 'Section'); await key(query('编辑文字'), 'Enter');
     expect(query('编辑文字')).toBeNull();
   });
@@ -114,14 +114,14 @@ describe('whiteboard direct interaction', () => {
     await click('备注所选元素'); expect(annotate.mock.lastCall?.[0]).toMatchObject({ anchor: { elementIds: ['locked'], coordinateSpace: 'element', x: 1, y: .5 } });
     await event(host.querySelector('[data-element-id="locked"]')!, 'dblclick'); await input(query('编辑文字') as HTMLTextAreaElement, 'Still editable'); await key(query('编辑文字'), 'Escape');
     await key(query('白板画布'), 'Delete'); expect(call).toHaveBeenCalledTimes(2);
-    await click('更多元素属性'); expect((query('元素宽度') as HTMLInputElement).disabled).toBe(true); expect((query('删除所选元素') as HTMLButtonElement).disabled).toBe(true);
+    expect(host.querySelectorAll('.studio-selection-corner.is-locked')).toHaveLength(4); await click('更多操作'); expect([...host.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='删除Delete')?.disabled).toBe(true);
     await event(host.querySelector('.studio-selection-toolbar [aria-label="解锁元素"]')!, 'click');
     expect(call.mock.calls[2]![1].operations[0]!.changes).toEqual({ locked: false });
-    expect(query('调整元素大小')).not.toBeNull();
+    expect(host.querySelectorAll('[aria-label^="调整元素大小"]')).toHaveLength(8);
   });
   it('blocks crop of a locked image while keeping its lock action reachable', async () => {
     await mount([element('image', { type: 'image', locked: true, src: 'data:image/png;base64,AA' })]); await select('image'); await event(host.querySelector('[data-element-id="image"]')!, 'dblclick');
-    expect(query('裁剪图片')).toBeNull(); expect(query('解锁元素')).not.toBeNull();
+    expect((query('裁剪图片') as HTMLButtonElement).disabled).toBe(true); expect(query('解锁元素')).not.toBeNull();
   });
   it('saves visible inline input before capturing and freezing a native comment against the real service', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'studio-canvas-comment-'));
@@ -146,15 +146,10 @@ describe('whiteboard direct interaction', () => {
       await act(async () => root.render(null)); await service.close(); await rm(folder, { recursive: true, force: true });
     }
   });
-  it('commits property text drafts before comment capture and retains inline drafts on a failed save', async () => {
-    const annotate = vi.fn(), call = await editable([element('one')], { onAnnotateNative: annotate });
-    await select('one'); await click('更多元素属性'); await input(query('属性文字') as HTMLTextAreaElement, 'Property draft');
-    await click('备注所选元素'); expect(call.mock.calls[0]![1].operations[0]!.changes).toEqual({ text: 'Property draft' });
-    expect(annotate.mock.lastCall?.[0]).toMatchObject({ label: '对象 · Property draft', versions: { one: 2 } });
-    await act(async () => root.render(null));
-    const failedAnnotation = vi.fn(); await mount([element('conflict')], { client: { embedded: true, call: vi.fn().mockRejectedValue(new Error('CONFLICT')) }, onAnnotateNative: failedAnnotation });
-    await select('conflict'); await event(host.querySelector('[data-element-id="conflict"]')!, 'dblclick'); await input(query('编辑文字') as HTMLTextAreaElement, 'Keep this draft');
-    await click('备注所选元素'); expect(failedAnnotation).not.toHaveBeenCalled(); expect((query('编辑文字') as HTMLTextAreaElement).value).toBe('Keep this draft');
+  it('retains inline drafts and does not capture comments on a failed save', async () => {
+    const failedAnnotation=vi.fn(); await mount([element('conflict')],{client:{embedded:true,call:vi.fn().mockRejectedValue(new Error('CONFLICT'))},onAnnotateNative:failedAnnotation});
+    await select('conflict');await event(host.querySelector('[data-element-id="conflict"]')!,'dblclick');await input(query('编辑文字') as HTMLTextAreaElement,'Keep this draft');
+    await click('备注所选元素');expect(failedAnnotation).not.toHaveBeenCalled();expect(query('编辑文字').textContent).toBe('Keep this draft');
   });
   it('produces relative object points and board-coordinate area and blank targets in global comment mode', async () => {
     const annotate = vi.fn();
@@ -189,7 +184,7 @@ describe('whiteboard direct interaction', () => {
     const open = vi.fn(), edit = vi.fn();
     await mount([element('region', { type: 'html', html: '<p>Hello</p>', locked: true })], { onOpenHtml: open, onEditHtml: edit, documentControls: <button aria-label="计时器">Timer</button> });
     await select('region'); await click('新标签页打开 HTML 图解'); expect(open.mock.lastCall?.[0].id).toBe('region');
-    await click('更多元素属性'); expect(edit.mock.lastCall?.[0].id).toBe('region');
+    await click('编辑 HTML 源码'); expect(edit.mock.lastCall?.[0].id).toBe('region');
     await event(host.querySelector('[data-element-id="region"]')!, 'dblclick'); expect((host.querySelector('iframe') as HTMLIFrameElement).style.pointerEvents).toBe('auto');
     expect([...host.querySelector('.studio-canvas-top-tools')!.children].map(node => node.getAttribute('aria-label'))).toEqual(['计时器', null, '缩放菜单']);
     await click('缩放菜单'); expect(query('撤销')).not.toBeNull(); expect(host.querySelector('.studio-zoom-menu')!.textContent).toContain('适应白板');
@@ -242,6 +237,182 @@ describe('whiteboard direct interaction', () => {
     await input(query('搜索贴纸') as HTMLInputElement, 'nothing-matches-this');
     expect(host.querySelector('.studio-sticker-empty')!.textContent).toContain('没有找到贴纸');
     await click('清除贴纸搜索'); expect(host.querySelectorAll('.studio-sticker-grid button')).toHaveLength(42);
+  });
+  it('uses reference tool keys and visible shape and ink palettes without an element sidebar', async () => {
+    await editable(); await key(query('白板画布'),'s'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('note');
+    await key(query('白板画布'),'e'); expect(query('贴纸库')).not.toBeNull();
+    await key(query('白板画布'),'l'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('arrow');
+    expect(query('墨色 陶土色')).not.toBeNull();
+    await key(query('白板画布'),'o'); expect(query('形状 椭圆').getAttribute('aria-pressed')).toBe('true');
+    await key(query('白板画布'),'d'); expect(query('形状 菱形').getAttribute('aria-pressed')).toBe('true');
+    await key(query('白板画布'),'T',{shiftKey:true}); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('table');
+    expect(host.querySelector('.studio-canvas-properties')).toBeNull();
+  });
+  it.each(['note', 'shape'] as const)('keeps the measured %s toolbar inside desktop and narrow canvas bounds without dropping controls', async type => {
+    const layout = { width: 1280, height: 720, barWidth: type === 'shape' ? 600 : 450, barHeight: 42 };
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const width = this.classList.contains('studio-selection-toolbar') ? layout.barWidth : this.classList.contains('studio-format-popover') ? 220 : layout.width;
+      const height = this.classList.contains('studio-selection-toolbar') ? layout.barHeight : layout.height;
+      return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON() {} };
+    });
+    await mount([element('one', { type, x: 3300, y: 1600 })], { externalViewport: { x: 0, y: 0, zoom: .33 }, externalSelectedIds: ['one'] });
+    const toolbar = query('选区格式') as HTMLElement;
+    const controls = [...toolbar.querySelectorAll('.studio-selection-toolbar-scroll > button,.studio-selection-toolbar-scroll > select')].map(node => node.getAttribute('aria-label'));
+    const left = Number.parseFloat(toolbar.style.left);
+    expect(left - layout.barWidth / 2).toBeGreaterThanOrEqual(12);
+    expect(left + layout.barWidth / 2).toBeLessThanOrEqual(1268);
+    layout.width = 320; layout.height = 440; layout.barWidth = 296; layout.barHeight = 54;
+    await act(async () => window.dispatchEvent(new Event('resize')));
+    expect(toolbar.style.left).toBe('160px');
+    expect([...toolbar.querySelectorAll('.studio-selection-toolbar-scroll > button,.studio-selection-toolbar-scroll > select')].map(node => node.getAttribute('aria-label'))).toEqual(controls);
+    await click('文字颜色');
+    expect(toolbar.querySelector('.studio-format-popover')!.parentElement).toBe(toolbar);
+    expect(toolbar.querySelector('.studio-selection-toolbar-scroll')!.contains(toolbar.querySelector('.studio-format-popover'))).toBe(false);
+  });
+  it('copies a serialized object through the system clipboard and pastes into a separate canvas instance', async () => {
+    const previous=Object.getOwnPropertyDescriptor(navigator,'clipboard');let payload='';
+    const writeText=vi.fn(async(value:string)=>{payload=value;}),readText=vi.fn(async()=>payload);
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText,readText}});
+    try {
+      await editable([element('source',{text:'Copied content'})],{externalSelectedIds:['source']});await click('更多操作');await event([...host.querySelectorAll('[role=menuitem]')].find(button=>button.textContent==='复制Ctrl/⌘ C')!,'click');
+      expect(writeText).toHaveBeenCalledTimes(1);expect(payload).toContain('AGENTERO_STUDIO_ELEMENTS_V1');
+      await act(async()=>root.render(null));const call=await editable();await event(query('白板画布'),'contextmenu');await event([...host.querySelectorAll('[role=menuitem]')].find(button=>button.textContent==='粘贴Ctrl/⌘ V')!,'click');
+      expect(readText).toHaveBeenCalledTimes(1);expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({text:'Copied content'});
+      expect(host.querySelectorAll('[data-element-id]')).toHaveLength(1);
+    } finally {if(previous)Object.defineProperty(navigator,'clipboard',previous);else Reflect.deleteProperty(navigator,'clipboard');}
+  });
+  it('does not delete a cut target when the system clipboard write and fallback fail', async () => {
+    const previous=Object.getOwnPropertyDescriptor(navigator,'clipboard'),exec=document.execCommand;
+    Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:vi.fn().mockRejectedValue(new Error('blocked'))}});document.execCommand=vi.fn(()=>false);
+    try {
+      const call=await editable([element('one')],{externalSelectedIds:['one']});await click('更多操作');await event([...host.querySelectorAll('[role=menuitem]')].find(button=>button.textContent==='剪切Ctrl/⌘ X')!,'click');
+      expect(call).not.toHaveBeenCalled();expect(host.querySelector('[role=alert]')).not.toBeNull();expect(host.querySelector('[data-element-id="one"]')).not.toBeNull();
+    } finally {if(previous)Object.defineProperty(navigator,'clipboard',previous);else Reflect.deleteProperty(navigator,'clipboard');document.execCommand=exec;}
+  });
+  it('exposes real object actions and aligns a multi-selection through the floating controls', async () => {
+    const call=await editable([element('a',{x:50}),element('b',{x:400})],{externalSelectedIds:['a','b']});
+    await click('对齐对象');await event([...host.querySelectorAll('.studio-format-row button')].find(button=>button.textContent==='左对齐')!,'click');
+    expect(call.mock.calls[0]![1].operations).toContainEqual({op:'update',id:'b',changes:{x:50,y:120}});
+    await click('更多操作');expect(host.querySelector('[role=menu]')!.textContent).toContain('置于顶层');
+    expect(host.querySelector('[role=menu]')!.textContent).toContain('整理');expect(host.querySelector('.studio-canvas-properties')).toBeNull();
+  });
+  it('uses four noninteractive locked corners and hides geometric controls in comment mode', async () => {
+    await mount([element('one',{locked:true})],{externalSelectedIds:['one']});
+    expect(host.querySelectorAll('.studio-selection-corner.is-locked')).toHaveLength(4);expect(host.querySelector('.studio-lock-indicator')).toBeNull();
+    await mount([element('one')],{externalSelectedIds:['one'],annotationActive:true});
+    expect(host.querySelector('.studio-selection-frame')).not.toBeNull();expect(host.querySelectorAll('.studio-selection-corner.is-locked')).toHaveLength(4);expect(host.querySelectorAll('[aria-label^="调整元素大小"]')).toHaveLength(0);expect(host.querySelector('.studio-resize-handle')).toBeNull();expect(host.querySelector('.studio-annotation-hint')).toBeNull();
+    expect(host.querySelector('.studio-selection-edge,.studio-rotate-hit,.studio-connection-port')).toBeNull();
+  });
+  it.each([
+    ['text', 4, 2, 4, 4], ['note', 4, 4, 4, 4], ['shape', 4, 4, 4, 4],
+    ['html', 4, 4, 0, 0], ['table', 4, 4, 0, 4], ['sticker', 4, 0, 4, 0],
+    ['image', 4, 0, 4, 4], ['link', 0, 0, 4, 4], ['arrow', 0, 0, 0, 0],
+  ] as const)('uses distinct reference selection affordances for %s', async (type, corners, edges, rotations, ports) => {
+    await mount([element('one',{type,from:[100,120],to:[300,220]})],{externalSelectedIds:['one']});
+    expect(host.querySelectorAll('button.studio-selection-corner')).toHaveLength(corners);
+    expect(host.querySelectorAll('.studio-selection-edge')).toHaveLength(edges);
+    expect(host.querySelectorAll('.studio-rotate-hit')).toHaveLength(rotations);
+    expect(host.querySelectorAll('.studio-connection-port')).toHaveLength(ports);
+    expect(host.querySelector('.studio-rotate-handle')).toBeNull();
+    if(type==='arrow') expect(host.querySelectorAll('.studio-arrow-handle').length).toBeGreaterThanOrEqual(2);
+  });
+  it('keeps multi-selection corners and edge resizing separate from single-object connection ports', async () => {
+    const call=await editable([element('a'),element('b',{x:500})],{externalSelectedIds:['a','b']});
+    expect(host.querySelectorAll('button.studio-selection-corner')).toHaveLength(4);
+    expect(host.querySelectorAll('.studio-selection-edge')).toHaveLength(4);
+    expect(host.querySelector('.studio-connection-port')).toBeNull();
+    await event(query('调整元素大小 e'),'pointerdown',700,170);await event(query('白板画布'),'pointermove',800,170);await event(query('白板画布'),'pointerup',800,170);
+    expect(call.mock.calls[0]![1].operations).toHaveLength(2);
+    expect(call.mock.calls[0]![1].operations.every(operation=>Number(operation.changes?.w)>200)).toBe(true);
+  });
+  it('rotates from the invisible corner reach without repurposing connection ports or visible resize squares', async () => {
+    const call=await editable([element('one')],{externalSelectedIds:['one']});
+    await event(query('旋转所选元素 ne'),'pointerdown',300,120);await event(query('白板画布'),'pointermove',250,270);
+    expect((host.querySelector('.studio-selection-frame') as HTMLElement).style.transform).toBe('rotate(90deg)');
+    await event(query('白板画布'),'pointerup',250,270);
+    expect(call.mock.lastCall![1].operations[0]).toMatchObject({op:'update',id:'one',changes:{rotation:90}});
+  });
+  it('creates an adjacent blank note on click and a connected matching shape on a shape port click', async () => {
+    const call=await editable([element('note',{type:'note',fill:'#F9E56F'}),element('shape',{x:700,kind:'diamond',fill:'#9DC8F7'})]);
+    await select('note');await event(query('连接点 right'),'pointerdown',312,170);await event(query('白板画布'),'pointerup',312,170);
+    expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({type:'note',x:324,y:120,text:'',fill:'#F9E56F'});
+    expect(query('编辑文字')).not.toBeNull();await key(query('编辑文字'),'Escape');
+    await select('shape');await event(query('连接点 bottom'),'pointerdown',800,232);await event(query('白板画布'),'pointerup',800,232);
+    const additions=call.mock.lastCall![1].operations.map(operation=>operation.element!);
+    expect(additions[0]).toMatchObject({type:'shape',kind:'diamond',fill:'#9DC8F7',x:700,y:268,text:''});
+    expect(additions[1]).toMatchObject({type:'arrow',from:'shape',fromSide:'bottom',to:additions[0].id,toSide:'top'});
+    expect(query('编辑文字')).not.toBeNull();
+    expect(host.querySelectorAll('.studio-selection-toolbar [aria-label="形状类型"]')).toHaveLength(1);
+  });
+  it('drags a connection port into a real side binding, while text-port clicks and sticky drags do not create objects', async () => {
+    const call=await editable([element('text',{type:'text'}),element('target',{x:500}),element('note',{type:'note',y:400})]);
+    await select('text');await event(query('连接点 right'),'pointerdown',312,170);await event(query('白板画布'),'pointerup',312,170);
+    expect(call).not.toHaveBeenCalled();
+    await event(query('连接点 right'),'pointerdown',312,170);await event(query('白板画布'),'pointermove',488,170);await event(query('白板画布'),'pointerup',488,170);
+    expect(call.mock.lastCall![1].operations[0]!.element).toMatchObject({type:'arrow',from:'text',fromSide:'right',to:'target',toSide:'left'});
+    await select('note');await event(query('连接点 right'),'pointerdown',312,450);await event(query('白板画布'),'pointermove',400,450);await event(query('白板画布'),'pointerup',400,450);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+  it('places rotated connection ports on the same local side used by saved arrow geometry', async () => {
+    const source=element('rotated',{type:'text',rotation:90}),target=element('target',{x:500});
+    const call=await editable([source,target],{externalSelectedIds:['rotated']});
+    expect((query('连接点 right') as HTMLElement).style.left).toBe('200px');
+    expect((query('连接点 right') as HTMLElement).style.top).toBe('282px');
+    await event(query('连接点 right'),'pointerdown',200,282);await event(query('白板画布'),'pointermove',488,170);await event(query('白板画布'),'pointerup',488,170);
+    const arrow=call.mock.lastCall![1].operations[0]!.element as BoardElement;
+    expect(arrow).toMatchObject({from:'rotated',fromSide:'right',to:'target',toSide:'left'});
+    expect(arrowGeometry(arrow,[source,target]).points[0]).toEqual({x:200,y:270});
+  });
+  it('keeps native table pointer clicks uncaptured until dragging and edits the original cell on double click', async () => {
+    const call=await editable([element('table',{type:'table',w:900,h:300,text:'名称\t说明\t状态\n项目 A\t双击单元格编辑\t进行中\n项目 B\t后续安排\t待处理'})]);
+    const cell=[...host.querySelectorAll('td')].find(node=>node.textContent==='双击单元格编辑')!;
+    const capture=vi.mocked(HTMLElement.prototype.setPointerCapture);
+    for(let i=0;i<2;i++){await event(cell,'pointerdown',550,270);await event(cell,'pointerup',550,270);await event(cell,'click',550,270);}
+    expect(capture).not.toHaveBeenCalled();
+    await event(cell,'dblclick',550,270);
+    expect(query('表格第2行第2列')).not.toBeNull();expect(query('编辑文字')).toBeNull();expect(call).not.toHaveBeenCalled();
+    await key(query('表格第2行第2列'),'Escape');
+    await event(host.querySelector('[data-element-id="table"]')!,'pointerdown',150,140);
+    await event(query('白板画布'),'pointermove',152,142);expect(capture).not.toHaveBeenCalled();
+    await event(query('白板画布'),'pointermove',180,170);expect(capture).toHaveBeenCalledTimes(1);
+    await event(query('白板画布'),'pointerup',180,170);expect(call.mock.lastCall![1].operations[0]).toMatchObject({op:'update',id:'table',changes:{x:130,y:150}});
+  });
+  it('uses a compact icon-only draw tray with five preset inks and keeps editable line width in the selection popover', async () => {
+    const call=await editable();await click('画笔');const tray=query('绘图选项');
+    expect([...tray.querySelectorAll('.studio-pen-choices button')].map(button=>button.textContent)).toEqual(['','']);
+    expect([...tray.querySelectorAll('.studio-native-colors button')].map(button=>button.getAttribute('aria-label'))).toEqual(['墨色 墨色','墨色 陶土色','墨色 蓝色','墨色 绿色','墨色 紫色']);
+    expect(tray.querySelector('input,select,.studio-custom-color')).toBeNull();
+    await click('墨色 紫色');await pointer(80,100,{x:280,y:180});
+    expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({type:'stroke',stroke:'#7C5CBF',strokeWidth:3});
+    expect(query('绘图选项')).not.toBeNull();
+    await click('选择');await click('边框与线条');expect(query('线条宽度')).not.toBeNull();expect(query('自定义颜色')).not.toBeNull();
+    await input(query('线条宽度') as HTMLInputElement,'6');expect(call.mock.lastCall![1].operations[0]!.changes).toEqual({strokeWidth:6});
+    await input(query('自定义颜色') as HTMLInputElement,'#123456');
+    expect(call.mock.calls.at(-2)![1].operations[0]!.changes).toEqual({stroke:'#123456'});
+    expect(call.mock.lastCall![1].operations[0]).toMatchObject({op:'style',style:{nativeInks:'123456'}});
+  });
+  it('formats only the chosen native text range before saving and keeps HTML captions in world scale', async () => {
+    const call=await editable([element('one',{text:'alpha beta'})]);await select('one');await event(host.querySelector('[data-element-id="one"]')!,'dblclick');
+    const editor=query('编辑文字');const text=editor.firstChild!.firstChild as Text;
+    const range=document.createRange();range.setStart(text,6);range.setEnd(text,10);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range);document.dispatchEvent(new Event('selectionchange'));
+    await click('加粗');await key(editor,'Escape');expect(call.mock.calls[0]![1].operations[0]!.changes?.text).toBe('alpha **beta**');
+    await act(async()=>root.render(null));await mount([element('region',{type:'html',html:'<p>Hi</p>'})],{externalViewport:{x:0,y:0,zoom:.5}});
+    expect((host.querySelector('.studio-html-caption') as HTMLElement).style.transform).toBe('');
+    expect((host.querySelector('.studio-canvas-world') as HTMLElement).style.transform).toContain('scale(0.5)');
+  });
+  it('saves real layer commands and restores their persisted order through undo and redo', async () => {
+    const folder=await mkdtemp(join(tmpdir(),'studio-canvas-layers-')),service=new StudioService({dataRoot:folder});
+    try {
+      const fixture=await service.execute('artifact_manage',{action:'create',title:'Layers',elements:[element('a'),element('b'),element('c')]},LOCAL_ACTOR) as {board:Board};
+      const live:StudioClient={embedded:true,async call<T>(name:ToolName,args:Record<string,unknown>={}){return await service.execute(name,args,LOCAL_ACTOR) as T;}};
+      function Harness(){const[value,setValue]=useState(fixture.board);return <WhiteboardCanvas board={value} client={live} actor={LOCAL_ACTOR} onChanged={setValue} onAnnotate={()=>{}} externalSelectedIds={['a']} externalViewport={initialViewport}/>;}
+      await act(async()=>root.render(<Harness/>));await click('更多操作');await event([...host.querySelectorAll('[role=menuitem]')].find(button=>button.textContent==='置于顶层')!,'click');
+      const order=()=>[...host.querySelectorAll('[data-element-id]')].map(node=>node.getAttribute('data-element-id'));
+      await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
+      await click('缩放菜单');await click('撤销');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['a','b','c']);});
+      await click('重做');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
+      await select('c');await key(query('白板画布'),'Delete');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','a']);});await click('缩放菜单');await click('撤销');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
+    } finally {await act(async()=>root.render(null));await service.close();await rm(folder,{recursive:true,force:true});}
   });
   it('uses identical canonical SVG markup in the palette, live canvas and SVG/HTML exports while preserving legacy text', async () => {
     const value = element('sticker', { type: 'sticker', text: '爱心', data: { stickerIconId: 'heart' }, w: 64, h: 64 });

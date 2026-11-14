@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "agentero-studio", "version": "0.1.2",
+  "name": "agentero-studio", "version": "0.1.3",
   "description": "作品管理、共享白板与 HTML 图解，在 Codex 对话旁通过标注协作修改。",
   "author": { "name": "doomclouds" }, "license": "MIT",
   "homepage": "https://github.com/doomclouds/CodexWorkbench",

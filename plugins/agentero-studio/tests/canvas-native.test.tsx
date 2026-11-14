@@ -28,7 +28,7 @@ async function event(node: Element, name: string) { await act(async () => { node
 async function input(node: HTMLInputElement | HTMLTextAreaElement, value: string) {
   await act(async () => {
     const prototype = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(node, value);
+    if(node.getAttribute('contenteditable')!==null)node.textContent=value;else Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(node, value);
     node.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
@@ -43,10 +43,10 @@ describe('native canvas parity', () => {
     expect(node.querySelectorAll('a')).toHaveLength(1); expect(node.querySelector('a')!.href).toBe('https://example.com/');
     expect(node.querySelector('img')).toBeNull(); expect(node.textContent).toContain('<img src=x onerror=alert(1)>');
     expect(node.querySelectorAll('.is-list')).toHaveLength(2);
-    expect(parseInlineText('**bold `literal`**')).toEqual([{ type: 'bold', text: 'bold `literal`' }]);
+    expect(parseInlineText('**bold `literal`**')).toEqual([{ type: 'bold', text: 'bold ' }, { type: 'code', text: 'literal', bold: true }]);
     expect(parseRichText('# literal heading')[0]!.segments[0]!.text).toBe('# literal heading');
     await event(node, 'dblclick');
-    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="编辑文字"]')!.value).toBe(text);
+    expect(host.querySelector('[aria-label="编辑文字"] strong')!.textContent).toBe('重点');
   });
   it('draws hollow and person shapes, real line style and an explicit unknown-kind fallback', async () => {
     await mount(board([element('hollow', { hollow: true, strokeWidth: 5, dash: true }), element('person', { kind: 'person' }), element('unknown', { kind: 'invented-kind' }), element('pen', { type: 'stroke', points: [0, 0, 20, 20], width: 7, dash: true })]));
@@ -111,18 +111,16 @@ describe('native canvas parity', () => {
     expect(activity.mock.lastCall?.[0]).toMatchObject({ dirty: true, editingIds: ['one'] });
     await mount(board([element('one', { version: 2, text: 'remote draft' })], 2), props);
     await act(async () => { reject(new Error('CONFLICT')); });
-    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="编辑文字"]')!.value).toBe('my local draft');
+    expect(host.querySelector('[aria-label="编辑文字"]')!.textContent).toBe('my local draft');
     await event([...host.querySelectorAll('button')].find(node => node.textContent === '重试保存文字')!, 'click');
     expect(call.mock.calls[1]![1].expectedVersions).toEqual({ one: 2 });
     call.mockResolvedValueOnce({ board: board([element('one', { version: 3, text: 'my local draft' })], 3) });
     await act(async () => { host.querySelector('[aria-label="编辑文字"]')!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })); });
     await select('one');
-    await event(host.querySelector('[aria-label="更多元素属性"]')!, 'click');
-    const property = host.querySelector<HTMLTextAreaElement>('[aria-label="属性文字"]')!;
-    await input(property, 'property draft');
-    await act(async () => { property.dispatchEvent(new FocusEvent('focusout', { bubbles: true })); });
+    await event(host.querySelector('[aria-label="文字颜色"]')!, 'click');
+    await event(host.querySelector('[aria-label="墨色 蓝色"]')!, 'click');
     await mount(board([element('one', { version: 3, text: 'newer remote draft' })], 3), props);
-    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="属性文字"]')!.value).toBe('property draft');
+    expect(host.querySelector('[aria-label="墨色 蓝色"]')!.getAttribute('aria-pressed')).toBe('true');
     expect(activity.mock.lastCall?.[0]).toMatchObject({ dirty: true, editingIds: ['one'] });
   });
   it('shows processing ranges from anchors and reports a real move lifecycle without inventing targets', async () => {

@@ -81,7 +81,7 @@ describe('shared session timer', () => {
     expect(resumed.timer).toMatchObject({ deadline: now + 80000, remainingMs: 50000, paused: false });
     expect((await service.execute('artifact_read', { artifactId, mode: 'history' })).history).toHaveLength(1);
     await service.updatePresence(artifactId, { timer: { action: 'reset' } }, LOCAL_ACTOR);
-    expect(service.getTimer(artifactId)).toBeNull();
+    expect(service.getTimer(artifactId)).toMatchObject({ durationMs: 60000, deadline: null, remainingMs: 60000, paused: false });
   });
   it('restricts timer control and clears only session state on service closure', async () => {
     const board = await create(), artifactId = board.artifact.id;

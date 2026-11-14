@@ -12,6 +12,31 @@ const shape: BoardElement = { id: 'one', type: 'shape', kind: 'rounded', x: -30,
 const region: BoardElement = { id: 'region', type: 'html', x: 140, y: 0, w: 320, h: 180, version: 4, html: '<!doctype html><html><head><style>.node{fill:#ff0000}.edge{stroke:#111111;marker-end:url(#arrow)}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" width="32" height="18" viewBox="0 0 32 18" role="img" aria-labelledby="title"><title id="title">图解</title><defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0 0L8 3L0 6"/></marker></defs><rect class="node" width="32" height="18"/><path class="edge" d="M2 2H8"/></svg></body></html>' };
 
 describe('artifact export preserves one canonical source', () => {
+  test('exports legacy TSV table cells with structured data taking precedence when present', async () => {
+    const legacy = { ...shape, type: 'table' as const, x: 0, y: 0, w: 900, h: 300, text: '名称\t说明\t状态\n项目 A\t双击单元格编辑\t进行中\n项目 B\t后续安排\t待处理', data: undefined };
+    const document = new JSDOM(buildBoardSvg(board([legacy])), { contentType: 'image/svg+xml' }).window.document;
+    expect(document.querySelectorAll('[data-studio-id="one"] > rect')).toHaveLength(9);
+    expect([...document.querySelectorAll('text')].map(node => node.textContent)).toEqual(['名称', '说明', '状态', '项目 A', '双击单元格编辑', '进行中', '项目 B', '后续安排', '待处理']);
+    expect(document.querySelector('[data-studio-id="one"] > rect')!.getAttribute('width')).toBe('300');
+    const html = new JSDOM(buildBoardHtml(board([legacy]))).window.document;
+    expect(html.body.textContent).toContain('后续安排');
+    const structured = new JSDOM(buildBoardSvg(board([{ ...legacy, data: { rows: [['Current', 'Rows']] } }])), { contentType: 'image/svg+xml' }).window.document;
+    expect([...structured.querySelectorAll('text')].map(node => node.textContent)).toEqual(['Current', 'Rows']);
+    const png = await exportArtifact(board([legacy]), 'png', { padding: 0 });
+    expect(Buffer.from(png.data, 'base64').readUInt32BE(16)).toBe(900);
+  });
+  test('preserves combined inline marks, escaped literals and real table widths and header state', () => {
+    const text={...shape,type:'text' as const,text:'[**_both_**](https://example.com) and \\_literal\\_'};
+    const document=new JSDOM(buildBoardSvg(board([text])),{contentType:'image/svg+xml'}).window.document;
+    expect(document.querySelector('a tspan')?.getAttribute('font-weight')).toBe('700');
+    expect(document.querySelector('a tspan')?.getAttribute('font-style')).toBe('italic');
+    expect(document.querySelector('text')?.textContent).toContain('_literal_');
+    const table={...shape,type:'table' as const,x:0,w:300,data:{rows:[['A','B'],['C','D']],columnWidths:[100,200],head:false}};
+    const exported=new JSDOM(buildBoardSvg(board([table])),{contentType:'image/svg+xml'}).window.document;
+    const cells=[...exported.querySelectorAll('[data-studio-id="one"] > rect')];
+    expect(cells.map(cell=>cell.getAttribute('width'))).toEqual(['100','200','100','200']);
+    expect(cells.map(cell=>cell.getAttribute('fill'))).toEqual(Array(4).fill(LIGHT_THEME.paper));
+  });
   test('exports the entire vector sticker catalog through the shared SVG, HTML and real PNG renderer', async () => {
     const stickers = BOARD_STICKERS.map((sticker, index): BoardElement => ({ id: `sticker-${sticker.id}`, type: 'sticker', text: sticker.label, data: { stickerIconId: sticker.id }, x: index % 7 * 80, y: Math.floor(index / 7) * 80, w: 64, h: 64, version: 1 }));
     const source = board(stickers);

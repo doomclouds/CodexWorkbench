@@ -15,10 +15,10 @@ export function createRegionReaders(service: StudioService, now = () => Date.now
   const unsubscribe = service.subscribe('*', event => {
     if (event.type === 'purged') { for (const [key, grant] of grants) if (grant.artifactId === event.artifactId) grants.delete(key); return; }
     if (event.type !== 'share') return;
-    for (const [key, grant] of grants) if (!grant.source.owner && grant.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role))) grants.delete(key);
+    for (const [key, grant] of grants) if (!grant.source.owner && grant.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(grant.source.actor.id))) grants.delete(key);
   });
   async function read(grant: Grant) {
-    if (!grant.source.owner && !await service.shareRole(grant.artifactId, grant.source.token)) throw new StudioError('UNAUTHORIZED', '原分享已关闭或链接已重置，请从白板重新打开。');
+    if (!grant.source.owner && await service.shareRole(grant.artifactId, grant.source.token, grant.source.actor.id) !== grant.source.actor.role) throw new StudioError('UNAUTHORIZED', '原分享权限已变更，请从白板重新打开。');
     const result = await service.execute('artifact_read', { artifactId: grant.artifactId, mode: 'objects', ids: [grant.regionId] }, grant.source.actor) as { artifact: Artifact; elements: BoardElement[] };
     if (result.artifact.trashedAt) throw new StudioError('TRASHED', '作品已移入回收站。');
     const element = result.elements?.find(value => value.id === grant.regionId && value.type === 'html');
