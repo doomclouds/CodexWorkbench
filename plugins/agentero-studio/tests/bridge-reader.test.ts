@@ -25,6 +25,18 @@ beforeEach(() => { mocks.capabilities = {}; });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('reader link host adaptation', () => {
+  it('preserves HTTP authentication status and reasons without conflating business permission errors', async () => {
+    const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000/' });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    dom.window.__STUDIO_BOOT__ = { baseUrl: 'http://127.0.0.1:5000', token: 'guest-secret', actor: LOCAL_ACTOR };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '访问已撤销', details: { reason: 'removed' } } }, { status: 401 }))
+      .mockResolvedValueOnce(Response.json({ ok: false, error: { code: 'FORBIDDEN', message: '仅查看角色不能编辑' } }, { status: 403 })));
+    const bridge = await createStudioBridge(() => {});
+    await expect(bridge.client.call('artifact_read', { artifactId: 'board' })).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED', details: { reason: 'removed' } });
+    await expect(bridge.client.call('artifact_apply', { artifactId: 'board' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    await bridge.close(); dom.window.close();
+  });
+
   it('uses only the public URL openLink request and surfaces a host refusal', async () => {
     const dom = new JSDOM('<div></div>');
     Object.defineProperty(dom.window, 'parent', { value: {} });

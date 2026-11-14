@@ -51,15 +51,14 @@ describe('live view activity and Agent coordination', () => {
     const now = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(now + 46_000);
     expect(await service.execute('artifact_apply', operation(first.board), agent)).toHaveProperty('board');
   });
-  it('records the processing actor and clears it when a reply or state transition finishes processing', async () => {
+  it('retains the processing actor through replies and clears it only on an explicit state transition', async () => {
     const board = await create(), artifactId = board.artifact.id;
     const created = await service.execute('artifact_feedback', { artifactId, action: 'create', text: '请调整', anchor: { elementIds: ['a'] } });
     const feedbackId = created.feedback[0].id;
     const processing = await service.execute('artifact_feedback', { artifactId, feedbackId, action: 'processing' }, agent);
     expect(processing.feedback[0]).toMatchObject({ status: 'processing', processingBy: agent });
     const replied = await service.execute('artifact_feedback', { artifactId, feedbackId, action: 'reply', text: '已调整' }, agent);
-    expect(replied.feedback[0].status).toBe('open'); expect(replied.feedback[0].processingBy).toBeUndefined();
-    await service.execute('artifact_feedback', { artifactId, feedbackId, action: 'processing' }, agent);
+    expect(replied.feedback[0]).toMatchObject({ status: 'processing', processingBy: agent });
     const resolved = await service.execute('artifact_feedback', { artifactId, feedbackId, action: 'resolve' }, agent);
     expect(resolved.feedback[0].status).toBe('resolved'); expect(resolved.feedback[0].processingBy).toBeUndefined();
   });

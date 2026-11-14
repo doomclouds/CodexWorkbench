@@ -18,6 +18,7 @@ export default function HtmlReader({ artifactId, regionId }: ReaderBoot) {
   const capability = useRef(new URLSearchParams(location.hash.slice(1)).get('cap') || '');
   const [content, setContent] = useState<ReaderContent>();
   const current = useRef(content); current.current = content;
+  const accessEpoch = useRef(0);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,34 +35,48 @@ export default function HtmlReader({ artifactId, regionId }: ReaderBoot) {
     if (!response.ok || !result.ok) throw Object.assign(new Error(result.error?.message || '阅读内容未能加载，请重试。'), { status: response.status });
     return result.data as T;
   }, [path]);
+  const fail = useCallback((reason: unknown, fallback: string) => {
+    if (reason instanceof Error && 'status' in reason && [401, 403, 404, 410].includes(Number(reason.status))) {
+      accessEpoch.current++; current.current = undefined;
+      setContent(undefined); setUpdated(false); setNotice('');
+    }
+    setError(reason instanceof Error ? reason.message : fallback);
+  }, []);
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    const epoch = ++accessEpoch.current;
     setBusy(true);
     try {
       const value = await request<ReaderContent>('', { signal });
-      if (signal?.aborted) return;
-      setContent(value); setUpdated(false); setError('');
+      if (signal?.aborted || epoch !== accessEpoch.current) return;
+      if (!current.current || value.version >= current.current.version) { current.current = value; setContent(value); }
+      setUpdated(false); setError('');
     } catch (reason) {
-      if (!signal?.aborted) {
-        if (reason instanceof Error && 'status' in reason && [401, 403, 404, 410].includes(Number(reason.status))) { setContent(undefined); setUpdated(false); }
-        setError(reason instanceof Error ? reason.message : '阅读内容未能加载。');
-      }
+      if (!signal?.aborted && epoch === accessEpoch.current) fail(reason, '阅读内容未能加载。');
     }
     finally { if (!signal?.aborted) setBusy(false); }
-  }, [request]);
-  useEffect(() => { const controller = new AbortController(); void refresh(controller.signal); return () => controller.abort(); }, [refresh]);
+  }, [request, fail]);
+  useEffect(() => { const controller = new AbortController(); void refresh(controller.signal); return () => { accessEpoch.current++; controller.abort(); }; }, [refresh]);
   useEffect(() => {
     let pending = false; const controller = new AbortController();
     const check = async () => {
       if (document.hidden || pending || !current.current) return;
+      const epoch = accessEpoch.current;
       pending = true;
       try {
         const metadata = await request<Omit<ReaderContent, 'element'>>('?metadata=1', { signal: controller.signal });
-        if (!controller.signal.aborted && metadata.sourceRevision !== current.current?.sourceRevision) setUpdated(true);
-      } catch (reason) {
-        if (!controller.signal.aborted) {
-          if (reason instanceof Error && 'status' in reason && [401, 403, 404, 410].includes(Number(reason.status))) { setContent(undefined); setUpdated(false); }
-          setError(reason instanceof Error ? reason.message : '无法检查内容更新。');
+        if (controller.signal.aborted || epoch !== accessEpoch.current || !current.current) return;
+        setError('');
+        const present = current.current;
+        if (metadata.canAnnotate !== present.canAnnotate) { current.current = { ...present, canAnnotate: metadata.canAnnotate }; setContent(current.current); }
+        if (metadata.sourceRevision !== present.sourceRevision) setUpdated(true);
+        else if (metadata.version > present.version) {
+          const value = await request<ReaderContent>('', { signal: controller.signal });
+          if (controller.signal.aborted || epoch !== accessEpoch.current || !current.current) return;
+          if (value.sourceRevision !== current.current.sourceRevision) setUpdated(true);
+          else if (value.version >= current.current.version) { current.current = value; setContent(value); setError(''); }
         }
+      } catch (reason) {
+        if (!controller.signal.aborted && epoch === accessEpoch.current) fail(reason, '无法检查内容更新。');
       }
       finally { pending = false; }
     };
@@ -69,7 +84,7 @@ export default function HtmlReader({ artifactId, regionId }: ReaderBoot) {
     const visible = () => { if (!document.hidden) void check(); };
     document.addEventListener('visibilitychange', visible);
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
-  }, [request]);
+  }, [request, fail]);
   useEffect(() => {
     const measure = () => setAvailableWidth(Math.max(240, (viewport.current?.clientWidth || window.innerWidth) - 48));
     measure();
@@ -80,11 +95,13 @@ export default function HtmlReader({ artifactId, regionId }: ReaderBoot) {
   }, [Boolean(content)]);
   useEffect(() => { try { localStorage.setItem('agentero-studio-reader-theme', theme); } catch { /* Theme does not require storage. */ } }, [theme]);
   const returnToBoard = async (annotate: boolean) => {
+    const epoch = accessEpoch.current;
     setBusy(true); setNotice('');
     try {
       await request('/return', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ annotate }) });
+      if (epoch !== accessEpoch.current) return;
       setNotice(annotate ? '已请求在原区域备注，请切回原白板。' : '已请求定位原区域，请切回原白板。');
-    } catch (reason) { setError(reason instanceof Error ? reason.message : '无法返回白板。'); }
+    } catch (reason) { if (epoch === accessEpoch.current) fail(reason, '无法返回白板。'); }
     finally { setBusy(false); }
   };
   const width = Math.max(320, content?.width || 1440), height = Math.max(240, content?.height || 1120);

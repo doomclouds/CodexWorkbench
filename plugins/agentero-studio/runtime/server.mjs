@@ -48,6 +48,69 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
+// src/core/shared/common.ts
+import { randomUUID } from "node:crypto";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+function safeId(value, label = "\u4F5C\u54C1 ID") {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) throw new StudioError("INVALID_ARGUMENT", `${label}\u65E0\u6548\u3002`);
+  return value;
+}
+function text(value, fallback = "", maximum = 2e4) {
+  if (value === void 0) return fallback;
+  if (typeof value !== "string" || value.length > maximum) throw new StudioError("INVALID_ARGUMENT", "\u6587\u5B57\u5185\u5BB9\u65E0\u6548\u6216\u8FC7\u957F\u3002");
+  return value;
+}
+function finite(value, fallback) {
+  if (value === void 0) return fallback;
+  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 1e7) throw new StudioError("INVALID_ARGUMENT", "\u5750\u6807\u6216\u5C3A\u5BF8\u65E0\u6548\u3002");
+  return value;
+}
+function requireRole(actor, roles) {
+  if (!roles.includes(actor.role)) throw new StudioError("FORBIDDEN", "\u5F53\u524D\u8EAB\u4EFD\u6CA1\u6709\u6B64\u64CD\u4F5C\u6743\u9650\u3002");
+}
+function assertAlive(artifact) {
+  if (artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u5728\u56DE\u6536\u7AD9\uFF0C\u8BF7\u5148\u6062\u590D\u3002");
+}
+async function atomicWrite(file2, content) {
+  await mkdir(dirname(file2), { recursive: true });
+  const temporary = join(dirname(file2), `.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, content, { flag: "wx" });
+    for (let retry = 0; ; retry++) {
+      try {
+        await rename(temporary, file2);
+        break;
+      } catch (error62) {
+        if (process.platform !== "win32" || retry === 5 || !["EPERM", "EBUSY", "EACCES"].includes(error62.code ?? "")) throw error62;
+        await delay(50 * (retry + 1));
+      }
+    }
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+var StudioError, copy, object2, same;
+var init_common = __esm({
+  "src/core/shared/common.ts"() {
+    "use strict";
+    StudioError = class extends Error {
+      constructor(code, message, details) {
+        super(message);
+        this.code = code;
+        this.details = details;
+        this.name = "StudioError";
+      }
+      code;
+      details;
+    };
+    copy = (value) => structuredClone(value);
+    object2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    same = (before, after) => JSON.stringify(before) === JSON.stringify(after);
+  }
+});
+
 // src/contracts/studio.ts
 var TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
 var init_studio = __esm({
@@ -56,6 +119,24 @@ var init_studio = __esm({
     TOOL_NAMES = ["studio_open", "artifact_list", "artifact_manage", "artifact_read", "artifact_apply", "artifact_feedback", "artifact_share", "artifact_export"];
     DEFAULT_STYLE = { name: "Diagram", paper: "#f5f5f5", ink: "#2d3142", muted: "#4f5d75", accent: "#eb6c36", link: "#2e5aa8", fontFamily: 'Arial, "Microsoft YaHei", sans-serif', titleFont: 'Georgia, "Songti SC", serif', monoFont: "Consolas, monospace" };
     LOCAL_ACTOR = { id: "local", name: "\u6211", kind: "human", role: "owner" };
+  }
+});
+
+// src/server/service-protocol.ts
+var SERVICE_PROTOCOL_VERSION;
+var init_service_protocol = __esm({
+  "src/server/service-protocol.ts"() {
+    "use strict";
+    SERVICE_PROTOCOL_VERSION = 2;
+  }
+});
+
+// src/contracts/version.ts
+var PLUGIN_VERSION;
+var init_version = __esm({
+  "src/contracts/version.ts"() {
+    "use strict";
+    PLUGIN_VERSION = "0.2.0";
   }
 });
 
@@ -7281,69 +7362,6 @@ var require_dist = __commonJS({
   }
 });
 
-// src/core/shared/common.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, rename as rename2, rm, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname, join as join2 } from "node:path";
-import { setTimeout as delay2 } from "node:timers/promises";
-function safeId(value, label = "\u4F5C\u54C1 ID") {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) throw new StudioError("INVALID_ARGUMENT", `${label}\u65E0\u6548\u3002`);
-  return value;
-}
-function text(value, fallback = "", maximum = 2e4) {
-  if (value === void 0) return fallback;
-  if (typeof value !== "string" || value.length > maximum) throw new StudioError("INVALID_ARGUMENT", "\u6587\u5B57\u5185\u5BB9\u65E0\u6548\u6216\u8FC7\u957F\u3002");
-  return value;
-}
-function finite(value, fallback) {
-  if (value === void 0) return fallback;
-  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 1e7) throw new StudioError("INVALID_ARGUMENT", "\u5750\u6807\u6216\u5C3A\u5BF8\u65E0\u6548\u3002");
-  return value;
-}
-function requireRole(actor, roles) {
-  if (!roles.includes(actor.role)) throw new StudioError("FORBIDDEN", "\u5F53\u524D\u8EAB\u4EFD\u6CA1\u6709\u6B64\u64CD\u4F5C\u6743\u9650\u3002");
-}
-function assertAlive(artifact) {
-  if (artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u5728\u56DE\u6536\u7AD9\uFF0C\u8BF7\u5148\u6062\u590D\u3002");
-}
-async function atomicWrite(file2, content) {
-  await mkdir2(dirname(file2), { recursive: true });
-  const temporary = join2(dirname(file2), `.${randomUUID3()}.tmp`);
-  try {
-    await writeFile2(temporary, content, { flag: "wx" });
-    for (let retry = 0; ; retry++) {
-      try {
-        await rename2(temporary, file2);
-        break;
-      } catch (error62) {
-        if (process.platform !== "win32" || retry === 5 || !["EPERM", "EBUSY", "EACCES"].includes(error62.code ?? "")) throw error62;
-        await delay2(50 * (retry + 1));
-      }
-    }
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
-var StudioError, copy, object3, same;
-var init_common = __esm({
-  "src/core/shared/common.ts"() {
-    "use strict";
-    StudioError = class extends Error {
-      constructor(code, message, details) {
-        super(message);
-        this.code = code;
-        this.details = details;
-        this.name = "StudioError";
-      }
-      code;
-      details;
-    };
-    copy = (value) => structuredClone(value);
-    object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-    same = (before, after) => JSON.stringify(before) === JSON.stringify(after);
-  }
-});
-
 // src/core/shared/products.ts
 var ProductRegistry;
 var init_products = __esm({
@@ -7377,6 +7395,170 @@ var init_products = __esm({
         this.get(state.artifact.type).adapter.validate(state.content);
       }
     };
+  }
+});
+
+// src/core/shared/safe-merge.ts
+function jsonEqual(left, right, depth = 0) {
+  if (left === right) return true;
+  if (depth > 64) return false;
+  if (Array.isArray(left) && Array.isArray(right)) return left.length === right.length && left.every((value, index) => jsonEqual(value, right[index], depth + 1));
+  if (!object4(left) || !object4(right)) return false;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every((key) => Object.hasOwn(right, key) && jsonEqual(left[key], right[key], depth + 1));
+}
+function hunks(base, side, local) {
+  const limit = Math.min(base.length + side.length, 512), offset = limit + 1, v = new Int32Array(2 * limit + 3), trace = [];
+  let found = -1;
+  for (let distance = 0; distance <= limit; distance++) {
+    trace.push(v.slice(offset - distance - 1, offset + distance + 2));
+    for (let diagonal = -distance; diagonal <= distance; diagonal += 2) {
+      let x3 = diagonal === -distance || diagonal !== distance && v[offset + diagonal - 1] < v[offset + diagonal + 1] ? v[offset + diagonal + 1] : v[offset + diagonal - 1] + 1;
+      let y2 = x3 - diagonal;
+      while (x3 < base.length && y2 < side.length && base[x3] === side[y2]) {
+        x3++;
+        y2++;
+      }
+      v[offset + diagonal] = x3;
+      if (x3 >= base.length && y2 >= side.length) {
+        found = distance;
+        break;
+      }
+    }
+    if (found >= 0) break;
+  }
+  if (found < 0) return;
+  const ops = [];
+  let x2 = base.length, y = side.length;
+  for (let distance = found; distance > 0; distance--) {
+    const previous = trace[distance], diagonal = x2 - y, at = (value) => previous[value + distance + 1];
+    const previousDiagonal = diagonal === -distance || diagonal !== distance && at(diagonal - 1) < at(diagonal + 1) ? diagonal + 1 : diagonal - 1;
+    const previousX = at(previousDiagonal), previousY = previousX - previousDiagonal;
+    while (x2 > previousX && y > previousY) {
+      ops.push("=");
+      x2--;
+      y--;
+    }
+    ops.push(x2 === previousX ? "+" : "-");
+    x2 = previousX;
+    y = previousY;
+  }
+  while (x2 > 0 && y > 0) {
+    ops.push("=");
+    x2--;
+    y--;
+  }
+  const result = [];
+  let open4, i2 = 0, j = 0;
+  for (const op of ops.reverse()) {
+    if (op === "=") {
+      open4 = void 0;
+      i2++;
+      j++;
+      continue;
+    }
+    if (!open4) {
+      open4 = { start: i2, end: i2, lines: [], local };
+      result.push(open4);
+    }
+    if (op === "-") open4.end = ++i2;
+    else open4.lines.push(side[j++]);
+  }
+  return result.flatMap((hunk) => hunk.end - hunk.start > 1 && hunk.lines.length === hunk.end - hunk.start ? hunk.lines.flatMap((line, index) => line === base[hunk.start + index] ? [] : [{ ...hunk, start: hunk.start + index, end: hunk.start + index + 1, lines: [line] }]) : [hunk]);
+}
+function applyHunks(base, start, end, changes) {
+  const result = [];
+  let at = start;
+  for (const change of changes) {
+    result.push(...base.slice(at, change.start), ...change.lines);
+    at = change.end;
+  }
+  result.push(...base.slice(at, end));
+  return result;
+}
+function mergeText(base, local, current, path2, conflicts) {
+  const lines = base.split("\n"), mine = local.split("\n"), theirs = current.split("\n");
+  if (Math.max(lines.length, mine.length, theirs.length) > 1e4) return;
+  const a = hunks(lines, mine, true), b = hunks(lines, theirs, false);
+  if (!a || !b) return;
+  const all = [...a, ...b].sort((left, right) => left.start - right.start || left.end - right.end), result = [];
+  let done = 0;
+  for (let i2 = 0; i2 < all.length; ) {
+    const region = [all[i2++]], start = region[0].start;
+    let end = region[0].end;
+    for (; i2 < all.length; i2++) {
+      const next = all[i2];
+      if (!(next.start < end || next.start === next.end && start === end && next.start === start)) break;
+      region.push(next);
+      end = Math.max(end, next.end);
+    }
+    result.push(...lines.slice(done, start));
+    if (region.every((change) => change.local === region[0].local)) result.push(...applyHunks(lines, start, end, region));
+    else {
+      const l = applyHunks(lines, start, end, region.filter((change) => change.local)), r = applyHunks(lines, start, end, region.filter((change) => !change.local));
+      if (!jsonEqual(l, r)) conflicts.push(`${path2 || "."}@${start + 1}`);
+      result.push(...l);
+    }
+    done = end;
+  }
+  result.push(...lines.slice(done));
+  return result.join("\n");
+}
+function mergeJson(base, local, current, matrixPaths = []) {
+  const conflicts = [];
+  const merge2 = (b, l, c, path2, depth = 0) => {
+    if (depth > 64) {
+      conflicts.push(path2 || ".");
+      return c;
+    }
+    if (jsonEqual(l, b)) return c;
+    if (jsonEqual(c, b) || jsonEqual(l, c)) return l;
+    if (object4(b) && object4(l) && object4(c)) {
+      const result = {};
+      for (const key of /* @__PURE__ */ new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(c)])) {
+        if (key === "__proto__") continue;
+        const value = merge2(b[key], l[key], c[key], path2 ? `${path2}.${key}` : key, depth + 1);
+        if (value !== void 0) result[key] = value;
+      }
+      return result;
+    }
+    if (matrixPaths.includes(path2) && Array.isArray(b) && Array.isArray(l) && Array.isArray(c) && b.length === l.length && b.length === c.length && b.every((row, i2) => Array.isArray(row) && Array.isArray(l[i2]) && Array.isArray(c[i2]) && row.length === l[i2].length && row.length === c[i2].length)) {
+      return b.map((row, i2) => row.map((value, j) => merge2(value, l[i2][j], c[i2][j], `${path2}[${i2}][${j}]`, depth + 1)));
+    }
+    if (typeof b === "string" && typeof l === "string" && typeof c === "string") {
+      const value = mergeText(b, l, c, path2, conflicts);
+      if (value !== void 0) return value;
+    }
+    conflicts.push(path2 || ".");
+    return c;
+  };
+  return { result: merge2(base, local, current, ""), conflicts: [...new Set(conflicts)] };
+}
+function mergeConflictDetails(base, local, current, paths) {
+  let truncated = paths.length > 32;
+  const preview = (value) => {
+    const encoded = JSON.stringify(value) ?? "null";
+    const bytes = encoder.encode(encoded);
+    if (bytes.length <= 2048) return value ?? null;
+    truncated = true;
+    return { preview: decoder.decode(bytes.subarray(0, 1e3)), truncated: true };
+  };
+  const values = { base: preview(base), local: preview(local), current: preview(current) };
+  const boundedPaths = paths.slice(0, 32).map((path2) => {
+    const bytes = encoder.encode(path2);
+    if (bytes.length <= 160) return path2;
+    truncated = true;
+    return decoder.decode(bytes.subarray(0, 156)) + "\u2026";
+  });
+  return { paths: boundedPaths, ...values, ...truncated ? { truncated: true } : {} };
+}
+var object4, encoder, decoder;
+var init_safe_merge = __esm({
+  "src/core/shared/safe-merge.ts"() {
+    "use strict";
+    object4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    encoder = new TextEncoder();
+    decoder = new TextDecoder();
   }
 });
 
@@ -8525,7 +8707,7 @@ function elementSvg(e, board, options = {}) {
     for (const width of widths) offsets.push(offsets.at(-1) + width);
     markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri === 0 && e.data?.head !== false ? semanticColor(e.fill, style, style["paper-2"] ?? style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + offsets[ci] + 8, y: e.y + ri * rowHeight, w: widths[ci] - 16, h: rowHeight, text: String(cell), fontSize: e.fontSize ?? 14, bold: ri === 0 && e.data?.head !== false ? true : e.bold }, board, semanticColor(e.color, style, style.ink), true)}`).join("")).join("");
   } else {
-    const fill = e.type === "container" || e.hollow ? "none" : semanticColor(e.fill, style, e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
+    const fill = e.hollow ? "none" : semanticColor(e.fill, style, e.type === "container" ? "none" : e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
     let textColor = semanticColor(e.color, style, style.ink);
     if (contrastRatio(textColor, fill === "none" ? "transparent" : fill, style.paper) < 4.5) textColor = readableText(fill === "none" ? "transparent" : fill, style.paper);
     markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
@@ -8680,7 +8862,7 @@ function validateWhiteboardAsset(mimeType) {
   if (!/^(image\/(png|jpeg|gif|webp|svg\+xml)|video\/(mp4|webm|quicktime))$/.test(mimeType)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u4EC5\u63A5\u6536\u56FE\u7247\u548C\u89C6\u9891\u8D44\u6E90\u3002");
 }
 function normalizeElement(input2, id2) {
-  if (!object3(input2) || !TYPES.has(input2.type ?? "")) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5143\u7D20\u7C7B\u578B\u65E0\u6548\u3002");
+  if (!object2(input2) || !TYPES.has(input2.type ?? "")) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5143\u7D20\u7C7B\u578B\u65E0\u6548\u3002");
   const result = { ...copy(input2), id: safeId(id2 ?? input2.id ?? randomUUID4(), "\u5143\u7D20 ID"), type: input2.type, x: finite(input2.x, 0), y: finite(input2.y, 0), w: finite(input2.w, 220), h: finite(input2.h, 120), version: 1 };
   if (result.w < 0 || result.h < 0) throw new StudioError("INVALID_ARGUMENT", "\u5143\u7D20\u5C3A\u5BF8\u4E0D\u80FD\u4E3A\u8D1F\u6570\u3002");
   if (result.html !== void 0 && (typeof result.html !== "string" || result.html.length > 2 * 1024 * 1024)) throw new StudioError("INVALID_ARGUMENT", "HTML \u5185\u5BB9\u65E0\u6548\u6216\u8D85\u8FC7 2 MB\u3002");
@@ -8703,9 +8885,61 @@ function normalizeElement(input2, id2) {
   }
   if (result.crop !== void 0) {
     const crop = result.crop;
-    if (!object3(crop) || typeof crop.zoom !== "number" || !Number.isFinite(crop.zoom) || crop.zoom < 1 || ["x", "y"].some((key) => typeof crop[key] !== "number" || !Number.isFinite(crop[key]) || crop[key] < 0 || crop[key] > 1)) throw new StudioError("INVALID_ARGUMENT", "\u56FE\u7247\u88C1\u526A\u7F29\u653E\u987B\u81F3\u5C11\u4E3A 1\uFF0C\u4F4D\u7F6E x/y \u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
+    if (!object2(crop) || typeof crop.zoom !== "number" || !Number.isFinite(crop.zoom) || crop.zoom < 1 || ["x", "y"].some((key) => typeof crop[key] !== "number" || !Number.isFinite(crop[key]) || crop[key] < 0 || crop[key] > 1)) throw new StudioError("INVALID_ARGUMENT", "\u56FE\u7247\u88C1\u526A\u7F29\u653E\u987B\u81F3\u5C11\u4E3A 1\uFF0C\u4F4D\u7F6E x/y \u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
   }
+  if (result.type === "table") result.data = tableIdentity(result.id, result.data);
   return result;
+}
+function tableIdentity(id2, value) {
+  const data = object2(value) ? copy(value) : {}, rows = data.rows;
+  if (!Array.isArray(rows) || !rows.every(Array.isArray)) return data;
+  const columns = Math.max(0, ...rows.map((row) => row.length));
+  const keys = (value2, length, axis) => {
+    if (value2 === void 0) return Array.from({ length }, (_, index) => `${id2}:${axis}:${index}`);
+    if (!Array.isArray(value2) || value2.length !== length || !value2.every((key) => typeof key === "string" && key.length > 0 && key.length <= 160) || new Set(value2).size !== length) throw new StudioError("INVALID_ARGUMENT", "\u8868\u683C\u884C\u5217\u6807\u8BC6\u5FC5\u987B\u552F\u4E00\u5E76\u5339\u914D\u5F53\u524D\u7ED3\u6784\u3002");
+    return value2;
+  };
+  return { ...data, rowIds: keys(data.rowIds, rows.length, "row"), columnIds: keys(data.columnIds, columns, "col") };
+}
+function mergeFields(value) {
+  if (!object2(value)) return {};
+  const { id: _id, version: _version, sourceRevision: _sourceRevision, ...fields } = value;
+  return fields;
+}
+function safeElementMerge(base, local, current) {
+  const b = mergeFields(base), l = mergeFields(local), c = mergeFields(current), matrices = [];
+  if (base.type === "table" && local.type === "table" && current.type === "table") {
+    b.data = tableIdentity(base.id, b.data);
+    l.data = tableIdentity(local.id, l.data);
+    c.data = tableIdentity(current.id, c.data);
+    const bd = b.data, ld = l.data, cd = c.data;
+    if (jsonEqual(bd.rowIds, ld.rowIds) && jsonEqual(bd.rowIds, cd.rowIds) && jsonEqual(bd.columnIds, ld.columnIds) && jsonEqual(bd.columnIds, cd.columnIds)) matrices.push("data.rows");
+    else if (!jsonEqual(bd.rows, ld.rows) && !jsonEqual(bd.rows, cd.rows)) return { result: c, conflicts: ["data.rows", "data.rowIds", "data.columnIds"] };
+  }
+  return mergeJson(b, l, c, matrices);
+}
+function syncElementVersions(content, previous, clocks, initialize = false) {
+  const before = new Map(previous.elements.map((element) => [element.id, element]));
+  for (const element of content.elements) {
+    const old = before.get(element.id), clock = Object.hasOwn(clocks, element.id) ? clocks[element.id] : void 0;
+    if (initialize) {
+      const incarnationStart = !old && clock ? Math.max(clock.version + 1, element.version) : clock?.incarnationStart ?? element.version;
+      const sourceRevision = Math.max(clock?.sourceRevision ?? 0, Number(element.sourceRevision ?? 0), !old && clock && element.type === "html" ? (clock.sourceRevision ?? 0) + 1 : 0);
+      clocks[element.id] = { version: Math.max(clock?.version ?? 0, element.version, incarnationStart), incarnationStart, ...sourceRevision ? { sourceRevision } : {} };
+      continue;
+    }
+    if (jsonEqual(old, element)) {
+      if (clock) {
+        element.version = Math.max(element.version, clock.version);
+        if (element.type === "html") element.sourceRevision = Math.max(Number(element.sourceRevision ?? 1), clock.sourceRevision ?? 1);
+      }
+      continue;
+    }
+    element.version = Math.max(element.version, (clock?.version ?? old?.version ?? 0) + 1);
+    if (element.type === "html") element.sourceRevision = old?.type === "html" && old.html === element.html ? old.sourceRevision ?? 1 : Math.max(Number(element.sourceRevision ?? 1), (clock?.sourceRevision ?? 0) + 1);
+    if (!Number.isSafeInteger(element.version) || element.sourceRevision !== void 0 && !Number.isSafeInteger(element.sourceRevision)) throw new StudioError("VERSION_EXHAUSTED", "\u5BF9\u8C61\u7248\u672C\u5DF2\u8D85\u8FC7\u53EF\u5B89\u5168\u8868\u793A\u7684\u8303\u56F4\u3002");
+    clocks[element.id] = { version: element.version, incarnationStart: old ? clock?.incarnationStart ?? old.version : element.version, ...element.sourceRevision || clock?.sourceRevision ? { sourceRevision: Math.max(clock?.sourceRevision ?? 0, Number(element.sourceRevision ?? 0)) } : {} };
+  }
 }
 function initialWhiteboard(elements, base) {
   return { elements: (base?.elements ?? (Array.isArray(elements) ? elements : [])).map((item) => normalizeElement(item)), style: copy(base?.style ?? DEFAULT_STYLE), orderVersion: 0, ...base?.motion ? { motion: copy(base.motion) } : {} };
@@ -8754,7 +8988,7 @@ function assertLockedGeometry(before, after, baseline) {
   }
 }
 function decodeWhiteboardState(value) {
-  if (object3(value) && value.schemaVersion === 1 && object3(value.board)) {
+  if (object2(value) && value.schemaVersion === 1 && object2(value.board)) {
     const legacy = value;
     const { board, history, ...rest } = legacy, { artifact, ...content } = board;
     return { ...rest, schemaVersion: 2, artifact, content, history: history.map((saved) => {
@@ -8770,17 +9004,31 @@ var init_whiteboard = __esm({
     "use strict";
     init_studio();
     init_common();
+    init_safe_merge();
     init_whiteboard_geometry();
     TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "table", "link", "note", "sticker", "diagram", "chart"]);
     LOCKED_GEOMETRY = ["type", "x", "y", "w", "h", "rotation", "parentId", "groupId", "from", "to", "fromSide", "toSide", "points", "bends", "crop"];
     whiteboardAdapter = {
       type: "whiteboard",
       validate(content) {
-        if (!object3(content) || !Array.isArray(content.elements) || !object3(content.style)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5185\u5BB9\u65E0\u6548\u3002");
+        if (!object2(content) || !Array.isArray(content.elements) || !object2(content.style)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5185\u5BB9\u65E0\u6548\u3002");
         if (content.orderVersion !== void 0 && (!Number.isSafeInteger(content.orderVersion) || content.orderVersion < 0)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5C42\u7EA7\u7248\u672C\u65E0\u6548\u3002");
         if (content.elements.length > 2e3 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError("TOO_LARGE", "\u767D\u677F\u5185\u5BB9\u8D85\u8FC7\u5F53\u524D\u5BB9\u91CF\uFF0C\u8BF7\u5206\u6210\u591A\u4E2A\u4F5C\u54C1\u3002");
       },
       versionOf: (content, id2) => id2 === "$order" ? content.orderVersion ?? 0 : content.elements.find((item) => item.id === id2)?.version ?? 0,
+      syncVersions: syncElementVersions,
+      rebaseUpdate(operation2, base, current) {
+        if (operation2.op !== "update" || !object2(base) || !object2(current) || !object2(operation2.changes) || base.type !== current.type) throw new StudioError("CONFLICT", "\u5BF9\u8C61\u7ED3\u6784\u5DF2\u6539\u53D8\uFF0C\u8BF7\u4FDD\u7559\u672C\u5730\u4FEE\u6539\u5E76\u6BD4\u8F83\u6700\u65B0\u5185\u5BB9\u3002", mergeConflictDetails(base, operation2.changes, current, ["."]));
+        const b = base, c = current;
+        const local = { ...copy(b), ...copy(operation2.changes), id: b.id, version: b.version };
+        if (local.type !== b.type) throw new StudioError("CONFLICT", "\u5BF9\u8C61\u7C7B\u578B\u53D1\u751F\u53D8\u5316\uFF0C\u4E0D\u80FD\u81EA\u52A8\u5408\u5E76\u8FC7\u671F\u4FEE\u6539\u3002", mergeConflictDetails(base, local, current, ["type"]));
+        if (b.type === "table" && object2(operation2.changes.data) && Object.hasOwn(operation2.changes.data, "rows") && (!Array.isArray(operation2.changes.data.rowIds) || !Array.isArray(operation2.changes.data.columnIds))) throw new StudioError("CONFLICT", "\u5E76\u53D1\u8868\u683C\u7F16\u8F91\u9700\u8981\u7A33\u5B9A\u7684\u884C\u5217\u6807\u8BC6\uFF0C\u8BF7\u6BD4\u8F83\u540E\u91CD\u65B0\u63D0\u4EA4\u3002", mergeConflictDetails(base, local, current, ["data.rows"]));
+        const merged = safeElementMerge(b, local, c);
+        if (merged.conflicts.length) throw new StudioError("CONFLICT", "\u8FD9\u4E9B\u5B57\u6BB5\u540C\u65F6\u88AB\u4FEE\u6539\uFF0C\u672A\u8986\u76D6\u4EFB\u4F55\u4E00\u65B9\u3002", mergeConflictDetails(base, local, current, merged.conflicts));
+        const fields = merged.result, existing = mergeFields(c), changes = {};
+        for (const key of /* @__PURE__ */ new Set([...Object.keys(fields), ...Object.keys(existing)])) if (!jsonEqual(fields[key], existing[key])) changes[key] = fields[key];
+        return { operation: { ...operation2, changes }, local };
+      },
       targets(content, operation2) {
         if (operation2.op === "restore") {
           const ids = operation2.ids ?? (operation2.id === void 0 ? void 0 : [operation2.id]);
@@ -8808,10 +9056,14 @@ var init_whiteboard = __esm({
         if (operation2.op === "update") {
           const id2 = safeId(operation2.id, "\u5143\u7D20 ID"), index = content.elements.findIndex((item) => item.id === id2), current = content.elements[index];
           if (!current) throw new StudioError("NOT_FOUND", "\u8981\u4FEE\u6539\u7684\u5143\u7D20\u4E0D\u5B58\u5728\u3002");
-          if (!object3(operation2.changes)) throw new StudioError("INVALID_ARGUMENT", "\u4FEE\u6539\u5B57\u6BB5\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
+          if (!object2(operation2.changes)) throw new StudioError("INVALID_ARGUMENT", "\u4FEE\u6539\u5B57\u6BB5\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
           if (Object.hasOwn(operation2.changes, "locked") && typeof operation2.changes.locked !== "boolean") throw new StudioError("INVALID_ARGUMENT", "locked \u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
           if (current.locked && operation2.changes.locked === false && Object.keys(operation2.changes).length !== 1) throw new StudioError("LOCKED", "\u8BF7\u901A\u8FC7\u5355\u72EC\u7684\u9501\u5B9A\u64CD\u4F5C\u660E\u786E\u89E3\u9501\u3002", { elementId: id2 });
-          const { id: _id, version: _version, ...changes } = operation2.changes;
+          const { id: _id, version: _version, ...changes } = copy(operation2.changes);
+          if (current.type === "table" && object2(changes.data) && Object.hasOwn(changes.data, "rows")) {
+            if (!Object.hasOwn(changes.data, "rowIds")) changes.data.rowIds = (Array.isArray(changes.data.rows) ? changes.data.rows : []).map((_, index2) => `${id2}:row:v${current.version + 1}:${index2}`);
+            if (!Object.hasOwn(changes.data, "columnIds")) changes.data.columnIds = Array.from({ length: Math.max(0, ...Array.isArray(changes.data.rows) ? changes.data.rows.filter(Array.isArray).map((row) => row.length) : []) }, (_, index2) => `${id2}:col:v${current.version + 1}:${index2}`);
+          }
           const next = normalizeElement({ ...current, ...copy(changes) }, id2);
           next.version = current.version + 1;
           if (next.type === "html") next.sourceRevision = current.html === next.html ? current.sourceRevision ?? 1 : Number(current.sourceRevision ?? 0) + 1;
@@ -8828,7 +9080,7 @@ var init_whiteboard = __esm({
         }
         if (operation2.op === "style") {
           const patch = operation2.style ?? {};
-          if (!object3(patch) || Object.values(patch).some((value) => typeof value !== "string" || value.length > 500)) throw new StudioError("INVALID_ARGUMENT", "\u6837\u5F0F\u5B57\u6BB5\u5FC5\u987B\u662F\u6587\u5B57\u3002");
+          if (!object2(patch) || Object.values(patch).some((value) => typeof value !== "string" || value.length > 500)) throw new StudioError("INVALID_ARGUMENT", "\u6837\u5F0F\u5B57\u6BB5\u5FC5\u987B\u662F\u6587\u5B57\u3002");
           content.style = { ...content.style, ...copy(patch) };
           return ["$style"];
         }
@@ -8873,6 +9125,24 @@ var init_whiteboard = __esm({
       },
       readUnit(content, id2) {
         return id2 === "$style" ? content.style : id2 === "$motion" ? content.motion : id2 === "$order" ? orderUnit(content) : content.elements.find((item) => item.id === id2) ?? null;
+      },
+      undoUnit(content, change, history = []) {
+        const current = this.readUnit(content, change.id);
+        if (change.id === "$order" || !object2(change.before) || !object2(change.after) || !object2(current)) {
+          if (!jsonEqual(current, change.after)) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, ["."]) });
+          this.restoreUnit(content, change, history);
+          return;
+        }
+        if (change.id === "$style" || change.id === "$motion") {
+          const merged2 = mergeJson(change.after, change.before, current);
+          if (merged2.conflicts.length) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8981\u64A4\u56DE\u7684\u5B57\u6BB5\uFF0C\u672A\u8986\u76D6\u4ED6\u4EBA\u7684\u7F16\u8F91\u3002", { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, merged2.conflicts) });
+          this.restoreUnit(content, { ...change, before: merged2.result }, history);
+          return;
+        }
+        const after = change.after, live = current;
+        const merged = safeElementMerge(after, change.before, live);
+        if (merged.conflicts.length) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8981\u64A4\u56DE\u7684\u5B57\u6BB5\uFF0C\u672A\u8986\u76D6\u4ED6\u4EBA\u7684\u7F16\u8F91\u3002", { elementId: change.id, currentVersion: live.version, ...mergeConflictDetails(change.after, change.before, current, merged.conflicts) });
+        this.restoreUnit(content, { ...change, before: { ...merged.result, id: live.id, version: live.version, ...live.sourceRevision !== void 0 ? { sourceRevision: live.sourceRevision } : {} } }, history);
       },
       restoreUnit(content, change, history = []) {
         if (change.id === "$style") {
@@ -8930,8 +9200,8 @@ var init_whiteboard = __esm({
         const unlocked = current.elements.find((element) => element.locked && restored.elements.some((next) => next.id === element.id && !next.locked));
         if (unlocked) throw new StudioError("LOCKED", "\u6062\u590D\u5386\u53F2\u4E0D\u80FD\u9690\u5F0F\u89E3\u9501\u5BF9\u8C61\uFF0C\u8BF7\u5148\u5355\u72EC\u660E\u786E\u89E3\u9501\u3002", { elementId: unlocked.id });
       },
-      snapshotFeedback(artifactId, feedbackId, snapshots, value, versions) {
-        const anchor3 = object3(value) ? copy(value) : {};
+      snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
+        const anchor3 = object2(value) ? copy(value) : {};
         if (anchor3.elementIds !== void 0 && (!Array.isArray(anchor3.elementIds) || anchor3.elementIds.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5143\u7D20\u5B9A\u4F4D\u65E0\u6548\u3002");
         if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
         for (const key of ["x", "y", "w", "h"]) if (anchor3[key] !== void 0) finite(anchor3[key], 0);
@@ -8959,6 +9229,9 @@ var init_whiteboard = __esm({
           if (!selected || ambiguous) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: id2, version: versions[id2] });
           return selected;
         });
+        if (anchor3.coordinateSpace === "element") {
+          for (const element of elements) if (element.version < (clocks?.[element.id]?.incarnationStart ?? 1)) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u5C5E\u4E8E\u5DF2\u5220\u9664\u7684\u5BF9\u8C61\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: element.id, version: element.version });
+        }
         const sources = elements.map((element) => typeof element.html === "string" ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) } : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });
         return { anchor: anchor3, versions: Object.fromEntries(elements.map((element) => [element.id, element.version])), sources };
       }
@@ -9541,8 +9814,8 @@ var require_graceful_fs = __commonJS({
       fs2.createReadStream = createReadStream;
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
-      fs2.readFile = readFile7;
-      function readFile7(path2, options, cb) {
+      fs2.readFile = readFile8;
+      function readFile8(path2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$readFile(path2, options, cb);
@@ -10254,11 +10527,11 @@ var require_mtime_precision = __commonJS({
     function probe2(file2, fs, callback) {
       const cachedPrecision = fs[cacheSymbol];
       if (cachedPrecision) {
-        return fs.stat(file2, (err2, stat) => {
+        return fs.stat(file2, (err2, stat2) => {
           if (err2) {
             return callback(err2);
           }
-          callback(null, stat.mtime, cachedPrecision);
+          callback(null, stat2.mtime, cachedPrecision);
         });
       }
       const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
@@ -10266,13 +10539,13 @@ var require_mtime_precision = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        fs.stat(file2, (err3, stat) => {
+        fs.stat(file2, (err3, stat2) => {
           if (err3) {
             return callback(err3);
           }
-          const precision = stat.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
+          const precision = stat2.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
           Object.defineProperty(fs, cacheSymbol, { value: precision });
-          callback(null, stat.mtime, precision);
+          callback(null, stat2.mtime, precision);
         });
       });
     }
@@ -10326,14 +10599,14 @@ var require_lockfile = __commonJS({
         if (options.stale <= 0) {
           return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
         }
-        options.fs.stat(lockfilePath, (err3, stat) => {
+        options.fs.stat(lockfilePath, (err3, stat2) => {
           if (err3) {
             if (err3.code === "ENOENT") {
               return acquireLock(file2, { ...options, stale: 0 }, callback);
             }
             return callback(err3);
           }
-          if (!isLockStale(stat, options)) {
+          if (!isLockStale(stat2, options)) {
             return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
           }
           removeLock(file2, options, (err4) => {
@@ -10345,8 +10618,8 @@ var require_lockfile = __commonJS({
         });
       });
     }
-    function isLockStale(stat, options) {
-      return stat.mtime.getTime() < Date.now() - options.stale;
+    function isLockStale(stat2, options) {
+      return stat2.mtime.getTime() < Date.now() - options.stale;
     }
     function removeLock(file2, options, callback) {
       options.fs.rmdir(getLockFile(file2, options), (err2) => {
@@ -10357,68 +10630,68 @@ var require_lockfile = __commonJS({
       });
     }
     function updateLock(file2, options) {
-      const lock3 = locks[file2];
-      if (lock3.updateTimeout) {
+      const lock4 = locks[file2];
+      if (lock4.updateTimeout) {
         return;
       }
-      lock3.updateDelay = lock3.updateDelay || options.update;
-      lock3.updateTimeout = setTimeout(() => {
-        lock3.updateTimeout = null;
-        options.fs.stat(lock3.lockfilePath, (err2, stat) => {
-          const isOverThreshold = lock3.lastUpdate + options.stale < Date.now();
+      lock4.updateDelay = lock4.updateDelay || options.update;
+      lock4.updateTimeout = setTimeout(() => {
+        lock4.updateTimeout = null;
+        options.fs.stat(lock4.lockfilePath, (err2, stat2) => {
+          const isOverThreshold = lock4.lastUpdate + options.stale < Date.now();
           if (err2) {
             if (err2.code === "ENOENT" || isOverThreshold) {
-              return setLockAsCompromised(file2, lock3, Object.assign(err2, { code: "ECOMPROMISED" }));
+              return setLockAsCompromised(file2, lock4, Object.assign(err2, { code: "ECOMPROMISED" }));
             }
-            lock3.updateDelay = 1e3;
+            lock4.updateDelay = 1e3;
             return updateLock(file2, options);
           }
-          const isMtimeOurs = lock3.mtime.getTime() === stat.mtime.getTime();
+          const isMtimeOurs = lock4.mtime.getTime() === stat2.mtime.getTime();
           if (!isMtimeOurs) {
             return setLockAsCompromised(
               file2,
-              lock3,
+              lock4,
               Object.assign(
                 new Error("Unable to update lock within the stale threshold"),
                 { code: "ECOMPROMISED" }
               )
             );
           }
-          const mtime = mtimePrecision.getMtime(lock3.mtimePrecision);
-          options.fs.utimes(lock3.lockfilePath, mtime, mtime, (err3) => {
-            const isOverThreshold2 = lock3.lastUpdate + options.stale < Date.now();
-            if (lock3.released) {
+          const mtime = mtimePrecision.getMtime(lock4.mtimePrecision);
+          options.fs.utimes(lock4.lockfilePath, mtime, mtime, (err3) => {
+            const isOverThreshold2 = lock4.lastUpdate + options.stale < Date.now();
+            if (lock4.released) {
               return;
             }
             if (err3) {
               if (err3.code === "ENOENT" || isOverThreshold2) {
-                return setLockAsCompromised(file2, lock3, Object.assign(err3, { code: "ECOMPROMISED" }));
+                return setLockAsCompromised(file2, lock4, Object.assign(err3, { code: "ECOMPROMISED" }));
               }
-              lock3.updateDelay = 1e3;
+              lock4.updateDelay = 1e3;
               return updateLock(file2, options);
             }
-            lock3.mtime = mtime;
-            lock3.lastUpdate = Date.now();
-            lock3.updateDelay = null;
+            lock4.mtime = mtime;
+            lock4.lastUpdate = Date.now();
+            lock4.updateDelay = null;
             updateLock(file2, options);
           });
         });
-      }, lock3.updateDelay);
-      if (lock3.updateTimeout.unref) {
-        lock3.updateTimeout.unref();
+      }, lock4.updateDelay);
+      if (lock4.updateTimeout.unref) {
+        lock4.updateTimeout.unref();
       }
     }
-    function setLockAsCompromised(file2, lock3, err2) {
-      lock3.released = true;
-      if (lock3.updateTimeout) {
-        clearTimeout(lock3.updateTimeout);
+    function setLockAsCompromised(file2, lock4, err2) {
+      lock4.released = true;
+      if (lock4.updateTimeout) {
+        clearTimeout(lock4.updateTimeout);
       }
-      if (locks[file2] === lock3) {
+      if (locks[file2] === lock4) {
         delete locks[file2];
       }
-      lock3.options.onCompromised(err2);
+      lock4.options.onCompromised(err2);
     }
-    function lock2(file2, options, callback) {
+    function lock3(file2, options, callback) {
       options = {
         stale: 1e4,
         update: null,
@@ -10448,7 +10721,7 @@ var require_lockfile = __commonJS({
             if (err3) {
               return callback(operation2.mainError());
             }
-            const lock3 = locks[file3] = {
+            const lock4 = locks[file3] = {
               lockfilePath: getLockFile(file3, options),
               mtime,
               mtimePrecision: mtimePrecision2,
@@ -10457,7 +10730,7 @@ var require_lockfile = __commonJS({
             };
             updateLock(file3, options);
             callback(null, (releasedCallback) => {
-              if (lock3.released) {
+              if (lock4.released) {
                 return releasedCallback && releasedCallback(Object.assign(new Error("Lock is already released"), { code: "ERELEASED" }));
               }
               unlock(file3, { ...options, realpath: false }, releasedCallback);
@@ -10476,12 +10749,12 @@ var require_lockfile = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        const lock3 = locks[file3];
-        if (!lock3) {
+        const lock4 = locks[file3];
+        if (!lock4) {
           return callback(Object.assign(new Error("Lock is not acquired/owned by you"), { code: "ENOTACQUIRED" }));
         }
-        lock3.updateTimeout && clearTimeout(lock3.updateTimeout);
-        lock3.released = true;
+        lock4.updateTimeout && clearTimeout(lock4.updateTimeout);
+        lock4.released = true;
         delete locks[file3];
         removeLock(file3, options, callback);
       });
@@ -10498,11 +10771,11 @@ var require_lockfile = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        options.fs.stat(getLockFile(file3, options), (err3, stat) => {
+        options.fs.stat(getLockFile(file3, options), (err3, stat2) => {
           if (err3) {
             return err3.code === "ENOENT" ? callback(null, false) : callback(err3);
           }
-          return callback(null, !isLockStale(stat, options));
+          return callback(null, !isLockStale(stat2, options));
         });
       });
     }
@@ -10518,7 +10791,7 @@ var require_lockfile = __commonJS({
         }
       }
     });
-    module.exports.lock = lock2;
+    module.exports.lock = lock3;
     module.exports.unlock = unlock;
     module.exports.check = check2;
     module.exports.getLocks = getLocks;
@@ -10596,7 +10869,7 @@ var require_proper_lockfile = __commonJS({
     "use strict";
     var lockfile = require_lockfile();
     var { toPromise, toSync, toSyncOptions } = require_adapter();
-    async function lock2(file2, options) {
+    async function lock3(file2, options) {
       const release = await toPromise(lockfile.lock)(file2, options);
       return toPromise(release);
     }
@@ -10616,8 +10889,8 @@ var require_proper_lockfile = __commonJS({
     function checkSync(file2, options) {
       return toSync(lockfile.check)(file2, toSyncOptions(options));
     }
-    module.exports = lock2;
-    module.exports.lock = lock2;
+    module.exports = lock3;
+    module.exports.lock = lock3;
     module.exports.unlock = unlock;
     module.exports.lockSync = lockSync;
     module.exports.unlockSync = unlockSync;
@@ -10627,16 +10900,27 @@ var require_proper_lockfile = __commonJS({
 });
 
 // src/core/shared/store.ts
-import { lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, realpath, rm as rm2, rmdir } from "node:fs/promises";
+import { lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, realpath, rm as rm2, rmdir, stat } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join4, resolve as resolve2 } from "node:path";
+function freezeState(value) {
+  const pending = [value], seen = /* @__PURE__ */ new WeakSet();
+  while (pending.length) {
+    const current = pending.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    Object.freeze(current);
+    for (const child of Object.values(current)) if (child && typeof child === "object") pending.push(child);
+  }
+  return value;
+}
 async function validateDeletionTree(path2) {
   const info = await lstat(path2);
   if (info.isSymbolicLink() || !samePath(await realpath(path2), path2)) throw resourceScope();
   if (info.isDirectory()) for (const entry of await readdir2(path2)) await validateDeletionTree(join4(path2, entry));
   else if (!info.isFile()) throw resourceScope();
 }
-var import_proper_lockfile, samePath, resourceScope, ArtifactStore;
+var import_proper_lockfile, samePath, resourceScope, CACHE_ENTRIES, CACHE_BYTES, signature, ArtifactStore;
 var init_store = __esm({
   "src/core/shared/store.ts"() {
     "use strict";
@@ -10644,6 +10928,9 @@ var init_store = __esm({
     init_common();
     samePath = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
     resourceScope = () => new StudioError("RESOURCE_SCOPE", "\u5220\u9664\u8DEF\u5F84\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u7684\u771F\u5B9E\u76EE\u5F55\u4E2D\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u8BBF\u95EE\u5176\u4ED6\u4F4D\u7F6E\u3002");
+    CACHE_ENTRIES = 4;
+    CACHE_BYTES = 64 * 1024 * 1024;
+    signature = (info) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":");
     ArtifactStore = class {
       constructor(root2, decode4, validateState2) {
         this.decode = decode4;
@@ -10653,6 +10940,8 @@ var init_store = __esm({
       decode;
       validateState;
       root;
+      parsed = /* @__PURE__ */ new Map();
+      parsedBytes = 0;
       folder(id2) {
         return join4(this.root, "artifacts", safeId(id2));
       }
@@ -10660,20 +10949,56 @@ var init_store = __esm({
         return join4(this.folder(id2), "artifact.json");
       }
       async read(id2) {
-        let raw;
+        return this.readProjection(id2, (state) => state);
+      }
+      /** Select synchronously from private frozen state; callers only receive an isolated copy. */
+      async readProjection(id2, pick2) {
         try {
-          raw = await readFile3(this.file(id2), "utf8");
+          return structuredClone(pick2(await this.normalizedState(id2)));
         } catch (error62) {
-          if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
+          this.evict(id2);
           throw error62;
         }
+      }
+      evict(id2) {
+        const cached2 = this.parsed.get(id2);
+        if (cached2) {
+          this.parsedBytes -= cached2.bytes;
+          this.parsed.delete(id2);
+        }
+      }
+      async normalizedState(id2) {
         try {
-          const parsed = JSON.parse(raw), state = this.decode ? this.decode(parsed) : parsed;
-          if (!object3(state) || state.schemaVersion !== 2 || state.artifact?.id !== id2 || typeof state.artifact.type !== "string" || !("content" in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object3(state.sharing) || !object3(state.sources) || !object3(state.assets)) throw new Error("invalid artifact");
-          this.validateState?.(state);
+          const file2 = this.file(id2), before = await stat(file2, { bigint: true }), key = signature(before), cached2 = this.parsed.get(id2);
+          if (cached2?.signature === key) {
+            this.parsed.delete(id2);
+            this.parsed.set(id2, cached2);
+            return cached2.state;
+          }
+          this.evict(id2);
+          const raw = await readFile3(file2, "utf8");
+          let state;
+          try {
+            const parsed = JSON.parse(raw);
+            state = this.decode ? this.decode(parsed) : parsed;
+            if (!object2(state) || state.schemaVersion !== 2 || state.artifact?.id !== id2 || typeof state.artifact.type !== "string" || !("content" in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object2(state.sharing) || !object2(state.sources) || !object2(state.assets)) throw new Error("invalid artifact");
+            this.validateState?.(state);
+          } catch {
+            throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6587\u4EF6\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\u5E76\u4ECE\u5907\u4EFD\u6062\u590D\u3002");
+          }
+          const after = await stat(file2, { bigint: true }), bytes = Buffer.byteLength(raw);
+          freezeState(state);
+          if (key === signature(after) && bytes <= CACHE_BYTES) {
+            this.evict(id2);
+            this.parsed.set(id2, { signature: key, bytes, state });
+            this.parsedBytes += bytes;
+            while (this.parsed.size > CACHE_ENTRIES || this.parsedBytes > CACHE_BYTES) this.evict(this.parsed.keys().next().value);
+          }
           return state;
-        } catch {
-          throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6587\u4EF6\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\u5E76\u4ECE\u5907\u4EFD\u6062\u590D\u3002");
+        } catch (error62) {
+          this.evict(id2);
+          if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
+          throw error62;
         }
       }
       async list() {
@@ -10695,20 +11020,50 @@ var init_store = __esm({
         return values;
       }
       async write(state) {
-        await atomicWrite(this.file(state.artifact.id), JSON.stringify(state));
+        try {
+          await atomicWrite(this.file(state.artifact.id), JSON.stringify(state));
+        } finally {
+          this.evict(state.artifact.id);
+        }
       }
       async transaction(id2, run) {
         const folder = this.folder(id2);
-        await mkdir3(folder, { recursive: true });
-        return this.withLock(folder, async (assertLocked) => {
+        try {
+          await mkdir3(folder, { recursive: true });
+        } catch (error62) {
+          this.evict(id2);
+          throw error62;
+        }
+        return this.withLock(id2, folder, async (assertLocked) => {
           const state = await this.read(id2), result = await run(state);
           assertLocked();
           await this.write(state);
           return result;
         });
       }
+      /** Serialize an external room commit with artifact permissions without rewriting unchanged content. */
+      async withSnapshotLock(id2, run) {
+        return this.withLock(id2, this.folder(id2), async (assertLocked) => {
+          const state = await this.read(id2);
+          assertLocked();
+          const result = await run(state);
+          assertLocked();
+          return result;
+        });
+      }
+      /** Hold the ordinary artifact lock while authorizing an external commit from a small fresh projection. */
+      async withProjectionLock(id2, pick2, run) {
+        return this.withLock(id2, this.folder(id2), async (assertLocked) => {
+          const projection = await this.readProjection(id2, pick2);
+          assertLocked();
+          const result = await run(projection);
+          assertLocked();
+          return result;
+        });
+      }
       /** Delete only a trashed artifact while retaining the same lock used by restore/save. */
       async purge(id2, beforeDelete) {
+        this.evict(id2);
         const folder = this.folder(id2);
         let canonical;
         try {
@@ -10718,7 +11073,7 @@ var init_store = __esm({
           if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
           throw error62;
         }
-        await this.withLock(canonical, async (assertLocked) => {
+        await this.withLock(id2, canonical, async (assertLocked) => {
           const state = await this.read(id2);
           if (!state.artifact.trashedAt) throw new StudioError("NOT_TRASHED", "\u4EC5\u80FD\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u4E2D\u7684\u4F5C\u54C1\uFF0C\u8BF7\u5148\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
           const entries = (await readdir2(canonical)).filter((entry) => entry !== "write.lock");
@@ -10732,19 +11087,21 @@ var init_store = __esm({
           assertLocked();
           await rm2(join4(canonical, "artifact.json"));
         });
+        this.evict(id2);
         try {
           await rmdir(canonical);
         } catch (error62) {
           if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error62.code ?? "")) throw error62;
         }
       }
-      async withLock(folder, run) {
+      async withLock(id2, folder, run) {
         let lost, release;
         try {
           release = await (0, import_proper_lockfile.lock)(join4(folder, "write"), { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: (error62) => {
             lost = error62;
           } });
         } catch (error62) {
+          this.evict(id2);
           if (error62.code === "ELOCKED") throw new StudioError("BUSY", "\u53E6\u4E00\u4E2A\u8FDB\u7A0B\u6B63\u5728\u4FDD\u5B58\u4F5C\u54C1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
           if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
           throw error62;
@@ -10754,8 +11111,16 @@ var init_store = __esm({
         };
         try {
           return await run(assertLocked);
+        } catch (error62) {
+          this.evict(id2);
+          throw error62;
         } finally {
-          if (!lost) await release();
+          try {
+            if (!lost) await release();
+          } catch (error62) {
+            this.evict(id2);
+            throw error62;
+          }
         }
       }
     };
@@ -10763,7 +11128,21 @@ var init_store = __esm({
 });
 
 // src/core/shared/history.ts
-import { createHash, randomUUID as randomUUID5 } from "node:crypto";
+import { createHash as createHash2, randomUUID as randomUUID5 } from "node:crypto";
+function initializeVersionClocks(state, adapter) {
+  if (!adapter.syncVersions) return;
+  if (state.unitClocks === void 0) {
+    state.unitClocks = {};
+    let previous = state.history[0]?.content ?? state.content;
+    for (const saved of state.history) {
+      adapter.syncVersions(saved.content, previous, state.unitClocks, true);
+      previous = saved.content;
+    }
+    adapter.syncVersions(state.content, previous, state.unitClocks, true);
+  }
+  for (const clock of Object.values(state.unitClocks)) if (!object2(clock) || !Number.isSafeInteger(clock.version) || clock.version < 1 || !Number.isSafeInteger(clock.incarnationStart) || clock.incarnationStart < 1 || clock.incarnationStart > clock.version || clock.sourceRevision !== void 0 && (!Number.isSafeInteger(clock.sourceRevision) || clock.sourceRevision < 1)) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+  adapter.syncVersions(state.content, state.content, state.unitClocks);
+}
 function createState(artifact, content, actor, summary, changedIds) {
   const entry = { id: randomUUID5(), revision: artifact.revision, createdAt: artifact.createdAt, actor: copy(actor), summary, changedIds: [...new Set(changedIds)] };
   return { schemaVersion: 2, artifact: copy(artifact), content: copy(content), feedback: [], history: [{ entry, artifact: copy(artifact), content: copy(content) }], operations: [], sources: {}, sharing: { enabled: false, generation: 0, tokens: {} }, assets: {} };
@@ -10828,30 +11207,46 @@ function restoreVersion(state, saved, actor, adapter, undo = false, ids, baselin
   const before = state.history[state.history.indexOf(saved) - 1];
   if (saved.entry.actor.id !== actor.id || !before) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u64A4\u56DE\u81EA\u5DF1\u63D0\u4EA4\u7684\u5185\u5BB9\u4FEE\u6539\u3002");
   const differences = adapter.diff(before.content, saved.content);
-  for (const difference of differences) if (!same(adapter.readUnit(state.content, difference.id), difference.after)) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: difference.id });
   const restored = copy(current);
-  for (const difference of differences) adapter.restoreUnit(restored, difference, history);
+  for (const difference of differences) {
+    const clock = state.unitClocks?.[difference.id], savedAfter = object2(difference.after) ? difference.after.version : void 0, savedBefore = object2(difference.before) ? difference.before.version : void 0;
+    if (clock && (typeof savedAfter === "number" && savedAfter < clock.incarnationStart || difference.after == null && typeof savedBefore === "number" && savedBefore < clock.version)) throw new StudioError("CONFLICT", "\u6B64\u5BF9\u8C61\u5DF2\u5220\u9664\u5E76\u91CD\u5EFA\uFF0C\u4E0D\u80FD\u64A4\u56DE\u65E7\u5BF9\u8C61\u7684\u4E8B\u52A1\u3002", { elementId: difference.id, currentVersion: adapter.versionOf(current, difference.id) });
+    if (adapter.undoUnit) adapter.undoUnit(restored, difference, history);
+    else {
+      if (!same(adapter.readUnit(restored, difference.id), difference.after)) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: difference.id });
+      adapter.restoreUnit(restored, difference, history);
+    }
+  }
   adapter.validateRestore?.(current, restored, baseline);
   state.content = restored;
   return differences.map((change) => change.id);
 }
 function applyMutation(state, args, actor, adapter) {
+  const working = { ...state, artifact: copy(state.artifact), content: copy(state.content), history: [...state.history], operations: [...state.operations], ...state.unitClocks ? { unitClocks: copy(state.unitClocks) } : {} };
+  const result = applyWorkingMutation(working, args, actor, adapter);
+  Object.assign(state, working);
+  return result;
+}
+function applyWorkingMutation(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor"]);
   assertAlive(state.artifact);
+  if (args.merge !== void 0 && args.merge !== "safe") throw new StudioError("INVALID_ARGUMENT", "merge \u4EC5\u652F\u6301 safe\u3002");
   const operationId = safeId(args.operationId ?? randomUUID5(), "\u64CD\u4F5C ID"), operations = args.operations;
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u6B21\u63D0\u4EA4\u5E94\u5305\u542B 1 \u81F3 200 \u4E2A\u64CD\u4F5C\u3002");
-  const fingerprint = createHash("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
+  if (operations.some((operation2) => !object2(operation2))) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+  const fingerprint = createHash2("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
   const duplicate = state.operations.find((item) => item.id === operationId);
   if (duplicate) {
     if (duplicate.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u4FEE\u6539\u3002");
     const saved = version2(state, duplicate.historyId);
     return { snapshot: copy({ artifact: saved.artifact, content: saved.content }), historyEntry: copy(saved.entry), changed: false };
   }
-  const expected = object3(args.expectedVersions) ? args.expectedVersions : void 0;
+  initializeVersionClocks(state, adapter);
+  const expected = object2(args.expectedVersions) ? args.expectedVersions : void 0;
   if (args.expectedRevision !== void 0 && (!Number.isInteger(args.expectedRevision) || Number(args.expectedRevision) < 0)) throw new StudioError("INVALID_ARGUMENT", "\u9884\u671F\u4F5C\u54C1\u7248\u672C\u65E0\u6548\u3002");
   if (args.expectedRevision === void 0) {
     for (const operation2 of operations) {
-      if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+      if (!object2(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
       const targets = mutationTargets(state.content, operation2, adapter);
       if (!targets || targets.some((id2) => !expected || !Object.hasOwn(expected, id2))) throw new StudioError("VERSION_REQUIRED", "\u4FEE\u6539\u5DF2\u6709\u5185\u5BB9\u524D\uFF0C\u8BF7\u63D0\u4F9B\u4F5C\u54C1\u7248\u672C\u6216\u5168\u90E8\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002");
     }
@@ -10859,26 +11254,48 @@ function applyMutation(state, args, actor, adapter) {
   if (args.expectedRevision !== void 0 && args.expectedRevision !== state.artifact.revision) {
     if (!expected || !Object.keys(expected).length) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
     for (const operation2 of operations) {
-      if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+      if (!object2(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
       const targets = mutationTargets(state.content, operation2, adapter);
       if (!targets) throw new StudioError("CONFLICT", "\u6574\u4F53\u64CD\u4F5C\u9700\u8981\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
       if (targets.some((id2) => typeof id2 !== "string" || !Object.hasOwn(expected, id2))) throw new StudioError("CONFLICT", "\u8FC7\u671F\u63D0\u4EA4\u5FC5\u987B\u6838\u5BF9\u6240\u6709\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002", { revision: state.artifact.revision });
     }
   }
+  const bases = /* @__PURE__ */ new Map();
   for (const [id2, expectedVersion] of Object.entries(expected ?? {})) {
     if (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 0) throw new StudioError("INVALID_ARGUMENT", "\u9884\u671F\u5BF9\u8C61\u7248\u672C\u65E0\u6548\u3002");
     const currentVersion = adapter.versionOf(state.content, id2);
-    if (currentVersion !== expectedVersion) throw new StudioError("CONFLICT", "\u76EE\u6807\u5BF9\u8C61\u5DF2\u88AB\u4FEE\u6539\uFF0C\u672A\u8986\u76D6\u4ED6\u4EBA\u7684\u7F16\u8F91\u3002", { elementId: id2, expectedVersion, currentVersion, revision: state.artifact.revision });
+    if (currentVersion !== expectedVersion) {
+      const details = { elementId: id2, expectedVersion, currentVersion, revision: state.artifact.revision };
+      const targetOperations = operations.filter((operation2) => mutationTargets(state.content, operation2, adapter)?.includes(id2));
+      if (args.merge !== "safe" || !adapter.rebaseUpdate || !targetOperations.length || targetOperations.some((operation2) => operation2.op !== "update") || id2.startsWith("$") || Number(expectedVersion) < (state.unitClocks?.[id2]?.incarnationStart ?? 1) || !currentVersion) throw new StudioError("CONFLICT", "\u76EE\u6807\u5BF9\u8C61\u5DF2\u88AB\u4FEE\u6539\uFF0C\u672A\u8986\u76D6\u4ED6\u4EBA\u7684\u7F16\u8F91\u3002", { ...details, ...mergeConflictDetails(null, null, adapter.readUnit(state.content, id2), ["."]) });
+      const candidates = state.history.filter((saved) => adapter.versionOf(saved.content, id2) === expectedVersion).map((saved) => adapter.readUnit(saved.content, id2));
+      const base = candidates[0];
+      if (base == null || candidates.some((candidate) => !jsonEqual(candidate, base))) throw new StudioError("CONFLICT", "\u539F\u5BF9\u8C61\u7248\u672C\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u4FDD\u7559\u672C\u5730\u4FEE\u6539\u5E76\u6BD4\u8F83\u6700\u65B0\u5185\u5BB9\u3002", { ...details, ...mergeConflictDetails(null, null, adapter.readUnit(state.content, id2), ["."]) });
+      bases.set(id2, copy(base));
+    }
   }
   const baseline = copy(state.content), changedIds = [];
   let restoredFrom;
-  for (const operation2 of operations) {
-    if (!object3(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+  for (let operation2 of operations) {
+    if (!object2(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+    const previous = copy(state.content);
+    if (operation2.op === "update" && operation2.id && bases.has(operation2.id)) {
+      const id2 = operation2.id;
+      try {
+        const rebased = adapter.rebaseUpdate(operation2, bases.get(id2), adapter.readUnit(state.content, id2));
+        bases.set(id2, rebased.local);
+        operation2 = rebased.operation;
+      } catch (error62) {
+        if (error62 instanceof StudioError && error62.code === "CONFLICT") throw new StudioError("CONFLICT", error62.message, { ...object2(error62.details) ? error62.details : {}, elementId: id2, expectedVersion: expected?.[id2], currentVersion: adapter.versionOf(state.content, id2), revision: state.artifact.revision });
+        throw error62;
+      }
+    }
     if (operation2.op === "restore") {
       const saved = version2(state, operation2.versionId);
       changedIds.push(...restoreVersion(state, saved, actor, adapter, operation2.data?.mode === "undo" || operation2.data?.undo === true || operation2.preset === "undo", restoreUnitIds(operation2), baseline));
       restoredFrom = saved.entry.id;
     } else changedIds.push(...adapter.apply(state.content, operation2, baseline));
+    if (adapter.syncVersions) adapter.syncVersions(state.content, previous, state.unitClocks);
   }
   adapter.validate(state.content);
   const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? "\u6062\u590D\u4F5C\u54C1\u5185\u5BB9" : "\u4FEE\u6539\u4F5C\u54C1", 500), changedIds, restoredFrom);
@@ -10890,6 +11307,7 @@ var init_history = __esm({
   "src/core/shared/history.ts"() {
     "use strict";
     init_common();
+    init_safe_merge();
   }
 });
 
@@ -10903,8 +11321,11 @@ var init_store2 = __esm({
     init_common();
     init_history();
     StudioStore = class extends ArtifactStore {
-      constructor(root2, products = studioProducts()) {
-        super(root2, (value) => products.decode(value), (state) => products.validate(state));
+      constructor(root2, products = studioProducts(), onRead) {
+        super(root2, (value) => products.decode(value), (state) => {
+          products.validate(state);
+          onRead?.(state);
+        });
       }
     };
   }
@@ -10955,7 +11376,7 @@ var init_artifacts = __esm({
 });
 
 // src/core/shared/proposals.ts
-import { createHash as createHash2, randomUUID as randomUUID7 } from "node:crypto";
+import { createHash as createHash3, randomUUID as randomUUID7 } from "node:crypto";
 function proposalExpired(item, now = Date.now()) {
   return !!item.proposal && Date.parse(item.proposal.expiresAt) <= now;
 }
@@ -10970,10 +11391,10 @@ function clearExpiredProposals(state) {
   state.feedback = state.feedback.filter((item) => !proposalExpired(item));
 }
 function captureOption(state, raw, args, adapter) {
-  if (!object3(raw)) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
+  if (!object2(raw)) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
   const label = text(raw.label, "", 60).trim(), description = text(raw.description, "", 160).trim();
   if (!label) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u4E2A\u5EFA\u8BAE\u65B9\u6848\u9700\u8981\u660E\u786E\u540D\u79F0\u3002");
-  if (!Array.isArray(raw.operations) || !raw.operations.length || raw.operations.length > 60 || raw.operations.some((op) => !object3(op) || typeof op.op !== "string" || op.op === "restore")) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u4E2A\u5EFA\u8BAE\u9700\u8981 1 \u81F3 60 \u4E2A\u4EA7\u54C1\u64CD\u4F5C\uFF1B\u5386\u53F2\u6062\u590D\u5E94\u76F4\u63A5\u64CD\u4F5C\u7248\u672C\u5386\u53F2\u3002");
+  if (!Array.isArray(raw.operations) || !raw.operations.length || raw.operations.length > 60 || raw.operations.some((op) => !object2(op) || typeof op.op !== "string" || op.op === "restore")) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u4E2A\u5EFA\u8BAE\u9700\u8981 1 \u81F3 60 \u4E2A\u4EA7\u54C1\u64CD\u4F5C\uFF1B\u5386\u53F2\u6062\u590D\u5E94\u76F4\u63A5\u64CD\u4F5C\u7248\u672C\u5386\u53F2\u3002");
   if (Buffer.byteLength(JSON.stringify(raw.operations)) > 24 * 1024) throw new StudioError("TOO_LARGE", "\u5355\u4E2A\u5EFA\u8BAE\u65B9\u6848\u8D85\u8FC7 24 KB\u3002");
   const operations = copy(raw.operations), draft = copy(state.content), explicitIds = /* @__PURE__ */ new Set();
   let wholeContent = false;
@@ -10989,7 +11410,7 @@ function captureOption(state, raw, args, adapter) {
   const repeat = copy(state.content);
   for (const operation2 of operations) adapter.apply(repeat, operation2, state.content);
   if (!same(draft, repeat)) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u4E2D\u7684\u65B0\u5185\u5BB9\u9700\u8981\u7A33\u5B9A ID\uFF0C\u4E0D\u80FD\u5728\u6BCF\u6B21\u5E94\u7528\u65F6\u968F\u673A\u751F\u6210\u3002");
-  const supplied = object3(args.expectedVersions) ? args.expectedVersions : {};
+  const supplied = object2(args.expectedVersions) ? args.expectedVersions : {};
   if (args.expectedRevision !== void 0 && (!Number.isInteger(args.expectedRevision) || args.expectedRevision !== state.artifact.revision)) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u5148\u8BFB\u53D6\u5F53\u524D\u4F5C\u54C1\u518D\u63D0\u4F9B\u5EFA\u8BAE\u3002", { revision: state.artifact.revision });
   if (wholeContent && args.expectedRevision === void 0) throw new StudioError("VERSION_REQUIRED", "\u6574\u4F53\u5EFA\u8BAE\u9700\u8981\u63D0\u4F9B\u521A\u8BFB\u53D6\u7684\u4F5C\u54C1\u7248\u672C\u3002");
   const versions = {}, baseline = {};
@@ -11047,9 +11468,9 @@ function updateProposal(state, args, actor, adapter) {
     }
     const options = args.options.map((option3) => captureOption(state, option3, args, adapter));
     if (new Set(options.map((option3) => option3.id)).size !== options.length || new Set(options.map((option3) => option3.label)).size !== options.length || new Set(options.map((option3) => digest(option3.operations))).size !== options.length) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u7684 ID\u3001\u540D\u79F0\u548C\u5185\u5BB9\u5FC5\u987B\u5404\u4E0D\u76F8\u540C\u3002");
-    const id2 = randomUUID7(), anchor3 = object3(args.anchor) ? copy(args.anchor) : {};
+    const id2 = randomUUID7(), anchor3 = object2(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor3)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
-    const frozen = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3);
+    const frozen = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, void 0, state.unitClocks);
     const proposal2 = { audience: "owner", expiresAt: new Date(Date.now() + LIFETIME).toISOString(), options, ...creationId ? { creationId } : {}, fingerprint: fingerprint2, receipts: [] };
     if (Buffer.byteLength(JSON.stringify(proposal2)) > 256 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u53CA\u76EE\u6807\u5FEB\u7167\u8D85\u8FC7 256 KB\uFF0C\u8BF7\u7F29\u5C0F\u5EFA\u8BAE\u8303\u56F4\u3002");
     state.feedback.push({ id: id2, artifactId: state.artifact.id, type: "comment", anchor: frozen.anchor, author: copy(actor), text: message, status: "open", createdAt: now, updatedAt: now, replies: [], versions: copy(frozen.versions), proposal: proposal2 });
@@ -11123,13 +11544,13 @@ var init_proposals = __esm({
     init_common();
     init_history();
     LIFETIME = 30 * 60 * 1e3;
-    digest = (value) => createHash2("sha256").update(JSON.stringify(value)).digest("hex");
+    digest = (value) => createHash3("sha256").update(JSON.stringify(value)).digest("hex");
     unit = (adapter, content, id2) => copy(adapter.readUnit(content, id2) ?? null);
   }
 });
 
 // src/core/shared/feedback.ts
-import { createHash as createHash3, randomUUID as randomUUID8 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID8 } from "node:crypto";
 function updateFeedback(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor", "commenter"]);
   assertAlive(state.artifact);
@@ -11138,13 +11559,13 @@ function updateFeedback(state, args, actor, adapter) {
   if (action === "create") {
     const content = text(args.text).trim();
     if (!content) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-    const anchor3 = object3(args.anchor) ? copy(args.anchor) : {};
+    const anchor3 = object2(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor3)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
-    if (args.versions !== void 0 && (!object3(args.versions) || Object.values(args.versions).some((value) => !Number.isInteger(value) || Number(value) < 1))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u65E0\u6548\u3002");
+    if (args.versions !== void 0 && (!object2(args.versions) || Object.values(args.versions).some((value) => !Number.isInteger(value) || Number(value) < 1))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u65E0\u6548\u3002");
     const versions = args.versions === void 0 ? void 0 : copy(args.versions);
     if (versions && Buffer.byteLength(JSON.stringify(versions)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u9009\u533A\u7684\u7248\u672C\u4FE1\u606F\u8FC7\u5927\u3002");
     const operationId = args.operationId === void 0 ? void 0 : safeId(args.operationId, "\u64CD\u4F5C ID");
-    const fingerprint = createHash3("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
+    const fingerprint = createHash4("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
     const deleted = operationId && state.deletedFeedbackReceipts?.find((receipt) => receipt.operationId === operationId);
     if (deleted) {
       if (deleted.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
@@ -11155,7 +11576,7 @@ function updateFeedback(state, args, actor, adapter) {
       if (duplicate.creationReceipt.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
       return { feedback: visibleFeedback(state.feedback, actor), contextId: duplicate.id };
     }
-    const id2 = randomUUID8(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, versions);
+    const id2 = randomUUID8(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, versions, state.unitClocks);
     item = { id: id2, artifactId: state.artifact.id, type: args.type === "request" ? "request" : "comment", anchor: snapshot.anchor, author: copy(actor), text: content, status: "open", createdAt: now, updatedAt: now, replies: [], versions: copy(snapshot.versions) };
     if (operationId) item.creationReceipt = { operationId, fingerprint };
     state.feedback.push(item);
@@ -11166,20 +11587,28 @@ function updateFeedback(state, args, actor, adapter) {
     if (!found) throw new StudioError("NOT_FOUND", "\u5907\u6CE8\u4E0D\u5B58\u5728\u3002");
     item = found;
     if (item.proposal) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u8BF7\u4F7F\u7528\u9009\u62E9\u3001\u64A4\u56DE\u6216\u6E05\u9664\u64CD\u4F5C\u3002");
+    if (actor.kind === "agent" && item.status === "processing" && item.processingBy && (item.processingBy.id !== actor.id || item.processingBy.kind !== actor.kind) && ["resolve", "reopen", "send"].includes(action)) throw new StudioError("BUSY", "\u6B64\u8BA8\u8BBA\u6B63\u5728\u7531\u5176\u4ED6\u534F\u4F5C\u8005\u5904\u7406\uFF0C\u8BF7\u52FF\u91CD\u590D\u63A5\u7BA1\u3002", { processingBy: copy(item.processingBy) });
     if (action === "reply") {
       const content = text(args.text).trim();
       if (!content) throw new StudioError("INVALID_ARGUMENT", "\u56DE\u590D\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-      item.replies.push({ id: randomUUID8(), author: copy(actor), text: content, createdAt: now });
-      if (item.status === "processing" || item.status === "resolved") {
+      const id2 = args.replyId === void 0 ? randomUUID8() : safeId(args.replyId, "\u56DE\u590D ID");
+      const duplicate = item.replies.find((reply) => reply.id === id2);
+      if (duplicate) {
+        if (duplicate.author.id !== actor.id || duplicate.author.kind !== actor.kind || duplicate.text !== content) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u56DE\u590D ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u4F5C\u8005\u6216\u5185\u5BB9\u3002");
+        return { feedback: visibleFeedback(state.feedback, actor) };
+      }
+      item.replies.push({ id: id2, author: copy(actor), text: content, createdAt: now });
+      if (item.status === "resolved") {
         item.status = "open";
         delete item.processingBy;
       }
     } else if (action === "edit") {
       const message = args.replyId === void 0 ? item : item.replies.find((reply) => reply.id === args.replyId);
       if (!message) throw new StudioError("NOT_FOUND", "\u56DE\u590D\u4E0D\u5B58\u5728\u3002");
-      if (message.author.id !== actor.id) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u64B0\u5199\u7684\u6D88\u606F\u3002");
+      if (message.author.id !== actor.id || message.author.kind !== actor.kind) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u64B0\u5199\u7684\u6D88\u606F\u3002");
       const content = text(args.text).trim();
       if (!content) throw new StudioError("INVALID_ARGUMENT", "\u6D88\u606F\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
+      if (args.expectedText !== void 0 && message.text !== text(args.expectedText)) throw new StudioError("CONFLICT", "\u6D88\u606F\u5DF2\u88AB\u5176\u4ED6\u7A97\u53E3\u4FEE\u6539\uFF0C\u8BF7\u4FDD\u7559\u8349\u7A3F\u5E76\u91CD\u65B0\u6253\u5F00\u540E\u6BD4\u8F83\u3002", { feedbackId: item.id, ...args.replyId !== void 0 ? { replyId: args.replyId } : {}, currentText: message.text });
       message.text = content;
     } else if (action === "delete") {
       if (actor.role !== "owner" && item.author.id !== actor.id) throw new StudioError("FORBIDDEN", "\u53EA\u6709\u6240\u6709\u8005\u6216\u5907\u6CE8\u4F5C\u8005\u53EF\u4EE5\u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u3002");
@@ -11197,6 +11626,10 @@ function updateFeedback(state, args, actor, adapter) {
       contextId = item.id;
     } else if (action === "processing") {
       requireRole(actor, ["owner"]);
+      if (item.status === "processing" && item.processingBy) {
+        if (item.processingBy.id !== actor.id || item.processingBy.kind !== actor.kind) throw new StudioError("BUSY", "\u6B64\u8BA8\u8BBA\u6B63\u5728\u7531\u5176\u4ED6\u534F\u4F5C\u8005\u5904\u7406\uFF0C\u8BF7\u52FF\u91CD\u590D\u63A5\u7BA1\u3002", { processingBy: copy(item.processingBy) });
+        return { feedback: visibleFeedback(state.feedback, actor) };
+      }
       item.status = "processing";
       item.processingBy = copy(actor);
     } else throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5907\u6CE8\u64CD\u4F5C\u3002");
@@ -11215,30 +11648,70 @@ var init_feedback = __esm({
 });
 
 // src/core/shared/sharing.ts
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash as createHash5, randomBytes, timingSafeEqual } from "node:crypto";
+function retireTokens(sharing, roles, reason) {
+  sharing.retiredTokens ??= {};
+  for (const role of roles) if (sharing.tokens[role]) sharing.retiredTokens[tokenKey(sharing.tokens[role])] = reason;
+  sharing.retiredTokens = Object.fromEntries(Object.entries(sharing.retiredTokens).slice(-500));
+}
+function nameTaken(state, id2, key, ownerName) {
+  return canonicalName(ownerName).toLowerCase() === key || Object.entries(state.guestNames ?? {}).some(([other, entry]) => other !== id2 && entry.key === key) || Object.values(state.sharing.members ?? {}).some((member) => member.id !== id2 && canonicalName(member.name).toLowerCase() === key);
+}
+function rememberGuestNames(state) {
+  for (const member of Object.values(state.sharing.members ?? {})) {
+    const name = canonicalName(member.name);
+    if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name)) continue;
+    state.guestNames ??= {};
+    state.guestNames[member.id] ??= { name, key: name.toLowerCase() };
+  }
+}
+function guestName(state, id2, ownerName = LOCAL_ACTOR.name) {
+  const profile = state.guestNames?.[id2];
+  return profile && !nameTaken(state, id2, profile.key, ownerName) ? profile.name : void 0;
+}
+function registerGuestName(state, id2, value, ownerName = LOCAL_ACTOR.name) {
+  rememberGuestNames(state);
+  const name = canonicalName(text(value, "", 60)), key = name.toLowerCase();
+  if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u8F93\u5165 1 \u5230 60 \u4E2A\u5B57\u7B26\u7684\u540D\u5B57\u3002");
+  if (nameTaken(state, id2, key, ownerName)) throw new StudioError("NAME_TAKEN", "\u8FD9\u4E2A\u540D\u5B57\u5DF2\u6709\u4EBA\u4F7F\u7528\uFF0C\u8BF7\u9009\u62E9\u53E6\u4E00\u4E2A\u540D\u5B57\u3002");
+  const saved = guestName(state, id2, ownerName);
+  if (saved && state.guestNames[id2].key !== key) throw new StudioError("NAME_ALREADY_SET", "\u6B64\u6D4F\u89C8\u5668\u5DF2\u8BB0\u4F4F\u4F60\u7684\u540D\u5B57\uFF0C\u8BF7\u76F4\u63A5\u4F7F\u7528\u539F\u8EAB\u4EFD\u8FDB\u5165\u767D\u677F\u3002");
+  state.guestNames ??= {};
+  state.guestNames[id2] = { name: saved ?? name, key };
+  return saved ?? name;
+}
 function checkedRole(role) {
   if (!SHARE_ROLES.includes(role)) throw new StudioError("INVALID_ARGUMENT", "\u5206\u4EAB\u89D2\u8272\u65E0\u6548\u3002");
   return role;
 }
-function shareInfo(artifactId, sharing, origin, peers = []) {
+function shareInfo(artifactId, sharing, origin, peers = [], owner = LOCAL_ACTOR, actor = owner) {
+  const allowed = actor.role === "owner" ? [...SHARE_ROLES] : SHARE_ROLES.slice(SHARE_ROLES.indexOf(actor.role));
+  const roles = allowed.filter((role) => roleOn(sharing, role));
+  const links = sharing.enabled ? Object.fromEntries(roles.map((role) => [role, `${origin}/?${new URLSearchParams({ artifactId, share: sharing.tokens[role] ?? "" })}`])) : {};
+  const canonicalPath = `/?${new URLSearchParams({ artifactId })}`;
+  if (actor.role !== "owner") return { enabled: sharing.enabled, access: sharingAccess(sharing), role: actor.role, roles, links, canonicalPath };
   const roleEnabled = Object.fromEntries(SHARE_ROLES.map((role) => [role, roleOn(sharing, role)]));
   const members2 = Object.values(sharing.members ?? {}).filter((member) => !member.removed && sharing.tokens[member.role] === member.roleToken).map(({ credential: _credential, roleToken: _roleToken, ownerAssigned: _ownerAssigned, removed: _removed, ...member }) => ({
     ...copy(member),
     active: sharing.enabled && roleOn(sharing, member.role),
     online: sharing.enabled && roleOn(sharing, member.role) && peers.some((peer) => peer.actor.id === member.id && peer.actor.role === member.role)
   })).sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeenAt.localeCompare(a.lastSeenAt));
-  return { enabled: sharing.enabled, generation: sharing.generation, links: sharing.enabled ? Object.fromEntries(SHARE_ROLES.filter((role) => roleOn(sharing, role)).map((role) => [role, `${origin}/?${new URLSearchParams({ artifactId, share: sharing.tokens[role] ?? "" })}`])) : {}, roles: [...SHARE_ROLES], roleEnabled, members: members2, owner: copy(LOCAL_ACTOR) };
+  return { enabled: sharing.enabled, access: sharingAccess(sharing), generation: sharing.generation, links, roles: [...SHARE_ROLES], roleEnabled, members: members2, owner: copy(owner), canonicalPath };
 }
 function updateSharing(artifact, sharing, action, actor, args) {
   requireRole(actor, ["owner"]);
   assertAlive(artifact);
   const result = { revokedRoles: [], revokedMemberIds: [] };
   if (action === "start") {
+    if (args.access !== void 0 && args.access !== "local" && args.access !== "lan") throw new StudioError("INVALID_ARGUMENT", "\u8BBF\u95EE\u8303\u56F4\u5E94\u4E3A local \u6216 lan\u3002");
+    const access = args.access ?? "lan";
     if (!sharing.enabled) {
+      retireTokens(sharing, SHARE_ROLES, "sharing-closed");
       sharing.tokens = Object.fromEntries(SHARE_ROLES.map((role) => [role, newToken()]));
       sharing.members = {};
       sharing.generation++;
-    }
+    } else if (sharingAccess(sharing) !== access) sharing.generation++;
+    sharing.access = access;
     sharing.enabled = true;
     return result;
   }
@@ -11259,6 +11732,7 @@ function updateSharing(artifact, sharing, action, actor, args) {
   }
   if (action === "reset") {
     const roles = args.role === void 0 || args.role === "all" ? [...SHARE_ROLES] : [checkedRole(args.role)];
+    retireTokens(sharing, roles, "link-reset");
     for (const role of roles) sharing.tokens[role] = newToken();
     sharing.generation++;
     result.revokedRoles = roles;
@@ -11280,29 +11754,47 @@ function updateSharing(artifact, sharing, action, actor, args) {
   }
   throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
 }
-function shareRole(artifact, sharing, token, memberId) {
-  if (!sharing.enabled || artifact.trashedAt || token.length > 200) return;
+function shareAccess(artifact, sharing, token, memberId) {
+  if (!sharing.enabled || artifact.trashedAt) return { reason: "sharing-closed" };
   const member = memberId ? sharing.members?.[memberId] : void 0;
-  if (member?.removed) return;
+  if (member?.removed) return { reason: "removed" };
+  if (!token) {
+    if (!member) return { reason: "invalid-link" };
+    if (!roleOn(sharing, member.role)) return { reason: "link-disabled" };
+    return sharing.tokens[member.role] === member.roleToken ? { role: member.role } : { reason: "link-reset" };
+  }
+  if (token.length > 200) return { reason: "invalid-link" };
   let invitedRole;
+  let matchedRole;
   for (const role of SHARE_ROLES) {
     const expected = sharing.tokens[role];
-    if (roleOn(sharing, role) && expected && Buffer.byteLength(expected) === Buffer.byteLength(token) && timingSafeEqual(Buffer.from(expected), Buffer.from(token))) {
-      invitedRole = role;
+    if (expected && Buffer.byteLength(expected) === Buffer.byteLength(token) && timingSafeEqual(Buffer.from(expected), Buffer.from(token))) {
+      matchedRole = role;
+      if (roleOn(sharing, role)) invitedRole = role;
       break;
     }
   }
-  if (member?.ownerAssigned) return roleOn(sharing, member.role) && sharing.tokens[member.role] === member.roleToken && (member.credential === token || invitedRole !== void 0) ? member.role : void 0;
-  return invitedRole;
+  if (member?.ownerAssigned) {
+    if (!roleOn(sharing, member.role)) return { reason: "link-disabled" };
+    if (sharing.tokens[member.role] !== member.roleToken) return { reason: "link-reset" };
+    return member.credential === token || invitedRole !== void 0 ? { role: member.role } : { reason: "invalid-link" };
+  }
+  if (invitedRole) return { role: invitedRole };
+  if (matchedRole) return { reason: "link-disabled" };
+  return { reason: sharing.retiredTokens?.[tokenKey(token)] ?? "invalid-link" };
+}
+function shareRole(artifact, sharing, token, memberId) {
+  return shareAccess(artifact, sharing, token, memberId).role;
 }
 function joinSharingMember(artifact, sharing, token, id2, name) {
   const role = shareRole(artifact, sharing, token, id2);
   if (!role) return;
   sharing.members ??= {};
   const current = sharing.members[id2], now = (/* @__PURE__ */ new Date()).toISOString();
-  if (!current) sharing.members[id2] = { id: id2, name, role, credential: token, roleToken: sharing.tokens[role], joinedAt: now, lastSeenAt: now };
+  if (!current && token) sharing.members[id2] = { id: id2, name, role, credential: token, roleToken: sharing.tokens[role], joinedAt: now, lastSeenAt: now };
   else {
-    if (!current.ownerAssigned) {
+    if (!current) return;
+    if (!current.ownerAssigned && token) {
       current.role = role;
       current.roleToken = sharing.tokens[role];
       current.credential = token;
@@ -11313,12 +11805,14 @@ function joinSharingMember(artifact, sharing, token, id2, name) {
   return { id: id2, name, kind: "human", role };
 }
 function revokeSharing(sharing) {
+  retireTokens(sharing, SHARE_ROLES, "sharing-closed");
   sharing.enabled = false;
+  sharing.access = "local";
   sharing.tokens = {};
   sharing.members = {};
   sharing.generation++;
 }
-var SHARE_ROLES, newToken, roleOn;
+var SHARE_ROLES, newToken, roleOn, sharingAccess, tokenKey, canonicalName;
 var init_sharing = __esm({
   "src/core/shared/sharing.ts"() {
     "use strict";
@@ -11327,19 +11821,216 @@ var init_sharing = __esm({
     SHARE_ROLES = ["editor", "commenter", "viewer"];
     newToken = () => randomBytes(24).toString("base64url");
     roleOn = (sharing, role) => sharing.roleEnabled?.[role] !== false;
+    sharingAccess = (sharing) => sharing.enabled ? sharing.access ?? "lan" : "local";
+    tokenKey = (token) => createHash5("sha256").update(token).digest("hex");
+    canonicalName = (name) => name.normalize("NFKC").trim();
+  }
+});
+
+// src/core/shared/collaboration-room.ts
+var ROOM_TTL, CollaborationRoom;
+var init_collaboration_room = __esm({
+  "src/core/shared/collaboration-room.ts"() {
+    "use strict";
+    init_common();
+    ROOM_TTL = { gesture: 1e4, upload: 9e4, chat: 5e3, follow: 8e3 };
+    CollaborationRoom = class {
+      budgets = /* @__PURE__ */ new Map();
+      sequences = /* @__PURE__ */ new Map();
+      order = /* @__PURE__ */ new Map();
+      static validate(input2, actor) {
+        if (!Array.isArray(input2) || input2.length > 80 || Buffer.byteLength(JSON.stringify(input2)) > 64 * 1024) throw new StudioError("TOO_LARGE", "\u4E34\u65F6\u534F\u4F5C\u6D88\u606F\u8D85\u8FC7\u9884\u7B97\u3002");
+        for (const item of input2) {
+          if (!object2(item) || typeof item.topic !== "string" || !Object.hasOwn(ROOM_TTL, item.topic) || !object2(item.data)) throw new StudioError("INVALID_ARGUMENT", "\u4E34\u65F6\u534F\u4F5C\u6D88\u606F\u65E0\u6548\u3002");
+          if (Buffer.byteLength(JSON.stringify(item.data)) > 4096) throw new StudioError("TOO_LARGE", "\u5355\u6761\u4E34\u65F6\u534F\u4F5C\u6D88\u606F\u8D85\u8FC7 4 KiB\u3002");
+          if (item.topic === "gesture" || item.topic === "upload") {
+            requireRole(actor, ["owner", "editor"]);
+            if (typeof item.data.id !== "string" || item.data.id.length > 120 || !Number.isSafeInteger(item.data.seq) || Number(item.data.seq) < 0 || !["start", "parts", "step", "end"].includes(String(item.data.phase))) throw new StudioError("INVALID_ARGUMENT", "\u4E34\u65F6\u624B\u52BF\u7684\u6807\u8BC6\u6216\u5E8F\u53F7\u65E0\u6548\u3002");
+          }
+        }
+        return input2;
+      }
+      accept(peerId, input2, actor) {
+        const now = Date.now(), bucket = this.budgets.get(peerId) ?? { tokens: 80, ends: 8, updatedAt: now };
+        bucket.tokens = Math.min(80, bucket.tokens + (now - bucket.updatedAt) * 40 / 1e3);
+        bucket.ends = Math.min(8, bucket.ends + (now - bucket.updatedAt) * 4 / 1e3);
+        bucket.updatedAt = now;
+        this.budgets.set(peerId, bucket);
+        for (const [key, value] of this.order) if (value.expiresAt <= now) this.order.delete(key);
+        const messages = [];
+        let dropped = 0, expiresAt = now;
+        for (const item of input2) {
+          const topic = item.topic, data = item.data, end = data.phase === "end";
+          const key = `${peerId}:${topic}:${typeof data.id === "string" ? data.id : ""}`, previous = this.order.get(key);
+          const seq = Number.isSafeInteger(data.seq) ? Number(data.seq) : void 0;
+          if (seq !== void 0 && previous && (seq < previous.sequence || seq === previous.sequence && (previous.ended || !end))) {
+            dropped++;
+            continue;
+          }
+          if (bucket.tokens < 1 && (!end || bucket.ends < 1)) {
+            dropped++;
+            continue;
+          }
+          if (bucket.tokens >= 1) bucket.tokens--;
+          else bucket.ends--;
+          if (seq !== void 0) this.order.set(key, { sequence: seq, ended: end, expiresAt: now + Math.max(3e4, ROOM_TTL[topic]) });
+          const sequence2 = (this.sequences.get(peerId) ?? 0) + 1;
+          this.sequences.set(peerId, sequence2);
+          messages.push({ peerId, actor: copy(actor), seq: sequence2, topic, data: copy(data), createdAt: new Date(now).toISOString() });
+          expiresAt = Math.max(expiresAt, now + ROOM_TTL[topic]);
+        }
+        return { messages, dropped, expiresAt };
+      }
+      forget(peerId) {
+        this.budgets.delete(peerId);
+        this.sequences.delete(peerId);
+        for (const key of this.order.keys()) if (key.startsWith(`${peerId}:`)) this.order.delete(key);
+      }
+      clear() {
+        this.budgets.clear();
+        this.sequences.clear();
+        this.order.clear();
+      }
+    };
+  }
+});
+
+// src/core/shared/collaboration-events.ts
+import { randomUUID as randomUUID9 } from "node:crypto";
+var MAX_EVENTS, MAX_BYTES, CollaborationEvents;
+var init_collaboration_events = __esm({
+  "src/core/shared/collaboration-events.ts"() {
+    "use strict";
+    init_common();
+    init_collaboration_room();
+    MAX_EVENTS = 512;
+    MAX_BYTES = 1024 * 1024;
+    CollaborationEvents = class {
+      epoch = randomUUID9();
+      sequence = 0;
+      floor = 0;
+      bytes = 0;
+      events = [];
+      cursor() {
+        return `${this.epoch}:${this.sequence}`;
+      }
+      append(input2) {
+        const sequence2 = ++this.sequence;
+        const event = copy({ ...input2, cursor: this.cursor() });
+        if (Buffer.byteLength(JSON.stringify(event)) > 128 * 1024) delete event.units;
+        const bytes = Buffer.byteLength(JSON.stringify(event));
+        this.events.push({ sequence: sequence2, bytes, event });
+        this.bytes += bytes;
+        while (this.events.length > MAX_EVENTS || this.bytes > MAX_BYTES) {
+          const removed = this.events.shift();
+          this.bytes -= removed.bytes;
+          this.floor = removed.sequence;
+        }
+        return copy(event);
+      }
+      read(artifactId, after) {
+        const prefix = `${this.epoch}:`, tail = after?.startsWith(prefix) ? after.slice(prefix.length) : "";
+        const sequence2 = /^(?:0|[1-9]\d*)$/.test(tail) ? Number(tail) : -1;
+        const reset = !Number.isSafeInteger(sequence2) || sequence2 < this.floor || sequence2 > this.sequence;
+        const now = Date.now();
+        const events = reset ? [] : this.events.filter((item) => item.sequence > sequence2 && (!artifactId || item.event.artifactId === artifactId)).flatMap((item) => {
+          const event = item.event;
+          if (event.type !== "room") return [event];
+          if (typeof event.expiresAt === "number" && event.expiresAt <= now) return [];
+          const messages = Array.isArray(event.events) ? event.events.filter((message) => typeof message?.topic === "string" && Date.parse(message.createdAt) + (ROOM_TTL[message.topic] ?? 0) > now) : [];
+          return messages.length ? [{ ...event, events: messages }] : [];
+        });
+        return { cursor: this.cursor(), reset, events: copy(events) };
+      }
+      clear() {
+        this.events = [];
+        this.bytes = 0;
+        this.floor = this.sequence;
+      }
+    };
+  }
+});
+
+// src/core/shared/room-timers.ts
+import { readFileSync } from "node:fs";
+import { join as join5 } from "node:path";
+var RoomTimers;
+var init_room_timers = __esm({
+  "src/core/shared/room-timers.ts"() {
+    "use strict";
+    init_common();
+    RoomTimers = class {
+      constructor(dataRoot) {
+        this.dataRoot = dataRoot;
+      }
+      dataRoot;
+      values = /* @__PURE__ */ new Map();
+      file(id2) {
+        return join5(this.dataRoot, "artifacts", safeId(id2), "room-timer.json");
+      }
+      get(id2, reload = false) {
+        if (this.dataRoot && (reload || !this.values.has(id2))) {
+          let raw;
+          try {
+            raw = readFileSync(this.file(id2), "utf8");
+          } catch (error62) {
+            if (error62.code !== "ENOENT") throw error62;
+            this.values.set(id2, null);
+            return null;
+          }
+          try {
+            const saved = JSON.parse(raw), timer2 = object2(saved) && saved.schemaVersion === 1 ? saved.timer : void 0;
+            if (!object2(timer2) || !Number.isInteger(timer2.durationMs) || Number(timer2.durationMs) < 1e3 || Number(timer2.durationMs) > 5999e3 || !Number.isFinite(timer2.remainingMs) || Number(timer2.remainingMs) < 0 || Number(timer2.remainingMs) > 5999e3 || timer2.deadline !== null && !Number.isFinite(timer2.deadline) || typeof timer2.paused !== "boolean" || !object2(timer2.source) || typeof timer2.source.id !== "string" || typeof timer2.source.name !== "string" || !["human", "agent"].includes(String(timer2.source.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(timer2.source.role))) throw new Error("invalid timer");
+            this.values.set(id2, timer2);
+          } catch {
+            throw new StudioError("CORRUPT_TIMER", "\u5171\u4EAB\u8BA1\u65F6\u5668\u8BB0\u5F55\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\u5E76\u4ECE\u5907\u4EFD\u6062\u590D\u3002");
+          }
+        }
+        const timer = this.values.get(id2);
+        if (!timer) return null;
+        return copy({ ...timer, remainingMs: timer.paused || timer.deadline === null ? timer.remainingMs : Math.max(0, timer.deadline - Date.now()) });
+      }
+      async set(id2, timer) {
+        if (this.dataRoot) await atomicWrite(this.file(id2), JSON.stringify({ schemaVersion: 1, timer }));
+        this.values.set(id2, copy(timer));
+      }
+      forget(id2) {
+        this.values.delete(id2);
+      }
+      close() {
+        this.values.clear();
+      }
+    };
   }
 });
 
 // src/core/shared/collaboration.ts
-var StudioCollaboration;
+import { createHash as createHash6, randomUUID as randomUUID10 } from "node:crypto";
+var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, StudioCollaboration;
 var init_collaboration = __esm({
   "src/core/shared/collaboration.ts"() {
     "use strict";
     init_common();
+    init_collaboration_events();
+    init_collaboration_room();
+    init_room_timers();
+    LEASE_MS = 45e3;
+    DISCONNECT_MS = 4e3;
+    AGENT_IDLE_MS = 2e4;
     StudioCollaboration = class {
       listeners = /* @__PURE__ */ new Map();
       peers = /* @__PURE__ */ new Map();
-      timers = /* @__PURE__ */ new Map();
+      timers;
+      events = new CollaborationEvents();
+      rooms = /* @__PURE__ */ new Map();
+      queues = /* @__PURE__ */ new Map();
+      activities = /* @__PURE__ */ new Map();
+      expiry;
+      constructor(options = {}) {
+        this.timers = new RoomTimers(options.dataRoot);
+        this.expiry = setInterval(() => this.expire(), 1e3);
+        this.expiry.unref();
+      }
       subscribe(artifactId, listener) {
         const key = artifactId || "*", group = this.listeners.get(key) ?? /* @__PURE__ */ new Set();
         group.add(listener);
@@ -11350,47 +12041,168 @@ var init_collaboration = __esm({
         };
       }
       emit(event) {
+        const published = this.events.append(event);
         for (const listener of [...this.listeners.get(event.artifactId) ?? [], ...this.listeners.get("*") ?? []]) {
           try {
-            listener(copy(event));
+            listener(copy(published));
           } catch {
           }
         }
       }
-      update(artifactId, input2, actor) {
-        const peerId = safeId(input2.peerId ?? actor.id, "\u53C2\u4E0E\u8005 ID"), group = this.peers.get(artifactId) ?? /* @__PURE__ */ new Map();
-        const previous = group.get(peerId);
-        if (previous && previous.actor.id !== actor.id) throw new StudioError("FORBIDDEN", "\u4E0D\u80FD\u66F4\u65B0\u5176\u4ED6\u53C2\u4E0E\u8005\u7684\u72B6\u6001\u3002");
-        if (Buffer.byteLength(JSON.stringify(input2)) > 16 * 1024) throw new StudioError("TOO_LARGE", "\u5728\u7EBF\u72B6\u6001\u8FC7\u5927\u3002");
-        const nextTimer = input2.timer === void 0 ? void 0 : this.timerAction(artifactId, input2.timer, actor);
-        if (input2.leave === true) group.delete(peerId);
-        else {
-          const now = (/* @__PURE__ */ new Date()).toISOString(), context = object3(input2.context) ? copy(input2.context) : previous?.context;
-          const ids = (value) => Array.isArray(value) && value.length <= 200 && value.every((id2) => typeof id2 === "string" && id2.length <= 200);
-          if (context && (context.artifactId !== artifactId || typeof context.viewId !== "string" || context.viewId.length > 120 || !ids(context.selectedIds) || context.editingIds !== void 0 && !ids(context.editingIds) || context.movingIds !== void 0 && !ids(context.movingIds) || context.dirty !== void 0 && typeof context.dirty !== "boolean")) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
-          if (context && context.issues !== void 0) {
-            if (!Array.isArray(context.issues)) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u95EE\u9898\u65E0\u6548\u3002");
-            context.issues = context.issues.slice(0, 5).map((issue2) => {
-              if (!object3(issue2) || typeof issue2.type !== "string" || typeof issue2.message !== "string" || !ids(issue2.ids)) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u95EE\u9898\u65E0\u6548\u3002");
-              return { type: issue2.type.slice(0, 80), message: issue2.message.slice(0, 500), ids: issue2.ids };
-            });
-          }
-          const displayActor = { ...copy(actor), ...typeof input2.name === "string" ? { name: input2.name.slice(0, 60) } : {} };
-          const cursor = object3(input2.cursor) ? { x: finite(input2.cursor.x, 0), y: finite(input2.cursor.y, 0) } : previous?.cursor;
-          const following = typeof input2.following === "string" ? input2.following.slice(0, 120) : previous?.following;
-          const chat = typeof input2.chat === "string" ? input2.chat.slice(0, 240) : previous?.chat;
-          group.set(peerId, { peerId, actor: displayActor, ...context ? { context } : {}, ...cursor ? { cursor } : {}, ...following !== void 0 ? { following } : {}, ...chat !== void 0 ? { chat } : {}, updatedAt: now });
+      cursor() {
+        return this.events.cursor();
+      }
+      group(artifactId) {
+        let group = this.peers.get(artifactId);
+        if (!group) {
+          group = /* @__PURE__ */ new Map();
+          this.peers.set(artifactId, group);
         }
-        if (nextTimer === null) this.timers.delete(artifactId);
-        else if (nextTimer) this.timers.set(artifactId, nextTimer);
-        this.peers.set(artifactId, group);
-        const peers = this.getPresence(artifactId), timer = this.getTimer(artifactId);
-        this.emit({ type: "presence", artifactId, peers, timer });
-        return { peers, timer };
+        return group;
+      }
+      peer(artifactId, input2, actor, registration = false) {
+        if (artifactId) this.getTimer(artifactId);
+        const peerId = safeId(input2.peerId ?? actor.id, "\u53C2\u4E0E\u8005 ID"), group = this.group(artifactId), now = Date.now();
+        if (peerId.startsWith("agent-")) throw new StudioError("FORBIDDEN", "\u4EE3\u7406\u9875\u9762\u72B6\u6001\u53EA\u80FD\u7531\u670D\u52A1\u7AEF\u767B\u8BB0\u3002");
+        const epoch = input2.peerEpoch === void 0 ? void 0 : safeId(input2.peerEpoch, "\u9875\u9762\u4EE3\u6B21");
+        let peer = group.get(peerId);
+        if (peer && peer.actorId !== actor.id) throw new StudioError("FORBIDDEN", "\u4E0D\u80FD\u66F4\u65B0\u5176\u4ED6\u53C2\u4E0E\u8005\u7684\u72B6\u6001\u3002");
+        if (peer?.epoch && !epoch || peer && epoch && peer.retired.has(epoch)) throw new StudioError("STALE_PEER", "\u9875\u9762\u534F\u4F5C\u4EE3\u6B21\u5DF2\u5931\u6548\u3002");
+        if (peer && epoch && peer.epoch !== epoch) {
+          if (peer.epoch && (!registration || peer.streams > 0 || peer.leaseUntil > now)) throw new StudioError("STALE_PEER", "\u9875\u9762\u534F\u4F5C\u4EE3\u6B21\u5DF2\u5931\u6548\u3002");
+          if (peer.epoch) peer.retired.add(peer.epoch);
+          peer.epoch = epoch;
+          peer.sequence = -1;
+          peer.roomSequence = -1;
+          peer.value = void 0;
+          peer.departed = false;
+        }
+        if (!peer) {
+          if (group.size >= 128) throw new StudioError("BUSY", "\u5F53\u524D\u4F5C\u54C1\u7684\u5728\u7EBF\u9875\u9762\u8FC7\u591A\u3002");
+          peer = { actorId: actor.id, ...epoch ? { epoch } : {}, sequence: -1, roomSequence: -1, leaseUntil: now + LEASE_MS, streams: 0, retired: /* @__PURE__ */ new Set(), tokens: 80, budgetAt: now };
+          group.set(peerId, peer);
+        }
+        if (peer.disconnect) {
+          clearTimeout(peer.disconnect);
+          peer.disconnect = void 0;
+        }
+        peer.leaseUntil = now + LEASE_MS;
+        if (registration && !peer.value && !peer.departed) {
+          peer.value = { peerId, actor: copy(actor), ...epoch ? { peerEpoch: epoch } : {}, updatedAt: new Date(now).toISOString() };
+          this.publishPresence(artifactId);
+        }
+        return { peerId, peer };
+      }
+      connectPeer(artifactId, peerId, peerEpoch, actor) {
+        const { peer } = this.peer(artifactId, { peerId, ...peerEpoch ? { peerEpoch } : {} }, actor, true);
+        peer.streams++;
+        let closed = false;
+        return () => {
+          if (closed) return;
+          closed = true;
+          peer.streams--;
+          if (!peer.streams && this.peers.get(artifactId)?.get(peerId) === peer) {
+            peer.disconnect = setTimeout(() => {
+              peer.disconnect = void 0;
+              if (!peer.streams && this.peers.get(artifactId)?.get(peerId) === peer) {
+                peer.value = void 0;
+                peer.leaseUntil = Date.now();
+                this.publishPresence(artifactId);
+              }
+            }, DISCONNECT_MS);
+            peer.disconnect.unref();
+          }
+        };
+      }
+      async sync(artifactId, options, actor) {
+        const wait = options.wait ?? 0;
+        if (!Number.isInteger(wait) || wait < 0 || wait > 2e4) throw new StudioError("INVALID_ARGUMENT", "\u540C\u6B65\u7B49\u5F85\u65F6\u95F4\u5E94\u4E3A 0 \u81F3 20000 \u6BEB\u79D2\u3002");
+        if (options.signal?.aborted) throw options.signal.reason ?? new DOMException("Aborted", "AbortError");
+        if (options.peerId) this.peer(artifactId, { peerId: options.peerId, ...options.peerEpoch ? { peerEpoch: options.peerEpoch } : {} }, actor, true);
+        const read = () => ({ ...this.events.read(artifactId, options.after), peers: this.getPresence(artifactId), timer: artifactId ? this.getTimer(artifactId) : null, serverTime: Date.now() });
+        const initial = read();
+        if (!wait || initial.reset || initial.events.length) return initial;
+        return new Promise((resolve4, reject) => {
+          let timer, done = false;
+          const finish = (error62) => {
+            if (done) return;
+            done = true;
+            unsubscribe();
+            if (timer) clearTimeout(timer);
+            options.signal?.removeEventListener("abort", abort);
+            if (error62) reject(error62);
+            else resolve4(read());
+          };
+          const abort = () => finish(options.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+          const unsubscribe = this.subscribe(artifactId, () => finish());
+          timer = setTimeout(() => finish(), wait);
+          timer.unref();
+          options.signal?.addEventListener("abort", abort, { once: true });
+          const current = this.events.read(artifactId, options.after);
+          if (current.reset || current.events.length) finish();
+        });
+      }
+      serialized(artifactId, run) {
+        const task = (this.queues.get(artifactId) ?? Promise.resolve()).catch(() => {
+        }).then(run);
+        this.queues.set(artifactId, task);
+        void task.finally(() => {
+          if (this.queues.get(artifactId) === task) this.queues.delete(artifactId);
+        }).catch(() => {
+        });
+        return task;
+      }
+      update(artifactId, input2, actor, validateActor2) {
+        return this.serialized(artifactId, async () => this.updateNow(artifactId, input2, validateActor2 ? await validateActor2() : actor));
+      }
+      async updateNow(artifactId, input2, actor) {
+        if (Buffer.byteLength(JSON.stringify(input2)) > 16 * 1024) throw new StudioError("TOO_LARGE", "\u5728\u7EBF\u72B6\u6001\u8FC7\u5927\u3002");
+        if (input2.context !== void 0 && input2.context !== null && !object2(input2.context) || input2.cursor !== void 0 && input2.cursor !== null && !object2(input2.cursor) || input2.following !== void 0 && input2.following !== null && typeof input2.following !== "string" || input2.chat !== void 0 && input2.chat !== null && typeof input2.chat !== "string") throw new StudioError("INVALID_ARGUMENT", "\u5728\u7EBF\u72B6\u6001\u5B57\u6BB5\u65E0\u6548\u3002");
+        if (input2.peerEpoch === void 0 !== (input2.peerSeq === void 0)) throw new StudioError("INVALID_ARGUMENT", "\u9875\u9762\u4EE3\u6B21\u548C\u72B6\u6001\u5E8F\u53F7\u5FC5\u987B\u4E00\u8D77\u63D0\u4F9B\u3002");
+        if (input2.peerSeq !== void 0 && (!Number.isSafeInteger(input2.peerSeq) || Number(input2.peerSeq) < 0)) throw new StudioError("INVALID_ARGUMENT", "\u5728\u7EBF\u72B6\u6001\u5E8F\u53F7\u65E0\u6548\u3002");
+        const peerId = safeId(input2.peerId ?? actor.id, "\u53C2\u4E0E\u8005 ID"), previous = this.peers.get(artifactId)?.get(peerId)?.value;
+        const context = input2.context === null ? void 0 : object2(input2.context) ? copy(input2.context) : copy(previous?.context);
+        const ids = (value) => Array.isArray(value) && value.length <= 200 && value.every((id2) => typeof id2 === "string" && id2.length <= 200);
+        if (context && (context.artifactId !== artifactId || typeof context.viewId !== "string" || context.viewId.length > 120 || !ids(context.selectedIds) || context.editingIds !== void 0 && !ids(context.editingIds) || context.movingIds !== void 0 && !ids(context.movingIds) || context.dirty !== void 0 && typeof context.dirty !== "boolean")) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
+        if (context && context.issues !== void 0) {
+          if (!Array.isArray(context.issues)) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u95EE\u9898\u65E0\u6548\u3002");
+          context.issues = context.issues.slice(0, 5).map((issue2) => {
+            if (!object2(issue2) || typeof issue2.type !== "string" || typeof issue2.message !== "string" || !ids(issue2.ids)) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u95EE\u9898\u65E0\u6548\u3002");
+            return { type: issue2.type.slice(0, 80), message: issue2.message.slice(0, 500), ids: issue2.ids };
+          });
+        }
+        if (context && Buffer.byteLength(JSON.stringify(context)) > 6144) throw new StudioError("TOO_LARGE", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u8D85\u8FC7 6 KiB\u3002");
+        const cursor = input2.cursor === null ? null : object2(input2.cursor) ? { x: finite(input2.cursor.x, 0), y: finite(input2.cursor.y, 0), ...typeof input2.cursor.surface === "string" ? { surface: input2.cursor.surface.slice(0, 120) } : {}, t: Date.now() } : previous?.cursor;
+        const following = input2.following === null ? void 0 : typeof input2.following === "string" ? input2.following.slice(0, 120) : previous?.following;
+        const chat = input2.chat === null ? void 0 : typeof input2.chat === "string" ? [...input2.chat].slice(0, 50).join("") : previous?.chat;
+        if (input2.color !== void 0 && (typeof input2.color !== "string" || !/^#[0-9a-f]{6}$/i.test(input2.color))) throw new StudioError("INVALID_ARGUMENT", "\u534F\u4F5C\u989C\u8272\u65E0\u6548\u3002");
+        if (input2.visible !== void 0 && typeof input2.visible !== "boolean") throw new StudioError("INVALID_ARGUMENT", "\u9875\u9762\u53EF\u89C1\u72B6\u6001\u65E0\u6548\u3002");
+        let nextTimer;
+        if (input2.timer !== void 0) {
+          requireRole(actor, ["owner", "editor"]);
+          this.timers.get(artifactId, true);
+          nextTimer = this.timerAction(artifactId, input2.timer, actor);
+        }
+        const { peer } = this.peer(artifactId, input2, actor);
+        const sequence2 = input2.peerSeq === void 0 ? peer.sequence + 1 : Number(input2.peerSeq);
+        const result = (accepted) => ({ peers: this.getPresence(artifactId), timer: this.getTimer(artifactId), cursor: this.cursor(), serverTime: Date.now(), ...peer.epoch ? { peerEpoch: peer.epoch } : {}, peerSeq: peer.sequence, accepted });
+        if (sequence2 <= peer.sequence) return result(false);
+        const now = Date.now();
+        peer.tokens = Math.min(80, peer.tokens + (now - peer.budgetAt) * 40 / 1e3);
+        peer.budgetAt = now;
+        if (input2.leave !== true && input2.timer === void 0 && peer.tokens < 1) return result(false);
+        if (input2.leave !== true && input2.timer === void 0) peer.tokens--;
+        const next = input2.leave === true ? void 0 : { peerId, actor: copy(actor), ...peer.epoch ? { peerEpoch: peer.epoch, peerSeq: sequence2 } : {}, ...context ? { context } : {}, ...cursor !== void 0 ? { cursor } : {}, ...following !== void 0 ? { following } : {}, ...chat !== void 0 ? { chat, chatExpiresAt: input2.chat === void 0 ? previous?.chatExpiresAt : Date.now() + 5e3 } : {}, ...input2.color !== void 0 || previous?.color ? { color: input2.color ?? previous?.color } : {}, ...input2.visible !== void 0 || previous?.visible !== void 0 ? { visible: input2.visible ?? previous?.visible } : {}, updatedAt: new Date(now).toISOString() };
+        if (nextTimer) await this.timers.set(artifactId, nextTimer);
+        peer.value = next;
+        peer.sequence = sequence2;
+        peer.departed = input2.leave === true;
+        this.publishPresence(artifactId);
+        return result(true);
       }
       timerAction(artifactId, input2, actor) {
         requireRole(actor, ["owner", "editor"]);
-        if (!object3(input2)) throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u5668\u64CD\u4F5C\u65E0\u6548\u3002");
+        if (!object2(input2)) throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u5668\u64CD\u4F5C\u65E0\u6548\u3002");
         const current = this.getTimer(artifactId), now = Date.now();
         const duration3 = () => {
           if (!Number.isInteger(input2.durationSeconds) || Number(input2.durationSeconds) < 1 || Number(input2.durationSeconds) > 5999) throw new StudioError("INVALID_ARGUMENT", "\u8BA1\u65F6\u65F6\u957F\u5E94\u4E3A 1 \u79D2\u81F3 99 \u5206 59 \u79D2\u3002");
@@ -11424,44 +12236,135 @@ var init_collaboration = __esm({
         return { ...current, deadline: now + remainingMs, remainingMs, paused: false, source: copy(actor) };
       }
       getTimer(artifactId) {
-        const timer = this.timers.get(artifactId);
-        if (!timer) return null;
-        return copy({ ...timer, remainingMs: timer.paused || timer.deadline === null ? timer.remainingMs : Math.max(0, timer.deadline - Date.now()) });
+        return this.timers.get(artifactId);
       }
       getPresence(artifactId) {
         const group = this.peers.get(artifactId);
         if (!group) return [];
-        const cutoff = Date.now() - 45e3;
-        for (const [key, peer] of group) if (Date.parse(peer.updatedAt) < cutoff) group.delete(key);
-        return copy([...group.values()]);
+        const now = Date.now();
+        return copy([...group.values()].flatMap((peer) => {
+          if (!peer.value || !peer.streams && peer.leaseUntil <= now) return [];
+          const value = copy(peer.value);
+          if (value.chatExpiresAt !== void 0 && value.chatExpiresAt <= now) {
+            delete value.chat;
+            delete value.chatExpiresAt;
+          }
+          return [value];
+        }));
+      }
+      publishPresence(artifactId) {
+        this.emit({ type: "presence", artifactId, peers: this.getPresence(artifactId), timer: this.getTimer(artifactId), serverTime: Date.now() });
+      }
+      expire() {
+        const now = Date.now();
+        for (const [artifactId, group] of this.peers) {
+          let changed = false;
+          for (const [peerId, peer] of group) {
+            if (!peer.streams && peer.leaseUntil <= now && peer.value) {
+              peer.value = void 0;
+              changed = true;
+            }
+            if (peerId.startsWith("agent-") && !peer.streams && peer.leaseUntil <= now) {
+              group.delete(peerId);
+              continue;
+            }
+            if (!peer.streams && now - peer.leaseUntil > 15 * 6e4) {
+              group.delete(peerId);
+              this.rooms.get(artifactId)?.forget(peerId);
+            }
+          }
+          if (changed) this.publishPresence(artifactId);
+          if (!group.size) this.peers.delete(artifactId);
+        }
+      }
+      room(artifactId, input2, actor) {
+        if (input2.peerEpoch === void 0 !== (input2.peerSeq === void 0) || input2.peerSeq !== void 0 && (!Number.isSafeInteger(input2.peerSeq) || Number(input2.peerSeq) < 0)) throw new StudioError("INVALID_ARGUMENT", "\u4E34\u65F6\u534F\u4F5C\u7684\u9875\u9762\u4EE3\u6B21\u6216\u5E8F\u53F7\u65E0\u6548\u3002");
+        const messages = CollaborationRoom.validate(input2.events, actor);
+        const { peerId, peer } = this.peer(artifactId, input2, actor);
+        if (input2.peerSeq !== void 0 && Number(input2.peerSeq) <= peer.roomSequence) return { accepted: 0, dropped: Array.isArray(input2.events) ? input2.events.length : 0, cursor: this.cursor(), serverTime: Date.now() };
+        let room = this.rooms.get(artifactId);
+        if (!room) {
+          room = new CollaborationRoom();
+          this.rooms.set(artifactId, room);
+        }
+        const result = room.accept(peerId, messages, actor);
+        if (input2.peerSeq !== void 0) peer.roomSequence = Number(input2.peerSeq);
+        if (result.messages.length) this.emit({ type: "room", artifactId, events: result.messages, expiresAt: result.expiresAt });
+        return { accepted: result.messages.length, dropped: result.dropped, cursor: this.cursor(), serverTime: Date.now() };
+      }
+      beginActivity(artifactId, actor, input2) {
+        if (actor.kind !== "agent") throw new StudioError("FORBIDDEN", "\u4EE3\u7406\u6D3B\u52A8\u5FC5\u987B\u7531\u670D\u52A1\u7AEF\u767B\u8BB0\u3002");
+        this.getTimer(artifactId);
+        const activityId = randomUUID10(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? /* @__PURE__ */ new Map();
+        group.set(activityId, { actor: copy(actor), ...copy(input2) });
+        this.activities.set(key, group);
+        const peerId = `agent-${createHash6("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
+        const publish = () => {
+          if (this.activities.get(key) !== group) return;
+          const entries = [...group.values()], peers = this.group(artifactId);
+          let peer = peers.get(peerId);
+          if (!entries.length) {
+            if (peer?.value) {
+              peer.leaseUntil = Date.now() + AGENT_IDLE_MS;
+              peer.value = { ...peer.value, context: { ...peer.value.context, editingIds: [], movingIds: [], activity: "idle", lastActivity: input2.status }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+            }
+            this.activities.delete(key);
+            this.publishPresence(artifactId);
+            return;
+          }
+          if (!peer) {
+            peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: Number.POSITIVE_INFINITY, streams: 0, retired: /* @__PURE__ */ new Set(), tokens: 80, budgetAt: Date.now() };
+            peers.set(peerId, peer);
+          }
+          peer.leaseUntil = Number.POSITIVE_INFINITY;
+          peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: input2.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap((item) => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap((item) => item.editingIds ?? []))], activity: entries.some((item) => item.status === "writing") ? "writing" : "reading" }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+          this.publishPresence(artifactId);
+        };
+        publish();
+        let done = false;
+        return () => {
+          if (done) return;
+          done = true;
+          group.delete(activityId);
+          publish();
+        };
       }
       revokeMembers(artifactId, memberIds) {
-        const group = this.peers.get(artifactId), revoked = new Set(memberIds);
+        const group = this.peers.get(artifactId), revoked2 = new Set(memberIds);
         if (!group) return;
-        for (const [peerId, peer] of group) if (revoked.has(peer.actor.id)) group.delete(peerId);
-        this.emit({ type: "presence", artifactId, peers: this.getPresence(artifactId), timer: this.getTimer(artifactId) });
+        for (const [peerId, peer] of group) if (revoked2.has(peer.actorId)) {
+          if (peer.disconnect) clearTimeout(peer.disconnect);
+          group.delete(peerId);
+        }
+        this.publishPresence(artifactId);
       }
       forget(artifactId) {
+        for (const peer of this.peers.get(artifactId)?.values() ?? []) if (peer.disconnect) clearTimeout(peer.disconnect);
         this.peers.delete(artifactId);
-        this.timers.delete(artifactId);
+        this.timers.forget(artifactId);
+        this.rooms.delete(artifactId);
+        for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key);
       }
       close() {
+        clearInterval(this.expiry);
+        for (const id2 of this.peers.keys()) this.forget(id2);
         this.listeners.clear();
-        this.peers.clear();
-        this.timers.clear();
+        this.activities.clear();
+        this.timers.close();
+        this.events.clear();
       }
     };
   }
 });
 
 // src/core/shared/files.ts
-import { randomUUID as randomUUID9 } from "node:crypto";
+import { randomUUID as randomUUID11 } from "node:crypto";
 import { cp, lstat as lstat2, mkdir as mkdir4, open as open2, readFile as readFile4, readdir as readdir3, realpath as realpath2, rename as rename3, rm as rm3 } from "node:fs/promises";
-import { basename, extname, isAbsolute, join as join5, resolve as resolve3 } from "node:path";
+import { basename, extname, isAbsolute, join as join6, resolve as resolve3 } from "node:path";
 async function assetDirectory(store, artifactId, directory, create = false) {
   const root2 = await realpath2(store.root), folder = await realpath2(store.folder(artifactId));
-  if (!samePath2(folder, join5(root2, "artifacts", safeId(artifactId)))) throw resourceScope2();
-  const path2 = join5(folder, directory);
+  if (!samePath2(folder, join6(root2, "artifacts", safeId(artifactId)))) throw resourceScope2();
+  const path2 = join6(folder, directory);
   if (create) await mkdir4(path2, { recursive: true });
   if (!samePath2(await realpath2(path2), path2)) throw resourceScope2();
   return path2;
@@ -11509,14 +12412,14 @@ function assetMimeType(data, filename) {
   if (!detected && MEDIA_MIMES.has(fallback)) throw new StudioError("INVALID_ARGUMENT", "\u6587\u4EF6\u5185\u5BB9\u4E0E\u56FE\u7247\u6216\u89C6\u9891\u683C\u5F0F\u4E0D\u7B26\uFF0C\u8BF7\u63D0\u4F9B\u5B9E\u9645\u5A92\u4F53\u6587\u4EF6\u3002");
   return detected ?? fallback;
 }
-async function importAsset(store, artifactId, assetPath, actor, validateMimeType) {
+async function importAsset(store, artifactId, assetPath, actor, validateMimeType, authorize) {
   requireRole(actor, ["owner"]);
   const path2 = text(assetPath, "", 4096);
   if (!path2 || !isAbsolute(path2)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u660E\u786E\u7684\u8D44\u6E90\u6587\u4EF6\u7EDD\u5BF9\u8DEF\u5F84\u3002");
   const canonical = await realpath2(path2);
   if (!samePath2(canonical, resolve3(path2))) throw new StudioError("RESOURCE_SCOPE", "\u8BF7\u63D0\u4F9B\u8D44\u6E90\u6587\u4EF6\u7684\u771F\u5B9E\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u5BFC\u5165\u3002");
   const data = await readBoundedAsset(canonical), filename = basename(canonical), mimeType = assetMimeType(data, filename);
-  return putAsset(store, artifactId, data, { filename, mimeType }, actor, validateMimeType);
+  return putAsset(store, artifactId, data, { filename, mimeType }, actor, validateMimeType, authorize);
 }
 function listAssets(state, args, actor) {
   requireRole(actor, ["owner"]);
@@ -11530,16 +12433,17 @@ function referencesAsset(value, id2) {
   if (value !== null && typeof value === "object") return Object.values(value).some((item) => referencesAsset(item, id2));
   return false;
 }
-async function deleteAsset(store, artifactId, assetId, actor) {
+async function deleteAsset(store, artifactId, assetId, actor, authorize) {
   requireRole(actor, ["owner"]);
   const id2 = safeId(assetId, "\u8D44\u6E90 ID");
   let moved;
   try {
     await store.transaction(artifactId, async (state) => {
+      requireRole(authorize ? authorize(state) : actor, ["owner"]);
       assertAlive(state.artifact);
       if (!Object.hasOwn(state.assets, id2)) throw new StudioError("NOT_FOUND", "\u8D44\u6E90\u4E0D\u5B58\u5728\u3002");
       if (referencesAsset([state.content, state.history, state.sources, state.feedback], id2)) throw new StudioError("REFERENCE_IN_USE", "\u5F53\u524D\u5185\u5BB9\u3001\u4FDD\u7559\u5386\u53F2\u6216\u53CD\u9988\u4ECD\u5F15\u7528\u6B64\u8D44\u6E90\uFF0C\u8BF7\u4FDD\u7559\u8D44\u6E90\u4EE5\u4FBF\u6062\u590D\u3002");
-      const active = join5(await assetDirectory(store, artifactId, "assets"), id2), recycled = join5(await assetDirectory(store, artifactId, "recycle-assets", true), id2);
+      const active = join6(await assetDirectory(store, artifactId, "assets"), id2), recycled = join6(await assetDirectory(store, artifactId, "recycle-assets", true), id2);
       let activeExists = true;
       try {
         await regularFile(active);
@@ -11574,19 +12478,20 @@ async function deleteAsset(store, artifactId, assetId, actor) {
   return { assetId: id2, removed: true };
 }
 async function duplicateAssets(store, from, to) {
-  await cp(join5(store.folder(from), "assets"), join5(store.folder(to), "assets"), { recursive: true }).catch((error62) => {
+  await cp(join6(store.folder(from), "assets"), join6(store.folder(to), "assets"), { recursive: true }).catch((error62) => {
     if (error62.code !== "ENOENT") throw error62;
   });
 }
-async function putAsset(store, artifactId, data, input2, actor, validateMimeType) {
+async function putAsset(store, artifactId, data, input2, actor, validateMimeType, authorize) {
   requireRole(actor, ["owner", "editor"]);
   if (!data.byteLength || data.byteLength > MAX_ASSET_BYTES) throw new StudioError("TOO_LARGE", "\u8D44\u6E90\u5E94\u5C0F\u4E8E 20 MB\u3002");
   const mimeType = text(input2.mimeType, "application/octet-stream", 100).split(";")[0];
   validateMimeType(mimeType);
-  const id2 = randomUUID9(), filename = basename(text(input2.filename, "resource", 250)).replace(/[\x00-\x1f]/g, "");
+  const id2 = randomUUID11(), filename = basename(text(input2.filename, "resource", 250)).replace(/[\x00-\x1f]/g, "");
   await store.transaction(artifactId, async (state) => {
+    requireRole(authorize ? authorize(state) : actor, ["owner", "editor"]);
     assertAlive(state.artifact);
-    await atomicWrite(join5(await assetDirectory(store, artifactId, "assets", true), id2), data);
+    await atomicWrite(join6(await assetDirectory(store, artifactId, "assets", true), id2), data);
     state.assets[id2] = { id: id2, filename, mimeType, size: data.byteLength };
   });
   return { id: id2, url: `/assets/${artifactId}/${id2}`, src: `/assets/${artifactId}/${id2}`, filename, mimeType, size: data.byteLength };
@@ -11597,10 +12502,10 @@ async function getAsset(store, artifactId, assetId) {
   if (!asset) throw new StudioError("NOT_FOUND", "\u8D44\u6E90\u4E0D\u5B58\u5728\u3002");
   let data;
   try {
-    data = await readBoundedAsset(join5(await assetDirectory(store, artifactId, "assets"), assetId));
+    data = await readBoundedAsset(join6(await assetDirectory(store, artifactId, "assets"), assetId));
   } catch (error62) {
     if (error62.code !== "ENOENT") throw error62;
-    data = await readBoundedAsset(join5(await assetDirectory(store, artifactId, "recycle-assets"), assetId));
+    data = await readBoundedAsset(join6(await assetDirectory(store, artifactId, "recycle-assets"), assetId));
   }
   return { ...asset, data };
 }
@@ -11614,24 +12519,24 @@ function exportResources(store, artifactId) {
   } };
 }
 async function saveExport(root2, artifactId, result) {
-  const exportId = randomUUID9(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
+  const exportId = randomUUID11(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
   const record3 = { exportId, artifactId, filename: basename(result.filename), mimeType: result.mimeType, size: data.length, downloadPath: `/api/exports/${exportId}?artifactId=${encodeURIComponent(artifactId)}` };
-  await atomicWrite(join5(root2, "exports", exportId), data);
-  await atomicWrite(join5(root2, "exports", `${exportId}.json`), JSON.stringify(record3));
+  await atomicWrite(join6(root2, "exports", exportId), data);
+  await atomicWrite(join6(root2, "exports", `${exportId}.json`), JSON.stringify(record3));
   return record3;
 }
 async function getExport(root2, exportId) {
   safeId(exportId, "\u5BFC\u51FA ID");
   try {
-    const record3 = JSON.parse(await readFile4(join5(root2, "exports", `${exportId}.json`), "utf8"));
-    return { ...record3, data: await readFile4(join5(root2, "exports", exportId)) };
+    const record3 = JSON.parse(await readFile4(join6(root2, "exports", `${exportId}.json`), "utf8"));
+    return { ...record3, data: await readFile4(join6(root2, "exports", exportId)) };
   } catch (error62) {
     if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u5BFC\u51FA\u6587\u4EF6\u4E0D\u5B58\u5728\u3002");
     throw error62;
   }
 }
 async function purgeExports(root2, artifactId) {
-  const directory = join5(await realpath2(root2), "exports");
+  const directory = join6(await realpath2(root2), "exports");
   let entries;
   try {
     const info = await lstat2(directory);
@@ -11645,7 +12550,7 @@ async function purgeExports(root2, artifactId) {
   for (const name of entries) {
     const match = /^([A-Za-z0-9][A-Za-z0-9_-]{0,119})\.json$/.exec(name);
     if (!match) continue;
-    const metadata = join5(directory, name);
+    const metadata = join6(directory, name);
     let record3;
     try {
       await regularFile(metadata);
@@ -11657,7 +12562,7 @@ async function purgeExports(root2, artifactId) {
     }
     if (!record3 || typeof record3 !== "object" || !("artifactId" in record3) || record3.artifactId !== artifactId) continue;
     if (!("exportId" in record3) || record3.exportId !== match[1]) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u4E0E\u6587\u4EF6\u540D\u4E0D\u7B26\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
-    const data = join5(directory, match[1]);
+    const data = join6(directory, match[1]);
     try {
       await regularFile(data);
     } catch (error62) {
@@ -12885,8 +13790,8 @@ var init_esm = __esm({
           this.p = null;
         }
       };
-      Unzip2.prototype.register = function(decoder) {
-        this.o[decoder.compression] = decoder;
+      Unzip2.prototype.register = function(decoder2) {
+        this.o[decoder2.compression] = decoder2;
       };
       return Unzip2;
     })();
@@ -12894,9 +13799,9 @@ var init_esm = __esm({
 });
 
 // src/core/shared/archive.ts
-import { randomUUID as randomUUID10 } from "node:crypto";
+import { randomUUID as randomUUID12 } from "node:crypto";
 import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rename as rename4, rm as rm4, writeFile as writeFile3 } from "node:fs/promises";
-import { basename as basename2, join as join6 } from "node:path";
+import { basename as basename2, join as join7 } from "node:path";
 async function readArchiveInput(args) {
   if (args.archivePath !== void 0 === (args.archiveBase64 !== void 0)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u4E00\u4E2A\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u6216\u5907\u4EFD\u5185\u5BB9\u3002");
   if (args.archiveBase64 !== void 0) {
@@ -12990,23 +13895,30 @@ function validDate(value) {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 function validateMetadata(value, expectedId, expectedType) {
-  if (!object3(value)) throw invalid();
+  if (!object2(value)) throw invalid();
   safeId(value.id);
   safeId(value.type, "\u4F5C\u54C1\u7C7B\u578B");
   if (expectedId !== void 0 && value.id !== expectedId || expectedType !== void 0 && value.type !== expectedType || typeof value.title !== "string" || !value.title.trim() || value.title.length > 200 || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !validDate(value.createdAt) || !validDate(value.updatedAt) || typeof value.pinned !== "boolean") throw invalid("\u5907\u4EFD\u4F5C\u54C1\u4FE1\u606F\u65E0\u6548\u3002");
 }
 function validateActor(value) {
-  if (!object3(value) || typeof value.id !== "string" || typeof value.name !== "string" || !["human", "agent"].includes(String(value.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(value.role))) throw invalid("\u5907\u4EFD\u4F5C\u8005\u4FE1\u606F\u65E0\u6548\u3002");
+  if (!object2(value) || typeof value.id !== "string" || typeof value.name !== "string" || !["human", "agent"].includes(String(value.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(value.role))) throw invalid("\u5907\u4EFD\u4F5C\u8005\u4FE1\u606F\u65E0\u6548\u3002");
 }
 function validateState(value, products) {
   const state = products.decode(value);
-  if (!object3(state) || state.schemaVersion !== 2 || !("content" in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object3(state.sources) || !object3(state.assets)) throw invalid();
+  if (!object2(state) || state.schemaVersion !== 2 || !("content" in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object2(state.sources) || !object2(state.assets)) throw invalid();
   validateMetadata(state.artifact);
   const { id: id2, type, revision } = state.artifact, product = products.get(type);
   product.adapter.validate(state.content);
+  if (state.unitClocks !== void 0) {
+    if (!object2(state.unitClocks)) throw invalid("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+    for (const [unitId, clock] of Object.entries(state.unitClocks)) {
+      safeId(unitId.startsWith("$") ? unitId.slice(1) : unitId, "\u5185\u5BB9\u5355\u5143 ID");
+      if (!object2(clock) || !Number.isSafeInteger(clock.version) || Number(clock.version) < 1 || !Number.isSafeInteger(clock.incarnationStart) || Number(clock.incarnationStart) < 1 || Number(clock.incarnationStart) > Number(clock.version) || clock.sourceRevision !== void 0 && (!Number.isSafeInteger(clock.sourceRevision) || Number(clock.sourceRevision) < 1)) throw invalid("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+    }
+  }
   const historyIds = /* @__PURE__ */ new Set(), revisions = /* @__PURE__ */ new Set();
   for (const saved of state.history) {
-    if (!object3(saved) || !object3(saved.entry)) throw invalid("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
+    if (!object2(saved) || !object2(saved.entry)) throw invalid("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
     validateMetadata(saved.artifact, id2, type);
     product.adapter.validate(saved.content);
     const entry = saved.entry;
@@ -13018,34 +13930,34 @@ function validateState(value, products) {
   }
   const feedbackIds = /* @__PURE__ */ new Set();
   for (const feedback of state.feedback) {
-    if (!object3(feedback)) throw invalid();
+    if (!object2(feedback)) throw invalid();
     safeId(feedback.id, "\u53CD\u9988 ID");
     validateActor(feedback.author);
-    if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object3(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
+    if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object2(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) {
-      if (!object3(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid();
+      if (!object2(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid();
       safeId(reply.id, "\u56DE\u590D ID");
       validateActor(reply.author);
     }
     if (feedback.proposal) {
       const proposal = feedback.proposal;
-      if (!object3(proposal) || proposal.audience !== "owner" || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== "string" || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid("\u5907\u4EFD\u5EFA\u8BAE\u8BB0\u5F55\u65E0\u6548\u3002");
+      if (!object2(proposal) || proposal.audience !== "owner" || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== "string" || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid("\u5907\u4EFD\u5EFA\u8BAE\u8BB0\u5F55\u65E0\u6548\u3002");
       const optionIds = /* @__PURE__ */ new Set();
       for (const option2 of proposal.options) {
-        if (!object3(option2)) throw invalid();
+        if (!object2(option2)) throw invalid();
         safeId(option2.id, "\u65B9\u6848 ID");
-        if (optionIds.has(option2.id) || typeof option2.label !== "string" || !Array.isArray(option2.operations) || option2.operations.some((op) => !object3(op) || typeof op.op !== "string") || !Number.isSafeInteger(option2.baselineRevision) || option2.baselineRevision < 0 || !object3(option2.baseline) || !object3(option2.versions) || Object.values(option2.versions).some((value2) => !Number.isSafeInteger(value2) || value2 < 0) || !Array.isArray(option2.targetIds) || option2.targetIds.some((value2) => typeof value2 !== "string") || typeof option2.wholeContent !== "boolean" || typeof option2.active !== "boolean") throw invalid("\u5907\u4EFD\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
+        if (optionIds.has(option2.id) || typeof option2.label !== "string" || !Array.isArray(option2.operations) || option2.operations.some((op) => !object2(op) || typeof op.op !== "string") || !Number.isSafeInteger(option2.baselineRevision) || option2.baselineRevision < 0 || !object2(option2.baseline) || !object2(option2.versions) || Object.values(option2.versions).some((value2) => !Number.isSafeInteger(value2) || value2 < 0) || !Array.isArray(option2.targetIds) || option2.targetIds.some((value2) => typeof value2 !== "string") || typeof option2.wholeContent !== "boolean" || typeof option2.active !== "boolean") throw invalid("\u5907\u4EFD\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
         optionIds.add(option2.id);
         if (option2.active && !option2.application) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u5DF2\u5E94\u7528\u65B9\u6848\u7684\u53D8\u66F4\u8BB0\u5F55\u3002");
         if (option2.application) {
           const application = option2.application;
-          if (!object3(application) || !Number.isSafeInteger(application.revision) || application.revision < 0 || !Array.isArray(application.changes) || application.changes.some((change) => !object3(change) || typeof change.id !== "string")) throw invalid();
+          if (!object2(application) || !Number.isSafeInteger(application.revision) || application.revision < 0 || !Array.isArray(application.changes) || application.changes.some((change) => !object2(change) || typeof change.id !== "string")) throw invalid();
           safeId(application.historyId, "\u5386\u53F2 ID");
         }
       }
       for (const receipt of proposal.receipts) {
-        if (!object3(receipt) || typeof receipt.fingerprint !== "string") throw invalid();
+        if (!object2(receipt) || typeof receipt.fingerprint !== "string") throw invalid();
         safeId(receipt.id, "\u64CD\u4F5C ID");
         if (receipt.historyId !== void 0) safeId(receipt.historyId, "\u5386\u53F2 ID");
       }
@@ -13054,7 +13966,7 @@ function validateState(value, products) {
   for (const [feedbackId, sources] of Object.entries(state.sources)) if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid("\u5907\u4EFD\u6765\u6E90\u8BB0\u5F55\u65E0\u6548\u3002");
   for (const [assetId, asset] of Object.entries(state.assets)) {
     safeId(assetId, "\u8D44\u6E90 ID");
-    if (!object3(asset) || asset.id !== assetId || typeof asset.filename !== "string" || typeof asset.mimeType !== "string" || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES2) throw invalid("\u5907\u4EFD\u8D44\u6E90\u4FE1\u606F\u65E0\u6548\u3002");
+    if (!object2(asset) || asset.id !== assetId || typeof asset.filename !== "string" || typeof asset.mimeType !== "string" || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES2) throw invalid("\u5907\u4EFD\u8D44\u6E90\u4FE1\u606F\u65E0\u6548\u3002");
     product.validateAsset(asset.mimeType);
   }
   return state;
@@ -13073,6 +13985,7 @@ function walk(value, visit2) {
 }
 function portable(state) {
   const snapshot = { schemaVersion: 2, artifact: copy(state.artifact), content: copy(state.content), history: copy(state.history), feedback: copy(state.feedback), sources: copy(state.sources), assets: copy(state.assets), operations: [], sharing: { enabled: false, generation: 0, tokens: {} } };
+  if (state.unitClocks) snapshot.unitClocks = copy(state.unitClocks);
   snapshot.artifact.sharing = false;
   for (const saved of snapshot.history) saved.artifact.sharing = false;
   for (const feedback of snapshot.feedback) {
@@ -13088,7 +14001,7 @@ async function exportArchive(store, state, actor) {
   if (json3.length > MAX_SNAPSHOT_BYTES || Object.keys(snapshot.assets).length + 1 > MAX_ENTRIES) throw tooLarge();
   for (const [id2, asset] of Object.entries(snapshot.assets)) {
     safeId(id2, "\u8D44\u6E90 ID");
-    const bytes2 = await readFile5(join6(store.folder(state.artifact.id), "assets", id2));
+    const bytes2 = await readFile5(join7(store.folder(state.artifact.id), "assets", id2));
     if (bytes2.length !== asset.size) throw invalid("\u4F5C\u54C1\u8D44\u6E90\u4E0D\u5B8C\u6574\uFF0C\u672A\u751F\u6210\u5907\u4EFD\u3002");
     size += bytes2.length;
     if (bytes2.length > MAX_ASSET_BYTES2 || size > MAX_EXPANDED_BYTES) throw tooLarge();
@@ -13122,7 +14035,7 @@ async function importArchive(store, products, data, actor, title) {
     if (!bytes || bytes.length !== asset.size) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
   }
   if ([...files.keys()].some((name) => name !== "artifact.json" && name !== "assets/" && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
-  const previous = copy(state.artifact), id2 = randomUUID10(), now = (/* @__PURE__ */ new Date()).toISOString();
+  const previous = copy(state.artifact), id2 = randomUUID12(), now = (/* @__PURE__ */ new Date()).toISOString();
   walk(state, (record3, key, value) => {
     if (typeof value === "string") record3[key] = key === "artifactId" && value === previous.id ? id2 : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id2}/`);
   });
@@ -13138,13 +14051,13 @@ async function importArchive(store, products, data, actor, title) {
   for (const saved of state.history) saved.artifact.id = id2;
   products.validate(state);
   products.get(state.artifact.type).result(state);
-  await mkdir5(join6(store.root, "staging"), { recursive: true });
-  const staging = await mkdtemp(join6(store.root, "staging", "import-"));
+  await mkdir5(join7(store.root, "staging"), { recursive: true });
+  const staging = await mkdtemp(join7(store.root, "staging", "import-"));
   try {
-    await mkdir5(join6(staging, "assets"));
-    for (const assetId of Object.keys(state.assets)) await writeFile3(join6(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
-    await writeFile3(join6(staging, "artifact.json"), JSON.stringify(state), { flag: "wx" });
-    await mkdir5(join6(store.root, "artifacts"), { recursive: true });
+    await mkdir5(join7(staging, "assets"));
+    for (const assetId of Object.keys(state.assets)) await writeFile3(join7(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
+    await writeFile3(join7(staging, "artifact.json"), JSON.stringify(state), { flag: "wx" });
+    await mkdir5(join7(store.root, "artifacts"), { recursive: true });
     await rename4(staging, store.folder(id2));
   } catch (error62) {
     await rm4(staging, { recursive: true, force: true });
@@ -13169,7 +14082,18 @@ var init_archive = __esm({
 });
 
 // src/core/service.ts
-var StudioService;
+import { userInfo } from "node:os";
+function ownerActor(name) {
+  if (name === void 0) {
+    try {
+      name = userInfo().username;
+    } catch {
+      name = "You";
+    }
+  }
+  return { ...LOCAL_ACTOR, name: text(name, "You", 200).trim() || "You" };
+}
+var authorizationState, StudioService;
 var init_service = __esm({
   "src/core/service.ts"() {
     "use strict";
@@ -13187,18 +14111,23 @@ var init_service = __esm({
     init_thumbnails();
     init_archive();
     init_store2();
+    authorizationState = (state) => ({ artifact: state.artifact, sharing: state.sharing, guestNames: state.guestNames });
     StudioService = class {
       thumbnails = new ThumbnailCache();
       store;
+      owner;
       products;
-      collaboration = new StudioCollaboration();
+      collaboration;
       tasks = /* @__PURE__ */ new Set();
       closing = false;
       sharingOrigin = "";
+      localOrigin = "";
       shareHandler;
       constructor(options = {}) {
         this.products = options.products ?? studioProducts();
-        this.store = new StudioStore(options.dataRoot, this.products);
+        this.store = new StudioStore(options.dataRoot, this.products, (state) => initializeVersionClocks(state, this.products.get(state.artifact.type).adapter));
+        this.owner = ownerActor(options.ownerName);
+        this.collaboration = new StudioCollaboration({ dataRoot: this.store.root });
       }
       get dataRoot() {
         return this.store.root;
@@ -13206,17 +14135,36 @@ var init_service = __esm({
       configureSharing(handler) {
         this.shareHandler = handler;
       }
+      configureLocalOrigin(origin) {
+        this.localOrigin = origin;
+      }
       subscribe(artifactId, listener) {
         return this.collaboration.subscribe(artifactId, listener);
       }
       emit(event) {
         this.collaboration.emit(event);
       }
-      async execute(name, args = {}, actor = LOCAL_ACTOR) {
+      emitBoard(snapshot, changedIds) {
+        const adapter = this.products.get(snapshot.artifact.type).adapter;
+        const units = [...new Set(changedIds)].map((id2) => ({ id: id2, after: copy(adapter.readUnit(snapshot.content, id2) ?? null) }));
+        this.emit({ type: "board", artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds, artifact: copy(snapshot.artifact), ...Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true } });
+      }
+      authorizedActor(state, actor, authority) {
+        if (!authority) return actor;
+        if (authority.actorId !== actor.id) throw new StudioError("FORBIDDEN", "\u8BF7\u6C42\u8EAB\u4EFD\u4E0E\u6388\u6743\u4E0A\u4E0B\u6587\u4E0D\u4E00\u81F4\u3002");
+        if (authority.viaLan && sharingAccess(state.sharing) !== "lan") throw new StudioError("UNAUTHORIZED", "\u8FD9\u5757\u767D\u677F\u5F53\u524D\u4E0D\u5141\u8BB8\u5C40\u57DF\u7F51\u8BBF\u95EE\u3002", { reason: state.sharing.enabled ? "local-only" : "sharing-closed" });
+        if (authority.owner) return actor.kind === "human" && actor.id === this.owner.id ? copy(this.owner) : actor;
+        const access = shareAccess(state.artifact, state.sharing, authority.credential, actor.id);
+        if (!access.role) throw new StudioError("UNAUTHORIZED", "\u5206\u4EAB\u6743\u9650\u5DF2\u5931\u6548\u3002", { reason: access.reason });
+        const name = guestName(state, actor.id, this.owner.name);
+        if (!name) throw new StudioError("NAME_REQUIRED", "\u8BF7\u8F93\u5165\u4F60\u7684\u540D\u5B57\u540E\u52A0\u5165\u767D\u677F\u3002");
+        return { id: actor.id, name, kind: "human", role: access.role };
+      }
+      async execute(name, args = {}, actor = this.owner, authority) {
         if (this.closing) throw new StudioError("CLOSED", "Studio \u670D\u52A1\u5DF2\u7ECF\u5173\u95ED\u3002");
         if (!TOOL_NAMES.includes(name)) throw new StudioError("UNKNOWN_TOOL", "\u4E0D\u652F\u6301\u7684 Studio \u64CD\u4F5C\u3002");
-        if (!object3(args)) throw new StudioError("INVALID_ARGUMENT", "\u64CD\u4F5C\u53C2\u6570\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
-        const task = this.dispatch(name, args, copy(actor));
+        if (!object2(args)) throw new StudioError("INVALID_ARGUMENT", "\u64CD\u4F5C\u53C2\u6570\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
+        const task = this.perform(name, args, copy(actor), authority);
         this.tasks.add(task);
         try {
           return await task;
@@ -13224,7 +14172,26 @@ var init_service = __esm({
           this.tasks.delete(task);
         }
       }
-      async dispatch(name, args, actor) {
+      async perform(name, args, actor, authority) {
+        let finish;
+        const createsArtifact = name === "artifact_manage" && ["create", "import"].includes(text(args.action, "create"));
+        if (actor.kind === "agent" && args.artifactId !== void 0 && !createsArtifact) {
+          const id2 = safeId(args.artifactId), projected = await this.store.readProjection(id2, (state) => {
+            const adapter = this.products.get(state.artifact.type).adapter;
+            const ids2 = name === "artifact_apply" && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap((operation2) => object2(operation2) && typeof operation2.op === "string" ? mutationTargets(state.content, operation2, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
+            return { authorization: authorizationState(state), ids: ids2 };
+          }), currentActor = this.authorizedActor(projected.authorization, actor, authority);
+          const writing = name === "artifact_apply" || name === "artifact_manage" || name === "artifact_share" && args.action !== "status" || name === "artifact_feedback" && !["list", "get", "preview"].includes(text(args.action, "list"));
+          const ids = projected.ids;
+          finish = this.collaboration.beginActivity(id2, currentActor, { status: writing ? "writing" : "reading", editingIds: writing ? ids : [], selectedIds: Array.isArray(args.ids) ? args.ids.filter((id3) => typeof id3 === "string").slice(0, 200) : ids });
+        }
+        try {
+          return await this.dispatch(name, args, actor, authority);
+        } finally {
+          finish?.();
+        }
+      }
+      async dispatch(name, args, actor, authority) {
         if (name === "studio_open") {
           if (args.artifactId) await this.store.read(safeId(args.artifactId));
           return { view: args.view ?? (args.artifactId ? "editor" : "library"), products: this.products.catalog(), ...args.artifactId ? { artifactId: args.artifactId } : {} };
@@ -13233,19 +14200,19 @@ var init_service = __esm({
           const result = listArtifacts(await this.store.list(), args, actor);
           return { ...result, artifacts: result.artifacts.map((artifact) => ({ ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` })) };
         }
-        if (name === "artifact_manage") return this.manage(args, actor);
+        if (name === "artifact_manage") return this.manage(args, actor, authority);
         const id2 = safeId(args.artifactId);
-        if (name === "artifact_read") return this.read(id2, args, actor);
-        if (name === "artifact_apply") return this.apply(id2, args, actor);
-        if (name === "artifact_feedback") return this.feedback(id2, args, actor);
-        if (name === "artifact_share") return this.share(id2, args, actor);
-        if (name === "artifact_export") return this.export(id2, args, actor);
+        if (name === "artifact_read") return this.read(id2, args, actor, authority);
+        if (name === "artifact_apply") return this.apply(id2, args, actor, authority);
+        if (name === "artifact_feedback") return this.feedback(id2, args, actor, authority);
+        if (name === "artifact_share") return this.share(id2, args, actor, authority);
+        if (name === "artifact_export") return this.export(id2, args, actor, authority);
         throw new StudioError("UNKNOWN_TOOL", "\u4E0D\u652F\u6301\u7684 Studio \u64CD\u4F5C\u3002");
       }
-      async manage(args, actor) {
+      async manage(args, actor, authority) {
         requireRole(actor, ["owner"]);
         const action = text(args.action, "create");
-        if (action === "purge") return this.purge(args);
+        if (action === "purge") return this.purge(args, actor, authority);
         if (action === "import") return this.importArchive(await readArchiveInput(args), actor, args.title);
         if (action === "create" || action === "duplicate") {
           const base = action === "duplicate" ? await this.store.read(safeId(args.artifactId)) : void 0;
@@ -13254,6 +14221,7 @@ var init_service = __esm({
           const content = product.create(args, base?.content);
           product.adapter.validate(content);
           const state = createArtifact(product.adapter.type, title, content, actor, action === "create" ? "\u521B\u5EFA\u4F5C\u54C1" : "\u590D\u5236\u4F5C\u54C1", product.initialIds(content));
+          initializeVersionClocks(state, product.adapter);
           const id3 = state.artifact.id;
           if (base) {
             product.rewriteAssetReferences?.(state.content, base.artifact.id, id3);
@@ -13269,28 +14237,32 @@ var init_service = __esm({
         if (action === "asset-import") {
           const state = await this.store.read(id2);
           assertAlive(state.artifact);
-          return { asset: await importAsset(this.store, id2, args.assetPath, actor, this.products.get(state.artifact.type).validateAsset) };
+          return { asset: await importAsset(this.store, id2, args.assetPath, actor, this.products.get(state.artifact.type).validateAsset, (current) => this.authorizedActor(current, actor, authority)) };
         }
-        if (action === "asset-delete") return deleteAsset(this.store, id2, args.assetId, actor);
+        if (action === "asset-delete") return deleteAsset(this.store, id2, args.assetId, actor, (current) => this.authorizedActor(current, actor, authority));
         const result = await this.store.transaction(id2, (state) => {
-          manageArtifact(state, action, args, actor);
+          const currentActor = this.authorizedActor(state, actor, authority);
+          manageArtifact(state, action, args, currentActor);
           return { artifact: copy(state.artifact), ...this.products.get(state.artifact.type).result(state) };
         });
         this.emit({ type: "artifact", artifactId: id2, artifact: result.artifact });
         if (action === "trash") {
-          this.emit({ type: "share", artifactId: id2, enabled: false, revokedRoles: [...SHARE_ROLES] });
+          this.emit({ type: "share", artifactId: id2, enabled: false, reason: "sharing-closed", revokedRoles: [...SHARE_ROLES] });
           await this.shareHandler?.(false);
         }
         return result;
       }
-      async purge(args) {
+      async purge(args, actor, authority) {
         const multiple = args.artifactIds !== void 0;
         if (multiple === (args.artifactId !== void 0) || multiple && (!Array.isArray(args.artifactIds) || !args.artifactIds.length || args.artifactIds.length > 100)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u5355\u4E2A\u4F5C\u54C1 ID\uFF0C\u6216 1 \u5230 100 \u4E2A\u4F5C\u54C1 ID \u7684\u5217\u8868\uFF0C\u4E24\u8005\u4E0D\u80FD\u540C\u65F6\u63D0\u4F9B\u3002");
         const ids = [...new Set((multiple ? args.artifactIds : [args.artifactId]).map((id2) => safeId(id2)))];
         const deletedIds2 = [], failures = [];
         for (const id2 of ids) {
           try {
-            await this.store.purge(id2, () => purgeExports(this.dataRoot, id2));
+            await this.store.purge(id2, async () => {
+              this.authorizedActor(await this.store.read(id2), actor, authority);
+              await purgeExports(this.dataRoot, id2);
+            });
           } catch (error62) {
             failures.push({ artifactId: id2, code: error62 instanceof StudioError ? error62.code : "PURGE_FAILED", message: error62 instanceof StudioError ? error62.message : `\u6C38\u4E45\u5220\u9664\u672A\u5B8C\u6210\uFF0C\u53EF\u80FD\u5DF2\u79FB\u9664\u90E8\u5206\u6240\u5C5E\u8D44\u6E90\uFF1B\u8BF7\u68C0\u67E5\u5B58\u50A8\u72B6\u6001\u540E\u91CD\u8BD5\u3002${error62 instanceof Error ? ` ${error62.message}` : ""}` });
             continue;
@@ -13298,12 +14270,12 @@ var init_service = __esm({
           deletedIds2.push(id2);
           this.collaboration.forget(id2);
           this.thumbnails.delete(id2);
-          this.emit({ type: "share", artifactId: id2, enabled: false, revokedRoles: [...SHARE_ROLES] });
+          this.emit({ type: "share", artifactId: id2, enabled: false, reason: "sharing-closed", revokedRoles: [...SHARE_ROLES] });
           this.emit({ type: "purged", artifactId: id2 });
         }
         return { deletedIds: deletedIds2, failures };
       }
-      async importArchive(data, actor = LOCAL_ACTOR, title) {
+      async importArchive(data, actor = this.owner, title) {
         if (this.closing) throw new StudioError("CLOSED", "Studio \u670D\u52A1\u5DF2\u7ECF\u5173\u95ED\u3002");
         const task = (async () => {
           const state = await importArchive(this.store, this.products, data, actor, title);
@@ -13317,11 +14289,24 @@ var init_service = __esm({
           this.tasks.delete(task);
         }
       }
-      async read(id2, args, actor) {
+      async read(id2, args, actor, authority) {
         const mode = text(args.mode, "document");
         if (mode === "source" && args.contextId !== void 0 && args.feedbackId === void 0) args = { ...args, feedbackId: safeId(args.contextId, "\u53CD\u9988 ID") };
         if (mode === "assets") requireRole(actor, ["owner"]);
+        if (mode === "context") return this.store.readProjection(id2, (state2) => {
+          const currentActor = this.authorizedActor(state2, actor, authority);
+          if (args.feedbackId || args.contextId) {
+            const feedbackId = safeId(args.feedbackId ?? args.contextId, "\u53CD\u9988 ID"), found = state2.feedback.find((item) => item.id === feedbackId && feedbackVisible(item, currentActor));
+            if (!found) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
+            const { creationReceipt: _receipt, ...feedback } = found;
+            return { contextId: feedbackId, artifact: state2.artifact, feedback, sources: state2.sources[feedbackId] ?? [], timer: this.getTimer(id2) };
+          }
+          const peers = this.getPresence(id2).filter((peer) => !args.viewId || peer.context?.viewId === args.viewId);
+          const pending = state2.feedback.filter((item) => item.status === "pending" && feedbackVisible(item, currentActor)).map(({ creationReceipt: _receipt, ...feedback }) => feedback);
+          return { artifactId: id2, contexts: peers.flatMap((peer) => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []), pending, timer: this.getTimer(id2) };
+        });
         const state = await this.store.read(id2), product = this.products.get(state.artifact.type);
+        actor = this.authorizedActor(state, actor, authority);
         if (mode === "assets") return listAssets(state, args, actor);
         const hidden = state.feedback.filter((item) => !feedbackVisible(item, actor));
         if (hidden.some((item) => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
@@ -13343,46 +14328,41 @@ var init_service = __esm({
           const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map((id3) => ({ id: id3, before: null, after: product.adapter.readUnit(after.content, id3) }));
           return { ...before ? product.diff(before, after) : { changes: units }, units: requestedIds ? units.filter((unit2) => requestedIds.includes(unit2.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
         }
-        if (mode === "context") {
-          if (args.feedbackId || args.contextId) {
-            const feedbackId = safeId(args.feedbackId ?? args.contextId, "\u53CD\u9988 ID"), feedback = state.feedback.find((item) => item.id === feedbackId);
-            if (!feedback) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
-            return { contextId: feedbackId, artifact: state.artifact, feedback, sources: state.sources[feedbackId] ?? [], timer: this.getTimer(id2) };
-          }
-          const peers = this.getPresence(id2).filter((peer) => !args.viewId || peer.context?.viewId === args.viewId);
-          return { artifactId: id2, contexts: peers.flatMap((peer) => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []), pending: state.feedback.filter((item) => item.status === "pending"), timer: this.getTimer(id2) };
-        }
         return product.read(state, mode, args);
       }
-      async apply(id2, args, actor) {
+      async apply(id2, args, actor, authority) {
         const result = await this.store.transaction(id2, (state) => {
+          const currentActor = this.authorizedActor(state, actor, authority);
           const adapter = this.products.get(state.artifact.type).adapter;
-          if (actor.kind === "agent" && !state.operations.some((operation2) => operation2.id === args.operationId) && Array.isArray(args.operations)) {
-            const editing = new Set(this.getPresence(id2).filter((peer) => ["owner", "editor"].includes(peer.actor.role) && (!args.viewId || peer.context?.viewId !== args.viewId)).flatMap((peer) => [...peer.context?.editingIds ?? [], ...Array.isArray(peer.context?.movingIds) ? peer.context.movingIds : []]));
+          if (currentActor.kind === "agent" && !state.operations.some((operation2) => operation2.id === args.operationId) && Array.isArray(args.operations)) {
+            const editing = new Set(this.getPresence(id2).filter((peer) => peer.actor.id !== currentActor.id && ["owner", "editor"].includes(peer.actor.role)).flatMap((peer) => [...peer.context?.editingIds ?? [], ...Array.isArray(peer.context?.movingIds) ? peer.context.movingIds : []]));
             const conflicts = /* @__PURE__ */ new Set();
             for (const operation2 of args.operations) {
-              if (!object3(operation2) || typeof operation2.op !== "string" || !editing.size) continue;
+              if (!object2(operation2) || typeof operation2.op !== "string" || !editing.size) continue;
               const targets = mutationTargets(state.content, { ...operation2, op: operation2.op }, adapter);
               for (const target of targets ?? editing) if (editing.has(target)) conflicts.add(target);
             }
             if (conflicts.size) throw new StudioError("EDIT_IN_PROGRESS", "\u76EE\u6807\u5185\u5BB9\u6B63\u5728\u5176\u4ED6\u89C6\u56FE\u4E2D\u7F16\u8F91\uFF0C\u8BF7\u7B49\u5F85\u7F16\u8F91\u5B8C\u6210\u540E\u91CD\u8BD5\u3002", { ids: [...conflicts] });
           }
-          return applyMutation(state, { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary }, actor, adapter);
+          return applyMutation(state, { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
         });
         const snapshot = result.snapshot;
-        if (result.changed) this.emit({ type: "board", artifactId: id2, revision: snapshot.artifact.revision, changedIds: result.historyEntry.changedIds });
+        if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds);
         return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
       }
-      async feedback(id2, args, actor) {
+      async feedback(id2, args, actor, authority) {
         const action = text(args.action, "list");
         if (action === "preview") {
           const state = await this.store.read(id2), product = this.products.get(state.artifact.type);
+          actor = this.authorizedActor(state, actor, authority);
           const snapshot = previewProposal(state, args, actor, product.adapter);
           return { document: product.project(snapshot) };
         }
         if (action === "list" || action === "get") {
           let state = await this.store.read(id2);
+          actor = this.authorizedActor(state, actor, authority);
           if (state.feedback.some((item) => proposalExpired(item))) state = await this.store.transaction(id2, (current) => {
+            this.authorizedActor(current, actor, authority);
             clearExpiredProposals(current);
             return copy(current);
           });
@@ -13391,38 +14371,43 @@ var init_service = __esm({
           return { feedback };
         }
         if (["suggest", "choose", "withdraw"].includes(action)) {
-          const result2 = await this.store.transaction(id2, (state) => updateProposal(state, args, actor, this.products.get(state.artifact.type).adapter));
+          const result2 = await this.store.transaction(id2, (state) => updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
           this.emit({ type: "feedback", artifactId: id2 });
-          if (result2.changed && result2.snapshot && result2.historyEntry) this.emit({ type: "board", artifactId: id2, revision: result2.snapshot.artifact.revision, changedIds: result2.historyEntry.changedIds });
+          if (result2.changed && result2.snapshot && result2.historyEntry) this.emitBoard(result2.snapshot, result2.historyEntry.changedIds);
           const { snapshot, changed: _changed, ...response } = result2;
           return { ...response, ...snapshot ? this.products.get(snapshot.artifact.type).result(snapshot) : {} };
         }
-        const result = await this.store.transaction(id2, (state) => updateFeedback(state, args, actor, this.products.get(state.artifact.type).adapter));
+        const result = await this.store.transaction(id2, (state) => updateFeedback(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
         this.emit({ type: "feedback", artifactId: id2 });
         return result;
       }
-      async share(id2, args, actor) {
-        requireRole(actor, ["owner"]);
+      async share(id2, args, actor, authority) {
         const action = text(args.action, "status");
-        const current = await this.store.read(id2);
-        if (action === "status") return shareInfo(id2, current.sharing, this.sharingOrigin, this.getPresence(id2));
+        const current = await this.store.readProjection(id2, authorizationState);
+        actor = this.authorizedActor(current, actor, authority);
+        const info = (state) => shareInfo(id2, state.sharing, sharingAccess(state.sharing) === "local" ? this.localOrigin : this.sharingOrigin, this.getPresence(id2), this.owner, actor);
+        if (action === "status") return info(current);
+        requireRole(actor, ["owner"]);
         if (!["start", "stop", "reset", "link", "role", "remove"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
         assertAlive(current.artifact);
         let opened = false;
         try {
-          if (action === "start") {
+          if (action === "start" && args.access !== void 0 && args.access !== "local" && args.access !== "lan") throw new StudioError("INVALID_ARGUMENT", "\u8BBF\u95EE\u8303\u56F4\u5E94\u4E3A local \u6216 lan\u3002");
+          if (action === "start" && args.access !== "local") {
             const origin = await this.shareHandler?.(true);
             opened = true;
             if (origin) this.sharingOrigin = origin;
           }
           const committed = await this.store.transaction(id2, (state) => {
-            const revoked = updateSharing(state.artifact, state.sharing, action, actor, args);
-            return { info: shareInfo(id2, state.sharing, this.sharingOrigin, this.getPresence(id2)), ...revoked };
+            rememberGuestNames(state);
+            const revoked2 = updateSharing(state.artifact, state.sharing, action, this.authorizedActor(state, actor, authority), args);
+            return { info: info(state), ...revoked2 };
           });
           const revokedMembers = [...committed.revokedMemberIds, ...this.getPresence(id2).filter((peer) => committed.revokedRoles.includes(peer.actor.role)).map((peer) => peer.actor.id)];
           if (revokedMembers.length) this.collaboration.revokeMembers(id2, revokedMembers);
-          this.emit({ type: "share", artifactId: id2, enabled: committed.info.enabled, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
-          if (action === "stop") await this.shareHandler?.(false);
+          const reason = action === "role" ? "role-changed" : action === "remove" ? "removed" : action === "reset" ? "link-reset" : action === "link" ? "link-disabled" : action === "start" && args.access === "local" ? "local-only" : "sharing-closed";
+          this.emit({ type: "share", artifactId: id2, enabled: committed.info.enabled, access: committed.info.access, reason, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
+          if (action === "stop" || action === "start" && args.access === "local") await this.shareHandler?.(false);
           return committed.info;
         } catch (error62) {
           if (opened) await this.shareHandler?.(false);
@@ -13432,53 +14417,91 @@ var init_service = __esm({
       async shareRole(artifactId, token, memberId) {
         let state;
         try {
-          state = await this.store.read(artifactId);
+          state = await this.store.readProjection(artifactId, (state2) => ({ artifact: state2.artifact, sharing: state2.sharing }));
         } catch {
           return;
         }
         return shareRole(state.artifact, state.sharing, token, memberId);
       }
-      async guestActor(artifactId, token, id2, name) {
+      async accessMode(artifactId, viaLan = false, allowMissing = false) {
         let state;
         try {
-          state = await this.store.read(artifactId);
-        } catch {
-          return;
+          state = await this.store.readProjection(artifactId, (state2) => ({ artifact: state2.artifact, sharing: state2.sharing }));
+        } catch (error62) {
+          if (error62 instanceof StudioError && error62.code === "NOT_FOUND") {
+            if (allowMissing) return "local";
+            throw new StudioError("UNAUTHORIZED", "\u5206\u4EAB\u94FE\u63A5\u65E0\u6548\u3002", { reason: "invalid-link" });
+          }
+          throw error62;
         }
-        const role = shareRole(state.artifact, state.sharing, token, id2);
-        if (!role) return;
-        const member = state.sharing.members?.[id2];
-        if (member && (member.ownerAssigned || member.credential === token) && member.name === name && Date.now() - Date.parse(member.lastSeenAt) < 6e4) return { id: id2, name, kind: "human", role };
-        return this.store.transaction(artifactId, (current) => joinSharingMember(current.artifact, current.sharing, token, id2, name));
+        const access = sharingAccess(state.sharing);
+        if (viaLan && access === "local") throw new StudioError("UNAUTHORIZED", state.sharing.enabled ? "\u8FD9\u5757\u767D\u677F\u4EC5\u5141\u8BB8\u5728\u6240\u6709\u8005\u7535\u8111\u4E0A\u8BBF\u95EE\u3002" : "\u8FD9\u5757\u767D\u677F\u7684\u5206\u4EAB\u5DF2\u5173\u95ED\u3002", { reason: state.sharing.enabled ? "local-only" : "sharing-closed" });
+        return access;
+      }
+      async guestActor(artifactId, token, id2, registration, viaLan = false) {
+        await this.accessMode(artifactId, viaLan);
+        const resolve4 = (state2) => {
+          if (viaLan && sharingAccess(state2.sharing) === "local") throw new StudioError("UNAUTHORIZED", "\u8FD9\u5757\u767D\u677F\u4EC5\u5141\u8BB8\u5728\u6240\u6709\u8005\u7535\u8111\u4E0A\u8BBF\u95EE\u3002", { reason: state2.sharing.enabled ? "local-only" : "sharing-closed" });
+          const access = shareAccess(state2.artifact, state2.sharing, token, id2);
+          if (!access.role) throw new StudioError("UNAUTHORIZED", "\u4F60\u5DF2\u65E0\u6CD5\u8BBF\u95EE\u8FD9\u5757\u767D\u677F\uFF0C\u8BF7\u5411\u6240\u6709\u8005\u7D22\u53D6\u6709\u6548\u94FE\u63A5\u3002", { reason: access.reason });
+          rememberGuestNames(state2);
+          const invitation = { title: state2.artifact.title, role: access.role };
+          let name;
+          try {
+            name = registration ? registerGuestName(state2, id2, registration.name, this.owner.name) : guestName(state2, id2, this.owner.name);
+          } catch (error62) {
+            if (error62 instanceof StudioError) throw new StudioError(error62.code, error62.message, { invitation });
+            throw error62;
+          }
+          if (!name) throw new StudioError("NAME_REQUIRED", "\u8BF7\u8F93\u5165\u4F60\u7684\u540D\u5B57\u540E\u52A0\u5165\u767D\u677F\u3002", { invitation });
+          return { id: id2, name, kind: "human", role: access.role };
+        };
+        const state = await this.store.readProjection(artifactId, authorizationState), hadName = state.guestNames?.[id2] !== void 0, actor = resolve4(state), member = state.sharing.members?.[id2];
+        if (!registration && hadName && member && (member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 6e4) return actor;
+        let roleChanged = false, joinedAccess = sharingAccess(state.sharing);
+        const joined = await this.store.transaction(artifactId, (current) => {
+          const previousRole = current.sharing.members?.[id2]?.role;
+          const next = resolve4(current), joined2 = joinSharingMember(current.artifact, current.sharing, token, id2, next.name);
+          if (!joined2) throw new StudioError("UNAUTHORIZED", "\u5206\u4EAB\u6743\u9650\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u8FDE\u63A5\u3002", { reason: shareAccess(current.artifact, current.sharing, token, id2).reason });
+          roleChanged = previousRole !== void 0 && previousRole !== joined2.role;
+          joinedAccess = sharingAccess(current.sharing);
+          return joined2;
+        });
+        if (roleChanged) {
+          this.collaboration.revokeMembers(artifactId, [id2]);
+          this.emit({ type: "share", artifactId, enabled: true, access: joinedAccess, reason: "role-changed", revokedMemberIds: [id2] });
+        }
+        return joined;
       }
       async hasShares() {
-        return (await this.store.list()).some((state) => state.sharing.enabled && !state.artifact.trashedAt);
+        return (await this.store.list()).some((state) => state.sharing.enabled && sharingAccess(state.sharing) === "lan" && !state.artifact.trashedAt);
       }
       async resetSharingSessions() {
         for (const saved of await this.store.list()) if (saved.sharing.enabled) {
           await this.store.transaction(saved.artifact.id, (state) => {
+            rememberGuestNames(state);
             revokeSharing(state.sharing);
           });
-          this.emit({ type: "share", artifactId: saved.artifact.id, enabled: false, revokedRoles: [...SHARE_ROLES] });
+          this.emit({ type: "share", artifactId: saved.artifact.id, enabled: false, reason: "sharing-closed", revokedRoles: [...SHARE_ROLES] });
         }
       }
-      async putAsset(artifactId, data, input2, actor) {
+      async putAsset(artifactId, data, input2, actor, authority) {
         const state = await this.store.read(artifactId);
-        return putAsset(this.store, artifactId, data, input2, actor, this.products.get(state.artifact.type).validateAsset);
+        return putAsset(this.store, artifactId, data, input2, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).validateAsset, (current) => this.authorizedActor(current, actor, authority));
       }
       async getAsset(artifactId, assetId) {
         return getAsset(this.store, artifactId, assetId);
       }
-      async getThumbnail(artifactId, actor = LOCAL_ACTOR) {
+      async getThumbnail(artifactId, actor = this.owner) {
         const state = await this.store.read(safeId(artifactId));
         if (state.artifact.trashedAt) requireRole(actor, ["owner"]);
         const product = this.products.get(state.artifact.type);
         if (!product.thumbnail) throw new StudioError("NO_PREVIEW", "\u6B64\u4EA7\u54C1\u672A\u63D0\u4F9B\u9884\u89C8\uFF0C\u8BF7\u76F4\u63A5\u6253\u5F00\u4F5C\u54C1\u3002");
         return this.thumbnails.get(artifactId, state.artifact.revision, () => product.thumbnail(state, exportResources(this.store, artifactId)));
       }
-      async updatePresence(artifactId, input2, actor) {
-        await this.store.read(artifactId);
-        return this.collaboration.update(artifactId, input2, actor);
+      async updatePresence(artifactId, input2, actor, authority) {
+        if (input2.timer !== void 0) return this.store.withProjectionLock(artifactId, authorizationState, (state) => this.collaboration.update(artifactId, input2, this.authorizedActor(state, actor, authority)));
+        return this.collaboration.update(artifactId, input2, actor, async () => this.authorizedActor(await this.store.readProjection(artifactId, authorizationState), actor, authority));
       }
       getPresence(artifactId) {
         return this.collaboration.getPresence(artifactId);
@@ -13486,13 +14509,34 @@ var init_service = __esm({
       getTimer(artifactId) {
         return this.collaboration.getTimer(artifactId);
       }
-      async export(id2, args, actor) {
+      cursor() {
+        return this.collaboration.cursor();
+      }
+      connectPeer(artifactId, peerId, peerEpoch, actor) {
+        return this.collaboration.connectPeer(artifactId, peerId, peerEpoch, actor);
+      }
+      async sync(artifactId, options, actor, authority) {
+        if (!artifactId) {
+          requireRole(actor, ["owner"]);
+          if (authority && !authority.owner) throw new StudioError("FORBIDDEN", "\u8BBF\u5BA2\u4E0D\u80FD\u8BA2\u9605\u4F5C\u54C1\u5E93\u3002");
+          return { ...await this.collaboration.sync("", options, actor), actor, access: "local" };
+        }
+        const currentActor = this.authorizedActor(await this.store.readProjection(artifactId, authorizationState), actor, authority);
+        const result = await this.collaboration.sync(artifactId, options, currentActor);
+        const current = await this.store.readProjection(artifactId, authorizationState), confirmedActor = this.authorizedActor(current, actor, authority);
+        return { ...result, actor: confirmedActor, access: sharingAccess(current.sharing) };
+      }
+      async room(artifactId, input2, actor, authority) {
+        return this.store.withProjectionLock(artifactId, authorizationState, (state) => this.collaboration.room(artifactId, input2, this.authorizedActor(state, actor, authority)));
+      }
+      async export(id2, args, actor, authority) {
         const state = await this.store.read(id2);
+        actor = this.authorizedActor(state, actor, authority);
         assertAlive(state.artifact);
         const format = text(args.format, "json", 20).toLowerCase();
         let result;
         const { artifactId: _artifactId, format: _format, options: nestedOptions, ...flatOptions } = args;
-        const options = { ...object3(nestedOptions) ? nestedOptions : {}, ...flatOptions };
+        const options = { ...object2(nestedOptions) ? nestedOptions : {}, ...flatOptions };
         const resources = exportResources(this.store, id2);
         try {
           result = format === "zip" ? await exportArchive(this.store, state, actor) : await this.products.get(state.artifact.type).export(state, format, options, resources);
@@ -13501,6 +14545,7 @@ var init_service = __esm({
           throw error62;
         }
         return this.store.transaction(id2, (current) => {
+          this.authorizedActor(current, actor, authority);
           assertAlive(current.artifact);
           return saveExport(this.dataRoot, id2, result);
         });
@@ -13519,23 +14564,61 @@ var init_service = __esm({
 });
 
 // src/server/guest-session.ts
-import { createHash as createHash4, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-function createGuestSessions(dataRoot) {
-  const secret = randomBytes2(32);
-  const cookieName = `studio-guest-${createHash4("sha256").update(dataRoot).update(secret).digest("hex").slice(0, 24)}`;
+import { createHash as createHash7, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdir as mkdir6, readFile as readFile6 } from "node:fs/promises";
+import { join as join8 } from "node:path";
+async function createGuestSessions(dataRoot) {
+  await mkdir6(dataRoot, { recursive: true });
+  const file2 = join8(dataRoot, "guest-auth.json");
+  let compromised = false;
+  const release = await (0, import_proper_lockfile2.lock)(file2, { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: () => {
+    compromised = true;
+  } });
+  let secret;
+  try {
+    let saved;
+    try {
+      saved = await readFile6(file2, "utf8");
+    } catch (error62) {
+      if (error62.code !== "ENOENT") throw error62;
+      saved = JSON.stringify({ version: 1, secret: randomBytes2(32).toString("base64url") });
+      if (compromised) throw new StudioError("LOCK_LOST", "\u8BBF\u5BA2\u8EAB\u4EFD\u5BC6\u94A5\u4FDD\u5B58\u9501\u5DF2\u5931\u6548\u3002");
+      await atomicWrite(file2, saved);
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(saved);
+    } catch {
+      throw new StudioError("CORRUPT_IDENTITY", "\u8BBF\u5BA2\u8EAB\u4EFD\u5BC6\u94A5\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\uFF1B\u4E0D\u80FD\u81EA\u52A8\u91CD\u7F6E\u5DF2\u6709\u8EAB\u4EFD\u3002");
+    }
+    if (!object2(parsed) || parsed.version !== 1 || typeof parsed.secret !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(parsed.secret)) throw new StudioError("CORRUPT_IDENTITY", "\u8BBF\u5BA2\u8EAB\u4EFD\u5BC6\u94A5\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\uFF1B\u4E0D\u80FD\u81EA\u52A8\u91CD\u7F6E\u5DF2\u6709\u8EAB\u4EFD\u3002");
+    secret = Buffer.from(parsed.secret, "base64url");
+    if (compromised) throw new StudioError("LOCK_LOST", "\u8BBF\u5BA2\u8EAB\u4EFD\u5BC6\u94A5\u4FDD\u5B58\u9501\u5DF2\u5931\u6548\u3002");
+  } finally {
+    if (!compromised) await release();
+  }
+  const cookieName = `studio-guest-${createHash7("sha256").update(secret).digest("hex").slice(0, 24)}`;
   const sign = (id2) => createHmac("sha256", secret).update(id2).digest("base64url");
-  return (request, response) => {
+  const read = (request) => {
     const value = request.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
     const signed = value && /^([A-Za-z0-9_-]{32})\.([A-Za-z0-9_-]{43})$/.exec(value);
     if (signed && timingSafeEqual2(Buffer.from(signed[2]), Buffer.from(sign(signed[1])))) return signed[1];
+  };
+  const resolve4 = (request, response) => {
+    const existing = read(request);
+    if (existing) return existing;
     const id2 = randomBytes2(24).toString("base64url");
-    response.appendHeader("Set-Cookie", `${cookieName}=${id2}.${sign(id2)}; Path=/; HttpOnly; SameSite=Lax`);
+    response.appendHeader("Set-Cookie", `${cookieName}=${id2}.${sign(id2)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
     return id2;
   };
+  return Object.assign(resolve4, { read });
 }
+var import_proper_lockfile2;
 var init_guest_session = __esm({
   "src/server/guest-session.ts"() {
     "use strict";
+    import_proper_lockfile2 = __toESM(require_proper_lockfile(), 1);
+    init_common();
   }
 });
 
@@ -13552,11 +14635,12 @@ function createRegionReaders(service, now = () => Date.now()) {
       return;
     }
     if (event.type !== "share") return;
-    for (const [key, grant] of grants) if (!grant.source.owner && grant.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(grant.source.actor.id))) grants.delete(key);
+    for (const [key, grant] of grants) if (grant.artifactId === event.artifactId && (event.access === "local" && grant.source.viaLan || !grant.source.owner && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(grant.source.actor.id)))) grants.delete(key);
   });
   async function read(grant) {
+    await service.accessMode(grant.artifactId, grant.source.viaLan);
     if (!grant.source.owner && await service.shareRole(grant.artifactId, grant.source.token, grant.source.actor.id) !== grant.source.actor.role) throw new StudioError("UNAUTHORIZED", "\u539F\u5206\u4EAB\u6743\u9650\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
-    const result = await service.execute("artifact_read", { artifactId: grant.artifactId, mode: "objects", ids: [grant.regionId] }, grant.source.actor);
+    const result = await service.execute("artifact_read", { artifactId: grant.artifactId, mode: "objects", ids: [grant.regionId] }, grant.source.actor, grant.source.authority);
     if (result.artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
     const element = result.elements?.find((value) => value.id === grant.regionId && value.type === "html");
     if (!element) throw new StudioError("NOT_FOUND", "\u539F HTML \u533A\u57DF\u4E0D\u5B58\u5728\uFF0C\u8BF7\u8FD4\u56DE\u767D\u677F\u67E5\u770B\u3002");
@@ -13613,7 +14697,7 @@ function createRegionReaders(service, now = () => Date.now()) {
       safeId(artifactId);
       safeId(viewId, "\u89C6\u56FE ID");
       sweep();
-      for (const grant of grants.values()) if (grant.artifactId === artifactId && grant.viewId === viewId && grant.source.token === source.token && grant.returned) {
+      for (const grant of grants.values()) if (grant.artifactId === artifactId && grant.viewId === viewId && grant.source.actor.id === source.actor.id && grant.source.token === source.token && grant.returned) {
         await read(grant);
         const navigation = grant.returned;
         delete grant.returned;
@@ -13660,6 +14744,161 @@ var init_lan_addresses = __esm({
   }
 });
 
+// src/server/collaboration-routes.ts
+function revoked(auth, event) {
+  return event.type === "share" && (event.access === "local" && auth.viaLan || !auth.owner && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(auth.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(auth.actor.id)));
+}
+function sequence(cursor) {
+  return typeof cursor === "string" ? Number(cursor.slice(cursor.lastIndexOf(":") + 1)) : -1;
+}
+function createCollaborationRoutes({ service, authorize, scope, readJson: readJson2, json: json3 }) {
+  const lives = /* @__PURE__ */ new Set(), pending = /* @__PURE__ */ new Set();
+  const unsubscribe = service.subscribe("*", (event) => {
+    for (const live of lives) if (live.artifactId === event.artifactId && revoked(live.auth, event)) {
+      if (live.response.headersSent) live.response.write(`data: ${JSON.stringify({ type: "access-revoked", artifactId: live.artifactId, reason: event.reason ?? "invalid-link", cursor: event.cursor })}
+
+`);
+      else json3(live.response, 403, { ok: false, error: { code: "FORBIDDEN", message: "\u767D\u677F\u8BBF\u95EE\u6743\u9650\u5DF2\u53D8\u66F4\u3002", details: { reason: event.reason ?? "invalid-link" } } });
+      live.dispose();
+      live.response.end();
+    }
+  });
+  return {
+    async handle(request, response, url2) {
+      const path2 = url2.pathname;
+      if (!["/api/sync", "/api/events", "/api/presence", "/api/room"].includes(path2)) return false;
+      if (path2 === "/api/sync" && request.method !== "GET" || path2 === "/api/events" && request.method !== "GET" || path2 === "/api/room" && request.method !== "POST" || path2 === "/api/presence" && !["GET", "POST"].includes(request.method ?? "")) return false;
+      const input2 = request.method === "POST" ? await readJson2(request) : {};
+      const artifactId = typeof input2.artifactId === "string" ? input2.artifactId : url2.searchParams.get("artifactId") ?? "";
+      const auth = await authorize(request, response, url2, artifactId || void 0);
+      scope(auth, artifactId || void 0);
+      if (path2 === "/api/presence") {
+        const data = request.method === "POST" ? await service.updatePresence(artifactId, input2, auth.actor, auth.authority) : await service.sync(artifactId, {}, auth.actor, auth.authority);
+        json3(response, 200, data);
+        return true;
+      }
+      if (path2 === "/api/room") {
+        json3(response, 200, await service.room(artifactId, input2, auth.actor, auth.authority));
+        return true;
+      }
+      const peerId = url2.searchParams.get("peerId") ?? void 0, peerEpoch = url2.searchParams.get("peerEpoch") ?? void 0;
+      if (peerEpoch && !peerId) throw new StudioError("INVALID_ARGUMENT", "\u9875\u9762\u4EE3\u6B21\u9700\u8981\u53C2\u4E0E\u8005 ID\u3002");
+      const after = url2.searchParams.get("after") ?? (typeof request.headers["last-event-id"] === "string" ? request.headers["last-event-id"] : void 0);
+      if (after && after.length > 160) throw new StudioError("INVALID_ARGUMENT", "\u540C\u6B65\u6E38\u6807\u65E0\u6548\u3002");
+      const waitInput = url2.searchParams.get("wait") ?? "0";
+      if (!/^(?:0|[1-9]\d*)$/.test(waitInput) || Number(waitInput) > 2e4) throw new StudioError("INVALID_ARGUMENT", "\u540C\u6B65\u7B49\u5F85\u65F6\u95F4\u5E94\u4E3A 0 \u81F3 20000 \u6BEB\u79D2\u3002");
+      const controller = new AbortController();
+      pending.add(controller);
+      const abort = () => controller.abort(new DOMException("Client disconnected", "AbortError"));
+      response.once("close", abort);
+      if (path2 === "/api/sync") {
+        try {
+          const data = await service.sync(artifactId, { after, wait: Number(waitInput), signal: controller.signal, peerId, peerEpoch }, auth.actor, auth.authority);
+          if (!response.destroyed) json3(response, 200, data);
+        } catch (error62) {
+          if (!controller.signal.aborted) throw error62;
+        } finally {
+          pending.delete(controller);
+          response.removeListener("close", abort);
+        }
+        return true;
+      }
+      const queued = [];
+      let queuedBytes = 0, overflow = false, ready = false, disposed = false, last = -1, releasePeer = () => {
+      };
+      const send = (event) => {
+        if (disposed || response.writableEnded) return;
+        if (!ready) {
+          if (!overflow) {
+            queued.push(event);
+            queuedBytes += Buffer.byteLength(JSON.stringify(event));
+            if (queued.length > 512 || queuedBytes > 1024 * 1024) {
+              overflow = true;
+              queued.length = 0;
+            }
+          }
+          return;
+        }
+        if (sequence(event.cursor) <= last) return;
+        last = sequence(event.cursor);
+        if (!response.write(`id: ${event.cursor ?? ""}
+data: ${JSON.stringify(event)}
+
+`)) response.end();
+      };
+      const stop = service.subscribe(artifactId, send);
+      const heartbeat = setInterval(() => {
+        if (!response.writableEnded && !response.write(": keep-alive\n\n")) response.end();
+      }, 15e3);
+      heartbeat.unref();
+      const live = { response, auth, artifactId, dispose: () => {
+        if (disposed) return;
+        disposed = true;
+        lives.delete(live);
+        stop();
+        releasePeer();
+        clearInterval(heartbeat);
+        pending.delete(controller);
+        response.removeListener("close", abort);
+      } };
+      lives.add(live);
+      response.once("close", live.dispose);
+      try {
+        const initial = await service.sync(artifactId, { after, peerId, peerEpoch, signal: controller.signal }, auth.actor, auth.authority);
+        if (disposed || controller.signal.aborted) {
+          live.dispose();
+          return true;
+        }
+        auth.actor = initial.actor;
+        auth.access = initial.access;
+        if (peerId) releasePeer = service.connectPeer(artifactId, peerId, peerEpoch, auth.actor);
+        let data = await service.sync(artifactId, { after, signal: controller.signal }, auth.actor, auth.authority);
+        if (disposed || controller.signal.aborted) {
+          live.dispose();
+          releasePeer();
+          return true;
+        }
+        auth.actor = data.actor;
+        auth.access = data.access;
+        if (overflow) data = { ...data, cursor: service.cursor(), reset: true, events: [] };
+        response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+        last = sequence(data.cursor);
+        if (!response.write(`retry: 1500
+id: ${data.cursor}
+data: ${JSON.stringify({ type: "ready", artifactId, ...data })}
+
+`)) response.end();
+        ready = true;
+        for (const event of queued) send(event);
+      } catch (error62) {
+        const failed = !disposed && !controller.signal.aborted;
+        live.dispose();
+        releasePeer();
+        if (failed) throw error62;
+      }
+      return true;
+    },
+    close() {
+      unsubscribe();
+      for (const controller of pending) controller.abort(new DOMException("Studio closed", "AbortError"));
+      for (const live of [...lives]) {
+        live.response.write(`data: ${JSON.stringify({ type: "access-revoked", artifactId: live.artifactId, reason: "sharing-closed" })}
+
+`);
+        live.dispose();
+        live.response.end();
+      }
+      pending.clear();
+    }
+  };
+}
+var init_collaboration_routes = __esm({
+  "src/server/collaboration-routes.ts"() {
+    "use strict";
+    init_common();
+  }
+});
+
 // src/server/http.ts
 var http_exports = {};
 __export(http_exports, {
@@ -13677,8 +14916,31 @@ function failure3(response, error62) {
     return;
   }
   const code = error62 instanceof StudioError ? error62.code : "INTERNAL_ERROR";
-  const status = { UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, TRASHED: 410, CONFLICT: 409, OPERATION_REUSED: 409, TOO_LARGE: 413, BUSY: 409, CLOSED: 503 }[code] ?? (error62 instanceof StudioError ? 400 : 500);
-  json2(response, status, { ok: false, error: { code, message: error62 instanceof Error ? error62.message : "Studio \u64CD\u4F5C\u5931\u8D25\u3002", ...error62 instanceof StudioError && error62.details !== void 0 ? { details: error62.details } : {} } });
+  const status = { UNAUTHORIZED: 401, FORBIDDEN: 403, NAME_REQUIRED: 428, NAME_TAKEN: 409, NAME_ALREADY_SET: 409, NOT_FOUND: 404, TRASHED: 410, CONFLICT: 409, OPERATION_REUSED: 409, TOO_LARGE: 413, BUSY: 409, CLOSED: 503 }[code] ?? (error62 instanceof StudioError ? 400 : 500);
+  const details = error62 instanceof StudioError && error62.details !== void 0 ? error62.details : code === "UNAUTHORIZED" ? { reason: "invalid-link" } : void 0;
+  json2(response, status, { ok: false, error: { code, message: error62 instanceof Error ? error62.message : "Studio \u64CD\u4F5C\u5931\u8D25\u3002", ...details !== void 0 ? { details } : {} } });
+}
+function accessPage(response, status, title, content) {
+  const html2 = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} \xB7 Agentero \u521B\u4F5C</title><style>
+:root{color-scheme:light dark;--bg:#f7f6f3;--card:#fff;--fg:#1f1e1d;--muted:#6b6a66;--line:#e3e1dc;--accent:#c96442}
+@media(prefers-color-scheme:dark){:root{--bg:#1f1e1d;--card:#2a2927;--fg:#f2f1ee;--muted:#a8a6a0;--line:#3a3936}}
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+main{width:min(420px,100%);padding:28px;background:var(--card);border:1px solid var(--line);border-radius:14px}h1{font-size:20px;line-height:1.4;margin:0 0 8px;overflow-wrap:anywhere}p{margin:0 0 20px;color:var(--muted)}
+label{display:block;font-size:13px;margin-bottom:8px;color:var(--muted)}input,button{width:100%;font:inherit;border-radius:8px}input{padding:10px 11px;border:1px solid var(--line);background:transparent;color:inherit}button{margin-top:16px;padding:10px;border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.note{margin:14px 0 0;font-size:12px}[role=alert]{color:light-dark(#a53131,#ff9b9b)}
+</style></head><body><main>${content}</main></body></html>`;
+  response.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'", "Content-Length": Buffer.byteLength(html2) });
+  response.end(html2);
+}
+function namePage(response, artifactId, token, invitation, error62 = "", name = "", status = 200) {
+  const action = `/api/session?${new URLSearchParams({ artifactId, share: token })}`;
+  const role = { editor: "\u7F16\u8F91", commenter: "\u8BC4\u8BBA", viewer: "\u67E5\u770B" }[invitation.role];
+  accessPage(response, status, invitation.title, `<h1>${escapeHtml(invitation.title)}</h1><p>\u4F60\u88AB\u9080\u8BF7${role}\u8FD9\u5757\u767D\u677F\u3002</p>${error62 ? `<p role="alert">${escapeHtml(error62)}</p>` : ""}<form method="post" action="${escapeHtml(action)}"><label for="guest-name">\u4F60\u7684\u540D\u5B57\uFF08\u522B\u4EBA\u4F1A\u5728\u4F60\u7684\u8BC4\u8BBA\u548C\u7F16\u8F91\u4E0A\u770B\u5230\u5B83\uFF09</label><input id="guest-name" name="name" autocomplete="nickname" maxlength="60" required autofocus value="${escapeHtml(name)}"><button type="submit">\u6253\u5F00\u767D\u677F</button></form><p class="note">\u8FD9\u4E2A\u6D4F\u89C8\u5668\u4F1A\u8BB0\u4F4F\u4F60\u7684\u8EAB\u4EFD\uFF1B\u6240\u6709\u8005\u53EF\u4EE5\u968F\u65F6\u79FB\u9664\u3002</p>`);
+}
+function deniedPage(response, error62) {
+  const reason = error62.details?.reason;
+  const messages = { removed: "\u6240\u6709\u8005\u5DF2\u79FB\u9664\u4F60\u7684\u8BBF\u95EE\u6743\u9650\u3002", "sharing-closed": "\u8FD9\u5757\u767D\u677F\u7684\u5206\u4EAB\u5DF2\u5173\u95ED\u3002", "link-disabled": "\u8FD9\u4E2A\u89D2\u8272\u7684\u9080\u8BF7\u94FE\u63A5\u5DF2\u505C\u7528\u3002", "link-reset": "\u8FD9\u4E2A\u9080\u8BF7\u94FE\u63A5\u5DF2\u91CD\u7F6E\uFF0C\u65E7\u94FE\u63A5\u5DF2\u5931\u6548\u3002", "local-only": "\u8FD9\u5757\u767D\u677F\u76EE\u524D\u4EC5\u5141\u8BB8\u5728\u6240\u6709\u8005\u7535\u8111\u4E0A\u8BBF\u95EE\u3002", "invalid-link": "\u8FD9\u4E2A\u5206\u4EAB\u94FE\u63A5\u65E0\u6548\u3002" };
+  accessPage(response, error62.code === "FORBIDDEN" ? 403 : 401, "\u65E0\u6743\u8BBF\u95EE", `<h1>\u65E0\u6743\u8BBF\u95EE</h1><p>${escapeHtml(messages[reason ?? ""] ?? "\u8FD9\u5757\u767D\u677F\u6CA1\u6709\u5206\u4EAB\u7ED9\u4F60\u3002")}\u8BF7\u5411\u6240\u6709\u8005\u7D22\u53D6\u6709\u6548\u94FE\u63A5\u3002</p>`);
 }
 async function body(request, maximum = MAX_BODY) {
   if (Number(request.headers["content-length"]) > maximum) {
@@ -13743,10 +15005,10 @@ function exportContentType(mimeType) {
 }
 async function startStudioHost(options = {}) {
   if (options.port && BROWSER_BLOCKED_PORTS.has(options.port)) throw new StudioError("INVALID_ARGUMENT", `\u6D4F\u89C8\u5668\u7981\u6B62\u8BBF\u95EE\u7AEF\u53E3 ${options.port}\uFF0C\u8BF7\u9009\u62E9\u5176\u4ED6\u7AEF\u53E3\u3002`);
-  const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes4(32).toString("base64url");
-  const guestSession = createGuestSessions(service.dataRoot);
+  const service = new StudioService({ dataRoot: options.dataRoot, ownerName: options.ownerName }), token = randomBytes4(32).toString("base64url");
+  const guestSession = await createGuestSessions(service.dataRoot);
   const regionReaders = createRegionReaders(service);
-  const lives = /* @__PURE__ */ new Set(), servers = /* @__PURE__ */ new Set(), sockets = /* @__PURE__ */ new Set();
+  const servers = /* @__PURE__ */ new Set(), sockets = /* @__PURE__ */ new Set();
   let origin = "", lan, sharingOrigin = "", startingLan, stopping = false;
   function server() {
     const instance = createServer((request, response) => {
@@ -13761,35 +15023,40 @@ async function startStudioHost(options = {}) {
     return instance;
   }
   const local = server();
-  async function authorize(request, response, url2, artifactId) {
-    const bearer = header(request, "authorization").replace(/^Bearer\s+/i, "");
-    const provided = bearer || url2.searchParams.get("token") || url2.searchParams.get("share") || "";
+  const viaLan = (request) => request.socket.localPort !== local.address()?.port;
+  const providedToken = (request, url2) => header(request, "authorization").replace(/^Bearer\s+/i, "") || url2.searchParams.get("token") || url2.searchParams.get("share") || "";
+  async function authorize(request, response, url2, artifactId, registration) {
+    const provided = providedToken(request, url2), scope2 = artifactId ?? url2.searchParams.get("artifactId") ?? void 0, lanRequest = viaLan(request);
     if (provided && equal(provided, token)) {
-      const actor = header(request, "x-studio-actor") === "agent" ? { id: "codex", name: "Codex", kind: "agent", role: "owner" } : { ...LOCAL_ACTOR };
-      return { actor, token: provided, owner: true, ...artifactId ? { artifactId } : {} };
+      const access2 = scope2 ? await service.accessMode(scope2, lanRequest, true) : "local";
+      let agentName = header(request, "x-studio-agent-name");
+      if (agentName) {
+        try {
+          agentName = decodeURIComponent(agentName);
+        } catch {
+          throw new StudioError("INVALID_ARGUMENT", "Agent \u540D\u79F0\u7F16\u7801\u65E0\u6548\u3002");
+        }
+      }
+      const actor = header(request, "x-studio-actor") === "agent" ? { id: header(request, "x-studio-agent-id") ? safeId(header(request, "x-studio-agent-id"), "Agent ID") : "codex", name: agentName ? text(agentName, "Codex", 60).trim() || "Codex" : "Codex", kind: "agent", role: "owner" } : { ...service.owner };
+      return { actor, token: provided, owner: true, access: access2, viaLan: lanRequest, authority: { owner: true, actorId: actor.id, viaLan: lanRequest }, ...scope2 ? { artifactId: scope2 } : {} };
     }
-    const scope2 = artifactId ?? url2.searchParams.get("artifactId") ?? void 0;
-    if (scope2 && provided) {
-      const id2 = guestSession(request, response), actor = await service.guestActor(scope2, provided, `guest-${id2}`, (header(request, "x-studio-name") || `\u8BBF\u5BA2 ${id2.slice(0, 6)}`).slice(0, 60));
-      if (actor) return { actor, token: provided, artifactId: scope2, owner: false };
+    const access = scope2 ? await service.accessMode(scope2, lanRequest) : "local";
+    if (scope2) {
+      const id2 = provided ? guestSession(request, response) : guestSession.read(request);
+      if (!id2) throw new StudioError("UNAUTHORIZED", "\u8BF7\u4F7F\u7528\u6709\u6548\u9080\u8BF7\u94FE\u63A5\u52A0\u5165\u767D\u677F\u3002", { reason: "invalid-link" });
+      if (!provided && request.method !== "GET" && request.method !== "OPTIONS") {
+        const requestOrigin = header(request, "origin"), expectedOrigin = `http://${header(request, "host")}`;
+        if (requestOrigin && requestOrigin !== expectedOrigin) throw new StudioError("FORBIDDEN", "\u4E0D\u80FD\u4ECE\u5176\u4ED6\u6765\u6E90\u4F7F\u7528\u767D\u677F\u4F1A\u8BDD\u4FEE\u6539\u5185\u5BB9\u3002");
+      }
+      const actor = await service.guestActor(scope2, provided || void 0, `guest-${id2}`, registration, lanRequest);
+      return { actor, token: provided, artifactId: scope2, owner: false, access, viaLan: lanRequest, authority: { owner: false, actorId: actor.id, credential: provided || void 0, viaLan: lanRequest } };
     }
-    throw new StudioError("UNAUTHORIZED", "\u8FDE\u63A5\u51ED\u636E\u65E0\u6548\uFF0C\u6216\u5206\u4EAB\u5DF2\u5173\u95ED\u3002");
+    throw new StudioError("UNAUTHORIZED", "\u5206\u4EAB\u94FE\u63A5\u65E0\u6548\u3002", { reason: "invalid-link" });
   }
   function scope(auth, artifactId) {
     if (!auth.owner && artifactId !== auth.artifactId) throw new StudioError("FORBIDDEN", "\u5206\u4EAB\u94FE\u63A5\u53EA\u80FD\u8BBF\u95EE\u5BF9\u5E94\u7684\u4F5C\u54C1\u3002");
   }
-  function endLive(live, reason) {
-    if (!lives.delete(live)) return;
-    live.response.write(`data: ${JSON.stringify({ type: "access-revoked", artifactId: live.artifactId, reason })}
-
-`);
-    live.dispose();
-    live.response.end();
-  }
-  service.subscribe("*", (event) => {
-    if (event.type !== "share") return;
-    for (const live of [...lives]) if (!live.auth.owner && live.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(live.auth.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(live.auth.actor.id))) endLive(live, "\u5206\u4EAB\u6743\u9650\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u91CD\u65B0\u8FDE\u63A5\u3002");
-  });
+  const collaborationRoutes = createCollaborationRoutes({ service, authorize, scope, readJson, json: json2 });
   service.configureSharing(async (enabled) => {
     if (enabled) {
       if (lan?.listening) return sharingOrigin;
@@ -13831,6 +15098,7 @@ async function startStudioHost(options = {}) {
       response.end();
       return;
     }
+    if (await collaborationRoutes.handle(request, response, url2)) return;
     if (url2.pathname === "/api/region-view" && (request.method === "POST" || request.method === "GET")) {
       const input2 = request.method === "POST" ? await readJson(request) : {}, artifactId = typeof input2.artifactId === "string" ? input2.artifactId : url2.searchParams.get("artifactId") ?? "";
       const auth = await authorize(request, response, url2, artifactId);
@@ -13844,6 +15112,7 @@ async function startStudioHost(options = {}) {
     if (reader && (request.method === "GET" && !reader[3] || request.method === "POST" && reader[3])) {
       const capability = header(request, "authorization").replace(/^Bearer\s+/i, "");
       const artifactId = decodeURIComponent(reader[1]), regionId = decodeURIComponent(reader[2]);
+      await service.accessMode(artifactId, viaLan(request));
       if ([...url2.searchParams.keys()].some((key) => key !== "metadata") || url2.searchParams.has("metadata") && url2.searchParams.get("metadata") !== "1") throw new StudioError("INVALID_ARGUMENT", "\u9605\u8BFB\u8BF7\u6C42\u53C2\u6570\u65E0\u6548\u3002");
       let data;
       if (reader[3]) {
@@ -13877,55 +15146,38 @@ async function startStudioHost(options = {}) {
       if (!TOOL_NAMES.includes(name)) throw new StudioError("UNKNOWN_TOOL", "Studio \u64CD\u4F5C\u4E0D\u5B58\u5728\u3002");
       const envelope = await readJson(request);
       const args = envelope.arguments && typeof envelope.arguments === "object" && !Array.isArray(envelope.arguments) ? envelope.arguments : envelope.args && typeof envelope.args === "object" && !Array.isArray(envelope.args) ? envelope.args : envelope;
-      const artifactId = typeof args.artifactId === "string" ? args.artifactId : void 0;
+      const createsArtifact = name === "artifact_manage" && ["create", "import"].includes(typeof args.action === "string" ? args.action : "create");
+      const artifactId = createsArtifact && equal(providedToken(request, url2), token) ? "" : typeof args.artifactId === "string" ? args.artifactId : void 0;
       const auth = await authorize(request, response, url2, artifactId);
       scope(auth, artifactId);
-      if (!auth.owner && ["artifact_list", "artifact_manage", "artifact_share"].includes(name)) throw new StudioError("FORBIDDEN", "\u8BBF\u5BA2\u4E0D\u80FD\u7BA1\u7406\u4F5C\u54C1\u5E93\u6216\u5206\u4EAB\u6743\u9650\u3002");
+      if (!auth.owner && (["artifact_list", "artifact_manage"].includes(name) || name === "artifact_share" && args.action !== void 0 && args.action !== "status")) throw new StudioError("FORBIDDEN", "\u8BBF\u5BA2\u4E0D\u80FD\u7BA1\u7406\u4F5C\u54C1\u5E93\u6216\u5206\u4EAB\u6743\u9650\u3002");
       if (!auth.owner && name === "studio_open") args.artifactId = auth.artifactId;
-      const data = await service.execute(name, args, auth.actor);
+      const data = await service.execute(name, args, auth.actor, auth.authority);
       json2(response, 200, { ok: true, data });
+      return;
+    }
+    if (url2.pathname === "/api/session" && request.method === "POST") {
+      const form = /^application\/x-www-form-urlencoded(?:;|$)/i.test(header(request, "content-type"));
+      const input2 = form ? Object.fromEntries(new URLSearchParams((await body(request, 8192)).toString("utf8"))) : await readJson(request);
+      const artifactId = typeof input2.artifactId === "string" ? input2.artifactId : url2.searchParams.get("artifactId") ?? "";
+      try {
+        const auth = await authorize(request, response, url2, artifactId, { name: input2.name });
+        if (form && !auth.owner) {
+          response.writeHead(303, { Location: `/?${new URLSearchParams({ artifactId })}`, "Cache-Control": "no-store" });
+          response.end();
+        } else json2(response, 200, { actor: auth.actor, artifactId: auth.artifactId, owner: auth.owner, access: auth.access, serviceProtocol: SERVICE_PROTOCOL_VERSION, pluginVersion: PLUGIN_VERSION, agentAvailable: false });
+      } catch (error62) {
+        if (!form || !(error62 instanceof StudioError)) throw error62;
+        const invitation = error62.details?.invitation;
+        if (error62.code === "UNAUTHORIZED" || error62.code === "FORBIDDEN") deniedPage(response, error62);
+        else if (invitation) namePage(response, artifactId, providedToken(request, url2), invitation, error62.message, typeof input2.name === "string" ? input2.name : "", ["NAME_TAKEN", "NAME_ALREADY_SET"].includes(error62.code) ? 409 : 400);
+        else throw error62;
+      }
       return;
     }
     if (url2.pathname === "/api/session" && request.method === "GET") {
       const auth = await authorize(request, response, url2);
-      json2(response, 200, { actor: auth.actor, artifactId: auth.artifactId, owner: auth.owner, agentAvailable: false });
-      return;
-    }
-    if (url2.pathname === "/api/events" && request.method === "GET") {
-      const artifactId = url2.searchParams.get("artifactId") ?? "", auth = await authorize(request, response, url2, artifactId || void 0);
-      scope(auth, artifactId || void 0);
-      if (artifactId) await service.execute("artifact_read", { artifactId, mode: "summary" }, auth.actor);
-      response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
-      response.write(`retry: 1500
-data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
-
-`);
-      const unsubscribe = service.subscribe(artifactId, (event) => {
-        if (!response.writableEnded) response.write(`data: ${JSON.stringify(event)}
-
-`);
-      });
-      const timer = setInterval(() => {
-        if (!response.writableEnded) response.write(": keep-alive\n\n");
-      }, 15e3);
-      timer.unref();
-      const live = { response, auth, artifactId, dispose: () => {
-        clearInterval(timer);
-        unsubscribe();
-      } };
-      lives.add(live);
-      response.on("close", () => {
-        lives.delete(live);
-        live.dispose();
-      });
-      return;
-    }
-    if (url2.pathname === "/api/presence" && (request.method === "GET" || request.method === "POST")) {
-      const input2 = request.method === "POST" ? await readJson(request) : {}, artifactId = typeof input2.artifactId === "string" ? input2.artifactId : url2.searchParams.get("artifactId") ?? "";
-      const auth = await authorize(request, response, url2, artifactId);
-      scope(auth, artifactId);
-      const result = request.method === "POST" ? await service.updatePresence(artifactId, input2, auth.actor) : { peers: service.getPresence(artifactId), timer: service.getTimer(artifactId) };
-      json2(response, 200, result);
+      json2(response, 200, { actor: auth.actor, artifactId: auth.artifactId, owner: auth.owner, access: auth.access, serviceProtocol: SERVICE_PROTOCOL_VERSION, pluginVersion: PLUGIN_VERSION, agentAvailable: false });
       return;
     }
     if (url2.pathname === "/api/assets" && request.method === "POST") {
@@ -13936,7 +15188,7 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
         filename = decodeURIComponent(filename);
       } catch {
       }
-      const result = await service.putAsset(artifactId, await body(request, 20 * 1024 * 1024), { filename, mimeType: header(request, "x-content-type") || header(request, "content-type") }, auth.actor);
+      const result = await service.putAsset(artifactId, await body(request, 20 * 1024 * 1024), { filename, mimeType: header(request, "x-content-type") || header(request, "content-type") }, auth.actor, auth.authority);
       json2(response, 200, result);
       return;
     }
@@ -13968,8 +15220,18 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
       return;
     }
     if ((url2.pathname === "/" || url2.pathname === "/index.html") && request.method === "GET") {
-      const auth = await authorize(request, response, url2);
-      const boot = JSON.stringify({ baseUrl: `http://${request.headers.host ?? new URL(origin).host}`, token: auth.token, actor: auth.actor, ...auth.artifactId ? { artifactId: auth.artifactId } : url2.searchParams.get("artifactId") ? { artifactId: url2.searchParams.get("artifactId") } : {} }).replace(/</g, "\\u003c");
+      let auth;
+      try {
+        auth = await authorize(request, response, url2);
+      } catch (error62) {
+        if (!(error62 instanceof StudioError)) throw error62;
+        const invitation = error62.details?.invitation;
+        if (error62.code === "NAME_REQUIRED" && invitation) namePage(response, url2.searchParams.get("artifactId") ?? "", providedToken(request, url2), invitation);
+        else if (error62.code === "UNAUTHORIZED" || error62.code === "FORBIDDEN") deniedPage(response, error62);
+        else throw error62;
+        return;
+      }
+      const boot = JSON.stringify({ baseUrl: `http://${request.headers.host ?? new URL(origin).host}`, token: auth.owner ? auth.token : "", actor: auth.actor, access: auth.access, serviceProtocol: SERVICE_PROTOCOL_VERSION, pluginVersion: PLUGIN_VERSION, ...auth.artifactId ? { artifactId: auth.artifactId } : url2.searchParams.get("artifactId") ? { artifactId: url2.searchParams.get("artifactId") } : {} }).replace(/</g, "\\u003c");
       const script = `<script>window.__STUDIO_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
       const html2 = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, (opening) => opening + script) : `${script}${raw}`;
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(html2) });
@@ -13982,6 +15244,7 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
     await service.resetSharingSessions();
     const port = await listen(local, options.port ?? 0, "127.0.0.1");
     origin = `http://127.0.0.1:${port}`;
+    service.configureLocalOrigin(origin);
   } catch (error62) {
     await service.close();
     throw error62;
@@ -13989,24 +15252,28 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
   return { service, origin, token, hasActiveReaders: regionReaders.hasActiveReaders, async close() {
     if (stopping) return;
     stopping = true;
+    collaborationRoutes.close();
     regionReaders.close();
-    for (const live of [...lives]) endLive(live, "Studio \u670D\u52A1\u5DF2\u9000\u51FA\u3002");
     await Promise.all([...servers].map(closeServer));
     for (const socket of sockets) socket.destroy();
     await service.resetSharingSessions();
     await service.close();
   } };
 }
-var MAX_BODY, BROWSER_BLOCKED_PORTS, json2;
+var MAX_BODY, BROWSER_BLOCKED_PORTS, json2, escapeHtml;
 var init_http = __esm({
   "src/server/http.ts"() {
     "use strict";
     init_studio();
     init_service();
+    init_common();
     init_archive();
     init_guest_session();
     init_region_reader();
     init_lan_addresses();
+    init_collaboration_routes();
+    init_service_protocol();
+    init_version();
     MAX_BODY = 21 * 1024 * 1024;
     BROWSER_BLOCKED_PORTS = /* @__PURE__ */ new Set([
       0,
@@ -14098,13 +15365,14 @@ var init_http = __esm({
       response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(body2) });
       response.end(body2);
     };
+    escapeHtml = (value) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   }
 });
 
 // src/server/index.ts
-import { randomUUID as randomUUID11 } from "node:crypto";
-import { readFile as readFile6, unlink as unlink2 } from "node:fs/promises";
-import { join as join7 } from "node:path";
+import { randomUUID as randomUUID13 } from "node:crypto";
+import { readFile as readFile7, unlink as unlink2 } from "node:fs/promises";
+import { join as join9 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1_ce399f1e4e31d6809a54d35f78d374fe/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -14833,9 +16101,9 @@ function floatSafeRemainder(val, step) {
   return ratio - roundedRatio;
 }
 var EVALUATING = /* @__PURE__ */ Symbol("evaluating");
-function defineLazy(object4, key, getter) {
+function defineLazy(object5, key, getter) {
   let value = void 0;
-  Object.defineProperty(object4, key, {
+  Object.defineProperty(object5, key, {
     get() {
       if (value === EVALUATING) {
         return void 0;
@@ -14847,7 +16115,7 @@ function defineLazy(object4, key, getter) {
       return value;
     },
     set(v) {
-      Object.defineProperty(object4, key, {
+      Object.defineProperty(object5, key, {
         value: v
         // configurable: true,
       });
@@ -29962,8 +31230,8 @@ function foldObjects(members2) {
   }
   const properties = {};
   const required2 = /* @__PURE__ */ new Set();
-  for (const object4 of objects) {
-    for (const key in object4.properties) {
+  for (const object5 of objects) {
+    for (const key in object5.properties) {
       if (Object.prototype.hasOwnProperty.call(properties, key))
         continue;
       const parts = [];
@@ -29977,18 +31245,18 @@ function foldObjects(members2) {
       const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
       assignProp(properties, key, merged);
     }
-    for (const key of object4.required ?? [])
+    for (const key of object5.required ?? [])
       required2.add(key);
   }
   const folded = { type: "object", properties };
   if (required2.size)
     folded.required = [...required2];
-  if (objects.every((object4) => object4.additionalProperties === false)) {
+  if (objects.every((object5) => object5.additionalProperties === false)) {
     folded.additionalProperties = false;
   } else {
     const constraints = [];
-    for (const object4 of objects) {
-      const constraint = undeclaredConstraint(object4);
+    for (const object5 of objects) {
+      const constraint = undeclaredConstraint(object5);
       if (constraint && !constraints.some((seen) => JSON.stringify(seen) === JSON.stringify(constraint)))
         constraints.push(constraint);
     }
@@ -35463,16 +36731,16 @@ var StdioServerTransport = class {
 };
 
 // src/server/client.ts
-init_studio();
+init_common();
 import { spawn } from "node:child_process";
-import { randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir, readFile, writeFile, rename, unlink, readdir } from "node:fs/promises";
+import { createHash, randomUUID as randomUUID3 } from "node:crypto";
+import { mkdir as mkdir2, readFile, writeFile as writeFile2, rename as rename2, unlink, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join as join2, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/server/app-transport.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 
 // src/contracts/transport.ts
 var APP_CHUNK_BYTES = 128 * 1024;
@@ -35505,13 +36773,18 @@ function validateUiRequest(request) {
   if (url2.origin !== "http://studio.invalid" || url2.pathname.split("/").some((segment) => segment === "." || segment === "..") || path2.split("?")[0] !== url2.pathname) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
   if (method !== "GET" && method !== "POST") throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u65B9\u6CD5\u65E0\u6548\u3002");
   const tool = /^\/api\/tools\/([^/]+)$/.exec(url2.pathname);
-  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/session" ? method === "GET" : url2.pathname === "/api/region-view" ? true : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
+  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/sync" ? method === "GET" : url2.pathname === "/api/room" ? method === "POST" : url2.pathname === "/api/session" ? method === "GET" : url2.pathname === "/api/region-view" ? true : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
   if (!allowed) throw failure2("FORBIDDEN", "\u6B64\u5730\u5740\u4E0D\u80FD\u901A\u8FC7\u4F5C\u54C1\u754C\u9762\u8BBF\u95EE\u3002");
   const thumbnail = method === "GET" && /^\/api\/thumbnails\/[^/]+$/.test(url2.pathname);
   const seen = /* @__PURE__ */ new Set();
   for (const [key, value] of url2.searchParams) {
-    if (seen.has(key) || (thumbnail ? key !== "revision" : url2.pathname === "/api/region-view" ? !["artifactId", "viewId"].includes(key) : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
+    if (seen.has(key) || (thumbnail ? key !== "revision" : url2.pathname === "/api/region-view" ? !["artifactId", "viewId"].includes(key) : url2.pathname === "/api/sync" ? !["artifactId", "after", "wait", "peerId", "peerEpoch"].includes(key) : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
     if (key === "revision" && (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u7F29\u7565\u56FE\u7248\u672C\u53F7\u65E0\u6548\u3002");
+    if (url2.pathname === "/api/sync") {
+      if (key === "wait" && (!/^(?:0|[1-9]\d*)$/.test(value) || Number(value) > 2e4)) throw failure2("INVALID_ARGUMENT", "\u540C\u6B65\u7B49\u5F85\u65F6\u95F4\u5E94\u4E3A 0 \u5230 20000 \u6BEB\u79D2\u3002");
+      if (key === "after" && !/^[A-Za-z0-9_-]{1,120}:\d{1,16}$/.test(value)) throw failure2("INVALID_ARGUMENT", "\u540C\u6B65\u6C34\u4F4D\u65E0\u6548\u3002");
+      if ((key === "peerId" || key === "peerEpoch") && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) throw failure2("INVALID_ARGUMENT", "\u534F\u4F5C\u9875\u9762\u6807\u8BC6\u65E0\u6548\u3002");
+    }
     seen.add(key);
   }
   const headers = {};
@@ -35558,7 +36831,7 @@ function createAppTransport(requestUi) {
   }
   function add(kind, bytes, offset = 0) {
     if (transfers.size >= MAX_TRANSFERS) throw failure2("BUSY", "\u540C\u65F6\u8FDB\u884C\u7684\u4F5C\u54C1\u4F20\u8F93\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
-    const id2 = randomUUID();
+    const id2 = randomUUID2();
     transfers.set(id2, { kind, bytes, offset, expiresAt: Date.now() + TTL_MS });
     return id2;
   }
@@ -35667,10 +36940,12 @@ function createAppTransport(requestUi) {
 }
 
 // src/server/client.ts
-var dataDirectory = (value) => resolve(value || process.env.AGENTERO_STUDIO_DATA_ROOT || join(homedir(), ".codexworkbench", "agentero-studio"));
+init_service_protocol();
+init_version();
+var dataDirectory = (value) => resolve(value || process.env.AGENTERO_STUDIO_DATA_ROOT || join2(homedir(), ".codexworkbench", "agentero-studio"));
 async function readRecord(root2) {
   try {
-    const value = JSON.parse(await readFile(join(root2, "service.json"), "utf8"));
+    const value = JSON.parse(await readFile(join2(root2, "service.json"), "utf8"));
     if (value.origin && value.token && value.pid) return value;
   } catch {
   }
@@ -35682,54 +36957,59 @@ async function probe(root2) {
     const url2 = new URL(record3.origin);
     if (url2.hostname !== "127.0.0.1" || url2.protocol !== "http:") return;
     const response = await fetch(`${record3.origin}/api/session`, { headers: { Authorization: `Bearer ${record3.token}` }, signal: AbortSignal.timeout(1500) });
-    if (response.ok) return record3;
-  } catch {
+    if (response.ok) {
+      const session = await response.json();
+      if (session.owner !== true || session.serviceProtocol !== SERVICE_PROTOCOL_VERSION || session.pluginVersion !== PLUGIN_VERSION) throw new StudioError("SERVICE_PROTOCOL_MISMATCH", `\u6B63\u5728\u8FD0\u884C\u7684 Studio \u670D\u52A1\u7248\u672C\u4E0E\u5F53\u524D\u63D2\u4EF6 ${PLUGIN_VERSION} \u4E0D\u517C\u5BB9\u3002\u8BF7\u5173\u95ED\u65E7\u7248\u672C\u767D\u677F\u7A97\u53E3\u3001\u91CD\u542F\u63D2\u4EF6\u540E\u518D\u6253\u5F00\uFF1B\u672A\u542F\u52A8\u7B2C\u4E8C\u4E2A\u6570\u636E\u670D\u52A1\u3002`, { expected: SERVICE_PROTOCOL_VERSION, actual: session.serviceProtocol ?? null, expectedVersion: PLUGIN_VERSION, actualVersion: session.pluginVersion ?? null });
+      return record3;
+    }
+  } catch (error62) {
+    if (error62 instanceof StudioError && error62.code === "SERVICE_PROTOCOL_MISMATCH") throw error62;
   }
 }
 async function writeRecord(root2, record3) {
-  await mkdir(root2, { recursive: true });
-  const target = join(root2, "service.json");
+  await mkdir2(root2, { recursive: true });
+  const target = join2(root2, "service.json");
   const temp = `${target}.${process.pid}.tmp`;
-  await writeFile(temp, `${JSON.stringify(record3)}
+  await writeFile2(temp, `${JSON.stringify(record3)}
 `, { mode: 384 });
-  await rename(temp, target);
+  await rename2(temp, target);
 }
-var delay = (ms) => new Promise((resolve4) => setTimeout(resolve4, ms));
+var delay2 = (ms) => new Promise((resolve4) => setTimeout(resolve4, ms));
 async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(import.meta.url)) {
-  await mkdir(root2, { recursive: true });
+  await mkdir2(root2, { recursive: true });
   let record3 = await probe(root2);
   if (!record3) {
     const existing = await readRecord(root2);
     if (existing && isAlive(existing.pid)) {
       for (let attempt = 0; attempt < 6 && !record3; attempt++) {
-        await delay(300);
+        await delay2(300);
         record3 = await probe(root2);
       }
       if (!record3) throw new Error("Studio \u670D\u52A1\u8FDB\u7A0B\u4ECD\u5728\u8FD0\u884C\uFF0C\u4F46\u6682\u65F6\u6CA1\u6709\u54CD\u5E94\uFF1B\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u672A\u53E6\u8D77\u7B2C\u4E8C\u4E2A\u6570\u636E\u670D\u52A1\u3002");
     }
   }
   if (!record3) {
-    const lock2 = join(root2, "startup.lock");
+    const lock3 = join2(root2, "startup.lock");
     let acquired = false;
     for (let attempt = 0; attempt < 100; attempt++) {
       try {
-        await mkdir(lock2);
-        await writeFile(join(lock2, "owner"), String(process.pid));
+        await mkdir2(lock3);
+        await writeFile2(join2(lock3, "owner"), String(process.pid));
         acquired = true;
         break;
       } catch {
         record3 = await probe(root2);
         if (record3) break;
         try {
-          const pid = Number(await readFile(join(lock2, "owner"), "utf8"));
+          const pid = Number(await readFile(join2(lock3, "owner"), "utf8"));
           if (pid && !isAlive(pid)) {
-            await unlink(join(lock2, "owner"));
+            await unlink(join2(lock3, "owner"));
             const { rmdir: rmdir2 } = await import("node:fs/promises");
-            await rmdir2(lock2);
+            await rmdir2(lock3);
           }
         } catch {
         }
-        await delay(150);
+        await delay2(150);
       }
     }
     if (acquired) {
@@ -35743,25 +37023,27 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
           });
           child.unref();
           for (let attempt = 0; attempt < 100 && !record3; attempt++) {
-            await delay(150);
+            await delay2(150);
             record3 = await probe(root2);
           }
         }
       } finally {
-        await unlink(join(lock2, "owner")).catch(() => {
+        await unlink(join2(lock3, "owner")).catch(() => {
         });
         const { rmdir: rmdir2 } = await import("node:fs/promises");
-        await rmdir2(lock2).catch(() => {
+        await rmdir2(lock3).catch(() => {
         });
       }
     }
     if (!record3) throw new Error("Studio \u672C\u673A\u670D\u52A1\u672A\u80FD\u542F\u52A8\uFF1B\u8BF7\u68C0\u67E5 Node.js \u7248\u672C\u548C\u6570\u636E\u76EE\u5F55\u6743\u9650\u3002");
   }
   const current = record3;
-  const leaseDirectory = join(root2, "leases");
-  await mkdir(leaseDirectory, { recursive: true });
-  const lease = join(leaseDirectory, `${process.pid}-${randomUUID2()}.json`);
-  const heartbeat = () => writeFile(lease, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 35e3 })).catch(() => {
+  const agentConnectionId = randomUUID3();
+  let owner;
+  const leaseDirectory = join2(root2, "leases");
+  await mkdir2(leaseDirectory, { recursive: true });
+  const lease = join2(leaseDirectory, `${process.pid}-${randomUUID3()}.json`);
+  const heartbeat = () => writeFile2(lease, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 35e3 })).catch(() => {
   });
   await heartbeat();
   const timer = setInterval(() => {
@@ -35769,9 +37051,25 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
   }, 1e4);
   timer.unref();
   return {
-    connection: async () => ({ baseUrl: current.origin, token: current.token, actor: LOCAL_ACTOR }),
-    async execute(name, args) {
-      const response = await fetch(`${current.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${current.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent" }, body: JSON.stringify(args), signal: AbortSignal.timeout(9e4) });
+    connection: async () => {
+      if (!owner) {
+        const response = await fetch(`${current.origin}/api/session`, { headers: { Authorization: `Bearer ${current.token}` }, signal: AbortSignal.timeout(5e3) });
+        const session = await response.json();
+        if (!response.ok || !session.owner || session.actor?.id !== "local" || session.actor.kind !== "human" || session.actor.role !== "owner") throw new Error("\u672C\u673A\u670D\u52A1\u672A\u8FD4\u56DE\u6709\u6548\u7684\u6240\u6709\u8005\u8EAB\u4EFD\u3002");
+        owner = session.actor;
+      }
+      return { baseUrl: current.origin, token: current.token, actor: owner };
+    },
+    async execute(name, args, context) {
+      const { participant: participant2, ...operationArgs } = args;
+      if (participant2 !== void 0 && !object2(participant2)) throw new StudioError("INVALID_ARGUMENT", "Agent participant \u5FC5\u987B\u63D0\u4F9B id \u548C name\u3002");
+      const participantId = object2(participant2) ? text(participant2.id, "", 120).trim() : void 0;
+      if (participantId === "") throw new StudioError("INVALID_ARGUMENT", "Agent participant ID \u4E0D\u80FD\u4E3A\u7A7A\u3002");
+      const displayName = (object2(participant2) ? text(participant2.name, "", 60) : context?.clientInfo?.title || context?.clientInfo?.name || "Codex").trim();
+      if (!displayName) throw new StudioError("INVALID_ARGUMENT", "Agent participant \u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\u3002");
+      const agentId = `agent-${createHash("sha256").update(JSON.stringify({ connection: agentConnectionId, participant: participantId ?? null })).digest("hex").slice(0, 32)}`;
+      const agentName = `${Array.from(displayName).slice(0, 24).join("")} \xB7 ${agentId.slice(-8)}`;
+      const response = await fetch(`${current.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${current.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": agentId, "X-Studio-Agent-Name": encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(9e4) });
       const result = await response.json();
       if (!result.ok) throw Object.assign(new Error(result.error?.message || "Studio \u64CD\u4F5C\u5931\u8D25"), { code: result.error?.code, details: result.error?.details });
       return result.data;
@@ -35804,10 +37102,10 @@ function isAlive(pid) {
   }
 }
 async function hasActiveLeases(root2) {
-  const directory = join(root2, "leases");
+  const directory = join2(root2, "leases");
   for (const name of await readdir(directory).catch(() => [])) {
     try {
-      const value = JSON.parse(await readFile(join(directory, name), "utf8"));
+      const value = JSON.parse(await readFile(join2(directory, name), "utf8"));
       if (value.expiresAt > Date.now() && isAlive(value.pid)) return true;
     } catch {
     }
@@ -35847,10 +37145,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object4) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object5) => {
     const keys = [];
-    for (const key in object4) {
-      if (Object.prototype.hasOwnProperty.call(object4, key)) {
+    for (const key in object5) {
+      if (Object.prototype.hasOwnProperty.call(object5, key)) {
         keys.push(key);
       }
     }
@@ -39767,7 +41065,7 @@ var ZodMiniObject = /* @__PURE__ */ $constructor("ZodMiniObject", (inst, def) =>
   installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
 });
 // @__NO_SIDE_EFFECTS__
-function object2(shape, params) {
+function object3(shape, params) {
   const def = {
     type: "object",
     shape: shape ?? {},
@@ -39784,11 +41082,11 @@ function isZ4Schema(s) {
 function objectFromShape(shape) {
   const values = Object.values(shape);
   if (values.length === 0)
-    return object2({});
+    return object3({});
   const allV4 = values.every(isZ4Schema);
   const allV3 = values.every((s) => !isZ4Schema(s));
   if (allV4)
-    return object2(shape);
+    return object3(shape);
   if (allV3)
     return objectType(shape);
   throw new Error("Mixed Zod versions detected in object shape.");
@@ -40671,11 +41969,11 @@ function parseMapDef(def, refs) {
 
 // ../../node_modules/.pnpm/zod-to-json-schema@3.25.2_zod@4.6.7/node_modules/zod-to-json-schema/dist/esm/parsers/nativeEnum.js
 function parseNativeEnumDef(def) {
-  const object4 = def.values;
+  const object5 = def.values;
   const actualKeys = Object.keys(def.values).filter((key) => {
-    return typeof object4[object4[key]] !== "number";
+    return typeof object5[object5[key]] !== "number";
   });
-  const actualValues = actualKeys.map((key) => object4[key]);
+  const actualValues = actualKeys.map((key) => object5[key]);
   const parsedTypes = Array.from(new Set(actualValues.map((values) => typeof values)));
   return {
     type: parsedTypes.length === 1 ? parsedTypes[0] === "string" ? "string" : "number" : ["string", "number"],
@@ -43866,12 +45164,11 @@ var STUDIO_ICON = {
   sizes: ["64x64"]
 };
 
-// src/contracts/version.ts
-var PLUGIN_VERSION = "0.1.3";
-
 // src/server/protocol.ts
+init_version();
 init_studio();
 var id = external_exports.string().min(1).max(200);
+var participant = external_exports.object({ id: external_exports.string().trim().min(1).max(120), name: external_exports.string().trim().min(1).max(60) }).optional().describe("\u4EC5\u6240\u6709\u8005\u7684 MCP \u8C03\u7528\u53EF\u63D0\u4F9B\uFF1A\u540C\u4E00\u8FDE\u63A5\u4E2D\u591A\u4E2A Agent \u4F7F\u7528\u7A33\u5B9A id/name \u533A\u5206\u534F\u4F5C\u8EAB\u4EFD\uFF1Bid \u662F\u4E0D\u900F\u660E\u6807\u8BC6\uFF0C\u53EF\u4EE5\u4F7F\u7528 Agent \u7684\u4EFB\u52A1\u8DEF\u5F84\uFF0C\u4E0D\u4F5C\u6587\u4EF6\u8DEF\u5F84\u89E3\u91CA\u3002\u8EAB\u4EFD\u7531\u670D\u52A1\u7AEF\u6309\u8FDE\u63A5\u547D\u540D\u7A7A\u95F4\u6D3E\u751F\uFF0C\u4E0D\u80FD\u7528\u4E8E\u8BBF\u5BA2\u63D0\u6743\u3002");
 var coordinate = external_exports.number().min(-1e7).max(1e7);
 var anchor2 = external_exports.object({
   coordinateSpace: external_exports.enum(["board", "element", "html"]).optional().describe("board: x/y/w/h \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement: x/y \u4E3A elementIds[0] \u5185\u7684 0..1 \u76F8\u5BF9\u5750\u6807\uFF1Bhtml: x/y/w/h \u4E3A regionId \u5185\u90E8 CSS \u50CF\u7D20\u3002\u7701\u7565\u65F6\u6CBF\u7528\u65E7\u951A\u70B9\u542B\u4E49\u3002"),
@@ -43903,9 +45200,9 @@ var schemas = {
   artifact_list: external_exports.object({ query: external_exports.string().optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().optional(), sort: external_exports.string().optional() }),
   artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "purge", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), artifactIds: external_exports.array(id).min(1).max(100).optional().describe("purge \u6279\u91CF\u6C38\u4E45\u5220\u9664\u7684\u4F5C\u54C1 ID\uFF0C1..100 \u4E2A\u3002\u4E0E\u5355\u4E2A artifactId \u4E8C\u9009\u4E00\uFF1B\u53EA\u5141\u8BB8\u623F\u4E3B\u5220\u9664\u56DE\u6536\u7AD9\u5185\u4F5C\u54C1\uFF0C\u8FD4\u56DE deletedIds \u548C\u9010\u9879 failures\u3002"), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
   artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
-  artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
-  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("edit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF1B\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
-  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove"]), role: external_exports.enum(["editor", "commenter", "viewer"]).optional(), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u6307\u5B9A\u5DF2\u52A0\u5165\u6210\u5458 ID\uFF1B\u6539\u89D2\u8272\u548C\u79FB\u9664\u4F1A\u64A4\u9500\u8BE5\u6210\u5458\u73B0\u6709\u8FDE\u63A5\u4E0E\u9605\u8BFB\u9875\u3002") }),
+  artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), merge: external_exports.literal("safe").optional().describe("\u5B89\u5168\u5408\u5E76\u8FC7\u671F update\uFF1A\u4ECE\u670D\u52A1\u5668\u4FDD\u7559\u5386\u53F2\u53D6\u53EF\u4FE1\u57FA\u7EBF\uFF0C\u4EC5\u5408\u5E76\u4E0D\u51B2\u7A81\u5B57\u6BB5/\u6587\u672C\u884C\uFF1B\u540C\u5B57\u6BB5\u51B2\u7A81\u4FDD\u7559\u539F\u5185\u5BB9\u5E76\u8FD4\u56DE CONFLICT\uFF0C\u4E0D\u9759\u9ED8\u8986\u76D6\u3002\u7F3A\u7701\u4FDD\u6301\u4E25\u683C\u7248\u672C\u68C0\u67E5\u3002"), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
+  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
+  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional(), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u6307\u5B9A\u5DF2\u52A0\u5165\u6210\u5458 ID\uFF1B\u6539\u89D2\u8272\u548C\u79FB\u9664\u4F1A\u64A4\u9500\u8BE5\u6210\u5458\u73B0\u6709\u8FDE\u63A5\u4E0E\u9605\u8BFB\u9875\u3002") }),
   artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() })
 };
 var descriptions = {
@@ -43915,7 +45212,7 @@ var descriptions = {
   artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
   artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
   artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
-  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5C40\u57DF\u7F51\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u5F00\u542F\u672C\u673A\u5C40\u57DF\u7F51\u8BBF\u95EE\uFF1Bstop \u5173\u95ED\u5C40\u57DF\u7F51\u8BBF\u95EE\uFF1Blink \u72EC\u7ACB\u542F\u7528/\u5173\u95ED\u89D2\u8272\u94FE\u63A5\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u4E0E\u5BF9\u5E94\u6210\u5458\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u5E76\u7ACB\u5373\u64A4\u9500\u539F\u8FDE\u63A5\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
+  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5C40\u57DF\u7F51\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5F00\u542F\u5C40\u57DF\u7F51\uFF1Baccess:local \u53EA\u542F\u7528\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0C\u590D\u5236\u94FE\u63A5\u4E0D\u81EA\u52A8\u5F00\u653E\u5C40\u57DF\u7F51\u3002\u5207\u6362\u8BBF\u95EE\u8303\u56F4\u4FDD\u7559\u9080\u8BF7\u548C\u6210\u5458\uFF0C\u5207\u4E3A\u672C\u673A\u65F6\u64A4\u9500\u539F\u5C40\u57DF\u7F51\u8FDE\u63A5\uFF1Bstop \u64A4\u9500\u6240\u6709\u9080\u8BF7\u4E0E\u6210\u5458\u6388\u6743\uFF1Blink \u72EC\u7ACB\u542F\u7528/\u5173\u95ED\u89D2\u8272\u94FE\u63A5\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u4E0E\u5BF9\u5E94\u6210\u5458\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u5E76\u7ACB\u5373\u64A4\u9500\u539F\u8FDE\u63A5\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
   artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002"
 };
 function record2(value) {
@@ -43979,14 +45276,14 @@ function createStudioServer(executor, html2) {
     server.registerTool(name, {
       title: name === "studio_open" ? "Agentero \u521B\u4F5C" : descriptions[name].split("\u3002")[0],
       description: descriptions[name],
-      inputSchema: schemas[name],
+      inputSchema: schemas[name].extend({ participant }),
       annotations: { readOnlyHint: ["studio_open", "artifact_list", "artifact_read"].includes(name), destructiveHint: name === "artifact_manage", openWorldHint: name === "artifact_share" },
       ...name === "studio_open" ? { _meta: { ui: { resourceUri: uri }, "openai/ui": { entrypoints: [{ type: "thread" }] } } } : {}
     }, async (input2) => {
       try {
         const args = input2;
         const request = name === "artifact_read" && !args.mode ? { ...args, mode: "summary" } : args;
-        const transformed = modelResult(name, request, await executor.execute(name, request));
+        const transformed = modelResult(name, request, await executor.execute(name, request, { clientInfo: server.server.getClientVersion() }));
         const data = JSON.stringify(transformed).length <= 24e4 ? transformed : { artifactId: request.artifactId, tooLarge: true, hint: "\u8BF7\u6309 summary \u9875\u3001\u5BF9\u8C61 ID \u6216 source \u7684 offset/limit \u7F29\u5C0F\u8BFB\u53D6\u8303\u56F4\uFF1B\u672A\u8FD4\u56DE\u5B8C\u6574\u5185\u5BB9\u3002" };
         return { content: [], structuredContent: { ok: true, data }, ...name === "studio_open" ? { _meta: { connection: await executor.connection() } } : {} };
       } catch (error62) {
@@ -44033,14 +45330,14 @@ var option = (key) => {
   return index < 0 ? void 0 : process.argv[index + 1];
 };
 var root = dataDirectory(option("--data-root"));
-var html = await readFile6(new URL("./app.html", import.meta.url), "utf8");
+var html = await readFile7(new URL("./app.html", import.meta.url), "utf8");
 if (process.argv.includes("--serve")) {
   const { startStudioHost: startStudioHost2 } = await Promise.resolve().then(() => (init_http(), http_exports));
   const host = await startStudioHost2({ dataRoot: root, html, port: Number(option("--port") || 0) });
-  await writeRecord(root, { origin: host.origin, token: host.token, pid: process.pid, instanceId: randomUUID11() });
+  await writeRecord(root, { origin: host.origin, token: host.token, pid: process.pid, instanceId: randomUUID13() });
   let closing;
   const close = () => closing ??= (async () => {
-    if ((await readRecord(root))?.pid === process.pid) await unlink2(join7(root, "service.json")).catch(() => {
+    if ((await readRecord(root))?.pid === process.pid) await unlink2(join9(root, "service.json")).catch(() => {
     });
     await host.close();
   })();
@@ -44074,3 +45371,23 @@ if (process.argv.includes("--serve")) {
   });
   await server.connect(new StdioServerTransport());
 }
+/*!
+ * Line-diff implementation adapted from open-artifacts, MIT License.
+ * Copyright (c) 2026 Jim Liu 宝玉
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */

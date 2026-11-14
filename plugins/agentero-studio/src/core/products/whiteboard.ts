@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_STYLE, type Anchor, type Board, type BoardElement, type Operation } from '../../contracts/studio.js';
 import { copy, finite, object, safeId, same, StudioError } from '../shared/common.js';
-import type { ArtifactState, ContentChange, ProductAdapter, Snapshot } from '../shared/model.js';
+import type { ArtifactState, ContentChange, ProductAdapter, Snapshot, UnitClock } from '../shared/model.js';
+import { jsonEqual, mergeConflictDetails, mergeJson } from '../shared/safe-merge.js';
 import type { ProductDefinition } from '../shared/products.js';
 import { arrowGeometry } from './whiteboard-geometry.js';
 
@@ -42,7 +43,54 @@ export function normalizeElement(input: Partial<BoardElement>, id?: string): Boa
     const crop = result.crop;
     if (!object(crop) || typeof crop.zoom !== 'number' || !Number.isFinite(crop.zoom) || crop.zoom < 1 || (['x', 'y'] as const).some(key => typeof crop[key] !== 'number' || !Number.isFinite(crop[key]) || crop[key] < 0 || crop[key] > 1)) throw new StudioError('INVALID_ARGUMENT', '图片裁剪缩放须至少为 1，位置 x/y 须在 0 到 1 之间。');
   }
+  if (result.type === 'table') result.data = tableIdentity(result.id, result.data);
   return result;
+}
+function tableIdentity(id: string, value: unknown): Record<string, unknown> {
+  const data = object(value) ? copy(value) : {}, rows = data.rows;
+  if (!Array.isArray(rows) || !rows.every(Array.isArray)) return data;
+  const columns = Math.max(0, ...rows.map(row => row.length));
+  const keys = (value: unknown, length: number, axis: string) => {
+    if (value === undefined) return Array.from({ length }, (_, index) => `${id}:${axis}:${index}`);
+    if (!Array.isArray(value) || value.length !== length || !value.every(key => typeof key === 'string' && key.length > 0 && key.length <= 160) || new Set(value).size !== length) throw new StudioError('INVALID_ARGUMENT', '表格行列标识必须唯一并匹配当前结构。');
+    return value;
+  };
+  return { ...data, rowIds: keys(data.rowIds, rows.length, 'row'), columnIds: keys(data.columnIds, columns, 'col') };
+}
+function mergeFields(value: unknown): Record<string, unknown> {
+  if (!object(value)) return {};
+  const { id: _id, version: _version, sourceRevision: _sourceRevision, ...fields } = value;
+  return fields;
+}
+function safeElementMerge(base: BoardElement, local: BoardElement, current: BoardElement) {
+  const b = mergeFields(base), l = mergeFields(local), c = mergeFields(current), matrices: string[] = [];
+  if (base.type === 'table' && local.type === 'table' && current.type === 'table') {
+    b.data = tableIdentity(base.id, b.data); l.data = tableIdentity(local.id, l.data); c.data = tableIdentity(current.id, c.data);
+    const bd = b.data as Record<string, unknown>, ld = l.data as Record<string, unknown>, cd = c.data as Record<string, unknown>;
+    if (jsonEqual(bd.rowIds, ld.rowIds) && jsonEqual(bd.rowIds, cd.rowIds) && jsonEqual(bd.columnIds, ld.columnIds) && jsonEqual(bd.columnIds, cd.columnIds)) matrices.push('data.rows');
+    else if (!jsonEqual(bd.rows, ld.rows) && !jsonEqual(bd.rows, cd.rows)) return { result: c, conflicts: ['data.rows', 'data.rowIds', 'data.columnIds'] };
+  }
+  return mergeJson(b, l, c, matrices);
+}
+function syncElementVersions(content: WhiteboardContent, previous: WhiteboardContent, clocks: Record<string, UnitClock>, initialize = false): void {
+  const before = new Map(previous.elements.map(element => [element.id, element]));
+  for (const element of content.elements) {
+    const old = before.get(element.id), clock = Object.hasOwn(clocks, element.id) ? clocks[element.id] : undefined;
+    if (initialize) {
+      const incarnationStart = !old && clock ? Math.max(clock.version + 1, element.version) : clock?.incarnationStart ?? element.version;
+      const sourceRevision = Math.max(clock?.sourceRevision ?? 0, Number(element.sourceRevision ?? 0), !old && clock && element.type === 'html' ? (clock.sourceRevision ?? 0) + 1 : 0);
+      clocks[element.id] = { version: Math.max(clock?.version ?? 0, element.version, incarnationStart), incarnationStart, ...(sourceRevision ? { sourceRevision } : {}) };
+      continue;
+    }
+    if (jsonEqual(old, element)) {
+      if (clock) { element.version = Math.max(element.version, clock.version); if (element.type === 'html') element.sourceRevision = Math.max(Number(element.sourceRevision ?? 1), clock.sourceRevision ?? 1); }
+      continue;
+    }
+    element.version = Math.max(element.version, (clock?.version ?? old?.version ?? 0) + 1);
+    if (element.type === 'html') element.sourceRevision = old?.type === 'html' && old.html === element.html ? old.sourceRevision ?? 1 : Math.max(Number(element.sourceRevision ?? 1), (clock?.sourceRevision ?? 0) + 1);
+    if (!Number.isSafeInteger(element.version) || element.sourceRevision !== undefined && !Number.isSafeInteger(element.sourceRevision)) throw new StudioError('VERSION_EXHAUSTED', '对象版本已超过可安全表示的范围。');
+    clocks[element.id] = { version: element.version, incarnationStart: old ? clock?.incarnationStart ?? old.version : element.version, ...(element.sourceRevision || clock?.sourceRevision ? { sourceRevision: Math.max(clock?.sourceRevision ?? 0, Number(element.sourceRevision ?? 0)) } : {}) };
+  }
 }
 export function initialWhiteboard(elements: unknown, base?: WhiteboardContent): WhiteboardContent {
   return { elements: (base?.elements ?? (Array.isArray(elements) ? elements : [])).map(item => normalizeElement(item as BoardElement)), style: copy(base?.style ?? DEFAULT_STYLE), orderVersion: 0, ...(base?.motion ? { motion: copy(base.motion) } : {}) };
@@ -99,6 +147,20 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     if (content.elements.length > 2000 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError('TOO_LARGE', '白板内容超过当前容量，请分成多个作品。');
   },
   versionOf: (content, id) => id === '$order' ? content.orderVersion ?? 0 : content.elements.find(item => item.id === id)?.version ?? 0,
+  syncVersions: syncElementVersions,
+  rebaseUpdate(operation, base, current) {
+    if (operation.op !== 'update' || !object(base) || !object(current) || !object(operation.changes) || base.type !== current.type) throw new StudioError('CONFLICT', '对象结构已改变，请保留本地修改并比较最新内容。', mergeConflictDetails(base, operation.changes, current, ['.']));
+    const b = base as unknown as BoardElement, c = current as unknown as BoardElement;
+    const local = { ...copy(b), ...copy(operation.changes), id: b.id, version: b.version };
+    if (local.type !== b.type) throw new StudioError('CONFLICT', '对象类型发生变化，不能自动合并过期修改。', mergeConflictDetails(base, local, current, ['type']));
+    // An unversioned matrix replacement does not assert stable row/column identities.
+    if (b.type === 'table' && object(operation.changes.data) && Object.hasOwn(operation.changes.data, 'rows') && (!Array.isArray(operation.changes.data.rowIds) || !Array.isArray(operation.changes.data.columnIds))) throw new StudioError('CONFLICT', '并发表格编辑需要稳定的行列标识，请比较后重新提交。', mergeConflictDetails(base, local, current, ['data.rows']));
+    const merged = safeElementMerge(b, local, c);
+    if (merged.conflicts.length) throw new StudioError('CONFLICT', '这些字段同时被修改，未覆盖任何一方。', mergeConflictDetails(base, local, current, merged.conflicts));
+    const fields = merged.result as Record<string, unknown>, existing = mergeFields(c), changes: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(fields), ...Object.keys(existing)])) if (!jsonEqual(fields[key], existing[key])) changes[key] = fields[key];
+    return { operation: { ...operation, changes }, local };
+  },
   targets(content, operation) {
     if (operation.op === 'restore') { const ids = operation.ids ?? (operation.id === undefined ? undefined : [operation.id]); return ids?.some(id => id.startsWith('$') && id !== '$order') ? undefined : ids; }
     if (['style', 'motion'].includes(operation.op)) return;
@@ -122,7 +184,12 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (!object(operation.changes)) throw new StudioError('INVALID_ARGUMENT', '修改字段必须是对象。');
       if (Object.hasOwn(operation.changes, 'locked') && typeof operation.changes.locked !== 'boolean') throw new StudioError('INVALID_ARGUMENT', 'locked 必须是布尔值。');
       if (current.locked && operation.changes.locked === false && Object.keys(operation.changes).length !== 1) throw new StudioError('LOCKED', '请通过单独的锁定操作明确解锁。', { elementId: id });
-      const { id: _id, version: _version, ...changes } = operation.changes;
+      const { id: _id, version: _version, ...changes } = copy(operation.changes);
+      if (current.type === 'table' && object(changes.data) && Object.hasOwn(changes.data, 'rows')) {
+        // Legacy full-matrix writes cannot establish which rows survived a structural edit.
+        if (!Object.hasOwn(changes.data, 'rowIds')) changes.data.rowIds = (Array.isArray(changes.data.rows) ? changes.data.rows : []).map((_, index) => `${id}:row:v${current.version + 1}:${index}`);
+        if (!Object.hasOwn(changes.data, 'columnIds')) changes.data.columnIds = Array.from({ length: Math.max(0, ...(Array.isArray(changes.data.rows) ? changes.data.rows.filter(Array.isArray).map(row => row.length) : [])) }, (_, index) => `${id}:col:v${current.version + 1}:${index}`);
+      }
       const next = normalizeElement({ ...current, ...copy(changes) }, id); next.version = current.version + 1;
       if (next.type === 'html') next.sourceRevision = current.html === next.html ? current.sourceRevision ?? 1 : Number(current.sourceRevision ?? 0) + 1;
       assertLockedGeometry(content, { ...content, elements: content.elements.map(element => element.id === id ? next : element) }, baseline);
@@ -166,6 +233,23 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     return [...elementChanges(before, after), ...(orderChanged(before, after) ? [{ id: '$order', before: orderUnit(before), after: orderUnit(after) }] : []), ...(['style', 'motion'] as const).flatMap(key => same(before[key], after[key]) ? [] : [{ id: `$${key}`, before: before[key], after: after[key] }])];
   },
   readUnit(content, id) { return id === '$style' ? content.style : id === '$motion' ? content.motion : id === '$order' ? orderUnit(content) : content.elements.find(item => item.id === id) ?? null; },
+  undoUnit(content, change, history = []) {
+    const current = this.readUnit(content, change.id);
+    if (change.id === '$order' || !object(change.before) || !object(change.after) || !object(current)) {
+      if (!jsonEqual(current, change.after)) throw new StudioError('CONFLICT', '后来有人修改了这项内容，不能直接撤回。', { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, ['.']) });
+      this.restoreUnit(content, change, history); return;
+    }
+    if (change.id === '$style' || change.id === '$motion') {
+      const merged = mergeJson(change.after, change.before, current);
+      if (merged.conflicts.length) throw new StudioError('CONFLICT', '后来有人修改了要撤回的字段，未覆盖他人的编辑。', { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, merged.conflicts) });
+      this.restoreUnit(content, { ...change, before: merged.result }, history); return;
+    }
+    // The history layer checks incarnation before computing a field-level inverse.
+    const after = change.after as unknown as BoardElement, live = current as unknown as BoardElement;
+    const merged = safeElementMerge(after, change.before as unknown as BoardElement, live);
+    if (merged.conflicts.length) throw new StudioError('CONFLICT', '后来有人修改了要撤回的字段，未覆盖他人的编辑。', { elementId: change.id, currentVersion: live.version, ...mergeConflictDetails(change.after, change.before, current, merged.conflicts) });
+    this.restoreUnit(content, { ...change, before: { ...merged.result as Record<string, unknown>, id: live.id, version: live.version, ...(live.sourceRevision !== undefined ? { sourceRevision: live.sourceRevision } : {}) } }, history);
+  },
   restoreUnit(content, change, history = []) {
     if (change.id === '$style') { content.style = copy(change.before) as WhiteboardContent['style']; return; }
     if (change.id === '$motion') { content.motion = copy(change.before) as WhiteboardContent['motion']; return; }
@@ -210,7 +294,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     const unlocked = current.elements.find(element => element.locked && restored.elements.some(next => next.id === element.id && !next.locked));
     if (unlocked) throw new StudioError('LOCKED', '恢复历史不能隐式解锁对象，请先单独明确解锁。', { elementId: unlocked.id });
   },
-  snapshotFeedback(artifactId, feedbackId, snapshots, value, versions) {
+  snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
     const anchor: Anchor = object(value) ? copy(value) : {};
     if (anchor.elementIds !== undefined && (!Array.isArray(anchor.elementIds) || anchor.elementIds.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '备注元素定位无效。');
     if (anchor.coordinateSpace !== undefined && !['board', 'element', 'html'].includes(anchor.coordinateSpace)) throw new StudioError('INVALID_ARGUMENT', '备注坐标空间无效。');
@@ -239,6 +323,8 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (!selected || ambiguous) throw new StudioError('CONFLICT', '原选区的对象版本已不可用，请重新选择目标后保存备注。', { elementId: id, version: versions[id] });
       return selected;
     });
+    // Historical source references remain valid; current-element coordinates cannot cross reincarnation.
+    if (anchor.coordinateSpace === 'element') for (const element of elements) if (element.version < (clocks?.[element.id]?.incarnationStart ?? 1)) throw new StudioError('CONFLICT', '原选区属于已删除的对象，请重新选择目标后保存备注。', { elementId: element.id, version: element.version });
     const sources: SourceSnapshot[] = elements.map(element => typeof element.html === 'string'
       ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) }
       : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });

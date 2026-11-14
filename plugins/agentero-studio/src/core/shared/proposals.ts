@@ -89,7 +89,7 @@ export function updateProposal<C, O extends ContentOperation, A, S>(state: Artif
     if (new Set(options.map(option => option.id)).size !== options.length || new Set(options.map(option => option.label)).size !== options.length || new Set(options.map(option => digest(option.operations))).size !== options.length) throw new StudioError('INVALID_ARGUMENT', '建议方案的 ID、名称和内容必须各不相同。');
     const id = randomUUID(), anchor = object(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor)) > 32 * 1024) throw new StudioError('TOO_LARGE', '建议定位信息过大。');
-    const frozen = adapter.snapshotFeedback(state.artifact.id, id, [state, ...state.history.slice().reverse()], anchor);
+    const frozen = adapter.snapshotFeedback(state.artifact.id, id, [state, ...state.history.slice().reverse()], anchor, undefined, state.unitClocks);
     const proposal: Proposal = { audience: 'owner', expiresAt: new Date(Date.now() + LIFETIME).toISOString(), options, ...(creationId ? { creationId } : {}), fingerprint, receipts: [] };
     if (Buffer.byteLength(JSON.stringify(proposal)) > 256 * 1024) throw new StudioError('TOO_LARGE', '建议及目标快照超过 256 KB，请缩小建议范围。');
     state.feedback.push({ id, artifactId: state.artifact.id, type: 'comment', anchor: frozen.anchor, author: copy(actor), text: message, status: 'open', createdAt: now, updatedAt: now, replies: [], versions: copy(frozen.versions), proposal });

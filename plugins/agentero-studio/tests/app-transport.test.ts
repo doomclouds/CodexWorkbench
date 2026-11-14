@@ -10,6 +10,17 @@ function transport(run: (request: UiHttpRequest) => Promise<Response> = async ()
 const request = (path = '/api/tools/artifact_list', body = '{}') => ({ action: 'request' as const, path, method: 'POST' as const, headers: { 'content-type': 'application/json' }, body: Buffer.from(body).toString('base64') });
 
 describe('App-only backend transport', () => {
+  it('accepts bounded collaboration waits and room writes without exposing credentials or an infinite stream', () => {
+    const path = '/api/sync?artifactId=one&after=epoch_1:15&wait=20000&peerId=view-one&peerEpoch=page-one';
+    expect(validateUiRequest({ path, method: 'GET', headers: {} }).path).toBe(path);
+    expect(validateUiRequest({ path: '/api/room?artifactId=one', method: 'POST', headers: { 'Content-Type': 'application/json' } }).path).toBe('/api/room?artifactId=one');
+    for (const query of ['wait=-1', 'wait=20001', 'wait=1e3', 'after=invalid', 'after=epoch:1&after=epoch:2', 'peerId=../x', 'peerEpoch=', 'token=private', 'share=private', 'unknown=1']) {
+      expect(() => validateUiRequest({ path: `/api/sync?artifactId=one&${query}`, method: 'GET', headers: {} })).toThrow();
+    }
+    expect(() => validateUiRequest({ path: '/api/sync', method: 'POST', headers: {} })).toThrow();
+    expect(() => validateUiRequest({ path: '/api/room', method: 'GET', headers: {} })).toThrow();
+    expect(() => validateUiRequest({ path: '/api/events', method: 'GET', headers: {} })).toThrow();
+  });
   it('preserves complete UI JSON without the model payload budget', async () => {
     const html = '<p>完整源码😀</p>'.repeat(30000), expected = JSON.stringify({ ok: true, data: { html } });
     const app = transport(async input => { expect(input.path).toBe('/api/tools/artifact_read'); return new Response(expected, { headers: { 'content-type': 'application/json' } }); });

@@ -6,6 +6,8 @@ Agentero Studio 是 CodexWorkbench 中面向 Codex 的独立插件实现。本�
 
 本插件不分发 open-artifacts 中还原的 Anthropic 编辑器、Anthropicons 字体、原始提示词或图种参考文档。这里的中文 Skill 围绕 Studio 的工具契约重新编写，不是原有 `claude-whiteboard` 指令的逐段翻译。
 
+`src/core/shared/safe-merge.ts` 的行级差异算法改编自 open-artifacts 的 MIT 本地服务器 `skills/claude-whiteboard/scripts/artifact.mjs`（提交 `d9e5123f888228cacdab69a157a4e94d2d1c629c`）。版权归属 Copyright (c) 2026 Jim Liu 宝玉。原 MIT 许可与署名保留在该模块的许可注释中，并随预构建运行资源分发。本插件将其真正冲突策略调整为保留双方并拒绝静默覆盖。
+
 Diagram Design 是用户可另行启用的外部插件／Skill。Studio 仅在其对当前 Agent 可用时组合使用，不将其实现、图种参考或示例打包为本插件的一部分。其名称仅用于标识可选能力，相关权利及许可由各自权利人保留。
 
 本插件不隶属于 Anthropic，也不借助 Claude 登录态、claude.ai 私有接口或 DeepSeek Harness 的宿主扩展运行。

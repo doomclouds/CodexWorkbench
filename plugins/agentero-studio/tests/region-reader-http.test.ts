@@ -27,7 +27,12 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 async function create(token = host.token, artifactId = board.artifact.id, regionId = 'html-one') {
-  const response = await fetch(`${host.origin}/api/region-view`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, regionId, viewId }) });
+  let cookie = '';
+  if (token !== host.token) {
+    const joined = await fetch(`${host.origin}/api/session?artifactId=${artifactId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: `Reader ${token.slice(0, 8)}` }) });
+    cookie = joined.headers.get('set-cookie')?.split(';')[0] ?? '';
+  }
+  const response = await fetch(`${host.origin}/api/region-view`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify({ artifactId, regionId, viewId }) });
   return { response, result: await response.json() };
 }
 function readerRequest(link: string, suffix = '', init?: RequestInit) {

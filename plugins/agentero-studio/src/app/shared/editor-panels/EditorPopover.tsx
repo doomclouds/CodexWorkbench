@@ -11,6 +11,7 @@ export interface EditorPopoverProps {
   className?: string;
   id?: string;
   hideHeading?: boolean;
+  persistent?: boolean;
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -18,7 +19,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 /** A non-modal popover. Its parent provides the anchor's positioning context. */
-export function EditorPopover({ title, onClose, anchorRef, children, className = '', id, hideHeading = false }: EditorPopoverProps) {
+export function EditorPopover({ title, onClose, anchorRef, children, className = '', id, hideHeading = false, persistent = false }: EditorPopoverProps) {
   const generatedId = useId();
   const headingId = `${id || generatedId}-heading`;
   const root = useRef<HTMLDivElement>(null);
@@ -50,14 +51,16 @@ export function EditorPopover({ title, onClose, anchorRef, children, className =
   useEffect(() => {
     const node = root.current;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    node?.focus({ preventScroll: true });
+    if (!persistent) node?.focus({ preventScroll: true });
     const outside = (event: PointerEvent) => {
+      if (persistent) return;
       if (event.target instanceof Element && event.target.closest('[data-studio-comment-menu], .studio-editor-submenu')) return;
       if (!(event.target instanceof Node) || root.current?.contains(event.target) || anchorRef?.current?.contains(event.target)) return;
       close.current();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || isEditableTarget(event.target)) return;
+      if (persistent && (!(event.target instanceof Node) || !node?.contains(event.target))) return;
       event.stopPropagation();
       close.current();
     };
@@ -71,7 +74,7 @@ export function EditorPopover({ title, onClose, anchorRef, children, className =
         if (target?.isConnected) target.focus({ preventScroll: true });
       }
     };
-  }, [anchorRef, host]);
+  }, [anchorRef, host, persistent]);
 
   const content = <div ref={root} id={id} role="dialog" aria-modal="false" aria-labelledby={hideHeading ? undefined : headingId} aria-label={hideHeading ? title : undefined} tabIndex={-1}
     className={`studio-editor-popover ${placement?.above ? 'is-above ' : ''}${className}`} style={{ position: 'fixed', left: placement?.left || 0, top: placement?.top || 0, maxHeight: placement?.maxHeight, visibility: placement ? 'visible' : 'hidden', '--studio-popover-arrow': `${placement?.arrow || 16}px` } as CSSProperties}>

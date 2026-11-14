@@ -95,6 +95,13 @@ function validateState(value: unknown, products: ProductRegistry): ArtifactState
   if (!object(state) || state.schemaVersion !== 2 || !('content' in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object(state.sources) || !object(state.assets)) throw invalid();
   validateMetadata(state.artifact); const { id, type, revision } = state.artifact, product = products.get(type);
   product.adapter.validate(state.content);
+  if (state.unitClocks !== undefined) {
+    if (!object(state.unitClocks)) throw invalid('备份对象版本时钟无效。');
+    for (const [unitId, clock] of Object.entries(state.unitClocks)) {
+      safeId(unitId.startsWith('$') ? unitId.slice(1) : unitId, '内容单元 ID');
+      if (!object(clock) || !Number.isSafeInteger(clock.version) || Number(clock.version) < 1 || !Number.isSafeInteger(clock.incarnationStart) || Number(clock.incarnationStart) < 1 || Number(clock.incarnationStart) > Number(clock.version) || clock.sourceRevision !== undefined && (!Number.isSafeInteger(clock.sourceRevision) || Number(clock.sourceRevision) < 1)) throw invalid('备份对象版本时钟无效。');
+    }
+  }
   const historyIds = new Set<string>(), revisions = new Set<number>();
   for (const saved of state.history) {
     if (!object(saved) || !object(saved.entry)) throw invalid('备份历史记录无效。');
@@ -145,6 +152,7 @@ function walk(value: unknown, visit?: (record: Record<string, unknown>, key: str
 function portable(state: ArtifactState<unknown>): ArtifactState<unknown> {
   // Pick the envelope explicitly: exports cannot accidentally include future daemon state.
   const snapshot: ArtifactState<unknown> = { schemaVersion: 2, artifact: copy(state.artifact), content: copy(state.content), history: copy(state.history), feedback: copy(state.feedback), sources: copy(state.sources), assets: copy(state.assets), operations: [], sharing: { enabled: false, generation: 0, tokens: {} } };
+  if (state.unitClocks) snapshot.unitClocks = copy(state.unitClocks);
   snapshot.artifact.sharing = false;
   for (const saved of snapshot.history) saved.artifact.sharing = false;
   for (const feedback of snapshot.feedback) { delete feedback.targetViewId; if (feedback.status === 'processing') feedback.status = 'pending'; }

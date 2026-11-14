@@ -1,15 +1,19 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
-import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Role, type ToolName } from '../contracts/studio.js';
-import { StudioError, StudioService } from '../core/service.js';
+import { TOOL_NAMES, type Actor, type Role, type ToolName } from '../contracts/studio.js';
+import { StudioError, StudioService, type StudioAuthority } from '../core/service.js';
+import { safeId, text } from '../core/shared/common.js';
 import { MAX_ARCHIVE_BYTES } from '../core/shared/archive.js';
 import { createGuestSessions } from './guest-session.js';
 import { createRegionReaders } from './region-reader.js';
 import { lanAddresses } from './lan-addresses.js';
+import { createCollaborationRoutes } from './collaboration-routes.js';
+import { SERVICE_PROTOCOL_VERSION } from './service-protocol.js';
+import { PLUGIN_VERSION } from '../contracts/version.js';
 
-interface Auth { actor: Actor; token: string; artifactId?: string; owner: boolean }
-interface Live { response: ServerResponse; auth: Auth; artifactId: string; dispose: () => void }
+interface Auth { actor: Actor; token: string; artifactId?: string; owner: boolean; access: 'local' | 'lan'; viaLan: boolean; authority: StudioAuthority }
+interface Invitation { title: string; role: Exclude<Role, 'owner'> }
 export interface StudioHost { service: StudioService; origin: string; token: string; hasActiveReaders(): boolean; close(): Promise<void> }
 const MAX_BODY = 21 * 1024 * 1024;
 // A listening socket on one of these ports is still rejected by browser Fetch.
@@ -29,8 +33,31 @@ function equal(a: string, b: string) { const left = Buffer.from(a), right = Buff
 function failure(response: ServerResponse, error: unknown) {
   if (response.headersSent) { response.end(); return; }
   const code = error instanceof StudioError ? error.code : 'INTERNAL_ERROR';
-  const status = ({ UNAUTHORIZED: 401, FORBIDDEN: 403, NOT_FOUND: 404, TRASHED: 410, CONFLICT: 409, OPERATION_REUSED: 409, TOO_LARGE: 413, BUSY: 409, CLOSED: 503 } as Record<string, number>)[code] ?? (error instanceof StudioError ? 400 : 500);
-  json(response, status, { ok: false, error: { code, message: error instanceof Error ? error.message : 'Studio 操作失败。', ...(error instanceof StudioError && error.details !== undefined ? { details: error.details } : {}) } });
+  const status = ({ UNAUTHORIZED: 401, FORBIDDEN: 403, NAME_REQUIRED: 428, NAME_TAKEN: 409, NAME_ALREADY_SET: 409, NOT_FOUND: 404, TRASHED: 410, CONFLICT: 409, OPERATION_REUSED: 409, TOO_LARGE: 413, BUSY: 409, CLOSED: 503 } as Record<string, number>)[code] ?? (error instanceof StudioError ? 400 : 500);
+  const details = error instanceof StudioError && error.details !== undefined ? error.details : code === 'UNAUTHORIZED' ? { reason: 'invalid-link' } : undefined;
+  json(response, status, { ok: false, error: { code, message: error instanceof Error ? error.message : 'Studio 操作失败。', ...(details !== undefined ? { details } : {}) } });
+}
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
+function accessPage(response: ServerResponse, status: number, title: string, content: string) {
+  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Agentero 创作</title><style>
+:root{color-scheme:light dark;--bg:#f7f6f3;--card:#fff;--fg:#1f1e1d;--muted:#6b6a66;--line:#e3e1dc;--accent:#c96442}
+@media(prefers-color-scheme:dark){:root{--bg:#1f1e1d;--card:#2a2927;--fg:#f2f1ee;--muted:#a8a6a0;--line:#3a3936}}
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Microsoft YaHei",sans-serif}
+main{width:min(420px,100%);padding:28px;background:var(--card);border:1px solid var(--line);border-radius:14px}h1{font-size:20px;line-height:1.4;margin:0 0 8px;overflow-wrap:anywhere}p{margin:0 0 20px;color:var(--muted)}
+label{display:block;font-size:13px;margin-bottom:8px;color:var(--muted)}input,button{width:100%;font:inherit;border-radius:8px}input{padding:10px 11px;border:1px solid var(--line);background:transparent;color:inherit}button{margin-top:16px;padding:10px;border:0;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}.note{margin:14px 0 0;font-size:12px}[role=alert]{color:light-dark(#a53131,#ff9b9b)}
+</style></head><body><main>${content}</main></body></html>`;
+  response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'", 'Content-Length': Buffer.byteLength(html) }); response.end(html);
+}
+function namePage(response: ServerResponse, artifactId: string, token: string, invitation: Invitation, error = '', name = '', status = 200) {
+  const action = `/api/session?${new URLSearchParams({ artifactId, share: token })}`;
+  const role = { editor: '编辑', commenter: '评论', viewer: '查看' }[invitation.role];
+  accessPage(response, status, invitation.title, `<h1>${escapeHtml(invitation.title)}</h1><p>你被邀请${role}这块白板。</p>${error ? `<p role="alert">${escapeHtml(error)}</p>` : ''}<form method="post" action="${escapeHtml(action)}"><label for="guest-name">你的名字（别人会在你的评论和编辑上看到它）</label><input id="guest-name" name="name" autocomplete="nickname" maxlength="60" required autofocus value="${escapeHtml(name)}"><button type="submit">打开白板</button></form><p class="note">这个浏览器会记住你的身份；所有者可以随时移除。</p>`);
+}
+function deniedPage(response: ServerResponse, error: StudioError) {
+  const reason = (error.details as { reason?: string } | undefined)?.reason;
+  const messages: Record<string, string> = { removed: '所有者已移除你的访问权限。', 'sharing-closed': '这块白板的分享已关闭。', 'link-disabled': '这个角色的邀请链接已停用。', 'link-reset': '这个邀请链接已重置，旧链接已失效。', 'local-only': '这块白板目前仅允许在所有者电脑上访问。', 'invalid-link': '这个分享链接无效。' };
+  accessPage(response, error.code === 'FORBIDDEN' ? 403 : 401, '无权访问', `<h1>无权访问</h1><p>${escapeHtml(messages[reason ?? ''] ?? '这块白板没有分享给你。')}请向所有者索取有效链接。</p>`);
 }
 async function body(request: IncomingMessage, maximum = MAX_BODY) {
   if (Number(request.headers['content-length']) > maximum) { request.resume(); throw new StudioError('TOO_LARGE', '请求内容过大。'); }
@@ -65,12 +92,12 @@ function exportContentType(mimeType: string) {
   const mediaType = mimeType.split(';', 1)[0]!.trim().toLowerCase();
   return mediaType.startsWith('text/') || mediaType === 'image/svg+xml' || mediaType === 'application/json' ? `${mediaType}; charset=utf-8` : mimeType;
 }
-export async function startStudioHost(options: { dataRoot?: string; html?: string; port?: number } = {}): Promise<StudioHost> {
+export async function startStudioHost(options: { dataRoot?: string; html?: string; port?: number; ownerName?: string } = {}): Promise<StudioHost> {
   if (options.port && BROWSER_BLOCKED_PORTS.has(options.port)) throw new StudioError('INVALID_ARGUMENT', `浏览器禁止访问端口 ${options.port}，请选择其他端口。`);
-  const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes(32).toString('base64url');
-  const guestSession = createGuestSessions(service.dataRoot);
+  const service = new StudioService({ dataRoot: options.dataRoot, ownerName: options.ownerName }), token = randomBytes(32).toString('base64url');
+  const guestSession = await createGuestSessions(service.dataRoot);
   const regionReaders = createRegionReaders(service);
-  const lives = new Set<Live>(), servers = new Set<Server>(), sockets = new Set<Socket>();
+  const servers = new Set<Server>(), sockets = new Set<Socket>();
   let origin = '', lan: Server | undefined, sharingOrigin = '', startingLan: Promise<string> | undefined, stopping = false;
   function server() {
     const instance = createServer((request, response) => { void handle(request, response).catch(error => failure(response, error)); });
@@ -79,29 +106,32 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     servers.add(instance); return instance;
   }
   const local = server();
-  async function authorize(request: IncomingMessage, response: ServerResponse, url: URL, artifactId?: string): Promise<Auth> {
-    const bearer = header(request, 'authorization').replace(/^Bearer\s+/i, '');
-    const provided = bearer || url.searchParams.get('token') || url.searchParams.get('share') || '';
+  const viaLan = (request: IncomingMessage) => request.socket.localPort !== (local.address() as AddressInfo | null)?.port;
+  const providedToken = (request: IncomingMessage, url: URL) => header(request, 'authorization').replace(/^Bearer\s+/i, '') || url.searchParams.get('token') || url.searchParams.get('share') || '';
+  async function authorize(request: IncomingMessage, response: ServerResponse, url: URL, artifactId?: string, registration?: { name: unknown }): Promise<Auth> {
+    const provided = providedToken(request, url), scope = artifactId ?? url.searchParams.get('artifactId') ?? undefined, lanRequest = viaLan(request);
     if (provided && equal(provided, token)) {
-      const actor: Actor = header(request, 'x-studio-actor') === 'agent' ? { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' } : { ...LOCAL_ACTOR };
-      return { actor, token: provided, owner: true, ...(artifactId ? { artifactId } : {}) };
+      const access = scope ? await service.accessMode(scope, lanRequest, true) : 'local';
+      let agentName = header(request, 'x-studio-agent-name');
+      if (agentName) { try { agentName = decodeURIComponent(agentName); } catch { throw new StudioError('INVALID_ARGUMENT', 'Agent 名称编码无效。'); } }
+      const actor: Actor = header(request, 'x-studio-actor') === 'agent' ? { id: header(request, 'x-studio-agent-id') ? safeId(header(request, 'x-studio-agent-id'), 'Agent ID') : 'codex', name: agentName ? text(agentName, 'Codex', 60).trim() || 'Codex' : 'Codex', kind: 'agent', role: 'owner' } : { ...service.owner };
+      return { actor, token: provided, owner: true, access, viaLan: lanRequest, authority: { owner: true, actorId: actor.id, viaLan: lanRequest }, ...(scope ? { artifactId: scope } : {}) };
     }
-    const scope = artifactId ?? url.searchParams.get('artifactId') ?? undefined;
-    if (scope && provided) {
-      const id = guestSession(request, response), actor = await service.guestActor(scope, provided, `guest-${id}`, (header(request, 'x-studio-name') || `访客 ${id.slice(0, 6)}`).slice(0, 60));
-      if (actor) return { actor, token: provided, artifactId: scope, owner: false };
+    const access = scope ? await service.accessMode(scope, lanRequest) : 'local';
+    if (scope) {
+      const id = provided ? guestSession(request, response) : guestSession.read(request);
+      if (!id) throw new StudioError('UNAUTHORIZED', '请使用有效邀请链接加入白板。', { reason: 'invalid-link' });
+      if (!provided && request.method !== 'GET' && request.method !== 'OPTIONS') {
+        const requestOrigin = header(request, 'origin'), expectedOrigin = `http://${header(request, 'host')}`;
+        if (requestOrigin && requestOrigin !== expectedOrigin) throw new StudioError('FORBIDDEN', '不能从其他来源使用白板会话修改内容。');
+      }
+      const actor = await service.guestActor(scope, provided || undefined, `guest-${id}`, registration, lanRequest);
+      return { actor, token: provided, artifactId: scope, owner: false, access, viaLan: lanRequest, authority: { owner: false, actorId: actor.id, credential: provided || undefined, viaLan: lanRequest } };
     }
-    throw new StudioError('UNAUTHORIZED', '连接凭据无效，或分享已关闭。');
+    throw new StudioError('UNAUTHORIZED', '分享链接无效。', { reason: 'invalid-link' });
   }
   function scope(auth: Auth, artifactId: unknown) { if (!auth.owner && artifactId !== auth.artifactId) throw new StudioError('FORBIDDEN', '分享链接只能访问对应的作品。'); }
-  function endLive(live: Live, reason: string) {
-    if (!lives.delete(live)) return;
-    live.response.write(`data: ${JSON.stringify({ type: 'access-revoked', artifactId: live.artifactId, reason })}\n\n`); live.dispose(); live.response.end();
-  }
-  service.subscribe('*', event => {
-    if (event.type !== 'share') return;
-    for (const live of [...lives]) if (!live.auth.owner && live.artifactId === event.artifactId && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(live.auth.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(live.auth.actor.id))) endLive(live, '分享权限已变更，请重新连接。');
-  });
+  const collaborationRoutes = createCollaborationRoutes({ service, authorize, scope, readJson, json });
   service.configureSharing(async enabled => {
     if (enabled) {
       if (lan?.listening) return sharingOrigin;
@@ -119,6 +149,7 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     response.setHeader('Referrer-Policy', 'no-referrer');
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
+    if (await collaborationRoutes.handle(request, response, url)) return;
     if (url.pathname === '/api/region-view' && (request.method === 'POST' || request.method === 'GET')) {
       const input = request.method === 'POST' ? await readJson(request) : {}, artifactId = typeof input.artifactId === 'string' ? input.artifactId : url.searchParams.get('artifactId') ?? '';
       const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
@@ -131,6 +162,7 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     if (reader && (request.method === 'GET' && !reader[3] || request.method === 'POST' && reader[3])) {
       const capability = header(request, 'authorization').replace(/^Bearer\s+/i, '');
       const artifactId = decodeURIComponent(reader[1]!), regionId = decodeURIComponent(reader[2]!);
+      await service.accessMode(artifactId, viaLan(request));
       if ([...url.searchParams.keys()].some(key => key !== 'metadata') || url.searchParams.has('metadata') && url.searchParams.get('metadata') !== '1') throw new StudioError('INVALID_ARGUMENT', '阅读请求参数无效。');
       let data;
       if (reader[3]) {
@@ -159,36 +191,38 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
       if (!TOOL_NAMES.includes(name as ToolName)) throw new StudioError('UNKNOWN_TOOL', 'Studio 操作不存在。');
       const envelope = await readJson(request);
       const args = envelope.arguments && typeof envelope.arguments === 'object' && !Array.isArray(envelope.arguments) ? envelope.arguments as Record<string, unknown> : envelope.args && typeof envelope.args === 'object' && !Array.isArray(envelope.args) ? envelope.args as Record<string, unknown> : envelope;
-      const artifactId = typeof args.artifactId === 'string' ? args.artifactId : undefined;
+      const createsArtifact = name === 'artifact_manage' && ['create', 'import'].includes(typeof args.action === 'string' ? args.action : 'create');
+      const artifactId = createsArtifact && equal(providedToken(request, url), token) ? '' : typeof args.artifactId === 'string' ? args.artifactId : undefined;
       const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
-      if (!auth.owner && ['artifact_list', 'artifact_manage', 'artifact_share'].includes(name)) throw new StudioError('FORBIDDEN', '访客不能管理作品库或分享权限。');
+      if (!auth.owner && (['artifact_list', 'artifact_manage'].includes(name) || name === 'artifact_share' && args.action !== undefined && args.action !== 'status')) throw new StudioError('FORBIDDEN', '访客不能管理作品库或分享权限。');
       if (!auth.owner && name === 'studio_open') args.artifactId = auth.artifactId;
-      const data = await service.execute(name as ToolName, args, auth.actor); json(response, 200, { ok: true, data }); return;
+      const data = await service.execute(name as ToolName, args, auth.actor, auth.authority); json(response, 200, { ok: true, data }); return;
+    }
+    if (url.pathname === '/api/session' && request.method === 'POST') {
+      const form = /^application\/x-www-form-urlencoded(?:;|$)/i.test(header(request, 'content-type'));
+      const input = form ? Object.fromEntries(new URLSearchParams((await body(request, 8192)).toString('utf8'))) : await readJson(request);
+      const artifactId = typeof input.artifactId === 'string' ? input.artifactId : url.searchParams.get('artifactId') ?? '';
+      try {
+        const auth = await authorize(request, response, url, artifactId, { name: input.name });
+        if (form && !auth.owner) { response.writeHead(303, { Location: `/?${new URLSearchParams({ artifactId })}`, 'Cache-Control': 'no-store' }); response.end(); }
+        else json(response, 200, { actor: auth.actor, artifactId: auth.artifactId, owner: auth.owner, access: auth.access, serviceProtocol: SERVICE_PROTOCOL_VERSION, pluginVersion: PLUGIN_VERSION, agentAvailable: false });
+      } catch (error) {
+        if (!form || !(error instanceof StudioError)) throw error;
+        const invitation = (error.details as { invitation?: Invitation } | undefined)?.invitation;
+        if (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN') deniedPage(response, error);
+        else if (invitation) namePage(response, artifactId, providedToken(request, url), invitation, error.message, typeof input.name === 'string' ? input.name : '', ['NAME_TAKEN', 'NAME_ALREADY_SET'].includes(error.code) ? 409 : 400);
+        else throw error;
+      }
+      return;
     }
     if (url.pathname === '/api/session' && request.method === 'GET') {
       const auth = await authorize(request, response, url);
-      json(response, 200, { actor: auth.actor, artifactId: auth.artifactId, owner: auth.owner, agentAvailable: false }); return;
-    }
-    if (url.pathname === '/api/events' && request.method === 'GET') {
-      const artifactId = url.searchParams.get('artifactId') ?? '', auth = await authorize(request, response, url, artifactId || undefined); scope(auth, artifactId || undefined);
-      if (artifactId) await service.execute('artifact_read', { artifactId, mode: 'summary' }, auth.actor);
-      response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
-      response.write(`retry: 1500\ndata: ${JSON.stringify({ type: 'ready', artifactId, actor: auth.actor })}\n\n`);
-      const unsubscribe = service.subscribe(artifactId, event => { if (!response.writableEnded) response.write(`data: ${JSON.stringify(event)}\n\n`); });
-      const timer = setInterval(() => { if (!response.writableEnded) response.write(': keep-alive\n\n'); }, 15_000); timer.unref();
-      const live: Live = { response, auth, artifactId, dispose: () => { clearInterval(timer); unsubscribe(); } }; lives.add(live);
-      response.on('close', () => { lives.delete(live); live.dispose(); }); return;
-    }
-    if (url.pathname === '/api/presence' && (request.method === 'GET' || request.method === 'POST')) {
-      const input = request.method === 'POST' ? await readJson(request) : {}, artifactId = typeof input.artifactId === 'string' ? input.artifactId : url.searchParams.get('artifactId') ?? '';
-      const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
-      const result = request.method === 'POST' ? await service.updatePresence(artifactId, input, auth.actor) : { peers: service.getPresence(artifactId), timer: service.getTimer(artifactId) };
-      json(response, 200, result); return;
+      json(response, 200, { actor: auth.actor, artifactId: auth.artifactId, owner: auth.owner, access: auth.access, serviceProtocol: SERVICE_PROTOCOL_VERSION, pluginVersion: PLUGIN_VERSION, agentAvailable: false }); return;
     }
     if (url.pathname === '/api/assets' && request.method === 'POST') {
       const artifactId = url.searchParams.get('artifactId') ?? '', auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
       let filename = header(request, 'x-filename') || 'resource'; try { filename = decodeURIComponent(filename); } catch { /* A literal filename is still usable. */ }
-      const result = await service.putAsset(artifactId, await body(request, 20 * 1024 * 1024), { filename, mimeType: header(request, 'x-content-type') || header(request, 'content-type') }, auth.actor);
+      const result = await service.putAsset(artifactId, await body(request, 20 * 1024 * 1024), { filename, mimeType: header(request, 'x-content-type') || header(request, 'content-type') }, auth.actor, auth.authority);
       json(response, 200, result); return;
     }
     if (url.pathname === '/api/import' && request.method === 'POST') {
@@ -213,8 +247,17 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
       response.writeHead(200, { 'Content-Type': exportContentType(result.mimeType), 'Content-Length': result.size, 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`, 'X-Content-Type-Options': 'nosniff' }); response.end(result.data); return;
     }
     if ((url.pathname === '/' || url.pathname === '/index.html') && request.method === 'GET') {
-      const auth = await authorize(request, response, url);
-      const boot = JSON.stringify({ baseUrl: `http://${request.headers.host ?? new URL(origin).host}`, token: auth.token, actor: auth.actor, ...(auth.artifactId ? { artifactId: auth.artifactId } : url.searchParams.get('artifactId') ? { artifactId: url.searchParams.get('artifactId') } : {}) }).replace(/</g, '\\u003c');
+      let auth: Auth;
+      try { auth = await authorize(request, response, url); }
+      catch (error) {
+        if (!(error instanceof StudioError)) throw error;
+        const invitation = (error.details as { invitation?: Invitation } | undefined)?.invitation;
+        if (error.code === 'NAME_REQUIRED' && invitation) namePage(response, url.searchParams.get('artifactId') ?? '', providedToken(request, url), invitation);
+        else if (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN') deniedPage(response, error);
+        else throw error;
+        return;
+      }
+      const boot = JSON.stringify({ baseUrl: `http://${request.headers.host ?? new URL(origin).host}`, token: auth.owner ? auth.token : '', actor: auth.actor, access: auth.access, serviceProtocol: SERVICE_PROTOCOL_VERSION, pluginVersion: PLUGIN_VERSION, ...(auth.artifactId ? { artifactId: auth.artifactId } : url.searchParams.get('artifactId') ? { artifactId: url.searchParams.get('artifactId') } : {}) }).replace(/</g, '\\u003c');
       const script = `<script>window.__STUDIO_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
       // Bundled JavaScript can contain literal closing head tags from HTML exports.
       const html = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, opening => opening + script) : `${script}${raw}`;
@@ -222,12 +265,12 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     }
     throw new StudioError('NOT_FOUND', '页面不存在。');
   }
-  try { await service.resetSharingSessions(); const port = await listen(local, options.port ?? 0, '127.0.0.1'); origin = `http://127.0.0.1:${port}`; }
+  try { await service.resetSharingSessions(); const port = await listen(local, options.port ?? 0, '127.0.0.1'); origin = `http://127.0.0.1:${port}`; service.configureLocalOrigin(origin); }
   catch (error) { await service.close(); throw error; }
   return { service, origin, token, hasActiveReaders: regionReaders.hasActiveReaders, async close() {
     if (stopping) return; stopping = true;
+    collaborationRoutes.close();
     regionReaders.close();
-    for (const live of [...lives]) endLive(live, 'Studio 服务已退出。');
     await Promise.all([...servers].map(closeServer)); for (const socket of sockets) socket.destroy(); await service.resetSharingSessions(); await service.close();
   } };
 }

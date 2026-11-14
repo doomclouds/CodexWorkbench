@@ -2,6 +2,19 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Actor, HistoryBatch, HistoryEntry } from '../../contracts/studio.js';
 import { assertAlive, copy, object, requireRole, safeId, same, StudioError, text } from './common.js';
 import type { ArtifactMetadata, ArtifactState, ContentOperation, MutationArguments, MutationResult, ProductAdapter, SavedVersion } from './model.js';
+import { jsonEqual, mergeConflictDetails } from './safe-merge.js';
+
+export function initializeVersionClocks<C, O extends ContentOperation, A, S>(state: ArtifactState<C, A, S>, adapter: ProductAdapter<C, O, A, S>): void {
+  if (!adapter.syncVersions) return;
+  if (state.unitClocks === undefined) {
+    state.unitClocks = {};
+    let previous = state.history[0]?.content ?? state.content;
+    for (const saved of state.history) { adapter.syncVersions(saved.content, previous, state.unitClocks, true); previous = saved.content; }
+    adapter.syncVersions(state.content, previous, state.unitClocks, true);
+  }
+  for (const clock of Object.values(state.unitClocks)) if (!object(clock) || !Number.isSafeInteger(clock.version) || clock.version < 1 || !Number.isSafeInteger(clock.incarnationStart) || clock.incarnationStart < 1 || clock.incarnationStart > clock.version || clock.sourceRevision !== undefined && (!Number.isSafeInteger(clock.sourceRevision) || clock.sourceRevision < 1)) throw new StudioError('CORRUPT_ARTIFACT', '作品对象版本时钟无效。');
+  adapter.syncVersions(state.content, state.content, state.unitClocks);
+}
 
 export function createState<Content, Anchor = unknown, Source = unknown>(artifact: ArtifactMetadata, content: Content, actor: Actor, summary: string, changedIds: string[]): ArtifactState<Content, Anchor, Source> {
   const entry: HistoryEntry = { id: randomUUID(), revision: artifact.revision, createdAt: artifact.createdAt, actor: copy(actor), summary, changedIds: [...new Set(changedIds)] };
@@ -65,24 +78,40 @@ export function restoreVersion<C, O extends ContentOperation, A, S>(state: Artif
   const before = state.history[state.history.indexOf(saved) - 1];
   if (saved.entry.actor.id !== actor.id || !before) throw new StudioError('FORBIDDEN', '只能撤回自己提交的内容修改。');
   const differences = adapter.diff(before.content, saved.content);
-  // Check the complete change set before mutating any unit, including product-global units.
-  for (const difference of differences) if (!same(adapter.readUnit(state.content, difference.id), difference.after)) throw new StudioError('CONFLICT', '后来有人修改了这项内容，不能直接撤回。', { elementId: difference.id });
+  // Apply to detached content so any unit conflict leaves the whole transaction intact.
   const restored = copy(current);
-  for (const difference of differences) adapter.restoreUnit(restored, difference, history);
+  for (const difference of differences) {
+    const clock = state.unitClocks?.[difference.id], savedAfter = object(difference.after) ? difference.after.version : undefined, savedBefore = object(difference.before) ? difference.before.version : undefined;
+    if (clock && (typeof savedAfter === 'number' && savedAfter < clock.incarnationStart || difference.after == null && typeof savedBefore === 'number' && savedBefore < clock.version)) throw new StudioError('CONFLICT', '此对象已删除并重建，不能撤回旧对象的事务。', { elementId: difference.id, currentVersion: adapter.versionOf(current, difference.id) });
+    if (adapter.undoUnit) adapter.undoUnit(restored, difference, history);
+    else {
+      if (!same(adapter.readUnit(restored, difference.id), difference.after)) throw new StudioError('CONFLICT', '后来有人修改了这项内容，不能直接撤回。', { elementId: difference.id });
+      adapter.restoreUnit(restored, difference, history);
+    }
+  }
   adapter.validateRestore?.(current, restored, baseline); state.content = restored;
   return differences.map(change => change.id);
 }
 /** Common idempotency, object CAS and history transaction policy, used by every product. */
 export function applyMutation<C, O extends ContentOperation, A, S>(state: ArtifactState<C, A, S>, args: MutationArguments<O>, actor: Actor, adapter: ProductAdapter<C, O, A, S>): MutationResult<C> {
+  // Pure callers receive the same all-or-nothing behavior as locked file transactions.
+  const working = { ...state, artifact: copy(state.artifact), content: copy(state.content), history: [...state.history], operations: [...state.operations], ...(state.unitClocks ? { unitClocks: copy(state.unitClocks) } : {}) };
+  const result = applyWorkingMutation(working, args, actor, adapter);
+  Object.assign(state, working); return result;
+}
+function applyWorkingMutation<C, O extends ContentOperation, A, S>(state: ArtifactState<C, A, S>, args: MutationArguments<O>, actor: Actor, adapter: ProductAdapter<C, O, A, S>): MutationResult<C> {
   requireRole(actor, ['owner', 'editor']); assertAlive(state.artifact);
+  if (args.merge !== undefined && args.merge !== 'safe') throw new StudioError('INVALID_ARGUMENT', 'merge 仅支持 safe。');
   const operationId = safeId(args.operationId ?? randomUUID(), '操作 ID'), operations = args.operations;
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) throw new StudioError('INVALID_ARGUMENT', '每次提交应包含 1 至 200 个操作。');
+  if (operations.some(operation => !object(operation))) throw new StudioError('INVALID_ARGUMENT', '作品操作无效。');
   const fingerprint = createHash('sha256').update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest('hex');
   const duplicate = state.operations.find(item => item.id === operationId);
   if (duplicate) {
     if (duplicate.fingerprint !== fingerprint) throw new StudioError('OPERATION_REUSED', '同一个操作 ID 不能提交不同的修改。');
     const saved = version(state, duplicate.historyId); return { snapshot: copy({ artifact: saved.artifact, content: saved.content }), historyEntry: copy(saved.entry), changed: false };
   }
+  initializeVersionClocks(state, adapter);
   const expected = object(args.expectedVersions) ? args.expectedVersions : undefined;
   if (args.expectedRevision !== undefined && (!Number.isInteger(args.expectedRevision) || Number(args.expectedRevision) < 0)) throw new StudioError('INVALID_ARGUMENT', '预期作品版本无效。');
   if (args.expectedRevision === undefined) {
@@ -101,19 +130,40 @@ export function applyMutation<C, O extends ContentOperation, A, S>(state: Artifa
       if (targets.some(id => typeof id !== 'string' || !Object.hasOwn(expected, id))) throw new StudioError('CONFLICT', '过期提交必须核对所有目标对象的版本。', { revision: state.artifact.revision });
     }
   }
+  const bases = new Map<string, unknown>();
   for (const [id, expectedVersion] of Object.entries(expected ?? {})) {
     if (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 0) throw new StudioError('INVALID_ARGUMENT', '预期对象版本无效。');
     const currentVersion = adapter.versionOf(state.content, id);
-    if (currentVersion !== expectedVersion) throw new StudioError('CONFLICT', '目标对象已被修改，未覆盖他人的编辑。', { elementId: id, expectedVersion, currentVersion, revision: state.artifact.revision });
+    if (currentVersion !== expectedVersion) {
+      const details = { elementId: id, expectedVersion, currentVersion, revision: state.artifact.revision };
+      const targetOperations = operations.filter(operation => mutationTargets(state.content, operation, adapter)?.includes(id));
+      if (args.merge !== 'safe' || !adapter.rebaseUpdate || !targetOperations.length || targetOperations.some(operation => operation.op !== 'update') || id.startsWith('$') || Number(expectedVersion) < (state.unitClocks?.[id]?.incarnationStart ?? 1) || !currentVersion) throw new StudioError('CONFLICT', '目标对象已被修改，未覆盖他人的编辑。', { ...details, ...mergeConflictDetails(null, null, adapter.readUnit(state.content, id), ['.']) });
+      const candidates = state.history.filter(saved => adapter.versionOf(saved.content, id) === expectedVersion).map(saved => adapter.readUnit(saved.content, id));
+      const base = candidates[0];
+      if (base == null || candidates.some(candidate => !jsonEqual(candidate, base))) throw new StudioError('CONFLICT', '原对象版本已不可用，请保留本地修改并比较最新内容。', { ...details, ...mergeConflictDetails(null, null, adapter.readUnit(state.content, id), ['.']) });
+      bases.set(id, copy(base));
+    }
   }
   const baseline = copy(state.content), changedIds: string[] = []; let restoredFrom: string | undefined;
-  for (const operation of operations) {
+  for (let operation of operations) {
     if (!object(operation)) throw new StudioError('INVALID_ARGUMENT', '作品操作无效。');
+    const previous = copy(state.content);
+    if (operation.op === 'update' && operation.id && bases.has(operation.id)) {
+      const id = operation.id;
+      try {
+        const rebased = adapter.rebaseUpdate!(operation, bases.get(id), adapter.readUnit(state.content, id));
+        bases.set(id, rebased.local); operation = rebased.operation;
+      } catch (error) {
+        if (error instanceof StudioError && error.code === 'CONFLICT') throw new StudioError('CONFLICT', error.message, { ...(object(error.details) ? error.details : {}), elementId: id, expectedVersion: expected?.[id], currentVersion: adapter.versionOf(state.content, id), revision: state.artifact.revision });
+        throw error;
+      }
+    }
     if (operation.op === 'restore') {
       const saved = version(state, operation.versionId);
       changedIds.push(...restoreVersion(state, saved, actor, adapter, operation.data?.mode === 'undo' || operation.data?.undo === true || operation.preset === 'undo', restoreUnitIds(operation), baseline));
       restoredFrom = saved.entry.id;
     } else changedIds.push(...adapter.apply(state.content, operation, baseline));
+    if (adapter.syncVersions) adapter.syncVersions(state.content, previous, state.unitClocks!);
   }
   adapter.validate(state.content);
   const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? '恢复作品内容' : '修改作品', 500), changedIds, restoredFrom);

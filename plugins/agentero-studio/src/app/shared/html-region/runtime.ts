@@ -12,8 +12,27 @@ export interface HtmlRuntimeOptions {
   writable?: boolean;
 }
 
+/** Replays newer intent and reports overlaps with remote values included in an own ACK. */
+export function rebaseHtmlState(base: Json, local: Json, accepted: Json): { state: Json; conflicted: boolean } {
+  let conflicted = false;
+  const replay = (before: Json | undefined, after: Json | undefined, current: Json | undefined): Json | undefined => {
+    if (JSON.stringify(before) === JSON.stringify(after)) return current;
+    if (JSON.stringify(after) === JSON.stringify(current) || JSON.stringify(before) === JSON.stringify(current)) return after;
+    if (before && after && current && typeof before === 'object' && typeof after === 'object' && typeof current === 'object' && !Array.isArray(before) && !Array.isArray(after) && !Array.isArray(current)) {
+      return Object.fromEntries([...new Set([...Object.keys(before), ...Object.keys(after), ...Object.keys(current)])].flatMap((key) => {
+        const value = replay(Object.hasOwn(before, key) ? before[key] : undefined, Object.hasOwn(after, key) ? after[key] : undefined, Object.hasOwn(current, key) ? current[key] : undefined);
+        return value === undefined ? [] : [[key, value]];
+      }));
+    }
+    conflicted = true;
+    return after;
+  };
+  const state = replay(base, local, accepted) ?? null;
+  return { state, conflicted };
+}
+
 /** Only the generated rendering copy contains this bridge; region.html stays canonical. */
-function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }): void {
+function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }, rebase: typeof rebaseHtmlState): void {
   let enabled = config.annotation;
   let areaStart: { x: number; y: number } | null = null;
   let pointerStart: { x: number; y: number } | null = null;
@@ -23,16 +42,36 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
   let cursorStyle: HTMLStyleElement | null = null;
   let lastSentAt = 0;
   let embedState: Json = config.state ?? null;
+  let authoritativeState: Json = config.state ?? null;
   let elementVersion = config.elementVersion ?? 0;
+  let writeBaseVersion = elementVersion;
   let saveSequence = 0;
+  let acknowledgedSequence = 0;
+  const submittedStates = new Map<number, Json>();
   const stateListeners = new Set<(state: Json) => void>();
   const cloneState = (value: Json): Json => JSON.parse(JSON.stringify(value)) as Json;
-  const showStateError = (message: string) => window.dispatchEvent(new CustomEvent('studio-embed-error', { detail: { message } }));
-  const receiveState = (value: Json, version: number) => {
-    if (version < elementVersion) return;
+  const showStateError = (message: string, saveId?: number) => window.dispatchEvent(new CustomEvent('studio-embed-error', { detail: { message, saveId, localState: cloneState(embedState), remoteState: cloneState(authoritativeState), version: elementVersion } }));
+  const replaceState = (value: Json) => {
     const changed = JSON.stringify(value) !== JSON.stringify(embedState);
-    embedState = cloneState(value); elementVersion = version;
+    embedState = cloneState(value);
     if (changed) for (const listener of stateListeners) { try { listener(cloneState(embedState)); } catch { /* An embed listener cannot break synchronization. */ } }
+  };
+  const receiveState = (value: Json, version: number, saveId?: number) => {
+    if (saveId !== undefined && (!Number.isInteger(saveId) || saveId <= acknowledgedSequence || !submittedStates.has(saveId))) return;
+    if (version >= elementVersion) { authoritativeState = cloneState(value); elementVersion = version; }
+    if (saveId !== undefined) {
+      const submitted = submittedStates.get(saveId)!;
+      const rebased = rebase(submitted, embedState, value);
+      acknowledgedSequence = saveId;
+      // An own ACK can contain a concurrent remote edit; it is not permission to overwrite it.
+      if (!rebased.conflicted) writeBaseVersion = version;
+      for (const [sequence, state] of submittedStates) {
+        if (sequence <= saveId) submittedStates.delete(sequence);
+        else if (!rebased.conflicted) submittedStates.set(sequence, rebase(submitted, state, value).state);
+      }
+      if (submittedStates.size && !rebased.conflicted) replaceState(rebased.state);
+    }
+    if (!submittedStates.size) { writeBaseVersion = elementVersion; replaceState(authoritativeState); }
   };
   Object.defineProperty(window, 'studioEmbed', { configurable: false, writable: false, value: Object.freeze({
     load: () => cloneState(embedState),
@@ -42,7 +81,8 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
       try { encoded = JSON.stringify(value); } catch { showStateError('嵌入状态必须是可序列化的 JSON 对象。'); return; }
       if (!value || typeof value !== 'object' || Array.isArray(value) || !encoded || new TextEncoder().encode(encoded).byteLength > 65536) { showStateError('嵌入状态必须是 64 KB 以内的 JSON 对象。'); return; }
       embedState = JSON.parse(encoded) as Json;
-      window.parent.postMessage({ type: 'studio-html-state', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, baseVersion: elementVersion, saveId: ++saveSequence, state: cloneState(embedState) }, '*');
+      submittedStates.set(++saveSequence, cloneState(embedState));
+      window.parent.postMessage({ type: 'studio-html-state', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, baseVersion: writeBaseVersion, saveId: saveSequence, state: cloneState(embedState) }, '*');
     },
     onLoad: (listener: (state: Json) => void) => { if (typeof listener !== 'function') throw new TypeError('onLoad 需要一个函数。'); stateListeners.add(listener); return () => stateListeners.delete(listener); },
   }) });
@@ -122,11 +162,15 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
       restoreScroll(); return;
     }
     if (event.data.type === 'studio-html-state-update' && event.data.regionId === config.regionId && Number.isInteger(event.data.version)) {
-      receiveState(event.data.state ?? null, event.data.version); return;
+      receiveState(event.data.state ?? null, event.data.version, event.data.saveId); return;
     }
     if (event.data.type === 'studio-html-state-error' && event.data.regionId === config.regionId) {
-      receiveState(event.data.state ?? null, event.data.version);
-      showStateError(typeof event.data.message === 'string' ? event.data.message : '嵌入状态未能保存。'); return;
+      if (Number.isInteger(event.data.version)) receiveState(event.data.state ?? null, event.data.version);
+      showStateError(typeof event.data.message === 'string' ? event.data.message : '嵌入状态未能保存。', event.data.saveId); return;
+    }
+    if (event.data.type === 'studio-html-state-reset' && event.data.regionId === config.regionId && Number.isInteger(event.data.version)) {
+      submittedStates.clear(); acknowledgedSequence = saveSequence;
+      receiveState(event.data.state ?? null, event.data.version); return;
     }
     if (event.data.type !== 'studio-html-mode') return;
     if (event.data.regionId !== config.regionId || event.data.sourceRevision !== config.sourceRevision) return;
@@ -246,7 +290,7 @@ export function buildHtmlRegionDocument(source: string, options: HtmlRuntimeOpti
   defaults.textContent = 'html{color-scheme:light;background:#f5f5f5;color:#2d3142}body{margin:0;font-family:Arial,"Microsoft YaHei",sans-serif}*{box-sizing:border-box}svg{max-width:100%}';
   const bridge = doc.createElement('script');
   bridge.setAttribute('data-studio-runtime', 'bridge');
-  bridge.textContent = `(${selectionRuntime.toString()})(${JSON.stringify({ ...options, commentCursor: COMMENT_CURSOR }).replace(/</g, '\\u003c')});`;
+  bridge.textContent = `(${selectionRuntime.toString()})(${JSON.stringify({ ...options, commentCursor: COMMENT_CURSOR }).replace(/</g, '\\u003c')}, ${rebaseHtmlState.toString()});`;
   // Declare UTF-8 before the bridge exceeds HTML's encoding prescan window.
   doc.head.prepend(charset, csp, defaults, bridge);
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;

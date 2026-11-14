@@ -1,4 +1,4 @@
-.studio-html-region { width: 100%; height: 100%; overflow: hidden; border-radius: 5px; border: 1px solid #d7d8dc; background: #f5f5f5; }
+.studio-html-region { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: 5px; border: 1px solid #d7d8dc; background: #f5f5f5; }
 .studio-html-region iframe { width: 100%; height: 100%; border: 0; display: block; background: #f5f5f5; }
 .studio-html-region.is-annotating { border-color: var(--canvas-accent); overflow: visible; }
 .studio-html-caption { position: absolute; left: 1px; top: calc(100% + 9px); width: 100%; display: flex; gap: 12px; align-items: center; font: 13px/1.3 Arial,"Microsoft YaHei",sans-serif; color: var(--studio-ink, #2d3142); }
@@ -7,3 +7,6 @@
 .studio-html-actions button { margin-top: 8px; }
 .studio-html-region { --canvas-accent: var(--studio-accent, #eb6c36); --canvas-ui: #ffffff; --canvas-ui-text: #2d3142; --canvas-ui-muted: #4f5d75; --canvas-ui-border: #bfc0c0; }
 .studio[data-studio-theme="dark"] .studio-html-region { --canvas-accent: #f08a59; --canvas-ui: #393e53; --canvas-ui-text: #f5f5f5; --canvas-ui-muted: #bfc0c0; --canvas-ui-border: #68738a; }
+.studio-html-state-error { position: absolute; inset: auto 8px 8px; max-height: 60%; overflow: auto; padding: 8px; border: 1px solid var(--canvas-accent); border-radius: 5px; background: var(--canvas-ui); color: var(--canvas-ui-text); font: 12px/1.5 Arial,"Microsoft YaHei",sans-serif; }
+.studio-html-state-error button { margin: 5px 6px 0 0; }
+.studio-html-state-error pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }

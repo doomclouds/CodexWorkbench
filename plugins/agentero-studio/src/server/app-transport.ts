@@ -27,6 +27,8 @@ export function validateUiRequest(request: UiHttpRequest): UiHttpRequest {
   const tool = /^\/api\/tools\/([^/]+)$/.exec(url.pathname);
   const allowed = tool ? method === 'POST' && TOOL_NAMES.includes(tool[1] as typeof TOOL_NAMES[number])
     : url.pathname === '/api/presence' ? true
+    : url.pathname === '/api/sync' ? method === 'GET'
+    : url.pathname === '/api/room' ? method === 'POST'
     : url.pathname === '/api/session' ? method === 'GET'
     : url.pathname === '/api/region-view' ? true
     : ['/api/import', '/api/assets'].includes(url.pathname) ? method === 'POST'
@@ -35,8 +37,13 @@ export function validateUiRequest(request: UiHttpRequest): UiHttpRequest {
   const thumbnail = method === 'GET' && /^\/api\/thumbnails\/[^/]+$/.test(url.pathname);
   const seen = new Set<string>();
   for (const [key, value] of url.searchParams) {
-    if (seen.has(key) || (thumbnail ? key !== 'revision' : url.pathname === '/api/region-view' ? !['artifactId', 'viewId'].includes(key) : key !== 'artifactId')) throw failure('FORBIDDEN', '作品请求不能指定连接凭据、重复或未知查询参数。');
+    if (seen.has(key) || (thumbnail ? key !== 'revision' : url.pathname === '/api/region-view' ? !['artifactId', 'viewId'].includes(key) : url.pathname === '/api/sync' ? !['artifactId', 'after', 'wait', 'peerId', 'peerEpoch'].includes(key) : key !== 'artifactId')) throw failure('FORBIDDEN', '作品请求不能指定连接凭据、重复或未知查询参数。');
     if (key === 'revision' && (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw failure('INVALID_ARGUMENT', '作品缩略图版本号无效。');
+    if (url.pathname === '/api/sync') {
+      if (key === 'wait' && (!/^(?:0|[1-9]\d*)$/.test(value) || Number(value) > 20_000)) throw failure('INVALID_ARGUMENT', '同步等待时间应为 0 到 20000 毫秒。');
+      if (key === 'after' && !/^[A-Za-z0-9_-]{1,120}:\d{1,16}$/.test(value)) throw failure('INVALID_ARGUMENT', '同步水位无效。');
+      if ((key === 'peerId' || key === 'peerEpoch') && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) throw failure('INVALID_ARGUMENT', '协作页面标识无效。');
+    }
     seen.add(key);
   }
   const headers: Record<string, string> = {};

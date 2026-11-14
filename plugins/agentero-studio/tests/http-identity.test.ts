@@ -14,17 +14,23 @@ async function sharedWork() {
   return { artifactId: artifact.id as string, token };
 }
 // Node fetch has no cookie jar; retain Set-Cookie as a same-origin browser does.
-function browser(token: string) {
-  let cookie = '';
+let guestSequence = 0;
+function browser(token: string, artifactId: string) {
+  let cookie = '', enrolled = false, issuedCookie = '';
   async function request(path: string, init: RequestInit = {}) {
+    if (!enrolled) {
+      const joined = await fetch(`${host.origin}/api/session?artifactId=${artifactId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: `Guest ${++guestSequence}` }) });
+      issuedCookie = joined.headers.get('set-cookie') ?? ''; cookie = issuedCookie.split(';')[0]!; enrolled = true;
+    }
+    const overrideCookie = new Headers(init.headers).has('Cookie');
     const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${token}`);
     if (cookie && !headers.has('Cookie')) headers.set('Cookie', cookie);
     const response = await fetch(`${host.origin}${path}`, { ...init, headers });
-    const issued = response.headers.get('set-cookie'); if (issued) cookie = issued.split(';')[0]!;
+    const issued = response.headers.get('set-cookie'); if (issued && !overrideCookie) cookie = issued.split(';')[0]!;
     return response;
   }
   return {
-    request, get cookie() { return cookie; },
+    request, get cookie() { return cookie; }, get issuedCookie() { return issuedCookie; },
     async call(name: string, args: Record<string, unknown>, headers: Record<string, string> = {}) {
       const response = await request(`/api/tools/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(args) });
       return { response, value: await response.json() };
@@ -38,9 +44,9 @@ async function readSse(reader: ReadableStreamDefaultReader<Uint8Array>, match: s
 
 describe('signed anonymous HTTP identity', () => {
   it('rejects public actor IDs, view headers and unsigned or forged cookies as comment authorship', async () => {
-    const { artifactId, token } = await sharedWork(), a = browser(token('commenter')), b = browser(token('commenter'));
+    const { artifactId, token } = await sharedWork(), a = browser(token('commenter'), artifactId), b = browser(token('commenter'), artifactId);
     const created = await a.call('artifact_feedback', { artifactId, action: 'create', text: 'A 的备注' });
-    expect(created.response.status).toBe(200); expect(created.response.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(created.response.status).toBe(200); expect(a.issuedCookie).toContain('HttpOnly');
     const feedback = created.value.data.feedback[0], aId = feedback.author.id as string, sid = aId.slice('guest-'.length);
     const session = await b.request(`/api/session?artifactId=${artifactId}`), bActor = (await session.json()).actor;
     expect(bActor.id).not.toBe(aId); expect(bActor.name).not.toBe(feedback.author.name);
@@ -58,7 +64,7 @@ describe('signed anonymous HTTP identity', () => {
     ];
     for (const headers of attempts) {
       const denied = await b.call('artifact_feedback', { artifactId, action: 'resolve', feedbackId: feedback.id }, headers);
-      expect(denied.response.status).toBe(403); expect(denied.value.error.code).toBe('FORBIDDEN');
+      expect(denied.response.status).toBe(headers.Cookie ? 428 : 403); expect(denied.value.error.code).toBe(headers.Cookie ? 'NAME_REQUIRED' : 'FORBIDDEN');
     }
     const resolved = await a.call('artifact_feedback', { artifactId, action: 'resolve', feedbackId: feedback.id });
     expect(resolved.response.status).toBe(200); expect(resolved.value.data.feedback[0].status).toBe('resolved');
@@ -68,9 +74,9 @@ describe('signed anonymous HTTP identity', () => {
   });
 
   it('keeps one signed identity across bootstrap, API calls and independent view IDs', async () => {
-    const { artifactId, token } = await sharedWork(), guest = browser(token('editor'));
-    const page = await guest.request(`/?artifactId=${artifactId}`), html = await page.text(), issued = page.headers.get('set-cookie')!;
-    expect(issued).toMatch(/^studio-guest-[a-f0-9]+=.+; Path=\/; HttpOnly; SameSite=Lax$/); expect(issued).not.toContain('Secure');
+    const { artifactId, token } = await sharedWork(), guest = browser(token('editor'), artifactId);
+    const page = await guest.request(`/?artifactId=${artifactId}`), html = await page.text(), issued = guest.issuedCookie;
+    expect(issued).toMatch(/^studio-guest-[a-f0-9]+=.+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=31536000$/); expect(issued).not.toContain('Secure');
     const cookie = guest.cookie, actor = (await (await guest.request(`/api/session?artifactId=${artifactId}`)).json()).actor;
     expect(html).toContain(`"id":"${actor.id}"`); expect(html).not.toContain(cookie.split('.')[1]!);
     for (const peerId of ['first-view', 'second-view']) {
@@ -83,7 +89,7 @@ describe('signed anonymous HTTP identity', () => {
   });
 
   it('protects editor undo authorship while allowing the signed author to undo', async () => {
-    const { artifactId, token } = await sharedWork(), a = browser(token('editor')), b = browser(token('editor'));
+    const { artifactId, token } = await sharedWork(), a = browser(token('editor'), artifactId), b = browser(token('editor'), artifactId);
     const edited = await a.call('artifact_apply', { artifactId, operations: [{ op: 'add', element: { id: 'owned-element', type: 'text' } }] });
     expect(edited.response.status).toBe(200);
     const entry = edited.value.data.historyEntry, undo = { artifactId, expectedRevision: entry.revision, operations: [{ op: 'restore', versionId: entry.id, data: { mode: 'undo' } }] };
@@ -93,9 +99,9 @@ describe('signed anonymous HTTP identity', () => {
   });
 
   it('issues a signed cookie on direct guest SSE and retains role scope and immediate revocation', async () => {
-    const { artifactId, token } = await sharedWork(), guest = browser(token('viewer'));
+    const { artifactId, token } = await sharedWork(), guest = browser(token('viewer'), artifactId);
     const stream = await guest.request(`/api/events?artifactId=${artifactId}`), reader = stream.body!.getReader();
-    expect(stream.status).toBe(200); expect(stream.headers.get('set-cookie')).toContain('HttpOnly');
+    expect(stream.status).toBe(200); expect(guest.issuedCookie).toContain('HttpOnly');
     const ready = await readSse(reader, 'ready'), session = await guest.request(`/api/session?artifactId=${artifactId}`), actor = (await session.json()).actor;
     expect(ready).toContain(`"id":"${actor.id}"`); expect(actor.role).toBe('viewer');
     expect((await guest.call('artifact_feedback', { artifactId, action: 'create', text: '禁止修改' })).response.status).toBe(403);
@@ -107,13 +113,13 @@ describe('signed anonymous HTTP identity', () => {
     await reader.cancel();
   });
 
-  it('isolates cookies from a previous server instance using the same data root', async () => {
-    const { artifactId, token } = await sharedWork(), guest = browser(token('commenter'));
+  it('remembers signed identity and name across restart while keeping old share tokens revoked', async () => {
+    const { artifactId, token } = await sharedWork(), guest = browser(token('commenter'), artifactId);
     const actor = (await (await guest.request(`/api/session?artifactId=${artifactId}`)).json()).actor, oldCookie = guest.cookie;
     await host.close(); host = await startStudioHost({ dataRoot: directory });
     const share = await host.service.execute('artifact_share', { artifactId, action: 'start' }), renewedToken = new URL(share.links.commenter).searchParams.get('share')!;
-    const next = browser(renewedToken), response = await next.request(`/api/session?artifactId=${artifactId}`, { headers: { Cookie: oldCookie, 'X-Studio-Peer-Id': actor.id.slice('guest-'.length) } });
-    expect(response.status).toBe(200); expect((await response.json()).actor.id).not.toBe(actor.id);
-    expect(next.cookie.split('=')[0]).not.toBe(oldCookie.split('=')[0]);
+    const next = browser(renewedToken, artifactId), response = await next.request(`/api/session?artifactId=${artifactId}`, { headers: { Cookie: oldCookie, 'X-Studio-Peer-Id': actor.id.slice('guest-'.length) } });
+    expect(response.status).toBe(200); expect((await response.json()).actor).toMatchObject({ id: actor.id, name: actor.name });
+    expect(response.headers.get('set-cookie')).toBeNull();
   });
 });

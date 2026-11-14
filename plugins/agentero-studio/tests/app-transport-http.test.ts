@@ -35,7 +35,7 @@ describe('UI requests through the real connected authority', () => {
     const human = await ui('artifact_apply', { artifactId: created.artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'human-object', type: 'text', text: 'Human input' } }] });
     expect(human.board.elements).toHaveLength(1); expect(human.historyEntry.actor).toMatchObject({ id: 'local', kind: 'human', role: 'owner' });
     const agent = await client.execute('artifact_apply', { artifactId: created.artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'agent-object', type: 'text', text: 'Agent input' } }] }) as any;
-    expect(agent.historyEntry.actor).toMatchObject({ id: 'codex', kind: 'agent', role: 'owner' });
+    expect(agent.historyEntry.actor).toMatchObject({ id: expect.stringMatching(/^agent-/), kind: 'agent', role: 'owner' });
   });
 
   it('rejects credential and identity injection before contacting HTTP', async () => {

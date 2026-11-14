@@ -283,7 +283,15 @@ const InlineTextEditor = forwardRef<InlineTextEditorHandle, InlineTextEditorProp
     document.addEventListener('selectionchange', selectionChanged);
     return () => document.removeEventListener('selectionchange', selectionChanged);
   }, []);
-  useLayoutEffect(() => { if (root.current && value !== lastValue.current) { lastValue.current = value; renderDocument(root.current, markdownLines(value)); history.current = [{ lines: markdownLines(value), selection: { start: 0, end: 0 } }]; future.current = []; } }, [value]);
+  useLayoutEffect(() => {
+    const editor = root.current;
+    if (!editor || value === lastValue.current) return;
+    const previous = selectionOffsets(editor, readDocument(editor));
+    lastValue.current = value; renderDocument(editor, markdownLines(value));
+    const length = readDocument(editor).length, selection = previous ? { start: Math.min(previous.start, length), end: Math.min(previous.end, length) } : { start: length, end: length };
+    if (document.activeElement === editor) restoreSelection(editor, selection);
+    history.current = [{ lines: markdownLines(value), selection }]; future.current = [];
+  }, [value]);
   const changeHistory = (redo: boolean) => {
     const editor = root.current; if (!editor || disabled) return;
     let snapshot: EditSnapshot | undefined;

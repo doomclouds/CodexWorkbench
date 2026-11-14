@@ -9,7 +9,7 @@ import { DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Artifact, type Board, type
 import { StudioService } from '../src/core/service';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
-  default: ({ board, onChanged, onAnnotate, onAnnotateNative, onSelectionChange, onEditHtml, onOpenHtml, readOnly }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onAnnotateNative?: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; onOpenHtml?: (element: Board['elements'][number]) => void; readOnly?: boolean }) => <section aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
+  default: ({ board, onChanged, onAnnotate, onAnnotateNative, onSelectionChange, onEditHtml, onOpenHtml, readOnly, presence, externalViewport }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onAnnotateNative?: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; onOpenHtml?: (element: Board['elements'][number]) => void; readOnly?: boolean; presence?: { peerId: string }[]; externalViewport?: unknown }) => <section data-peers={presence?.map(peer => peer.peerId).join(',')} data-external-viewport={JSON.stringify(externalViewport)} aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-input'], quote: '输入节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="input"]', rect: { x: 10, y: 20, w: 80, h: 30 } })}>标注 HTML 内部</button>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-output'], quote: '输出节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="output"]', rect: { x: 100, y: 20, w: 80, h: 30 } })}>标注 HTML 输出</button>
     <button onClick={() => { const element = board.elements.find(item => item.id === 'native-table'); if (element) onAnnotateNative?.({ anchor: { coordinateSpace: 'element', elementIds: [element.id], x: 1, y: .5 }, versions: { [element.id]: element.version }, label: '对象 · table', screenPoint: { x: 300, y: 150 } }); }}>标注原生表格</button>
@@ -48,6 +48,7 @@ afterEach(async () => {
   if (target.startsWith(`${parent}\\agentero-studio-app-`) || target.startsWith(`${parent}/agentero-studio-app-`)) await rm(target, { recursive: true, force: true });
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 async function mount(options: { artifactId?: string; actor?: Actor; view?: 'trash' | 'recent'; attach?: (feedback: Feedback, board: Pick<Board, 'artifact'>) => Promise<void> } = {}) {
@@ -84,12 +85,27 @@ function region(html = '<h1 data-node="input">输入节点</h1>'): Board['elemen
 async function apply(board: Board, operations: unknown[]) {
   return await service.execute('artifact_apply', { artifactId: board.artifact.id, operationId: crypto.randomUUID(), expectedRevision: board.artifact.revision, operations }, LOCAL_ACTOR) as { board: Board };
 }
+async function appRequest(input: string | URL, init?: RequestInit, actor: Actor = LOCAL_ACTOR): Promise<Response> {
+  const url = new URL(String(input));
+  if (url.pathname === '/api/session') return Response.json({ actor, access: 'local' });
+  if (url.pathname.startsWith('/api/tools/')) {
+    const name = url.pathname.slice('/api/tools/'.length) as ToolName;
+    return Response.json({ ok: true, data: await call(name, JSON.parse(String(init?.body || '{}'))) });
+  }
+  if (url.pathname === '/api/sync') {
+    if (!url.searchParams.has('after')) return Response.json({ cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null, serverTime: Date.now() });
+    return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError'))));
+  }
+  if (url.pathname === '/api/presence') return Response.json({ peers: [], timer: null, cursor: 'fixture:0', serverTime: Date.now() });
+  if (url.pathname === '/api/room') return Response.json({ accepted: JSON.parse(String(init?.body || '{}')).events?.length || 0, dropped: 0, cursor: 'fixture:0', serverTime: Date.now() });
+  throw new Error(`Unexpected app request: ${url.pathname}`);
+}
 function readerTransport() {
   vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   const request = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = new URL(input);
-    if (url.pathname === '/api/presence') return Response.json({ peers: [], timer: null });
+    if (url.pathname !== '/api/region-view') return appRequest(input, init);
     if (url.pathname === '/api/region-view') {
       if (init?.method === 'POST') {
         const target = JSON.parse(String(init.body)) as { artifactId: string; regionId: string };
@@ -112,40 +128,150 @@ describe('Studio real management workflows', () => {
     vi.stubGlobal('EventSource', class {
       onmessage: ((event: { data: string }) => void) | null = null;
       onopen = null; onerror = null;
-      constructor() { streams.push(this); }
+      constructor() { streams.push(this); queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'ready', cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null, serverTime: Date.now() }) })); }
       addEventListener() {}
       close() {}
     });
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ peers: [], timer: null })));
+    let liveActor = guest;
+    vi.stubGlobal('fetch', vi.fn((input, init) => appRequest(input, init, liveActor)));
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     client = { ...client, embedded: false, baseUrl: 'http://studio.test', token: 'fixture-guest' };
     await mount({ artifactId: fixture.board.artifact.id, actor: guest });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    const emit = async (message: object) => act(async () => { streams[0]!.onmessage!({ data: JSON.stringify({ artifactId: fixture.board.artifact.id, ...message }) }); });
+    const emit = async (message: object) => act(async () => { streams.at(-1)!.onmessage!({ data: JSON.stringify({ artifactId: fixture.board.artifact.id, ...message }) }); });
     const readOnly = () => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-read-only');
     expect(readOnly()).toBe('false');
     await click(button('标注 HTML 内部'));
     await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '尚未发送的备注');
 
-    await emit({ type: 'access-revoked', reason: '分享权限已变更，请重新连接。' });
+    liveActor = { ...guest, role: 'viewer' };
+    await emit({ type: 'access-revoked', reason: 'role-changed' });
     expect(readOnly()).toBe('true');
     expect(button('备注').disabled).toBe(true);
     expect(container.querySelector('[aria-label="批注内容"]')).toBeNull();
     await emit({ type: 'ready', actor: { ...guest, role: 'viewer' } });
     expect(readOnly()).toBe('true');
     expect(button('备注').disabled).toBe(true);
+    // A ready frame can expose a change missed while disconnected, but never grants a role without a fresh session check.
+    await emit({ type: 'ready', actor: { ...guest, role: 'editor' } });
+    expect(readOnly()).toBe('true'); expect(button('备注').disabled).toBe(true);
     await click(button('分享'));
-    expect(button('一般访问权限').textContent).toBe('局域网可访问');
-    expect(container.textContent).toContain('你当前的权限为“仅查看”');
+    expect(container.querySelector('[aria-label="一般访问权限"]')).toBeNull();
+    expect(container.textContent).not.toContain('作品所有者');
     await click(button('关闭架构讨论'));
 
-    await emit({ type: 'ready', actor: { ...guest, role: 'commenter' } });
+    liveActor = { ...guest, role: 'commenter' };
+    await emit({ type: 'access-revoked', reason: 'role-changed' });
     expect(readOnly()).toBe('true');
     expect(button('备注').disabled).toBe(false);
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('尚未发送的备注');
-    await emit({ type: 'ready', actor: guest });
+    liveActor = guest;
+    await emit({ type: 'access-revoked', reason: 'role-changed' });
     expect(readOnly()).toBe('false');
     expect(call.mock.calls.some(([name, args]) => name === 'artifact_feedback' && args.action === 'create')).toBe(false);
+  });
+
+  it('rechecks fresh self metadata on a long-poll reset even when the role-change event is absent', async () => {
+    const fixture = await createFixture();
+    const guest: Actor = { id: 'reset-guest', name: '重连访客', kind: 'human', role: 'editor' };
+    let liveActor = guest, sessionReads = 0;
+    const request = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/session') { sessionReads++; return Response.json({ actor: liveActor, access: 'local' }); }
+      if (url.pathname === '/api/sync' && !url.searchParams.has('after')) {
+        liveActor = { ...guest, role: 'viewer' };
+        return Response.json({ cursor: 'reset:10', reset: true, events: [], peers: [], timer: null, serverTime: Date.now(), actor: liveActor, access: 'local' });
+      }
+      return appRequest(input, init, liveActor);
+    });
+    client = { ...client, embedded: true, baseUrl: 'http://studio.test', token: '', request };
+    await mount({ artifactId: fixture.board.artifact.id, actor: guest });
+    await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-read-only') === 'true');
+    expect(sessionReads).toBeGreaterThanOrEqual(2); expect(button('备注').disabled).toBe(true);
+    expect(container.querySelector('.studio-session-message')).toBeNull();
+    expect(call.mock.calls.some(([name]) => name === 'artifact_apply')).toBe(false);
+  });
+
+  it('hides mounted popovers and menus on terminal access loss and stops invalid reconnects', async () => {
+    const fixture = await createFixture([region()]);
+    const streams: { onmessage: ((event: { data: string }) => void) | null; close: ReturnType<typeof vi.fn> }[] = [];
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onopen = null; onerror = null; close = vi.fn();
+      constructor() { streams.push(this); queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'ready', cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null, serverTime: Date.now() }) })); }
+      addEventListener() {}
+    });
+    const request = vi.fn((input, init) => appRequest(input, init));
+    vi.stubGlobal('fetch', request); vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    client = { ...client, embedded: false, baseUrl: 'http://studio.test', token: 'fixture-owner' };
+    await mount({ artifactId: fixture.board.artifact.id });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('分享')); await waitUntil(() => !button('一般访问权限').disabled);
+    await click(button('一般访问权限'));
+    const popover = container.querySelector<HTMLElement>('.studio-editor-popover')!;
+    const menu = container.querySelector<HTMLElement>('.studio-editor-submenu')!;
+    expect(popover.parentElement).toBe(container.querySelector('.studio'));
+    expect(menu.parentElement).toBe(container.querySelector('.studio'));
+    await act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'access-revoked', artifactId: fixture.board.artifact.id, reason: 'invalid-link' }) }));
+    expect(container.querySelector('.studio')?.getAttribute('data-session-status')).toBe('denied');
+    expect(container.querySelector<HTMLElement>('.studio-session-content')?.hidden).toBe(true);
+    expect(popover.hidden).toBe(true); expect(popover.inert).toBe(true); expect(popover.getAttribute('aria-hidden')).toBe('true');
+    expect(!menu.isConnected || menu.hidden && menu.inert).toBe(true);
+    expect(document.activeElement).toBe(container.querySelector('.studio-session-message'));
+    expect(streams[0]!.close).toHaveBeenCalled();
+    const requests = request.mock.calls.length, streamCount = streams.length;
+    vi.useFakeTimers(); await act(async () => { await vi.advanceTimersByTimeAsync(60000); }); vi.useRealTimers();
+    expect(request).toHaveBeenCalledTimes(requests); expect(streams).toHaveLength(streamCount);
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_apply' || name === 'artifact_feedback' && args.action === 'create')).toBe(false);
+  });
+
+  it('counts people by actor while preserving their page peers and follows an active viewport', async () => {
+    const fixture = await createFixture([region()]);
+    const streams: { onmessage: ((event: { data: string }) => void) | null }[] = [];
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: { data: string }) => void) | null = null; onopen = null; onerror = null;
+      constructor() { streams.push(this); queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'ready', cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null, serverTime: Date.now() }) })); } addEventListener() {} close() {}
+    });
+    vi.stubGlobal('fetch', vi.fn((input, init) => appRequest(input, init)));
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    client = { ...client, embedded: false, baseUrl: 'http://studio.test', token: 'fixture-owner' };
+    await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    const remote = { ...LOCAL_ACTOR, id: 'remote', name: '同名协作者' }, other = { ...remote, id: 'another' };
+    const peer = (peerId: string, actor: Actor, updatedAt: string, x: number) => ({ peerId, actor, updatedAt, cursor: { x, y: 1 }, context: { viewId: peerId, artifactId: fixture.board.artifact.id, selectedIds: [], viewport: { x, y: 0, zoom: 1 } } });
+    const peers = [peer('my-other-tab', LOCAL_ACTOR, '2026-11-14T10:00:03Z', 5), peer('remote-old', remote, '2026-11-14T10:00:01Z', 10), peer('remote-active', remote, '2026-11-14T10:00:03Z', 30), peer('another-page', other, '2026-11-14T10:00:02Z', 20)];
+    const emit = async (pages: typeof peers) => act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'presence', artifactId: fixture.board.artifact.id, peers: pages }) }));
+    await emit(peers); await click(button('分享')); await click(button('此刻在这里'));
+    expect(container.querySelectorAll('.studio-online-row')).toHaveLength(2);
+    expect(button('此刻在这里').querySelectorAll('.studio-online-avatar')).toHaveLength(2);
+    expect(container.textContent).toContain('同名协作者');
+    await click([...container.querySelectorAll<HTMLButtonElement>('.studio-online-row button')][0]!);
+    const canvas = container.querySelector('[aria-label="白板画布"]')!;
+    await waitUntil(() => Math.abs((JSON.parse(canvas.getAttribute('data-external-viewport') || '{}').x || 0) - 30) < .1);
+    expect(canvas.getAttribute('data-peers')?.split(',')).toHaveLength(4);
+    await emit(peers.filter(page => page.peerId !== 'remote-active'));
+    await waitUntil(() => Math.abs((JSON.parse(canvas.getAttribute('data-external-viewport') || '{}').x || 0) - 10) < .1);
+    vi.useFakeTimers(); await emit(peers.filter(page => page.actor.id !== remote.id));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1001); }); vi.useRealTimers();
+    expect(container.querySelector('.studio-follow-banner')).toBeNull();
+  });
+
+  it('refreshes joined members, online state and roles while the same share panel remains open', async () => {
+    const fixture = await createFixture();
+    const member = { id: 'guest-member', name: '新加入的人', role: 'editor' as const, joinedAt: '', lastSeenAt: '', active: true, online: true };
+    let state = { enabled: true, access: 'local' as const, members: [] as ({ role: string } & Omit<typeof member, 'role'>)[], owner: LOCAL_ACTOR };
+    const execute = call.getMockImplementation()!;
+    call.mockImplementation((name, args) => name === 'artifact_share' && args.action === 'status' ? Promise.resolve(state) : execute(name, args));
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    vi.useFakeTimers(); await click(button('分享'));
+    expect(button('一般访问权限').disabled).toBe(false);
+    const panel = container.querySelector('.studio-share-panel'); expect(panel?.textContent).not.toContain(member.name);
+    state = { ...state, members: [member] };
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    expect(container.querySelector('.studio-share-panel')).toBe(panel); expect(panel?.textContent).toContain(member.name); expect(panel?.textContent).toContain('在线');
+    state = { ...state, members: [{ ...member, role: 'viewer', online: false }] };
+    await act(async () => { await vi.advanceTimersByTimeAsync(4000); }); vi.useRealTimers();
+    expect(button(`管理成员：${member.name}`).textContent).toBe('仅查看'); expect(panel?.textContent).toContain('离线');
   });
 
   it('keeps search, filters, views, import and icon theme switching usable in the compact library header', async () => {
@@ -261,7 +387,7 @@ describe('Studio real management workflows', () => {
     expect(items.artifacts[0].trashedAt).toBeUndefined();
   });
 
-  it('imports HTML as a real persisted region with a checked board revision', async () => {
+  it('imports HTML as a persisted independent region without blocking unrelated board changes', async () => {
     const fixture = await createFixture();
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
@@ -275,7 +401,9 @@ describe('Studio real management workflows', () => {
     expect(saved.elements[0]).toMatchObject({ type: 'html', html, sourceRevision: 1 });
     const request = call.mock.calls.find(([name]) => name === 'artifact_apply');
     expect(request?.[1].operationId).toBeTruthy();
-    expect(request?.[1].expectedRevision).toBe(fixture.board.artifact.revision);
+    expect(request?.[1].merge).toBe('safe');
+    const addedId = request?.[1].operations[0].element.id;
+    expect(request?.[1].expectedVersions).toEqual({ [addedId]: 0 });
   });
 
   it('offers a scoped explicit reader link after host open fails and watches the original view without creating another grant', async () => {
@@ -332,7 +460,8 @@ describe('Studio real management workflows', () => {
   it('closes a reserved Web reader tab when its scoped request fails', async () => {
     const fixture = await createFixture([region()]), { request } = readerTransport();
     client.embedded = false;
-    request.mockResolvedValue(Response.json({ ok: false, error: { code: 'FORBIDDEN', message: '无法创建阅读链接' } }, { status: 403 }));
+    const original = request.getMockImplementation()!;
+    request.mockImplementation((input, init) => new URL(String(input)).pathname === '/api/region-view' ? Promise.resolve(Response.json({ ok: false, error: { code: 'FORBIDDEN', message: '无法创建阅读链接' } }, { status: 403 })) : original(input, init));
     const tab = { opener: window, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
     vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
     await mount({ artifactId: fixture.board.artifact.id });
@@ -497,6 +626,38 @@ describe('Studio real management workflows', () => {
     expect(result.feedback[0].replies[0].text).toBe('已补充接口约束');
   });
 
+  it('reuses a committed reply ID after a lost acknowledgement and closing/reopening the thread', async () => {
+    const fixture = await createFixture([region()]);
+    await service.execute('artifact_feedback', { action: 'create', operationId: crypto.randomUUID(), artifactId: fixture.board.artifact.id, type: 'comment', text: '回复确认测试', anchor: { regionId: 'region-one', sourceRevision: 1 } }, LOCAL_ACTOR);
+    const execute = call.getMockImplementation()!; let loseAck = true;
+    call.mockImplementation(async (name, args) => {
+      const result = await execute(name, args);
+      if (name === 'artifact_feedback' && args.action === 'reply' && loseAck) { loseAck = false; throw new Error('回复已保存，但确认丢失。'); }
+      return result;
+    });
+    await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    const open = async () => { await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-comment-list-item')); await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!); };
+    await open();
+    await change(container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注：回复确认测试"]')!, '保持这条回复');
+    await submit(container.querySelector<HTMLFormElement>('.studio-reply-form')!);
+    await waitUntil(() => container.querySelector('.studio-comment-error')?.textContent?.includes('确认丢失') === true);
+    let saved = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
+    expect(saved.feedback[0].replies).toHaveLength(1);
+    await click(button('关闭备注')); expect(container.querySelector('.studio-reply-form')).toBeNull();
+    await open(); expect(container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注：回复确认测试"]')?.value).toBe('保持这条回复');
+    await submit(container.querySelector<HTMLFormElement>('.studio-reply-form')!);
+    await waitUntil(() => container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注：回复确认测试"]')?.value === '');
+    saved = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
+    expect(saved.feedback[0].replies).toHaveLength(1);
+    let attempts = call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'reply');
+    expect(attempts).toHaveLength(2); expect(attempts[1]![1].replyId).toBe(attempts[0]![1].replyId);
+    await change(container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注：回复确认测试"]')!, '保持这条回复');
+    await submit(container.querySelector<HTMLFormElement>('.studio-reply-form')!);
+    await waitUntil(() => container.querySelectorAll('.studio-feedback-reply').length === 2);
+    attempts = call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'reply');
+    expect(attempts[2]![1].replyId).not.toBe(attempts[0]![1].replyId);
+  });
+
   it('retries attaching the saved comment after a host failure without creating it again', async () => {
     const fixture = await createFixture([region()]);
     const attach = vi.fn().mockRejectedValueOnce(new Error('对话草稿暂不可用')).mockResolvedValueOnce(undefined);
@@ -545,7 +706,9 @@ describe('Studio real management workflows', () => {
     await waitUntil(() => exportDocument.mock.calls.length === 1);
     expect(exportDocument.mock.calls[0]).toEqual([expect.objectContaining({ artifact: expect.objectContaining({ id: fixture.board.artifact.id }) }), 'json', client]);
     expect(call.mock.calls.some(([name, args]) => name === 'artifact_share' && args.action === 'start')).toBe(false);
-    expect((await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id })).enabled).toBe(false);
+    const local = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
+    expect(local.enabled).toBe(false);
+    expect(container.querySelector('[aria-label="局域网共享已开启"]')).toBeNull();
   });
 
   it('previews history without mutating the live board, then restores while retaining subsequent history', async () => {
@@ -591,7 +754,7 @@ describe('Studio real management workflows', () => {
     expect(saved.elements[0].text).toBe('他人刚刚修改');
   });
 
-  it('offers a work link without silently enabling LAN access or copying an owner token', async () => {
+  it('copies a local role invitation without silently enabling LAN or copying an owner token', async () => {
     const fixture = await createFixture();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
@@ -599,28 +762,27 @@ describe('Studio real management workflows', () => {
     await waitUntil(() => !!container.querySelector(`[aria-label="管理作品：${fixture.board.artifact.title}"]`));
     await click(button(`管理作品：${fixture.board.artifact.title}`));
     await click(button('复制链接'));
-    await waitUntil(() => !!container.querySelector('.studio-share-panel') && !!container.querySelector('[aria-label="白板画布"]'));
-    let status: { enabled: boolean } | undefined;
-    await act(async () => { status = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id }); });
-    expect(status?.enabled).toBe(false);
-    expect(writeText).not.toHaveBeenCalled();
-    await waitUntil(() => !button('一般访问权限').disabled);
-    const access = button('一般访问权限');
-    await click(access);
-    expect(access.isConnected, container.textContent || '').toBe(true);
-    expect(access.getAttribute('aria-expanded'), container.textContent || '').toBe('true');
-    await click(button('局域网可访问'));
-    await waitUntil(() => !button('复制可编辑链接').disabled);
-    let sharing: { links: { viewer: string } } | undefined;
-    await act(async () => { sharing = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id }); });
-    await click(button('返回作品中心'));
-    await waitUntil(() => !!container.querySelector(`[aria-label="管理作品：${fixture.board.artifact.title}"]`));
-    await click(button(`管理作品：${fixture.board.artifact.title}`));
-    await click(button('复制链接'));
     await waitUntil(() => writeText.mock.calls.length === 1);
-    expect(writeText).toHaveBeenCalledWith(sharing!.links.viewer);
+    const status = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
+    expect(status).toMatchObject({ enabled: true, access: 'local' });
+    expect(writeText).toHaveBeenCalledWith(status.links.viewer);
+    expect(call.mock.calls.filter(([name, args]) => name === 'artifact_share' && args.action === 'start').map(([, args]) => args.access)).toEqual(['local']);
+    expect(container.querySelector('[aria-label="局域网共享已开启"]')).toBeNull();
   });
-  it('starts role-based LAN sharing, rotates one role link and revokes sharing', async () => {
+  it('provides the actual local invitation for manual copy when the browser blocks the clipboard', async () => {
+    const fixture = await createFixture();
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockRejectedValue(new Error('blocked')) } });
+    await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('分享')); await waitUntil(() => !button('复制可编辑链接').disabled);
+    await click(button('复制可编辑链接'));
+    await waitUntil(() => !!container.querySelector('[aria-label="邀请链接"]'));
+    const state = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
+    expect(state.access).toBe('local');
+    expect(container.querySelector<HTMLInputElement>('[aria-label="邀请链接"]')?.value).toBe(state.links.editor);
+    expect(container.querySelector('[aria-label="局域网共享已开启"]')).toBeNull();
+  });
+
+  it('starts LAN sharing, rotates one role link and preserves invitations when returning to local access', async () => {
     const fixture = await createFixture();
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
@@ -631,6 +793,7 @@ describe('Studio real management workflows', () => {
     await waitUntil(() => !button('复制可编辑链接').disabled);
     const before = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
     expect(before.enabled).toBe(true);
+    expect(container.querySelector('[aria-label="局域网共享已开启"]')).not.toBeNull();
     await click(button('可编辑链接更多操作'));
     await click(button('重置此链接'));
     expect(call.mock.calls.some(([name, args]) => name === 'artifact_share' && args.action === 'reset')).toBe(false);
@@ -642,7 +805,10 @@ describe('Studio real management workflows', () => {
     await click(button('一般访问权限'));
     await click(button('仅这台电脑'));
     await waitUntil(() => button('一般访问权限').textContent?.includes('仅这台电脑') === true && !button('一般访问权限').disabled);
-    expect((await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id })).enabled).toBe(false);
+    const local = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
+    expect(local).toMatchObject({ enabled: true, access: 'local' });
+    for (const role of ['editor', 'commenter', 'viewer'] as const) expect(new URL(local.links[role], 'http://studio.test').searchParams.get('share')).toBe(new URL(after.links[role], 'http://studio.test').searchParams.get('share'));
+    expect(container.querySelector('[aria-label="局域网共享已开启"]')).toBeNull();
   });
 });
 

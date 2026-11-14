@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import HtmlRegion from '../src/app/shared/html-region/HtmlRegion.js';
-import type { BoardElement } from '../src/contracts/studio.js';
+import type { BoardElement, Json } from '../src/contracts/studio.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -24,6 +24,24 @@ function mount() {
     return { post, identity: { channel: identity.channel, regionId: identity.regionId, sourceRevision: identity.sourceRevision } };
   };
   return { dom, root, send, messages };
+}
+
+async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameElement) {
+  const { post, identity } = await host.messages(frame);
+  let embedded: JSDOM | undefined;
+  post.mockImplementation((message: unknown) => {
+    if (embedded) embedded.window.dispatchEvent(new embedded.window.MessageEvent('message', { source: embedded.window as unknown as MessageEventSource, data: message }));
+  });
+  await act(async () => {
+    embedded = new JSDOM(frame.srcdoc, { runScripts: 'dangerously', beforeParse(window) {
+      Object.defineProperty(window, 'TextEncoder', { value: TextEncoder });
+      window.postMessage = (message: unknown) => { host.send(frame, message); };
+    } });
+    await new Promise<void>(resolve => embedded!.window.addEventListener('load', () => resolve(), { once: true }));
+  });
+  const runtime = embedded!;
+  cleanups.push(async () => runtime.window.close());
+  return { identity, post, load: () => runtime.window.eval('studioEmbed.load()') as Json, save: (state: Json) => runtime.window.eval(`studioEmbed.save(${JSON.stringify(state)})`) };
 }
 
 it('broadcasts state-only changes without replacing an iframe rendering document', async () => {
@@ -136,4 +154,127 @@ it('coalesces pending state saves and advances only its accepted compare-and-swa
   await act(async () => { finishFirst({ state: { votes: 2 }, version: 5 }); });
   expect(change).toHaveBeenCalledTimes(2);
   expect(change).toHaveBeenNthCalledWith(2, { votes: 4 }, 5);
+});
+
+it('runs real iframe clicks through the serial saver without early ACK rollback or losing merged remote fields', async () => {
+  const host = mount();
+  const waiting: ((result: { state: Json; version: number }) => void)[] = [];
+  const change = vi.fn((_state: Json, _version: number) => new Promise<{ state: Json; version: number }>(resolve => waiting.push(resolve)));
+  await act(async () => host.root.render(<HtmlRegion element={{ ...region, state: { votes: 0, label: 'A' } }} annotation={false} interactive onAnnotate={() => {}} onStateChange={change} />));
+  const runtime = await connectRuntime(host, host.dom.window.document.querySelector('iframe')!);
+  await act(async () => { runtime.save({ votes: 1, label: 'A' }); runtime.save({ votes: 2, label: 'A' }); });
+  expect(change).toHaveBeenCalledTimes(1);
+  await act(async () => waiting.shift()!({ state: { votes: 1, label: 'Remote' }, version: 5 }));
+  expect(runtime.load()).toEqual({ votes: 2, label: 'Remote' });
+  expect(change).toHaveBeenNthCalledWith(2, { votes: 2, label: 'Remote' }, 5);
+  await act(async () => runtime.save({ ...runtime.load() as object, votes: 3 }));
+  await act(async () => waiting.shift()!({ state: { votes: 2, label: 'Remote' }, version: 6 }));
+  expect(runtime.load()).toEqual({ votes: 3, label: 'Remote' });
+  expect(change).toHaveBeenNthCalledWith(3, { votes: 3, label: 'Remote' }, 6);
+  await act(async () => waiting.shift()!({ state: { votes: 3, label: 'Remote' }, version: 7 }));
+  expect(runtime.load()).toEqual({ votes: 3, label: 'Remote' });
+  await act(async () => host.send(host.dom.window.document.querySelector('iframe')!, { type: 'studio-html-state', ...runtime.identity, saveId: 3, baseVersion: 6, state: { votes: 99 } }));
+  expect(change).toHaveBeenCalledTimes(3);
+});
+
+it('retains the newest failed iframe intent for explicit retry and exposes the authoritative state for discard', async () => {
+  const host = mount();
+  let reject!: (error: Error) => void;
+  const change = vi.fn().mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; })).mockResolvedValueOnce({ state: { votes: 3 }, version: 5 }).mockRejectedValueOnce(new Error('同一字段有冲突'));
+  await act(async () => host.root.render(<HtmlRegion element={region} annotation={false} interactive onAnnotate={() => {}} onStateChange={change} />));
+  const runtime = await connectRuntime(host, host.dom.window.document.querySelector('iframe')!);
+  await act(async () => { runtime.save({ votes: 2 }); runtime.save({ votes: 3 }); reject(new Error('网络暂不可用')); });
+  expect(runtime.load()).toEqual({ votes: 3 });
+  expect(host.dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('网络暂不可用');
+  expect(host.dom.window.document.querySelector('pre')?.textContent).toContain('"votes": 1');
+  await act(async () => [...host.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '重试保存')!.click());
+  expect(change).toHaveBeenNthCalledWith(2, { votes: 3 }, 4);
+  expect(host.dom.window.document.querySelector('[role="alert"]')).toBeNull();
+  await act(async () => runtime.save({ votes: 4 }));
+  expect(runtime.load()).toEqual({ votes: 4 });
+  await act(async () => [...host.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '使用共享状态')!.click());
+  expect(runtime.load()).toEqual({ votes: 3 });
+  expect(change).toHaveBeenCalledTimes(3);
+});
+
+it('isolates old-source asynchronous errors from the new channel and its pending real iframe saves', async () => {
+  const host = mount();
+  let rejectOld!: (error: Error) => void;
+  let acceptNew!: (result: { state: Json; version: number }) => void;
+  const change = vi.fn().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; })).mockImplementationOnce(() => new Promise(resolve => { acceptNew = resolve; })).mockResolvedValueOnce({ state: { votes: 12 }, version: 7 });
+  const render = (element: BoardElement) => host.root.render(<HtmlRegion element={element} annotation={false} interactive onAnnotate={() => {}} onStateChange={change} />);
+  await act(async () => render(region));
+  const frame = host.dom.window.document.querySelector('iframe')!;
+  const old = await connectRuntime(host, frame);
+  await act(async () => old.save({ votes: 2 }));
+  await act(async () => render({ ...region, html: '<p>New source</p>', sourceRevision: 3, version: 5, state: { votes: 10 } }));
+  const next = await connectRuntime(host, frame);
+  expect(next.identity.channel).not.toBe(old.identity.channel);
+  await act(async () => { next.save({ votes: 11 }); next.save({ votes: 12 }); rejectOld(new Error('旧源码请求失败')); });
+  expect(host.dom.window.document.querySelector('[role="alert"]')).toBeNull();
+  expect(next.load()).toEqual({ votes: 12 });
+  await act(async () => acceptNew({ state: { votes: 11 }, version: 6 }));
+  expect(change).toHaveBeenNthCalledWith(3, { votes: 12 }, 6);
+  expect(next.load()).toEqual({ votes: 12 });
+});
+
+it('keeps the original write base across a remote conflict until the user explicitly adopts shared state', async () => {
+  const host = mount();
+  const change = vi.fn().mockRejectedValueOnce(new Error('共享字段已变化')).mockRejectedValueOnce(new Error('共享字段仍有冲突')).mockResolvedValueOnce({ state: { votes: 10 }, version: 6 });
+  const render = (element: BoardElement) => host.root.render(<HtmlRegion element={element} annotation={false} interactive onAnnotate={() => {}} onStateChange={change} />);
+  await act(async () => render(region));
+  const runtime = await connectRuntime(host, host.dom.window.document.querySelector('iframe')!);
+  await act(async () => runtime.save({ votes: 2 }));
+  await act(async () => render({ ...region, version: 5, state: { votes: 9 } }));
+  expect(runtime.load()).toEqual({ votes: 2 });
+  await act(async () => runtime.save({ votes: 3 }));
+  expect(change).toHaveBeenCalledTimes(1);
+  await act(async () => [...host.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '重试保存')!.click());
+  expect(change).toHaveBeenNthCalledWith(2, { votes: 3 }, 4);
+  expect(runtime.load()).toEqual({ votes: 3 });
+  expect(host.dom.window.document.querySelector('pre')?.textContent).toContain('"votes": 9');
+  await act(async () => [...host.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '使用共享状态')!.click());
+  expect(runtime.load()).toEqual({ votes: 9 });
+  await act(async () => runtime.save({ votes: 10 }));
+  expect(change).toHaveBeenNthCalledWith(3, { votes: 10 }, 5);
+});
+
+it('does not turn a remote overlap included in an own ACK into a newer-version overwrite', async () => {
+  const host = mount();
+  let acceptFirst!: (result: { state: Json; version: number }) => void;
+  const change = vi.fn().mockImplementationOnce(() => new Promise(resolve => { acceptFirst = resolve; })).mockRejectedValueOnce(new Error('共享字段 b 存在冲突'));
+  await act(async () => host.root.render(<HtmlRegion element={{ ...region, state: { a: 0, b: 0 } }} annotation={false} interactive onAnnotate={() => {}} onStateChange={change} />));
+  const runtime = await connectRuntime(host, host.dom.window.document.querySelector('iframe')!);
+  await act(async () => { runtime.save({ a: 1, b: 0 }); runtime.save({ a: 1, b: 1 }); });
+  await act(async () => acceptFirst({ state: { a: 1, b: 2 }, version: 5 }));
+  expect(change).toHaveBeenNthCalledWith(2, { a: 1, b: 1 }, 4);
+  expect(runtime.load()).toEqual({ a: 1, b: 1 });
+  expect(host.dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('存在冲突');
+  expect(host.dom.window.document.querySelector('pre')?.textContent).toContain('"b": 2');
+  await act(async () => [...host.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '使用共享状态')!.click());
+  expect(runtime.load()).toEqual({ a: 1, b: 2 });
+});
+
+it('lets two real iframe regions progress independently and pauses unsent intent after edit permission is removed', async () => {
+  const host = mount();
+  let acceptFirst!: (result: { state: Json; version: number }) => void;
+  const firstChange = vi.fn().mockImplementationOnce(() => new Promise(resolve => { acceptFirst = resolve; })).mockResolvedValueOnce({ state: { votes: 3 }, version: 6 });
+  const secondChange = vi.fn().mockResolvedValue({ state: { votes: 2 }, version: 5 });
+  const render = (writable: boolean) => host.root.render(<><HtmlRegion element={region} annotation={false} interactive onAnnotate={() => {}} onStateChange={writable ? firstChange : undefined} /><HtmlRegion element={{ ...region, id: 'second-region' }} annotation={false} interactive onAnnotate={() => {}} onStateChange={secondChange} /></>);
+  await act(async () => render(true));
+  const frames = host.dom.window.document.querySelectorAll('iframe');
+  const first = await connectRuntime(host, frames[0]);
+  const second = await connectRuntime(host, frames[1]);
+  await act(async () => { first.save({ votes: 2 }); first.save({ votes: 3 }); second.save({ votes: 2 }); });
+  expect(firstChange).toHaveBeenCalledTimes(1); expect(secondChange).toHaveBeenCalledTimes(1);
+  expect(second.load()).toEqual({ votes: 2 });
+  await act(async () => render(false));
+  await act(async () => render(true));
+  await act(async () => acceptFirst({ state: { votes: 2 }, version: 5 }));
+  expect(firstChange).toHaveBeenCalledTimes(1);
+  expect(first.load()).toEqual({ votes: 3 });
+  expect(host.dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('编辑权限已变更');
+  expect(firstChange).toHaveBeenCalledTimes(1);
+  await act(async () => [...host.dom.window.document.querySelectorAll('button')].find(button => button.textContent === '重试保存')!.click());
+  expect(firstChange).toHaveBeenNthCalledWith(2, { votes: 3 }, 5);
 });

@@ -58,11 +58,44 @@ it('reports source editing and preserves the dirty draft and failure until a suc
   expect(onActivity.mock.calls.at(-1)?.[0]).toMatchObject({ editingIds: [], movingIds: [], dirty: false, issues: [] });
 });
 
+it('shows real dirty, pending, failed and saved source writes in the header', async () => {
+  const board = makeBoard('save-state-board');
+  const renderErrors = vi.spyOn(console, 'error');
+  let resolveWrite: ((value: { board: Board }) => void) | undefined, rejectWrite: ((error: Error) => void) | undefined;
+  const client: StudioClient = { embedded: true, call: vi.fn(async (name, args) => {
+    if (name === 'artifact_feedback') return { feedback: [] };
+    if (name === 'artifact_read') return args?.mode === 'source' ? { html: '<h1>原文</h1>' } : board;
+    return new Promise<{ board: Board }>((resolve, reject) => { resolveWrite = resolve; rejectWrite = reject; });
+  }) as StudioClient['call'] };
+  await act(async () => root.render(<StudioApp client={client} actor={LOCAL_ACTOR} initialArtifactId={board.artifact.id} />));
+  await waitUntil(() => !!container.querySelector('[aria-label="测试画布"]'));
+  const saveStatus = () => container.querySelector<HTMLElement>('[data-save-status]')!;
+  expect(saveStatus().dataset.saveStatus).toBe('saved'); expect(saveStatus().classList.contains('studio-save-saved')).toBe(true);
+  await click('编辑 HTML'); await change(container.querySelector<HTMLTextAreaElement>('#studio-html-source')!, '<h1>尚未保存</h1>');
+  expect(saveStatus().textContent).toBe('未保存'); expect(saveStatus().classList.contains('studio-save-dirty')).toBe(true);
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(saveStatus().textContent).toBe('保存中…'); expect(saveStatus().classList.contains('studio-save-saving')).toBe(true);
+  await act(async () => rejectWrite!(new Error('磁盘暂时无法写入')));
+  expect(saveStatus().textContent).toBe('保存异常'); expect(saveStatus().title).toBe('磁盘暂时无法写入');
+  expect(container.querySelector<HTMLTextAreaElement>('#studio-html-source')?.value).toBe('<h1>尚未保存</h1>');
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(saveStatus().textContent).toBe('保存中…');
+  await act(async () => resolveWrite!({ board }));
+  expect(saveStatus().textContent).toBe('已保存'); expect(saveStatus().title).toBe('已保存');
+  expect(saveStatus().getAttribute('aria-label')).toBe('已保存');
+  expect(container.querySelector('#studio-html-source')).toBeNull();
+  expect(renderErrors.mock.calls.some(args => String(args[0]).includes('same key'))).toBe(false);
+});
+
 it('uses the shared presence channel to start, adjust, pause, resume and reset the room timer', async () => {
   const collaboration = new StudioCollaboration();
   const request = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
+    const url = new URL(String(_url));
+    if (url.pathname === '/api/session') return Response.json({ actor: LOCAL_ACTOR, access: 'local' });
+    if (url.pathname === '/api/sync') return Response.json(await collaboration.sync('timer-board', { after: url.searchParams.get('after') || undefined, wait: Number(url.searchParams.get('wait')), peerId: url.searchParams.get('peerId') || undefined, peerEpoch: url.searchParams.get('peerEpoch') || undefined, signal: options?.signal || undefined }, LOCAL_ACTOR));
+    if (url.pathname.startsWith('/api/tools/')) return Response.json({ ok: true, data: url.pathname.endsWith('artifact_feedback') ? { feedback: [] } : makeBoard('timer-board') });
     const input = options?.body ? JSON.parse(String(options.body)) : undefined;
-    const result = input ? collaboration.update('timer-board', input, LOCAL_ACTOR) : { peers: [], timer: collaboration.getTimer('timer-board') };
+    const result = input ? await collaboration.update('timer-board', input, LOCAL_ACTOR) : { peers: [], timer: collaboration.getTimer('timer-board') };
     return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
   });
   const client: StudioClient = { embedded: true, baseUrl: 'http://studio.test', token: 'test-token', call: vi.fn(async name => name === 'artifact_feedback' ? { feedback: [] } : makeBoard('timer-board')) as StudioClient['call'] };

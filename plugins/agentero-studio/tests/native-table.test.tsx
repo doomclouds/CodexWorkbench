@@ -183,13 +183,13 @@ describe('native table editing', () => {
     await event(button('放弃表格草稿'), 'click'); expect(cell(0, 0).textContent).toBe('Remote edit'); expect(host.querySelector('[role="textbox"]')).toBeNull();
   });
 
-  it('disables overlapping saves and retains the reason from a rejected save', async () => {
+  it('keeps newer input responsive during a save and retains it after rejection', async () => {
     let reject!: (failure: Error) => void;
     const save = vi.fn().mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
     await mount(table(), { onSave: save }); await event(cell(0, 0), 'dblclick'); await type('Pending'); await key(editor(), 'Escape');
-    expect(editor().getAttribute('aria-disabled')).toBe('true'); await key(editor(), 'Escape'); expect(save).toHaveBeenCalledTimes(1);
+    expect(editor().getAttribute('aria-disabled')).toBeNull(); await type('Newer pending'); await key(editor(), 'Escape'); expect(save).toHaveBeenCalledTimes(1);
     await act(async () => reject(new Error('Network unavailable')));
-    expect(editor().textContent).toBe('Pending'); expect(editor().getAttribute('aria-disabled')).toBeNull(); expect(host.querySelector('[role="alert"]')!.textContent).toContain('Network unavailable');
+    expect(editor().textContent).toBe('Newer pending'); expect(editor().getAttribute('aria-disabled')).toBeNull(); expect(host.querySelector('[role="alert"]')!.textContent).toContain('Network unavailable');
   });
 
   it('offers row and column insertion/deletion in the actual cell menu and keeps one final cell', async () => {

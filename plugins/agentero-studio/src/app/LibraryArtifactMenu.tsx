@@ -4,7 +4,7 @@ import { Copy, FileCode2, MoreHorizontal, Pin, Share2, Trash2 } from 'lucide-rea
 import type { Artifact } from '../contracts/studio';
 import './library.css';
 
-interface MenuPlacement { left: number; top: number; maxHeight: number; maxWidth: number; side: 'above' | 'below' }
+interface MenuPlacement { left: number; top: number; maxHeight: number; maxWidth: number; side: 'above' | 'below' | 'point' }
 export interface LibraryMenuProps {
   anchorRef: RefObject<HTMLElement | null>;
   label: string;
@@ -13,10 +13,11 @@ export interface LibraryMenuProps {
   className?: string;
   initialFocus?: 'first' | 'last' | 'selected';
   id?: string;
+  atPoint?: boolean;
 }
 
 /** Menus leave the scrolling library pane, while inheriting its Studio theme. */
-export function LibraryMenu({ anchorRef, label, onClose, children, className = '', initialFocus = 'selected', id }: LibraryMenuProps) {
+export function LibraryMenu({ anchorRef, label, onClose, children, className = '', initialFocus = 'selected', id, atPoint = false }: LibraryMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null), closeRef = useRef(onClose); closeRef.current = onClose;
   const [placement, setPlacement] = useState<MenuPlacement | null>(null);
   const host = anchorRef.current?.closest<HTMLElement>('.studio');
@@ -32,10 +33,10 @@ export function LibraryMenu({ anchorRef, label, onClose, children, className = '
     const menuRect = menu.getBoundingClientRect(), width = Math.min(menuRect.width, maxWidth);
     const height = menu.scrollHeight || menuRect.height;
     const below = Math.max(0, bounds.bottom - inset - anchorRect.bottom - gap), above = Math.max(0, anchorRect.top - gap - bounds.top - inset);
-    const side = height <= below || below >= above ? 'below' : 'above';
-    const maxHeight = side === 'below' ? below : above;
-    const left = Math.max(bounds.left + inset, Math.min(anchorRect.right - width, bounds.right - inset - width));
-    const top = side === 'below' ? anchorRect.bottom + gap : anchorRect.top - gap - Math.min(height, maxHeight);
+    const side = atPoint ? 'point' : height <= below || below >= above ? 'below' : 'above';
+    const maxHeight = atPoint ? Math.max(0, bounds.bottom - bounds.top - inset * 2) : side === 'below' ? below : above;
+    const left = Math.max(bounds.left + inset, Math.min(atPoint ? anchorRect.left : anchorRect.right - width, bounds.right - inset - width));
+    const top = atPoint ? Math.max(bounds.top + inset, Math.min(anchorRect.top, bounds.bottom - inset - Math.min(height, maxHeight))) : side === 'below' ? anchorRect.bottom + gap : anchorRect.top - gap - Math.min(height, maxHeight);
     const next: MenuPlacement = { left, top, maxHeight, maxWidth, side };
     setPlacement(previous => previous && Object.keys(next).every(key => previous[key as keyof MenuPlacement] === next[key as keyof MenuPlacement]) ? previous : next);
   }
@@ -63,7 +64,7 @@ export function LibraryMenu({ anchorRef, label, onClose, children, className = '
   }
 
   if (!host) return null;
-  return createPortal(<div id={id} ref={menuRef} role="menu" aria-label={label} data-placement={placement?.side} className={`studio-menu studio-library-floating-menu ${className}`} onKeyDown={navigate}
+  return createPortal(<div id={id} ref={menuRef} role="menu" aria-label={label} data-native-interactive="true" data-placement={placement?.side} className={`studio-menu studio-library-floating-menu ${className}`} onKeyDown={navigate}
     style={{ position: 'fixed', left: placement?.left || 0, top: placement?.top || 0, maxWidth: placement?.maxWidth, maxHeight: placement?.maxHeight, visibility: placement ? 'visible' : 'hidden' }}>{children}</div>, host);
 }
 
