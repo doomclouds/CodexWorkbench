@@ -28,6 +28,16 @@ describe('Studio authenticated local and LAN host', () => {
     expect(page.status).toBe(200); expect(html).toContain('window.__STUDIO_BOOT__'); expect(html).toContain('"role":"owner"');
     expect((await call('studio_open', {})).value).toMatchObject({ ok: true, data: { view: 'library' } });
   });
+  it('injects bootstrap before the bundle without rewriting HTML literals inside JavaScript', async () => {
+    await host.close();
+    const bundle = '<script type="module">const exportTemplate = "<html><head></head><body>export</body></html>";</script>';
+    const source = `<!doctype html><html><head data-test="real-head">${bundle}</head><body><div id="root"></div></body></html>`;
+    host = await startStudioHost({ dataRoot: directory, html: source });
+    const html = await (await fetch(`${host.origin}/?token=${host.token}`)).text();
+    expect(html).toContain('<head data-test="real-head"><script>window.__STUDIO_BOOT__=');
+    expect(html).toContain(bundle);
+    expect(html.replace(/<script>window\.__STUDIO_BOOT__=.*?<\/script>/, '')).toBe(source);
+  });
   it('shares a real LAN web entry and restricts editor/commenter/viewer roles', async () => {
     const artifact = await work(), shared = await sharing(artifact.id);
     expect(shared.enabled).toBe(true); expect(new URL(shared.links.editor).hostname).not.toBe('127.0.0.1');

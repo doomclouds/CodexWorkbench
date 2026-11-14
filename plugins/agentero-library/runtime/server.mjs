@@ -62592,7 +62592,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.5.0";
+var PLUGIN_VERSION = "0.5.1";
 
 // src/infrastructure/native-mcp.ts
 var replayableReads = /* @__PURE__ */ new Set(["vault_list", "paper_get", "paper_paths", "vault_search", "page_read", "paper_text_get", "file_read", "file_list", "paper_notes_get"]);
@@ -67782,7 +67782,7 @@ function createLibraryServer(service2, options = {}) {
       return failure2(error62);
     }
   });
-  for (const [name2, title, appOnly] of [["library_open", "\u6253\u5F00\u6587\u732E\u5E93", false], ["settings_open", "\u914D\u7F6E\u4E0E\u8BCA\u65AD", true]]) {
+  for (const [name2, title, appOnly] of [["library_open", "\u6587\u732E\u5E93", false], ["settings_open", "\u914D\u7F6E\u4E0E\u8BCA\u65AD", true]]) {
     server2.registerTool(name2, {
       title,
       description: title,

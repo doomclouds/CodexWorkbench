@@ -2,7 +2,7 @@
 
 Agentero Studio 是 CodexWorkbench 的本地设计创作插件。通过 Codex 对话旁的 MCP App 进入作品中心，创建白板、组织原生对象和 HTML Region，并围绕具体内容留下备注、附加到对话，让 Codex 修改原始内容。
 
-版本：`0.1.0`。运行要求：Node.js 24 或更高版本。
+版本：`0.1.1`。运行要求：Node.js 24 或更高版本。
 
 ## 使用流程
 
@@ -46,7 +46,7 @@ MCP App 内的标注通过插件自己的选择层和宿主消息扩展实现，
 
 ## 明暗主题
 
-界面与内容分别处理主题。Studio 界面响应宿主主题；HTML Region 保留自己的内容配色，不做整图强制反色。默认参考 Diagram Design 的背景、正文、次要文字、强调和连接等语义色，尤其检查暗色下节点填充与文字、连线及标签的对比。
+界面与内容分别处理主题。Studio 首次响应宿主主题，之后可用单个日／月图标切换明暗；HTML Region 保留自己的内容配色，不做整图强制反色。默认参考 Diagram Design 的背景、正文、次要文字、强调和连接等语义色，尤其检查暗色下节点填充与文字、连线及标签的对比。
 
 ## MCP 工具
 
@@ -69,7 +69,7 @@ MCP App 内的标注通过插件自己的选择层和宿主消息扩展实现，
 
 `runtime/server.mjs` 是 [tooling/build-agentero-studio.mjs](../../tooling/build-agentero-studio.mjs) 从 `src/server/index.ts` 自动生成的 esbuild 分发文件，包含后端运行依赖；其长度包含打包代码，不能视为业务单体。前端由同一脚本经 Vite 生成 `runtime/app.html`，PNG 渲染另随附 `runtime/resvg.wasm`。业务修改维护下列源码，再统一构建运行资源，不手工修改生成文件。
 
-`src/server/` 负责 stdio MCP 协议、HTTP／SSE 传输、连接鉴权、本机权威服务发现与进程租约。它把请求交给 `src/core/service.ts`，不另建一套业务存储。
+`src/server/` 负责 stdio MCP 协议、HTTP／SSE 传输、连接鉴权、本机权威服务发现与进程租约。嵌入的 MCP App 通过仅界面可用的 `studio_app_request` 与宿主通信，不直接请求 loopback；该内部传输不增加模型可见的八个业务工具。完整文档、媒体和备份按有界分块传输，写入保留人类作者。局域网 Web 页面继续使用 HTTP／SSE，MCP App 使用可见时的版本检查与在线状态轮询。它把请求交给 `src/core/service.ts`，不另建一套业务存储。
 
 `src/core/shared/` 统一作品身份、持久化、历史、CAS／幂等、批注／提案、分享权限、在线状态、资源与 ZIP 归档。产品内容存入泛型 `content`，这些公共模块不读取白板元素或 HTML。
 

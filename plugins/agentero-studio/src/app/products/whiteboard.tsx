@@ -4,6 +4,7 @@ import type { Artifact, Board, HtmlSelection, Operation, StudioClient } from '..
 import type { ProductAnnotation, ProductDescriptor, ProductDifferenceProps, ProductEditorProps, ProductPreviewProps, ProductToolbarProps } from '../products';
 import WhiteboardCanvas from '../canvas/WhiteboardCanvas';
 import { StudioDialog } from './dialog';
+import { downloadStudioFile, studioRequest } from '../transport';
 
 function newId(prefix: string) { return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`; }
 function downloadableUrl(client: StudioClient, path: string): string {
@@ -16,7 +17,7 @@ function thumbnailUrl(client: StudioClient, thumbnail: string): string | undefin
   try {
     const url = new URL(thumbnail, client.baseUrl || window.location.href);
     const origin = new URL(client.baseUrl || window.location.href).origin;
-    return url.origin === origin ? downloadableUrl(client, thumbnail) : undefined;
+    return url.origin === origin ? client.assetUrl ? client.assetUrl(thumbnail) : downloadableUrl(client, thumbnail) : undefined;
   } catch { return undefined; }
 }
 function WhiteboardPreview({ artifact, cached, client }: { artifact: Artifact; cached?: Board; client: StudioClient }) {
@@ -114,12 +115,12 @@ function WhiteboardToolbar({ document: opaqueDocument, client, selectedIds, disa
 async function exportWhiteboard(document: unknown, format: 'png' | 'svg' | 'html' | 'json', client: StudioClient) {
   const board = document as Board;
   try {
-    if (format === 'png') { const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token }); return; }
+    if (format === 'png') { const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token, request: (url: string | URL) => studioRequest(client, url) }); return; }
     const result = await client.call<{ filename: string; downloadPath: string }>('artifact_export', { artifactId: board.artifact.id, format });
-    const link = window.document.createElement('a'); link.href = downloadableUrl(client, result.downloadPath); link.download = result.filename; link.rel = 'noopener'; window.document.body.append(link); link.click(); link.remove();
+    await downloadStudioFile(client, result.downloadPath, result.filename);
   } catch (error) {
     if (!((error as { code?: string })?.code === 'EXPORT_BROWSER_REQUIRED' || error instanceof Error && error.message.includes('EXPORT_BROWSER_REQUIRED'))) throw error;
-    const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token });
+    const { downloadBoard } = await import('../export'); await downloadBoard(board, format, { baseUrl: client.baseUrl, token: client.token, request: (url: string | URL) => studioRequest(client, url) });
   }
 }
 export const whiteboardProduct: ProductDescriptor = {

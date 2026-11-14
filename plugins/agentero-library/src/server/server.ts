@@ -159,7 +159,7 @@ export function createLibraryServer(service: LibraryService, options: { html?: s
     catch (error) { return failure(error); }
   });
 
-  for (const [name, title, appOnly] of [['library_open', '打开文献库', false], ['settings_open', '配置与诊断', true]] as const) {
+  for (const [name, title, appOnly] of [['library_open', '文献库', false], ['settings_open', '配置与诊断', true]] as const) {
     server.registerTool(name, {
       title, description: title,
       inputSchema: z.object({ view: z.enum(['library', 'reading', 'notes', 'trash', 'settings']).optional(), paperPath: key.optional(), vaultId: key.optional() }).strict(),
