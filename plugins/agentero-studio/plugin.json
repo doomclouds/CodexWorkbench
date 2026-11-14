@@ -1,0 +1,15 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agentero-studio", "version": "0.1.0",
+  "description": "作品管理、共享白板与 HTML 图解，在 Codex 对话旁通过标注协作修改。",
+  "author": { "name": "doomclouds" }, "license": "MIT",
+  "homepage": "https://github.com/doomclouds/CodexWorkbench",
+  "repository": "https://github.com/doomclouds/CodexWorkbench",
+  "keywords": ["whiteboard", "design", "html", "agentero", "codex"],
+  "extensions": { "com.openai": { "requires_local_executor": true, "interface": {
+    "displayName": "Agentero 创作", "shortDescription": "共享白板、HTML 图解与 Agent 标注协作",
+    "longDescription": "创建和管理作品，编辑共享白板，标注 HTML 图解并附加到 Codex 对话，保留历史版本。Diagram Design 为可选外部 Skill。",
+    "developerName": "doomclouds", "category": "Productivity", "capabilities": ["Interactive"],
+    "defaultPrompt": "打开 Agentero 创作，创建一块白板。", "composerIcon": "./assets/icon.svg", "logo": "./assets/icon.svg"
+  } } }
+}

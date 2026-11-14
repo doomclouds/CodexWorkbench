@@ -15,6 +15,12 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Productivity"
+    },
+    {
+      "name": "agentero-studio",
+      "source": { "source": "local", "path": "./plugins/agentero-studio" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
     }
   ]
 }
