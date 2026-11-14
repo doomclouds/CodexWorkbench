@@ -2,12 +2,13 @@ import './region.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HtmlRegionContent, HtmlSelection, Json } from '../../../contracts/studio.js';
 import { buildHtmlRegionDocument, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlStateSave } from './runtime.js';
+import { newClientId } from '../client-id.js';
 
 interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
 
 export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, onAnnotate, onStateChange }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const channel = useMemo(() => crypto.randomUUID(), [element.id, element.html]);
+  const channel = useMemo(() => newClientId(), [element.id, element.html]);
   const [ready, setReady] = useState(false);
   const sourceRevision = typeof element.sourceRevision === 'number' ? element.sourceRevision : element.version;
   const source = useMemo(() => buildHtmlRegionDocument(element.html ?? '', { channel, regionId: element.id, sourceRevision, annotation, preserveScroll, state: element.state ?? null, elementVersion: element.version, writable: Boolean(onStateChange) }), [element.html, element.id, sourceRevision, channel]);

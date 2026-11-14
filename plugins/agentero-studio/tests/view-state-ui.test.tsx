@@ -2,7 +2,8 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type Feedback, type RoomTimer, type StudioClient } from '../src/contracts/studio';
+import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type Feedback, type StudioClient } from '../src/contracts/studio';
+import { StudioCollaboration } from '../src/core/shared/collaboration';
 import type { ProductActivity } from '../src/app/products';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
@@ -57,15 +58,12 @@ it('reports source editing and preserves the dirty draft and failure until a suc
   expect(onActivity.mock.calls.at(-1)?.[0]).toMatchObject({ editingIds: [], movingIds: [], dirty: false, issues: [] });
 });
 
-it('uses the shared presence channel to start, pause, resume and reset the room timer', async () => {
-  let timer: RoomTimer | null = null;
+it('uses the shared presence channel to start, adjust, pause, resume and reset the room timer', async () => {
+  const collaboration = new StudioCollaboration();
   const request = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, options) => {
-    const input = JSON.parse(String(options?.body));
-    if (input.timer?.action === 'start') timer = { deadline: Date.now() + input.timer.durationSeconds * 1000, remainingMs: input.timer.durationSeconds * 1000, paused: false, source: LOCAL_ACTOR };
-    else if (input.timer?.action === 'pause') timer = { ...timer!, deadline: null, paused: true };
-    else if (input.timer?.action === 'resume') timer = { ...timer!, deadline: Date.now() + timer!.remainingMs, paused: false };
-    else if (input.timer?.action === 'reset') timer = null;
-    return new Response(JSON.stringify({ peers: [], timer }), { headers: { 'Content-Type': 'application/json' } });
+    const input = options?.body ? JSON.parse(String(options.body)) : undefined;
+    const result = input ? collaboration.update('timer-board', input, LOCAL_ACTOR) : { peers: [], timer: collaboration.getTimer('timer-board') };
+    return new Response(JSON.stringify(result), { headers: { 'Content-Type': 'application/json' } });
   });
   const client: StudioClient = { embedded: true, baseUrl: 'http://studio.test', token: 'test-token', call: vi.fn(async name => name === 'artifact_feedback' ? { feedback: [] } : makeBoard('timer-board')) as StudioClient['call'] };
   await act(async () => root.render(<StudioApp client={client} actor={LOCAL_ACTOR} initialArtifactId="timer-board" />));
@@ -73,9 +71,14 @@ it('uses the shared presence channel to start, pause, resume and reset the room 
   await click('共享计时器');
   await click('开始');
   expect(container.querySelector('[aria-label="剩余时间"]')?.textContent).toBe('05:00');
-  await click('暂停'); expect(container.querySelector('.studio-timer-footer')?.textContent).toContain('已暂停');
-  await click('继续'); expect(container.querySelector('.studio-timer-footer')?.textContent).toContain('计时中');
+  await click('增加一分钟'); expect(collaboration.getTimer('timer-board')).toMatchObject({ durationMs: 300_000 });
+  expect(container.querySelector('[aria-label="剩余时间"]')?.textContent).toBe('06:00');
+  await click('暂停'); expect(container.querySelector('[aria-label="计时状态"]')?.textContent).toContain('已暂停');
+  await click('继续'); expect(container.querySelector('[aria-label="计时状态"]')?.textContent).toContain('计时中');
+  await click('暂停');
   await click('重置'); expect(container.querySelector('[aria-label="剩余时间"]')).toBeNull();
-  const actions = request.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).timer).filter(Boolean);
-  expect(actions).toEqual([{ action: 'start', durationSeconds: 300 }, { action: 'pause' }, { action: 'resume' }, { action: 'reset' }]);
+  expect(collaboration.getTimer('timer-board')).toMatchObject({ durationMs: 300_000, remainingMs: 300_000, deadline: null, paused: false });
+  expect((container.querySelector('[aria-label="计时分钟"]') as HTMLInputElement).value).toBe('05');
+  const actions = request.mock.calls.flatMap(([, options]) => options?.body ? [JSON.parse(String(options.body)).timer] : []).filter(Boolean);
+  expect(actions).toEqual([{ action: 'start', durationSeconds: 300 }, { action: 'adjust', deltaSeconds: 60 }, { action: 'pause' }, { action: 'resume' }, { action: 'pause' }, { action: 'reset' }]);
 });

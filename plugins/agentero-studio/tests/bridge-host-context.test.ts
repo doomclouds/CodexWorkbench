@@ -72,11 +72,13 @@ describe('Studio host background context', () => {
   });
 });
 
-it('attaches generic artifact feedback as a draft that first requests source context', () => {
+it('attaches generic artifact feedback as context without inserting a task into the draft', () => {
   const document: ArtifactView = { artifact: { id: 'artifact-one', type: 'future-product', title: '作品', revision: 1, pinned: false, createdAt: '', updatedAt: '' } };
   const feedback: Feedback = { id: 'feedback-one', artifactId: 'artifact-one', type: 'request', text: '请调整布局', anchor: { targetIds: ['node-one'] }, author: LOCAL_ACTOR, status: 'open', createdAt: '', updatedAt: '', replies: [] };
   const draft = feedbackDraft(feedback, document);
   expect(draft._meta['openai/message']).toEqual({ target: 'active', send: false });
-  expect(draft.content[1]?.text).toContain('"artifactType":"future-product"');
-  expect(draft.content[1]?.text).toContain('artifact_read 的 context 模式');
+  expect(draft.content).toHaveLength(1);
+  expect(draft.content[0]?._meta?.['openai/title']).toBeTruthy();
+  expect(draft.content[0]?.text).toContain('"artifactType":"future-product"');
+  expect(draft.content[0]?.text).toContain('artifact_read 的 context 模式');
 });

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Server } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -22,6 +23,25 @@ async function readSse(reader: ReadableStreamDefaultReader<Uint8Array>, match: s
 }
 
 describe('Studio authenticated local and LAN host', () => {
+  it('rejects a requested browser-blocked port before starting a service', async () => {
+    await expect(startStudioHost({ dataRoot: directory, port: 6000 })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect((await fetch(`${host.origin}/api/session?token=${host.token}`)).status).toBe(200);
+  });
+  it('rebinds an automatically assigned browser-blocked port and serves a real response', async () => {
+    await host.close();
+    const original = Server.prototype.address;
+    let assigned = false;
+    const address = vi.spyOn(Server.prototype, 'address').mockImplementation(function (this: Server) {
+      if (!assigned) { assigned = true; return { address: '127.0.0.1', family: 'IPv4', port: 6000 }; }
+      return original.call(this);
+    });
+    try {
+      host = await startStudioHost({ dataRoot: directory });
+      expect(address.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(new URL(host.origin).port).not.toBe('6000');
+      expect((await fetch(`${host.origin}/api/session?token=${host.token}`)).status).toBe(200);
+    } finally { address.mockRestore(); }
+  });
   it('requires authentication and injects only the authenticated web session', async () => {
     expect((await fetch(`${host.origin}/api/session`)).status).toBe(401);
     const page = await fetch(`${host.origin}/?token=${host.token}`), html = await page.text();

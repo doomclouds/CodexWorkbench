@@ -1,4 +1,5 @@
 import { DEFAULT_STYLE, type Anchor, type BoardElement, type ElementType, type Operation, type StudioClient, type StyleProfile } from '../../contracts/studio.js';
+import { newClientId } from '../shared/client-id.js';
 import { DARK_THEME, LIGHT_THEME } from '../../core/theme.js';
 import { arrowGeometry } from '../../core/products/whiteboard-geometry.js';
 export { arrowGeometry, arrowEnd, arrowHeads } from '../../core/products/whiteboard-geometry.js';
@@ -8,10 +9,10 @@ export interface Point { x: number; y: number }
 export interface Rect extends Point { w: number; h: number }
 export interface Viewport extends Point { zoom: number }
 
-export const MIN_ZOOM = 0.12;
-export const MAX_ZOOM = 3;
+export const MIN_ZOOM = 0.05;
+export const MAX_ZOOM = 8;
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-export const newId = () => `e-${crypto.randomUUID()}`;
+export const newId = () => newClientId('e');
 
 /** Host theme projects the uncustomized palette; it never rewrites the shared board or an HTML region. */
 export function canvasStyle(style: StyleProfile, theme: 'light' | 'dark'): StyleProfile {
@@ -109,9 +110,9 @@ export function editableFields(element: BoardElement): Partial<BoardElement> {
 
 export function makeElement(type: ElementType, point: Point, overrides: Partial<BoardElement> = {}): BoardElement {
   const defaults: Partial<Record<ElementType, Partial<BoardElement>>> = {
-    shape: { w: 208, h: 112, kind: 'rounded', text: '新建节点', fill: '#ffffff', stroke: 'muted', fontSize: 17 },
-    note: { w: 208, h: 184, text: '写下你的想法', fill: '#fff0b5', color: '#4b422a', fontSize: 18 },
-    text: { w: 300, h: 70, text: '双击编辑文字', fontSize: 24, fill: 'transparent' },
+    shape: { w: 208, h: 112, kind: 'rounded', text: '', fill: '#EFEFEF', stroke: 'transparent', fontSize: 16 },
+    note: { w: 208, h: 184, text: '', fill: '#F9E56F', color: '#0B0B0B', fontSize: 15 },
+    text: { w: 300, h: 70, text: '', fontSize: 16, fill: 'transparent' },
     container: { w: 600, h: 360, text: '分区', fill: 'transparent', stroke: '#9ca3af', fontSize: 18 },
     stroke: { w: 1, h: 1, points: [0, 0, 1, 1], stroke: 'muted', strokeWidth: 3 },
     arrow: { w: 180, h: 1, from: [point.x, point.y], to: [point.x + 180, point.y], color: 'muted', head: 'end' },
@@ -178,5 +179,16 @@ export function assetDisplayUrl(src: string | undefined, client: StudioClient): 
 
 export function tableRows(element: BoardElement): string[][] {
   const rows = element.data?.rows;
-  return Array.isArray(rows) && rows.every(Array.isArray) ? rows.map((row) => row.map((cell: unknown) => String(cell ?? ''))) : [['名称', '说明'], ['项目', '双击编辑']];
+  if (Array.isArray(rows) && rows.every(Array.isArray) && rows.length) return rows.map(row => row.map((cell: unknown) => String(cell ?? '')));
+  if (typeof element.text === 'string' && element.text.length) return element.text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map(row => row.split('\t'));
+  return [['']];
+}
+
+/** The toolbar is centered on the selection, then kept inside the canvas in screen pixels. */
+export function placeFormatToolbar(anchor: Point, size: { w: number; h: number }, viewport: { w: number; h: number }): Point {
+  const margin = 12;
+  return {
+    x: clamp(anchor.x, margin + size.w / 2, Math.max(margin + size.w / 2, viewport.w - margin - size.w / 2)),
+    y: clamp(anchor.y, margin, Math.max(margin, viewport.h - margin - size.h)),
+  };
 }

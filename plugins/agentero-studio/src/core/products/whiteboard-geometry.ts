@@ -21,14 +21,20 @@ export function arrowHeads(arrow: BoardElement): [ArrowHead, ArrowHead] {
   return [arrow.head === 'both' ? 'arrow' : 'none', arrow.head === 'none' ? 'none' : 'arrow'];
 }
 
+function rotatePoint(point: Point, center: Point, degrees: number): Point {
+  const angle = degrees % 360 * Math.PI / 180;
+  if (!angle) return point;
+  const cosine = Math.cos(angle), sine = Math.sin(angle), dx = point.x - center.x, dy = point.y - center.y;
+  return { x: center.x + dx * cosine - dy * sine, y: center.y + dx * sine + dy * cosine };
+}
+
 export function arrowEnd(element: BoardElement | undefined, side: string | undefined, other: Point, fallback: Point): Point {
   if (!element) return fallback;
   const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
-  const resolved = side ?? (Math.abs(other.x - center.x) > Math.abs(other.y - center.y) ? other.x >= center.x ? 'right' : 'left' : other.y >= center.y ? 'bottom' : 'top');
-  if (resolved === 'left') return { x: element.x, y: center.y };
-  if (resolved === 'right') return { x: element.x + element.w, y: center.y };
-  if (resolved === 'top') return { x: center.x, y: element.y };
-  return { x: center.x, y: element.y + element.h };
+  const localOther = rotatePoint(other, center, -(element.rotation ?? 0));
+  const resolved = side ?? (Math.abs(localOther.x - center.x) > Math.abs(localOther.y - center.y) ? localOther.x >= center.x ? 'right' : 'left' : localOther.y >= center.y ? 'bottom' : 'top');
+  const anchor = resolved === 'left' ? { x: element.x, y: center.y } : resolved === 'right' ? { x: element.x + element.w, y: center.y } : resolved === 'top' ? { x: center.x, y: element.y } : { x: center.x, y: element.y + element.h };
+  return rotatePoint(anchor, center, element.rotation ?? 0);
 }
 
 function roundedPolyline(points: Point[], radius = 8): string {
@@ -66,14 +72,19 @@ export function arrowGeometry(arrow: BoardElement, elements: readonly BoardEleme
     const firstOther = firstHorizontal ? { x: at[0]!, y: fromCenter.y } : { x: fromCenter.x, y: at[0]! };
     const nextHorizontal = firstHorizontal === (offsets.length % 2 === 0);
     const lastOther = nextHorizontal ? { x: toCenter.x, y: at.at(-1)! } : { x: at.at(-1)!, y: toCenter.y };
-    from = arrowEnd(fromElement, arrow.fromSide ?? (firstHorizontal ? firstOther.x >= fromCenter.x ? 'right' : 'left' : firstOther.y >= fromCenter.y ? 'bottom' : 'top'), firstOther, fromCenter);
-    to = arrowEnd(toElement, arrow.toSide ?? (nextHorizontal ? lastOther.y >= toCenter.y ? 'bottom' : 'top' : lastOther.x >= toCenter.x ? 'right' : 'left'), lastOther, toCenter);
+    from = arrowEnd(fromElement, arrow.fromSide ?? ((fromElement?.rotation ?? 0) % 360 ? undefined : firstHorizontal ? firstOther.x >= fromCenter.x ? 'right' : 'left' : firstOther.y >= fromCenter.y ? 'bottom' : 'top'), firstOther, fromCenter);
+    to = arrowEnd(toElement, arrow.toSide ?? ((toElement?.rotation ?? 0) % 360 ? undefined : nextHorizontal ? lastOther.y >= toCenter.y ? 'bottom' : 'top' : lastOther.x >= toCenter.x ? 'right' : 'left'), lastOther, toCenter);
     points = [from];
     let cursor = from;
     at.forEach((coordinate, index) => { cursor = firstHorizontal === (index % 2 === 0) ? { x: coordinate, y: cursor.y } : { x: cursor.x, y: coordinate }; points!.push(cursor); });
     points.push(nextHorizontal ? { x: to.x, y: cursor.y } : { x: cursor.x, y: to.y }, to);
     const clearsEnd = (element: BoardElement | undefined, endpoint: Point, neighbor: Point, side: string | undefined) => {
       if (!element) return true;
+      if ((element.rotation ?? 0) % 360) {
+        const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
+        const localEnd = rotatePoint(endpoint, center, -element.rotation!), localNeighbor = rotatePoint(neighbor, center, -element.rotation!);
+        return (localNeighbor.x - localEnd.x) * (localEnd.x - center.x) + (localNeighbor.y - localEnd.y) * (localEnd.y - center.y) > 0;
+      }
       if (side === 'left' || endpoint.x === element.x && endpoint.y === element.y + element.h / 2) return neighbor.y === endpoint.y && neighbor.x < endpoint.x;
       if (side === 'right' || endpoint.x === element.x + element.w && endpoint.y === element.y + element.h / 2) return neighbor.y === endpoint.y && neighbor.x > endpoint.x;
       if (side === 'top' || endpoint.y === element.y) return neighbor.x === endpoint.x && neighbor.y < endpoint.y;

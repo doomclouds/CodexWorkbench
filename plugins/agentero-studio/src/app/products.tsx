@@ -17,6 +17,7 @@ export interface ProductEditorProps<Document = StudioDocument> {
   onActivityChange?: (state: ProductActivity) => void; activities?: Feedback[];
   presence: Presence[]; selfPeerId: string; externalViewport?: Viewport; externalSelectedIds?: string[];
   annotationActive?: boolean; onAnnotationModeChange?: (active: boolean) => void;
+  annotationTarget?: Anchor;
   onFeedbackSelect?: (feedback: Feedback, screenPoint: { x: number; y: number }) => void;
   onOpenHtml?: (regionId: string) => void; documentControls?: ReactNode;
 }

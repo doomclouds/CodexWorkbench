@@ -3,6 +3,7 @@ import { Check, Lightbulb, Loader2, RotateCcw, X } from 'lucide-react';
 import type { Feedback, StudioClient } from '../contracts/studio';
 import type { ProposalOperation } from '../contracts/proposals';
 import type { StudioDocument } from './products';
+import { newClientId } from './shared/client-id.js';
 
 export interface SuggestionPanelProps<Document extends StudioDocument = StudioDocument> {
   feedback: Feedback;
@@ -40,7 +41,7 @@ export function SuggestionPanel<Document extends StudioDocument = StudioDocument
     if (busy || !proposal) return;
     setBusy(optionId ?? 'clear'); callbacks.current.onPreview(null);
     try {
-      const result = await client.call<{ feedback: Feedback[]; board?: Document; document?: Document }>('artifact_feedback', { action: optionId ? 'choose' : 'withdraw', artifactId, feedbackId: feedback.id, ...(optionId ? { optionId } : {}), operationId: crypto.randomUUID() });
+      const result = await client.call<{ feedback: Feedback[]; board?: Document; document?: Document }>('artifact_feedback', { action: optionId ? 'choose' : 'withdraw', artifactId, feedbackId: feedback.id, ...(optionId ? { optionId } : {}), operationId: newClientId() });
       const changed = result.document ?? result.board;
       if (changed) callbacks.current.onChanged(changed);
       await callbacks.current.onRefresh();

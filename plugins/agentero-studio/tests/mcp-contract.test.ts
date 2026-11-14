@@ -76,6 +76,39 @@ describe('model MCP contracts through the real SDK', () => {
     await failure('artifact_feedback', { ...args, operationId: randomUUID(), versions: {} }, 'INVALID_ARGUMENT');
   });
 
+  it('roundtrips immutable display batches, adjacent unit diffs and CAS-protected partial restore', async () => {
+    const first = await add([{ id: 'a', type: 'text', text: 'A' }, { id: 'b', type: 'text', text: 'B' }]);
+    const second = await call('artifact_apply', { expectedVersions: { a: 1, b: 1 }, operations: [{ op: 'update', id: 'a', changes: { text: 'A2' } }, { op: 'update', id: 'b', changes: { text: 'B2' } }] });
+    const history = await call('artifact_read', { mode: 'history' });
+    expect(history.history).toHaveLength(3);
+    expect(history.batches.at(-1)).toMatchObject({ id: second.historyEntry.id, firstVersionId: first.historyEntry.id, versionIds: [first.historyEntry.id, second.historyEntry.id] });
+    const adjacent = await call('artifact_read', { mode: 'diff', versionId: first.historyEntry.id, adjacent: true, ids: ['a'] });
+    expect(adjacent.units).toEqual([{ id: 'a', before: null, after: expect.objectContaining({ text: 'A', version: 1 }) }]);
+    const selected = await call('artifact_read', { mode: 'diff', fromVersionId: first.historyEntry.id, toVersionId: second.historyEntry.id, ids: ['a'] });
+    expect(selected.units).toEqual([{ id: 'a', before: expect.objectContaining({ text: 'A' }), after: expect.objectContaining({ text: 'A2' }) }]);
+    const args = { operationId: randomUUID(), expectedVersions: { a: 2 }, operations: [{ op: 'restore', versionId: first.historyEntry.id, ids: ['a'] }] };
+    const restored = await call('artifact_apply', args);
+    expect(restored.historyEntry).toMatchObject({ changedIds: ['a'], restoredFrom: first.historyEntry.id });
+    expect(await call('artifact_apply', args)).toEqual(restored);
+    const objects = await call('artifact_read', { mode: 'objects', ids: ['a', 'b'] });
+    expect(objects.elements).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'a', text: 'A', version: 3 }), expect.objectContaining({ id: 'b', text: 'B2', version: 2 })]));
+    await failure('artifact_apply', { ...args, operationId: randomUUID() }, 'CONFLICT');
+  });
+
+  it('roundtrips the order unit clock and safely undoes and redoes real layer changes', async () => {
+    await add(['a', 'b', 'c'].map(id => ({ id, type: 'text', text: id })));
+    const baseline = await call('artifact_read', { mode: 'objects', ids: ['$order'] });
+    expect(baseline.units).toEqual([{ id: '$order', value: { version: 3, ids: ['a', 'b', 'c'] } }]);
+    const reordered = await call('artifact_apply', { expectedVersions: { a: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['a'] }] });
+    expect(reordered.historyEntry.changedIds).toEqual(['a', '$order']);
+    const undo = await call('artifact_apply', { expectedRevision: reordered.artifact.revision, operations: [{ op: 'restore', versionId: reordered.historyEntry.id, data: { mode: 'undo' } }] });
+    expect((await call('artifact_read', { mode: 'objects' })).elements.map((element: { id: string }) => element.id)).toEqual(['a', 'b', 'c']);
+    await call('artifact_apply', { expectedRevision: undo.artifact.revision, operations: [{ op: 'restore', versionId: undo.historyEntry.id, data: { mode: 'undo' } }] });
+    const result = await call('artifact_read', { mode: 'objects' });
+    expect(result.orderVersion).toBe(6); expect(result.elements.map((element: { id: string }) => element.id)).toEqual(['b', 'c', 'a']);
+    await failure('artifact_apply', { expectedVersions: { b: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['b'] }] }, 'CONFLICT');
+  });
+
   it('roundtrips all coordinate spaces and rejects invalid coordinates or versions at the protocol/domain boundary', async () => {
     await add([{ id: 'native', type: 'shape' }, { id: 'region', type: 'html', html: '<h1>Original</h1>' }]);
     const anchors = [

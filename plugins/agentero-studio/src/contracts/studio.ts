@@ -2,6 +2,7 @@ import type { Proposal } from './proposals.js';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Role = 'owner' | 'editor' | 'commenter' | 'viewer';
 export interface Actor { id: string; name: string; kind: 'human' | 'agent'; role: Role }
+export interface ShareMember { id: string; name: string; role: Exclude<Role, 'owner'>; joinedAt: string; lastSeenAt: string; active: boolean; online: boolean }
 export interface Artifact {
   id: string; type: string; title: string; revision: number; createdAt: string; updatedAt: string;
   pinned: boolean; trashedAt?: string; thumbnail?: string; sharing?: boolean;
@@ -26,7 +27,7 @@ export interface BoardElement {
 }
 export interface ArtifactView { artifact: Artifact }
 export interface HtmlRegionContent { id: string; version: number; html?: string; sourceRevision?: number; text?: string; state?: Json }
-export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown> }
+export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown>; orderVersion?: number }
 export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
 export interface Feedback {
   id: string; artifactId: string; type: 'comment' | 'request'; anchor: Anchor; author: Actor;
@@ -37,9 +38,11 @@ export interface Feedback {
   processingBy?: Actor;
 }
 export interface HistoryEntry { id: string; revision: number; createdAt: string; actor: Actor; summary: string; changedIds: string[]; restoredFrom?: string }
+/** Display grouping only; every version remains independently addressable. */
+export interface HistoryBatch extends HistoryEntry { firstVersionId: string; firstRevision: number; firstCreatedAt: string; beforeVersionId?: string; versionIds: string[] }
 export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; [key: string]: unknown }
 export interface Presence { peerId: string; actor: Actor; context?: ViewContext; cursor?: { x: number; y: number }; following?: string; chat?: string; updatedAt: string }
-export interface RoomTimer { deadline: number | null; remainingMs: number; paused: boolean; source: Actor }
+export interface RoomTimer { durationMs: number; deadline: number | null; remainingMs: number; paused: boolean; source: Actor }
 export interface Operation {
   op: 'add' | 'update' | 'delete' | 'layout' | 'style' | 'restore' | 'motion';
   id?: string; element?: Partial<BoardElement>; changes?: Partial<BoardElement>; ids?: string[];

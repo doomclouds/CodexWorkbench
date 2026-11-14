@@ -76,13 +76,13 @@ export function extractRegionSvg(html: string, prefix: string): string | undefin
 function wrap(text: string, width: number, size: number): RichTextSegment[][] {
   const rows: RichTextSegment[][] = [];
   for (const line of parseRichText(text)) {
-    const segments: RichTextSegment[] = [...(line.marker ? [{ type: 'text' as const, text: `${line.marker} ` }] : []), ...line.segments];
+    const segments: RichTextSegment[] = [...(line.marker ? [{ type: 'text' as const, text: `${'  '.repeat(line.indent ?? 0)}${line.marker} ` }] : []), ...line.segments];
     let row: RichTextSegment[] = []; let used = 0;
     for (const segment of segments) for (const character of segment.text) {
-      const cost = /[\u2e80-\uffff]/u.test(character) ? size : size * (segment.type === 'code' ? .62 : .6);
+      const cost = /[\u2e80-\uffff]/u.test(character) ? size : size * ((segment.type === 'code' || segment.code) ? .62 : .6);
       if (used && used + cost > width) { rows.push(row); row = []; used = 0; }
       const previous = row.at(-1);
-      if (previous?.type === segment.type && previous.href === segment.href) previous.text += character;
+      if (previous?.type === segment.type && previous.href === segment.href && previous.bold === segment.bold && previous.italic === segment.italic && previous.code === segment.code) previous.text += character;
       else row.push({ ...segment, text: character });
       used += cost;
     }
@@ -96,7 +96,7 @@ function textSvg(e: BoardElement, board: Board, color: string, center = false): 
   const aligned = e.textAlign ?? (center ? 'center' : 'left');
   const x = aligned === 'center' ? e.x + e.w / 2 : aligned === 'right' ? e.x + e.w - 12 : e.x + (center ? 12 : 0);
   const y = center ? e.y + Math.max(16, (e.h - (lines.length - 1) * size * 1.45) / 2) + size * .35 : e.y + size;
-  const segment = (part: RichTextSegment) => { const span = `<tspan${part.type === 'bold' ? ' font-weight="700"' : ''}${part.type === 'italic' ? ' font-style="italic"' : ''}${part.type === 'code' ? ` font-family="${escapeXml(board.style.monoFont)}"` : ''}>${escapeXml(part.text)}</tspan>`; return part.type === 'link' && part.href ? `<a href="${escapeXml(part.href)}" fill="${escapeXml(board.style.link)}">${span}</a>` : span; };
+  const segment = (part: RichTextSegment) => { const span = `<tspan${(part.type === 'bold' || part.bold) ? ' font-weight="700"' : ''}${(part.type === 'italic' || part.italic) ? ' font-style="italic"' : ''}${(part.type === 'code' || part.code) ? ` font-family="${escapeXml(board.style.monoFont)}"` : ''}>${escapeXml(part.text)}</tspan>`; return part.type === 'link' && part.href ? `<a href="${escapeXml(part.href)}" fill="${escapeXml(board.style.link)}">${span}</a>` : span; };
   return `<text fill="${escapeXml(color)}" font-family="${escapeXml(e.fontFamily ?? board.style.fontFamily)}" font-size="${size}" font-weight="${e.bold ? 700 : 400}" font-style="${e.italic ? 'italic' : 'normal'}" text-anchor="${aligned === 'center' ? 'middle' : aligned === 'right' ? 'end' : 'start'}">${lines.map((line, i) => `<tspan x="${x}" y="${y + i * size * 1.45}">${line.map(segment).join('')}</tspan>`).join('')}</text>`;
 }
 function shapeSvg(e: BoardElement, fill: string, stroke: string): string {
@@ -162,9 +162,19 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
     const href = !e.video && safeHttpLink(e.href);
     if (href) markup = `<a href="${escapeXml(href)}" target="_blank" rel="noopener noreferrer">${markup}</a>`;
   } else if (e.type === 'table') {
-    const rows = Array.isArray(e.data?.rows) ? e.data.rows as unknown[][] : [];
+    const storedRows = e.data?.rows;
+    const rows: unknown[][] = Array.isArray(storedRows) && storedRows.every(Array.isArray) && storedRows.length
+      ? storedRows
+      : typeof e.text === 'string' && e.text.length
+        ? e.text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').map(row => row.split('\t'))
+        : [['']];
     const cols = Math.max(1, ...rows.map(row => Array.isArray(row) ? row.length : 1)); const rowHeight = e.h / Math.max(1, rows.length);
-    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + ci * e.w / cols}" y="${e.y + ri * rowHeight}" width="${e.w / cols}" height="${rowHeight}" fill="${escapeXml(ri ? style.paper : style['paper-2'] ?? style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + ci * e.w / cols + 8, y: e.y + ri * rowHeight, w: e.w / cols - 16, h: rowHeight, text: String(cell), fontSize: 14 }, board, style.ink, true)}`).join('')).join('');
+    const stored = e.data?.columnWidths;
+    const proportions = Array.isArray(stored) && stored.length === cols && stored.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0) ? stored as number[] : Array.from({length:cols},()=>1);
+    const total = proportions.reduce((sum,value)=>sum+value,0), widths=proportions.map(value=>value/total*e.w), offsets=[0];
+    for(const width of widths)offsets.push(offsets.at(-1)!+width);
+    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri===0 && e.data?.head!==false ? semanticColor(e.fill,style,style['paper-2']??style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x:e.x+offsets[ci]+8, y:e.y+ri*rowHeight, w:widths[ci]-16, h:rowHeight, text:String(cell), fontSize:e.fontSize??14, bold:ri===0&&e.data?.head!==false?true:e.bold },board,semanticColor(e.color,style,style.ink),true)}`).join('')).join('');
+
   } else {
     const fill = e.type === 'container' || e.hollow ? 'none' : semanticColor(e.fill, style, e.type === 'note' ? '#fff0b5' : style['paper-2'] ?? style.paper);
     let textColor = semanticColor(e.color, style, style.ink);

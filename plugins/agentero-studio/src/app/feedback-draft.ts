@@ -2,19 +2,18 @@ import type { OpenAIMessageParams } from '@openai/mcp-extensions/app';
 import { STUDIO_ICON } from '../contracts/brand-icon';
 import type { ArtifactView, Feedback } from '../contracts/studio';
 
-/** Append a task and its titled source reference together without submitting a turn. */
+/** Attach a titled context item without changing the user's draft or submitting a turn. */
 export function feedbackDraft(feedback: Feedback, document: ArtifactView) {
   const anchor = feedback.anchor;
   const source = {
     artifactId: feedback.artifactId, artifactType: document.artifact.type, feedbackId: feedback.id,
     regionId: anchor.regionId, elementIds: anchor.elementIds, targetIds: anchor.targetIds,
     sourceRevision: anchor.sourceRevision, sourceVersions: feedback.versions,
-    selectedText: anchor.quote, excerpt: anchor.excerpt, selector: anchor.selector,
+    selectedText: anchor.quote, excerpt: anchor.excerpt, selector: anchor.selector, comment: feedback.text,
   };
   return {
     role: 'user',
     content: [
-      { type: 'text', text: `\n请根据所附作品备注修改对应内容：${feedback.text}\n先读取冻结反馈和当前目标内容，保留其他人的新修改，只提交本次需要的变更。\n` },
       { type: 'text', text: [
         '<studio-feedback>',
         JSON.stringify(source),

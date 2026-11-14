@@ -2,10 +2,10 @@ import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Presence, type Role, type Stu
 import { copy, safeId, StudioError, StudioStore, type ArtifactState } from './store.js';
 import { assertAlive, object, requireRole, text } from './shared/common.js';
 import { createArtifact, listArtifacts, manageArtifact } from './shared/artifacts.js';
-import { applyMutation, version } from './shared/history.js';
+import { applyMutation, historyBatches, mutationTargets, version } from './shared/history.js';
 import { updateFeedback } from './shared/feedback.js';
 import { clearExpiredProposals, feedbackVisible, previewProposal, proposalExpired, updateProposal, visibleFeedback } from './shared/proposals.js';
-import { SHARE_ROLES, shareInfo, shareRole, updateSharing, revokeSharing } from './shared/sharing.js';
+import { SHARE_ROLES, shareInfo, shareRole, joinSharingMember, updateSharing, revokeSharing } from './shared/sharing.js';
 import { studioProducts } from './products/index.js';
 import type { ProductRegistry } from './shared/products.js';
 import type { ContentOperation } from './shared/model.js';
@@ -110,6 +110,7 @@ export class StudioService {
   }
   private async read(id: string, args: Record<string, unknown>, actor: Actor) {
     const mode = text(args.mode, 'document');
+    if (mode === 'source' && args.contextId !== undefined && args.feedbackId === undefined) args = { ...args, feedbackId: safeId(args.contextId, '反馈 ID') };
     if (mode === 'assets') requireRole(actor, ['owner']);
     const state = await this.store.read(id), product = this.products.get(state.artifact.type);
     if (mode === 'assets') return listAssets(state, args, actor);
@@ -120,12 +121,17 @@ export class StudioService {
     for (const item of hidden) delete state.sources[item.id];
     state.feedback = visibleFeedback(state.feedback, actor);
     if (mode === 'document' || mode === 'board') return product.project(state);
-    if (mode === 'history') return { history: state.history.map(item => item.entry) };
+    if (mode === 'history') { const history = state.history.map(item => item.entry); return { history, batches: historyBatches(history) }; }
     if (mode === 'version') return product.result(version(state, args.versionId ?? args.revision));
     if (mode === 'diff') {
-      const before = version(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
-      const after = args.toVersionId !== undefined || args.to !== undefined ? version(state, args.toVersionId ?? args.to) : state;
-      return { ...product.diff(before, after), fromRevision: before.artifact.revision, toRevision: after.artifact.revision };
+      const adjacent = args.adjacent === true;
+      const selected = adjacent ? version(state, args.versionId ?? args.revision) : undefined;
+      const before = selected ? state.history[state.history.indexOf(selected) - 1] : version(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
+      const after = selected ?? (args.toVersionId !== undefined || args.to !== undefined ? version(state, args.toVersionId ?? args.to) : state);
+      if (args.ids !== undefined && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '差异内容单元 ID 列表无效。');
+      const requestedIds = args.ids as string[] | undefined;
+      const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map(id => ({ id, before: null, after: product.adapter.readUnit(after.content, id) }));
+      return { ...(before ? product.diff(before, after) : { changes: units }), units: requestedIds ? units.filter(unit => requestedIds.includes(unit.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
     }
     if (mode === 'context') {
       if (args.feedbackId || args.contextId) { const feedbackId = safeId(args.feedbackId ?? args.contextId, '反馈 ID'), feedback = state.feedback.find(item => item.id === feedbackId); if (!feedback) throw new StudioError('NOT_FOUND', '反馈上下文不存在。'); return { contextId: feedbackId, artifact: state.artifact, feedback, sources: state.sources[feedbackId] ?? [], timer: this.getTimer(id) }; }
@@ -141,7 +147,7 @@ export class StudioService {
         const conflicts = new Set<string>();
         for (const operation of args.operations) {
           if (!object(operation) || typeof operation.op !== 'string' || !editing.size) continue;
-          const targets = operation.op === 'restore' ? undefined : adapter.targets(state.content, { ...operation, op: operation.op });
+          const targets = mutationTargets(state.content, { ...operation, op: operation.op }, adapter);
           for (const target of targets ?? editing) if (editing.has(target)) conflicts.add(target);
         }
         if (conflicts.size) throw new StudioError('EDIT_IN_PROGRESS', '目标内容正在其他视图中编辑，请等待编辑完成后重试。', { ids: [...conflicts] });
@@ -180,24 +186,34 @@ export class StudioService {
   private async share(id: string, args: Record<string, unknown>, actor: Actor) {
     requireRole(actor, ['owner']); const action = text(args.action, 'status');
     const current = await this.store.read(id);
-    if (action === 'status') return shareInfo(id, current.sharing, this.sharingOrigin);
-    if (!['start', 'stop', 'reset'].includes(action)) throw new StudioError('INVALID_ARGUMENT', '不支持的分享操作。');
+    if (action === 'status') return shareInfo(id, current.sharing, this.sharingOrigin, this.getPresence(id));
+    if (!['start', 'stop', 'reset', 'link', 'role', 'remove'].includes(action)) throw new StudioError('INVALID_ARGUMENT', '不支持的分享操作。');
     // Validate before opening LAN, and close a newly opened listener if the commit fails.
     assertAlive(current.artifact); let opened = false;
     try {
       if (action === 'start') { const origin = await this.shareHandler?.(true); opened = true; if (origin) this.sharingOrigin = origin; }
       const committed = await this.store.transaction(id, state => {
-        const revokedRoles = updateSharing(state.artifact, state.sharing, action, actor, args.role);
-        return { info: shareInfo(id, state.sharing, this.sharingOrigin), revokedRoles };
+        const revoked = updateSharing(state.artifact, state.sharing, action, actor, args);
+        return { info: shareInfo(id, state.sharing, this.sharingOrigin, this.getPresence(id)), ...revoked };
       });
-      this.emit({ type: 'share', artifactId: id, enabled: committed.info.enabled, generation: committed.info.generation, revokedRoles: [...committed.revokedRoles] });
+      const revokedMembers = [...committed.revokedMemberIds, ...this.getPresence(id).filter(peer => committed.revokedRoles.includes(peer.actor.role as Exclude<Role, 'owner'>)).map(peer => peer.actor.id)];
+      if (revokedMembers.length) this.collaboration.revokeMembers(id, revokedMembers);
+      this.emit({ type: 'share', artifactId: id, enabled: committed.info.enabled, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
       if (action === 'stop') await this.shareHandler?.(false);
       return committed.info;
     } catch (error) { if (opened) await this.shareHandler?.(false); throw error; }
   }
-  async shareRole(artifactId: string, token: string): Promise<Exclude<Role, 'owner'> | undefined> {
+  async shareRole(artifactId: string, token: string, memberId?: string): Promise<Exclude<Role, 'owner'> | undefined> {
     let state: ArtifactState; try { state = await this.store.read(artifactId); } catch { return; }
-    return shareRole(state.artifact, state.sharing, token);
+    return shareRole(state.artifact, state.sharing, token, memberId);
+  }
+  async guestActor(artifactId: string, token: string, id: string, name: string): Promise<Actor | undefined> {
+    let state: ArtifactState; try { state = await this.store.read(artifactId); } catch { return; }
+    const role = shareRole(state.artifact, state.sharing, token, id); if (!role) return;
+    const member = state.sharing.members?.[id];
+    // Persist last-seen at most once a minute rather than writing on every cursor heartbeat.
+    if (member && (member.ownerAssigned || member.credential === token) && member.name === name && Date.now() - Date.parse(member.lastSeenAt) < 60_000) return { id, name, kind: 'human', role };
+    return this.store.transaction(artifactId, current => joinSharingMember(current.artifact, current.sharing, token, id, name));
   }
   async hasShares() { return (await this.store.list()).some(state => state.sharing.enabled && !state.artifact.trashedAt); }
   async resetSharingSessions() {
