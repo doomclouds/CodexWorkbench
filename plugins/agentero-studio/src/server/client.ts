@@ -6,6 +6,8 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Connection, ToolName, ToolResponse } from '../contracts/studio.js';
 import { LOCAL_ACTOR } from '../contracts/studio.js';
+import type { UiHttpRequest } from '../contracts/transport.js';
+import { validateUiRequest } from './app-transport.js';
 
 export const dataDirectory = (value?: string) => resolve(value || process.env.AGENTERO_STUDIO_DATA_ROOT || join(homedir(), '.codexworkbench', 'agentero-studio'));
 export interface ServiceRecord { origin: string; token: string; pid: number; instanceId: string }
@@ -80,6 +82,17 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
       const result = await response.json() as ToolResponse;
       if (!result.ok) throw Object.assign(new Error(result.error?.message || 'Studio 操作失败'), { code: result.error?.code, details: result.error?.details });
       return result.data;
+    },
+    async requestUi(input: UiHttpRequest, signal?: AbortSignal) {
+      const request = validateUiRequest(input);
+      const url = new URL(request.path, current.origin);
+      if (url.origin !== current.origin) throw Object.assign(new Error('作品请求不能切换服务地址。'), { code: 'FORBIDDEN' });
+      return fetch(url, {
+        method: request.method,
+        headers: { ...request.headers, Authorization: `Bearer ${current.token}`, 'X-Studio-Actor': 'human' },
+        ...(request.body !== undefined ? { body: Buffer.from(request.body) } : {}),
+        redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
+      });
     },
     async close() { clearInterval(timer); await unlink(lease).catch(() => {}); },
   };

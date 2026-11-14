@@ -11,7 +11,7 @@ async function embedImages(board: Board, options: ExportOptions): Promise<Board>
       const url = new URL(source, baseUrl);
       if (url.origin !== new URL(baseUrl).origin) throw new ExportError('EXTERNAL_ASSET', '请先将外部图片上传到这块白板，再导出独立图片。');
       if (typeof options.token === 'string') url.searchParams.set('token', options.token);
-      const response = await fetch(url);
+      const response = typeof options.request === 'function' ? await (options.request as (url: URL) => Promise<Response>)(url) : await fetch(url);
       if (!response.ok) throw new ExportError('ASSET_UNAVAILABLE', '图片资源读取失败，请重新加载后导出。');
       const blob = await response.blob();
       return await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(new ExportError('ASSET_UNAVAILABLE', '图片资源转换失败。')); reader.readAsDataURL(blob); });

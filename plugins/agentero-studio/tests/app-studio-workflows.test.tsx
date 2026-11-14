@@ -79,11 +79,85 @@ async function apply(board: Board, operations: unknown[]) {
 }
 
 describe('Studio real management workflows', () => {
-  it('creates immediately, renames, pins, trashes and restores the same persisted artifact', async () => {
+  it('keeps search, filters, views, import and icon theme switching usable in the compact library header', async () => {
+    await createFixture();
+    await service.execute('artifact_manage', { action: 'create', title: '系统规划' }, LOCAL_ACTOR);
+    const items = await service.execute('artifact_list', {}, LOCAL_ACTOR);
+    const pinned = items.artifacts.find((item: { id: string; title: string }) => item.title === '系统规划')!;
+    await service.execute('artifact_manage', { action: 'pin', artifactId: pinned.id, pinned: true }, LOCAL_ACTOR);
+    await mount();
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 2);
+
+    expect(container.querySelector('select[aria-label="主题"]')).toBeNull();
+
+    await click(button('切换为列表视图'));
+    expect(container.querySelector('.studio-artifacts-list')).not.toBeNull();
+    expect(localStorage.getItem('agentero-studio-view')).toBe('list');
+    expect(button('切换为卡片视图').title).toBe('切换为卡片视图');
+    await click(button('切换为卡片视图'));
+    expect(container.querySelector('.studio-artifacts-grid')).not.toBeNull();
+    expect(localStorage.getItem('agentero-studio-view')).toBe('grid');
+    await click(button('切换为列表视图'));
+    await click(button('搜索作品'));
+    const search = container.querySelector<HTMLInputElement>('[aria-label="搜索作品名称"]')!;
+    expect(document.activeElement).toBe(search);
+    await change(search, '架构');
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 1);
+    expect(container.querySelector('.studio-artifact h3')?.textContent).toBe('架构讨论');
+    await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 2);
+    expect(container.querySelector('[aria-label="搜索作品名称"]')).toBeNull();
+    expect(document.activeElement).toBe(button('搜索作品'));
+
+    await click(button('筛选作品'));
+    expect(document.activeElement).toBe(button('最近作品'));
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(document.activeElement).toBe(button('已固定'));
+    await click(button('已固定'));
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 1);
+    expect(container.querySelector('.studio-artifact h3')?.textContent).toBe('系统规划');
+    expect(button('筛选作品').getAttribute('aria-expanded')).toBe('false');
+    await click(button('筛选作品'));
+    expect(document.activeElement).toBe(button('已固定'));
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.activeElement).toBe(button('筛选作品'));
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+
+    await click(button('切换为暗色主题'));
+    expect(container.querySelector('.studio')?.getAttribute('data-studio-theme')).toBe('dark');
+    expect(button('切换为明亮主题').textContent).toBe('');
+    await click(button('切换为明亮主题'));
+    expect(container.querySelector('.studio')?.getAttribute('data-studio-theme')).toBe('light');
+    const archive = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const chooseArchive = vi.spyOn(archive, 'click').mockImplementation(() => {});
+    await click(button('新建作品'));
+    expect(document.activeElement).toBe(button('白板'));
+    await act(async () => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    await click(button('新建作品'));
+    await click(button('导入作品'));
+    expect(chooseArchive).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+  });
+
+  it('creates from the new menu, renames, pins, trashes and restores the same persisted artifact', async () => {
     await mount();
     await waitUntil(() => call.mock.calls.some(([name]) => name === 'artifact_list'));
-    await click(button('新建白板'));
+    await click(button('新建作品'));
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_manage' && args.action === 'create')).toBe(false);
+    expect(container.querySelector('[aria-label="白板画布"]')).toBeNull();
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })));
+    expect(document.activeElement).toBe(button('导入作品'));
+    await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(container.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(button('新建作品'));
+    await act(async () => button('新建作品').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    await click(button('白板'));
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    expect(container.querySelector('select[aria-label="主题"]')).toBeNull();
+    await click(button('切换为暗色主题'));
+    expect(container.querySelector('.studio')?.getAttribute('data-studio-theme')).toBe('dark');
+    await click(button('切换为明亮主题'));
     let items = await service.execute('artifact_list', {}, LOCAL_ACTOR);
     expect(items.artifacts).toHaveLength(1);
     const artifactId = items.artifacts[0].id;
@@ -105,6 +179,7 @@ describe('Studio real management workflows', () => {
     await click(button('移入回收站'));
     await waitUntil(() => !container.querySelector('[aria-label="打开白板：硬件系统架构"]'));
     expect((await service.execute('artifact_list', {}, LOCAL_ACTOR)).artifacts).toHaveLength(0);
+    await click(button('筛选作品'));
     await click(button('回收站'));
     await waitUntil(() => !!container.querySelector('[aria-label="打开白板：硬件系统架构"]'));
     await click(button('恢复'));
@@ -208,6 +283,27 @@ describe('Studio real management workflows', () => {
     expect(saved.elements[0].text).toBe('他人刚刚修改');
   });
 
+  it('offers a work link without silently enabling LAN access or copying an owner token', async () => {
+    const fixture = await createFixture();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    await mount();
+    await waitUntil(() => !!container.querySelector(`[aria-label="管理作品：${fixture.board.artifact.title}"]`));
+    await click(button(`管理作品：${fixture.board.artifact.title}`));
+    await click(button('复制链接'));
+    await waitUntil(() => !!container.querySelector('[aria-label="分享面板"]'));
+    expect((await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id })).enabled).toBe(false);
+    expect(writeText).not.toHaveBeenCalled();
+    await click(button('开启局域网分享'));
+    await waitUntil(() => !!container.querySelector('[aria-label="可编辑分享链接"]'));
+    const sharing = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
+    await click(button('返回作品中心'));
+    await waitUntil(() => !!container.querySelector(`[aria-label="管理作品：${fixture.board.artifact.title}"]`));
+    await click(button(`管理作品：${fixture.board.artifact.title}`));
+    await click(button('复制链接'));
+    await waitUntil(() => writeText.mock.calls.length === 1);
+    expect(writeText).toHaveBeenCalledWith(sharing.links.viewer);
+  });
   it('starts role-based LAN sharing, rotates one role link and revokes sharing', async () => {
     const fixture = await createFixture();
     await mount({ artifactId: fixture.board.artifact.id });

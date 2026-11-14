@@ -168,7 +168,8 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
       const auth = await authorize(request, response, url);
       const boot = JSON.stringify({ baseUrl: `http://${request.headers.host ?? new URL(origin).host}`, token: auth.token, actor: auth.actor, ...(auth.artifactId ? { artifactId: auth.artifactId } : url.searchParams.get('artifactId') ? { artifactId: url.searchParams.get('artifactId') } : {}) }).replace(/</g, '\\u003c');
       const script = `<script>window.__STUDIO_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
-      const html = raw.includes('</head>') ? raw.replace('</head>', `${script}</head>`) : `${script}${raw}`;
+      // Bundled JavaScript can contain literal closing head tags from HTML exports.
+      const html = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, opening => opening + script) : `${script}${raw}`;
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Length': Buffer.byteLength(html) }); response.end(html); return;
     }
     throw new StudioError('NOT_FOUND', '页面不存在。');

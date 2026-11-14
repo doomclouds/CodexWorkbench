@@ -1,9 +1,13 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { STUDIO_ICON } from '../contracts/brand-icon.js';
+import { PLUGIN_VERSION } from '../contracts/version.js';
 import type { Connection, ToolName } from '../contracts/studio.js';
 import { TOOL_NAMES } from '../contracts/studio.js';
+import { APP_TOOL_NAME, type UiRequester } from '../contracts/transport.js';
+import { appTransportSchema, createAppTransport } from './app-transport.js';
 
-export interface StudioExecutor { execute(name: ToolName, args: Record<string, unknown>): Promise<unknown>; connection(): Promise<Connection> }
+export interface StudioExecutor { execute(name: ToolName, args: Record<string, unknown>): Promise<unknown>; connection(): Promise<Connection>; requestUi?: UiRequester }
 const id = z.string().min(1).max(200);
 const loose = z.record(z.string(), z.unknown());
 const schemas = {
@@ -27,7 +31,7 @@ const descriptions: Record<ToolName, string> = {
   artifact_export: '按范围导出 JSON、HTML、SVG 或 PNG，或由房主导出包含资源、历史和反馈的 ZIP 备份；返回下载资源引用。富 HTML PNG 可能需要在白板界面导出。',
 };
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
-/** UI keeps full documents over HTTP; model results carry bounded, explicit references. */
+/** UI keeps full documents on its private transport; model results carry bounded references. */
 function modelResult(name: ToolName, args: Record<string, unknown>, value: unknown): unknown {
   const result = record(value); if (!result) return value;
   if (name === 'artifact_list' && Array.isArray(result.artifacts)) return { ...result, artifacts: result.artifacts.map(item => { const { thumbnail: _thumbnail, ...metadata } = record(item) || {}; return metadata; }) };
@@ -64,7 +68,7 @@ function modelResult(name: ToolName, args: Record<string, unknown>, value: unkno
   return result;
 }
 export function createStudioServer(executor: StudioExecutor, html: string) {
-  const server = new McpServer({ name: 'agentero-studio', version: '0.1.0' });
+  const server = new McpServer({ name: 'agentero-studio', title: 'Agentero 创作', version: PLUGIN_VERSION, icons: [STUDIO_ICON] });
   const uri = 'ui://agentero-studio/app';
   for (const name of TOOL_NAMES) {
     server.registerTool(name, {
@@ -84,12 +88,29 @@ export function createStudioServer(executor: StudioExecutor, html: string) {
       }
     });
   }
-  server.registerResource('studio-ui', uri, { mimeType: 'text/html;profile=mcp-app' }, async () => {
-    const connection = await executor.connection();
+  const appTransport = createAppTransport((request, signal) => {
+    if (!executor.requestUi) throw Object.assign(new Error('作品界面传输不可用，请更新插件后重试。'), { code: 'UNAVAILABLE' });
+    return executor.requestUi(request, signal);
+  });
+  server.registerTool(APP_TOOL_NAME, {
+    title: '作品界面传输', description: '仅供作品界面访问当前本机作品服务；完整文档和文件字节不进入模型内容。',
+    inputSchema: appTransportSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    _meta: { ui: { visibility: ['app'] } },
+  }, async (input, extra) => {
+    try { return { content: [], structuredContent: { ok: true }, _meta: { response: await appTransport.execute(input, extra.signal) } }; }
+    catch (error) {
+      const failure = error as Error & { code?: string };
+      return { isError: true, content: [], structuredContent: { ok: false, error: { code: failure.code || 'STUDIO_TRANSPORT_ERROR', message: failure.message } } };
+    }
+  });
+  server.registerResource('studio-ui', uri, { title: 'Agentero 创作', icons: [STUDIO_ICON], mimeType: 'text/html;profile=mcp-app' }, async () => {
     return { contents: [{ uri, mimeType: 'text/html;profile=mcp-app', text: html, _meta: {
-      ui: { csp: { connectDomains: [connection.baseUrl], resourceDomains: [connection.baseUrl, 'data:', 'blob:'], frameDomains: ["'self'", 'blob:', 'data:'] }, prefersBorder: false },
+      ui: { csp: { connectDomains: [], resourceDomains: ['data:', 'blob:'], frameDomains: ["'self'", 'blob:', 'data:'] }, prefersBorder: false },
       'openai/ui': { preferredDisplayMode: 'fullscreen', availableDisplayModes: ['inline', 'fullscreen'] },
     } }] };
   });
+  const originalClose = server.close.bind(server);
+  server.close = async () => { appTransport.close(); await originalClose(); };
   return server;
 }

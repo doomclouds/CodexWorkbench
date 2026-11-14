@@ -137,7 +137,10 @@ export function assetDisplayUrl(src: string | undefined, client: StudioClient): 
   try {
     const url = new URL(src, client.baseUrl ?? globalThis.location?.href);
     if (!['http:', 'https:'].includes(url.protocol)) return undefined;
-    if (client.baseUrl && url.origin === new URL(client.baseUrl).origin && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/api/assets/')) && client.token) url.searchParams.set('token', client.token);
+    if (client.baseUrl && url.origin === new URL(client.baseUrl).origin && (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/api/assets/'))) {
+      if (client.assetUrl) return client.assetUrl(src);
+      if (client.token) url.searchParams.set('token', client.token);
+    }
     return url.href;
   } catch { return undefined; }
 }

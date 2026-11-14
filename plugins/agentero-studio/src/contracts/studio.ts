@@ -48,7 +48,12 @@ export interface Operation {
 export const TOOL_NAMES = ['studio_open', 'artifact_list', 'artifact_manage', 'artifact_read', 'artifact_apply', 'artifact_feedback', 'artifact_share', 'artifact_export'] as const;
 export type ToolName = typeof TOOL_NAMES[number];
 export interface ToolResponse<T = unknown> { ok: boolean; data?: T; error?: { code: string; message: string; details?: unknown } }
-export interface StudioClient { call<T = unknown>(name: ToolName, args?: Record<string, unknown>): Promise<T>; baseUrl?: string; token?: string; embedded: boolean }
+export interface StudioClient {
+  call<T = unknown>(name: ToolName, args?: Record<string, unknown>): Promise<T>;
+  request?: (input: string | URL, init?: RequestInit) => Promise<Response>;
+  assetUrl?: (reference: string) => string | undefined;
+  baseUrl?: string; token?: string; embedded: boolean;
+}
 export interface HtmlSelection { regionId: string; sourceRevision: number; targetIds: string[]; quote: string; excerpt: string; selector?: string; rect?: { x: number; y: number; w: number; h: number } }
 export interface Connection { baseUrl: string; token: string; actor: Actor; artifactId?: string }
 export interface StudioEvent { type: string; artifactId: string; [key: string]: unknown }

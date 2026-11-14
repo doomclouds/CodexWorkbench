@@ -8,6 +8,7 @@ import { shapePath, strokePath } from '../../core/products/whiteboard-geometry.j
 import { CroppedImage, ImageCropDialog } from './NativeMedia.js';
 import { measureNativeIssues, type NativeIssue } from './native-issues.js';
 import RichText from './RichText.js';
+import { studioRequest } from '../transport.js';
 import './canvas.css';
 
 export interface WhiteboardCanvasProps {
@@ -449,7 +450,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         if (file.size > 20 * 1024 * 1024) throw new Error(`${file.name} 超过 20 MB，请压缩后添加。`);
         let src: string;
         if (client.baseUrl && client.token) {
-          const response = await fetch(new URL(`/api/assets?artifactId=${encodeURIComponent(boardRef.current.artifact.id)}`, client.baseUrl), { method: 'POST', headers: { Authorization: `Bearer ${client.token}`, 'Content-Type': file.type, 'X-Filename': encodeURIComponent(file.name), 'X-Studio-Name': encodeURIComponent(actor.name) }, body: file });
+          const response = await studioRequest(client, new URL(`/api/assets?artifactId=${encodeURIComponent(boardRef.current.artifact.id)}`, client.baseUrl), { method: 'POST', headers: { Authorization: `Bearer ${client.token}`, 'Content-Type': file.type, 'X-Filename': encodeURIComponent(file.name), 'X-Studio-Name': encodeURIComponent(actor.name) }, body: file });
           const result = await response.json() as { src?: string; error?: { message?: string } };
           if (!response.ok || !result.src) throw new Error(result.error?.message ?? `资源上传失败（${response.status}）`);
           src = result.src;

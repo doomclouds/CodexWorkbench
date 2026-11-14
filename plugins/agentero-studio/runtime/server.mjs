@@ -7282,7 +7282,7 @@ var require_dist = __commonJS({
 });
 
 // src/core/shared/common.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir2, rename as rename2, rm, writeFile as writeFile2 } from "node:fs/promises";
 import { dirname, join as join2 } from "node:path";
 function safeId(value, label = "\u4F5C\u54C1 ID") {
@@ -7307,7 +7307,7 @@ function assertAlive(artifact) {
 }
 async function atomicWrite(file2, content) {
   await mkdir2(dirname(file2), { recursive: true });
-  const temporary = join2(dirname(file2), `.${randomUUID2()}.tmp`);
+  const temporary = join2(dirname(file2), `.${randomUUID3()}.tmp`);
   try {
     await writeFile2(temporary, content, { flag: "wx" });
     await rename2(temporary, file2);
@@ -8518,7 +8518,7 @@ var init_export = __esm({
 });
 
 // src/core/products/whiteboard.ts
-import { randomUUID as randomUUID3 } from "node:crypto";
+import { randomUUID as randomUUID4 } from "node:crypto";
 function boardView(snapshot) {
   return { artifact: snapshot.artifact, ...snapshot.content };
 }
@@ -8527,7 +8527,7 @@ function validateWhiteboardAsset(mimeType) {
 }
 function normalizeElement(input2, id2) {
   if (!object3(input2) || !TYPES.has(input2.type ?? "")) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5143\u7D20\u7C7B\u578B\u65E0\u6548\u3002");
-  const result = { ...copy(input2), id: safeId(id2 ?? input2.id ?? randomUUID3(), "\u5143\u7D20 ID"), type: input2.type, x: finite(input2.x, 0), y: finite(input2.y, 0), w: finite(input2.w, 220), h: finite(input2.h, 120), version: 1 };
+  const result = { ...copy(input2), id: safeId(id2 ?? input2.id ?? randomUUID4(), "\u5143\u7D20 ID"), type: input2.type, x: finite(input2.x, 0), y: finite(input2.y, 0), w: finite(input2.w, 220), h: finite(input2.h, 120), version: 1 };
   if (result.w < 0 || result.h < 0) throw new StudioError("INVALID_ARGUMENT", "\u5143\u7D20\u5C3A\u5BF8\u4E0D\u80FD\u4E3A\u8D1F\u6570\u3002");
   if (result.html !== void 0 && (typeof result.html !== "string" || result.html.length > 2 * 1024 * 1024)) throw new StudioError("INVALID_ARGUMENT", "HTML \u5185\u5BB9\u65E0\u6548\u6216\u8D85\u8FC7 2 MB\u3002");
   if (result.type === "html") result.sourceRevision = typeof input2.sourceRevision === "number" ? input2.sourceRevision : 1;
@@ -10368,8 +10368,8 @@ var init_store = __esm({
     import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
     init_common();
     ArtifactStore = class {
-      constructor(root2, decode3, validateState2) {
-        this.decode = decode3;
+      constructor(root2, decode4, validateState2) {
+        this.decode = decode4;
         this.validateState = validateState2;
         this.root = resolve2(root2 ?? join4(homedir2(), ".codexworkbench", "agentero-studio"));
       }
@@ -10446,9 +10446,9 @@ var init_store = __esm({
 });
 
 // src/core/shared/history.ts
-import { createHash, randomUUID as randomUUID4 } from "node:crypto";
+import { createHash, randomUUID as randomUUID5 } from "node:crypto";
 function createState(artifact, content, actor, summary, changedIds) {
-  const entry = { id: randomUUID4(), revision: artifact.revision, createdAt: artifact.createdAt, actor: copy(actor), summary, changedIds: [...new Set(changedIds)] };
+  const entry = { id: randomUUID5(), revision: artifact.revision, createdAt: artifact.createdAt, actor: copy(actor), summary, changedIds: [...new Set(changedIds)] };
   return { schemaVersion: 2, artifact: copy(artifact), content: copy(content), feedback: [], history: [{ entry, artifact: copy(artifact), content: copy(content) }], operations: [], sources: {}, sharing: { enabled: false, generation: 0, tokens: {} }, assets: {} };
 }
 function version2(state, value) {
@@ -10460,7 +10460,7 @@ function makeHistory(state, actor, summary, changedIds, restoredFrom) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   state.artifact.revision++;
   state.artifact.updatedAt = now;
-  const entry = { id: randomUUID4(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restoredFrom ? { restoredFrom } : {} };
+  const entry = { id: randomUUID5(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restoredFrom ? { restoredFrom } : {} };
   state.history.push({ entry, artifact: copy(state.artifact), content: copy(state.content) });
   if (state.history.length > 200) state.history.splice(0, state.history.length - 200);
   return entry;
@@ -10483,7 +10483,7 @@ function restoreVersion(state, saved, actor, adapter, undo = false) {
 function applyMutation(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor"]);
   assertAlive(state.artifact);
-  const operationId = safeId(args.operationId ?? randomUUID4(), "\u64CD\u4F5C ID"), operations = args.operations;
+  const operationId = safeId(args.operationId ?? randomUUID5(), "\u64CD\u4F5C ID"), operations = args.operations;
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u6B21\u63D0\u4EA4\u5E94\u5305\u542B 1 \u81F3 200 \u4E2A\u64CD\u4F5C\u3002");
   const fingerprint = createHash("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
   const duplicate = state.operations.find((item) => item.id === operationId);
@@ -10556,12 +10556,12 @@ var init_store2 = __esm({
 });
 
 // src/core/shared/artifacts.ts
-import { randomUUID as randomUUID5 } from "node:crypto";
+import { randomUUID as randomUUID6 } from "node:crypto";
 function createArtifact(type, title, content, actor, summary, changedIds) {
   requireRole(actor, ["owner"]);
   const now = (/* @__PURE__ */ new Date()).toISOString(), name = text(title, "", 200).trim();
   if (!name) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-  return createState({ id: randomUUID5(), type, title: name, revision: 0, createdAt: now, updatedAt: now, pinned: false }, content, actor, summary, changedIds);
+  return createState({ id: randomUUID6(), type, title: name, revision: 0, createdAt: now, updatedAt: now, pinned: false }, content, actor, summary, changedIds);
 }
 function manageArtifact(state, action, args, actor) {
   requireRole(actor, ["owner"]);
@@ -10600,7 +10600,7 @@ var init_artifacts = __esm({
 });
 
 // src/core/shared/proposals.ts
-import { createHash as createHash2, randomUUID as randomUUID6 } from "node:crypto";
+import { createHash as createHash2, randomUUID as randomUUID7 } from "node:crypto";
 function proposalExpired(item, now = Date.now()) {
   return !!item.proposal && Date.parse(item.proposal.expiresAt) <= now;
 }
@@ -10645,7 +10645,7 @@ function captureOption(state, raw, args, adapter) {
     versions[id2] = current;
     baseline[id2] = value;
   }
-  return { id: raw.id === void 0 ? randomUUID6() : safeId(raw.id, "\u65B9\u6848 ID"), label, ...description ? { description } : {}, operations, baselineRevision: state.artifact.revision, versions, baseline, wholeContent, targetIds, active: false };
+  return { id: raw.id === void 0 ? randomUUID7() : safeId(raw.id, "\u65B9\u6848 ID"), label, ...description ? { description } : {}, operations, baselineRevision: state.artifact.revision, versions, baseline, wholeContent, targetIds, active: false };
 }
 function previewProposal(saved, args, actor, adapter) {
   requireRole(actor, ["owner"]);
@@ -10691,7 +10691,7 @@ function updateProposal(state, args, actor, adapter) {
     }
     const options = args.options.map((option3) => captureOption(state, option3, args, adapter));
     if (new Set(options.map((option3) => option3.id)).size !== options.length || new Set(options.map((option3) => option3.label)).size !== options.length || new Set(options.map((option3) => digest(option3.operations))).size !== options.length) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u7684 ID\u3001\u540D\u79F0\u548C\u5185\u5BB9\u5FC5\u987B\u5404\u4E0D\u76F8\u540C\u3002");
-    const id2 = randomUUID6(), anchor2 = object3(args.anchor) ? copy(args.anchor) : {};
+    const id2 = randomUUID7(), anchor2 = object3(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor2)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
     const frozen = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor2);
     const proposal2 = { audience: "owner", expiresAt: new Date(Date.now() + LIFETIME).toISOString(), options, ...creationId ? { creationId } : {}, fingerprint: fingerprint2, receipts: [] };
@@ -10712,7 +10712,7 @@ function updateProposal(state, args, actor, adapter) {
   const option2 = proposal.options.find((entry) => entry.id === args.optionId);
   if (!option2) throw new StudioError("NOT_FOUND", "\u5EFA\u8BAE\u65B9\u6848\u4E0D\u5B58\u5728\u3002");
   if (!["choose", "withdraw"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5EFA\u8BAE\u64CD\u4F5C\u3002");
-  const operationId = safeId(args.operationId ?? randomUUID6(), "\u64CD\u4F5C ID"), fingerprint = digest({ action, feedbackId: item.id, optionId: option2.id });
+  const operationId = safeId(args.operationId ?? randomUUID7(), "\u64CD\u4F5C ID"), fingerprint = digest({ action, feedbackId: item.id, optionId: option2.id });
   const previous = proposal.receipts.find((receipt) => receipt.id === operationId);
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u6267\u884C\u4E0D\u540C\u5EFA\u8BAE\u64CD\u4F5C\u3002");
@@ -10773,7 +10773,7 @@ var init_proposals = __esm({
 });
 
 // src/core/shared/feedback.ts
-import { randomUUID as randomUUID7 } from "node:crypto";
+import { randomUUID as randomUUID8 } from "node:crypto";
 function updateFeedback(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor", "commenter"]);
   assertAlive(state.artifact);
@@ -10784,7 +10784,7 @@ function updateFeedback(state, args, actor, adapter) {
     if (!content) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
     const anchor2 = object3(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor2)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
-    const id2 = randomUUID7(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor2);
+    const id2 = randomUUID8(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor2);
     item = { id: id2, artifactId: state.artifact.id, type: args.type === "request" ? "request" : "comment", anchor: snapshot.anchor, author: copy(actor), text: content, status: "open", createdAt: now, updatedAt: now, replies: [], versions: copy(snapshot.versions) };
     state.feedback.push(item);
     state.sources[id2] = copy(snapshot.sources);
@@ -10797,7 +10797,7 @@ function updateFeedback(state, args, actor, adapter) {
     if (action === "reply") {
       const content = text(args.text).trim();
       if (!content) throw new StudioError("INVALID_ARGUMENT", "\u56DE\u590D\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-      item.replies.push({ id: randomUUID7(), author: copy(actor), text: content, createdAt: now });
+      item.replies.push({ id: randomUUID8(), author: copy(actor), text: content, createdAt: now });
       if (item.status === "processing") {
         item.status = "open";
         delete item.processingBy;
@@ -10976,7 +10976,7 @@ var init_collaboration = __esm({
 });
 
 // src/core/shared/files.ts
-import { randomUUID as randomUUID8 } from "node:crypto";
+import { randomUUID as randomUUID9 } from "node:crypto";
 import { cp, lstat, mkdir as mkdir4, open as open2, readFile as readFile4, realpath, rename as rename3 } from "node:fs/promises";
 import { basename, extname, isAbsolute, join as join5, resolve as resolve3 } from "node:path";
 async function assetDirectory(store, artifactId, directory, create = false) {
@@ -11104,7 +11104,7 @@ async function putAsset(store, artifactId, data, input2, actor, validateMimeType
   if (!data.byteLength || data.byteLength > MAX_ASSET_BYTES) throw new StudioError("TOO_LARGE", "\u8D44\u6E90\u5E94\u5C0F\u4E8E 20 MB\u3002");
   const mimeType = text(input2.mimeType, "application/octet-stream", 100).split(";")[0];
   validateMimeType(mimeType);
-  const id2 = randomUUID8(), filename = basename(text(input2.filename, "resource", 250)).replace(/[\x00-\x1f]/g, "");
+  const id2 = randomUUID9(), filename = basename(text(input2.filename, "resource", 250)).replace(/[\x00-\x1f]/g, "");
   await store.transaction(artifactId, async (state) => {
     assertAlive(state.artifact);
     await atomicWrite(join5(await assetDirectory(store, artifactId, "assets", true), id2), data);
@@ -11135,7 +11135,7 @@ function exportResources(store, artifactId) {
   } };
 }
 async function saveExport(root2, artifactId, result) {
-  const exportId = randomUUID8(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
+  const exportId = randomUUID9(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
   const record3 = { exportId, artifactId, filename: basename(result.filename), mimeType: result.mimeType, size: data.length, downloadPath: `/api/exports/${exportId}?artifactId=${encodeURIComponent(artifactId)}` };
   await atomicWrite(join5(root2, "exports", exportId), data);
   await atomicWrite(join5(root2, "exports", `${exportId}.json`), JSON.stringify(record3));
@@ -12372,7 +12372,7 @@ var init_esm = __esm({
 });
 
 // src/core/shared/archive.ts
-import { randomUUID as randomUUID9 } from "node:crypto";
+import { randomUUID as randomUUID10 } from "node:crypto";
 import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rename as rename4, rm as rm2, writeFile as writeFile3 } from "node:fs/promises";
 import { basename as basename2, join as join6 } from "node:path";
 async function readArchiveInput(args) {
@@ -12600,7 +12600,7 @@ async function importArchive(store, products, data, actor, title) {
     if (!bytes || bytes.length !== asset.size) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
   }
   if ([...files.keys()].some((name) => name !== "artifact.json" && name !== "assets/" && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
-  const previous = copy(state.artifact), id2 = randomUUID9(), now = (/* @__PURE__ */ new Date()).toISOString();
+  const previous = copy(state.artifact), id2 = randomUUID10(), now = (/* @__PURE__ */ new Date()).toISOString();
   walk(state, (record3, key, value) => {
     if (typeof value === "string") record3[key] = key === "artifactId" && value === previous.id ? id2 : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id2}/`);
   });
@@ -12981,7 +12981,7 @@ function equal(a, b) {
   const left = Buffer.from(a), right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual3(left, right);
 }
-function failure2(response, error62) {
+function failure3(response, error62) {
   if (response.headersSent) {
     response.end();
     return;
@@ -13050,7 +13050,7 @@ async function startStudioHost(options = {}) {
   let origin = "", lan, sharingOrigin = "", startingLan, stopping = false;
   function server() {
     const instance = createServer((request, response) => {
-      void handle(request, response).catch((error62) => failure2(response, error62));
+      void handle(request, response).catch((error62) => failure3(response, error62));
     });
     instance.on("connection", (socket) => {
       sockets.add(socket);
@@ -13242,7 +13242,7 @@ data: ${JSON.stringify({ type: "ready", artifactId, actor: auth.actor })}
       const auth = await authorize(request, response, url2);
       const boot = JSON.stringify({ baseUrl: `http://${request.headers.host ?? new URL(origin).host}`, token: auth.token, actor: auth.actor, ...auth.artifactId ? { artifactId: auth.artifactId } : url2.searchParams.get("artifactId") ? { artifactId: url2.searchParams.get("artifactId") } : {} }).replace(/</g, "\\u003c");
       const script = `<script>window.__STUDIO_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
-      const html2 = raw.includes("</head>") ? raw.replace("</head>", `${script}</head>`) : `${script}${raw}`;
+      const html2 = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, (opening) => opening + script) : `${script}${raw}`;
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(html2) });
       response.end(html2);
       return;
@@ -13285,7 +13285,7 @@ var init_http = __esm({
 });
 
 // src/server/index.ts
-import { randomUUID as randomUUID10 } from "node:crypto";
+import { randomUUID as randomUUID11 } from "node:crypto";
 import { readFile as readFile6, unlink as unlink2 } from "node:fs/promises";
 import { join as join7 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
@@ -14574,8 +14574,8 @@ function cleanEnum(obj) {
     return Number.isNaN(Number.parseInt(k, 10));
   }).map((el) => el[1]);
 }
-function base64ToUint8Array(base643) {
-  const binaryString = atob(base643);
+function base64ToUint8Array(base644) {
+  const binaryString = atob(base644);
   const bytes = new Uint8Array(binaryString.length);
   for (let i2 = 0; i2 < binaryString.length; i2++) {
     bytes[i2] = binaryString.charCodeAt(i2);
@@ -14590,9 +14590,9 @@ function uint8ArrayToBase64(bytes) {
   return btoa(binaryString);
 }
 function base64urlToUint8Array(base64url3) {
-  const base643 = base64url3.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = "=".repeat((4 - base643.length % 4) % 4);
-  return base64ToUint8Array(base643 + padding);
+  const base644 = base64url3.replace(/-/g, "+").replace(/_/g, "/");
+  const padding = "=".repeat((4 - base644.length % 4) % 4);
+  return base64ToUint8Array(base644 + padding);
 }
 function uint8ArrayToBase64url(bytes) {
   return uint8ArrayToBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
@@ -16335,8 +16335,8 @@ var base64urlCharset = /^[A-Za-z0-9_-]*$/;
 function isValidBase64URL(data) {
   if (!base64urlCharset.test(data))
     return false;
-  const base643 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
-  const padded = base643.padEnd(Math.ceil(base643.length / 4) * 4, "=");
+  const base644 = data.replace(/[-_]/g, (c) => c === "-" ? "+" : "/");
+  const padded = base644.padEnd(Math.ceil(base644.length / 4) * 4, "=");
   return isValidBase64(padded);
 }
 var $ZodBase64URL = /* @__PURE__ */ $constructor("$ZodBase64URL", (inst, def) => {
@@ -34648,11 +34648,208 @@ var StdioServerTransport = class {
 // src/server/client.ts
 init_studio();
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir, readFile, writeFile, rename, unlink, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// src/server/app-transport.ts
+import { randomUUID } from "node:crypto";
+
+// src/contracts/transport.ts
+var APP_CHUNK_BYTES = 128 * 1024;
+var APP_MAX_BYTES = 128 * 1024 * 1024;
+var APP_TOOL_NAME = "studio_app_request";
+
+// src/server/app-transport.ts
+init_studio();
+var transferId = external_exports.string().uuid();
+var base643 = external_exports.string().max(Math.ceil(APP_CHUNK_BYTES / 3) * 4);
+var appTransportSchema = external_exports.discriminatedUnion("action", [
+  external_exports.object({ action: external_exports.literal("request"), path: external_exports.string().min(1).max(8192), method: external_exports.enum(["GET", "POST"]).optional(), headers: external_exports.record(external_exports.string(), external_exports.string().max(4096)).optional(), body: base643.optional(), uploadId: transferId.optional() }).strict(),
+  external_exports.object({ action: external_exports.literal("upload"), transferId: transferId.optional(), offset: external_exports.number().int().min(0).max(APP_MAX_BYTES), size: external_exports.number().int().min(1).max(APP_MAX_BYTES), data: base643 }).strict(),
+  external_exports.object({ action: external_exports.literal("download"), transferId, offset: external_exports.number().int().min(0).max(APP_MAX_BYTES) }).strict(),
+  external_exports.object({ action: external_exports.literal("release"), transferId }).strict()
+]);
+var REQUEST_HEADERS = /* @__PURE__ */ new Set(["content-type", "x-filename", "x-content-type"]);
+var RESPONSE_HEADERS = /* @__PURE__ */ new Set(["content-type", "content-disposition", "cache-control", "content-length"]);
+var TTL_MS = 12e4;
+var MAX_TRANSFERS = 8;
+var MAX_CONCURRENT = 4;
+var MAX_BUDGET = APP_MAX_BYTES * 2;
+function failure2(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+function validateUiRequest(request) {
+  const { path, method } = request;
+  if (typeof path !== "string" || path.length > 8192 || !path.startsWith("/") || path.startsWith("//") || /[\\#\u0000-\u0020]/.test(path) || /%(?:2e|2f|5c|25)/i.test(path)) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
+  const url2 = new URL(path, "http://studio.invalid");
+  if (url2.origin !== "http://studio.invalid" || url2.pathname.split("/").some((segment) => segment === "." || segment === "..") || path.split("?")[0] !== url2.pathname) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
+  if (method !== "GET" && method !== "POST") throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u65B9\u6CD5\u65E0\u6548\u3002");
+  const tool = /^\/api\/tools\/([^/]+)$/.exec(url2.pathname);
+  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/session" ? method === "GET" : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
+  if (!allowed) throw failure2("FORBIDDEN", "\u6B64\u5730\u5740\u4E0D\u80FD\u901A\u8FC7\u4F5C\u54C1\u754C\u9762\u8BBF\u95EE\u3002");
+  const thumbnail = method === "GET" && /^\/api\/thumbnails\/[^/]+$/.test(url2.pathname);
+  const seen = /* @__PURE__ */ new Set();
+  for (const [key, value] of url2.searchParams) {
+    if (seen.has(key) || (thumbnail ? key !== "revision" : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
+    if (key === "revision" && (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u7F29\u7565\u56FE\u7248\u672C\u53F7\u65E0\u6548\u3002");
+    seen.add(key);
+  }
+  const headers = {};
+  for (const [key, value] of Object.entries(request.headers || {})) {
+    const lower = key.toLowerCase();
+    if (!REQUEST_HEADERS.has(lower) || typeof value !== "string" || value.length > 4096 || /[\r\n\u0000]/.test(value)) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u8BF7\u6C42\u5934\u3002");
+    headers[lower] = value;
+  }
+  if (method === "GET" && request.body !== void 0) throw failure2("INVALID_ARGUMENT", "\u8BFB\u53D6\u8BF7\u6C42\u4E0D\u80FD\u5305\u542B\u5185\u5BB9\u3002");
+  if (request.body && request.body.byteLength > APP_MAX_BYTES) throw failure2("TOO_LARGE", "\u4F5C\u54C1\u8BF7\u6C42\u8D85\u8FC7 128 MB\u3002");
+  return { path: url2.pathname + url2.search, method, headers, ...request.body !== void 0 ? { body: request.body } : {} };
+}
+function decode3(value) {
+  if (value.length % 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u5206\u5757\u4E0D\u662F\u6709\u6548\u7684 Base64\u3002");
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.length > APP_CHUNK_BYTES || bytes.toString("base64") !== value) throw failure2("TOO_LARGE", "\u4F5C\u54C1\u5206\u5757\u8D85\u8FC7 128 KiB \u6216\u7F16\u7801\u65E0\u6548\u3002");
+  return bytes;
+}
+function createAppTransport(requestUi) {
+  const transfers = /* @__PURE__ */ new Map();
+  let budget = 0, active = 0, closed = false;
+  const lifetime = new AbortController();
+  function reserve(size) {
+    if (budget + size > MAX_BUDGET) throw failure2("BUSY", "\u4F5C\u54C1\u4F20\u8F93\u7F13\u5B58\u5DF2\u6EE1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+    budget += size;
+  }
+  function remove(id2) {
+    const value = transfers.get(id2);
+    if (value) {
+      transfers.delete(id2);
+      budget -= value.bytes.length;
+    }
+    return !!value;
+  }
+  function sweep() {
+    const now = Date.now();
+    for (const [id2, value] of transfers) if (value.expiresAt <= now) remove(id2);
+  }
+  function get(id2, kind) {
+    const value = transfers.get(id2);
+    if (!value || value.kind !== kind) throw failure2("TRANSFER_EXPIRED", "\u4F5C\u54C1\u4F20\u8F93\u5DF2\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u6267\u884C\u64CD\u4F5C\u3002");
+    value.expiresAt = Date.now() + TTL_MS;
+    return value;
+  }
+  function add(kind, bytes, offset = 0) {
+    if (transfers.size >= MAX_TRANSFERS) throw failure2("BUSY", "\u540C\u65F6\u8FDB\u884C\u7684\u4F5C\u54C1\u4F20\u8F93\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+    const id2 = randomUUID();
+    transfers.set(id2, { kind, bytes, offset, expiresAt: Date.now() + TTL_MS });
+    return id2;
+  }
+  const timer = setInterval(sweep, TTL_MS);
+  timer.unref();
+  return {
+    async execute(value, signal) {
+      if (closed) throw failure2("CLOSED", "\u4F5C\u54C1\u8FDE\u63A5\u5DF2\u5173\u95ED\u3002");
+      const input2 = appTransportSchema.parse(value);
+      sweep();
+      const requestSignal = signal ? AbortSignal.any([lifetime.signal, signal]) : lifetime.signal;
+      requestSignal.throwIfAborted();
+      if (input2.action === "release") return { released: remove(input2.transferId) };
+      if (input2.action === "upload") {
+        const bytes2 = decode3(input2.data);
+        if (!bytes2.length || input2.offset + bytes2.length > input2.size) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u4E0A\u4F20\u5206\u5757\u5927\u5C0F\u65E0\u6548\u3002");
+        let id2 = input2.transferId;
+        if (!id2) {
+          if (input2.offset !== 0) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u4E0A\u4F20\u5FC5\u987B\u4ECE\u7B2C\u4E00\u4E2A\u5206\u5757\u5F00\u59CB\u3002");
+          if (transfers.size >= MAX_TRANSFERS) throw failure2("BUSY", "\u540C\u65F6\u8FDB\u884C\u7684\u4F5C\u54C1\u4F20\u8F93\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+          reserve(input2.size);
+          try {
+            id2 = add("upload", Buffer.alloc(input2.size));
+          } catch (error62) {
+            budget -= input2.size;
+            throw error62;
+          }
+        }
+        const upload = get(id2, "upload");
+        if (upload.bytes.length !== input2.size || upload.offset !== input2.offset) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u4E0A\u4F20\u5206\u5757\u987A\u5E8F\u6216\u603B\u957F\u5EA6\u4E0D\u5339\u914D\u3002");
+        bytes2.copy(upload.bytes, input2.offset);
+        upload.offset += bytes2.length;
+        return { transferId: id2, nextOffset: upload.offset };
+      }
+      if (input2.action === "download") {
+        const download = get(input2.transferId, "download");
+        if (input2.offset !== download.offset) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u4E0B\u8F7D\u5206\u5757\u987A\u5E8F\u4E0D\u5339\u914D\u3002");
+        const end = Math.min(download.bytes.length, input2.offset + APP_CHUNK_BYTES);
+        const data = download.bytes.subarray(input2.offset, end).toString("base64");
+        download.offset = end;
+        return { data, nextOffset: end, done: end === download.bytes.length };
+      }
+      if (active >= MAX_CONCURRENT) throw failure2("BUSY", "\u540C\u65F6\u8FDB\u884C\u7684\u4F5C\u54C1\u8BF7\u6C42\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+      if (input2.body !== void 0 && input2.uploadId) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u91CD\u590D\u6307\u5B9A\u5185\u5BB9\u3002");
+      let uploaded, responseBytes = 0;
+      const bytes = input2.body === void 0 ? void 0 : decode3(input2.body);
+      const request = validateUiRequest({ path: input2.path, method: input2.method ?? "GET", headers: input2.headers ?? {}, ...bytes ? { body: bytes } : {} });
+      if (input2.uploadId) {
+        uploaded = get(input2.uploadId, "upload");
+        if (uploaded.offset !== uploaded.bytes.length) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u4E0A\u4F20\u5C1A\u672A\u5B8C\u6210\u3002");
+        if (request.method !== "POST") throw failure2("INVALID_ARGUMENT", "\u8BFB\u53D6\u8BF7\u6C42\u4E0D\u80FD\u5305\u542B\u4E0A\u4F20\u5185\u5BB9\u3002");
+        transfers.delete(input2.uploadId);
+        request.body = uploaded.bytes;
+      }
+      active++;
+      try {
+        const response = await requestUi(request, requestSignal);
+        const declaredSize = Number(response.headers.get("content-length"));
+        if (Number.isFinite(declaredSize) && declaredSize > APP_MAX_BYTES) {
+          await response.body?.cancel();
+          throw failure2("TOO_LARGE", "\u4F5C\u54C1\u54CD\u5E94\u8D85\u8FC7 128 MB\u3002");
+        }
+        const chunks = [];
+        if (response.body) {
+          const reader = response.body.getReader();
+          try {
+            while (true) {
+              requestSignal.throwIfAborted();
+              const next = await reader.read();
+              if (next.done) break;
+              if (responseBytes + next.value.byteLength > APP_MAX_BYTES) throw failure2("TOO_LARGE", "\u4F5C\u54C1\u54CD\u5E94\u8D85\u8FC7 128 MB\u3002");
+              reserve(next.value.byteLength);
+              responseBytes += next.value.byteLength;
+              chunks.push(Buffer.from(next.value));
+            }
+          } finally {
+            await reader.cancel().catch(() => {
+            });
+            reader.releaseLock();
+          }
+        }
+        const body2 = Buffer.concat(chunks, responseBytes), headers = {};
+        response.headers.forEach((value2, key) => {
+          if (RESPONSE_HEADERS.has(key)) headers[key] = value2;
+        });
+        const result = { status: response.status, headers, size: body2.length };
+        if (body2.length <= APP_CHUNK_BYTES) return { ...result, body: body2.toString("base64") };
+        const downloadId = add("download", body2);
+        responseBytes = 0;
+        return { ...result, downloadId };
+      } finally {
+        active--;
+        budget -= responseBytes;
+        if (uploaded) budget -= uploaded.bytes.length;
+      }
+    },
+    close() {
+      if (!closed) {
+        closed = true;
+        lifetime.abort(failure2("CLOSED", "\u4F5C\u54C1\u8FDE\u63A5\u5DF2\u5173\u95ED\u3002"));
+        clearInterval(timer);
+        for (const id2 of transfers.keys()) remove(id2);
+      }
+    }
+  };
+}
+
+// src/server/client.ts
 var dataDirectory = (value) => resolve(value || process.env.AGENTERO_STUDIO_DATA_ROOT || join(homedir(), ".codexworkbench", "agentero-studio"));
 async function readRecord(root2) {
   try {
@@ -34746,7 +34943,7 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
   const current = record3;
   const leaseDirectory = join(root2, "leases");
   await mkdir(leaseDirectory, { recursive: true });
-  const lease = join(leaseDirectory, `${process.pid}-${randomUUID()}.json`);
+  const lease = join(leaseDirectory, `${process.pid}-${randomUUID2()}.json`);
   const heartbeat = () => writeFile(lease, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 35e3 })).catch(() => {
   });
   await heartbeat();
@@ -34761,6 +34958,18 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
       const result = await response.json();
       if (!result.ok) throw Object.assign(new Error(result.error?.message || "Studio \u64CD\u4F5C\u5931\u8D25"), { code: result.error?.code, details: result.error?.details });
       return result.data;
+    },
+    async requestUi(input2, signal) {
+      const request = validateUiRequest(input2);
+      const url2 = new URL(request.path, current.origin);
+      if (url2.origin !== current.origin) throw Object.assign(new Error("\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u5207\u6362\u670D\u52A1\u5730\u5740\u3002"), { code: "FORBIDDEN" });
+      return fetch(url2, {
+        method: request.method,
+        headers: { ...request.headers, Authorization: `Bearer ${current.token}`, "X-Studio-Actor": "human" },
+        ...request.body !== void 0 ? { body: Buffer.from(request.body) } : {},
+        redirect: "error",
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(9e4)]) : AbortSignal.timeout(9e4)
+      });
     },
     async close() {
       clearInterval(timer);
@@ -35678,8 +35887,8 @@ function isValidJWT2(jwt2, alg) {
     const [header2] = jwt2.split(".");
     if (!header2)
       return false;
-    const base643 = header2.replace(/-/g, "+").replace(/_/g, "/").padEnd(header2.length + (4 - header2.length % 4) % 4, "=");
-    const decoded = JSON.parse(atob(base643));
+    const base644 = header2.replace(/-/g, "+").replace(/_/g, "/").padEnd(header2.length + (4 - header2.length % 4) % 4, "=");
+    const decoded = JSON.parse(atob(base644));
     if (typeof decoded !== "object" || decoded === null)
       return false;
     if ("typ" in decoded && decoded?.typ !== "JWT")
@@ -42833,6 +43042,16 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// src/contracts/brand-icon.ts
+var STUDIO_ICON = {
+  src: "data:image/png;base64,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",
+  mimeType: "image/png",
+  sizes: ["64x64"]
+};
+
+// src/contracts/version.ts
+var PLUGIN_VERSION = "0.1.1";
+
 // src/server/protocol.ts
 init_studio();
 var id = external_exports.string().min(1).max(200);
@@ -42906,7 +43125,7 @@ function modelResult(name, args, value) {
   return result;
 }
 function createStudioServer(executor, html2) {
-  const server = new McpServer({ name: "agentero-studio", version: "0.1.0" });
+  const server = new McpServer({ name: "agentero-studio", title: "Agentero \u521B\u4F5C", version: PLUGIN_VERSION, icons: [STUDIO_ICON] });
   const uri = "ui://agentero-studio/app";
   for (const name of TOOL_NAMES) {
     server.registerTool(name, {
@@ -42923,18 +43142,40 @@ function createStudioServer(executor, html2) {
         const data = JSON.stringify(transformed).length <= 24e4 ? transformed : { artifactId: request.artifactId, tooLarge: true, hint: "\u8BF7\u6309 summary \u9875\u3001\u5BF9\u8C61 ID \u6216 source \u7684 offset/limit \u7F29\u5C0F\u8BFB\u53D6\u8303\u56F4\uFF1B\u672A\u8FD4\u56DE\u5B8C\u6574\u5185\u5BB9\u3002" };
         return { content: [], structuredContent: { ok: true, data }, ...name === "studio_open" ? { _meta: { connection: await executor.connection() } } : {} };
       } catch (error62) {
-        const failure3 = error62;
-        return { isError: true, content: [{ type: "text", text: failure3.message }], structuredContent: { ok: false, error: { code: failure3.code || "STUDIO_ERROR", message: failure3.message, ...failure3.details ? { details: failure3.details } : {} } } };
+        const failure4 = error62;
+        return { isError: true, content: [{ type: "text", text: failure4.message }], structuredContent: { ok: false, error: { code: failure4.code || "STUDIO_ERROR", message: failure4.message, ...failure4.details ? { details: failure4.details } : {} } } };
       }
     });
   }
-  server.registerResource("studio-ui", uri, { mimeType: "text/html;profile=mcp-app" }, async () => {
-    const connection = await executor.connection();
+  const appTransport = createAppTransport((request, signal) => {
+    if (!executor.requestUi) throw Object.assign(new Error("\u4F5C\u54C1\u754C\u9762\u4F20\u8F93\u4E0D\u53EF\u7528\uFF0C\u8BF7\u66F4\u65B0\u63D2\u4EF6\u540E\u91CD\u8BD5\u3002"), { code: "UNAVAILABLE" });
+    return executor.requestUi(request, signal);
+  });
+  server.registerTool(APP_TOOL_NAME, {
+    title: "\u4F5C\u54C1\u754C\u9762\u4F20\u8F93",
+    description: "\u4EC5\u4F9B\u4F5C\u54C1\u754C\u9762\u8BBF\u95EE\u5F53\u524D\u672C\u673A\u4F5C\u54C1\u670D\u52A1\uFF1B\u5B8C\u6574\u6587\u6863\u548C\u6587\u4EF6\u5B57\u8282\u4E0D\u8FDB\u5165\u6A21\u578B\u5185\u5BB9\u3002",
+    inputSchema: appTransportSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    _meta: { ui: { visibility: ["app"] } }
+  }, async (input2, extra) => {
+    try {
+      return { content: [], structuredContent: { ok: true }, _meta: { response: await appTransport.execute(input2, extra.signal) } };
+    } catch (error62) {
+      const failure4 = error62;
+      return { isError: true, content: [], structuredContent: { ok: false, error: { code: failure4.code || "STUDIO_TRANSPORT_ERROR", message: failure4.message } } };
+    }
+  });
+  server.registerResource("studio-ui", uri, { title: "Agentero \u521B\u4F5C", icons: [STUDIO_ICON], mimeType: "text/html;profile=mcp-app" }, async () => {
     return { contents: [{ uri, mimeType: "text/html;profile=mcp-app", text: html2, _meta: {
-      ui: { csp: { connectDomains: [connection.baseUrl], resourceDomains: [connection.baseUrl, "data:", "blob:"], frameDomains: ["'self'", "blob:", "data:"] }, prefersBorder: false },
+      ui: { csp: { connectDomains: [], resourceDomains: ["data:", "blob:"], frameDomains: ["'self'", "blob:", "data:"] }, prefersBorder: false },
       "openai/ui": { preferredDisplayMode: "fullscreen", availableDisplayModes: ["inline", "fullscreen"] }
     } }] };
   });
+  const originalClose = server.close.bind(server);
+  server.close = async () => {
+    appTransport.close();
+    await originalClose();
+  };
   return server;
 }
 
@@ -42948,7 +43189,7 @@ var html = await readFile6(new URL("./app.html", import.meta.url), "utf8");
 if (process.argv.includes("--serve")) {
   const { startStudioHost: startStudioHost2 } = await Promise.resolve().then(() => (init_http(), http_exports));
   const host = await startStudioHost2({ dataRoot: root, html, port: Number(option("--port") || 0) });
-  await writeRecord(root, { origin: host.origin, token: host.token, pid: process.pid, instanceId: randomUUID10() });
+  await writeRecord(root, { origin: host.origin, token: host.token, pid: process.pid, instanceId: randomUUID11() });
   let closing;
   const close = () => closing ??= (async () => {
     if ((await readRecord(root))?.pid === process.pid) await unlink2(join7(root, "service.json")).catch(() => {
