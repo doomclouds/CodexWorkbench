@@ -7,6 +7,7 @@ import { feedbackDraft } from './feedback-draft';
 export { feedbackDraft } from './feedback-draft';
 import { STUDIO_ICON } from '../contracts/brand-icon';
 import { PLUGIN_VERSION } from '../contracts/version';
+import { APP_MAX_BYTES } from '../contracts/transport';
 
 declare global { interface Window { __STUDIO_BOOT__?: Connection } }
 export interface StudioBridge {
@@ -28,6 +29,11 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
     if (!boot) throw new Error('请从 Codex 插件或有效的作品分享链接打开 Agentero 创作。');
     const client: StudioClient = {
       embedded: false, baseUrl: boot.baseUrl || location.origin, token: boot.token,
+      async openLink(url) {
+        const opened = window.open(url, '_blank');
+        if (!opened) throw new Error('浏览器未打开阅读页，请点击阅读链接。');
+        opened.opener = null;
+      },
       async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
         const response = await fetch(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${client.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
         return unwrap(await response.json() as ToolResponse<T>);
@@ -95,6 +101,20 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   const client: StudioClient = {
     request: transport.request, assetUrl: transport.assetUrl,
     embedded: true, baseUrl: connection.baseUrl, token: connection.token,
+    async downloadFile(blob, filename) {
+      if (!app.getHostCapabilities()?.downloadFile) throw new Error('当前宿主不支持文件下载，请更新宿主或在浏览器中导出。');
+      if (blob.size > APP_MAX_BYTES) throw new Error('导出文件超过作品传输的 128 MB 预算，请缩小导出范围。');
+      if (!filename || filename.length > 255 || /[\\/\u0000-\u001f\u007f]/.test(filename) || filename === '.' || filename === '..') throw new Error('导出文件名无效。');
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+      const result = await app.downloadFile({ contents: [{ type: 'resource', resource: { uri: `file:///${encodeURIComponent(filename)}`, mimeType: blob.type || 'application/octet-stream', blob: btoa(binary) } }] });
+      if (result.isError) throw new Error('宿主未完成文件下载，可能已取消或被拒绝；请重试。');
+    },
+    async openLink(url) {
+      const result = await app.openLink({ url });
+      if (result.isError) throw new Error('宿主未打开阅读页，请点击阅读链接。');
+    },
     async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
       const result = await transport.request(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${client.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
       return unwrap(await result.json() as ToolResponse<T>);

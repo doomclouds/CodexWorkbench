@@ -57,6 +57,21 @@ describe('Studio authenticated local and LAN host', () => {
     const result = await call('artifact_apply', { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { type: 'text' } }] }, host.token, { 'X-Studio-Actor': 'agent' });
     expect(result.value.data.historyEntry.actor).toMatchObject({ id: 'codex', kind: 'agent', role: 'owner' });
   });
+  it('keeps recycle bin thumbnail previews owner-only without restoring the work', async () => {
+    const artifact = await work(), shared = await sharing(artifact.id), viewer = shareToken(shared, 'viewer');
+    await call('artifact_apply', { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { type: 'text', text: '回收站预览保留内容' } }] });
+    const path = `${host.origin}/api/thumbnails/${artifact.id}`;
+    expect((await fetch(`${path}?token=${viewer}`)).status).toBe(200);
+    await call('artifact_manage', { action: 'trash', artifactId: artifact.id });
+    const preview = await fetch(`${path}?token=${host.token}`);
+    expect(preview.status).toBe(200); expect(preview.headers.get('content-type')).toBe('image/svg+xml');
+    expect(await preview.text()).toContain('回收站预览保留内容');
+    expect((await fetch(path)).status).toBe(401);
+    expect((await fetch(`${path}?token=${viewer}`)).status).toBe(401);
+    await expect(host.service.getThumbnail(artifact.id, { id: 'viewer', name: 'Viewer', kind: 'human', role: 'viewer' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect((await call('artifact_read', { artifactId: artifact.id })).value.data.artifact.trashedAt).toEqual(expect.any(String));
+    expect((await call('artifact_list', { trashed: true })).value.data.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: artifact.id, trashedAt: expect.any(String) })]));
+  });
   it('streams shared edits and terminates old live connections on link reset', async () => {
     const artifact = await work(), shared = await sharing(artifact.id), token = shareToken(shared, 'viewer');
     const response = await fetch(`${host.origin}/api/events?artifactId=${artifact.id}&token=${token}`), reader = response.body!.getReader();
@@ -92,9 +107,33 @@ describe('Studio authenticated local and LAN host', () => {
     const downloadPath = exported.value.data.downloadPath;
     expect((await fetch(`${host.origin}${downloadPath}`)).status).toBe(401);
     const downloaded = await fetch(`${host.origin}${downloadPath}&token=${host.token}`);
-    expect(downloaded.status).toBe(200); expect(downloaded.headers.get('content-type')).toContain('text/html'); expect(await downloaded.text()).toContain('完整源码');
+    expect(downloaded.status).toBe(200); expect(downloaded.headers.get('content-type')).toBe('text/html; charset=utf-8'); expect(await downloaded.text()).toContain('完整源码');
     const png = await call('artifact_export', { artifactId: artifact.id, format: 'png', options: { regionId: 'region' } });
     expect(png.value.error.code).toBe('EXPORT_BROWSER_REQUIRED');
+  });
+  it.each([['html', 'text/html'], ['svg', 'image/svg+xml'], ['json', 'application/json']])('declares UTF-8 for Chinese %s downloads without changing canonical source', async (format, mimeType) => {
+    const artifact = await work();
+    const source = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="10" y="30">中文图解与备注</text></svg>';
+    await call('artifact_apply', { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'chinese-region', type: 'html', html: source } }] });
+    const exported = await call('artifact_export', { artifactId: artifact.id, format, options: { regionId: 'chinese-region' } });
+    expect(exported.value.ok).toBe(true);
+    const response = await fetch(`${host.origin}${exported.value.data.downloadPath}&token=${host.token}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe(`${mimeType}; charset=utf-8`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const charset = /charset=([^;\s]+)/.exec(response.headers.get('content-type')!)![1];
+    expect(new TextDecoder(charset, { fatal: true }).decode(bytes)).toContain('中文图解与备注');
+    const original = await call('artifact_read', { artifactId: artifact.id, mode: 'source', regionId: 'chinese-region' });
+    expect(original.value.data.html).toBe(source);
+  });
+  it.each([['png', 'image/png'], ['zip', 'application/zip']])('preserves the binary %s download media type', async (format, mimeType) => {
+    const artifact = await work();
+    const exported = await call('artifact_export', { artifactId: artifact.id, format });
+    expect(exported.value.ok).toBe(true);
+    const response = await fetch(`${host.origin}${exported.value.data.downloadPath}&token=${host.token}`);
+    expect(response.status).toBe(200); expect(response.headers.get('content-type')).toBe(mimeType);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    expect(Buffer.from(bytes.subarray(0, format === 'png' ? 8 : 4)).toString('hex')).toBe(format === 'png' ? '89504e470d0a1a0a' : '504b0304');
   });
   it('copies uploaded resources with duplicated works', async () => {
     const artifact = await work();

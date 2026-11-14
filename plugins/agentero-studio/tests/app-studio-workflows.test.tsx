@@ -5,17 +5,20 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Board, type Feedback, type StudioClient, type ToolName } from '../src/contracts/studio';
+import { DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Artifact, type Board, type Feedback, type StudioClient, type ToolName } from '../src/contracts/studio';
 import { StudioService } from '../src/core/service';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
-  default: ({ board, onChanged, onAnnotate, onSelectionChange, readOnly }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; readOnly?: boolean }) => <section aria-label="白板画布" data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
+  default: ({ board, onChanged, onAnnotate, onSelectionChange, onEditHtml, onOpenHtml, readOnly }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; onOpenHtml?: (element: Board['elements'][number]) => void; readOnly?: boolean }) => <section aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-input'], quote: '输入节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="input"]', rect: { x: 10, y: 20, w: 80, h: 30 } })}>标注 HTML 内部</button>
     <button onClick={() => onSelectionChange?.(['region-one'])}>选择 HTML 区域</button>
+    <button onClick={() => onEditHtml?.()}>导入 HTML</button>
+    <button onClick={() => { const element = board.elements.find(element => element.id === 'region-one'); if (element) onOpenHtml?.(element); }}>独立阅读 HTML</button>
     <button onClick={() => onChanged({ ...board, artifact: { ...board.artifact, revision: board.artifact.revision + 5 } })}>模拟较新画布版本</button>
   </section>,
 }));
 import StudioApp from '../src/app/StudioApp';
+import { whiteboardProduct } from '../src/app/products/whiteboard';
 
 let folder = '';
 let service: StudioService;
@@ -44,8 +47,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function mount(options: { artifactId?: string; actor?: Actor; attach?: (feedback: Feedback, board: Pick<Board, 'artifact'>) => Promise<void> } = {}) {
-  await act(async () => root.render(<StudioApp client={client} actor={options.actor || LOCAL_ACTOR} initialArtifactId={options.artifactId} attachContext={options.attach} />));
+async function mount(options: { artifactId?: string; actor?: Actor; view?: 'trash' | 'recent'; attach?: (feedback: Feedback, board: Pick<Board, 'artifact'>) => Promise<void> } = {}) {
+  await act(async () => root.render(<StudioApp client={client} actor={options.actor || LOCAL_ACTOR} initialArtifactId={options.artifactId} initialView={options.view} attachContext={options.attach} />));
 }
 async function waitUntil(check: () => boolean) {
   for (let attempt = 0; attempt < 80; attempt++) {
@@ -55,11 +58,12 @@ async function waitUntil(check: () => boolean) {
   throw new Error(`UI did not reach expected state. ${container.textContent?.slice(0, 1500)}`);
 }
 function button(label: string, partial = false): HTMLButtonElement {
-  const found = [...container.querySelectorAll<HTMLButtonElement>('button')].find(element => element.getAttribute('aria-label') === label || (partial ? element.textContent?.includes(label) : element.textContent?.trim() === label));
+  const all = [...container.querySelectorAll<HTMLButtonElement>('button')];
+  const found = all.find(element => element.getAttribute('aria-label') === label) || [...container.querySelectorAll<HTMLButtonElement>('[role="menu"] button'), ...all].find(element => partial ? element.textContent?.includes(label) : element.textContent?.trim() === label);
   if (!found) throw new Error(`Button missing: ${label}`);
   return found;
 }
-async function click(element: HTMLElement) { await act(async () => { element.click(); }); }
+async function click(element: HTMLElement) { await act(async () => { element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); element.click(); }); }
 async function change(element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
   await act(async () => {
     const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : element instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
@@ -76,6 +80,25 @@ function region(html = '<h1 data-node="input">输入节点</h1>'): Board['elemen
 }
 async function apply(board: Board, operations: unknown[]) {
   return await service.execute('artifact_apply', { artifactId: board.artifact.id, operationId: crypto.randomUUID(), expectedRevision: board.artifact.revision, operations }, LOCAL_ACTOR) as { board: Board };
+}
+function readerTransport() {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  const request = vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(input);
+    if (url.pathname === '/api/presence') return Response.json({ peers: [], timer: null });
+    if (url.pathname === '/api/region-view') {
+      if (init?.method === 'POST') {
+        const target = JSON.parse(String(init.body)) as { artifactId: string; regionId: string };
+        return Response.json({ ok: true, data: { url: `http://studio.test/region/${target.artifactId}/${target.regionId}#cap=limited-reader`, expiresAt: Date.now() + 900000 } });
+      }
+      return Response.json({ ok: true, data: {} });
+    }
+    throw new Error(`Unexpected reader request: ${url.pathname}`);
+  });
+  const openLink = vi.fn().mockRejectedValue(new Error('宿主不支持打开新标签'));
+  Object.assign(client, { baseUrl: 'http://studio.test', token: 'owner-secret-kept-in-header', request, openLink });
+  return { request, openLink };
 }
 
 describe('Studio real management workflows', () => {
@@ -155,9 +178,12 @@ describe('Studio real management workflows', () => {
     await click(button('白板'));
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
     expect(container.querySelector('select[aria-label="主题"]')).toBeNull();
+    await click(button('分享'));
+    await waitUntil(() => !!container.querySelector('.studio-share-panel'));
     await click(button('切换为暗色主题'));
     expect(container.querySelector('.studio')?.getAttribute('data-studio-theme')).toBe('dark');
     await click(button('切换为明亮主题'));
+    await click(button('分享'));
     let items = await service.execute('artifact_list', {}, LOCAL_ACTOR);
     expect(items.artifacts).toHaveLength(1);
     const artifactId = items.artifacts[0].id;
@@ -182,7 +208,7 @@ describe('Studio real management workflows', () => {
     await click(button('筛选作品'));
     await click(button('回收站'));
     await waitUntil(() => !!container.querySelector('[aria-label="打开白板：硬件系统架构"]'));
-    await click(button('恢复'));
+    await click(button('恢复作品：硬件系统架构'));
     await waitUntil(() => !container.querySelector('[aria-label="打开白板：硬件系统架构"]'));
     items = await service.execute('artifact_list', {}, LOCAL_ACTOR);
     expect(items.artifacts[0]).toMatchObject({ id: artifactId, title: '硬件系统架构', pinned: true });
@@ -206,6 +232,59 @@ describe('Studio real management workflows', () => {
     expect(request?.[1].expectedRevision).toBe(fixture.board.artifact.revision);
   });
 
+  it('offers a scoped explicit reader link after host open fails and watches the original view without creating another grant', async () => {
+    const fixture = await createFixture([region()]), { request, openLink } = readerTransport();
+    await mount({ artifactId: fixture.board.artifact.id });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('独立阅读 HTML'));
+    await waitUntil(() => !!container.querySelector('.studio-reader-fallback a'));
+    const fallback = container.querySelector<HTMLAnchorElement>('.studio-reader-fallback a')!, url = new URL(fallback.href);
+    expect(url.pathname).toBe(`/region/${fixture.board.artifact.id}/region-one`);
+    expect(url.hash).toBe('#cap=limited-reader'); expect(url.searchParams.has('token')).toBe(false);
+    expect(fallback.href).not.toContain(client.token);
+    expect(fallback.target).toBe('_blank'); expect(fallback.rel).toBe('noopener noreferrer');
+    expect(openLink).toHaveBeenCalledExactlyOnceWith(fallback.href);
+    const creates = request.mock.calls.filter(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method === 'POST');
+    expect(creates).toHaveLength(1);
+    const target = JSON.parse(String(creates[0]![1]?.body));
+    expect(target).toEqual({ artifactId: fixture.board.artifact.id, regionId: 'region-one', viewId: expect.any(String) });
+    expect(creates[0]![1]?.headers).toMatchObject({ Authorization: `Bearer ${client.token}` });
+    expect(request.mock.calls.some(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method !== 'POST')).toBe(false);
+    // Keep JSDOM in this document while exercising the anchor's real click handler.
+    fallback.addEventListener('click', event => event.preventDefault(), { once: true });
+    await click(fallback);
+    await waitUntil(() => request.mock.calls.some(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method !== 'POST'));
+    const poll = request.mock.calls.find(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method !== 'POST')!;
+    const pollUrl = new URL(poll[0]);
+    expect(pollUrl.searchParams.get('artifactId')).toBe(fixture.board.artifact.id);
+    expect(pollUrl.searchParams.get('viewId')).toBe(target.viewId);
+    expect(pollUrl.href).not.toContain(client.token);
+    expect(request.mock.calls.filter(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method === 'POST')).toHaveLength(1);
+    expect(container.querySelector('.studio-reader-fallback')).toBeNull();
+  });
+
+  it('clears a blocked reader link when switching artifacts and when returning home', async () => {
+    const first = await createFixture([region()]);
+    const second = await service.execute('artifact_manage', { action: 'create', title: '另一块白板', elements: [region()] }, LOCAL_ACTOR) as { board: Board };
+    const { request } = readerTransport();
+    await mount({ artifactId: first.board.artifact.id });
+    await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-artifact') === first.board.artifact.id);
+    await click(button('独立阅读 HTML'));
+    await waitUntil(() => !!container.querySelector('.studio-reader-fallback a'));
+    expect(container.querySelector<HTMLAnchorElement>('.studio-reader-fallback a')?.href).toContain(`/region/${first.board.artifact.id}/region-one`);
+    await mount({ artifactId: second.board.artifact.id });
+    await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-artifact') === second.board.artifact.id);
+    expect(container.querySelector('.studio-reader-fallback')).toBeNull();
+    await click(button('独立阅读 HTML'));
+    await waitUntil(() => !!container.querySelector('.studio-reader-fallback a'));
+    expect(container.querySelector<HTMLAnchorElement>('.studio-reader-fallback a')?.href).toContain(`/region/${second.board.artifact.id}/region-one`);
+    await click(button('返回作品中心'));
+    await waitUntil(() => !!container.querySelector('.studio-library-main'));
+    expect(container.querySelector('.studio-reader-fallback')).toBeNull();
+    const targets = request.mock.calls.filter(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method === 'POST').map(([, init]) => JSON.parse(String(init?.body)));
+    expect(targets.map(target => target.artifactId)).toEqual([first.board.artifact.id, second.board.artifact.id]);
+  });
+
   it('freezes internal HTML selection and original source even when the region changed before commenting', async () => {
     const original = '<h1 data-node="input">输入节点</h1>';
     const fixture = await createFixture([region(original)]);
@@ -215,34 +294,124 @@ describe('Studio real management workflows', () => {
     await click(button('标注 HTML 内部'));
     await apply(fixture.board, [{ op: 'update', id: 'region-one', changes: { html: '<h1>已被他人修改的新内容</h1>' } }]);
     await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '把输入节点改成强调色');
-    await submit(container.querySelector<HTMLFormElement>('.studio-feedback-compose')!);
-    await waitUntil(() => !!container.querySelector('[data-feedback-id]'));
+    const compose = container.querySelector<HTMLFormElement>('.studio-comment-compose')!;
+    expect(compose.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
+    expect(container.querySelector('[aria-label="反馈类型"]')).toBeNull();
+    await submit(compose);
+    await waitUntil(() => !container.querySelector('.studio-comment-compose') && !!container.querySelector('[data-feedback-id]'));
     const result = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
     expect(result.feedback).toHaveLength(1);
+    expect(result.feedback[0]).toMatchObject({ type: 'comment', status: 'open' });
+    expect(attach).not.toHaveBeenCalled();
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_feedback' && args.action === 'send')).toBe(false);
     expect(result.feedback[0].anchor).toMatchObject({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-input'], quote: '输入节点' });
     const source = await service.execute('artifact_read', { artifactId: fixture.board.artifact.id, mode: 'source', feedbackId: result.feedback[0].id });
     expect(source.html).toBe(original);
+    await click(button('备注列表'));
+    await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+    await click(container.querySelector<HTMLButtonElement>('.studio-comment-list-item')!);
     await click(button('附加到对话'));
     await waitUntil(() => attach.mock.calls.length === 1);
     expect(attach.mock.calls[0]?.[0]).toMatchObject({ id: result.feedback[0].id, anchor: result.feedback[0].anchor });
   });
 
-  it('keeps a Web guest request pending for the owner instead of pretending to send a Codex message', async () => {
+  it('keeps an explicitly attached Web guest comment pending for the owner', async () => {
     const fixture = await createFixture([region()]);
     const guest: Actor = { id: 'guest-one', name: '同事', kind: 'human', role: 'commenter' };
     client.embedded = false;
     call.mockImplementation((name: ToolName, args: Record<string, unknown> = {}) => service.execute(name, args, guest));
     await mount({ artifactId: fixture.board.artifact.id, actor: guest });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    await click(button('批注与请求'));
-    await change(container.querySelector<HTMLSelectElement>('[aria-label="反馈类型"]')!, 'request');
+    await click(button('备注'));
+    await click(button('标注 HTML 内部'));
     await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '请补充状态机');
-    await submit(container.querySelector<HTMLFormElement>('.studio-feedback-compose')!);
-    await waitUntil(() => !!container.querySelector('[data-feedback-id]'));
+    const compose = container.querySelector<HTMLFormElement>('.studio-comment-compose')!;
+    await click(compose.querySelector<HTMLInputElement>('input[type="checkbox"]')!);
+    await submit(compose);
+    await waitUntil(() => !container.querySelector('.studio-comment-popover'));
     const { feedback } = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
-    expect(feedback[0]).toMatchObject({ type: 'request', status: 'pending', author: { id: guest.id }, text: '请补充状态机' });
+    expect(feedback[0]).toMatchObject({ type: 'comment', status: 'pending', author: { id: guest.id }, text: '请补充状态机' });
     expect(call.mock.calls.find(([name, args]) => name === 'artifact_feedback' && args.action === 'send')?.[1]).toMatchObject({ artifactId: fixture.board.artifact.id, feedbackId: feedback[0].id });
     expect(container.querySelector('[aria-label="返回作品中心"]')).toBeNull();
+  });
+
+  it('opens existing comments from the list and persists replies, resolution and reopening', async () => {
+    const fixture = await createFixture([region()]);
+    await service.execute('artifact_feedback', { action: 'create', operationId: crypto.randomUUID(), artifactId: fixture.board.artifact.id, type: 'comment', text: '需要补充说明', anchor: { regionId: 'region-one', sourceRevision: 1 } }, LOCAL_ACTOR);
+    await mount({ artifactId: fixture.board.artifact.id });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('备注列表'));
+    await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+    await click(container.querySelector<HTMLButtonElement>('.studio-comment-list-item')!);
+    await change(container.querySelector<HTMLInputElement>('[aria-label="回复批注：需要补充说明"]')!, '已补充接口约束');
+    await submit(container.querySelector<HTMLFormElement>('.studio-reply-form')!);
+    await waitUntil(() => container.querySelector('.studio-feedback-reply')?.textContent?.includes('已补充接口约束') === true);
+    let result = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
+    expect(result.feedback[0].replies).toHaveLength(1);
+    expect(result.feedback[0].replies[0].text).toBe('已补充接口约束');
+    await click(button('解决'));
+    await waitUntil(() => !![...container.querySelectorAll('button')].find(node => node.textContent?.trim() === '重新打开'));
+    await click(button('备注列表'));
+    expect(container.querySelector('.studio-comment-list-item')).toBeNull();
+    await click(container.querySelector<HTMLInputElement>('.studio-comment-list-tools input[type="checkbox"]')!);
+    await waitUntil(() => !!container.querySelector('.studio-comment-list-item[data-status="resolved"]'));
+    await click(container.querySelector<HTMLButtonElement>('.studio-comment-list-item')!);
+    await click(button('重新打开'));
+    await waitUntil(() => container.querySelector('.studio-feedback-status-open') !== null);
+    result = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
+    expect(result.feedback[0].status).toBe('open');
+    expect(result.feedback[0].replies[0].text).toBe('已补充接口约束');
+  });
+
+  it('retries attaching the saved comment after a host failure without creating it again', async () => {
+    const fixture = await createFixture([region()]);
+    const attach = vi.fn().mockRejectedValueOnce(new Error('对话草稿暂不可用')).mockResolvedValueOnce(undefined);
+    await mount({ artifactId: fixture.board.artifact.id, attach });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('备注'));
+    expect(button('备注').getAttribute('aria-pressed')).toBe('true');
+    await click(button('标注 HTML 内部'));
+    await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '把输入节点改成强调色');
+    const compose = container.querySelector<HTMLFormElement>('.studio-comment-compose')!;
+    const attachToggle = compose.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(attachToggle.checked).toBe(false);
+    expect(attachToggle.closest('label')?.textContent).toContain('附加到对话');
+    await click(attachToggle);
+    await submit(compose);
+    await waitUntil(() => attach.mock.calls.length === 1 && !!container.querySelector('[role="alert"]'));
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('把输入节点改成强调色');
+    let saved = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
+    expect(saved.feedback).toHaveLength(1);
+    expect(saved.feedback[0]).toMatchObject({ type: 'comment', status: 'open' });
+    expect(attach.mock.calls[0]?.[0]).toMatchObject({ id: saved.feedback[0].id });
+    await submit(container.querySelector<HTMLFormElement>('.studio-comment-compose')!);
+    await waitUntil(() => attach.mock.calls.length === 2 && !container.querySelector('.studio-comment-popover'));
+    saved = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
+    expect(saved.feedback).toHaveLength(1);
+    expect(attach.mock.calls[1]?.[0]).toMatchObject({ id: saved.feedback[0].id });
+    expect(call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'create')).toHaveLength(1);
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_feedback' && args.action === 'send')).toBe(false);
+  });
+
+  it('opens one header popover at a time and exports through the active product without enabling sharing', async () => {
+    const fixture = await createFixture();
+    const exportDocument = vi.spyOn(whiteboardProduct, 'exportDocument').mockResolvedValue(undefined);
+    await mount({ artifactId: fixture.board.artifact.id });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('版本历史'));
+    await waitUntil(() => !!container.querySelector('.studio-history-panel'));
+    expect(container.querySelectorAll('.studio-editor-popover')).toHaveLength(1);
+    await click(button('分享'));
+    await waitUntil(() => !!container.querySelector('.studio-share-panel'));
+    expect(container.querySelector('.studio-history-panel')).toBeNull();
+    expect(container.querySelectorAll('.studio-editor-popover')).toHaveLength(1);
+    await click(button('导出'));
+    expect(container.querySelectorAll('.studio-editor-export-option')).toHaveLength(whiteboardProduct.exportFormats.length + 1);
+    await click(button('白板文件 (.json)', true));
+    await waitUntil(() => exportDocument.mock.calls.length === 1);
+    expect(exportDocument.mock.calls[0]).toEqual([expect.objectContaining({ artifact: expect.objectContaining({ id: fixture.board.artifact.id }) }), 'json', client]);
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_share' && args.action === 'start')).toBe(false);
+    expect((await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id })).enabled).toBe(false);
   });
 
   it('previews history without mutating the live board, then restores while retaining subsequent history', async () => {
@@ -251,11 +420,12 @@ describe('Studio real management workflows', () => {
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
     await click(button('版本历史'));
-    await waitUntil(() => container.querySelectorAll('.studio-history-item').length === 2);
-    await click(button('版本 0', true));
+    await waitUntil(() => container.querySelectorAll('.studio-history-record').length === 2);
+    await click(button('展开版本 0'));
+    await click(button('预览版本'));
     await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-read-only') === 'true');
     expect((await service.execute('artifact_read', { artifactId: fixture.board.artifact.id })).elements).toHaveLength(1);
-    await click(button('恢复此版本'));
+    await click(button('恢复为新版本'));
     await waitUntil(() => call.mock.calls.some(([name, args]) => name === 'artifact_apply' && args.operations?.[0]?.op === 'restore'));
     await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-read-only') === 'false');
     const current = await service.execute('artifact_read', { artifactId: fixture.board.artifact.id });
@@ -272,11 +442,12 @@ describe('Studio real management workflows', () => {
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
     await click(button('版本历史'));
-    await waitUntil(() => container.querySelectorAll('.studio-history-item').length === 2);
-    await click(button('版本 0', true));
+    await waitUntil(() => container.querySelectorAll('.studio-history-record').length === 2);
+    await click(button('展开版本 0'));
+    await click(button('预览版本'));
     await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-read-only') === 'true');
     const second = await apply(first.board, [{ op: 'update', id: 'shape-one', changes: { text: '他人刚刚修改' } }]);
-    await click(button('恢复此版本'));
+    await click(button('恢复为新版本'));
     await waitUntil(() => !!container.querySelector('[role="alert"]'));
     const saved = await service.execute('artifact_read', { artifactId: fixture.board.artifact.id });
     expect(saved.artifact.revision).toBe(second.board.artifact.revision);
@@ -291,38 +462,147 @@ describe('Studio real management workflows', () => {
     await waitUntil(() => !!container.querySelector(`[aria-label="管理作品：${fixture.board.artifact.title}"]`));
     await click(button(`管理作品：${fixture.board.artifact.title}`));
     await click(button('复制链接'));
-    await waitUntil(() => !!container.querySelector('[aria-label="分享面板"]'));
-    expect((await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id })).enabled).toBe(false);
+    await waitUntil(() => !!container.querySelector('.studio-share-panel') && !!container.querySelector('[aria-label="白板画布"]'));
+    let status: { enabled: boolean } | undefined;
+    await act(async () => { status = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id }); });
+    expect(status?.enabled).toBe(false);
     expect(writeText).not.toHaveBeenCalled();
-    await click(button('开启局域网分享'));
-    await waitUntil(() => !!container.querySelector('[aria-label="可编辑分享链接"]'));
-    const sharing = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
+    await click(button('启用局域网分享'));
+    await waitUntil(() => !button('复制可编辑链接').disabled);
+    let sharing: { links: { viewer: string } } | undefined;
+    await act(async () => { sharing = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id }); });
     await click(button('返回作品中心'));
     await waitUntil(() => !!container.querySelector(`[aria-label="管理作品：${fixture.board.artifact.title}"]`));
     await click(button(`管理作品：${fixture.board.artifact.title}`));
     await click(button('复制链接'));
     await waitUntil(() => writeText.mock.calls.length === 1);
-    expect(writeText).toHaveBeenCalledWith(sharing.links.viewer);
+    expect(writeText).toHaveBeenCalledWith(sharing!.links.viewer);
   });
   it('starts role-based LAN sharing, rotates one role link and revokes sharing', async () => {
     const fixture = await createFixture();
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
     await click(button('分享'));
-    await waitUntil(() => !!container.querySelector('[aria-label="分享面板"] .studio-full-width'));
-    await click(button('开启局域网分享'));
-    await waitUntil(() => !!container.querySelector('[aria-label="可编辑分享链接"]'));
-    const previous = container.querySelector<HTMLInputElement>('[aria-label="可编辑分享链接"]')!.value;
+    await waitUntil(() => !!container.querySelector('.studio-share-panel .studio-share-start'));
+    await click(button('启用局域网分享'));
+    await waitUntil(() => !button('复制可编辑链接').disabled);
     const before = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
-    expect(before.enabled).toBe(true); expect(previous).toBe(before.links.editor);
+    expect(before.enabled).toBe(true);
+    await click(button('可编辑链接更多操作'));
     await click(button('重置此链接'));
-    await waitUntil(() => container.querySelector<HTMLInputElement>('[aria-label="可编辑分享链接"]')?.value !== previous);
+    await waitUntil(() => !button('复制可编辑链接').disabled);
     const after = await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id });
     expect(after.links.editor).not.toBe(before.links.editor);
     expect(after.links.viewer).toBe(before.links.viewer);
-    await click(button('关闭分享'));
-    await waitUntil(() => !!container.querySelector('[aria-label="分享面板"] .studio-primary'));
+    await click(button('更多共享设置'));
+    await click(button('停止局域网分享'));
+    await waitUntil(() => !!container.querySelector('.studio-share-start'));
     expect((await service.execute('artifact_share', { action: 'status', artifactId: fixture.board.artifact.id })).enabled).toBe(false);
+  });
+});
+
+describe('Studio recycle bin workflows', () => {
+  async function trashFixture(title: string): Promise<Artifact> {
+    const created = await service.execute('artifact_manage', { action: 'create', title }, LOCAL_ACTOR) as { artifact: Artifact };
+    const result = await service.execute('artifact_manage', { action: 'trash', artifactId: created.artifact.id }, LOCAL_ACTOR) as { artifact: Artifact };
+    return result.artifact;
+  }
+  function confirmDelete() { return container.querySelector<HTMLButtonElement>('[role="dialog"] .studio-purge-confirm')!; }
+
+  it.each(['grid', 'list'] as const)('confirms a single deletion in %s and keeps compact restore, selection and scope controls usable', async layout => {
+    localStorage.setItem('agentero-studio-view', layout);
+    const first = await trashFixture('可删除的作品'), second = await trashFixture('可以恢复的作品');
+    await mount({ view: 'trash' });
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 2);
+    expect(container.querySelector('h1')?.textContent).toBe('回收站'); expect(container.querySelector('.studio-library-scope')).toBeNull();
+    expect(container.querySelector('[aria-label="筛选作品"]')).toBeNull(); expect(container.querySelector('[aria-label="新建作品"]')).toBeNull();
+    expect(container.querySelectorAll('.studio-artifact-preview')).toHaveLength(layout === 'grid' ? 2 : 0);
+    expect(button(`恢复作品：${second.title}`).textContent).toBe(''); expect(button(`永久删除作品：${first.title}`).textContent).toBe('');
+    await click(button('搜索回收站'));
+    expect(container.querySelector<HTMLInputElement>('[aria-label="搜索回收站名称"]')?.placeholder).toBe('搜索回收站');
+    await click(button(`永久删除作品：${first.title}`));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('永久删除 1 项作品，此操作无法恢复');
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_manage' && args.action === 'purge')).toBe(false);
+    await click(button('取消'));
+    expect((await service.execute('artifact_list', { trashed: true }, LOCAL_ACTOR)).artifacts).toHaveLength(2);
+    await click(button(`永久删除作品：${first.title}`)); await click(confirmDelete());
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 1 && !container.querySelector('[role="dialog"]') && !button(`恢复作品：${second.title}`).disabled);
+    expect(call.mock.calls.find(([name, args]) => name === 'artifact_manage' && args.action === 'purge')?.[1]).toEqual({ action: 'purge', artifactId: first.id });
+    const saved = await service.execute('artifact_list', { trashed: true }, LOCAL_ACTOR);
+    expect(saved.artifacts.map((item: Artifact) => item.id)).toEqual([second.id]);
+    await click(container.querySelector<HTMLInputElement>(`[aria-label="选择作品：${second.title}"]`)!);
+    expect(container.querySelector('.studio-trash-selection')?.textContent).toContain('1 项已选');
+    await click(button(`恢复作品：${second.title}`));
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 0);
+    expect((await service.execute('artifact_list', {}, LOCAL_ACTOR)).artifacts.map((item: Artifact) => item.id)).toEqual([second.id]);
+    await click(button('返回最近作品'));
+    await waitUntil(() => container.querySelector('h1')?.textContent === '作品');
+  });
+
+  it('retains failed selections and their error while removing successful batch items, then retries only the failed item', async () => {
+    const first = await trashFixture('应删除成功'), failed = await trashFixture('暂时无法删除');
+    call.mockImplementation(async (name: ToolName, args: Record<string, any>) => {
+      if (name !== 'artifact_manage' || args.action !== 'purge') return service.execute(name, args, LOCAL_ACTOR);
+      const ids: string[] = args.artifactIds || [args.artifactId];
+      const result = await service.execute('artifact_manage', { action: 'purge', artifactIds: ids.filter(id => id !== failed.id) }, LOCAL_ACTOR) as { deletedIds: string[] };
+      return { deletedIds: result.deletedIds, failures: [{ artifactId: failed.id, code: 'DELETE_FAILED', message: '文件正在使用，请重试。' }] };
+    });
+    await mount({ view: 'trash' }); await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 2);
+    await click(container.querySelector<HTMLInputElement>('[aria-label="全选当前页"]')!);
+    expect(container.querySelector('.studio-trash-selection')?.textContent).toContain('2 项已选');
+    await click(button('永久删除所选作品'));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('永久删除 2 项作品');
+    await click(confirmDelete());
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 1 && !!container.querySelector('.studio-trash-errors') && !button('永久删除所选作品').disabled);
+    expect(container.querySelector<HTMLInputElement>(`[aria-label="选择作品：${failed.title}"]`)?.checked).toBe(true);
+    expect(container.querySelector('.studio-trash-errors')?.textContent).toContain('文件正在使用，请重试。');
+    expect(container.querySelector('.studio-trash-errors')?.textContent).toContain(failed.title);
+    expect((await service.execute('artifact_list', { trashed: true }, LOCAL_ACTOR)).artifacts.map((item: Artifact) => item.id)).toEqual([failed.id]);
+    call.mockImplementation((name: ToolName, args: Record<string, unknown>) => service.execute(name, args, LOCAL_ACTOR));
+    await click(button('永久删除所选作品')); await click(confirmDelete());
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 0 && !container.querySelector('[role="dialog"]'));
+    expect(container.querySelector('.studio-trash-errors')).toBeNull();
+    const requests = call.mock.calls.filter(([name, args]) => name === 'artifact_manage' && args.action === 'purge').map(([, args]) => args);
+    expect(requests[0].artifactIds).toEqual(expect.arrayContaining([first.id, failed.id]));
+    expect(requests[1]).toEqual({ action: 'purge', artifactId: failed.id });
+  });
+
+  it('collects every unfiltered trash page before confirming clear, batches the fixed snapshot and retains a concurrently restored failure', async () => {
+    const records = new Map<string, Artifact>(Array.from({ length: 105 }, (_, index) => { const id = `trash-${index}`; return [id, { id, title: index === 0 ? '唯一匹配的作品' : `作品 ${index}`, type: 'whiteboard', revision: 0, pinned: false, createdAt: '', updatedAt: '', trashedAt: '2026-11-14T10:00:00Z' }]; }));
+    call.mockImplementation(async (name: ToolName, args: Record<string, any>) => {
+      if (name === 'artifact_list') {
+        const matches = [...records.values()].filter(item => !!item.trashedAt === !!args.trashed && (!args.query || item.title.includes(args.query)));
+        const start = Number(args.cursor || 0), limit = Number(args.limit || 60);
+        return { artifacts: matches.slice(start, start + limit), ...(start + limit < matches.length ? { nextCursor: String(start + limit) } : {}) };
+      }
+      if (name === 'artifact_manage' && args.action === 'purge') {
+        const ids: string[] = args.artifactIds || [args.artifactId], deletedIds: string[] = [], failures = [];
+        for (const id of ids) {
+          if (!records.get(id)?.trashedAt) failures.push({ artifactId: id, code: 'NOT_TRASHED', message: '作品已恢复，不能永久删除。' });
+          else { records.delete(id); deletedIds.push(id); }
+        }
+        return { deletedIds, failures };
+      }
+      throw new Error(`Unexpected ${name}`);
+    });
+    await mount({ view: 'trash' }); await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 60);
+    await click(button('搜索回收站')); await change(container.querySelector<HTMLInputElement>('[aria-label="搜索回收站名称"]')!, '唯一匹配');
+    await waitUntil(() => container.querySelectorAll('.studio-artifact').length === 1);
+    await click(button('清空回收站'));
+    await waitUntil(() => !!container.querySelector('[role="dialog"]'));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('永久删除 105 项作品');
+    expect(call.mock.calls.filter(([name, args]) => name === 'artifact_list' && args.limit === 100).map(([, args]) => args)).toEqual([{ trashed: true, limit: 100 }, { trashed: true, limit: 100, cursor: '100' }]);
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_manage' && args.action === 'purge')).toBe(false);
+    records.set('later-trash', { ...records.get('trash-0')!, id: 'later-trash', title: '确认后移入的作品' });
+    delete records.get('trash-104')!.trashedAt;
+    await click(confirmDelete());
+    await waitUntil(() => !container.querySelector('[role="dialog"]') && !!container.querySelector('.studio-trash-errors') && !button('清空回收站').disabled);
+    const batches = call.mock.calls.filter(([name, args]) => name === 'artifact_manage' && args.action === 'purge').map(([, args]) => args.artifactIds as string[]);
+    expect(batches.map(ids => ids.length)).toEqual([100, 5]);
+    expect(batches.flat()).toEqual(Array.from({ length: 105 }, (_, index) => `trash-${index}`));
+    expect([...records.keys()]).toEqual(['trash-104', 'later-trash']);
+    expect(container.querySelector('.studio-trash-errors')?.textContent).toContain('作品已恢复，不能永久删除。');
+    expect(container.querySelector('.studio-trash-selection')?.textContent).toContain('1 项已选');
   });
 });
 
@@ -338,7 +618,8 @@ describe('Studio stale response protection', () => {
       throw new Error(`Unexpected ${name}`);
     });
     await mount();
-    await click(button('新建白板'));
+    await click(button('新建作品'));
+    await click(button('白板'));
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]') && !!resolveRead);
     await click(button('模拟较新画布版本'));
     expect(container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-revision')).toBe('5');

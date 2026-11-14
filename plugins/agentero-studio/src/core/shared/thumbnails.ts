@@ -18,5 +18,6 @@ export class ThumbnailCache {
     while (this.entries.size > 24) this.entries.delete(this.entries.keys().next().value!);
     return promise;
   }
+  delete(id: string) { this.entries.delete(id); }
   clear() { this.entries.clear(); }
 }

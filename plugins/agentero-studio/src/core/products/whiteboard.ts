@@ -3,9 +3,13 @@ import { DEFAULT_STYLE, type Anchor, type Board, type BoardElement, type Operati
 import { copy, finite, object, safeId, same, StudioError } from '../shared/common.js';
 import type { ArtifactState, ContentChange, ProductAdapter, Snapshot } from '../shared/model.js';
 import type { ProductDefinition } from '../shared/products.js';
+import { arrowGeometry } from './whiteboard-geometry.js';
 
 export type WhiteboardContent = Omit<Board, 'artifact'>;
-export interface SourceSnapshot { html: string; regionId: string; sourceRevision: number; version: number; artifactId: string; feedbackId?: string }
+export type SourceSnapshot = { version: number; artifactId: string; feedbackId?: string; element?: BoardElement } & (
+  { html: string; regionId: string; sourceRevision: number } |
+  { elementId: string; element: BoardElement; html?: never; regionId?: never; sourceRevision?: never }
+);
 export type WhiteboardState = ArtifactState<WhiteboardContent, Anchor, SourceSnapshot>;
 export function boardView(snapshot: Snapshot<WhiteboardContent>): Board { return { artifact: snapshot.artifact, ...snapshot.content }; }
 export function validateWhiteboardAsset(mimeType: string): void {
@@ -20,6 +24,7 @@ export function normalizeElement(input: Partial<BoardElement>, id?: string): Boa
   if (result.type === 'html') result.sourceRevision = typeof input.sourceRevision === 'number' ? input.sourceRevision : 1;
   if (result.points !== undefined && (!Array.isArray(result.points) || result.points.length > 40_000 || result.points.some(n => typeof n !== 'number' || !Number.isFinite(n)))) throw new StudioError('INVALID_ARGUMENT', '笔迹坐标无效。');
   if (result.type === 'shape' && result.kind !== undefined && !['rect', 'rounded', 'ellipse', 'diamond', 'pill', 'hexagon', 'parallelogram', 'database', 'queue', 'document', 'cloud', 'person'].includes(result.kind)) throw new StudioError('INVALID_ARGUMENT', '不支持此原生形状类型。');
+  if (result.locked !== undefined && typeof result.locked !== 'boolean') throw new StudioError('INVALID_ARGUMENT', 'locked 必须是布尔值。');
   for (const key of ['hollow', 'dash'] as const) if (result[key] !== undefined && typeof result[key] !== 'boolean') throw new StudioError('INVALID_ARGUMENT', `${key} 必须是布尔值。`);
   for (const key of ['strokeWidth', 'width'] as const) if (result[key] !== undefined && (typeof result[key] !== 'number' || !Number.isFinite(result[key]) || result[key] <= 0 || result[key] > 100)) throw new StudioError('INVALID_ARGUMENT', '线条宽度须大于 0 且不超过 100。');
   if (result.type === 'arrow') {
@@ -64,6 +69,23 @@ function deletedIds(content: WhiteboardContent, operation: Operation): string[] 
   if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string')) throw new StudioError('INVALID_ARGUMENT', '元素 ID 列表无效。');
   return content.elements.filter(element => ids.includes(element.id) || element.type === 'arrow' && (typeof element.from === 'string' && ids.includes(element.from) || typeof element.to === 'string' && ids.includes(element.to))).map(element => element.id);
 }
+const LOCKED_GEOMETRY = ['type', 'x', 'y', 'w', 'h', 'rotation', 'parentId', 'groupId', 'from', 'to', 'fromSide', 'toSide', 'points', 'bends', 'crop'] as const;
+/** Coordinates are absolute; only actual changes to a locked object or bound arrow are blocked. */
+function assertLockedGeometry(before: WhiteboardContent, after: WhiteboardContent, baseline: WhiteboardContent) {
+  const protectedIds = new Set([...baseline.elements, ...before.elements].filter(element => element.locked).map(element => element.id));
+  if (!protectedIds.size) return;
+  const beforeById = new Map(before.elements.map(element => [element.id, element])), afterById = new Map(after.elements.map(element => [element.id, element]));
+  const bounds = (element: BoardElement | undefined) => element && [element.x, element.y, element.w, element.h];
+  for (const current of before.elements) {
+    if (!protectedIds.has(current.id)) continue;
+    const next = afterById.get(current.id);
+    const removedParent = current.parentId && beforeById.has(current.parentId) && !afterById.has(current.parentId);
+    const endpointMoved = current.type === 'arrow' && [current.from, current.to].some(id => typeof id === 'string' && !same(bounds(beforeById.get(id)), bounds(afterById.get(id))));
+    if (!next || removedParent || LOCKED_GEOMETRY.some(key => !same(current[key], next[key])) || endpointMoved && !same(arrowGeometry(current, before.elements).points, arrowGeometry(next, after.elements).points)) {
+      throw new StudioError('LOCKED', '对象的位置与尺寸已锁定，请先单独解锁后修改几何或删除。', { elementId: current.id });
+    }
+  }
+}
 export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anchor, SourceSnapshot> = {
   type: 'whiteboard',
   validate(content) {
@@ -79,24 +101,27 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     if (operation.op === 'update') return [safeId(operation.id, '元素 ID')];
     return [];
   },
-  apply(content, operation) {
+  apply(content, operation, baseline = content) {
     if (operation.op === 'add') {
       const element = normalizeElement(operation.element ?? {}, operation.id ?? operation.element?.id);
       if (element.type === 'html') element.sourceRevision = 1;
       if (content.elements.some(item => item.id === element.id)) throw new StudioError('CONFLICT', '元素 ID 已存在。', { elementId: element.id });
+      assertLockedGeometry(content, { ...content, elements: [...content.elements, element] }, baseline);
       content.elements.push(element); return [element.id];
     }
     if (operation.op === 'update') {
       const id = safeId(operation.id, '元素 ID'), index = content.elements.findIndex(item => item.id === id), current = content.elements[index];
       if (!current) throw new StudioError('NOT_FOUND', '要修改的元素不存在。');
       if (!object(operation.changes)) throw new StudioError('INVALID_ARGUMENT', '修改字段必须是对象。');
-      if (current.locked && !(Object.keys(operation.changes).length === 1 && operation.changes.locked === false)) throw new StudioError('LOCKED', '对象已锁定，请先明确解锁后修改。', { elementId: id });
+      if (Object.hasOwn(operation.changes, 'locked') && typeof operation.changes.locked !== 'boolean') throw new StudioError('INVALID_ARGUMENT', 'locked 必须是布尔值。');
+      if (current.locked && operation.changes.locked === false && Object.keys(operation.changes).length !== 1) throw new StudioError('LOCKED', '请通过单独的锁定操作明确解锁。', { elementId: id });
       const { id: _id, version: _version, ...changes } = operation.changes;
       const next = normalizeElement({ ...current, ...copy(changes) }, id); next.version = current.version + 1;
       if (next.type === 'html') next.sourceRevision = current.html === next.html ? current.sourceRevision ?? 1 : Number(current.sourceRevision ?? 0) + 1;
+      assertLockedGeometry(content, { ...content, elements: content.elements.map(element => element.id === id ? next : element) }, baseline);
       content.elements[index] = next; return [id];
     }
-    if (operation.op === 'delete') { const ids = deletedIds(content, operation); const locked = content.elements.find(element => ids.includes(element.id) && element.locked); if (locked) throw new StudioError('LOCKED', '对象或关联线已锁定，请先解锁。', { elementId: locked.id }); content.elements = content.elements.filter(element => !ids.includes(element.id)); return ids; }
+    if (operation.op === 'delete') { const ids = deletedIds(content, operation), elements = content.elements.filter(element => !ids.includes(element.id)); assertLockedGeometry(content, { ...content, elements }, baseline); content.elements = elements; return ids; }
     if (operation.op === 'style') {
       const patch = operation.style ?? {};
       if (!object(patch) || Object.values(patch).some(value => typeof value !== 'string' || value.length > 500)) throw new StudioError('INVALID_ARGUMENT', '样式字段必须是文字。');
@@ -104,11 +129,12 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     }
     if (operation.op === 'motion') { content.motion = copy(operation.data ?? {}); return ['$motion']; }
     if (operation.op === 'layout') {
-      const elements = content.elements.filter(item => !operation.ids || operation.ids.includes(item.id));
-      const locked = elements.find(item => item.locked); if (locked) throw new StudioError('LOCKED', '整理范围包含锁定对象，请先解锁或缩小范围。', { elementId: locked.id });
+      const elements = content.elements.filter(item => !operation.ids || operation.ids.includes(item.id)).map(item => ({ ...item }));
       const columns = operation.preset === 'column' ? 1 : operation.preset === 'row' ? Math.max(1, elements.length) : Math.max(1, Math.ceil(Math.sqrt(elements.length)));
       const width = Math.max(220, ...elements.map(item => item.w)), height = Math.max(120, ...elements.map(item => item.h));
       elements.forEach((item, index) => { item.x = finite(operation.data?.x, 80) + index % columns * (width + 64); item.y = finite(operation.data?.y, 80) + Math.floor(index / columns) * (height + 64); item.version++; });
+      const updates = new Map(elements.map(element => [element.id, element])), next = { ...content, elements: content.elements.map(element => updates.get(element.id) ?? element) };
+      assertLockedGeometry(content, next, baseline); content.elements = next.elements;
       return elements.map(item => item.id);
     }
     throw new StudioError('INVALID_ARGUMENT', '不支持的白板修改操作。');
@@ -127,13 +153,39 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
   restore(current, saved) {
     return { elements: saved.elements.map(item => restoredElement(item, current.elements.find(element => element.id === item.id))), style: copy(saved.style), motion: copy(saved.motion) };
   },
-  snapshotFeedback(artifactId, feedbackId, snapshots, value) {
+  snapshotFeedback(artifactId, feedbackId, snapshots, value, versions) {
     const anchor: Anchor = object(value) ? copy(value) : {};
     if (anchor.elementIds !== undefined && (!Array.isArray(anchor.elementIds) || anchor.elementIds.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '备注元素定位无效。');
-    const ids = [...new Set([...(anchor.regionId ? [safeId(anchor.regionId, '区域 ID')] : []), ...(anchor.elementIds ?? [])])];
+    if (anchor.coordinateSpace !== undefined && !['board', 'element', 'html'].includes(anchor.coordinateSpace)) throw new StudioError('INVALID_ARGUMENT', '备注坐标空间无效。');
+    for (const key of ['x', 'y', 'w', 'h'] as const) if (anchor[key] !== undefined) finite(anchor[key], 0);
+    if ((anchor.w ?? 0) < 0 || (anchor.h ?? 0) < 0) throw new StudioError('INVALID_ARGUMENT', '备注范围尺寸不能为负数。');
+    if (anchor.coordinateSpace === 'element' && (!anchor.elementIds?.length || [anchor.x, anchor.y].some(value => value !== undefined && (value < 0 || value > 1)))) throw new StudioError('INVALID_ARGUMENT', '对象备注需要定位对象，且相对坐标须在 0 到 1 之间。');
+    if (anchor.coordinateSpace === 'html' && !anchor.regionId) throw new StudioError('INVALID_ARGUMENT', 'HTML 备注需要区域 ID。');
+    if (anchor.sourceRevision !== undefined && (!Number.isInteger(anchor.sourceRevision) || anchor.sourceRevision < 1 || !anchor.regionId)) throw new StudioError('INVALID_ARGUMENT', '备注源码版本无效。');
+    if (anchor.targetIds !== undefined && (!Array.isArray(anchor.targetIds) || anchor.targetIds.length > 100 || anchor.targetIds.some(id => typeof id !== 'string' || id.length > 160 || /[\u0000-\u001f]/.test(id)))) throw new StudioError('INVALID_ARGUMENT', 'HTML 备注目标无效。');
+    for (const [key, limit] of [['quote', 4000], ['excerpt', 16000], ['selector', 1200]] as const) if (anchor[key] !== undefined && (typeof anchor[key] !== 'string' || anchor[key]!.length > limit)) throw new StudioError('INVALID_ARGUMENT', '备注来源文字无效或过长。');
+    const ids = [...new Set([...(anchor.regionId !== undefined ? [safeId(anchor.regionId, '区域 ID')] : []), ...(anchor.elementIds ?? []).map(id => safeId(id, '元素 ID'))])];
+    if (versions && (ids.some(id => !Object.hasOwn(versions, id)) || Object.keys(versions).some(id => !ids.includes(id)))) throw new StudioError('INVALID_ARGUMENT', '备注选区需要提供全部目标对象的版本。');
+    const current = snapshots[0]!;
+    if (ids.some(id => !current.content.elements.some(element => element.id === id))) throw new StudioError('NOT_FOUND', '备注定位的对象已不存在。');
     const source = anchor.regionId ? htmlSource(snapshots, anchor.regionId, anchor.sourceRevision).snapshot : snapshots[0]!;
-    const regions = source.content.elements.filter(element => ids.includes(element.id) && typeof element.html === 'string');
-    return { anchor, versions: Object.fromEntries(source.content.elements.filter(element => ids.includes(element.id)).map(element => [element.id, element.version])), sources: regions.map(region => ({ artifactId, feedbackId, html: region.html!, regionId: region.id, sourceRevision: Number(region.sourceRevision ?? 1), version: Number(region.sourceRevision ?? 1) })) };
+    const elements = ids.map(id => {
+      if (!versions) return source.content.elements.find(element => element.id === id) ?? current.content.elements.find(element => element.id === id)!;
+      let selected: BoardElement | undefined;
+      let ambiguous = false;
+      for (const snapshot of snapshots) {
+        const candidate = snapshot.content.elements.find(element => element.id === id && element.version === versions[id]);
+        if (!candidate || id === anchor.regionId && anchor.sourceRevision !== undefined && candidate.sourceRevision !== anchor.sourceRevision) continue;
+        if (selected && !same(selected, candidate)) ambiguous = true;
+        selected = candidate;
+      }
+      if (!selected || ambiguous) throw new StudioError('CONFLICT', '原选区的对象版本已不可用，请重新选择目标后保存备注。', { elementId: id, version: versions[id] });
+      return selected;
+    });
+    const sources: SourceSnapshot[] = elements.map(element => typeof element.html === 'string'
+      ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) }
+      : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });
+    return { anchor, versions: Object.fromEntries(elements.map(element => [element.id, element.version])), sources };
   },
 };
 
@@ -164,7 +216,7 @@ export const whiteboardProduct: ProductDefinition<WhiteboardContent, Operation, 
     if (mode === 'objects') { const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : undefined; return { artifact: state.artifact, elements: state.content.elements.filter(item => !ids || ids.includes(item.id)) }; }
     if (mode === 'source') {
       if (args.feedbackId) {
-        const snapshots = state.sources[safeId(args.feedbackId, '反馈 ID')], snapshot = snapshots?.find(item => args.regionId === undefined || item.regionId === args.regionId);
+        const snapshots = state.sources[safeId(args.feedbackId, '反馈 ID')], snapshot = snapshots?.find(item => (args.regionId === undefined || item.regionId === args.regionId) && (args.elementId === undefined || item.element?.id === args.elementId));
         if (!snapshot) throw new StudioError('NOT_FOUND', '反馈没有对应的冻结源码。');
         return { ...copy(snapshot), sources: copy(snapshots) };
       }

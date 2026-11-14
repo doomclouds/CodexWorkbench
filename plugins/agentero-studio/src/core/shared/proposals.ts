@@ -10,7 +10,7 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 const unit = <C, O extends ContentOperation, A, S>(adapter: ProductAdapter<C, O, A, S>, content: C, id: string) => copy(adapter.readUnit(content, id) ?? null);
 export function proposalExpired(item: { proposal?: Proposal }, now = Date.now()): boolean { return !!item.proposal && Date.parse(item.proposal.expiresAt) <= now; }
 export function feedbackVisible(item: { proposal?: Proposal }, actor: Actor): boolean { return !item.proposal || actor.role === 'owner' && !proposalExpired(item); }
-export function visibleFeedback<A>(items: FeedbackRecord<A>[], actor: Actor): FeedbackRecord<A>[] { return copy(items.filter(item => feedbackVisible(item, actor))); }
+export function visibleFeedback<A>(items: FeedbackRecord<A>[], actor: Actor): FeedbackRecord<A>[] { return copy(items.filter(item => feedbackVisible(item, actor)).map(({ creationReceipt: _receipt, ...item }) => item)); }
 export function clearExpiredProposals<C, A, S>(state: ArtifactState<C, A, S>): void {
   for (const item of state.feedback) if (proposalExpired(item)) delete state.sources[item.id];
   state.feedback = state.feedback.filter(item => !proposalExpired(item));
@@ -26,13 +26,13 @@ function captureOption<C, O extends ContentOperation, A, S>(state: ArtifactState
   for (const operation of operations) {
     const targets = adapter.targets(draft, operation);
     if (targets === undefined) wholeContent = true; else for (const id of targets) explicitIds.add(id);
-    adapter.apply(draft, operation);
+    adapter.apply(draft, operation, state.content);
   }
   adapter.validate(draft);
   const changes = adapter.diff(state.content, draft), targetIds = [...new Set([...explicitIds, ...changes.map(change => change.id)])];
   if (!changes.length) throw new StudioError('INVALID_ARGUMENT', '建议方案应产生可应用的内容变化。');
   // Stable product operations are necessary for preview, later application and mutual exclusion.
-  const repeat = copy(state.content); for (const operation of operations) adapter.apply(repeat, operation);
+  const repeat = copy(state.content); for (const operation of operations) adapter.apply(repeat, operation, state.content);
   if (!same(draft, repeat)) throw new StudioError('INVALID_ARGUMENT', '建议中的新内容需要稳定 ID，不能在每次应用时随机生成。');
   const supplied = object(args.expectedVersions) ? args.expectedVersions : {};
   if (args.expectedRevision !== undefined && (!Number.isInteger(args.expectedRevision) || args.expectedRevision !== state.artifact.revision)) throw new StudioError('CONFLICT', '作品已被修改，请先读取当前作品再提供建议。', { revision: state.artifact.revision });
@@ -68,7 +68,8 @@ export function previewProposal<C, O extends ContentOperation, A, S>(saved: Arti
   }
   if (option.wholeContent && option.baselineRevision !== state.artifact.revision) throw new StudioError('CONFLICT', '作品已被修改，请根据最新内容重新提供整体方案。');
   for (const id of option.targetIds) if (adapter.versionOf(state.content, id) !== option.versions[id] || !same(unit(adapter, state.content, id), option.baseline[id])) throw new StudioError('CONFLICT', '建议目标已被修改，请根据最新内容重新建议。', { targetId: id });
-  for (const operation of option.operations) adapter.apply(state.content, operation as unknown as O);
+  const baseline = copy(state.content);
+  for (const operation of option.operations) adapter.apply(state.content, operation as unknown as O, baseline);
   adapter.validate(state.content); return { artifact: state.artifact, content: state.content };
 }
 

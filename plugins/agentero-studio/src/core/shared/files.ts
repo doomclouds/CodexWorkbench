@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { cp, lstat, mkdir, open, readFile, realpath, rename } from 'node:fs/promises';
+import { cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import type { Actor } from '../../contracts/studio.js';
 import type { ExportResources } from './products.js';
@@ -149,4 +149,31 @@ export async function getExport(root: string, exportId: string): Promise<ExportR
   safeId(exportId, '导出 ID');
   try { const record = JSON.parse(await readFile(join(root, 'exports', `${exportId}.json`), 'utf8')) as ExportRecord; return { ...record, data: await readFile(join(root, 'exports', exportId)) }; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new StudioError('NOT_FOUND', '导出文件不存在。'); throw error; }
+}
+/** Called under the owning artifact's lock, before its content is permanently deleted. */
+export async function purgeExports(root: string, artifactId: string): Promise<void> {
+  const directory = join(await realpath(root), 'exports');
+  let entries: string[];
+  try {
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink() || !samePath(await realpath(directory), directory)) throw resourceScope();
+    entries = await readdir(directory);
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  const owned: { metadata: string; data: string }[] = [];
+  for (const name of entries) {
+    const match = /^([A-Za-z0-9][A-Za-z0-9_-]{0,119})\.json$/.exec(name); if (!match) continue;
+    const metadata = join(directory, name);
+    let record: unknown;
+    try { await regularFile(metadata); record = JSON.parse(await readFile(metadata, 'utf8')); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; // Another artifact's purge may remove its own export.
+      if (error instanceof SyntaxError) throw new StudioError('CORRUPT_EXPORT', '导出记录无法读取，作品尚未删除；请保留并检查导出目录。'); throw error;
+    }
+    if (!record || typeof record !== 'object' || !('artifactId' in record) || record.artifactId !== artifactId) continue;
+    if (!('exportId' in record) || record.exportId !== match[1]) throw new StudioError('CORRUPT_EXPORT', '导出记录与文件名不符，作品尚未删除；请保留并检查导出目录。');
+    const data = join(directory, match[1]);
+    try { await regularFile(data); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    owned.push({ metadata, data });
+  }
+  for (const entry of owned) { await rm(entry.data, { force: true }); await rm(entry.metadata, { force: true }); }
 }

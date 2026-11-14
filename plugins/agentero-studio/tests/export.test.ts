@@ -5,12 +5,31 @@ import { exportArtifact } from '../src/core/export';
 import { boardBounds, buildBoardHtml, buildBoardSvg, extractRegionSvg, filenameFor } from '../src/core/serialization';
 import { DARK_THEME, LIGHT_THEME } from '../src/core/theme';
 import type { Board, BoardElement } from '../src/contracts/studio';
+import { BOARD_STICKERS, boardStickerMarkup } from '../src/core/products/whiteboard-stickers';
 
 function board(elements: BoardElement[] = []): Board { return { artifact: { id: 'board-one', type: 'whiteboard', title: '架构 <审阅> / 示例', revision: 3, createdAt: '2026-11-14T00:00:00Z', updatedAt: '2026-11-14T01:00:00Z', pinned: false }, style: { ...LIGHT_THEME }, elements }; }
 const shape: BoardElement = { id: 'one', type: 'shape', kind: 'rounded', x: -30, y: 15, w: 140, h: 90, text: '采样 <ADC> & FPGA', version: 2 };
 const region: BoardElement = { id: 'region', type: 'html', x: 140, y: 0, w: 320, h: 180, version: 4, html: '<!doctype html><html><head><style>.node{fill:#ff0000}.edge{stroke:#111111;marker-end:url(#arrow)}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" width="32" height="18" viewBox="0 0 32 18" role="img" aria-labelledby="title"><title id="title">图解</title><defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0 0L8 3L0 6"/></marker></defs><rect class="node" width="32" height="18"/><path class="edge" d="M2 2H8"/></svg></body></html>' };
 
 describe('artifact export preserves one canonical source', () => {
+  test('exports the entire vector sticker catalog through the shared SVG, HTML and real PNG renderer', async () => {
+    const stickers = BOARD_STICKERS.map((sticker, index): BoardElement => ({ id: `sticker-${sticker.id}`, type: 'sticker', text: sticker.label, data: { stickerIconId: sticker.id }, x: index % 7 * 80, y: Math.floor(index / 7) * 80, w: 64, h: 64, version: 1 }));
+    const source = board(stickers);
+    expect(new Set(BOARD_STICKERS.map(sticker => sticker.id)).size).toBe(42);
+    const svg = buildBoardSvg(source, { padding: 0 }), html = buildBoardHtml(source);
+    const xml = new JSDOM(svg, { contentType: 'image/svg+xml' }).window.document;
+    expect(xml.querySelector('parsererror')).toBeNull();
+    expect(xml.querySelectorAll('[data-sticker-icon-id]')).toHaveLength(42);
+    for (const sticker of BOARD_STICKERS) {
+      expect(svg).toContain(boardStickerMarkup(sticker.id));
+      expect(html).toContain(boardStickerMarkup(sticker.id));
+    }
+    expect(svg).not.toContain('<text');
+    const png = Buffer.from((await exportArtifact(source, 'png', { padding: 0 })).data, 'base64');
+    expect(png.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(png.readUInt32BE(16)).toBe(544); expect(png.readUInt32BE(20)).toBe(464);
+    expect(png.length).toBeGreaterThan(10_000);
+  });
   test('native JSON round-trips versions and HTML exactly; source HTML export is unchanged', async () => {
     const original = board([shape, region]);
     const result = await exportArtifact(original, 'json'); expect(JSON.parse(result.data)).toEqual(original);

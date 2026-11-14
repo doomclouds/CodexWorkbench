@@ -6,10 +6,11 @@ import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Role, type ToolName } from '.
 import { StudioError, StudioService } from '../core/service.js';
 import { MAX_ARCHIVE_BYTES } from '../core/shared/archive.js';
 import { createGuestSessions } from './guest-session.js';
+import { createRegionReaders } from './region-reader.js';
 
 interface Auth { actor: Actor; token: string; artifactId?: string; owner: boolean }
 interface Live { response: ServerResponse; auth: Auth; artifactId: string; dispose: () => void }
-export interface StudioHost { service: StudioService; origin: string; token: string; close(): Promise<void> }
+export interface StudioHost { service: StudioService; origin: string; token: string; hasActiveReaders(): boolean; close(): Promise<void> }
 const MAX_BODY = 21 * 1024 * 1024;
 const json = (response: ServerResponse, status: number, value: unknown) => {
   const body = JSON.stringify(value);
@@ -47,9 +48,14 @@ function lanAddress() {
   return addresses[0]!.address;
 }
 function header(request: IncomingMessage, key: string) { const value = request.headers[key]; return typeof value === 'string' ? value : ''; }
+function exportContentType(mimeType: string) {
+  const mediaType = mimeType.split(';', 1)[0]!.trim().toLowerCase();
+  return mediaType.startsWith('text/') || mediaType === 'image/svg+xml' || mediaType === 'application/json' ? `${mediaType}; charset=utf-8` : mimeType;
+}
 export async function startStudioHost(options: { dataRoot?: string; html?: string; port?: number } = {}): Promise<StudioHost> {
   const service = new StudioService({ dataRoot: options.dataRoot }), token = randomBytes(32).toString('base64url');
   const guestSession = createGuestSessions(service.dataRoot);
+  const regionReaders = createRegionReaders(service);
   const lives = new Set<Live>(), servers = new Set<Server>(), sockets = new Set<Socket>();
   let origin = '', lan: Server | undefined, sharingOrigin = '', startingLan: Promise<string> | undefined, stopping = false;
   function server() {
@@ -99,10 +105,38 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     response.setHeader('Referrer-Policy', 'no-referrer');
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
+    if (url.pathname === '/api/region-view' && (request.method === 'POST' || request.method === 'GET')) {
+      const input = request.method === 'POST' ? await readJson(request) : {}, artifactId = typeof input.artifactId === 'string' ? input.artifactId : url.searchParams.get('artifactId') ?? '';
+      const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
+      // Use the listener's known address, never a caller-controlled Host header.
+      const readerOrigin = request.socket.localPort === (local.address() as AddressInfo)?.port ? origin : sharingOrigin;
+      const data = request.method === 'POST' ? await regionReaders.create(auth, input, readerOrigin) : await regionReaders.takeReturn(auth, artifactId, url.searchParams.get('viewId') ?? '');
+      json(response, 200, { ok: true, data }); return;
+    }
+    const reader = /^\/api\/region-reader\/([^/]+)\/([^/]+)(\/return)?$/.exec(url.pathname);
+    if (reader && (request.method === 'GET' && !reader[3] || request.method === 'POST' && reader[3])) {
+      const capability = header(request, 'authorization').replace(/^Bearer\s+/i, '');
+      const artifactId = decodeURIComponent(reader[1]!), regionId = decodeURIComponent(reader[2]!);
+      if ([...url.searchParams.keys()].some(key => key !== 'metadata') || url.searchParams.has('metadata') && url.searchParams.get('metadata') !== '1') throw new StudioError('INVALID_ARGUMENT', '阅读请求参数无效。');
+      let data;
+      if (reader[3]) {
+        const input = await readJson(request);
+        if (Object.keys(input).some(key => key !== 'annotate') || typeof input.annotate !== 'boolean') throw new StudioError('INVALID_ARGUMENT', '返回白板请求无效。');
+        data = await regionReaders.returnToBoard(capability, artifactId, regionId, input.annotate);
+      } else data = await regionReaders.source(capability, artifactId, regionId, url.searchParams.get('metadata') === '1');
+      json(response, 200, { ok: true, data }); return;
+    }
+    const readerPage = /^\/region\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})$/.exec(url.pathname);
+    if (readerPage && request.method === 'GET') {
+      const boot = JSON.stringify({ artifactId: readerPage[1], regionId: readerPage[2] }).replace(/</g, '\\u003c');
+      const script = `<script>window.__STUDIO_READER_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
+      const html = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, opening => opening + script) : `${script}${raw}`;
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Length': Buffer.byteLength(html) }); response.end(html); return;
+    }
     if (request.method === 'GET' && url.pathname.startsWith('/api/thumbnails/')) {
       const artifactId = decodeURIComponent(url.pathname.slice('/api/thumbnails/'.length));
       const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
-      const thumbnail = await service.getThumbnail(artifactId);
+      const thumbnail = await service.getThumbnail(artifactId, auth.actor);
       response.writeHead(200, { 'Content-Type': thumbnail.mimeType, 'Content-Length': thumbnail.data.byteLength, 'Cache-Control': 'private, max-age=0', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-src 'none'; sandbox" });
       response.end(thumbnail.data); return;
     }
@@ -162,7 +196,7 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     if (exported && request.method === 'GET') {
       const result = await service.getExport(decodeURIComponent(exported[1]!)), auth = await authorize(request, response, url, result.artifactId); scope(auth, result.artifactId);
       if (result.mimeType === 'application/zip' && !auth.owner) throw new StudioError('FORBIDDEN', '只有所有者可以下载包含历史和反馈的作品备份。');
-      response.writeHead(200, { 'Content-Type': result.mimeType, 'Content-Length': result.size, 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`, 'X-Content-Type-Options': 'nosniff' }); response.end(result.data); return;
+      response.writeHead(200, { 'Content-Type': exportContentType(result.mimeType), 'Content-Length': result.size, 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`, 'X-Content-Type-Options': 'nosniff' }); response.end(result.data); return;
     }
     if ((url.pathname === '/' || url.pathname === '/index.html') && request.method === 'GET') {
       const auth = await authorize(request, response, url);
@@ -176,8 +210,9 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
   }
   try { await service.resetSharingSessions(); const port = await listen(local, options.port ?? 0, '127.0.0.1'); origin = `http://127.0.0.1:${port}`; }
   catch (error) { await service.close(); throw error; }
-  return { service, origin, token, async close() {
+  return { service, origin, token, hasActiveReaders: regionReaders.hasActiveReaders, async close() {
     if (stopping) return; stopping = true;
+    regionReaders.close();
     for (const live of [...lives]) endLive(live, 'Studio 服务已退出。');
     await Promise.all([...servers].map(closeServer)); for (const socket of sockets) socket.destroy(); await service.resetSharingSessions(); await service.close();
   } };

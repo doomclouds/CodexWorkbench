@@ -68,14 +68,14 @@ export function applyMutation<C, O extends ContentOperation, A, S>(state: Artifa
     const currentVersion = adapter.versionOf(state.content, id);
     if (currentVersion !== expectedVersion) throw new StudioError('CONFLICT', '目标对象已被修改，未覆盖他人的编辑。', { elementId: id, expectedVersion, currentVersion, revision: state.artifact.revision });
   }
-  const changedIds: string[] = []; let restoredFrom: string | undefined;
+  const baseline = copy(state.content), changedIds: string[] = []; let restoredFrom: string | undefined;
   for (const operation of operations) {
     if (!object(operation)) throw new StudioError('INVALID_ARGUMENT', '作品操作无效。');
     if (operation.op === 'restore') {
       const saved = version(state, operation.versionId);
       changedIds.push(...restoreVersion(state, saved, actor, adapter, operation.data?.mode === 'undo' || operation.data?.undo === true || operation.preset === 'undo'));
       restoredFrom = saved.entry.id;
-    } else changedIds.push(...adapter.apply(state.content, operation));
+    } else changedIds.push(...adapter.apply(state.content, operation, baseline));
   }
   adapter.validate(state.content);
   const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? '恢复作品内容' : '修改作品', 500), changedIds, restoredFrom);

@@ -62,7 +62,7 @@ async function captureRegion(html: string, width: number, height: number): Promi
   } finally { frame.remove(); }
 }
 
-function download(blob: Blob, filename: string): void {
+async function download(blob: Blob, filename: string): Promise<void> {
   const url = URL.createObjectURL(blob); const link = document.createElement('a');
   link.href = url; link.download = filename; link.hidden = true; document.body.append(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -100,16 +100,16 @@ export async function renderBoardPng(board: Board, options: ExportOptions = {}):
   if (!Number.isFinite(scale) || scale <= 0 || scale > 4) throw new ExportError('INVALID_EXPORT_SCALE', '导出缩放倍数必须大于 0 且不超过 4。');
   return rasterize(svg, Math.max(1, Math.ceil(width * scale)), Math.max(1, Math.ceil(height * scale)));
 }
-export async function downloadBoard(board: Board, format: string, options: ExportOptions = {}): Promise<void> {
+export async function downloadBoard(board: Board, format: string, options: ExportOptions = {}, save: (blob: Blob, filename: string) => Promise<void> = download): Promise<void> {
   const originalTitle = selectedElements(board, options)[0]?.text || board.artifact.title;
-  if (format === 'png') { download(await renderBoardPng(board, options), filenameFor((options.regionId || options.elementId) ? originalTitle : board.artifact.title, 'png')); return; }
+  if (format === 'png') { await save(await renderBoardPng(board, options), filenameFor((options.regionId || options.elementId) ? originalTitle : board.artifact.title, 'png')); return; }
   if (format === 'svg') board = await embedImages(board, options);
   const elements = selectedElements(board, options); const selectedRegion = (options.regionId || options.elementId) && elements.length === 1 && elements[0].type === 'html' ? elements[0] : undefined;
   const title = selectedRegion?.text || board.artifact.title;
-  if (format === 'json') { download(new Blob([JSON.stringify({ ...board, elements }, null, 2)], { type: 'application/json' }), filenameFor(title, 'json')); return; }
-  if (format === 'html') { download(new Blob([selectedRegion ? String(selectedRegion.html ?? '') : buildBoardHtml(board, options)], { type: 'text/html' }), filenameFor(title, 'html')); return; }
+  if (format === 'json') { await save(new Blob([JSON.stringify({ ...board, elements }, null, 2)], { type: 'application/json; charset=utf-8' }), filenameFor(title, 'json')); return; }
+  if (format === 'html') { await save(new Blob([selectedRegion ? String(selectedRegion.html ?? '') : buildBoardHtml(board, options)], { type: 'text/html; charset=utf-8' }), filenameFor(title, 'html')); return; }
   let svg = selectedRegion ? extractRegionSvg(String(selectedRegion.html ?? ''), selectedRegion.id) : undefined;
   svg ??= buildBoardSvg(board, options);
-  if (format === 'svg') { download(new Blob([svg], { type: 'image/svg+xml' }), filenameFor(title, 'svg')); return; }
+  if (format === 'svg') { await save(new Blob([svg], { type: 'image/svg+xml; charset=utf-8' }), filenameFor(title, 'svg')); return; }
   throw new ExportError('UNSUPPORTED_EXPORT', '支持导出 HTML、SVG、PNG 和白板 JSON。');
 }

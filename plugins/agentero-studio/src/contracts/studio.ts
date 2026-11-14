@@ -27,7 +27,7 @@ export interface BoardElement {
 export interface ArtifactView { artifact: Artifact }
 export interface HtmlRegionContent { id: string; version: number; html?: string; sourceRevision?: number; text?: string; state?: Json }
 export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown> }
-export interface Anchor { elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
+export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
 export interface Feedback {
   id: string; artifactId: string; type: 'comment' | 'request'; anchor: Anchor; author: Actor;
   text: string; status: 'open' | 'pending' | 'processing' | 'resolved'; createdAt: string; updatedAt: string;
@@ -52,9 +52,11 @@ export interface StudioClient {
   call<T = unknown>(name: ToolName, args?: Record<string, unknown>): Promise<T>;
   request?: (input: string | URL, init?: RequestInit) => Promise<Response>;
   assetUrl?: (reference: string) => string | undefined;
+  openLink?: (url: string) => Promise<void>;
+  downloadFile?: (blob: Blob, filename: string) => Promise<void>;
   baseUrl?: string; token?: string; embedded: boolean;
 }
-export interface HtmlSelection { regionId: string; sourceRevision: number; targetIds: string[]; quote: string; excerpt: string; selector?: string; rect?: { x: number; y: number; w: number; h: number } }
+export interface HtmlSelection { regionId: string; sourceRevision: number; targetIds: string[]; quote: string; excerpt: string; selector?: string; rect?: { x: number; y: number; w: number; h: number }; screenPoint?: { x: number; y: number } }
 export interface Connection { baseUrl: string; token: string; actor: Actor; artifactId?: string }
 export interface StudioEvent { type: string; artifactId: string; [key: string]: unknown }
 export const DEFAULT_STYLE: StyleProfile = { name: 'Diagram', paper: '#f5f5f5', ink: '#2d3142', muted: '#4f5d75', accent: '#eb6c36', link: '#2e5aa8', fontFamily: 'Arial, "Microsoft YaHei", sans-serif', titleFont: 'Georgia, "Songti SC", serif', monoFont: 'Consolas, monospace' };
