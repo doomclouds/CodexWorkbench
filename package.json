@@ -14,8 +14,8 @@
     "url": "git+https://github.com/doomclouds/CodexWorkbench.git"
   },
   "scripts": {
-    "check": "node tooling/check-repository.mjs && pnpm --filter @codexworkbench/agentero-library typecheck",
-    "test": "node --test tooling/check-repository.test.mjs tooling/collect-agentero-licenses.test.mjs tooling/app-sdk-debug.test.mjs tooling/build-agentero-branding.test.mjs && pnpm --filter @codexworkbench/agentero-library test",
-    "build": "pnpm --filter @codexworkbench/agentero-library build"
+    "check": "node tooling/check-repository.mjs && pnpm --filter \"./plugins/*\" typecheck",
+    "test": "node --test tooling/check-repository.test.mjs tooling/collect-agentero-licenses.test.mjs tooling/app-sdk-debug.test.mjs tooling/build-agentero-branding.test.mjs && pnpm --filter \"./plugins/*\" test",
+    "build": "pnpm --filter \"./plugins/*\" build"
   }
 }

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agentero 创作"
+  short_description: "管理白板与 HTML 图解，依据备注协作修改并保留原始内容和历史版本"
+  default_prompt: "使用 $agentero-studio 打开作品中心，根据所选白板内容或备注继续创作，并保留历史版本。"
