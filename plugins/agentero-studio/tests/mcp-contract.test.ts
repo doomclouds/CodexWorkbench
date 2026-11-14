@@ -8,14 +8,16 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { TOOL_NAMES, type Actor, type ToolResponse } from '../src/contracts/studio.js';
 import { APP_TOOL_NAME } from '../src/contracts/transport.js';
 import { StudioService } from '../src/core/service.js';
-import { createStudioServer } from '../src/server/protocol.js';
+import { createStudioServer, type StudioExecutionContext } from '../src/server/protocol.js';
 
 const actor: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
 let directory: string, service: StudioService, server: ReturnType<typeof createStudioServer>, client: Client, artifactId: string;
+let execution: { name: string; args: Record<string, unknown>; context?: StudioExecutionContext } | undefined;
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'studio-mcp-contract-'));
   service = new StudioService({ dataRoot: directory });
-  server = createStudioServer({ execute: (name, args) => service.execute(name, args, actor), connection: async () => ({ baseUrl: 'http://127.0.0.1:12345', token: 'test-only', actor }) }, '<!doctype html><html></html>');
+  execution = undefined;
+  server = createStudioServer({ execute: (name, args, context) => { execution = { name, args, context }; return service.execute(name, args, actor); }, connection: async () => ({ baseUrl: 'http://127.0.0.1:12345', token: 'test-only', actor }) }, '<!doctype html><html></html>');
   client = new Client({ name: 'studio-contract-regression', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport); await client.connect(clientTransport);
@@ -28,7 +30,7 @@ afterEach(async () => {
 });
 async function call(name: string, args: Record<string, unknown>): Promise<any> {
   const result = await client.callTool({ name, arguments: { artifactId, ...args } });
-  expect(result.isError).not.toBe(true);
+  expect(result.isError, JSON.stringify(result.structuredContent)).not.toBe(true);
   const body = result.structuredContent as unknown as ToolResponse;
   expect(body.ok).toBe(true); return body.data;
 }
@@ -41,6 +43,15 @@ async function failure(name: string, args: Record<string, unknown>, code?: strin
 const add = (elements: Record<string, unknown>[]) => call('artifact_apply', { operationId: randomUUID(), operations: elements.map(element => ({ op: 'add', element })) });
 
 describe('model MCP contracts through the real SDK', () => {
+  it('preserves explicit Agent participants and documented MCP client identity through schema parsing', async () => {
+    await call('artifact_read', { mode: 'summary', participant: { id: 'review-agent', name: 'Reviewer' } });
+    expect(execution).toMatchObject({ name: 'artifact_read', args: { participant: { id: 'review-agent', name: 'Reviewer' } }, context: { clientInfo: { name: 'studio-contract-regression', version: '1.0.0' } } });
+    const { tools } = await client.listTools();
+    for (const tool of tools.filter(tool => TOOL_NAMES.includes(tool.name as typeof TOOL_NAMES[number]))) {
+      expect((tool.inputSchema.properties as Record<string, any>).participant.properties.id.maxLength).toBe(120);
+    }
+    expect((tools.find(tool => tool.name === 'artifact_apply')!.inputSchema.properties as Record<string, any>).merge.const).toBe('safe');
+  });
   it('publishes coordinate/version/lock semantics with eight model tools and one app-only transport', async () => {
     const { tools } = await client.listTools();
     const visible = tools.filter(tool => !(tool._meta?.ui as { visibility?: string[] } | undefined)?.visibility || (tool._meta?.ui as { visibility: string[] }).visibility.includes('model'));

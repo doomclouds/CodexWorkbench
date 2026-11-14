@@ -29,7 +29,7 @@ function historyProps(extra: Partial<HistoryPanelProps> = {}): HistoryPanelProps
   return { history: [], currentRevision: 3, actor: LOCAL_ACTOR, canRestore: true, onRefresh: vi.fn(), onPreview: vi.fn(), onRestore: vi.fn().mockResolvedValue(true), onLoadChanges: vi.fn(async (entry: HistoryBatch) => [...new Set(entry.changedIds)].map(id => ({ id, before: null, after: { text: '新增内容' } }))), ...extra };
 }
 function shareProps(extra: Partial<SharePanelProps> = {}): SharePanelProps {
-  return { title: '测试作品', actor: LOCAL_ACTOR, share: { enabled: false, owner: LOCAL_ACTOR, members: [], roleEnabled: { editor: true, commenter: true, viewer: true } }, exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'json', label: 'JSON 数据' }], canBackup: true, onStart: vi.fn().mockResolvedValue(true), onReset: vi.fn().mockResolvedValue(true), onStop: vi.fn().mockResolvedValue(true), onToggleRole: vi.fn().mockResolvedValue(true), onMemberRole: vi.fn().mockResolvedValue(true), onRemoveMember: vi.fn().mockResolvedValue(true), onCopy: vi.fn(), onExport: vi.fn(), ...extra };
+  return { title: '测试作品', actor: LOCAL_ACTOR, share: { enabled: false, owner: LOCAL_ACTOR, members: [], roleEnabled: { editor: true, commenter: true, viewer: true } }, exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'json', label: 'JSON 数据' }], canBackup: true, onStart: vi.fn().mockResolvedValue(true), onReset: vi.fn().mockResolvedValue(true), onToggleRole: vi.fn().mockResolvedValue(true), onMemberRole: vi.fn().mockResolvedValue(true), onRemoveMember: vi.fn().mockResolvedValue(true), onCopy: vi.fn(), onExport: vi.fn(), ...extra };
 }
 
 describe('history popover content', () => {
@@ -94,24 +94,24 @@ describe('history popover content', () => {
 });
 
 describe('share and export popover content', () => {
-  it('shows authoritative members and requires explicit LAN access selection before copy', async () => {
+  it('offers local invitations without enabling LAN and changes scope explicitly', async () => {
     const props = shareProps(); props.share!.members = [member]; await render(<SharePanel {...props} />);
     expect([...host.querySelectorAll('.studio-share-person strong')].filter(node => node.textContent === person.name)).toHaveLength(1);
-    expect(button('复制可编辑链接').disabled).toBe(true);
-    expect(button('复制可评论链接').disabled).toBe(true);
-    expect(button('复制仅查看链接').disabled).toBe(true);
-    await click('复制可编辑链接'); expect(props.onCopy).not.toHaveBeenCalled(); expect(props.onStart).not.toHaveBeenCalled();
-    await click('一般访问权限'); await click('局域网可访问'); expect(props.onStart).toHaveBeenCalledOnce();
+    expect(button('复制可编辑链接').disabled).toBe(false);
+    expect(button('复制可评论链接').disabled).toBe(false);
+    expect(button('复制仅查看链接').disabled).toBe(false);
+    await click('复制可编辑链接'); expect(props.onCopy).toHaveBeenCalledWith(undefined, 'editor'); expect(props.onStart).not.toHaveBeenCalled();
+    await click('一般访问权限'); await click('局域网可访问'); expect(props.onStart).toHaveBeenCalledWith('lan');
   });
 
   it('copies only supplied role links and keeps reset and stop behind their more controls', async () => {
-    const props = shareProps(); props.share = { ...props.share!, enabled: true, links: { editor: 'http://local.test/editor', commenter: 'http://local.test/commenter', viewer: 'http://local.test/viewer' } };
+    const props = shareProps(); props.share = { ...props.share!, enabled: true, access: 'lan', links: { editor: 'http://local.test/editor', commenter: 'http://local.test/commenter', viewer: 'http://local.test/viewer' } };
     await render(<SharePanel {...props} />);
     expect(host.querySelector('[role="menu"]')).toBeNull();
-    await click('复制可评论链接'); expect(props.onCopy).toHaveBeenCalledWith('http://local.test/commenter');
+    await click('复制可评论链接'); expect(props.onCopy).toHaveBeenCalledWith('http://local.test/commenter', 'commenter');
     await click('可编辑链接更多操作'); await click('重置此链接'); expect(props.onReset).not.toHaveBeenCalled();
     await click('确认重置'); expect(props.onReset).toHaveBeenCalledWith('editor');
-    await click('一般访问权限'); await click('仅这台电脑'); expect(props.onStop).toHaveBeenCalledOnce();
+    await click('一般访问权限'); await click('仅这台电脑'); expect(props.onStart).toHaveBeenCalledWith('local');
   });
 
   it('uses real role-link toggles and member role/removal callbacks with confirmation', async () => {
@@ -127,14 +127,16 @@ describe('share and export popover content', () => {
     expect(props.onRemoveMember).toHaveBeenCalledWith(member.id);
   });
 
-  it('renders product export formats dynamically and excludes owner management and backup for guests', async () => {
-    const props = shareProps({ actor: { ...person, role: 'viewer' }, share: { enabled: true, owner: LOCAL_ACTOR, members: [member], links: { editor: 'hidden' } }, canBackup: false });
+  it('uses the guest invitation projection and canonical link without owner management or tabs', async () => {
+    const props = shareProps({ actor: { ...person, role: 'viewer' }, share: { enabled: true, role: 'viewer', roles: ['viewer'], links: { viewer: 'viewer-link' } }, canonicalLink: 'http://local.test/?artifactId=board', canBackup: false });
     await render(<SharePanel {...props} />);
     expect(host.querySelector(`[aria-label="管理成员：${member.name}"]`)).toBeNull();
     expect(host.querySelector('[aria-label="复制可编辑链接"]')).toBeNull();
     expect(host.textContent).toContain('仅查看');
-    await click('导出'); await click('PNG 图片PNG'); expect(props.onExport).toHaveBeenCalledWith('png');
-    expect(host.textContent).not.toContain('SVG'); expect(host.textContent).not.toContain('完整作品备份');
+    expect(host.querySelector('[role="tablist"]')).toBeNull();
+    expect(host.textContent).not.toContain('作品所有者'); expect(host.textContent).not.toContain('完整作品备份');
+    await click('复制仅查看链接'); expect(props.onCopy).toHaveBeenCalledWith('viewer-link', 'viewer');
+    await click('复制页面链接'); expect(props.onCopy).toHaveBeenCalledWith('http://local.test/?artifactId=board');
     expect(props.onStart).not.toHaveBeenCalled();
   });
 
@@ -181,7 +183,7 @@ describe('shared timer control', () => {
 
   it('sends shared running adjustments and replaces them with same-slot reset when paused', async () => {
     const onAction = vi.fn(), timer = timerState();
-    await render(<TimerControl timer={timer} canEdit busy={false} onAction={onAction} />); await click('共享计时器');
+    await render(<TimerControl timer={timer} canEdit busy={false} onAction={onAction} />);
     expect(host.querySelector('[aria-label="剩余时间"]')?.textContent).toBe('02:05');
     expect(button('增加一分钟').disabled).toBe(false);
     await click('增加一分钟'); expect(onAction).toHaveBeenLastCalledWith('adjust', undefined, 60);
@@ -197,7 +199,7 @@ describe('shared timer control', () => {
 
   it('commits paused digits as a new shared duration and leaves cross-half drafts untouched until commit', async () => {
     const onAction = vi.fn(), timer = timerState({ paused: true, deadline: null });
-    await render(<TimerControl timer={timer} canEdit busy={false} onAction={onAction} />); await click('共享计时器');
+    await render(<TimerControl timer={timer} canEdit busy={false} onAction={onAction} />);
     await act(async () => timerInput('计时分钟').focus());
     await type('计时分钟', '12');
     expect(timerInput('计时分钟').value).toBe('12'); expect(document.activeElement).toBe(timerInput('计时秒数')); expect(onAction).not.toHaveBeenCalled();
@@ -240,7 +242,7 @@ describe('shared timer control', () => {
   it('restarts naturally ended timers with their shared duration and returns to idle after the reference linger', async () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-14T10:00:00Z')); vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     const onAction = vi.fn(), timer = timerState({ durationMs: 91000, remainingMs: 2000, deadline: Date.now() + 2000 });
-    await render(<TimerControl timer={timer} canEdit busy={false} onAction={onAction} />); await click('共享计时器');
+    await render(<TimerControl timer={timer} canEdit busy={false} onAction={onAction} />);
     await act(async () => vi.advanceTimersByTime(2000));
     expect(host.querySelector('[aria-label="剩余时间"]')?.textContent).toBe('00:00'); expect(button('开始').disabled).toBe(false);
     await click('开始'); expect(onAction).toHaveBeenLastCalledWith('start', undefined);
@@ -252,12 +254,34 @@ describe('shared timer control', () => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-14T10:00:00Z'));
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     const timer = timerState({ durationMs: 2000, deadline: Date.now() + 2000, remainingMs: 2000 }), onAction = vi.fn();
-    await render(<TimerControl timer={timer} canEdit={false} busy={false} onAction={onAction} />); await click('共享计时器');
+    await render(<TimerControl timer={timer} canEdit={false} busy={false} onAction={onAction} />);
     await act(async () => vi.advanceTimersByTime(2000));
     expect(host.querySelector('[aria-label="剩余时间"]')?.textContent).toBe('00:00');
     expect(host.textContent).toContain('已结束');
     expect(host.querySelector('[aria-label="暂停"]')).toBeNull(); expect(host.querySelector('[aria-label="增加一分钟"]')).toBeNull();
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('keeps the full timer visible during canvas work without taking focus (paused=%s)', async paused => {
+    const onAction = vi.fn(), onSelect = vi.fn();
+    const example = (timer: RoomTimer | null) => <><button onClick={onSelect}>选择画布元素</button><input aria-label="画布输入" /><TimerControl timer={timer} canEdit busy={false} onAction={onAction} /></>;
+    await render(example(null));
+    const canvasInput = host.querySelector<HTMLInputElement>('[aria-label="画布输入"]')!;
+    canvasInput.focus();
+    await render(example(timerState({ paused, deadline: paused ? null : Date.now() + 125000 })));
+    expect(host.querySelector('[role="dialog"][aria-label="共享计时器"]')).not.toBeNull();
+    expect(document.activeElement).toBe(canvasInput);
+    expect(button('共享计时器').textContent).toBe('');
+    await click('选择画布元素');
+    expect(onSelect).toHaveBeenCalledOnce();
+    await act(async () => canvasInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host.querySelector('.studio-timer-layout')).not.toBeNull();
+    expect(document.activeElement).toBe(canvasInput);
+    expect(onAction).not.toHaveBeenCalled();
+    await click('共享计时器');
+    expect(host.querySelector('.studio-timer-layout')).toBeNull();
+    await click('共享计时器');
+    expect(host.querySelector('.studio-timer-layout')).not.toBeNull();
   });
 });
 

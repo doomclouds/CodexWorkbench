@@ -5,7 +5,7 @@ import { EditorPopover } from './EditorPopover';
 import './editor-panels.css';
 
 export type TimerAction = 'start' | 'pause' | 'resume' | 'reset' | 'adjust' | 'set-duration';
-export interface TimerControlProps { timer: RoomTimer | null; canEdit: boolean; busy: boolean; onAction: (action: TimerAction, durationSeconds?: number, deltaSeconds?: number) => void }
+export interface TimerControlProps { timer: RoomTimer | null; canEdit: boolean; busy: boolean; clockOffsetMs?: number; onAction: (action: TimerAction, durationSeconds?: number, deltaSeconds?: number) => void }
 type TimerDraft = [string | null, string | null] | null;
 export function timerRemainingSeconds(timer: RoomTimer, now: number): number {
   return Math.ceil(Math.max(0, timer.paused || timer.deadline === null ? timer.remainingMs : timer.deadline - now) / 1000);
@@ -13,20 +13,21 @@ export function timerRemainingSeconds(timer: RoomTimer, now: number): number {
 function timerDigits(seconds: number): [string, string] { return [String(Math.floor(seconds / 60)).padStart(2, '0'), String(seconds % 60).padStart(2, '0')]; }
 function TimerDigits({ digits, ended = false, decorative = true }: { digits: [string, string]; ended?: boolean; decorative?: boolean }) { return <span className="studio-timer-digits" data-ended={ended || undefined} aria-hidden={decorative || undefined}>{digits[0]}<span className="studio-timer-colon">:</span>{digits[1]}</span>; }
 
-export function TimerControl({ timer, canEdit, busy, onAction }: TimerControlProps) {
-  const [open, setOpen] = useState(false), [localDuration, setLocalDuration] = useState(300), [now, setNow] = useState(Date.now), [draft, setDraft] = useState<TimerDraft>(null), [entryMessage, setEntryMessage] = useState('');
+export function TimerControl({ timer, canEdit, busy, clockOffsetMs = 0, onAction }: TimerControlProps) {
+  const [open, setOpen] = useState(() => !!timer && (timer.deadline !== null || timer.paused)), [localDuration, setLocalDuration] = useState(300), [now, setNow] = useState(Date.now), [draft, setDraft] = useState<TimerDraft>(null), [entryMessage, setEntryMessage] = useState('');
   const anchor = useRef<HTMLButtonElement>(null), fields = useRef<(HTMLInputElement | null)[]>([null, null]), firstDigit = useRef(true);
   useEffect(() => {
     let interval: number | undefined;
-    const update = () => { const stamp = Date.now(); setNow(stamp); if (timer?.deadline !== null && timer?.deadline !== undefined && stamp >= timer.deadline + 2400) { window.clearInterval(interval); interval = undefined; } };
-    const visibility = () => { window.clearInterval(interval); interval = undefined; if (document.visibilityState === 'hidden') return; update(); if (timer?.deadline !== null && timer?.deadline !== undefined && Date.now() < timer.deadline + 2400) interval = window.setInterval(update, 250); };
+    const update = () => { const stamp = Date.now() + clockOffsetMs; setNow(stamp); if (timer?.deadline !== null && timer?.deadline !== undefined && stamp >= timer.deadline + 2400) { window.clearInterval(interval); interval = undefined; } };
+    const visibility = () => { window.clearInterval(interval); interval = undefined; if (document.visibilityState === 'hidden') return; update(); if (timer?.deadline !== null && timer?.deadline !== undefined && Date.now() + clockOffsetMs < timer.deadline + 2400) interval = window.setInterval(update, 250); };
     visibility(); document.addEventListener('visibilitychange', visibility);
     return () => { window.clearInterval(interval); document.removeEventListener('visibilitychange', visibility); };
-  }, [timer?.deadline, timer?.paused, timer?.remainingMs]);
+  }, [timer?.deadline, timer?.paused, timer?.remainingMs, clockOffsetMs]);
   const remaining = timer ? timerRemainingSeconds(timer, now) : localDuration;
   const running = !!timer && !timer.paused && timer.deadline !== null && timer.deadline > now;
   const ended = !!timer && timer.deadline !== null && remaining === 0 && now < timer.deadline + 2400;
   const paused = !!timer && timer.paused && remaining > 0;
+  useEffect(() => { if (running || paused) setOpen(true); }, [running, paused]);
   const idle = !running && !paused && !ended;
   const seconds = idle ? timer ? timer.durationMs / 1000 : localDuration : remaining;
   const originalDigits = timerDigits(seconds), digits: [string, string] = [draft?.[0] ?? originalDigits[0], draft?.[1] ?? originalDigits[1]];
@@ -108,8 +109,8 @@ export function TimerControl({ timer, canEdit, busy, onAction }: TimerControlPro
     return value >= 60 && value <= 5940;
   }
   return <div className="studio-editor-popover-anchor studio-timer-control">
-    <button ref={anchor} type="button" className={`studio-icon-button studio-timer-trigger${open ? ' is-active' : ''}`} aria-label="共享计时器" aria-haspopup="dialog" aria-expanded={open} title={!idle ? `共享计时器 ${label}` : '共享计时器'} onClick={() => setOpen(previous => !previous)}><Timer size={19} />{!idle && <span className="studio-timer-trigger-label">{label}</span>}</button>
-    {open && <EditorPopover title="共享计时器" hideHeading className="studio-timer-popover" anchorRef={anchor} onClose={() => { setOpen(false); setDraft(null); }}>
+    <button ref={anchor} type="button" className={`studio-icon-button studio-timer-trigger${open ? ' is-active' : ''}`} aria-label="共享计时器" aria-haspopup="dialog" aria-expanded={open} title={!idle ? `共享计时器 ${label}` : '共享计时器'} onClick={() => setOpen(previous => !previous)}><Timer size={19} /></button>
+    {open && <EditorPopover title="共享计时器" hideHeading persistent className="studio-timer-popover" anchorRef={anchor} onClose={() => { setOpen(false); setDraft(null); }}>
       <div className={`studio-timer-layout${canEdit ? '' : ' is-readonly'}`}>{canEdit && <button type="button" className="studio-timer-play" aria-label={actionLabel} disabled={busy} onClick={play}>{running ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}</button>}
         <div className="studio-timer-face">{editable ? <><TimerDigits digits={digits} /><div className="studio-timer-duration" role="group" aria-label="计时时长">{[0, 1].map(field => <input key={field} ref={node => { fields.current[field] = node; }} type="text" role="spinbutton" aria-label={field === 0 ? '计时分钟' : '计时秒数'} aria-valuemin={0} aria-valuemax={field === 0 ? 99 : 59} aria-valuenow={Number(digits[field])} inputMode="numeric" enterKeyHint="done" autoComplete="off" disabled={busy} value={digits[field]} onChange={event => changed(field, event)} onCompositionEnd={event => typeDigits(field, event.data)} onPaste={event => { event.preventDefault(); typeDigits(field, event.clipboardData.getData('text')); }} onKeyDown={event => keyDown(field, event)} onKeyUp={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') finishDraft(); }} onFocus={() => { firstDigit.current = true; }} onPointerDown={() => { firstDigit.current = true; }} onSelect={event => { const input = event.currentTarget; if (input.selectionStart !== input.selectionEnd) input.setSelectionRange(input.value.length, input.value.length); }} onBlur={event => { if (event.relatedTarget !== fields.current[1 - field] && !(event.relatedTarget instanceof Element && event.relatedTarget.closest('.studio-timer-play'))) finishDraft(); }} />)}</div></> : <output className="studio-timer-display" aria-label="剩余时间"><TimerDigits digits={timerDigits(seconds)} ended={ended} decorative={false} /></output>}</div>
         {canEdit && <div className="studio-timer-slot">{paused ? <button type="button" className="studio-timer-reset studio-icon-button" aria-label="重置" title={`重置为 ${timerDigits(timer!.durationMs / 1000).join(':')}`} disabled={busy} onClick={() => { setDraft(null); onAction('reset'); }}><RotateCcw size={21} /></button> : <div className="studio-timer-adjust"><button type="button" className="studio-icon-button" aria-label="增加一分钟" title="增加一分钟" disabled={!canNudge(1)} onClick={() => nudge(1)}><Plus size={19} /></button><button type="button" className="studio-icon-button" aria-label="减少一分钟" title="减少一分钟" disabled={!canNudge(-1)} onClick={() => nudge(-1)}><Minus size={19} /></button></div>}</div>}

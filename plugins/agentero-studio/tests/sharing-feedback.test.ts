@@ -21,10 +21,15 @@ afterEach(async () => {
 });
 const share = (args: Record<string, unknown> = {}) => host.service.execute('artifact_share', { artifactId, ...args });
 const tokenFor = (info: any, role: string) => new URL(info.links[role]).searchParams.get('share')!;
-function browser(token: string, name = 'Guest') {
-  let cookie = '';
+let guestSequence = 0;
+function browser(token: string, name = `Guest ${++guestSequence}`) {
+  let cookie = '', enrolled = false;
   async function request(path: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${token}`); headers.set('X-Studio-Name', name);
+    if (!enrolled) {
+      const joined = await fetch(`${host.origin}/api/session?artifactId=${artifactId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      cookie = joined.headers.get('set-cookie')?.split(';')[0] ?? ''; enrolled = true;
+    }
+    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${token}`);
     if (cookie) headers.set('Cookie', cookie);
     const response = await fetch(host.origin + path, { ...init, headers });
     const issued = response.headers.get('set-cookie'); if (issued) cookie = issued.split(';')[0]!;

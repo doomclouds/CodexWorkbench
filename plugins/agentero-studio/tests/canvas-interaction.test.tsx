@@ -20,7 +20,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0));
   vi.stubGlobal('cancelAnimationFrame', clearTimeout);
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  host = document.createElement('div'); host.className = 'studio'; document.body.append(host); root = createRoot(host);
   HTMLElement.prototype.setPointerCapture = vi.fn(); HTMLElement.prototype.releasePointerCapture = vi.fn(); HTMLElement.prototype.hasPointerCapture = () => false;
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -53,6 +53,22 @@ async function input(node: HTMLInputElement | HTMLTextAreaElement, value: string
 async function key(node: Element, value: string, options: KeyboardEventInit = {}) { await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: value, ...options }))); }
 
 describe('whiteboard direct interaction', () => {
+  it('hides all of this identity’s cursors across refreshes and shows one current cursor per other member', async () => {
+    const now = Date.now(), other = { ...LOCAL_ACTOR, id: 'other-member', name: '协作者' };
+    const peers: NonNullable<WhiteboardCanvasProps['presence']> = [
+      { peerId: 'old-self', actor: LOCAL_ACTOR, cursor: { x: 10, y: 20 }, updatedAt: new Date(now - 2000).toISOString() },
+      { peerId: 'current-self', actor: LOCAL_ACTOR, cursor: { x: 30, y: 40 }, updatedAt: new Date(now).toISOString() },
+      { peerId: 'old-other', actor: other, cursor: { x: 50, y: 60 }, updatedAt: new Date(now - 1000).toISOString() },
+      { peerId: 'current-other', actor: other, cursor: { x: 70, y: 80 }, updatedAt: new Date(now).toISOString() },
+      { peerId: 'expired', actor: { ...other, id: 'expired' }, cursor: { x: 90, y: 100 }, updatedAt: new Date(now - 15 * 60_000 - 1).toISOString() },
+    ];
+    for (const selfPeerId of ['current-self', 'refreshed-self', 'refreshed-again']) {
+      await mount([], { presence: peers, selfPeerId });
+      const cursors = host.querySelectorAll<HTMLElement>('.studio-remote-cursor');
+      expect(cursors).toHaveLength(1); expect(cursors[0]!.querySelector('span')!.textContent).toBe('协作者');
+      expect(cursors[0]!.style.left).toBe('70px'); expect(cursors[0]!.style.top).toBe('80px');
+    }
+  });
   it('keeps exactly eight main tools in the approved order and collects lower-frequency insertion', async () => {
     await mount();
     expect([...query('白板工具').querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['选择', '平移', '文字', '分区', '便签', '画笔', '形状', '贴纸']);
@@ -70,11 +86,13 @@ describe('whiteboard direct interaction', () => {
     expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
     const editor = query('编辑文字') as HTMLTextAreaElement;
     expect(editor).not.toBeNull();
+    expect(editor.closest('.studio-board-element')?.classList.contains('is-editing')).toBe(true);
     await input(editor, 'Created locally'); await key(editor, 'Escape');
     expect(call).toHaveBeenCalledTimes(2);
     const id = call.mock.calls[0]![1].operations[0]!.id!;
     expect((call.mock.calls[1]![1] as unknown as { expectedVersions: Record<string, number> }).expectedVersions).toEqual({ [id]: 1 });
     expect(query('编辑文字')).toBeNull();
+    expect(host.querySelector('.studio-board-element.is-editing')).toBeNull();
     expect(host.querySelector(`[data-element-id="${id}"]`)!.textContent).toContain('Created locally');
   });
   it('uses dragged dimensions, creates blank-space text by double click and cancels an unfinished gesture with Escape', async () => {
@@ -86,6 +104,39 @@ describe('whiteboard direct interaction', () => {
     await key(query('编辑文字'), 'Escape'); await click('便签');
     await event(query('白板画布'), 'pointerdown', 20, 30); await key(query('白板画布'), 'Escape'); await event(query('白板画布'), 'pointerup', 90, 90);
     expect(call).toHaveBeenCalledTimes(2);
+  });
+  it('creates sections with the white fill selected and keeps palette changes in the saved element', async () => {
+    const call = await editable();
+    await click('分区'); await pointer(100, 100, { x: 500, y: 350 });
+    expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({ type: 'container', fill: '#EFEFEF', w: 400, h: 250 });
+    const created = call.mock.calls[0]![1].operations[0]!.element as BoardElement;
+    const exported = new DOMParser().parseFromString(buildBoardSvg(board([created])), 'image/svg+xml');
+    expect(exported.querySelector(`[data-studio-id="${created.id}"] rect`)?.getAttribute('fill')).toBe('#EFEFEF');
+    await key(query('编辑文字'), 'Escape'); await click('填充颜色');
+    expect(query('填充 白色').getAttribute('aria-pressed')).toBe('true');
+    await click('填充 蓝色');
+    expect(call.mock.lastCall![1].operations[0]!.changes).toMatchObject({ fill: '#9DC8F7' });
+    expect(query('填充 白色').getAttribute('aria-pressed')).toBe('false');
+    expect(query('填充 蓝色').getAttribute('aria-pressed')).toBe('true');
+  });
+  it('keeps section border choices selected and makes solid, dashed and hidden borders match the saved style', async () => {
+    await editable([element('section', { type: 'container', fill: '#EFEFEF', stroke: '#9ca3af' })]);
+    await select('section'); await click('边框与线条');
+    const choice = (text: string) => [...host.querySelectorAll<HTMLButtonElement>('.studio-format-row button')].find(button => button.textContent === text)!;
+    const section = () => host.querySelector<HTMLElement>('[data-element-id="section"]')!;
+    expect(choice('实线').getAttribute('aria-pressed')).toBe('true');
+    expect(section().style.borderStyle).toBe('solid');
+    await event(choice('无边框'), 'click');
+    expect(choice('无边框').getAttribute('aria-pressed')).toBe('true');
+    expect(section().style.borderColor).toBe('rgba(0, 0, 0, 0)');
+    await event(choice('虚线'), 'click');
+    expect(choice('虚线').getAttribute('aria-pressed')).toBe('true');
+    expect(section().style.borderStyle).toBe('dashed'); expect(section().style.borderColor).not.toBe('rgba(0, 0, 0, 0)');
+    await input(query('线条宽度') as HTMLInputElement, '3');
+    expect(section().style.borderWidth).toBe('3px');
+    await event(choice('实线'), 'click');
+    expect(choice('实线').getAttribute('aria-pressed')).toBe('true'); expect(choice('虚线').getAttribute('aria-pressed')).toBe('false');
+    expect(section().style.borderStyle).toBe('solid'); expect(section().style.borderWidth).toBe('3px');
   });
   it('retains continuous pen, arrow and sticker tools after saving', async () => {
     const call = await editable(); await click('画笔'); await pointer(50, 80, { x: 160, y: 180 });
@@ -123,6 +174,19 @@ describe('whiteboard direct interaction', () => {
     await mount([element('image', { type: 'image', locked: true, src: 'data:image/png;base64,AA' })]); await select('image'); await event(host.querySelector('[data-element-id="image"]')!, 'dblclick');
     expect((query('裁剪图片') as HTMLButtonElement).disabled).toBe(true); expect(query('解锁元素')).not.toBeNull();
   });
+  it('retains an inline draft without submitting when editing permission is suspended', async () => {
+    const elements = [element('draft')], call = vi.fn(), editor = { ...LOCAL_ACTOR, role: 'editor' as const };
+    await mount(elements, { actor: editor, client: { embedded: true, call } });
+    await select('draft'); await event(host.querySelector('[data-element-id="draft"]')!, 'dblclick');
+    await input(query('编辑文字') as HTMLTextAreaElement, 'Keep this unsent draft');
+    await mount(elements, { readOnly: true, actor: { ...editor, role: 'viewer' }, client: { embedded: true, call } });
+    expect(query('编辑文字').getAttribute('contenteditable')).toBe('false');
+    await event(query('编辑文字'), 'focusout'); await key(query('编辑文字'), 'Escape');
+    expect(call).not.toHaveBeenCalled(); expect(query('编辑文字').textContent).toBe('Keep this unsent draft');
+    await mount(elements, { actor: editor, client: { embedded: true, call } });
+    expect(query('编辑文字').getAttribute('contenteditable')).toBe('true');
+    expect(query('编辑文字').textContent).toBe('Keep this unsent draft'); expect(call).not.toHaveBeenCalled();
+  });
   it('saves visible inline input before capturing and freezing a native comment against the real service', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'studio-canvas-comment-'));
     const service = new StudioService({ dataRoot: folder });
@@ -147,9 +211,19 @@ describe('whiteboard direct interaction', () => {
     }
   });
   it('retains inline drafts and does not capture comments on a failed save', async () => {
-    const failedAnnotation=vi.fn(); await mount([element('conflict')],{client:{embedded:true,call:vi.fn().mockRejectedValue(new Error('CONFLICT'))},onAnnotateNative:failedAnnotation});
+    const failedAnnotation=vi.fn(), activity=vi.fn(); await mount([element('conflict')],{client:{embedded:true,call:vi.fn().mockRejectedValue(new Error('CONFLICT'))},onAnnotateNative:failedAnnotation,onActivityChange:activity});
     await select('conflict');await event(host.querySelector('[data-element-id="conflict"]')!,'dblclick');await input(query('编辑文字') as HTMLTextAreaElement,'Keep this draft');
     await click('备注所选元素');expect(failedAnnotation).not.toHaveBeenCalled();expect(query('编辑文字').textContent).toBe('Keep this draft');
+    expect(activity.mock.lastCall?.[0]).toMatchObject({ dirty: true, saving: false, saveError: expect.stringContaining('未覆盖他人的内容') });
+  });
+  it('reports pending and completed saves to the header using the actual mutation response', async () => {
+    const activity = vi.fn(); let finish!: (value: { board: Board }) => void;
+    const call = vi.fn(() => new Promise<{ board: Board }>(resolve => { finish = resolve; }));
+    await mount([element('saving')], { client: { embedded: true, call } as StudioClient, onActivityChange: activity });
+    await select('saving'); await click('加粗');
+    expect(activity.mock.lastCall?.[0]).toMatchObject({ dirty: true, saving: true, saveError: '' });
+    await act(async () => finish({ board: board([element('saving', { bold: true, version: 2 })], 2) }));
+    expect(activity.mock.lastCall?.[0]).toMatchObject({ dirty: false, saving: false, saveError: '' });
   });
   it('produces relative object points and board-coordinate area and blank targets in global comment mode', async () => {
     const annotate = vi.fn();
@@ -411,7 +485,7 @@ describe('whiteboard direct interaction', () => {
       await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
       await click('缩放菜单');await click('撤销');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['a','b','c']);});
       await click('重做');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
-      await select('c');await key(query('白板画布'),'Delete');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','a']);});await click('缩放菜单');await click('撤销');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
+      await select('c');await key(query('白板画布'),'Delete');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','a']);});await click('缩放菜单');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect((query('撤销') as HTMLButtonElement).disabled).toBe(false);});await click('撤销');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(order()).toEqual(['b','c','a']);});
     } finally {await act(async()=>root.render(null));await service.close();await rm(folder,{recursive:true,force:true});}
   });
   it('uses identical canonical SVG markup in the palette, live canvas and SVG/HTML exports while preserving legacy text', async () => {

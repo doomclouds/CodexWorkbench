@@ -28,19 +28,31 @@ export function updateFeedback<C, O extends ContentOperation, A, S>(state: Artif
       if (duplicate.creationReceipt!.fingerprint !== fingerprint) throw new StudioError('OPERATION_REUSED', '同一个操作 ID 不能提交不同的备注。');
       return { feedback: visibleFeedback(state.feedback, actor), contextId: duplicate.id };
     }
-    const id = randomUUID(), snapshot = adapter.snapshotFeedback(state.artifact.id, id, [state, ...state.history.slice().reverse()], anchor, versions);
+    const id = randomUUID(), snapshot = adapter.snapshotFeedback(state.artifact.id, id, [state, ...state.history.slice().reverse()], anchor, versions, state.unitClocks);
     item = { id, artifactId: state.artifact.id, type: args.type === 'request' ? 'request' : 'comment', anchor: snapshot.anchor, author: copy(actor), text: content, status: 'open', createdAt: now, updatedAt: now, replies: [], versions: copy(snapshot.versions) };
     if (operationId) item.creationReceipt = { operationId, fingerprint };
     state.feedback.push(item); state.sources[id] = copy(snapshot.sources); contextId = id;
   } else {
     const found = state.feedback.find(entry => entry.id === args.feedbackId && feedbackVisible(entry, actor)); if (!found) throw new StudioError('NOT_FOUND', '备注不存在。'); item = found;
     if (item.proposal) throw new StudioError('INVALID_ARGUMENT', '建议请使用选择、撤回或清除操作。');
-    if (action === 'reply') { const content = text(args.text).trim(); if (!content) throw new StudioError('INVALID_ARGUMENT', '回复内容不能为空。'); item.replies.push({ id: randomUUID(), author: copy(actor), text: content, createdAt: now }); if (item.status === 'processing' || item.status === 'resolved') { item.status = 'open'; delete item.processingBy; } }
+    if (actor.kind === 'agent' && item.status === 'processing' && item.processingBy && (item.processingBy.id !== actor.id || item.processingBy.kind !== actor.kind) && ['resolve', 'reopen', 'send'].includes(action)) throw new StudioError('BUSY', '此讨论正在由其他协作者处理，请勿重复接管。', { processingBy: copy(item.processingBy) });
+    if (action === 'reply') {
+      const content = text(args.text).trim(); if (!content) throw new StudioError('INVALID_ARGUMENT', '回复内容不能为空。');
+      const id = args.replyId === undefined ? randomUUID() : safeId(args.replyId, '回复 ID');
+      const duplicate = item.replies.find(reply => reply.id === id);
+      if (duplicate) {
+        if (duplicate.author.id !== actor.id || duplicate.author.kind !== actor.kind || duplicate.text !== content) throw new StudioError('OPERATION_REUSED', '同一个回复 ID 不能提交不同的作者或内容。');
+        return { feedback: visibleFeedback(state.feedback, actor) };
+      }
+      item.replies.push({ id, author: copy(actor), text: content, createdAt: now });
+      if (item.status === 'resolved') { item.status = 'open'; delete item.processingBy; }
+    }
     else if (action === 'edit') {
       const message = args.replyId === undefined ? item : item.replies.find(reply => reply.id === args.replyId);
       if (!message) throw new StudioError('NOT_FOUND', '回复不存在。');
-      if (message.author.id !== actor.id) throw new StudioError('FORBIDDEN', '只能编辑自己撰写的消息。');
+      if (message.author.id !== actor.id || message.author.kind !== actor.kind) throw new StudioError('FORBIDDEN', '只能编辑自己撰写的消息。');
       const content = text(args.text).trim(); if (!content) throw new StudioError('INVALID_ARGUMENT', '消息内容不能为空。');
+      if (args.expectedText !== undefined && message.text !== text(args.expectedText)) throw new StudioError('CONFLICT', '消息已被其他窗口修改，请保留草稿并重新打开后比较。', { feedbackId: item.id, ...(args.replyId !== undefined ? { replyId: args.replyId } : {}), currentText: message.text });
       message.text = content;
     }
     else if (action === 'delete') {
@@ -50,7 +62,14 @@ export function updateFeedback<C, O extends ContentOperation, A, S>(state: Artif
     }
     else if (action === 'resolve' || action === 'reopen') { if (actor.role === 'commenter' && item.author.id !== actor.id) throw new StudioError('FORBIDDEN', '只能更改自己备注的状态。'); item.status = action === 'resolve' ? 'resolved' : 'open'; delete item.processingBy; }
     else if (action === 'send') { item.status = 'pending'; delete item.processingBy; if (typeof args.targetViewId === 'string') item.targetViewId = text(args.targetViewId, '', 120); contextId = item.id; }
-    else if (action === 'processing') { requireRole(actor, ['owner']); item.status = 'processing'; item.processingBy = copy(actor); }
+    else if (action === 'processing') {
+      requireRole(actor, ['owner']);
+      if (item.status === 'processing' && item.processingBy) {
+        if (item.processingBy.id !== actor.id || item.processingBy.kind !== actor.kind) throw new StudioError('BUSY', '此讨论正在由其他协作者处理，请勿重复接管。', { processingBy: copy(item.processingBy) });
+        return { feedback: visibleFeedback(state.feedback, actor) };
+      }
+      item.status = 'processing'; item.processingBy = copy(actor);
+    }
     else throw new StudioError('INVALID_ARGUMENT', '不支持的备注操作。');
     item.updatedAt = now;
   }

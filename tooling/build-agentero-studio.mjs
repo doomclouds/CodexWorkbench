@@ -17,7 +17,11 @@ await copyFile(requirePlugin.resolve('@resvg/resvg-wasm/index_bg.wasm'), `${runt
 let appInputs = [];
 await viteBuild({ configFile: false, root: `${root}src/app`, plugins: [sdkProtocolDebugPlugin(transform), viteSingleFile(), { name: 'studio-runtime-inputs', generateBundle() { appInputs = [...this.getModuleIds()]; } }], build: { outDir: runtime, emptyOutDir: false, target: 'es2023', sourcemap: false, reportCompressedSize: false } });
 const html = await readFile(`${runtime}/index.html`, 'utf8');
-await writeFile(`${runtime}/app.html`, html.endsWith('\n') ? html : `${html}\n`);
+// Rolldown strips module comments; retain the adapted algorithm's MIT notice in the standalone HTML too.
+const mergeSource = await readFile(`${root}src/core/shared/safe-merge.ts`, 'utf8');
+const mergeNotice = mergeSource.match(/^\/\*![\s\S]*?\*\//)?.[0];
+if (!mergeNotice) throw new Error('The safe-merge distribution notice is missing.');
+await writeFile(`${runtime}/app.html`, `${html.trimEnd()}\n<!--\n${mergeNotice}\n-->\n`);
 await unlink(`${runtime}/index.html`);
 const packages = new Map();
 for (let input of [...Object.keys(serverResult.metafile.inputs), ...appInputs, requirePlugin.resolve('@resvg/resvg-wasm/index_bg.wasm')]) {

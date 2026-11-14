@@ -66,14 +66,14 @@ function assetMimeType(data: Buffer, filename: string): string {
   return detected ?? fallback;
 }
 /** Only the caller-supplied canonical absolute filename is read; it is never persisted. */
-export async function importAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, assetPath: unknown, actor: Actor, validateMimeType: (mimeType: string) => void) {
+export async function importAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, assetPath: unknown, actor: Actor, validateMimeType: (mimeType: string) => void, authorize?: (state: ArtifactState<C, A, S>) => Actor) {
   requireRole(actor, ['owner']);
   const path = text(assetPath, '', 4096);
   if (!path || !isAbsolute(path)) throw new StudioError('INVALID_ARGUMENT', '请提供明确的资源文件绝对路径。');
   const canonical = await realpath(path);
   if (!samePath(canonical, resolve(path))) throw new StudioError('RESOURCE_SCOPE', '请提供资源文件的真实绝对路径，不能通过符号链接导入。');
   const data = await readBoundedAsset(canonical), filename = basename(canonical), mimeType = assetMimeType(data, filename);
-  return putAsset(store, artifactId, data, { filename, mimeType }, actor, validateMimeType);
+  return putAsset(store, artifactId, data, { filename, mimeType }, actor, validateMimeType, authorize);
 }
 export function listAssets<C, A, S>(state: ArtifactState<C, A, S>, args: Record<string, unknown>, actor: Actor) {
   requireRole(actor, ['owner']);
@@ -87,10 +87,11 @@ function referencesAsset(value: unknown, id: string): boolean {
   if (value !== null && typeof value === 'object') return Object.values(value).some(item => referencesAsset(item, id));
   return false;
 }
-export async function deleteAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, assetId: unknown, actor: Actor) {
+export async function deleteAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, assetId: unknown, actor: Actor, authorize?: (state: ArtifactState<C, A, S>) => Actor) {
   requireRole(actor, ['owner']); const id = safeId(assetId, '资源 ID'); let moved: { active: string; recycled: string } | undefined;
   try {
     await store.transaction(artifactId, async state => {
+      requireRole(authorize ? authorize(state) : actor, ['owner']);
       assertAlive(state.artifact);
       if (!Object.hasOwn(state.assets, id)) throw new StudioError('NOT_FOUND', '资源不存在。');
       // Include retained versions and private proposals even when they are absent from public reads.
@@ -117,12 +118,12 @@ export async function deleteAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifa
 export async function duplicateAssets<C, A, S>(store: ArtifactStore<C, A, S>, from: string, to: string): Promise<void> {
   await cp(join(store.folder(from), 'assets'), join(store.folder(to), 'assets'), { recursive: true }).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; });
 }
-export async function putAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, data: Uint8Array, input: { filename?: string; mimeType?: string }, actor: Actor, validateMimeType: (mimeType: string) => void) {
+export async function putAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, data: Uint8Array, input: { filename?: string; mimeType?: string }, actor: Actor, validateMimeType: (mimeType: string) => void, authorize?: (state: ArtifactState<C, A, S>) => Actor) {
   requireRole(actor, ['owner', 'editor']);
   if (!data.byteLength || data.byteLength > MAX_ASSET_BYTES) throw new StudioError('TOO_LARGE', '资源应小于 20 MB。');
   const mimeType = text(input.mimeType, 'application/octet-stream', 100).split(';')[0]!; validateMimeType(mimeType);
   const id = randomUUID(), filename = basename(text(input.filename, 'resource', 250)).replace(/[\x00-\x1f]/g, '');
-  await store.transaction(artifactId, async state => { assertAlive(state.artifact); await atomicWrite(join(await assetDirectory(store, artifactId, 'assets', true), id), data); state.assets[id] = { id, filename, mimeType, size: data.byteLength }; });
+  await store.transaction(artifactId, async state => { requireRole(authorize ? authorize(state) : actor, ['owner', 'editor']); assertAlive(state.artifact); await atomicWrite(join(await assetDirectory(store, artifactId, 'assets', true), id), data); state.assets[id] = { id, filename, mimeType, size: data.byteLength }; });
   return { id, url: `/assets/${artifactId}/${id}`, src: `/assets/${artifactId}/${id}`, filename, mimeType, size: data.byteLength };
 }
 export async function getAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, assetId: string): Promise<AssetRecord & { data: Uint8Array }> {

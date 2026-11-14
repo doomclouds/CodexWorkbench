@@ -17,6 +17,7 @@ async function runtime(source: string, overrides = {}) {
   const sent: Record<string, unknown>[] = [];
   const dom = new JSDOM(buildHtmlRegionDocument(source, { ...options, ...overrides }), { runScripts: 'dangerously', beforeParse(window) {
     Object.defineProperty(window, 'CSS', { value: { escape: (value: string) => value } });
+    Object.defineProperty(window, 'TextEncoder', { value: TextEncoder });
     window.postMessage = (message: Record<string, unknown>) => { sent.push(message); };
   } }); windows.push(dom);
   await new Promise<void>((resolve) => dom.window.addEventListener('load', () => resolve(), { once: true }));
@@ -242,13 +243,70 @@ describe('studioEmbed state bridge', () => {
     const request = sent.find((value) => value && typeof value === 'object' && 'type' in value && value.type === 'studio-html-state');
     expect(request).toMatchObject({ regionId: 'region-one', sourceRevision: 7, baseVersion: 4, state: { votes: 3 } });
     expect(validateHtmlStateMessage(request, options)).toMatchObject({ baseVersion: 4, state: { votes: 3 } });
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-state-update', channel: options.channel, regionId: options.regionId, state: { votes: 3 }, version: 5, saveId: 1 } }));
     const beforeRemote = sent.length;
-    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-state-update', channel: options.channel, regionId: options.regionId, state: { votes: 8 }, version: 5 } }));
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-state-update', channel: options.channel, regionId: options.regionId, state: { votes: 8 }, version: 6 } }));
     expect(dom.window.document.querySelector('#count')?.textContent).toBe('8');
     expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 8 });
     expect(dom.window.eval('window.changes')).toEqual([{ votes: 8 }]);
     expect(sent).toHaveLength(beforeRemote);
     expect(source).not.toContain('votes:8');
+  });
+
+  it('keeps newer local clicks across an early own acknowledgement and ignores duplicate acknowledgements', async () => {
+    const { dom, sent } = await runtime('<p>Counter</p>', { annotation: false, state: { votes: 0 }, elementVersion: 1, writable: true });
+    const receive = (data: Record<string, unknown>) => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-state-update', channel: options.channel, regionId: options.regionId, ...data } }));
+    const click = () => dom.window.eval('studioEmbed.save({votes:studioEmbed.load().votes+1})');
+    click(); click();
+    receive({ saveId: 1, state: { votes: 1 }, version: 2 });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 2 });
+    click();
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 3 });
+    expect(sent.filter(value => value.type === 'studio-html-state').map(value => [value.saveId, value.state, value.baseVersion])).toEqual([[1, { votes: 1 }, 1], [2, { votes: 2 }, 1], [3, { votes: 3 }, 2]]);
+    receive({ saveId: 3, state: { votes: 3 }, version: 3 });
+    receive({ saveId: 1, state: { votes: 1 }, version: 2 });
+    receive({ saveId: 3, state: { votes: 99 }, version: 99 });
+    receive({ saveId: 999, state: { votes: 99 }, version: 99 });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 3 });
+    receive({ state: { votes: 4 }, version: 4 });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 4 });
+  });
+
+  it('replays newer nested local intent over merged own ACK values, including deletions and array replacement', async () => {
+    const { dom } = await runtime('<p>Form</p>', { annotation: false, state: { form: { count: 0, label: 'A', obsolete: true }, rows: [1] }, elementVersion: 1, writable: true });
+    dom.window.eval('studioEmbed.save({form:{count:1,label:"A",obsolete:true},rows:[1]});studioEmbed.save({form:{count:2,label:"A"},rows:[1,2]});');
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-state-update', channel: options.channel, regionId: options.regionId, saveId: 1, version: 3, state: { form: { count: 1, label: 'Remote', obsolete: true }, rows: [1], remote: true } } }));
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ form: { count: 2, label: 'Remote' }, rows: [1, 2], remote: true });
+  });
+
+  it('keeps remote authority separate from dirty intent, reports both on error, and discards only explicitly', async () => {
+    const { dom, sent } = await runtime('<p>Counter</p>', { annotation: false, state: { votes: 0 }, elementVersion: 1, writable: true });
+    dom.window.eval('window.errors=[];window.addEventListener("studio-embed-error", event=>window.errors.push(event.detail));studioEmbed.save({votes:1});');
+    const receive = (data: Record<string, unknown>) => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { channel: options.channel, regionId: options.regionId, ...data } }));
+    receive({ type: 'studio-html-state-update', version: 5, state: { votes: 8 } });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 1 });
+    dom.window.eval('studioEmbed.save({votes:2})');
+    expect(sent.filter(value => value.type === 'studio-html-state').at(-1)?.baseVersion).toBe(1);
+    receive({ type: 'studio-html-state-error', version: 5, saveId: 1, state: { votes: 8 }, message: '字段冲突' });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 2 });
+    expect(dom.window.eval('window.errors.at(-1)')).toMatchObject({ message: '字段冲突', saveId: 1, localState: { votes: 2 }, remoteState: { votes: 8 }, version: 5 });
+    receive({ type: 'studio-html-state-reset', version: 5, state: { votes: 8 } });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 8 });
+    receive({ type: 'studio-html-state-update', version: 2, saveId: 1, state: { votes: 1 } });
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 8 });
+    receive({ type: 'studio-html-mode', sourceRevision: options.sourceRevision, enabled: false, writable: false });
+    dom.window.eval('studioEmbed.save({votes:9})');
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ votes: 8 });
+    expect(sent.filter(value => value.type === 'studio-html-state')).toHaveLength(2);
+  });
+
+  it('does not advance a newer intent over a conflicting remote value carried by an own ACK', async () => {
+    const { dom, sent } = await runtime('<p>Form</p>', { annotation: false, state: { a: 0, b: 0 }, elementVersion: 4, writable: true });
+    dom.window.eval('studioEmbed.save({a:1,b:0});studioEmbed.save({a:1,b:1});');
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-state-update', channel: options.channel, regionId: options.regionId, saveId: 1, version: 5, state: { a: 1, b: 2 } } }));
+    expect(dom.window.eval('studioEmbed.load()')).toEqual({ a: 1, b: 1 });
+    dom.window.eval('studioEmbed.save({a:2,b:1})');
+    expect(sent.filter(value => value.type === 'studio-html-state').at(-1)).toMatchObject({ state: { a: 2, b: 1 }, baseVersion: 4 });
   });
 
   it('gives read-only embeds no persistence ability', async () => {

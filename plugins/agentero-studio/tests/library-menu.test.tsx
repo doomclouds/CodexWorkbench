@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LibraryArtifactMenu } from '../src/app/LibraryArtifactMenu';
+import CanvasActionsMenu from '../src/app/canvas/CanvasActionsMenu';
 import type { Artifact } from '../src/contracts/studio';
 
 let container: HTMLDivElement, root: Root, anchorTop: number;
@@ -17,6 +18,8 @@ beforeEach(() => {
     if (this.classList.contains('studio')) return rect(0, 0, window.innerWidth, window.innerHeight);
     if (this.classList.contains('studio-library-main')) return rect(0, 80, window.innerWidth, window.innerHeight - 80);
     if (this.getAttribute('aria-haspopup') === 'menu') return rect(window.innerWidth - 38, anchorTop, 32, 32);
+    if (this.tagName === 'SPAN' && this.style.position === 'absolute') return rect(Number.parseFloat(this.style.left), Number.parseFloat(this.style.top), 0, 0);
+    if (this.classList.contains('studio-canvas-actions-menu')) return rect(0, 0, 220, 398);
     if (this.getAttribute('role') === 'menu') return rect(0, 0, 192, 220);
     return rect(0, 0, 0, 0);
   });
@@ -28,6 +31,30 @@ function Example({ theme, layout, actions }: { theme: 'light' | 'dark'; layout: 
   return <div className="studio studio-library" data-studio-theme={theme}><main className="studio-library-main" style={{ overflow: 'auto' }}><div className={`studio-artifacts-${layout}`}><article className="studio-artifact"><LibraryArtifactMenu artifact={artifact} open={open} busy={false} onOpenChange={setOpen} onPin={actions[0]!} onRename={actions[1]!} onCopyLink={actions[2]!} onDuplicate={actions[3]!} onTrash={actions[4]!} /></article></div></main></div>;
 }
 async function click(node: HTMLElement) { await act(async () => node.click()); }
+
+it.each(['light', 'dark'] as const)('keeps the canvas action menu inside a short %s viewport and preserves its delete action', async theme => {
+  const command = vi.fn(), close = vi.fn();
+  await act(async () => root.render(<div className="studio" data-studio-theme={theme}><section className="studio-whiteboard" style={{ overflow: 'hidden' }}><CanvasActionsMenu point={{ x: 380, y: 560 }} canEdit selected={1} locked={false} hasClipboard onCommand={command} onClose={close} /></section></div>));
+  const menu = container.querySelector<HTMLElement>('[role="menu"]')!;
+  expect(menu.parentElement).toBe(container.querySelector('.studio'));
+  expect(menu.closest('.studio-whiteboard')).toBeNull();
+  expect(menu.dataset.placement).toBe('point');
+  expect(menu.style.top).toBe('194px');
+  expect(menu.style.left).toBe('172px');
+  expect(menu.style.maxHeight).toBe('584px');
+  expect(menu.closest('[data-studio-theme]')?.getAttribute('data-studio-theme')).toBe(theme);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 260 });
+  await act(async () => window.dispatchEvent(new Event('resize')));
+  expect(menu.style.top).toBe('8px');
+  expect(menu.style.maxHeight).toBe('244px');
+  await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })));
+  expect(document.activeElement?.textContent).toBe('适应白板Shift 1');
+  const remove = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === '删除Delete')!;
+  expect(remove.disabled).toBe(false);
+  await click(remove);
+  expect(command).toHaveBeenCalledWith('delete');
+  expect(close).toHaveBeenCalledOnce();
+});
 
 it.each([['light', 'list'], ['dark', 'list'], ['light', 'grid'], ['dark', 'grid']] as const)('keeps all five actions above the last %s %s item, outside its scroll pane and inside its theme root', async (theme, layout) => {
   const actions = Array.from({ length: 5 }, () => vi.fn());

@@ -19,6 +19,14 @@ import { describeCommentTarget, liveCommentPoint, type CommentPoint } from './sh
 import { createRegionReaderLink, watchRegionReaderReturn } from './region-reader';
 import { copyPlainText } from './clipboard';
 import { newClientId } from './shared/client-id';
+import { isAuthenticationFailure, useStudioSession } from './shared/useStudioSession';
+import { SessionNotice, useSessionVisibility } from './shared/SessionNotice';
+import { claimParticipantColor } from './shared/presence-members';
+import { useCollaboration } from './shared/useCollaboration';
+import { OnlineParticipants } from './shared/OnlineParticipants';
+import { CursorChat } from './shared/CursorChat';
+import { useViewportFollow } from './shared/useViewportFollow';
+import { SaveStatus } from './shared/SaveStatus';
 
 export interface StudioAppProps {
   client: StudioClient;
@@ -60,18 +68,21 @@ function relativeTime(value: string): string {
 function authorName(actor: Actor): string { return actor.kind === 'agent' ? `${actor.name || 'Agent'} · Agent` : actor.name || '协作者'; }
 function newId(prefix: string): string { return newClientId(prefix); }
 function emptyActivity(): ProductActivity { return { editingIds: [], movingIds: [], dirty: false, issues: [] }; }
-function initialPresence() { return { selectedIds: [] as string[], viewport: { x: 0, y: 0, zoom: 1 }, cursor: undefined as { x: number; y: number } | undefined, chat: '', following: '', ...emptyActivity() }; }
+function initialPresence() { return { selectedIds: [] as string[], viewport: { x: 0, y: 0, zoom: 1 }, cursor: null as { x: number; y: number; t?: number; surface?: string } | null, chat: '', following: '', ...emptyActivity() }; }
 function ArtifactPreview({ artifact, cached, client }: { artifact: Artifact; cached?: StudioDocument; client: StudioClient }) {
   const Preview = getProduct(artifact.type)?.Preview;
   return Preview ? <Preview artifact={artifact} cached={cached} client={client} /> : <div className="studio-artifact-preview studio-blank-preview">暂无预览</div>;
 }
 function ProductGlyph({ type, size = 22 }: { type: string; size?: number }) { const Icon = getProduct(type)?.Icon || FileCode2; return <Icon size={size} />; }
 
-export default function StudioApp({ client, actor: initialActor, initialArtifactId, initialView, navigationRevision, onViewContext, attachContext }: StudioAppProps) {
-  const [sessionActor, setSessionActor] = useState(initialActor);
-  const [accessPending, setAccessPending] = useState(false);
-  const actor: Actor = accessPending ? { ...sessionActor, role: 'viewer' } : sessionActor;
+export default function StudioApp({ client: transportClient, actor: initialActor, initialArtifactId, initialView, navigationRevision, onViewContext, attachContext }: StudioAppProps) {
   const [activeId, setActiveId] = useState(initialArtifactId || '');
+  const session = useStudioSession(transportClient, initialActor, activeId);
+  const { client } = session;
+  const accessPending = session.status !== 'valid';
+  const actor: Actor = accessPending ? { ...session.actor, role: 'viewer' } : session.actor;
+  const studioRoot = useRef<HTMLDivElement>(null);
+  useSessionVisibility(studioRoot, session.status);
   const activeRef = useRef(activeId);
   const initialRoute = useRef({ id: initialArtifactId, view: initialView, revision: navigationRevision });
   const [board, setBoard] = useState<StudioDocument | null>(null);
@@ -92,8 +103,11 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   const [panel, setPanel] = useState<Panel>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [copyFallback, setCopyFallback] = useState('');
   const [busy, setBusy] = useState('');
   const [sync, setSync] = useState<'loading' | 'saved' | 'reconnecting'>('loading');
+  const [saveActivity, setSaveActivity] = useState<Pick<ProductActivity, 'dirty' | 'saving' | 'saveError'>>({ dirty: false, saving: false, saveError: '' });
+  const [editingBusy, setEditingBusy] = useState(false);
   const [menuId, setMenuId] = useState('');
   const [trashSelection, setTrashSelection] = useState<string[]>([]);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
@@ -121,12 +135,17 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   const [readerSession, setReaderSession] = useState<{ artifactId: string; expiresAt: number } | null>(null);
   const [readerFallback, setReaderFallback] = useState<{ artifactId: string; url: string; expiresAt: number } | null>(null);
   const [replies, setReplies] = useState<Record<string, string>>({});
+  const replyAttempts = useRef(new Map<string, { text: string; replyId: string }>());
   const [showResolved, setShowResolved] = useState(false);
   const [history, setHistory] = useState<HistoryBatch[]>([]);
   const [preview, setPreview] = useState<{ board: StudioDocument; version: HistoryEntry } | null>(null);
   const [previewRestoreOpen, setPreviewRestoreOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [share, setShare] = useState<ShareState | null>(null);
+  const shareSequence = useRef(0);
+  const shareAuthority = useRef('');
+  const shareAuthorityKey = `${session.actor.id}:${session.actor.role}:${session.status}`;
+  if (shareAuthority.current !== shareAuthorityKey) { shareAuthority.current = shareAuthorityKey; shareSequence.current += 1; }
   const listSequence = useRef(0);
   const versionSequence = useRef(0);
   const retryRef = useRef<(() => void) | null>(null);
@@ -134,11 +153,11 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   const skipTitleBlur = useRef(false);
   const [peerId] = useState(() => newId('view'));
   const [peers, setPeers] = useState<Presence[]>([]);
-  const [presenceOpen, setPresenceOpen] = useState(false);
-  const [cursorChat, setCursorChat] = useState('');
+  const [cursorLive, setCursorLive] = useState(false);
   const [following, setFollowing] = useState('');
   const [roomTimer, setRoomTimer] = useState<RoomTimer | null>(null);
   const [timerBusy, setTimerBusy] = useState(false);
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const presenceRef = useRef(initialPresence());
   const activitySources = useRef({ editor: emptyActivity(), toolbar: emptyActivity() });
   const requestPresence = useRef<(() => void) | null>(null);
@@ -148,20 +167,21 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   const publishViewContext = useCallback(() => {
     const id = activeRef.current;
     const state = presenceRef.current;
-    onViewContext?.(id ? { viewId: peerId, artifactId: id, selectedIds: state.selectedIds, viewport: state.viewport, selectedCount: state.selectedIds.length, editingIds: state.editingIds, movingIds: state.movingIds, dirty: state.dirty, issues: state.issues } : null);
-  }, [onViewContext, peerId]);
+    onViewContext?.(id && !accessPending ? { viewId: peerId, artifactId: id, selectedIds: state.selectedIds, viewport: state.viewport, selectedCount: state.selectedIds.length, editingIds: state.editingIds, movingIds: state.movingIds, dirty: state.dirty, issues: state.issues } : null);
+  }, [onViewContext, peerId, accessPending]);
   const reportActivity = useCallback((source: 'editor' | 'toolbar', artifactId: string, state: ProductActivity) => {
     if (!artifactId || artifactId !== activeRef.current) return;
     activitySources.current[source] = state;
     const activities = Object.values(activitySources.current);
-    const merged: ProductActivity = { editingIds: [...new Set(activities.flatMap(activity => activity.editingIds))].slice(0, 200), movingIds: [...new Set(activities.flatMap(activity => activity.movingIds))].slice(0, 200), dirty: activities.some(activity => activity.dirty), issues: activities.flatMap(activity => activity.issues ?? []).slice(0, 5) };
+    const merged: ProductActivity = { editingIds: [...new Set(activities.flatMap(activity => activity.editingIds))].slice(0, 200), movingIds: [...new Set(activities.flatMap(activity => activity.movingIds))].slice(0, 200), dirty: activities.some(activity => activity.dirty), saving: activities.some(activity => activity.saving), saveError: activities.find(activity => activity.saveError)?.saveError || '', issues: activities.flatMap(activity => activity.issues ?? []).slice(0, 5) };
+    setSaveActivity(previous => previous.dirty === merged.dirty && previous.saving === merged.saving && previous.saveError === merged.saveError ? previous : { dirty: merged.dirty, saving: merged.saving, saveError: merged.saveError });
+    setEditingBusy(merged.editingIds.length > 0 || merged.movingIds.length > 0);
     Object.assign(presenceRef.current, merged); requestPresence.current?.(); publishViewContext();
   }, [publishViewContext]);
   const editorActivityChanged = useMemo(() => (state: ProductActivity) => reportActivity('editor', activeId, state), [activeId, reportActivity]);
   const toolbarActivityChanged = useMemo(() => (state: ProductActivity) => reportActivity('toolbar', activeId, state), [activeId, reportActivity]);
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  useEffect(() => { setSessionActor(initialActor); setAccessPending(false); }, [initialActor]);
   useEffect(() => {
     if (initialRoute.current.id === initialArtifactId && initialRoute.current.view === initialView && initialRoute.current.revision === navigationRevision) return;
     initialRoute.current = { id: initialArtifactId, view: initialView, revision: navigationRevision };
@@ -170,6 +190,7 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   }, [initialArtifactId, initialView, navigationRevision]);
   const fail = useCallback((cause: unknown, retry?: () => void) => {
     if (!mounted.current) return;
+    if (isAuthenticationFailure(cause) || (cause as { code?: string } | null)?.code === 'SESSION_PAUSED') return;
     setError(errorText(cause)); retryRef.current = retry || null;
   }, []);
   const inform = useCallback((message: string) => { setNotice(message); }, []);
@@ -203,18 +224,39 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
     setCachedBoards(previous => ({ ...previous, [next.artifact.id]: next }));
   }, []);
 
-  const refreshBoard = useCallback(async (id = activeRef.current) => {
-    if (!id) return;
-    const results = await Promise.allSettled([
-      client.call<StudioDocument>('artifact_read', { artifactId: id, mode: 'board' }),
-      client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'list', artifactId: id }),
-    ]);
-    if (!mounted.current || activeRef.current !== id) return;
-    if (results[0].status === 'fulfilled') acceptBoard(results[0].value);
-    else { setSync('reconnecting'); fail(results[0].reason, () => { void refreshBoard(id); }); }
-    if (results[1].status === 'fulfilled') setFeedback(results[1].value.feedback);
-    else fail(results[1].reason, () => { void refreshBoard(id); });
-  }, [acceptBoard, client, fail]);
+  const collaboration = useCollaboration({
+    client, polling: !!transportClient.request, artifactId: activeId, peerId, enabled: !!activeId && !accessPending,
+    getDocument: () => boardRef.current, onDocument: acceptBoard, onFeedback: setFeedback,
+    onPresence: (nextPeers, nextTimer) => { setPeers(nextPeers); setRoomTimer(nextTimer); }, onClock: setClockOffsetMs,
+    onCursorClear: () => { presenceRef.current.cursor = null; setCursorLive(false); },
+    onStatus: setSync, onError: cause => {
+      if (cause instanceof Error && /实时连接/.test(cause.message)) void session.check();
+      fail(cause);
+    },
+    onEvent: message => {
+      if (message.type === 'access-revoked') { setShare(null); session.revoke(message.reason); }
+      else if (message.type === 'ready') {
+        session.updateAccess(message.access);
+        const nextActor = message.actor as Actor | undefined;
+        if (nextActor && (nextActor.id !== session.actor.id || nextActor.role !== session.actor.role)) void session.check('role-changed');
+      } else if (message.type === 'share') {
+        shareSequence.current += 1; session.updateAccess(message.access);
+        if (message.reason === 'role-changed' && Array.isArray(message.revokedMemberIds) && message.revokedMemberIds.includes(session.actor.id)) void session.check('role-changed');
+        setShare(previous => previous && (message.access === 'local' || message.access === 'lan') ? { ...previous, access: message.access } : previous);
+      }
+    },
+  });
+  const stopFollowMotion = useRef<(() => void) | undefined>(undefined);
+  const stopFollowing = useCallback(() => { stopFollowMotion.current?.(); setFollowing(''); }, []);
+  const follow = useViewportFollow({ actorId: actor.id, peerId, peers, following, room: collaboration.room, area: canvasArea, busy: !!saveActivity.saving || editingBusy, onStop: stopFollowing, currentViewport: presenceRef.current.viewport });
+  stopFollowMotion.current = follow.stop;
+  const followedPeer = follow.peer;
+  const refreshBoard = useCallback(async (id = activeRef.current) => { if (id === activeRef.current && !accessPending) await collaboration.refresh(); }, [collaboration, accessPending]);
+  const acceptFeedback = useCallback(async (_next: Feedback[]) => { collaboration.feedbackChanged(); await collaboration.refreshFeedback(); }, [collaboration]);
+  requestPresence.current = () => {
+    const state = presenceRef.current, area = canvasArea.current;
+    collaboration.presence({ context: { viewId: peerId, artifactId: activeId, selectedIds: state.selectedIds, viewport: state.viewport, surface: { w: area?.clientWidth || window.innerWidth, h: area?.clientHeight || window.innerHeight }, editingIds: state.editingIds, movingIds: state.movingIds, dirty: state.dirty, issues: state.issues }, following: state.following });
+  };
 
   const loadLibrary = useCallback(async (cursor?: string) => {
     const serial = ++listSequence.current;
@@ -240,113 +282,18 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
     setTrashSelection(previous => { const next = previous.filter(id => retained.has(id)); return next.length === previous.length ? previous : next; });
   }, [artifacts, purgeFailures]);
 
-  useEffect(() => {
-    if (!activeId) return;
-    setSync('loading'); void refreshBoard(activeId);
-  }, [activeId, refreshBoard]);
-
-  useEffect(() => {
-    if (!activeId) return;
-    let stream: EventSource | undefined;
-    let reconnecting = false;
-    let refreshing = false;
-    const refresh = () => {
-      if (document.visibilityState === 'hidden' || refreshing) return;
-      refreshing = true;
-      void (async () => {
-        if (client.request && boardRef.current) {
-          const summary = await client.call<{ artifact: Artifact }>('artifact_read', { artifactId: activeId, mode: 'summary', limit: 1 });
-          if (activeRef.current !== activeId) return;
-          const presenceUrl = new URL('/api/presence', client.baseUrl); presenceUrl.searchParams.set('artifactId', activeId);
-          const presenceResponse = await studioRequest(client, presenceUrl);
-          if (presenceResponse.ok && activeRef.current === activeId) {
-            const state = await presenceResponse.json() as { peers: Presence[]; timer?: RoomTimer | null };
-            setPeers(state.peers); setRoomTimer(state.timer ?? null);
-          }
-          if (summary.artifact.revision !== boardRef.current?.artifact.revision) await refreshBoard(activeId);
-          else {
-            const result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'list', artifactId: activeId });
-            if (activeRef.current === activeId && mounted.current) { setFeedback(result.feedback); setSync('saved'); }
-          }
-        } else await refreshBoard(activeId);
-      })().catch(cause => { if (activeRef.current === activeId) { setSync('reconnecting'); fail(cause); } }).finally(() => { refreshing = false; });
-    };
-    const connect = () => {
-      stream?.close(); stream = undefined;
-      if (client.request || document.visibilityState === 'hidden' || !client.baseUrl || typeof EventSource === 'undefined') return;
-      const url = new URL('/api/events', client.baseUrl); url.searchParams.set('artifactId', activeId);
-      if (client.token) url.searchParams.set('token', client.token);
-      stream = new EventSource(url.href);
-      stream.addEventListener('change', refresh);
-      stream.onmessage = event => {
-        if (activeRef.current !== activeId) return;
-        try {
-          const message = JSON.parse(event.data);
-          if (message.artifactId && message.artifactId !== activeId) return;
-          if (message.type === 'access-revoked') {
-            setAccessPending(true); setAnnotationActive(false); setShare(null); setSync('reconnecting');
-            inform(message.reason || '分享权限已变更，正在更新访问权限。');
-          } else if (message.type === 'ready' && message.actor) {
-            setSessionActor(message.actor); setAccessPending(false); refresh();
-          } else if (message.type === 'presence' && Array.isArray(message.peers)) {
-            setPeers(message.peers); if ('timer' in message) setRoomTimer(message.timer);
-          } else refresh();
-        } catch { refresh(); }
-      };
-      stream.onopen = () => { if (activeRef.current !== activeId) return; if (reconnecting) refresh(); reconnecting = false; setSync(boardRef.current ? 'saved' : 'loading'); };
-      stream.onerror = () => { if (activeRef.current !== activeId) return; reconnecting = true; setSync('reconnecting'); };
-    };
-    const visibility = () => { connect(); if (document.visibilityState !== 'hidden') refresh(); };
-    connect();
-    const poll = window.setInterval(() => { if (!stream || reconnecting) refresh(); }, client.request ? 3000 : 7000);
-    document.addEventListener('visibilitychange', visibility);
-    return () => { stream?.close(); window.clearInterval(poll); document.removeEventListener('visibilitychange', visibility); };
-  }, [activeId, client, refreshBoard, inform]);
-
-  useEffect(() => {
-    if (!activeId || !client.baseUrl) return;
-    const url = new URL('/api/presence', client.baseUrl); url.searchParams.set('artifactId', activeId);
-    let stopped = false; let pending: number | undefined; let lastSent = 0;
-    const send = async (leave = false) => {
-      if (!leave && (stopped || document.visibilityState === 'hidden')) return;
-      lastSent = Date.now();
-      const state = presenceRef.current;
-      try {
-        const response = await studioRequest(client, url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}) }, body: JSON.stringify({ artifactId: activeId, peerId, ...(leave ? { leave: true } : { context: { viewId: peerId, artifactId: activeId, selectedIds: state.selectedIds, viewport: state.viewport, editingIds: state.editingIds, movingIds: state.movingIds, dirty: state.dirty, issues: state.issues }, cursor: state.cursor, chat: state.chat, following: state.following }) }), keepalive: leave });
-        if (!response.ok || leave) return;
-        const result = await response.json() as { peers: Presence[]; timer?: RoomTimer | null };
-        if (!stopped && activeRef.current === activeId) { setPeers(result.peers); setRoomTimer(result.timer ?? null); }
-      } catch { /* Board sync reports connectivity; presence reconnects on the next heartbeat. */ }
-    };
-    requestPresence.current = () => {
-      if (pending !== undefined) return;
-      pending = window.setTimeout(() => { pending = undefined; void send(); }, Math.max(0, 200 - (Date.now() - lastSent)));
-    };
-    const visibility = () => { if (document.visibilityState === 'hidden') void send(true); else void send(); };
-    void send();
-    const heartbeat = window.setInterval(() => { void send(); }, 15000);
-    document.addEventListener('visibilitychange', visibility);
-    return () => { stopped = true; requestPresence.current = null; window.clearTimeout(pending); window.clearInterval(heartbeat); document.removeEventListener('visibilitychange', visibility); void send(true); };
-  }, [activeId, client, peerId]);
   useEffect(() => { presenceRef.current.selectedIds = selectedIds; requestPresence.current?.(); publishViewContext(); }, [activeId, selectedIds, publishViewContext]);
-  useEffect(() => { presenceRef.current.following = following; requestPresence.current?.(); }, [following]);
+  useEffect(() => { presenceRef.current.following = followedPeer?.peerId || ''; requestPresence.current?.(); }, [followedPeer?.peerId]);
+  useEffect(() => { collaboration.presence({ color: claimParticipantColor(session.actor, peerId, peers) }); }, [collaboration, session.actor, peerId, peers]);
   const selectionChanged = useCallback((ids: string[]) => { if (activeRef.current === activeId) setSelectedIds(ids); }, [activeId]);
-  const viewportChanged = useCallback((viewport: { x: number; y: number; zoom: number }) => { if (activeRef.current !== activeId) return; presenceRef.current.viewport = viewport; requestPresence.current?.(); publishViewContext(); }, [activeId, publishViewContext]);
-  const cursorMoved = useCallback((cursor: { x: number; y: number }) => { if (activeRef.current !== activeId) return; presenceRef.current.cursor = cursor; requestPresence.current?.(); }, [activeId]);
-  function sendCursorChat(event: FormEvent) {
-    event.preventDefault(); presenceRef.current.chat = cursorChat.trim().slice(0, 240); setCursorChat(''); requestPresence.current?.();
-  }
+  const viewportChanged = useCallback((viewport: Viewport) => { if (activeRef.current !== activeId) return; presenceRef.current.viewport = viewport; requestPresence.current?.(); publishViewContext(); }, [activeId, publishViewContext]);
+  const cursorMoved = useCallback((cursor: { x: number; y: number } | null) => { if (activeRef.current !== activeId) return; const previous = presenceRef.current.cursor; if (cursor && previous && Math.abs(cursor.x - previous.x) < .002 && Math.abs(cursor.y - previous.y) < .002) return; presenceRef.current.cursor = cursor ? { ...cursor, t: Date.now(), surface: 'board' } : null; setCursorLive(!!cursor); collaboration.presence({ cursor: presenceRef.current.cursor }); }, [activeId, collaboration]);
   async function changeTimer(action: TimerAction, durationSeconds?: number, deltaSeconds?: number) {
-    const id = activeRef.current; if (!id || !canEdit || timerBusy || !client.baseUrl) return;
+    if (!canEdit || timerBusy) return;
     setTimerBusy(true);
-    try {
-      const url = new URL('/api/presence', client.baseUrl);
-      const response = await studioRequest(client, url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}) }, body: JSON.stringify({ artifactId: id, peerId, timer: { action, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(deltaSeconds !== undefined ? { deltaSeconds } : {}) } }) });
-      const result = await response.json() as { peers: Presence[]; timer: RoomTimer | null; error?: { message?: string } };
-      if (!response.ok) throw new Error(result.error?.message || '共享计时器未能更新。');
-      if (mounted.current && activeRef.current === id) { setRoomTimer(result.timer); setPeers(result.peers); }
-    } catch (cause) { if (activeRef.current === id) fail(cause); }
-    finally { if (mounted.current && activeRef.current === id) setTimerBusy(false); }
+    try { await collaboration.timer({ action, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(deltaSeconds !== undefined ? { deltaSeconds } : {}) }); }
+    catch (cause) { fail(cause); }
+    finally { if (mounted.current) setTimerBusy(false); }
   }
 
   useEffect(() => { setTitleDraft(board?.artifact.title || ''); }, [board?.artifact.title]);
@@ -360,28 +307,35 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
     finally { if (mounted.current && activeRef.current === id) setHistoryLoading(false); }
   }, [client, fail]);
   const loadShare = useCallback(async () => {
-    const id = activeRef.current; if (!id) return;
-    if (!canManage) { setShare(accessPending ? null : { enabled: true }); return; }
-    try { const result = await client.call<ShareState>('artifact_share', { action: 'status', artifactId: id }); if (activeRef.current === id && mounted.current) setShare(result); }
+    const id = activeRef.current; if (!id || busy === 'share') return;
+    const serial = ++shareSequence.current;
+    try { const result = await client.call<ShareState>('artifact_share', { action: 'status', artifactId: id }); if (activeRef.current === id && mounted.current && serial === shareSequence.current) setShare(result); }
     catch (cause) { fail(cause, () => { void loadShare(); }); }
-  }, [client, fail, canManage, accessPending]);
+  }, [client, fail, canManage, accessPending, session.access, busy]);
   useEffect(() => { if (panel === 'history') void loadHistory(); }, [panel, board?.artifact.revision, loadHistory]);
-  useEffect(() => { if (panel === 'share') void loadShare(); }, [panel, loadShare]);
+  useEffect(() => {
+    if (panel !== 'share' || accessPending) return;
+    void loadShare();
+    const refresh = () => { if (document.visibilityState !== 'hidden') void loadShare(); };
+    const timer = window.setInterval(refresh, 4000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [panel, loadShare, accessPending]);
 
   function openArtifact(id: string, ready?: StudioDocument) {
     versionSequence.current += 1; activeRef.current = id; boardRef.current = null;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
-    setRoomTimer(null); setTimerBusy(false); publishViewContext();
+    setRoomTimer(null); setTimerBusy(false); setSaveActivity({ dirty: false, saving: false, saveError: '' }); setEditingBusy(false); publishViewContext();
     resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReaderSession(null); setReaderFallback(null); setShare(null); setHistory([]);
-    setActiveId(id); setBoard(null); setFeedback([]); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setSelectedIds([]); setAnnotation(null); setError(''); setMenuId(''); setPeers([]); setFollowing(''); setPresenceOpen(false);
+    setActiveId(id); setBoard(null); setFeedback([]); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setSelectedIds([]); setAnnotation(null); setError(''); setMenuId(''); setPeers([]); setFollowing('');
     if (ready) acceptBoard(ready);
   }
   function goHome() {
     activeRef.current = ''; boardRef.current = null; versionSequence.current += 1;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
-    setRoomTimer(null); setTimerBusy(false); publishViewContext();
+    setRoomTimer(null); setTimerBusy(false); setSaveActivity({ dirty: false, saving: false, saveError: '' }); setEditingBusy(false); publishViewContext();
     resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReaderSession(null); setReaderFallback(null);
-    setActiveId(''); setBoard(null); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setAnnotation(null); setSelectedIds([]); setError(''); setPeers([]); setFollowing(''); setPresenceOpen(false);
+    setActiveId(''); setBoard(null); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setAnnotation(null); setSelectedIds([]); setError(''); setPeers([]); setFollowing('');
   }
   async function importArchive(file: File) {
     if (!canManage || busy) return;
@@ -518,7 +472,7 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
     finally { if (mounted.current) setBusy(''); }
   }
   useEffect(() => {
-    if (!readerSession || readerSession.artifactId !== activeId || readerSession.expiresAt <= Date.now()) return;
+    if (accessPending || !readerSession || readerSession.artifactId !== activeId || readerSession.expiresAt <= Date.now()) return;
     return watchRegionReaderReturn(client, { artifactId: activeId, viewId: peerId }, target => {
       if (activeRef.current !== target.artifactId || target.viewId !== peerId) return;
       const point = locateAnchor({ regionId: target.regionId });
@@ -527,7 +481,7 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
       setPanel(null); setCommentOpen(false); setSelectedFeedback(null);
       setAnnotationActive(target.annotate && canComment); inform(target.annotate && canComment ? '已定位原区域，点击图解中的目标添加备注。' : '已定位原区域。');
     });
-  }, [readerSession, activeId, client, peerId, canComment]);
+  }, [readerSession, activeId, client, peerId, canComment, accessPending]);
 
   async function createFeedback(event: FormEvent) {
     event.preventDefault(); const current = boardRef.current;
@@ -543,14 +497,14 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
         const created = result.feedback.find(item => item.id === result.contextId);
         if (!created) throw new Error('备注已提交，但未取得保存结果，请重试。');
         pending.created = created;
-        if (activeRef.current === id) { setFeedback(result.feedback); setSavedComment(created); }
+        if (activeRef.current === id) { await acceptFeedback(result.feedback); setSavedComment(created); }
       }
       if (activeRef.current !== id || !mounted.current) return;
       if (attachComment) {
         if (attachContext) await attachContext(pending.created, current);
         else {
           const result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'send', artifactId: id, feedbackId: pending.created.id, targetViewId: peerId });
-          if (activeRef.current === id) setFeedback(result.feedback);
+          if (activeRef.current === id) await acceptFeedback(result.feedback);
         }
       }
       if (activeRef.current !== id || !mounted.current) return;
@@ -563,11 +517,20 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   }
   async function feedbackAction(action: CommentAction, item: Feedback, args: CommentActionArguments = {}): Promise<Feedback | null> {
     if (busy) throw new Error('正在处理上一项操作，请稍候。');
+    const attemptKey = JSON.stringify([actor.kind, actor.id, item.artifactId, item.id]);
+    let attempt: { text: string; replyId: string } | undefined;
+    if (action === 'reply') {
+      const text = args.text?.trim() || '', previous = replyAttempts.current.get(attemptKey);
+      attempt = previous?.text === text ? previous : { text, replyId: previous ? newId('reply') : args.replyId || newId('reply') };
+      replyAttempts.current.set(attemptKey, attempt);
+      args = { ...args, text: attempt.text, replyId: attempt.replyId };
+    }
     setBusy(`feedback:${item.id}`); setError('');
     try {
       const result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action, artifactId: item.artifactId, feedbackId: item.id, ...args });
-      if (activeRef.current === item.artifactId) { setFeedback(result.feedback); if (action === 'delete' || action === 'resolve') setSelectedFeedback(previous => previous?.id === item.id ? null : previous); }
+      if (activeRef.current === item.artifactId) { await acceptFeedback(result.feedback); if (action === 'delete' || action === 'resolve') setSelectedFeedback(previous => previous?.id === item.id ? null : previous); }
       if (action === 'send') inform('请求已提交，等待房主附加到对话。');
+      if (attempt && replyAttempts.current.get(attemptKey) === attempt) replyAttempts.current.delete(attemptKey);
       return result.feedback.find(entry => entry.id === item.id) || null;
     }
     finally { if (mounted.current) setBusy(''); }
@@ -602,8 +565,9 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
     catch (cause) { fail(cause); return false; }
     finally { if (mounted.current) setBusy(''); }
   }
-  async function changeSharing(action: 'start' | 'stop' | 'reset' | 'link' | 'role' | 'remove', options: { role?: string; on?: boolean; memberId?: string } = {}): Promise<boolean> {
+  async function changeSharing(action: 'start' | 'stop' | 'reset' | 'link' | 'role' | 'remove', options: { role?: string; on?: boolean; memberId?: string; access?: 'local' | 'lan' } = {}): Promise<boolean> {
     const id = activeRef.current; if (!id || busy) return false;
+    shareSequence.current += 1;
     setBusy('share'); setError('');
     try { const result = await client.call<ShareState>('artifact_share', { artifactId: id, action, ...options }); if (activeRef.current === id) setShare(result); return true; }
     catch (cause) { fail(cause, () => { void changeSharing(action, options); }); return false; }
@@ -611,17 +575,34 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   }
   async function copyLink(link: string) {
     try { await copyPlainText(link); inform('链接已复制。'); }
-    catch (cause) { fail(cause); }
+    catch { setCopyFallback(link); }
+  }
+  async function copyInvitation(link: string | undefined, role: 'editor' | 'commenter' | 'viewer') {
+    const id = activeRef.current; if (!id || busy) return;
+    if (link) { await copyLink(link); return; }
+    if (share?.enabled) { fail(new Error('该角色的邀请链接不可用，请重新读取分享权限。')); return; }
+    shareSequence.current += 1;
+    setBusy('share'); setError('');
+    try {
+      const result = await client.call<ShareState>('artifact_share', { artifactId: id, action: 'start', access: 'local' });
+      if (activeRef.current !== id) return;
+      setShare(result);
+      const invitation = result.links?.[role];
+      if (!invitation) throw new Error('该角色的邀请链接不可用，请重新读取分享权限。');
+      await copyLink(invitation);
+    } catch (cause) { fail(cause); }
+    finally { if (mounted.current) setBusy(''); }
   }
   async function copyArtifactLink(artifact: Artifact) {
     if (busy) return;
     setMenuId(''); setBusy(`copy-link:${artifact.id}`);
     try {
-      const state = await client.call<ShareState>('artifact_share', { action: 'status', artifactId: artifact.id });
+      let state = await client.call<ShareState>('artifact_share', { action: 'status', artifactId: artifact.id });
+      if (!state.enabled) state = await client.call<ShareState>('artifact_share', { action: 'start', artifactId: artifact.id, access: 'local' });
       if (state.enabled && state.links?.viewer) await copyLink(state.links.viewer);
       else {
         openArtifact(artifact.id); setPanel('share'); setShare(state);
-        inform('请先开启局域网共享，再复制访问链接。');
+        inform('仅查看邀请链接已停用，请在分享面板中启用。');
       }
     } catch (cause) { fail(cause); }
     finally { if (mounted.current) setBusy(''); }
@@ -655,17 +636,16 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
   }
   const product = getProduct(board?.artifact.type || products[0]!.id)!;
   const ProductEditor = product.Editor;
-  const otherPeers = peers.filter(peer => peer.peerId !== peerId);
-  const followedPeer = peers.find(peer => peer.peerId === following);
-  const collaboration = client.baseUrl && <div className="studio-presence"><button className="studio-icon-button" aria-label="在线协作" aria-expanded={presenceOpen} onClick={() => setPresenceOpen(previous => !previous)}><Users size={18} />{otherPeers.length > 0 && <small>{otherPeers.length + 1}</small>}</button>{presenceOpen && <div className="studio-presence-menu"><h3>在线协作</h3><p>{otherPeers.length ? `你和 ${otherPeers.length} 位协作者正在这里` : '目前只有你在白板上'}</p>{otherPeers.map(peer => <div className="studio-peer-row" key={peer.peerId}><span className="studio-peer-avatar">{peer.actor.name.slice(0, 1)}</span><span>{peer.actor.name}</span><button className="studio-link-button" disabled={!peer.context?.viewport} onClick={() => { setFollowing(following === peer.peerId ? '' : peer.peerId); setPresenceOpen(false); }}>{following === peer.peerId ? '停止跟随' : '跟随'}</button></div>)}<form className="studio-cursor-chat" onSubmit={sendCursorChat}><label htmlFor="studio-cursor-chat">光标聊天</label><div><input id="studio-cursor-chat" value={cursorChat} onChange={event => setCursorChat(event.target.value)} maxLength={240} placeholder="在光标旁说句话…" /><button className="studio-icon-button" aria-label="发送光标消息" disabled={!cursorChat.trim()}><Send size={14} /></button></div><button type="button" className="studio-link-button" onClick={() => { presenceRef.current.chat = ''; requestPresence.current?.(); }}>清除我的消息</button></form></div>}</div>;
-
   const activeFeedback = feedback.find(item => item.id === selectedFeedback?.id);
   const closePreview = () => { versionSequence.current += 1; setPreview(null); };
   const historyContent = <div aria-label="版本历史面板"><HistoryPanel history={history} currentRevision={board?.artifact.revision || 0} actor={actor} loading={historyLoading} busy={!!busy} previewId={preview?.version.id} canRestore={canEdit} onRefresh={() => void loadHistory()} onPreview={entry => void previewVersion(entry)} onRestore={restoreVersion} onLoadChanges={loadHistoryChanges} onReturnToCurrent={closePreview} onClose={() => setPanel(null)} /></div>;
-  const shareContent = <div aria-label="分享面板"><SharePanel title={board?.artifact.title || '作品'} actor={actor} share={share} busy={!!busy} exportFormats={product.exportFormats} canBackup={canManage} onStart={() => changeSharing('start')} onReset={role => changeSharing('reset', { role })} onStop={() => changeSharing('stop')} onToggleRole={(role, on) => changeSharing('link', { role, on })} onMemberRole={(memberId, role) => changeSharing('role', { memberId, role })} onRemoveMember={memberId => changeSharing('remove', { memberId })} onCopy={link => void copyLink(link)} onExport={format => void exportBoard(format)} extraContent={<div className="studio-editor-secondary"><button className="studio-button studio-text-button" aria-label={resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题'} onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>{resolvedTheme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}切换为{resolvedTheme === 'dark' ? '明亮' : '暗色'}主题</button>{collaboration}</div>} /></div>;
+  const shareContent = <div aria-label="分享面板"><SharePanel title={board?.artifact.title || '作品'} actor={actor} share={share} busy={!!busy} exportFormats={product.exportFormats} canBackup={canManage} onStart={access => changeSharing('start', { access })} onReset={role => changeSharing('reset', { role })} onToggleRole={(role, on) => changeSharing('link', { role, on })} onMemberRole={(memberId, role) => changeSharing('role', { memberId, role })} onRemoveMember={memberId => changeSharing('remove', { memberId })} canonicalLink={share?.canonicalPath && client.baseUrl ? new URL(share.canonicalPath, client.baseUrl).href : undefined} onCopy={(link, role) => { if (role) void copyInvitation(link, role); else if (link) void copyLink(link); }} onExport={format => void exportBoard(format)} extraContent={<div className="studio-editor-secondary"><button className="studio-button studio-text-button" aria-label={resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题'} onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>{resolvedTheme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}切换为{resolvedTheme === 'dark' ? '明亮' : '暗色'}主题</button></div>} /></div>;
   const commentsContent = <CommentsPanel feedback={feedback} actor={actor} busy={!!busy} showResolved={showResolved} onShowResolved={setShowResolved} onOpen={selectFeedback} onAction={feedbackAction} onAttach={attachFeedback} renderSuggestion={item => <SuggestionPanel feedback={item} client={client} artifactId={activeId} onChanged={acceptBoard} onPreview={operations => void previewSuggestion(item, operations)} onRefresh={() => void refreshBoard()} onError={fail} />} />;
 
-  return <div className={`studio ${activeId ? 'studio-editor' : 'studio-library'}`} data-studio-theme={resolvedTheme}>
+  return <div ref={studioRoot} className={`studio ${activeId ? 'studio-editor' : 'studio-library'}${session.status === 'denied' ? ' studio-session-denied' : ''}`} data-session-status={session.status} data-studio-theme={resolvedTheme}>
+    <SessionNotice status={session.status} reason={session.reason} onRetry={() => void session.check()} />
+    <CursorChat enabled={!!activeId && !accessPending && !preview && !suggestionPreview} live={cursorLive} color={claimParticipantColor(actor, peerId, peers)} onMessage={(text, expiresAt) => collaboration.presence({ chat: text, chatExpiresAt: expiresAt })} />
+    <div className="studio-session-content" hidden={session.status === 'denied'} aria-hidden={session.status === 'denied' ? true : undefined} inert={accessPending}>
     {error && <div className="studio-error" role="alert"><AlertCircle size={17} /><span>{error}</span>{retryRef.current && <button onClick={() => { setError(''); retryRef.current?.(); }}>重试</button>}<button className="studio-icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15} /></button></div>}
     {notice && <div className="studio-notice" role="status"><Check size={15} />{notice}<button className="studio-icon-button" aria-label="关闭通知" onClick={() => setNotice('')}><X size={14} /></button></div>}
     {readerFallback?.artifactId === activeId && <div className="studio-reader-fallback" role="status"><span>请点击链接打开 HTML 阅读页。</span><a href={readerFallback.url} target="_blank" rel="noopener noreferrer" onClick={() => { setReaderSession({ artifactId: activeId, expiresAt: readerFallback.expiresAt }); setReaderFallback(null); }}>在新标签打开</a><button className="studio-icon-button" aria-label="关闭阅读页链接" onClick={() => setReaderFallback(null)}><X size={14} /></button></div>}
@@ -689,19 +669,22 @@ export default function StudioApp({ client, actor: initialActor, initialArtifact
         </section>
       </> : <div className="studio-empty"><Share2 size={30} /><h3>从分享链接打开白板</h3><p>此页面仅显示你获准访问的作品。</p></div>}
     </main> : <>
-      <header className="studio-editor-header"><div className="studio-editor-title">{canManage ? <button className="studio-icon-button" aria-label="返回作品中心" onClick={goHome}><ArrowLeft size={20} /></button> : <Share2 size={22} className="studio-guest-brand" />}<input aria-label={`${product.label}名称`} value={titleDraft} readOnly={!canManage || !!preview} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { skipTitleBlur.current = true; setTitleDraft(boardRef.current?.artifact.title || ''); event.currentTarget.blur(); } }} onBlur={() => { if (skipTitleBlur.current) { skipTitleBlur.current = false; return; } const title = titleDraft.trim(); if (board && title && title !== board.artifact.title) void manageArtifact('rename', board.artifact, { title }); else if (!title) setTitleDraft(board?.artifact.title || ''); }} /><span className={`studio-save-status ${sync === 'reconnecting' ? 'studio-save-warning' : ''}`} role="status">{sync === 'loading' ? <Loader2 size={13} className="studio-spin" /> : sync === 'reconnecting' ? <RefreshCw size={13} /> : <Check size={13} />}{sync === 'loading' ? '加载中' : sync === 'reconnecting' ? '正在重连' : canEdit ? '已保存' : '只读'}</span></div><div className="studio-editor-actions">
+      <header className="studio-editor-header"><div className="studio-editor-title">{canManage ? <button className="studio-icon-button" aria-label="返回作品中心" onClick={goHome}><ArrowLeft size={20} /></button> : <Share2 size={22} className="studio-guest-brand" />}<input aria-label={`${product.label}名称`} value={titleDraft} readOnly={!canManage || !!preview} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { skipTitleBlur.current = true; setTitleDraft(boardRef.current?.artifact.title || ''); event.currentTarget.blur(); } }} onBlur={() => { if (skipTitleBlur.current) { skipTitleBlur.current = false; return; } if (!canManage) return; const title = titleDraft.trim(); if (board && title && title !== board.artifact.title) void manageArtifact('rename', board.artifact, { title }); else if (!title) setTitleDraft(board?.artifact.title || ''); }} /><SaveStatus activity={saveActivity} sync={sync} session={session.status} canEdit={canEdit} /></div><div className="studio-editor-actions">
+        <OnlineParticipants peers={peers} actor={actor} following={following} onFollow={id => { setTargetViewport(undefined); if (id) setFollowing(id); else stopFollowing(); }} />
         <div className="studio-editor-popover-anchor"><button ref={historyButton} className={`studio-icon-button${panel === 'history' ? ' is-active' : ''}`} aria-label="版本历史" title="版本历史" aria-expanded={panel === 'history'} onClick={() => togglePanel('history')}><Clock3 size={20} /></button>{panel === 'history' && <EditorPopover title="版本历史" className="studio-history-popover" hideHeading anchorRef={historyButton} onClose={() => setPanel(null)}>{historyContent}</EditorPopover>}</div>
-        <div className="studio-editor-popover-anchor"><button ref={shareButton} className={`studio-button studio-text-button${panel === 'share' ? ' is-active' : ''}`} aria-label="分享" aria-expanded={panel === 'share'} onClick={() => togglePanel('share')}><Share2 size={19} /><span>分享</span></button>{panel === 'share' && <EditorPopover title={board?.artifact.title || '分享作品'} className="studio-share-popover" anchorRef={shareButton} onClose={() => setPanel(null)}>{shareContent}</EditorPopover>}</div>
+        <div className="studio-editor-popover-anchor"><button ref={shareButton} className={`studio-button studio-text-button${panel === 'share' ? ' is-active' : ''}`} aria-label="分享" aria-expanded={panel === 'share'} onClick={() => togglePanel('share')}><Share2 size={19} /><span>分享</span>{(share?.access ?? session.access) === 'lan' && <span className="studio-share-lan-dot" role="img" aria-label="局域网共享已开启" title="局域网共享已开启" />}</button>{panel === 'share' && <EditorPopover title={board?.artifact.title || '分享作品'} className="studio-share-popover" anchorRef={shareButton} onClose={() => setPanel(null)}>{shareContent}</EditorPopover>}</div>
         <div className="studio-comment-mode-control"><button className={`studio-icon-button${annotationActive ? ' is-active' : ''}`} aria-label="备注" title="点击目标添加备注" aria-pressed={annotationActive} disabled={!board || !canComment || !!preview || !!suggestionPreview} onClick={() => { setPanel(null); setAnnotationActive(previous => !previous); if (annotation && feedbackText.trim()) setCommentOpen(true); }}><MessageSquare size={20} fill={annotationActive ? 'currentColor' : 'none'} /></button><div className="studio-editor-popover-anchor"><button ref={commentsButton} className="studio-icon-button studio-comment-dropdown" aria-label="备注列表" title="备注列表" aria-expanded={panel === 'feedback'} onClick={() => togglePanel('feedback')}><ChevronDown size={15} />{feedback.some(item => item.status !== 'resolved') && <span className="studio-unread-dot" />}</button>{panel === 'feedback' && <EditorPopover title="所有备注" className="studio-comments-panel" anchorRef={commentsButton} onClose={() => setPanel(null)}>{commentsContent}</EditorPopover>}</div></div>
       </div></header>
       {preview && <div className="studio-preview-banner"><Clock3 size={16} /><span>正在预览版本 {preview.version.revision}，当前白板未改变。</span><button className="studio-button studio-compact" onClick={closePreview}>退出预览</button>{canEdit && <button className="studio-button studio-primary studio-compact" disabled={!!busy} onClick={() => setPreviewRestoreOpen(true)}><RotateCcw size={14} />恢复此版本</button>}</div>}
       {previewRestoreOpen && preview && <StudioDialog title="恢复此版本？" onClose={() => { if (!busy) setPreviewRestoreOpen(false); }}><p>将整个作品恢复到版本 {preview.version.revision}。恢复会创建新版本，已有历史记录将保留。</p><div className="studio-modal-footer"><button type="button" className="studio-button" disabled={!!busy} onClick={() => setPreviewRestoreOpen(false)}>取消</button><button type="button" className="studio-button studio-primary" disabled={!!busy} onClick={() => { void restoreVersion().then(restored => { if (restored) setPreviewRestoreOpen(false); }); }}>确认恢复</button></div></StudioDialog>}
       {following && <div className="studio-follow-banner"><Users size={14} /><span>正在跟随 {followedPeer?.actor.name || "协作者"} 的视角</span><button className="studio-link-button" onClick={() => setFollowing('')}>停止跟随</button></div>}
-      <div className="studio-workspace"><div ref={canvasArea} className="studio-canvas-area">{board ? <ProductEditor key={board.artifact.id} document={preview?.board || suggestionPreview || board} client={client} actor={actor} onChanged={acceptBoard} onAnnotate={annotate} onError={fail} onNotice={inform} readOnly={!canEdit || !!preview || !!suggestionPreview} annotationActive={annotationActive && !preview && !suggestionPreview} annotationTarget={commentOpen && annotation ? annotation.anchor : activeFeedback?.anchor} onAnnotationModeChange={setAnnotationActive} onSelectionChange={selectionChanged} onActivityChange={editorActivityChanged} activities={feedback.filter(item => item.status !== 'resolved' || showResolved)} onFeedbackSelect={selectFeedback} onOpenHtml={regionId => void openHtmlReader(regionId)} documentControls={client.baseUrl && <TimerControl timer={roomTimer} canEdit={canEdit && !preview && !suggestionPreview} busy={timerBusy} onAction={(action, duration, delta) => void changeTimer(action, duration, delta)} />} onViewportChange={viewportChanged} onCursorMove={cursorMoved} presence={peers} selfPeerId={peerId} externalViewport={followedPeer?.context?.viewport || targetViewport} externalSelectedIds={targetSelection} /> : <div className="studio-empty"><Loader2 size={28} className="studio-spin" /><p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>{error && <button className="studio-button" onClick={() => void refreshBoard()}><RefreshCw size={16} />重新加载</button>}</div>}</div></div>
+      <div className="studio-workspace"><div ref={canvasArea} className="studio-canvas-area">{board ? <><div className="studio-live-editor" hidden={!!preview || !!suggestionPreview}><ProductEditor key={board.artifact.id} document={board} client={client} actor={actor} clockOffsetMs={clockOffsetMs} onChanged={acceptBoard} onAnnotate={annotate} onError={fail} onNotice={inform} readOnly={!canEdit || !!preview || !!suggestionPreview} annotationActive={annotationActive && !preview && !suggestionPreview} annotationTarget={commentOpen && annotation ? annotation.anchor : activeFeedback?.anchor} onAnnotationModeChange={setAnnotationActive} onSelectionChange={selectionChanged} onActivityChange={editorActivityChanged} activities={feedback.filter(item => item.status !== 'resolved' || showResolved)} onFeedbackSelect={selectFeedback} onOpenHtml={regionId => void openHtmlReader(regionId)} documentControls={client.baseUrl && <TimerControl timer={roomTimer} clockOffsetMs={clockOffsetMs} canEdit={canEdit && !preview && !suggestionPreview} busy={timerBusy} onAction={(action, duration, delta) => void changeTimer(action, duration, delta)} />} onViewportChange={viewportChanged} onCursorMove={cursorMoved} onViewportInteract={stopFollowing} room={collaboration.room} presence={peers} selfPeerId={peerId} externalViewport={follow.viewport || targetViewport} externalSelectedIds={targetSelection} /></div>{(preview?.board || suggestionPreview) && <ProductEditor key={`preview-${preview?.version.id || 'suggestion'}`} document={preview?.board || suggestionPreview!} client={client} actor={actor} clockOffsetMs={clockOffsetMs} readOnly preview onChanged={() => {}} onAnnotate={() => {}} onSelectionChange={() => {}} onViewportChange={() => {}} onCursorMove={() => {}} presence={[]} selfPeerId={`preview-${peerId}`} />}</> : <div className="studio-empty"><Loader2 size={28} className="studio-spin" /><p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>{error && <button className="studio-button" onClick={() => void refreshBoard()}><RefreshCw size={16} />重新加载</button>}</div>}</div></div>
       {commentOpen && annotation && canComment && <CommentPopover point={annotation.screenPoint} locate={() => commentPoint(annotation.anchor, undefined, annotation.screenPoint)} draft pinLabel={actor.name} label={annotation.label} onClose={() => setCommentOpen(false)} onOutside={() => { if (!feedbackText.trim() && !savedComment) setCommentOpen(false); }}><CommentComposer text={feedbackText} attach={attachComment} busy={busy === 'feedback'} saved={!!savedComment} error={commentError} onTextChange={setFeedbackText} onAttachChange={setAttachComment} onSubmit={event => void createFeedback(event)} /></CommentPopover>}
       {activeFeedback && selectedFeedback && <CommentPopover point={selectedFeedback.point} locate={() => commentPoint(activeFeedback.anchor, activeFeedback.id, selectedFeedback.point)} onClose={() => setSelectedFeedback(null)}><CommentThread feedback={activeFeedback} actor={actor} busy={!!busy} onAction={feedbackAction} onAttach={attachFeedback} onClose={() => setSelectedFeedback(null)} replyText={replies[activeFeedback.id] || ''} onReplyTextChange={value => setReplies(previous => ({ ...previous, [activeFeedback.id]: value }))} /></CommentPopover>}    </>}
     {purgeConfirmation && <StudioDialog title={purgeConfirmation.all ? '清空回收站' : '永久删除作品'} onClose={() => { if (!purgeRunning.current) setPurgeConfirmation(null); }}><p>将永久删除 {purgeConfirmation.targets.length} 项作品，此操作无法恢复。</p>{purgeConfirmation.targets.length === 1 && <p className="studio-purge-target">{purgeConfirmation.targets[0]!.title}</p>}<div className="studio-modal-footer"><button type="button" className="studio-button" disabled={!!busy} onClick={() => setPurgeConfirmation(null)}>取消</button><button type="button" className="studio-button studio-purge-confirm" disabled={!!busy} onClick={() => void purgeArtifacts()}>{busy === 'purge' ? <Loader2 className="studio-spin" size={15} /> : <Trash2 size={15} />}{busy === 'purge' ? '正在删除…' : purgeConfirmation.all ? '清空回收站' : '永久删除'}</button></div></StudioDialog>}
+    {copyFallback && <StudioDialog title="手动复制链接" onClose={() => setCopyFallback('')}><p>浏览器未能自动复制，请复制下面的邀请链接。</p><input className="studio-text-field" aria-label="邀请链接" readOnly value={copyFallback} onFocus={event => event.currentTarget.select()} autoFocus /><div className="studio-modal-footer"><button className="studio-button" onClick={() => setCopyFallback('')}>完成</button></div></StudioDialog>}
     {rename && <StudioDialog title="重命名作品" onClose={() => setRename(null)}><form onSubmit={event => { event.preventDefault(); if (rename.title.trim()) void manageArtifact('rename', rename.artifact, { title: rename.title.trim() }); }}><label className="studio-field-label" htmlFor="studio-rename-title">作品名称</label><input className="studio-text-field" id="studio-rename-title" maxLength={200} value={rename.title} onChange={event => setRename(previous => previous ? { ...previous, title: event.target.value } : null)} /><div className="studio-modal-footer"><button type="button" className="studio-button" onClick={() => setRename(null)}>取消</button><button className="studio-button studio-primary" type="submit" disabled={!rename.title.trim() || !!busy}>保存</button></div></form></StudioDialog>}
 
+    </div>
   </div>;
 }

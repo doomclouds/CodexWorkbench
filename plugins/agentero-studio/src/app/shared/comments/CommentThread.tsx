@@ -2,11 +2,12 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Mouse
 import { ArrowUp, Check, MoreHorizontal, Pencil, RotateCcw, Send, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import type { Actor, Feedback } from '../../../contracts/studio';
+import { newClientId } from '../client-id';
 
 export type CommentAction = 'reply' | 'edit' | 'delete' | 'resolve' | 'reopen' | 'send';
-export interface CommentActionArguments { text?: string; replyId?: string }
+export interface CommentActionArguments { text?: string; replyId?: string; expectedText?: string }
 export type RunCommentAction = (action: CommentAction, item: Feedback, args?: CommentActionArguments) => Promise<Feedback | null>;
-interface MenuItem { label: string; icon: ReactNode; danger?: boolean; checked?: boolean; run: () => void }
+interface MenuItem { label: string; icon: ReactNode; title?: string; danger?: boolean; checked?: boolean; run: () => void }
 
 export function CommentMenu({ label, items, disabled, icon }: { label: string; items: MenuItem[]; disabled: boolean; icon?: ReactNode }) {
   const [open, setOpen] = useState(false), root = useRef<HTMLDivElement>(null), button = useRef<HTMLButtonElement>(null), menu = useRef<HTMLDivElement>(null);
@@ -28,7 +29,7 @@ export function CommentMenu({ label, items, disabled, icon }: { label: string; i
       const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role^=menuitem]')], index = options.indexOf(document.activeElement as HTMLButtonElement);
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setOpen(false); button.current?.focus(); }
       else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) { event.preventDefault(); options[event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length]?.focus(); }
-    }}>{items.map(item => <button type="button" role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked} key={item.label} className={item.danger ? 'is-danger' : ''} onClick={() => { setOpen(false); button.current?.focus(); item.run(); }}>{item.icon}<span>{item.label}</span>{item.checked && <Check size={14} />}</button>)}</div>, root.current?.closest('.studio') || document.body)}
+    }}>{items.map(item => <button type="button" role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'} aria-checked={item.checked} title={item.title} key={item.label} className={item.danger ? 'is-danger' : ''} onClick={() => { setOpen(false); button.current?.focus(); item.run(); }}>{item.icon}<span>{item.label}</span>{item.checked && <Check size={14} />}</button>)}</div>, root.current?.closest('.studio') || document.body)}
   </div>;
 }
 
@@ -48,23 +49,29 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
   const [editing, setEditing] = useState<string | null>(null), [editText, setEditText] = useState(''), [deleting, setDeleting] = useState(false), [error, setError] = useState(''), [running, setRunning] = useState(false), [attach, setAttach] = useState(false), [pendingReply, setPendingReply] = useState<Feedback | null>(null);
   const [editAttach, setEditAttach] = useState(false), [savedEdit, setSavedEdit] = useState<Feedback | null>(null);
   const input = useRef<HTMLTextAreaElement>(null), submitLock = useRef(false);
+  const editBase = useRef('');
+  const replyAttempt = useRef<{ threadId: string; actorId: string; actorKind: Actor['kind']; text: string; replyId: string } | null>(null);
+  const currentReplyText = useRef(replyText); currentReplyText.current = replyText;
   const canComment = actor.role !== 'viewer', canDelete = canComment && (actor.role === 'owner' || own(feedback.author, actor));
-  const canResolve = actor.role === 'owner' || actor.role === 'editor' || canComment && own(feedback.author, actor);
+  const commentPermission = useRef(canComment); commentPermission.current = canComment;
+  const processing = feedback.status === 'processing';
+  const otherAgentProcessing = actor.kind === 'agent' && processing && feedback.processingBy && (feedback.processingBy.id !== actor.id || feedback.processingBy.kind !== actor.kind);
+  const canResolve = !otherAgentProcessing && (actor.role === 'owner' || actor.role === 'editor' || canComment && own(feedback.author, actor));
   const disabled = busy || running, resolved = feedback.status === 'resolved';
   useEffect(() => { if (editing) input.current?.focus(); }, [editing]);
   async function run(action: CommentAction, args?: CommentActionArguments) {
-    if (submitLock.current) return undefined;
+    if (submitLock.current || !commentPermission.current) return undefined;
     submitLock.current = true; setRunning(true); setError('');
     try { return await onAction(action, feedback, args); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return undefined; }
     finally { submitLock.current = false; setRunning(false); }
   }
-  function edit(id: string, text: string) { setDeleting(false); setEditText(text); setEditing(id); setEditAttach(false); setSavedEdit(null); setError(''); }
+  function edit(id: string, text: string) { if (!commentPermission.current) return; editBase.current = text; setDeleting(false); setEditText(text); setEditing(id); setEditAttach(false); setSavedEdit(null); setError(''); }
   async function saveEdit(event: FormEvent) {
-    event.preventDefault(); if (!editText.trim()) return;
-    const result = savedEdit || await run('edit', { text: editText.trim(), ...(editing !== 'main' ? { replyId: editing! } : {}) });
+    event.preventDefault(); if (!commentPermission.current || !editText.trim()) return;
+    const result = savedEdit || await run('edit', { text: editText.trim(), expectedText: editBase.current, ...(editing !== 'main' ? { replyId: editing! } : {}) });
     if (!result) return;
-    if (editAttach) {
+    if (editAttach && commentPermission.current) {
       setRunning(true);
       try { await onAttach(result); setSavedEdit(null); }
       catch (cause) { setSavedEdit(result); setError(cause instanceof Error ? cause.message : String(cause)); return; }
@@ -73,20 +80,29 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
     setEditing(null);
   }
   async function submitReply(event: FormEvent) {
-    event.preventDefault();
+    event.preventDefault(); if (!commentPermission.current) return;
     let saved = pendingReply;
-    if (!saved) { if (!replyText.trim()) return; saved = await run('reply', { text: replyText.trim() }) || null; if (!saved) return; onReplyTextChange?.(''); }
-    if (attach) {
+    if (!saved) {
+      const content = replyText.trim(); if (!content) return;
+      let attempt = replyAttempt.current;
+      if (!attempt || attempt.threadId !== feedback.id || attempt.actorId !== actor.id || attempt.actorKind !== actor.kind || attempt.text !== content) attempt = replyAttempt.current = { threadId: feedback.id, actorId: actor.id, actorKind: actor.kind, text: content, replyId: newClientId() };
+      saved = await run('reply', { text: attempt.text, replyId: attempt.replyId }) || null;
+      if (!saved) return;
+      replyAttempt.current = null;
+      if (currentReplyText.current === replyText) onReplyTextChange?.('');
+    }
+    if (attach && commentPermission.current) {
       setRunning(true);
       try { await onAttach(saved); setPendingReply(null); }
       catch (cause) { setPendingReply(saved); setError(cause instanceof Error ? cause.message : String(cause)); }
       finally { setRunning(false); }
     }
   }
-  const editor = <form className="studio-comment-edit" onSubmit={event => void saveEdit(event)}><textarea ref={input} aria-label="编辑备注内容" value={editText} rows={3} maxLength={16000} disabled={disabled || !!savedEdit} onChange={event => setEditText(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(null); } }} /><label className="studio-comment-edit-attach"><input type="checkbox" checked={editAttach} disabled={disabled || !!savedEdit} onChange={event => setEditAttach(event.target.checked)} />附加到对话</label><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setEditing(null)}>取消</button><button type="submit" className="studio-button studio-primary" disabled={disabled || !editText.trim()}>{savedEdit ? '重试附加' : '保存'}</button></div></form>;
+  const editor = <form className="studio-comment-edit" onSubmit={event => void saveEdit(event)}><textarea ref={input} aria-label="编辑备注内容" value={editText} rows={3} maxLength={16000} readOnly={!canComment} disabled={disabled || !!savedEdit} onChange={event => setEditText(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(null); } }} /><label className="studio-comment-edit-attach"><input type="checkbox" checked={editAttach} disabled={!canComment || disabled || !!savedEdit} onChange={event => setEditAttach(event.target.checked)} />附加到对话</label><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setEditing(null)}>取消</button><button type="submit" className="studio-button studio-primary" disabled={!canComment || disabled || !editText.trim()}>{savedEdit ? '重试附加' : '保存'}</button></div></form>;
   const mainMenu: MenuItem[] = [
     ...(canComment && own(feedback.author, actor) ? [{ label: '编辑', icon: <Pencil size={14} />, run: () => edit('main', feedback.text) }] : []),
     ...(canResolve && resolved ? [{ label: '重新打开', icon: <RotateCcw size={14} />, run: () => { void run('reopen'); } }] : []),
+    ...(processing && actor.kind === 'human' && actor.role === 'owner' ? [{ label: '重新打开备注', title: '仅清除处理标记；已经开始的任务不会因此中断。', icon: <RotateCcw size={14} />, run: () => { void run('reopen'); } }] : []),
     ...(canComment ? [{ label: '附加到对话', icon: <Send size={14} />, run: () => { setError(''); void onAttach(feedback).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); } }] : []),
     ...(canDelete ? [{ label: '删除备注线程', icon: <Trash2 size={14} />, danger: true, run: () => { setEditing(null); setDeleting(true); } }] : []),
   ];
@@ -96,15 +112,15 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
       <CommentMenu label="备注操作" items={mainMenu} disabled={disabled} />
       {!compact && <button type="button" className="studio-icon-button" aria-label="关闭备注" onClick={onClose}><X size={15} /></button>}
     </MessageHeader>
-    {feedback.status !== 'open' && <span className={`studio-feedback-status studio-feedback-status-${feedback.status}`}>{resolved ? '已解决' : feedback.status === 'pending' ? '待房主处理' : '处理中'}</span>}
+    {feedback.status !== 'open' && <span className={`studio-feedback-status studio-feedback-status-${feedback.status}`}>{resolved ? '已解决' : feedback.status === 'pending' ? '待房主处理' : feedback.processingBy ? `${feedback.processingBy.name || (feedback.processingBy.kind === 'agent' ? 'Codex' : '协作者')} 正在处理` : '处理中'}</span>}
     {editing === 'main' ? editor : <p className="studio-feedback-message">{feedback.text}</p>}
-    {deleting && <div className="studio-comment-delete-confirm" role="group" aria-label="删除备注确认"><p>删除这条备注及其所有回复？</p><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setDeleting(false)}>取消</button><button type="button" className="studio-button is-danger" disabled={disabled} onClick={() => { void run('delete'); }}>删除</button></div></div>}
+    {deleting && <div className="studio-comment-delete-confirm" role="group" aria-label="删除备注确认"><p>删除这条备注及其所有回复？</p><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setDeleting(false)}>取消</button><button type="button" className="studio-button is-danger" disabled={!canDelete || disabled} onClick={() => { void run('delete'); }}>删除</button></div></div>}
     {compact ? feedback.replies.length > 0 && <button type="button" className="studio-link-button studio-comment-reply-count" onClick={onOpen}>{feedback.replies.length} 条回复</button> : <>
       <div className="studio-comment-replies">{feedback.replies.map(reply => <div className="studio-feedback-reply" key={reply.id}>
         <MessageHeader author={reply.author} date={reply.createdAt} expanded><CommentMenu label={`回复操作：${reply.author.name}`} disabled={disabled} items={canComment && own(reply.author, actor) ? [{ label: '编辑回复', icon: <Pencil size={14} />, run: () => edit(reply.id, reply.text) }] : []} /></MessageHeader>
         {editing === reply.id ? editor : <p>{reply.text}</p>}
       </div>)}</div>
-      {canComment && !editing && !deleting && <form className="studio-reply-form" onSubmit={event => void submitReply(event)}><textarea aria-label={`回复批注：${feedback.text}`} placeholder={resolved ? '回复以重新打开…' : '回复…'} value={replyText} rows={1} maxLength={16000} disabled={disabled || !!pendingReply} onChange={event => onReplyTextChange?.(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div className="studio-comment-compose-footer"><label><input type="checkbox" checked={attach} disabled={disabled || !!pendingReply} onChange={event => setAttach(event.target.checked)} />附加到对话</label><button type="submit" className="studio-comment-submit" aria-label={pendingReply ? '重试附加回复' : '发送回复'} disabled={disabled || !replyText.trim() && !pendingReply}><ArrowUp size={18} /></button></div></form>}
+      {(canComment || replyText.trim() || pendingReply) && !editing && !deleting && <form className="studio-reply-form" onSubmit={event => void submitReply(event)}><textarea aria-label={`回复批注：${feedback.text}`} placeholder={resolved ? '回复以重新打开…' : '回复…'} value={replyText} rows={1} maxLength={16000} readOnly={!canComment} disabled={disabled || !!pendingReply} onChange={event => onReplyTextChange?.(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div className="studio-comment-compose-footer">{canComment ? <><label><input type="checkbox" checked={attach} disabled={disabled || !!pendingReply} onChange={event => setAttach(event.target.checked)} />附加到对话</label><button type="submit" className="studio-comment-submit" aria-label={pendingReply ? '重试附加回复' : '发送回复'} disabled={disabled || !replyText.trim() && !pendingReply}><ArrowUp size={18} /></button></> : <span>当前为只读查看，回复草稿已保留。</span>}</div></form>}
     </>}
     {error && <p className="studio-comment-error" role="alert">{error}</p>}
   </article>;

@@ -66,6 +66,74 @@ describe('independent HTML reader', () => {
     await act(async () => root.unmount()); dom.window.close();
   });
 
+  it('synchronizes state-only updates into the existing read-only iframe and refreshes annotation authority', async () => {
+    vi.useFakeTimers(); const dom = browser();
+    let value = first;
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input.endsWith('?metadata=1')) { const { element: _element, ...metadata } = value; return Response.json({ ok: true, data: metadata }); }
+      return Response.json({ ok: true, data: value });
+    }));
+    const root = createRoot(dom.window.document.getElementById('root')!);
+    await act(async () => root.render(<HtmlReader artifactId="artifact-one" regionId="html-one" />));
+    const frame = dom.window.document.querySelector('iframe')!, source = frame.srcdoc;
+    const post = vi.spyOn(frame.contentWindow!, 'postMessage');
+    value = { ...first, version: 3, canAnnotate: false, element: { ...first.element, version: 3, state: { votes: 9 } } };
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(dom.window.document.querySelector('iframe')).toBe(frame);
+    expect(frame.srcdoc).toBe(source);
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: 'studio-html-state-update', version: 3, state: { votes: 9 } }), '*');
+    expect(dom.window.document.body.textContent).not.toContain('原 HTML 已更新');
+    expect([...dom.window.document.querySelectorAll('button')].find(button => button.textContent === '在白板中备注')?.disabled).toBe(true);
+    await act(async () => root.unmount()); dom.window.close();
+  });
+
+  it('keeps content after a network check failure, recovers its notice, then clears it on revoked return authority', async () => {
+    vi.useFakeTimers(); const dom = browser();
+    let unavailable = false;
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input.endsWith('/return')) return Response.json({ ok: false, error: { code: 'FORBIDDEN', message: '阅读权限已撤销' } }, { status: 403 });
+      if (input.endsWith('?metadata=1')) {
+        if (unavailable) throw new TypeError('连接暂不可用');
+        const { element: _element, ...metadata } = first; return Response.json({ ok: true, data: metadata });
+      }
+      return Response.json({ ok: true, data: first });
+    }));
+    const root = createRoot(dom.window.document.getElementById('root')!);
+    await act(async () => root.render(<HtmlReader artifactId="artifact-one" regionId="html-one" />));
+    const frame = dom.window.document.querySelector('iframe')!;
+    unavailable = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(dom.window.document.querySelector('iframe')).toBe(frame);
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('连接暂不可用');
+    unavailable = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(dom.window.document.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => [...dom.window.document.querySelectorAll('button')].find(button => button.textContent === '在白板中备注')!.click());
+    expect(dom.window.document.querySelector('iframe')).toBeNull();
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('阅读权限已撤销');
+    expect(dom.window.document.querySelector('[role="status"]')).toBeNull();
+    await act(async () => root.unmount()); dom.window.close();
+  });
+
+  it('does not let an earlier successful refresh revive content after a terminal access check', async () => {
+    vi.useFakeTimers(); const dom = browser();
+    let read = 0, resolveRefresh!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      if (input.endsWith('?metadata=1')) return Response.json({ ok: false, error: { code: 'UNAUTHORIZED', message: '阅读链接已撤销' } }, { status: 401 });
+      if (++read === 1) return Response.json({ ok: true, data: first });
+      return new Promise<Response>(resolve => { resolveRefresh = resolve; });
+    }));
+    const root = createRoot(dom.window.document.getElementById('root')!);
+    await act(async () => root.render(<HtmlReader artifactId="artifact-one" regionId="html-one" />));
+    await act(async () => [...dom.window.document.querySelectorAll('button')].find(button => button.textContent === '刷新')!.click());
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(dom.window.document.querySelector('iframe')).toBeNull();
+    await act(async () => resolveRefresh(Response.json({ ok: true, data: first })));
+    expect(dom.window.document.querySelector('iframe')).toBeNull();
+    expect(dom.window.document.querySelector('[role="alert"]')?.textContent).toContain('阅读链接已撤销');
+    await act(async () => root.unmount()); dom.window.close();
+  });
+
   it('uses the embedded request transport and bounds return polling to the original live view', async () => {
     vi.useFakeTimers(); const dom = browser();
     const onReturn = vi.fn();

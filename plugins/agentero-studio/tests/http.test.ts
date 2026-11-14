@@ -7,14 +7,23 @@ import { randomUUID } from 'node:crypto';
 import { startStudioHost, type StudioHost } from '../src/server/http.js';
 
 let directory: string, host: StudioHost;
-beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'agentero-studio-http-')); host = await startStudioHost({ dataRoot: directory, html: '<!doctype html><html><head><title>Studio</title></head><body><div id="root"></div></body></html>' }); });
+const guestCookies = new Map<string, string>();
+const guestHeaders = (token: string): Record<string, string> => guestCookies.has(token) ? { Cookie: guestCookies.get(token)! } : {};
+beforeEach(async () => { guestCookies.clear(); directory = await mkdtemp(join(tmpdir(), 'agentero-studio-http-')); host = await startStudioHost({ dataRoot: directory, html: '<!doctype html><html><head><title>Studio</title></head><body><div id="root"></div></body></html>' }); });
 afterEach(async () => { await host.close(); if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }); });
 async function call(name: string, args: Record<string, unknown>, token = host.token, headers: Record<string, string> = {}) {
-  const response = await fetch(`${host.origin}/api/tools/${name}${typeof args.artifactId === 'string' ? `?artifactId=${args.artifactId}` : ''}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(args) });
+  const response = await fetch(`${host.origin}/api/tools/${name}${typeof args.artifactId === 'string' ? `?artifactId=${args.artifactId}` : ''}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...guestHeaders(token), ...headers }, body: JSON.stringify(args) });
   return { response, value: await response.json() };
 }
 async function work() { return (await call('artifact_manage', { action: 'create', title: 'LAN 设计' })).value.data.artifact; }
-async function sharing(id: string) { return (await call('artifact_share', { artifactId: id, action: 'start' })).value.data; }
+async function sharing(id: string) {
+  const info = (await call('artifact_share', { artifactId: id, action: 'start' })).value.data;
+  for (const role of ['editor', 'commenter', 'viewer']) {
+    const token = shareToken(info, role), joined = await fetch(`${host.origin}/api/session?artifactId=${id}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: `${role}-${id.slice(0, 8)}` }) });
+    expect(joined.status).toBe(200); guestCookies.set(token, joined.headers.get('set-cookie')!.split(';')[0]!);
+  }
+  return info;
+}
 function shareToken(share: { links: Record<string, string> }, role: string) { return new URL(share.links[role]!).searchParams.get('share')!; }
 async function readSse(reader: ReadableStreamDefaultReader<Uint8Array>, match: string) {
   let text = '';
@@ -61,14 +70,14 @@ describe('Studio authenticated local and LAN host', () => {
   it('shares a real LAN web entry and restricts editor/commenter/viewer roles', async () => {
     const artifact = await work(), shared = await sharing(artifact.id);
     expect(shared.enabled).toBe(true); expect(new URL(shared.links.editor).hostname).not.toBe('127.0.0.1');
-    const page = await fetch(shared.links.editor); expect(page.status).toBe(200); expect(await page.text()).toContain('"role":"editor"');
+    const page = await fetch(shared.links.editor, { headers: guestHeaders(shareToken(shared, 'editor')) }); expect(page.status).toBe(200); expect(await page.text()).toContain('"role":"editor"');
     const operation = { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'node-a', type: 'text', text: '共同编辑' } }] };
     const edited = await call('artifact_apply', operation, shareToken(shared, 'editor'), { 'X-Studio-Actor': 'agent' });
     expect(edited.response.status).toBe(200); expect(edited.value.data.historyEntry.actor).toMatchObject({ role: 'editor', kind: 'human' });
     expect((await call('artifact_apply', { ...operation, operationId: randomUUID() }, shareToken(shared, 'commenter'))).response.status).toBe(403);
     expect((await call('artifact_feedback', { artifactId: artifact.id, action: 'create', text: '请检查这里' }, shareToken(shared, 'commenter'))).response.status).toBe(200);
     expect((await call('artifact_feedback', { artifactId: artifact.id, action: 'create', text: '不能评论' }, shareToken(shared, 'viewer'))).response.status).toBe(403);
-    expect((await call('artifact_share', { artifactId: artifact.id, action: 'status' }, shareToken(shared, 'editor'))).response.status).toBe(403);
+    expect((await call('artifact_share', { artifactId: artifact.id, action: 'stop' }, shareToken(shared, 'editor'))).response.status).toBe(403);
     expect((await call('artifact_list', { artifactId: artifact.id }, shareToken(shared, 'editor'))).response.status).toBe(403);
     const other = await work(); expect((await call('artifact_read', { artifactId: other.id }, shareToken(shared, 'viewer'))).response.status).toBe(401);
   });
@@ -81,20 +90,20 @@ describe('Studio authenticated local and LAN host', () => {
     const artifact = await work(), shared = await sharing(artifact.id), viewer = shareToken(shared, 'viewer');
     await call('artifact_apply', { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { type: 'text', text: '回收站预览保留内容' } }] });
     const path = `${host.origin}/api/thumbnails/${artifact.id}`;
-    expect((await fetch(`${path}?token=${viewer}`)).status).toBe(200);
+    expect((await fetch(`${path}?token=${viewer}`, { headers: guestHeaders(viewer) })).status).toBe(200);
     await call('artifact_manage', { action: 'trash', artifactId: artifact.id });
     const preview = await fetch(`${path}?token=${host.token}`);
     expect(preview.status).toBe(200); expect(preview.headers.get('content-type')).toBe('image/svg+xml');
     expect(await preview.text()).toContain('回收站预览保留内容');
     expect((await fetch(path)).status).toBe(401);
-    expect((await fetch(`${path}?token=${viewer}`)).status).toBe(401);
+    expect((await fetch(`${path}?token=${viewer}`, { headers: guestHeaders(viewer) })).status).toBe(401);
     await expect(host.service.getThumbnail(artifact.id, { id: 'viewer', name: 'Viewer', kind: 'human', role: 'viewer' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect((await call('artifact_read', { artifactId: artifact.id })).value.data.artifact.trashedAt).toEqual(expect.any(String));
     expect((await call('artifact_list', { trashed: true })).value.data.artifacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: artifact.id, trashedAt: expect.any(String) })]));
   });
   it('streams shared edits and terminates old live connections on link reset', async () => {
     const artifact = await work(), shared = await sharing(artifact.id), token = shareToken(shared, 'viewer');
-    const response = await fetch(`${host.origin}/api/events?artifactId=${artifact.id}&token=${token}`), reader = response.body!.getReader();
+    const response = await fetch(`${host.origin}/api/events?artifactId=${artifact.id}&token=${token}`, { headers: guestHeaders(token) }), reader = response.body!.getReader();
     expect(await readSse(reader, 'ready')).toContain('ready');
     await call('artifact_apply', { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { type: 'text' } }] });
     expect(await readSse(reader, '"type":"board"')).toContain('"type":"board"');
@@ -112,11 +121,11 @@ describe('Studio authenticated local and LAN host', () => {
   });
   it('authenticates asset reads, enforces artifact boundaries and sends presence', async () => {
     const artifact = await work(), shared = await sharing(artifact.id), editor = shareToken(shared, 'editor'), viewer = shareToken(shared, 'viewer');
-    const upload = await fetch(`${host.origin}/api/assets?artifactId=${artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${editor}`, 'Content-Type': 'image/png', 'X-Filename': encodeURIComponent('截图.png') }, body: Buffer.from('89504e470d0a1a0a', 'hex') });
+    const upload = await fetch(`${host.origin}/api/assets?artifactId=${artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${editor}`, ...guestHeaders(editor), 'Content-Type': 'image/png', 'X-Filename': encodeURIComponent('截图.png') }, body: Buffer.from('89504e470d0a1a0a', 'hex') });
     expect(upload.status).toBe(200); const asset = await upload.json();
     expect((await fetch(`${host.origin}${asset.url}`)).status).toBe(401);
-    expect((await fetch(`${host.origin}${asset.url}?token=${viewer}`)).status).toBe(200);
-    const presence = await fetch(`${host.origin}/api/presence?artifactId=${artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${editor}`, 'Content-Type': 'application/json', 'X-Studio-Peer-Id': 'peer-test' }, body: JSON.stringify({ peerId: 'peer-test', context: { viewId: 'view-test', artifactId: artifact.id, selectedIds: [] }, cursor: { x: 10, y: 40 } }) });
+    expect((await fetch(`${host.origin}${asset.url}?token=${viewer}`, { headers: guestHeaders(viewer) })).status).toBe(200);
+    const presence = await fetch(`${host.origin}/api/presence?artifactId=${artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${editor}`, ...guestHeaders(editor), 'Content-Type': 'application/json', 'X-Studio-Peer-Id': 'peer-test' }, body: JSON.stringify({ peerId: 'peer-test', context: { viewId: 'view-test', artifactId: artifact.id, selectedIds: [] }, cursor: { x: 10, y: 40 } }) });
     expect(presence.status).toBe(200); expect((await presence.json()).peers[0]).toMatchObject({ peerId: 'peer-test', cursor: { x: 10, y: 40 }, actor: { role: 'editor' } });
   });
   it('exports to authenticated downloads without putting large bytes in tool results', async () => {

@@ -3,15 +3,23 @@ import type { BoardElement } from '../../contracts/studio.js';
 import { tableRows } from './canvas-model.js';
 import RichText from './RichText.js';
 import InlineTextEditor, { type InlineTextEditorHandle, type InlineTextFormat, type InlineTextFormatState } from './InlineTextEditor.js';
+import { newClientId } from '../shared/client-id.js';
+import { applyContentIntent } from './content-queue.js';
+import { mergeJson } from '../../core/shared/safe-merge.js';
 
 interface Cell { row: number; col: number }
-interface Draft { base: BoardElement; rows: string[][]; widths: number[]; head: boolean; width: number; dirty: boolean }
+interface Draft { base: BoardElement; rows: string[][]; rowIds: string[]; columnIds: string[]; widths: number[]; head: boolean; width: number; dirty: boolean }
+export interface NativeTableDraft { base: BoardElement; changes: Partial<BoardElement> }
 interface Props {
   element: BoardElement; selected: boolean; canEdit: boolean;
   onSave: (changes: Partial<BoardElement>, base: BoardElement) => Promise<BoardElement | false>;
   onEditingChange: (active: boolean) => void;
   onRequestLink?: (url: string) => void;
   onFormatStateChange?: (state: InlineTextFormatState) => void;
+  initialDraft?: NativeTableDraft;
+  onDraftChange?: (draft: NativeTableDraft | null) => void;
+  bodyPaint?: { background: string; color: string };
+  headerPaint?: { background: string; color: string };
 }
 function makeDraft(element: BoardElement): Draft {
   const source = tableRows(element), columns = Math.max(1, ...source.map(row => row.length));
@@ -19,15 +27,19 @@ function makeDraft(element: BoardElement): Draft {
   const stored = element.data?.columnWidths;
   const widths = Array.isArray(stored) && stored.length === columns && stored.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0) ? stored as number[] : Array.from({ length: columns }, () => 1);
   const total = widths.reduce((sum, width) => sum + width, 0);
-  return { base: element, rows, widths: widths.map(width => width / total * element.w), head: element.data?.head !== false, width: element.w, dirty: false };
+  const rowIds = Array.isArray(element.data?.rowIds) && element.data.rowIds.length === rows.length ? element.data.rowIds as string[] : rows.map((_row, index) => `${element.id}:row:${index}`);
+  const columnIds = Array.isArray(element.data?.columnIds) && element.data.columnIds.length === columns ? element.data.columnIds as string[] : rows[0]!.map((_cell, index) => `${element.id}:col:${index}`);
+  return { base: element, rows, rowIds, columnIds, widths: widths.map(width => width / total * element.w), head: element.data?.head !== false, width: element.w, dirty: false };
 }
-function changeDraft(draft: Draft, changes: Partial<Pick<Draft, 'rows' | 'widths' | 'head' | 'width'>>): Draft {
+function changeDraft(draft: Draft, changes: Partial<Pick<Draft, 'rows' | 'rowIds' | 'columnIds' | 'widths' | 'head' | 'width'>>): Draft {
   const next = { ...draft, ...changes }, original = makeDraft(draft.base);
   return { ...next, dirty: next.width !== original.width || next.head !== original.head || JSON.stringify(next.rows) !== JSON.stringify(original.rows) || JSON.stringify(next.widths) !== JSON.stringify(original.widths) };
 }
+function draftChanges(draft: Draft): Partial<BoardElement> { return { data: { ...draft.base.data, rows: draft.rows, rowIds: draft.rowIds, columnIds: draft.columnIds, columnWidths: draft.widths, head: draft.head }, ...(draft.width !== draft.base.w ? { w: draft.width } : {}) }; }
+function restoreDraft(draft?: NativeTableDraft): Draft | null { return draft ? { ...makeDraft({ ...draft.base, ...draft.changes }), base: draft.base, dirty: true } : null; }
 
-export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange }: Props) {
-  const [active, setActive] = useState<Cell | null>(null), [draft, setDraft] = useState<Draft | null>(null);
+export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint }: Props) {
+  const [active, setActive] = useState<Cell | null>(null), [draft, setDraft] = useState<Draft | null>(() => restoreDraft(initialDraft));
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [resizing, setResizing] = useState(false);
   const [menu, setMenu] = useState<{ cell: Cell; x: number; y: number } | null>(null);
   const root = useRef<HTMLDivElement>(null), input = useRef<InlineTextEditorHandle>(null);
@@ -36,13 +48,17 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
   const busyRef = useRef(false), activity = useRef(onEditingChange); activity.current = onEditingChange;
   const activeRef = useRef(active); activeRef.current = active;
   const canEditRef = useRef(canEdit); canEditRef.current = canEdit;
+  const draftCallback = useRef(onDraftChange); draftCallback.current = onDraftChange;
+  const pending = useRef<{ next: Draft; close: boolean; nextCell: Cell | null } | null>(null);
+  const savingDraft = useRef<Draft | null>(null);
   const drag = useRef<{ col: number; x: number; scale: number; initial: Draft; next: Draft } | null>(null);
-  const current = draft ?? makeDraft(element), { rows, widths, head } = current;
+  const current = draft ? { ...makeDraft(applyContentIntent(draft.base, { ...draft.base, ...draftChanges(draft) }, element) as BoardElement), base: draft.base, dirty: draft.dirty } : makeDraft(element), { rows, widths, head } = current;
   const editing = Boolean(active || draft?.dirty || busy || resizing);
   useEffect(() => { activity.current(editing); }, [editing]);
   useEffect(() => () => activity.current(false), []);
   useEffect(() => { if (active && !busy) input.current?.focus(); }, [active?.row, active?.col, busy]);
-  const stage = (next: Draft | null) => { draftRef.current = next; setDraft(next); };
+  const stage = (value: Draft | null) => { const next = value && busyRef.current && savingDraft.current && JSON.stringify(draftChanges(value)) !== JSON.stringify(draftChanges(savingDraft.current)) ? { ...value, dirty: true } : value; draftRef.current = next; setDraft(next); draftCallback.current?.(next?.dirty ? { base: next.base, changes: draftChanges(next) } : null); };
+  useEffect(() => { if (draftRef.current && !draftRef.current.dirty && !busyRef.current) stage(makeDraft(element)); }, [element.version]);
   useEffect(() => {
     const node = root.current;
     if (!node) return;
@@ -71,31 +87,49 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
   }, [canEdit, element.locked]);
   const ensureDraft = () => draftRef.current ?? makeDraft(elementRef.current);
   const save = async (next: Draft, close = true, nextCell: Cell | null = active): Promise<boolean> => {
-    if (busyRef.current || !canEdit) return false;
+    if (!canEditRef.current) return false;
+    if (busyRef.current) { pending.current = { next, close, nextCell }; return false; }
     if (!next.dirty) { stage(close ? null : makeDraft(elementRef.current)); setActive(close ? null : nextCell); return true; }
-    busyRef.current = true; setBusy(true); setError('');
+    busyRef.current = true; savingDraft.current = next; setBusy(true); setError('');
     try {
-      const saved = await onSave({ data: { ...next.base.data, rows: next.rows, columnWidths: next.widths, head: next.head }, ...(next.width !== next.base.w ? { w: next.width } : {}) }, next.base);
-      if (!saved) { stage(next); setError('表格未能保存，草稿已保留。'); return false; }
+      const saved = await onSave(draftChanges(next), next.base);
+      if (!saved) { stage(draftRef.current ?? next); setError('表格未能保存，草稿已保留。'); return false; }
+      busyRef.current = false;
       const latest = elementRef.current.id === saved.id && elementRef.current.version > saved.version ? elementRef.current : saved;
       const accepted = makeDraft(latest);
+      const newer = draftRef.current;
+      if (newer?.dirty && JSON.stringify(draftChanges(newer)) !== JSON.stringify(draftChanges(next))) {
+        const merged = mergeJson({ ...next.base, ...draftChanges(next) }, { ...newer.base, ...draftChanges(newer) }, latest, ['data.rows']);
+        if (merged.conflicts.length) { stage(newer); setError('同一单元格有新的共享修改，草稿已保留，请比较后选择。'); return false; }
+        const rebased = merged.result as BoardElement;
+        stage(changeDraft({ ...makeDraft(rebased), base: latest }, {}));
+        return true;
+      }
       stage(close ? null : accepted);
       setActive(close || !nextCell ? null : { row: Math.min(nextCell.row, accepted.rows.length - 1), col: Math.min(nextCell.col, accepted.rows[0]!.length - 1) });
       return true;
-    } catch (failure) { stage(next); setError(failure instanceof Error ? failure.message : String(failure)); return false; }
-    finally { busyRef.current = false; setBusy(false); }
+    } catch (failure) { stage(draftRef.current ?? next); setError(failure instanceof Error ? failure.message : String(failure)); return false; }
+    finally { busyRef.current = false; savingDraft.current = null; setBusy(false); const queued = pending.current; pending.current = null; if (queued && canEditRef.current) void save(draftRef.current ?? queued.next, queued.close, queued.nextCell); }
   };
+  const liveSave = useRef(() => {}); liveSave.current = () => { if (draftRef.current?.dirty && !error) void save(draftRef.current, false); };
+  const waitStarted = useRef<number | null>(null);
+  useEffect(() => {
+    if (!draft?.dirty || !canEdit || error) { waitStarted.current = null; return; }
+    waitStarted.current ??= Date.now();
+    const timeout = setTimeout(() => { waitStarted.current = null; liveSave.current(); }, Math.max(0, Math.min(250, 1000 - (Date.now() - waitStarted.current))));
+    return () => clearTimeout(timeout);
+  }, [draft?.rows, canEdit, error]);
   const start = (row: number, col: number) => { if (!canEdit || busyRef.current) return; stage(ensureDraft()); setActive({ row, col }); setMenu(null); };
   const navigate = async (cell: Cell, next = ensureDraft()) => { stage(next); if (!await save(next, false, cell)) setActive(cell); };
   const insert = (axis: 'row' | 'col', at?: number) => {
     if (!canEdit || busyRef.current) return;
     const base = ensureDraft(), index = at ?? (axis === 'row' ? base.rows.length : base.rows[0]!.length);
     let next: Draft;
-    if (axis === 'row') next = changeDraft(base, { rows: [...base.rows.slice(0, index), base.rows[0]!.map(() => ''), ...base.rows.slice(index)] });
+    if (axis === 'row') next = changeDraft(base, { rows: [...base.rows.slice(0, index), base.rows[0]!.map(() => ''), ...base.rows.slice(index)], rowIds: [...base.rowIds.slice(0, index), newClientId('row'), ...base.rowIds.slice(index)] });
     else {
       const width = base.widths.reduce((sum, value) => sum + value, 0) / base.widths.length;
       const columns = [...base.widths.slice(0, index), width, ...base.widths.slice(index)];
-      next = changeDraft(base, { rows: base.rows.map(row => [...row.slice(0, index), '', ...row.slice(index)]), widths: element.locked ? columns.map(value => value * base.width / (base.width + width)) : columns, width: element.locked ? base.width : base.width + width });
+      next = changeDraft(base, { rows: base.rows.map(row => [...row.slice(0, index), '', ...row.slice(index)]), columnIds: [...base.columnIds.slice(0, index), newClientId('col'), ...base.columnIds.slice(index)], widths: element.locked ? columns.map(value => value * base.width / (base.width + width)) : columns, width: element.locked ? base.width : base.width + width });
     }
     setMenu(null); void navigate({ row: axis === 'row' ? index : active?.row ?? 0, col: axis === 'col' ? index : active?.col ?? 0 }, next);
   };
@@ -104,10 +138,10 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
     const base = ensureDraft();
     if (axis === 'row' && base.rows.length < 2 || axis === 'col' && base.rows[0]!.length < 2) return;
     let next: Draft;
-    if (axis === 'row') next = changeDraft(base, { rows: base.rows.filter((_row, index) => index !== cell.row) });
+    if (axis === 'row') next = changeDraft(base, { rows: base.rows.filter((_row, index) => index !== cell.row), rowIds: base.rowIds.filter((_id, index) => index !== cell.row) });
     else {
       const columns = base.widths.filter((_width, index) => index !== cell.col), total = columns.reduce((sum, width) => sum + width, 0);
-      next = changeDraft(base, { rows: base.rows.map(row => row.filter((_text, index) => index !== cell.col)), widths: element.locked ? columns.map(width => width * base.width / total) : columns, width: element.locked ? base.width : total });
+      next = changeDraft(base, { rows: base.rows.map(row => row.filter((_text, index) => index !== cell.col)), columnIds: base.columnIds.filter((_id, index) => index !== cell.col), widths: element.locked ? columns.map(width => width * base.width / total) : columns, width: element.locked ? base.width : total });
     }
     setMenu(null); void navigate({ row: Math.min(cell.row, next.rows.length - 1), col: Math.min(cell.col, next.rows[0]!.length - 1) }, next);
   };
@@ -133,14 +167,14 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
   };
   let edge = 0;
   return <div ref={root} className="studio-native-table" style={{ position: 'relative', width: current.width, height: '100%' }} onDoubleClick={event => event.stopPropagation()} onPointerDownCapture={event => { if (menu && !(event.target as Element).closest('.studio-table-cell-menu')) setMenu(null); }}>
-    <table className="studio-board-table" style={{ width: current.width }}><colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup><tbody>{rows.map((row, r) => <tr key={r}>{row.map((cell, c) => {
+    <table className="studio-board-table" style={{ width: current.width, ...bodyPaint }}><colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup><tbody>{rows.map((row, r) => <tr key={r}>{row.map((cell, c) => {
       const Cell = r === 0 && head ? 'th' : 'td', editing = active?.row === r && active.col === c;
       return <Cell key={c} data-cell={`${r}:${c}`} onPointerDown={event => { if (active && !editing && canEdit && !busyRef.current) { event.preventDefault(); event.stopPropagation(); void navigate({ row: r, col: c }); } }} onDoubleClick={event => { event.stopPropagation(); start(r, c); }} onContextMenu={event => {
         if (!canEdit) return;
         event.preventDefault(); event.stopPropagation(); start(r, c);
         const rect = root.current!.getBoundingClientRect(), scale = rect.width / current.width || 1;
         setMenu({ cell: { row: r, col: c }, x: (event.clientX - rect.left) / scale, y: (event.clientY - rect.top) / scale });
-      }} style={r === 0 && head ? { background: element.fill } : undefined}>{editing ? <InlineTextEditor ref={input} className="studio-table-cell-editor" ariaLabel={`表格第${r + 1}行第${c + 1}列`} disabled={busy || !canEdit} value={cell} onRequestLink={onRequestLink} onFormatStateChange={onFormatStateChange} onChange={value => {
+      }} style={r === 0 && head ? headerPaint ?? { background: element.fill } : undefined}>{editing ? <InlineTextEditor ref={input} className="studio-table-cell-editor" ariaLabel={`表格第${r + 1}行第${c + 1}列`} disabled={!canEdit} value={cell} onRequestLink={onRequestLink} onFormatStateChange={onFormatStateChange} onChange={value => {
         const base = ensureDraft(); stage(changeDraft(base, { rows: base.rows.map((line, index) => index === r ? line.map((text, col) => col === c ? value : text) : line) }));
       }} onCommit={() => { if (!busyRef.current) void save(ensureDraft()); }} onBlur={event => {
         const target = event.relatedTarget as HTMLElement | null;
@@ -155,7 +189,7 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
           else void save(ensureDraft());
         } else if (event.key === 'Tab') {
           event.preventDefault(); const index = r * row.length + c + (event.shiftKey ? -1 : 1); if (index < 0) return;
-          const base = ensureDraft(), next = index >= rows.length * row.length ? changeDraft(base, { rows: [...base.rows, row.map(() => '')] }) : base;
+          const base = ensureDraft(), next = index >= rows.length * row.length ? changeDraft(base, { rows: [...base.rows, row.map(() => '')], rowIds: [...base.rowIds, newClientId('row')] }) : base;
           void navigate({ row: Math.floor(index / row.length), col: index % row.length }, next);
         }
       }} /> : <RichText text={cell} />}</Cell>;

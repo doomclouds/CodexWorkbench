@@ -69,7 +69,7 @@ it('edits individual own messages in place and retains an unsuccessful edit', as
   expect(host.querySelector<HTMLTextAreaElement>('[aria-label=编辑备注内容]')!.value).toBe('补充完成');
   expect(host.querySelector('[role=alert]')?.textContent).toBe('保存失败');
   await submit(host.querySelector<HTMLFormElement>('.studio-comment-edit')!);
-  expect(onAction).toHaveBeenLastCalledWith('edit', feedback, { text: '补充完成', replyId: 'reply' });
+  expect(onAction).toHaveBeenLastCalledWith('edit', feedback, { text: '补充完成', replyId: 'reply', expectedText: '我来补充' });
   expect(host.querySelector('.studio-comment-edit')).toBeNull();
 });
 
@@ -80,7 +80,7 @@ it('offers a reply on resolved threads and retries a failed attachment without p
   expect(host.querySelector('textarea')?.getAttribute('placeholder')).toBe('回复以重新打开…');
   await click(host.querySelector<HTMLInputElement>('.studio-comment-compose-footer input')!);
   await submit(host.querySelector<HTMLFormElement>('.studio-reply-form')!);
-  expect(onAction).toHaveBeenCalledExactlyOnceWith('reply', resolved, { text: '重新讨论' });
+  expect(onAction).toHaveBeenCalledExactlyOnceWith('reply', resolved, { text: '重新讨论', replyId: expect.any(String) });
   expect(button('重试附加回复').disabled).toBe(false);
   await submit(host.querySelector<HTMLFormElement>('.studio-reply-form')!);
   expect(onAction).toHaveBeenCalledTimes(1); expect(attach).toHaveBeenCalledTimes(2);
@@ -95,7 +95,7 @@ it('retries attaching a saved edit without submitting the edit twice', async () 
   await submit(host.querySelector<HTMLFormElement>('.studio-comment-edit')!);
   expect(host.querySelector<HTMLTextAreaElement>('[aria-label=编辑备注内容]')!.disabled).toBe(true);
   await click(button('重试附加'));
-  expect(onAction).toHaveBeenCalledExactlyOnceWith('edit', ownFeedback, { text: '编辑后附加' });
+  expect(onAction).toHaveBeenCalledExactlyOnceWith('edit', ownFeedback, { text: '编辑后附加', expectedText: ownFeedback.text });
   expect(attach).toHaveBeenCalledTimes(2); expect(host.querySelector('.studio-comment-edit')).toBeNull();
 });
 

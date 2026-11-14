@@ -136,7 +136,7 @@ describe('HTML feedback, sharing and scope', () => {
     expect(await service.shareRole(id, editorToken)).toBeUndefined(); expect(await service.shareRole(id, viewerToken)).toBe('viewer');
     await service.execute('artifact_share', { artifactId: id, action: 'stop' }); expect(await service.shareRole(id, viewerToken)).toBeUndefined();
     await service.execute('artifact_share', { artifactId: id, action: 'start' }); expect(await service.shareRole(id, viewerToken)).toBeUndefined();
-    await expect(service.execute('artifact_share', { artifactId: id }, editor)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(service.execute('artifact_share', { artifactId: id, action: 'start' }, editor)).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
   it('broadcasts commits and stores view contexts separately from content', async () => {
     const board = await create(), events: string[] = [], unsubscribe = service.subscribe(board.artifact.id, event => events.push(event.type));

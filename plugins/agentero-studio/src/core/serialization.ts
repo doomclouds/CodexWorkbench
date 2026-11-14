@@ -176,7 +176,7 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
     markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri===0 && e.data?.head!==false ? semanticColor(e.fill,style,style['paper-2']??style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x:e.x+offsets[ci]+8, y:e.y+ri*rowHeight, w:widths[ci]-16, h:rowHeight, text:String(cell), fontSize:e.fontSize??14, bold:ri===0&&e.data?.head!==false?true:e.bold },board,semanticColor(e.color,style,style.ink),true)}`).join('')).join('');
 
   } else {
-    const fill = e.type === 'container' || e.hollow ? 'none' : semanticColor(e.fill, style, e.type === 'note' ? '#fff0b5' : style['paper-2'] ?? style.paper);
+    const fill = e.hollow ? 'none' : semanticColor(e.fill, style, e.type === 'container' ? 'none' : e.type === 'note' ? '#fff0b5' : style['paper-2'] ?? style.paper);
     let textColor = semanticColor(e.color, style, style.ink);
     if (contrastRatio(textColor, fill === 'none' ? 'transparent' : fill, style.paper) < 4.5) textColor = readableText(fill === 'none' ? 'transparent' : fill, style.paper);
     markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);

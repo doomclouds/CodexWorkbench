@@ -19,8 +19,8 @@ export interface StudioBridge {
   updateContext?: (context: ViewContext | null) => void;
   close(): Promise<void>;
 }
-function unwrap<T>(result: ToolResponse<T>): T {
-  if (!result.ok) throw Object.assign(new Error(result.error?.message || '操作未完成'), { code: result.error?.code, details: result.error?.details });
+function unwrap<T>(result: ToolResponse<T>, status?: number): T {
+  if (!result.ok) throw Object.assign(new Error(result.error?.message || '操作未完成'), { code: result.error?.code, details: result.error?.details, status });
   return result.data as T;
 }
 export async function createStudioBridge(onNavigate: (artifactId?: string, view?: string) => void): Promise<StudioBridge> {
@@ -35,8 +35,8 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
         opened.opener = null;
       },
       async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
-        const response = await fetch(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${client.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
-        return unwrap(await response.json() as ToolResponse<T>);
+        const response = await fetch(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+        return unwrap(await response.json() as ToolResponse<T>, response.status);
       },
     };
     return { client, actor: boot.actor, artifactId: boot.artifactId, view: boot.artifactId ? 'editor' : 'library', close: async () => {} };
@@ -82,7 +82,7 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
       // Bootstrap supplies only the UI connection; its default route must not replace host input.
       connection ??= opened._meta?.connection as Connection | undefined;
     }
-    if (!connection?.baseUrl || !connection.token) throw new Error('本机作品服务没有返回有效连接。');
+    if (!connection?.baseUrl || typeof connection.token !== 'string') throw new Error('本机作品服务没有返回有效连接。');
   } catch (error) {
     if (!tornDown) await app.close().catch(() => {});
     throw error;
@@ -93,7 +93,7 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   const transport = createRpcTransport(connection.baseUrl, async (args, signal) => {
     const result = await app.callServerTool({ name: 'studio_app_request', arguments: args }, { timeout: 120_000, signal });
     const status = result.structuredContent as ToolResponse | undefined;
-    if (result.isError || status?.ok === false) throw Object.assign(new Error(status?.error?.message || '作品服务请求失败。'), { code: status?.error?.code });
+    if (result.isError || status?.ok === false) throw Object.assign(new Error(status?.error?.message || '作品服务请求失败。'), { code: status?.error?.code, details: status?.error?.details });
     if (!result._meta?.response) throw new Error('作品服务没有返回界面响应，请更新插件后重新打开。');
     return result._meta.response;
   });
@@ -116,8 +116,8 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
       if (result.isError) throw new Error('宿主未打开阅读页，请点击阅读链接。');
     },
     async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
-      const result = await transport.request(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${client.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
-      return unwrap(await result.json() as ToolResponse<T>);
+      const result = await transport.request(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+      return unwrap(await result.json() as ToolResponse<T>, result.status);
     },
   };
   bridge = {

@@ -46,7 +46,7 @@ beforeEach(async () => {
   await client.connect(clientTransport);
   const opened = await client.callTool({ name: 'studio_open', arguments: {} });
   expect(opened.isError).not.toBe(true);
-  expect(opened._meta?.connection).toMatchObject({ baseUrl: host.origin, actor: LOCAL_ACTOR });
+  expect(opened._meta?.connection).toMatchObject({ baseUrl: host.origin, actor: host.service.owner });
 
   actions = []; activeTransfers = new Set();
   transport = createRpcTransport(host.origin, async (args, signal) => {
@@ -117,14 +117,14 @@ describe('first-run MCP App with unavailable browser networking', () => {
       operations: [{ op: 'add', element: { id: 'html-region', type: 'html', html } }],
     });
     expect(first.board.elements[0]?.html).toBe(html);
-    expect(first.historyEntry.actor).toEqual(LOCAL_ACTOR);
+    expect(first.historyEntry.actor).toEqual(host.service.owner);
     const changedHtml = `${html}\n<!-- 用户保存的修订 🎨 -->`;
     const changed = await call<{ board: Board; historyEntry: HistoryEntry }>('artifact_apply', {
       artifactId, expectedRevision: 1, expectedVersions: { 'html-region': 1 }, operationId: randomUUID(),
       operations: [{ op: 'update', id: 'html-region', changes: { html: changedHtml } }],
     });
     expect(changed.board.elements[0]?.html).toBe(changedHtml);
-    expect(changed.historyEntry.actor).toEqual(LOCAL_ACTOR);
+    expect(changed.historyEntry.actor).toEqual(host.service.owner);
     const reread = await call<Board>('artifact_read', { artifactId, mode: 'document' });
     expect(reread.artifact.revision).toBe(2);
     expect(reread.elements[0]?.html).toBe(changedHtml);

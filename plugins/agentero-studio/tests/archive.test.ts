@@ -24,6 +24,33 @@ async function fixture() {
 }
 
 describe('portable artifact archives', () => {
+  it('preserves deleted object version clocks through archive and history retention', async () => {
+    const { artifact } = await service.execute('artifact_manage', { action: 'create', title: 'Version clocks' });
+    await service.execute('artifact_apply', { artifactId: artifact.id, operations: [{ op: 'add', element: { id: 'reused', type: 'note', text: 'Old generation' } }] });
+    await service.execute('artifact_apply', { artifactId: artifact.id, expectedVersions: { reused: 1 }, operations: [{ op: 'delete', id: 'reused' }] });
+    await service.store.transaction(artifact.id, state => { state.history = state.history.slice(-1); state.operations = []; });
+    const exported = await service.execute('artifact_export', { artifactId: artifact.id, format: 'zip' });
+    const { data } = await service.getExport(exported.exportId);
+    const target = new StudioService({ dataRoot: join(directory, 'clock-import') });
+    try {
+      const imported = await target.importArchive(data), id = imported.artifact.id;
+      expect((await target.store.read(id)).unitClocks?.reused).toMatchObject({ version: 1 });
+      const result = await target.execute('artifact_apply', { artifactId: id, operations: [{ op: 'add', element: { id: 'reused', type: 'note', text: 'New generation' } }] });
+      expect(result.board.elements[0].version).toBeGreaterThan(1);
+      await expect(target.execute('artifact_apply', { artifactId: id, expectedVersions: { reused: 1 }, merge: 'safe', operations: [{ op: 'update', id: 'reused', changes: { text: 'Stale generation' } }] })).rejects.toMatchObject({ code: 'CONFLICT' });
+    } finally { await target.close(); }
+  });
+
+  it('rejects malformed imported clocks before publishing a work', async () => {
+    const source = await fixture(), entries = unzipSync(source.data);
+    const snapshot = JSON.parse(Buffer.from(entries['artifact.json']!).toString());
+    snapshot.unitClocks = { reused: { version: 1, incarnationStart: 2 } };
+    entries['artifact.json'] = strToU8(JSON.stringify(snapshot));
+    const before = (await service.execute('artifact_list', {})).artifacts.length;
+    await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
+    expect((await service.execute('artifact_list', {})).artifacts).toHaveLength(before);
+  });
+
   it('moves the full work to a new data root with history, feedback, sources and all assets', async () => {
     const source = await fixture(), packed = unzipSync(source.data), snapshot = JSON.parse(Buffer.from(packed['artifact.json']!).toString());
     expect(snapshot.schemaVersion).toBe(2); expect(snapshot.sharing).toEqual({ enabled: false, generation: 0, tokens: {} }); expect(snapshot.operations).toEqual([]);
@@ -86,7 +113,9 @@ describe('portable artifact archives', () => {
     expect(upload.status).toBe(200); expect(await upload.json()).toMatchObject({ ok: true, data: { artifact: { title: '完整作品' }, board: { elements: expect.any(Array) } } });
     expect((await fetch(`${host.origin}/api/import?token=${host.token}`, { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: Buffer.from(source.data) })).status).toBe(401);
     const sharing = await host.service.execute('artifact_share', { artifactId: source.artifact.id, action: 'start' }), shared = new URL(sharing.links.viewer), share = shared.searchParams.get('share')!;
-    expect((await fetch(`${host.origin}${source.exported.downloadPath}&token=${share}`)).status).toBe(403);
-    expect((await fetch(`${host.origin}/api/import?artifactId=${source.artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${share}`, 'Content-Type': 'application/zip' }, body: Buffer.from(source.data) })).status).toBe(403);
+    const joined = await fetch(`${host.origin}/api/session?artifactId=${source.artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${share}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Archive viewer' }) });
+    expect(joined.status).toBe(200); const cookie = joined.headers.get('set-cookie')!.split(';')[0]!;
+    expect((await fetch(`${host.origin}${source.exported.downloadPath}&token=${share}`, { headers: { Cookie: cookie } })).status).toBe(403);
+    expect((await fetch(`${host.origin}/api/import?artifactId=${source.artifact.id}`, { method: 'POST', headers: { Authorization: `Bearer ${share}`, Cookie: cookie, 'Content-Type': 'application/zip' }, body: Buffer.from(source.data) })).status).toBe(403);
   });
 });
