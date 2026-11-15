@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { TOOL_NAMES, type Actor, type ToolResponse } from '../src/contracts/studio.js';
+import { TOOL_NAMES, type Actor, type AgentTaskBinding, type ToolResponse } from '../src/contracts/studio.js';
 import { APP_TOOL_NAME } from '../src/contracts/transport.js';
 import { StudioService } from '../src/core/service.js';
 import { createStudioServer, type StudioExecutionContext } from '../src/server/protocol.js';
@@ -13,10 +13,12 @@ import { createStudioServer, type StudioExecutionContext } from '../src/server/p
 const actor: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
 let directory: string, service: StudioService, server: ReturnType<typeof createStudioServer>, client: Client, artifactId: string;
 let execution: { name: string; args: Record<string, unknown>; context?: StudioExecutionContext } | undefined;
+let fixtureBinding: AgentTaskBinding | undefined;
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'studio-mcp-contract-'));
   service = new StudioService({ dataRoot: directory });
   execution = undefined;
+  fixtureBinding = undefined;
   server = createStudioServer({ execute: (name, args, context) => { execution = { name, args, context }; return service.execute(name, args, actor); }, connection: async () => ({ baseUrl: 'http://127.0.0.1:12345', token: 'test-only', actor }) }, '<!doctype html><html></html>');
   client = new Client({ name: 'studio-contract-regression', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -40,7 +42,18 @@ async function failure(name: string, args: Record<string, unknown>, code?: strin
   if (code) expect(result.structuredContent).toMatchObject({ ok: false, error: { code } });
   else expect(result.content).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'text' })]));
 }
-const add = (elements: Record<string, unknown>[]) => call('artifact_apply', { operationId: randomUUID(), operations: elements.map(element => ({ op: 'add', element })) });
+async function fixtureTask(): Promise<AgentTaskBinding> {
+  if (!fixtureBinding) {
+    const result = await call('artifact_activity', { action: 'begin', taskId: 'contract-fixture', phase: 'writing', scope: { rect: { x: -400, y: -100, w: 2400, h: 1600 } }, label: 'Exercise bounded model contracts' });
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0].generation).toEqual(expect.any(String));
+    fixtureBinding = { taskId: result.tasks[0].taskId, generation: result.tasks[0].generation };
+  }
+  return fixtureBinding;
+}
+async function apply(args: Record<string, unknown>) { return call('artifact_apply', { ...await fixtureTask(), ...args }); }
+async function applyFailure(args: Record<string, unknown>, code?: string) { return failure('artifact_apply', { ...await fixtureTask(), ...args }, code); }
+const add = (elements: Record<string, unknown>[]) => apply({ operationId: randomUUID(), operations: elements.map(element => ({ op: 'add', element })) });
 
 describe('model MCP contracts through the real SDK', () => {
   it('preserves explicit Agent participants and documented MCP client identity through schema parsing', async () => {
@@ -73,22 +86,53 @@ describe('model MCP contracts through the real SDK', () => {
     expect(tools.some(tool => /reader/.test(tool.name))).toBe(false);
   });
 
-  it('declares, renews and ends an Agent working area through the public SDK contract', async () => {
+  it('publishes explicit task generations and lifecycle actions without exposing the UI transport to models', async () => {
+    const { tools } = await client.listTools();
+    const fields = tools.find(tool => tool.name === 'artifact_activity')!.inputSchema.properties as Record<string, any>;
+    expect(fields.action.enum).toEqual(['begin', 'update', 'end', 'status', 'release']);
+    expect(fields.phase.enum).toEqual(['preparing', 'writing', 'verifying']);
+    expect(fields.outcome.enum).toEqual(['completed', 'failed', 'cancelled']);
+    expect(fields.generation).toMatchObject({ type: 'string', minLength: 1 });
+    expect(fields.targetActorId).toMatchObject({ type: 'string' });
+    expect(tools.find(tool => tool.name === 'artifact_activity')!.inputSchema.required).not.toContain('taskId');
+    for (const name of ['artifact_read', 'artifact_apply', 'artifact_feedback']) {
+      const binding = tools.find(tool => tool.name === name)!.inputSchema.properties as Record<string, any>;
+      expect(binding.taskId).toMatchObject({ type: 'string' });
+      expect(binding.generation).toMatchObject({ type: 'string', minLength: 1 });
+    }
+    expect(tools.find(tool => tool.name === APP_TOOL_NAME)?._meta).toMatchObject({ ui: { visibility: ['app'] } });
+  });
+
+  it('declares, queries, updates and ends the exact Agent generation through the public SDK contract', async () => {
     await add([{ id: 'work-target', type: 'text', text: 'Work target' }]);
-    const declared = await call('artifact_activity', { action: 'begin', taskId: 'task', scope: { ids: ['work-target'] }, label: 'Review diagram' });
-    expect(declared.tasks).toMatchObject([{ taskId: 'task', scope: { ids: ['work-target'] }, label: 'Review diagram', expiresAt: expect.any(Number) }]);
-    const renewed = await call('artifact_activity', { action: 'update', taskId: 'task', label: 'Finish review' });
-    expect(renewed.tasks).toMatchObject([{ taskId: 'task', scope: { ids: ['work-target'] }, label: 'Finish review' }]);
+    await call('artifact_activity', { action: 'end', ...fixtureBinding, outcome: 'completed' });
+    fixtureBinding = undefined;
+    const declared = await call('artifact_activity', { action: 'begin', taskId: 'task', phase: 'preparing', scope: { ids: ['work-target'] }, label: 'Review diagram' });
+    expect(declared.tasks).toMatchObject([{ taskId: 'task', generation: expect.any(String), phase: 'preparing', scope: { ids: ['work-target'] }, label: 'Review diagram', expiresAt: expect.any(Number) }]);
+    const binding = { taskId: 'task', generation: declared.tasks[0].generation };
+    expect(execution?.args).toMatchObject({ phase: 'preparing' });
+    expect((await call('artifact_activity', { action: 'status' })).tasks).toMatchObject([binding]);
+    expect((await call('artifact_activity', { action: 'status', taskId: 'task' })).tasks).toMatchObject([binding]);
+    const renewed = await call('artifact_activity', { action: 'update', ...binding, phase: 'verifying', label: 'Finish review' });
+    expect(renewed.tasks).toMatchObject([{ ...binding, phase: 'verifying', scope: { ids: ['work-target'] }, label: 'Finish review' }]);
+    expect(execution?.args).toMatchObject({ ...binding, phase: 'verifying' });
+    await call('artifact_read', { mode: 'objects', ids: ['work-target'], ...binding });
+    expect(execution?.args).toMatchObject(binding);
+    await failure('artifact_activity', { action: 'release', targetActorId: actor.id, ...binding }, 'FORBIDDEN');
+    expect(execution?.args).toMatchObject({ targetActorId: actor.id, ...binding });
     await failure('artifact_activity', { action: 'begin', taskId: 'missing', scope: { ids: ['missing'] } }, 'NOT_FOUND');
     await failure('artifact_activity', { action: 'begin', taskId: 'invalid', scope: { rect: { x: 0, y: 0, w: -1, h: 1 } } });
-    expect(await call('artifact_activity', { action: 'end', taskId: 'task' })).toMatchObject({ tasks: [] });
+    expect(await call('artifact_activity', { action: 'end', ...binding, outcome: 'completed' })).toMatchObject({ tasks: [] });
+    expect(execution?.args).toMatchObject({ ...binding, outcome: 'completed' });
+    await failure('artifact_apply', { ...binding, operations: [{ op: 'update', id: 'work-target', changes: { text: 'must not resume a closed task' } }], expectedVersions: { 'work-target': 1 } }, 'TASK_CLOSED');
+    await failure('artifact_apply', { operations: [{ op: 'update', id: 'work-target', changes: { text: 'binding required' } }], expectedVersions: { 'work-target': 1 } }, 'TASK_REQUIRED');
     const read = await call('artifact_read', { mode: 'units', ids: ['work-target'], atRevision: 1 });
     expect(read).toMatchObject({ artifact: { revision: 1 }, units: [{ id: 'work-target', after: { text: 'Work target', version: 1 } }] });
   });
 
   it('preserves create versions through schema parsing, freezes the clicked native source and deduplicates retries', async () => {
     await add([{ id: 'native', type: 'text', text: 'Clicked content', x: 10, y: 20 }]);
-    await call('artifact_apply', { expectedVersions: { native: 1 }, operations: [{ op: 'update', id: 'native', changes: { text: 'Current content', x: 500 } }] });
+    await apply({ expectedVersions: { native: 1 }, operations: [{ op: 'update', id: 'native', changes: { text: 'Current content', x: 500 } }] });
     const args = { action: 'create', operationId: randomUUID(), text: 'Review clicked content', versions: { native: 1 }, anchor: { coordinateSpace: 'element', elementIds: ['native'], x: .25, y: .75 } };
     const first = await call('artifact_feedback', args), retry = await call('artifact_feedback', args);
     expect(retry.contextId).toBe(first.contextId); expect(retry.feedback).toHaveLength(1);
@@ -102,7 +146,7 @@ describe('model MCP contracts through the real SDK', () => {
 
   it('roundtrips immutable display batches, adjacent unit diffs and CAS-protected partial restore', async () => {
     const first = await add([{ id: 'a', type: 'text', text: 'A' }, { id: 'b', type: 'text', text: 'B' }]);
-    const second = await call('artifact_apply', { expectedVersions: { a: 1, b: 1 }, operations: [{ op: 'update', id: 'a', changes: { text: 'A2' } }, { op: 'update', id: 'b', changes: { text: 'B2' } }] });
+    const second = await apply({ expectedVersions: { a: 1, b: 1 }, operations: [{ op: 'update', id: 'a', changes: { text: 'A2' } }, { op: 'update', id: 'b', changes: { text: 'B2' } }] });
     const history = await call('artifact_read', { mode: 'history' });
     expect(history.history).toHaveLength(3);
     expect(history.batches.at(-1)).toMatchObject({ id: second.historyEntry.id, firstVersionId: first.historyEntry.id, versionIds: [first.historyEntry.id, second.historyEntry.id] });
@@ -111,26 +155,48 @@ describe('model MCP contracts through the real SDK', () => {
     const selected = await call('artifact_read', { mode: 'diff', fromVersionId: first.historyEntry.id, toVersionId: second.historyEntry.id, ids: ['a'] });
     expect(selected.units).toEqual([{ id: 'a', before: expect.objectContaining({ text: 'A' }), after: expect.objectContaining({ text: 'A2' }) }]);
     const args = { operationId: randomUUID(), expectedVersions: { a: 2 }, operations: [{ op: 'restore', versionId: first.historyEntry.id, ids: ['a'] }] };
-    const restored = await call('artifact_apply', args);
+    const restored = await apply(args);
     expect(restored.historyEntry).toMatchObject({ changedIds: ['a'], restoredFrom: first.historyEntry.id });
-    expect(await call('artifact_apply', args)).toEqual(restored);
+    expect(await apply(args)).toEqual(restored);
     const objects = await call('artifact_read', { mode: 'objects', ids: ['a', 'b'] });
     expect(objects.elements).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'a', text: 'A', version: 3 }), expect.objectContaining({ id: 'b', text: 'B2', version: 2 })]));
-    await failure('artifact_apply', { ...args, operationId: randomUUID() }, 'CONFLICT');
+    await applyFailure({ ...args, operationId: randomUUID() }, 'CONFLICT');
+    const binding = { ...fixtureBinding! };
+    await call('artifact_activity', { action: 'end', ...binding, outcome: 'completed' });
+    expect(await call('artifact_apply', { ...binding, ...args })).toEqual(restored);
+  });
+
+  it('preserves the task binding for proposal content application and active withdrawal over MCP', async () => {
+    await add([{ id: 'proposal-target', type: 'text', text: 'Original' }]);
+    const suggested = await call('artifact_feedback', { action: 'suggest', text: 'Choose wording', expectedVersions: { 'proposal-target': 1 }, options: [
+      { id: 'option-a', label: 'A', operations: [{ op: 'update', id: 'proposal-target', changes: { text: 'Option A' } }] },
+      { id: 'option-b', label: 'B', operations: [{ op: 'update', id: 'proposal-target', changes: { text: 'Option B' } }] },
+    ] });
+    const feedbackId = suggested.feedback[0].id, binding = { ...fixtureBinding! };
+    await failure('artifact_feedback', { action: 'choose', feedbackId, optionId: 'option-a', operationId: randomUUID() }, 'TASK_REQUIRED');
+    await call('artifact_feedback', { action: 'choose', feedbackId, optionId: 'option-a', operationId: randomUUID(), ...binding });
+    expect(execution?.args).toMatchObject(binding);
+    expect((await call('artifact_read', { mode: 'objects', ids: ['proposal-target'] })).elements[0]).toMatchObject({ text: 'Option A', version: 2 });
+    await failure('artifact_feedback', { action: 'withdraw', feedbackId, optionId: 'option-a', operationId: randomUUID() }, 'TASK_REQUIRED');
+    await call('artifact_feedback', { action: 'withdraw', feedbackId, optionId: 'option-a', operationId: randomUUID(), ...binding });
+    expect(execution?.args).toMatchObject(binding);
+    expect((await call('artifact_read', { mode: 'objects', ids: ['proposal-target'] })).elements[0]).toMatchObject({ text: 'Original', version: 3 });
+    await call('artifact_activity', { action: 'end', ...binding, outcome: 'completed' });
+    await failure('artifact_feedback', { action: 'choose', feedbackId, optionId: 'option-b', operationId: randomUUID(), ...binding }, 'TASK_CLOSED');
   });
 
   it('roundtrips the order unit clock and safely undoes and redoes real layer changes', async () => {
     await add(['a', 'b', 'c'].map(id => ({ id, type: 'text', text: id })));
     const baseline = await call('artifact_read', { mode: 'objects', ids: ['$order'] });
     expect(baseline.units).toEqual([{ id: '$order', value: { version: 3, ids: ['a', 'b', 'c'] } }]);
-    const reordered = await call('artifact_apply', { expectedVersions: { a: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['a'] }] });
+    const reordered = await apply({ expectedVersions: { a: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['a'] }] });
     expect(reordered.historyEntry.changedIds).toEqual(['a', '$order']);
-    const undo = await call('artifact_apply', { expectedRevision: reordered.artifact.revision, operations: [{ op: 'restore', versionId: reordered.historyEntry.id, data: { mode: 'undo' } }] });
+    const undo = await apply({ expectedRevision: reordered.artifact.revision, operations: [{ op: 'restore', versionId: reordered.historyEntry.id, data: { mode: 'undo' } }] });
     expect((await call('artifact_read', { mode: 'objects' })).elements.map((element: { id: string }) => element.id)).toEqual(['a', 'b', 'c']);
-    await call('artifact_apply', { expectedRevision: undo.artifact.revision, operations: [{ op: 'restore', versionId: undo.historyEntry.id, data: { mode: 'undo' } }] });
+    await apply({ expectedRevision: undo.artifact.revision, operations: [{ op: 'restore', versionId: undo.historyEntry.id, data: { mode: 'undo' } }] });
     const result = await call('artifact_read', { mode: 'objects' });
     expect(result.orderVersion).toBe(6); expect(result.elements.map((element: { id: string }) => element.id)).toEqual(['b', 'c', 'a']);
-    await failure('artifact_apply', { expectedVersions: { b: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['b'] }] }, 'CONFLICT');
+    await applyFailure({ expectedVersions: { b: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['b'] }] }, 'CONFLICT');
   });
 
   it('roundtrips all coordinate spaces and rejects invalid coordinates or versions at the protocol/domain boundary', async () => {
@@ -154,9 +220,9 @@ describe('model MCP contracts through the real SDK', () => {
 
   it('accepts locked content edits over MCP and refuses geometry or batch-unlock bypasses', async () => {
     await add([{ id: 'region', type: 'html', locked: true, html: '<h1>Original</h1>', x: 20, y: 30, w: 600, h: 400 }]);
-    await call('artifact_apply', { expectedVersions: { region: 1 }, operations: [{ op: 'update', id: 'region', changes: { html: '<h2>Changed</h2>', state: { tab: 2 }, fill: '#abcdef' } }] });
-    await failure('artifact_apply', { expectedVersions: { region: 2 }, operations: [{ op: 'update', id: 'region', changes: { x: 100 } }] }, 'LOCKED');
-    await failure('artifact_apply', { expectedVersions: { region: 2 }, operations: [{ op: 'update', id: 'region', changes: { locked: false } }, { op: 'delete', id: 'region' }] }, 'LOCKED');
+    await apply({ expectedVersions: { region: 1 }, operations: [{ op: 'update', id: 'region', changes: { html: '<h2>Changed</h2>', state: { tab: 2 }, fill: '#abcdef' } }] });
+    await applyFailure({ expectedVersions: { region: 2 }, operations: [{ op: 'update', id: 'region', changes: { x: 100 } }] }, 'LOCKED');
+    await applyFailure({ expectedVersions: { region: 2 }, operations: [{ op: 'update', id: 'region', changes: { locked: false } }, { op: 'delete', id: 'region' }] }, 'LOCKED');
     const document = await call('artifact_read', { mode: 'objects', ids: ['region'] });
     expect(document.elements[0]).toMatchObject({ locked: true, x: 20, html: '<h2>Changed</h2>', state: { tab: 2 }, fill: '#abcdef', version: 2 });
   });
@@ -192,7 +258,7 @@ describe('model MCP contracts through the real SDK', () => {
     expect(html.length).toBeGreaterThan(240_000);
     await add([{ id: 'native', type: 'text', text: 'Frozen native' }, { id: 'region', type: 'html', html }]);
     const feedback = await call('artifact_feedback', { action: 'create', text: 'Mixed selection', anchor: { coordinateSpace: 'board', elementIds: ['native', 'region'], x: 0, y: 0, w: 800, h: 600 }, versions: { native: 1, region: 1 } });
-    await call('artifact_apply', { expectedVersions: { native: 1, region: 1 }, operations: [{ op: 'update', id: 'native', changes: { text: 'Current native' } }, { op: 'update', id: 'region', changes: { html: '<p>Current HTML</p>' } }] });
+    await apply({ expectedVersions: { native: 1, region: 1 }, operations: [{ op: 'update', id: 'native', changes: { text: 'Current native' } }, { op: 'update', id: 'region', changes: { html: '<p>Current HTML</p>' } }] });
     const context = await call('artifact_read', { mode: 'context', feedbackId: feedback.contextId });
     expect(context.sources[0]).toMatchObject({ elementId: 'native', element: { text: 'Frozen native', version: 1 } });
     expect(context.sources[1]).toMatchObject({ regionId: 'region', sourceRevision: 1, htmlLength: html.length, element: { version: 1 }, readWith: expect.stringContaining('source') });

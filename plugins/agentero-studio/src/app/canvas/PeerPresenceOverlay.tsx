@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import type { BoardElement, Presence } from '../../contracts/studio.js';
+import { AGENT_TASK_FADE_MS, type AgentTaskReleaseTarget, type BoardElement, type Presence } from '../../contracts/studio.js';
 import { readableText } from '../../core/theme.js';
 import { participantColor } from '../shared/presence-members.js';
 import { boundsOf, elementBounds } from './canvas-model.js';
-import { activeAgentTasks, agentTaskBounds, agentWorkStatus } from '../shared/agent-activity.js';
+import { visibleAgentTasks, agentTaskBounds, agentTaskDeadline, agentTaskEndedAt, agentTaskStale, agentWorkStatus, type ActivityBounds } from '../shared/agent-activity.js';
 import { AgentWorkingMark } from '../shared/AgentWorkingMark.js';
 
 interface Props {
@@ -15,14 +15,17 @@ interface Props {
   clockOffsetMs?: number;
   preview?: boolean;
   geometryTargets?: readonly { peerId: string; elementIds: readonly string[] }[];
+  onReleaseAgentTask?: (target: AgentTaskReleaseTarget) => Promise<void>;
 }
 const IDLE_AFTER = 60_000, EXPIRE_AFTER = 15 * 60_000, CHAT_FADE = 600;
 
-export default function PeerPresenceOverlay({ peers, elements, artifactId, selfActorId, zoom, clockOffsetMs = 0, preview = false, geometryTargets = [] }: Props) {
+export default function PeerPresenceOverlay({ peers, elements, artifactId, selfActorId, zoom, clockOffsetMs = 0, preview = false, geometryTargets = [], onReleaseAgentTask }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden');
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const [, tick] = useState(0);
+  const lastTaskBoxes = useRef(new Map<string, ActivityBounds>()), pending = useRef(new Set<string>());
+  const [releasing, setReleasing] = useState(new Set<string>()), [releaseError, setReleaseError] = useState<{ key: string; message: string }>();
   useEffect(() => {
     const update = () => { setVisible(document.visibilityState !== 'hidden' && !root.current?.closest('[hidden]')); tick(value => value + 1); };
     update();
@@ -58,16 +61,18 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
     if (!previous || previous.at < at || previous.at === at && previous.peer.updatedAt < peer.updatedAt) cursors.set(peer.actor.id, { peer, at });
   }
   const byId = new Map(elements.map(element => [element.id, element]));
-  const taskAreas = active.flatMap(peer => activeAgentTasks(peer, now).flatMap(task => {
-    schedule(task.expiresAt);
-    const box = agentTaskBounds(task, elements);
-    return box ? [{ peer, task, box }] : [];
+  const taskAreas = active.flatMap(peer => visibleAgentTasks(peer, now).flatMap(task => {
+    schedule(agentTaskDeadline(task, now));
+    const key = `${peer.actor.id}\0${task.taskId}\0${task.generation}`, endedAt = agentTaskEndedAt(task, now);
+    const box = agentTaskBounds(task, elements) ?? (endedAt === undefined ? undefined : lastTaskBoxes.current.get(key));
+    return box ? [{ peer, task, box, key, endedAt }] : [];
   }));
+  useEffect(() => { lastTaskBoxes.current = new Map(taskAreas.map(({ key, box }) => [key, box])); });
   type TargetState = 'editing' | 'moving' | 'saving';
   const priority = { saving: 0, editing: 1, moving: 2 };
   const targets = new Map<string, { peer: Presence; element: BoardElement; state: TargetState }>();
   for (const peer of active) {
-    if (activeAgentTasks(peer, now).length) continue;
+    if (visibleAgentTasks(peer, now).length) continue;
     const editing = new Set(peer.context?.editingIds ?? []), moving = new Set(Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : []), saving = peer.context?.savingIds ?? [];
     const previewing = new Set(geometryTargets.filter(target => target.peerId === peer.peerId).flatMap(target => [...target.elementIds]));
     for (const id of new Set([...editing, ...moving, ...saving])) {
@@ -94,13 +99,22 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
     return () => clearTimeout(timeout);
   }, [deadline, clockOffsetMs, visible, preview]);
 
+  const release = async (target: AgentTaskReleaseTarget, key: string) => {
+    if (!onReleaseAgentTask || preview || pending.current.has(key)) return;
+    pending.current.add(key); setReleasing(new Set(pending.current)); setReleaseError(undefined);
+    try { await onReleaseAgentTask(target); }
+    catch (error) { setReleaseError({ key, message: `结束工作区失败：${error instanceof Error ? error.message : String(error)}` }); }
+    finally { pending.current.delete(key); setReleasing(new Set(pending.current)); }
+  };
+
   const slots = new Map<string, number>();
   const targetCounts = new Map<string, number>();
   for (const hint of hints.values()) { const key = hint.elements.map(element => element.id).sort().join('\0'); targetCounts.set(key, (targetCounts.get(key) ?? 0) + 1); }
   return <div ref={root} className="studio-peer-presence-overlay" aria-label="协作者在画布上的位置" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-    {taskAreas.map(({ peer, task, box }) => {
-      const color = participantColor(peer.actor, peer.color), label = agentWorkStatus(task.label);
-      return <div key={`${peer.actor.id}:${task.taskId}`} className="studio-agent-task-area" data-agent-task={task.taskId} data-peer-actor={peer.actor.id} role="status" aria-label={`${peer.actor.name} · ${label}，工作区域提示`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, pointerEvents: 'none', '--agent-work-color': color, '--agent-work-stroke': `${1.5 / zoom}px`, '--agent-work-radius': `${8 / zoom}px`, '--agent-work-gap': `${4 / zoom}px`, '--agent-work-scale': 1 / zoom } as React.CSSProperties}><div className="studio-agent-task-label" style={{ background: color, color: readableText(color) }}><AgentWorkingMark /><span>{peer.actor.name} · {label}</span><i>.</i><i>.</i><i>.</i></div></div>;
+    {taskAreas.map(({ peer, task, box, key, endedAt }) => {
+      const color = participantColor(peer.actor, peer.color), label = agentWorkStatus(task, now), stale = agentTaskStale(task, now), ending = endedAt !== undefined;
+      const displayColor = stale || ending ? 'var(--canvas-ui-muted, var(--studio-muted, #737b86))' : color;
+      return <div key={key} className={`studio-agent-task-area${stale ? ' is-stale' : ''}${ending ? ' is-ending' : ''}`} data-agent-task={task.taskId} data-agent-generation={task.generation} data-agent-phase={task.phase} data-agent-state={ending ? 'ending' : stale ? 'stale' : task.phase} data-peer-actor={peer.actor.id} role="status" aria-label={`${peer.actor.name} · ${label}，工作区域提示`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, pointerEvents: 'none', opacity: ending ? 0 : 1, '--agent-work-color': displayColor, '--agent-work-stroke': `${1.5 / zoom}px`, '--agent-work-radius': `${8 / zoom}px`, '--agent-work-gap': `${4 / zoom}px`, '--agent-work-scale': 1 / zoom, '--agent-work-play-state': stale || ending ? 'paused' : 'running', '--agent-work-fade': `${ending ? Math.max(0, endedAt + AGENT_TASK_FADE_MS - now) : AGENT_TASK_FADE_MS}ms` } as React.CSSProperties}><div className="studio-agent-task-label" style={{ background: displayColor, color: stale || ending ? 'var(--canvas-ui, var(--studio-surface, #fff))' : readableText(color) }}><AgentWorkingMark /><span>{peer.actor.name} · {label}</span><i>.</i><i>.</i><i>.</i>{!ending && onReleaseAgentTask && <button type="button" data-native-interactive="true" data-agent-task-release={task.taskId} aria-label={`结束此工作区：${task.label || task.taskId}`} title="结束此工作区并撤销后续写入，不会停止模型运行" disabled={releasing.has(key)} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); void release({ artifactId, targetActorId: peer.actor.id, taskId: task.taskId, generation: task.generation }, key); }}>{releasing.has(key) ? '正在结束…' : '结束此工作区'}</button>}</div>{releaseError?.key === key && <div className="studio-agent-task-error" role="alert" style={{ transform: `scale(${1 / zoom})` }}>{releaseError.message}</div>}</div>;
     })}
     {[...hints.entries()].map(([key, { peer, elements: changed, state }]) => {
       const first = changed[0]!, ids = changed.map(element => element.id).sort(), targetKey = ids.join('\0');

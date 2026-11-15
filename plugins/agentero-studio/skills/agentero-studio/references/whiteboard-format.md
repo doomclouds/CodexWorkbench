@@ -6,6 +6,8 @@
 
 `artifact_read` 默认返回概要。`mode: "summary"` 提供类型计数、有界对象清单、标签、几何位置及版本；有 `nextOffset` 时继续。需要完整对象用 `mode: "objects", ids: [...]`，需要 HTML 原始源用 `mode: "source", regionId: ...`。源码有 `nextOffset` 时先读完整，不把第一段当完整源码写回。
 
+首次发现可以不带任务只读；开始修改前，按[对象与协作操作](operations.md#多-agent-身份与活动)声明非重叠范围，保存实际返回的taskId/generation。每笔Agent内容提交都显式携带该绑定，CAS和对象版本仍另行检查；人类界面不需要Agent任务。
+
 `artifact_apply` 的 `operations` 是一笔事务：
 
 - `add` 携带新对象 `element`。为新对象提供不冲突的稳定 `id`；不从标题或用户路径猜 ID。
@@ -17,11 +19,14 @@
 
 发生错误时整笔操作不半应用。写入重试保留 `operationId`。`locked` 固定位置、尺寸、旋转、连接几何和裁剪，删除或改变这些字段前需用户明确解锁；文字、样式、HTML 源和交互 `state` 仍可局部更新，不为内容修改解锁。同一事务内先解锁再移动或删除会被拒绝，不能用重建对象绕过。返回的版本以程序确认值为准，不自行加一后假定其他内容未变。
 
-以下是最小的原生对象组合；示例 ID 仅用于展示，实际使用前查重：
+以下是最小的原生对象组合；先begin预留覆盖这些对象的空地（例如x40,y120,w640,h200），再使用返回代次。示例ID仅用于展示，实际使用前查重：
 
 ```json
 {
   "artifactId": "工具返回的作品ID",
+  "taskId": "本次明确申请的任务ID",
+  "generation": "begin返回的实际generation",
+  "participant": { "id": "flow-builder", "name": "Agent A" },
   "operationId": "本次稳定操作ID",
   "operations": [
     { "op": "add", "element": { "id": "input", "type": "shape", "kind": "rounded", "x": 80, "y": 160, "w": 220, "h": 100, "text": "输入", "fill": "paper", "color": "ink" } },

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { StudioService } from '../src/core/service.js';
-import { LOCAL_ACTOR, type Actor, type Board, type BoardElement, type Operation } from '../src/contracts/studio.js';
+import { LOCAL_ACTOR, type Actor, type AgentTask, type Board, type BoardElement, type Operation } from '../src/contracts/studio.js';
 
 const agent: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
 const commenter: Actor = { id: 'commenter', name: 'Commenter', kind: 'human', role: 'commenter' };
@@ -21,6 +21,11 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 const read = () => service.execute('artifact_read', { artifactId }) as Promise<Board>;
+async function beginAgentTask(ids: string[]) {
+  const taskId = randomUUID(), result = await service.execute('artifact_activity', { artifactId, action: 'begin', taskId, scope: { ids } }, agent);
+  const task = (result.tasks as AgentTask[]).find(value => value.taskId === taskId)!;
+  return { taskId, generation: task.generation };
+}
 async function apply(operations: Operation[], actor = LOCAL_ACTOR, extra: Record<string, unknown> = {}) {
   const board = await read();
   return service.execute('artifact_apply', { artifactId, operationId: randomUUID(), expectedRevision: board.artifact.revision, operations, ...extra }, actor);
@@ -32,7 +37,8 @@ describe('whiteboard geometry locks', () => {
   it('undoes and redoes a standalone lock while keeping concurrent text and rejecting ordinary restore unlocks', async () => {
     const added = await add({ id: 'a', type: 'text', text: 'Before' });
     const locked = await apply([{ op: 'update', id: 'a', changes: { locked: true } }]);
-    await apply([{ op: 'update', id: 'a', changes: { text: 'Concurrent text' } }], agent);
+    const task = await beginAgentTask(['a']);
+    await apply([{ op: 'update', id: 'a', changes: { text: 'Concurrent text' } }], agent, task);
     await expect(apply([{ op: 'restore', versionId: added.historyEntry.id }])).rejects.toMatchObject({ code: 'LOCKED' });
     const undone = await apply([{ op: 'restore', versionId: locked.historyEntry.id, data: { mode: 'undo' } }]);
     expect(undone.board.elements[0].locked).not.toBe(true);
@@ -54,21 +60,23 @@ describe('whiteboard geometry locks', () => {
   });
   it.each([LOCAL_ACTOR, agent])('allows locked content and style edits for $kind actors while enforcing role and CAS', async actor => {
     await add({ id: 'html-a', type: 'html', html: '<h1>Before</h1>', locked: true, x: 20, y: 30, w: 400, h: 300 });
-    const first = await apply([{ op: 'update', id: 'html-a', changes: { html: '<h2>After</h2>', state: { active: true }, text: 'Updated', fill: '#ffeedd', stroke: '#333', fontSize: 28 } }], actor);
+    const task = actor.kind === 'agent' ? await beginAgentTask(['html-a']) : {};
+    const first = await apply([{ op: 'update', id: 'html-a', changes: { html: '<h2>After</h2>', state: { active: true }, text: 'Updated', fill: '#ffeedd', stroke: '#333', fontSize: 28 } }], actor, task);
     expect(first.board.elements[0]).toMatchObject({ x: 20, y: 30, w: 400, h: 300, locked: true, version: 2, sourceRevision: 2, state: { active: true }, text: 'Updated', fill: '#ffeedd' });
-    await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Stale' } }], actor, { expectedVersions: { 'html-a': 1 } })).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Stale' } }], actor, { ...task, expectedVersions: { 'html-a': 1 } })).rejects.toMatchObject({ code: 'CONFLICT' });
     await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Viewer' } }], viewer)).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Commenter' } }], commenter)).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
 
   it('rejects all geometry fields, crop, deletion and layout without changing history', async () => {
     await add({ id: 'a', type: 'image', locked: true, x: 20, y: 30, w: 400, h: 300 });
+    const task = await beginAgentTask(['a']);
     const before = await read(), changes: Partial<BoardElement>[] = [
       { x: 21 }, { y: 31 }, { w: 401 }, { h: 301 }, { rotation: 45 }, { parentId: 'frame' }, { groupId: 'group' },
       { from: [1, 2] }, { to: [3, 4] }, { fromSide: 'left' }, { toSide: 'right' }, { points: [0, 0, 10, 10] },
       { bends: [20, 30] }, { crop: { zoom: 2, x: .5, y: .5 } }, { type: 'shape' },
     ];
-    for (const patch of changes) await expect(apply([{ op: 'update', id: 'a', changes: patch }], agent)).rejects.toMatchObject({ code: 'LOCKED' });
+    for (const patch of changes) await expect(apply([{ op: 'update', id: 'a', changes: patch }], agent, task)).rejects.toMatchObject({ code: 'LOCKED' });
     await expect(apply([{ op: 'delete', id: 'a' }])).rejects.toMatchObject({ code: 'LOCKED' });
     await expect(apply([{ op: 'layout', ids: ['a'] }])).rejects.toMatchObject({ code: 'LOCKED' });
     expect(await read()).toEqual(before);
@@ -97,7 +105,8 @@ describe('whiteboard geometry locks', () => {
       await expect(apply([operation])).rejects.toMatchObject({ code: 'LOCKED', details: { elementId: 'edge' } });
     }
     const current = await read();
-    await expect(apply([{ op: 'delete', id: 'a' }], agent, { expectedRevision: undefined, expectedVersions: { a: current.elements[0]!.version } })).rejects.toMatchObject({ code: 'VERSION_REQUIRED' });
+    const task = await beginAgentTask(['a', 'edge']);
+    await expect(apply([{ op: 'delete', id: 'a' }], agent, { ...task, expectedRevision: undefined, expectedVersions: { a: current.elements[0]!.version } })).rejects.toMatchObject({ code: 'VERSION_REQUIRED' });
     expect(current.elements.find(element => element.id === 'a')!.text).toBe('Allowed');
   });
 
@@ -144,7 +153,8 @@ describe('feedback coordinates, frozen sources and retries', () => {
     ]);
     await apply([{ op: 'update', id: 'a', changes: { text: 'Clicked A', x: 30 } }]);
     const selected = await read(), versions = Object.fromEntries(selected.elements.map(element => [element.id, element.version]));
-    await apply([{ op: 'update', id: 'a', changes: { text: 'Current A', x: 90 } }, { op: 'update', id: 'b', changes: { text: 'Current B', x: 500 } }], agent);
+    const task = await beginAgentTask(['a', 'b']);
+    await apply([{ op: 'update', id: 'a', changes: { text: 'Current A', x: 90 } }, { op: 'update', id: 'b', changes: { text: 'Current B', x: 500 } }], agent, task);
     const operationId = randomUUID(), anchor = { coordinateSpace: 'board', elementIds: ['a', 'b'], x: 30, y: 20, w: 490, h: 120 };
     const result = await createFeedback(anchor, { versions, operationId });
     const context = await service.execute('artifact_read', { artifactId, mode: 'context', contextId: result.contextId });
@@ -162,7 +172,8 @@ describe('feedback coordinates, frozen sources and retries', () => {
       { op: 'add', element: { id: 'a', type: 'text', text: 'Selected' } },
       { op: 'add', element: { id: 'html', type: 'html', html: '<h1>Selected HTML</h1>' } },
     ]);
-    await apply([{ op: 'update', id: 'html', changes: { html: '<h2>Current HTML</h2>' } }], agent);
+    const task = await beginAgentTask(['html']);
+    await apply([{ op: 'update', id: 'html', changes: { html: '<h2>Current HTML</h2>' } }], agent, task);
     const anchor = { coordinateSpace: 'element', elementIds: ['a'], x: .5, y: .5 }, before = await read();
     await expect(createFeedback(anchor, { versions: {} })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     await expect(createFeedback(anchor, { versions: { a: '1' } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });

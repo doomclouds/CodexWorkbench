@@ -2,15 +2,17 @@
 import { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { LOCAL_ACTOR, DEFAULT_STYLE, type Board, type CollaborationRoom, type Presence } from '../src/contracts/studio';
+import { LOCAL_ACTOR, DEFAULT_STYLE, type AgentTask, type Board, type CollaborationRoom, type Presence } from '../src/contracts/studio';
 import { OnlineParticipants } from '../src/app/shared/OnlineParticipants';
 import { CursorChat } from '../src/app/shared/CursorChat';
 import { useNativeGestureSync, type NativeGesture } from '../src/app/shared/useNativeGestureSync';
 import { claimParticipantColor, participantColor } from '../src/app/shared/presence-members';
 import { useViewportFollow } from '../src/app/shared/useViewportFollow';
 
+const taskMeta = (at = Date.now()) => ({ generation: 'generation-1', phase: 'writing' as const, startedAt: at, lastActivityAt: at, lastProgressAt: at });
+
 it.each(['human', 'agent'] as const)('keeps %s identity visible but disables follow throughout a preview', async kind => {
-  const onFollow = vi.fn(), peer: Presence = { peerId: 'preview-peer', actor: { id: 'preview-member', name: 'Preview member', kind, role: 'owner' }, context: { artifactId: 'board', viewId: 'preview-peer', selectedIds: [], viewport: { x: 30, y: 20, zoom: 1 }, agentTasks: [{ taskId: 'task', scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: Date.now() + 60000 }] }, updatedAt: new Date().toISOString() };
+  const onFollow = vi.fn(), peer: Presence = { peerId: 'preview-peer', actor: { id: 'preview-member', name: 'Preview member', kind, role: 'owner' }, context: { artifactId: 'board', viewId: 'preview-peer', selectedIds: [], viewport: { x: 30, y: 20, zoom: 1 }, agentTasks: [{ ...taskMeta(), taskId: 'task', scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: Date.now() + 60000 }] }, updatedAt: new Date().toISOString() };
   await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[peer]} following="" onFollow={onFollow} preview />));
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
   const follow = container.querySelector<HTMLButtonElement>('.studio-online-row button')!;
@@ -22,7 +24,7 @@ it.each(['human', 'agent'] as const)('keeps %s identity visible but disables fol
 
 it('offers explicit Agent-area follow without inventing a viewport, and disables it on lease expiry', async () => {
   vi.useFakeTimers(); vi.setSystemTime(1000); const onFollow = vi.fn();
-  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', name: 'Builder', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], activity: 'working', agentTasks: [{ taskId: 'work', label: '扩展架构图', scope: { rect: { x: 100, y: 100, w: 500, h: 300 } }, expiresAt: 2000 }] }, updatedAt: new Date().toISOString() };
+  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', name: 'Builder', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], activity: 'working', agentTasks: [{ ...taskMeta(), taskId: 'work', label: '扩展架构图', scope: { rect: { x: 100, y: 100, w: 500, h: 300 } }, expiresAt: 2000 }] }, updatedAt: new Date().toISOString() };
   await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[peer]} following="" onFollow={onFollow} />));
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
   expect(container.textContent).toContain('扩展架构图');
@@ -36,7 +38,7 @@ it('offers explicit Agent-area follow without inventing a viewport, and disables
 it('follows the Agent world area with pan and zoom, yields while editing, and stops on task expiry', async () => {
   vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
   const onStop = vi.fn(), room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} };
-  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], agentTasks: [{ taskId: 'work', scope: { rect: { x: 100, y: 200, w: 600, h: 400 } }, expiresAt: 2000 }] }, updatedAt: new Date().toISOString() };
+  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], agentTasks: [{ ...taskMeta(), taskId: 'work', scope: { rect: { x: 100, y: 200, w: 600, h: 400 } }, expiresAt: 2000 }] }, updatedAt: new Date().toISOString() };
   function Fixture({ busy }: { busy: boolean }) {
     const area = useRef<HTMLDivElement>(null);
     const follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers: [peer], following: 'agent', room, area, busy, onStop });
@@ -51,7 +53,7 @@ it('follows the Agent world area with pan and zoom, yields while editing, and st
 it('keeps an Agent ID target on current board geometry and exits when that target disappears', async () => {
   vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
   const room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} }, onStop = vi.fn();
-  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], agentTasks: [{ taskId: 'work', scope: { ids: ['shape'] }, expiresAt: 62000 }] }, updatedAt: new Date().toISOString() };
+  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], agentTasks: [{ ...taskMeta(), taskId: 'work', scope: { ids: ['shape'] }, expiresAt: 62000 }] }, updatedAt: new Date().toISOString() };
   const board: Board = { artifact: { id: 'board', type: 'whiteboard', title: '', revision: 0, createdAt: '', updatedAt: '', pinned: false }, elements: [{ id: 'shape', type: 'shape', x: 0, y: 0, w: 100, h: 100, version: 1 }], style: DEFAULT_STYLE };
   function Fixture({ document }: { document: Board }) {
     const area = useRef<HTMLDivElement>(null), follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers: [peer], following: 'agent', room, area, busy: false, onStop, document });
@@ -98,7 +100,7 @@ it('distinguishes saving from live editing and clears busy after save completion
 });
 
 it('keeps both Agents as robots in the header and member list throughout working and idle changes', async () => {
-  const agent = (id: string, name: string, color: string, working: boolean): Presence => ({ peerId: `${id}-page`, actor: { ...LOCAL_ACTOR, id, name, kind: 'agent' }, color, context: { artifactId: 'board', viewId: `${id}-page`, selectedIds: [], activity: working ? 'working' : 'idle', agentTasks: working ? [{ taskId: `${id}-task`, label: '绘制图解', scope: { rect: { x: 0, y: 0, w: 200, h: 100 } }, expiresAt: Date.now() + 60_000 }] : [] }, updatedAt: new Date().toISOString() });
+  const agent = (id: string, name: string, color: string, working: boolean): Presence => ({ peerId: `${id}-page`, actor: { ...LOCAL_ACTOR, id, name, kind: 'agent' }, color, context: { artifactId: 'board', viewId: `${id}-page`, selectedIds: [], activity: working ? 'working' : 'idle', agentTasks: working ? [{ ...taskMeta(), taskId: `${id}-task`, label: '绘制图解', scope: { rect: { x: 0, y: 0, w: 200, h: 100 } }, expiresAt: Date.now() + 60_000 }] : [] }, updatedAt: new Date().toISOString() });
   const render = (workingA: boolean, workingB: boolean) => act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[agent('agent-a', 'Agent A · aa00', '#785ee8', workingA), agent('agent-b', 'Agent B · bb00', '#d25f25', workingB)]} following="agent-a" onFollow={() => {}} />));
   await render(true, true); await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
   const colors = [...container.querySelectorAll<HTMLElement>('.studio-online-avatar')].map(avatar => avatar.style.background);
@@ -114,15 +116,15 @@ it('keeps both Agents as robots in the header and member list throughout working
 });
 
 it('keeps Agent identity separate from a normalized work status for plain and already-prefixed labels', async () => {
-  const peers = ['绘制服务图', '正在工作 · 绘制依赖图'].map((label, index): Presence => ({ peerId: `agent-${index}-page`, actor: { ...LOCAL_ACTOR, id: `agent-${index}`, name: `Agent ${index ? 'B' : 'A'} · ${index ? 'bb00' : 'aa00'}`, kind: 'agent' }, context: { artifactId: 'board', viewId: `agent-${index}-page`, selectedIds: [], agentTasks: [{ taskId: 'task', label, scope: { rect: { x: index * 300, y: 0, w: 200, h: 100 } }, expiresAt: Date.now() + 60_000 }] }, updatedAt: new Date().toISOString() }));
+  const peers = ['绘制服务图', '正在工作 · 绘制依赖图'].map((label, index): Presence => ({ peerId: `agent-${index}-page`, actor: { ...LOCAL_ACTOR, id: `agent-${index}`, name: `Agent ${index ? 'B' : 'A'} · ${index ? 'bb00' : 'aa00'}`, kind: 'agent' }, context: { artifactId: 'board', viewId: `agent-${index}-page`, selectedIds: [], agentTasks: [{ ...taskMeta(), taskId: 'task', label, scope: { rect: { x: index * 300, y: 0, w: 200, h: 100 } }, expiresAt: Date.now() + 60_000 }] }, updatedAt: new Date().toISOString() }));
   await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={peers} following="" onFollow={() => {}} />));
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
   const rows = [...container.querySelectorAll('.studio-online-row')];
   for (const peer of peers) {
     const row = rows.find(row => row.querySelector('strong')?.firstChild?.textContent === peer.actor.name)!;
     expect(row).toBeDefined(); expect(row.querySelector('strong')!.textContent).not.toContain('绘制');
-    const status = row.querySelector('p')!.textContent!; expect(status).toBe(`正在工作 · ${peer.actor.id === 'agent-0' ? '绘制服务图' : '绘制依赖图'}`);
-    expect(status.match(/正在工作/g)).toHaveLength(1);
+    const status = row.querySelector('p')!.textContent!; expect(status).toBe(`修改中 · ${peer.actor.id === 'agent-0' ? '绘制服务图' : '绘制依赖图'}`);
+    expect(status.match(/修改中/g)).toHaveLength(1);
   }
 });
 
@@ -200,4 +202,100 @@ it('eases follow movement over 90 ms, pauses while editing, and uses a fixed mis
   expect(value()).toEqual({ x: -100, y: 75, zoom: 1 }); // Reduced motion applies the fitted view immediately.
   await render([{ ...peer, following: 'own-page' }], false);
   await act(async () => { await vi.advanceTimersByTimeAsync(1501); }); expect(onStop).toHaveBeenCalledOnce();
+});
+
+it('shows workspace phases ahead of tool activity and keeps stale identities as robots without a busy ring', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000);
+  const task = { ...taskMeta(), taskId: 'work', phase: 'preparing' as const, label: '准备房屋笔迹', scope: { rect: { x: 0, y: 0, w: 400, h: 300 } }, expiresAt: 601_000 };
+  const agent: Presence = { peerId: 'builder-peer', actor: { ...LOCAL_ACTOR, id: 'builder', name: 'Agent A', kind: 'agent' }, context: { viewId: 'builder-peer', artifactId: 'board', selectedIds: [], activity: 'writing', agentTasks: [task] }, updatedAt: new Date().toISOString() };
+  const render = (tasks: AgentTask[]) => act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[{ ...agent, context: { ...agent.context!, agentTasks: tasks } }]} following="" onFollow={() => {}} />));
+  await render([task]); await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  expect(container.textContent).toContain('准备中'); expect(container.textContent).not.toContain('正在修改');
+  await act(async () => vi.advanceTimersByTimeAsync(120_000));
+  expect(container.textContent).toContain('暂未收到新进度'); expect(container.querySelector('.is-busy')).toBeNull();
+  expect(container.querySelectorAll('.lucide-bot')).toHaveLength(2);
+  await render([{ ...task, phase: 'verifying', lastProgressAt: 121_000, lastActivityAt: 121_000, expiresAt: 721_000 }]);
+  expect(container.textContent).toContain('检查中'); expect(container.textContent).not.toContain('暂未收到新进度'); expect(container.querySelector('.is-busy')).not.toBeNull();
+});
+
+it('can release each empty workspace explicitly from the member list while follow stays disabled', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000);
+  const tasks = ['first', 'second'].map(taskId => ({ ...taskMeta(), taskId, generation: `${taskId}-generation`, label: taskId, scope: { ids: ['missing'] }, expiresAt: 601_000 }));
+  const agent: Presence = { peerId: 'builder-peer', actor: { ...LOCAL_ACTOR, id: 'builder', name: 'Agent A', kind: 'agent' }, context: { viewId: 'builder-peer', artifactId: 'board', selectedIds: [], agentTasks: tasks }, updatedAt: new Date().toISOString() };
+  const release = vi.fn().mockResolvedValue(undefined);
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[agent]} following="" onFollow={() => {}} onReleaseAgentTask={release} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const actions = container.querySelectorAll<HTMLButtonElement>('[data-agent-task-release]'); expect(actions).toHaveLength(2);
+  expect(container.querySelector<HTMLButtonElement>('.studio-online-follow')!.disabled).toBe(true);
+  await act(async () => actions[1]!.click());
+  expect(release).toHaveBeenCalledWith({ artifactId: 'board', targetActorId: 'builder', taskId: 'second', generation: 'second-generation' });
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[agent]} following="" onFollow={() => {}} />));
+  expect(container.querySelector('[data-agent-task-release]')).toBeNull();
+});
+
+it('keeps stale workspace follow but stops immediately for its terminal record instead of following the fade', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  const room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} }, onStop = vi.fn();
+  const task = { ...taskMeta(), taskId: 'work', scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: 601_000 };
+  const agent: Presence = { peerId: 'builder-peer', actor: { ...LOCAL_ACTOR, id: 'builder', kind: 'agent' }, context: { viewId: 'builder-peer', artifactId: 'board', selectedIds: [], agentTasks: [task] }, updatedAt: new Date().toISOString() };
+  function Fixture({ peer }: { peer: Presence }) {
+    const area = useRef<HTMLDivElement>(null), follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers: [peer], following: 'builder', room, area, busy: false, onStop });
+    return <div ref={area}><output>{JSON.stringify(follow.viewport)}</output></div>;
+  }
+  await act(async () => root.render(<Fixture peer={agent} />)); expect(container.querySelector('output')!.textContent).not.toBe('');
+  await act(async () => vi.advanceTimersByTimeAsync(120_000)); expect(onStop).not.toHaveBeenCalled();
+  await act(async () => root.render(<Fixture peer={{ ...agent, context: { ...agent.context!, agentTasks: [{ ...task, outcome: 'released', endedAt: 121_000 }] } }} />));
+  expect(onStop).toHaveBeenCalledOnce(); expect(container.querySelector('output')!.textContent).toBe('');
+});
+
+it('continues following another active workspace when one task ends and stops after the last task ends', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  const room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} }, onStop = vi.fn();
+  const tasks: AgentTask[] = [0, 1000].map((x, index) => ({ ...taskMeta(), taskId: `work-${index}`, scope: { rect: { x, y: 100, w: 100, h: 100 } }, expiresAt: 601_000 }));
+  const agent: Presence = { peerId: 'builder-peer', actor: { ...LOCAL_ACTOR, id: 'builder', kind: 'agent' }, context: { viewId: 'builder-peer', artifactId: 'board', selectedIds: [], agentTasks: tasks }, updatedAt: new Date().toISOString() };
+  function Fixture({ current }: { current: AgentTask[] }) {
+    const area = useRef<HTMLDivElement>(null), follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers: [{ ...agent, context: { ...agent.context!, agentTasks: current } }], following: 'builder', room, area, busy: false, onStop });
+    return <div ref={area}><output>{JSON.stringify(follow.viewport)}</output></div>;
+  }
+  await act(async () => root.render(<Fixture current={tasks} />)); const both = JSON.parse(container.querySelector('output')!.textContent!);
+  const endedFirst = [{ ...tasks[0]!, outcome: 'completed' as const, endedAt: 1000 }, tasks[1]!];
+  await act(async () => root.render(<Fixture current={endedFirst} />)); const remaining = JSON.parse(container.querySelector('output')!.textContent!);
+  expect(remaining.x).toBeLessThan(both.x); expect(remaining.zoom).toBeGreaterThanOrEqual(both.zoom); expect(onStop).not.toHaveBeenCalled();
+  await act(async () => root.render(<Fixture current={endedFirst.map(task => ({ ...task, outcome: 'completed', endedAt: 1000 }))} />));
+  expect(onStop).toHaveBeenCalledOnce(); expect(container.querySelector('output')!.textContent).toBe('');
+  expect((room.send as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]).toMatchObject({ phase: 'end' });
+});
+
+it.each(['owner', 'guest', 'preview'] as const)('shows a single workspace status once for %s without hiding readonly or preview status', async mode => {
+  vi.useFakeTimers(); vi.setSystemTime(200_000);
+  const task: AgentTask = { ...taskMeta(1000), taskId: 'work', label: '整理左侧便签', scope: { rect: { x: 0, y: 0, w: 400, h: 300 } }, expiresAt: 601_000 };
+  const peer: Presence = { peerId: 'builder-peer', actor: { ...LOCAL_ACTOR, id: 'builder', name: 'Agent A', kind: 'agent' }, context: { viewId: 'builder-peer', artifactId: 'board', selectedIds: [], agentTasks: [task] }, updatedAt: new Date().toISOString() };
+  const release = vi.fn().mockResolvedValue(undefined), actor = mode === 'guest' ? { ...LOCAL_ACTOR, id: 'viewer', role: 'viewer' as const } : LOCAL_ACTOR;
+  await act(async () => root.render(<OnlineParticipants actor={actor} peers={[peer]} following="" onFollow={() => {}} preview={mode === 'preview'} onReleaseAgentTask={mode === 'guest' ? undefined : release} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const row = container.querySelector('.studio-online-row')!, status = '暂未收到新进度 · 修改中 · 整理左侧便签';
+  expect(row.textContent!.split(status)).toHaveLength(2);
+  expect(row.querySelectorAll('[data-agent-task-release]')).toHaveLength(mode === 'owner' ? 1 : 0);
+  if (mode === 'owner') expect(row.querySelector('p')).toBeNull();
+  else expect(row.querySelector('p')!.textContent).toBe(status);
+  expect(row.querySelector('.lucide-bot')).not.toBeNull();
+});
+
+it('shows a workspace count summary with one status and release action for each active task', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000);
+  const tasks: AgentTask[] = [
+    { ...taskMeta(), taskId: 'first', generation: 'first-generation', label: '整理左侧便签', scope: { rect: { x: 0, y: 0, w: 200, h: 100 } }, expiresAt: 601_000 },
+    { ...taskMeta(), taskId: 'second', generation: 'second-generation', phase: 'verifying', label: '核对右侧卡片', scope: { rect: { x: 300, y: 0, w: 200, h: 100 } }, expiresAt: 601_000 },
+  ];
+  const peer: Presence = { peerId: 'builder-peer', actor: { ...LOCAL_ACTOR, id: 'builder', name: 'Agent A', kind: 'agent' }, context: { viewId: 'builder-peer', artifactId: 'board', selectedIds: [], agentTasks: tasks }, updatedAt: new Date().toISOString() };
+  const release = vi.fn().mockResolvedValue(undefined), follow = vi.fn();
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[peer]} following="" onFollow={follow} onReleaseAgentTask={release} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const row = container.querySelector('.studio-online-row')!;
+  expect(row.querySelector('p')!.textContent).toBe('2个工作区');
+  for (const text of ['修改中 · 整理左侧便签', '检查中 · 核对右侧卡片']) expect(row.textContent!.split(text)).toHaveLength(2);
+  const actions = [...row.querySelectorAll<HTMLButtonElement>('[data-agent-task-release]')]; expect(actions).toHaveLength(2);
+  for (const action of actions) await act(async () => action.click());
+  expect(release.mock.calls.map(([target]) => target)).toEqual(tasks.map(task => ({ artifactId: 'board', targetActorId: 'builder', taskId: task.taskId, generation: task.generation })));
+  expect(follow).not.toHaveBeenCalled();
 });

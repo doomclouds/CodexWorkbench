@@ -1,14 +1,35 @@
-import type { AgentTask, BoardElement, Presence } from '../../contracts/studio.js';
+import { AGENT_TASK_FADE_MS, AGENT_TASK_STALE_MS, type AgentTask, type BoardElement, type Presence } from '../../contracts/studio.js';
 import type { StudioDocument } from '../products.js';
 import { elementBounds } from '../canvas/canvas-model.js';
 
 export interface ActivityBounds { x: number; y: number; w: number; h: number }
 export function activeAgentTasks(peer: Presence, now: number): AgentTask[] {
-  return peer.actor.kind === 'agent' ? (peer.context?.agentTasks ?? []).filter(task => task.expiresAt > now) : [];
+  return peer.actor.kind === 'agent' ? (peer.context?.agentTasks ?? []).filter(task => !task.outcome && task.endedAt === undefined && task.expiresAt > now) : [];
 }
-export function agentWorkStatus(label?: string): string {
-  const action = (label ?? '').trim().replace(/^正在工作(?:\s*·\s*|$)/, '').trim();
-  return action ? `正在工作 · ${action}` : '正在工作';
+export function agentTaskEndedAt(task: AgentTask, now: number): number | undefined {
+  if (task.outcome === 'expired') return Math.min(task.endedAt ?? task.expiresAt, task.expiresAt);
+  return task.endedAt ?? (task.expiresAt <= now ? task.expiresAt : undefined);
+}
+export function visibleAgentTasks(peer: Presence, now: number): AgentTask[] {
+  return peer.actor.kind === 'agent' ? (peer.context?.agentTasks ?? []).filter(task => {
+    const endedAt = agentTaskEndedAt(task, now);
+    return endedAt === undefined ? !task.outcome : endedAt + AGENT_TASK_FADE_MS > now;
+  }) : [];
+}
+export function agentTaskStale(task: AgentTask, now: number): boolean {
+  return !task.outcome && task.endedAt === undefined && task.expiresAt > now && task.lastProgressAt + AGENT_TASK_STALE_MS <= now;
+}
+export function agentTaskDeadline(task: AgentTask, now: number): number {
+  const endedAt = agentTaskEndedAt(task, now);
+  if (endedAt !== undefined) return endedAt + AGENT_TASK_FADE_MS;
+  const staleAt = task.lastProgressAt + AGENT_TASK_STALE_MS;
+  return Math.min(task.expiresAt, staleAt > now ? staleAt : Infinity);
+}
+export function agentWorkStatus(task: AgentTask, now: number): string {
+  const action = (task.label ?? '').trim().replace(/^正在工作(?:\s*·\s*|$)/, '').trim();
+  const endedAt = agentTaskEndedAt(task, now);
+  const phase = endedAt !== undefined ? ({ completed: '已完成', failed: '未完成', cancelled: '已取消', expired: '工作区已过期', released: '工作区已结束' }[task.outcome ?? 'expired']) : ({ preparing: '准备中', writing: '修改中', verifying: '检查中' }[task.phase]);
+  return `${agentTaskStale(task, now) ? '暂未收到新进度 · ' : ''}${phase}${action ? ` · ${action}` : ''}`;
 }
 export function documentElements(document?: StudioDocument | null): BoardElement[] {
   return document && 'elements' in document ? document.elements as BoardElement[] : [];

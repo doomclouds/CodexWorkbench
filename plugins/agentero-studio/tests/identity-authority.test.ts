@@ -65,6 +65,14 @@ async function agentConnection(name: string) {
     },
   };
 }
+async function claimNode(connection: Awaited<ReturnType<typeof agentConnection>>, participant?: { id: string; name: string }) {
+  const taskId = `identity-${randomUUID()}`;
+  const begun = await connection.call('artifact_activity', { action: 'begin', taskId, phase: 'writing', scope: { ids: ['node'] }, ...(participant ? { participant } : {}) });
+  expect(begun.error, JSON.stringify(begun.value)).toBe(false);
+  const generation = begun.value.data.tasks[0].generation;
+  expect(generation).toEqual(expect.any(String));
+  return { taskId, generation: generation as string };
+}
 
 describe('host owner and viewer-safe sharing identity', () => {
   it('uses the host OS username consistently while preserving stable IDs and old author snapshots', async () => {
@@ -309,8 +317,11 @@ describe('real MCP connection and explicit participant identity', () => {
     const a = await agentConnection('Planner MCP'), b = await agentConnection('Worker MCP'), events: StudioEvent[] = [];
     const stop = host.service.subscribe(artifactId, event => events.push(event)); closers.push(async () => stop());
     const mutate = async (connection: typeof a, version: number, participant?: { id: string; name: string }) => {
-      const result = await connection.call('artifact_apply', { expectedVersions: { node: version }, operations: [{ op: 'update', id: 'node', changes: { text: `version ${version + 1}` } }], ...(participant ? { participant } : {}) });
-      expect(result.error, JSON.stringify(result.value ?? result.content)).toBe(false); return result;
+      const binding = await claimNode(connection, participant);
+      try {
+        const result = await connection.call('artifact_apply', { ...binding, expectedVersions: { node: version }, operations: [{ op: 'update', id: 'node', changes: { text: `version ${version + 1}` } }], ...(participant ? { participant } : {}) });
+        expect(result.error, JSON.stringify(result.value ?? result.content)).toBe(false); return result;
+      } finally { await connection.call('artifact_activity', { action: 'end', ...binding, outcome: 'completed', ...(participant ? { participant } : {}) }); }
     };
     const first = await mutate(a, 1), again = await mutate(a, 2), second = await mutate(b, 3);
     expect(first.error).toBe(false); const baseActor = first.value.data.historyEntry.actor;
@@ -333,29 +344,48 @@ describe('real MCP connection and explicit participant identity', () => {
 
   it('protects human editing without letting the agent viewId hide it or the agent activity block itself', async () => {
     const a = await agentConnection('Editing guard');
+    const binding = await claimNode(a);
     await host.service.updatePresence(artifactId, { peerId: 'human-view', context: { artifactId, viewId: 'human-view', selectedIds: ['node'], editingIds: ['node'] } }, host.service.owner);
     const contexts = await a.call('artifact_read', { mode: 'context', viewId: 'human-view' });
     expect(contexts.value.data.contexts).toHaveLength(1); expect(contexts.value.data.contexts[0]).toMatchObject({ viewId: 'human-view', actor: { id: host.service.owner.id, kind: 'human' } });
-    const blocked = await a.call('artifact_apply', { viewId: 'human-view', expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'blocked' } }] });
+    const blocked = await a.call('artifact_apply', { ...binding, viewId: 'human-view', expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'blocked' } }] });
     expect(blocked.value).toMatchObject({ ok: false, error: { code: 'EDIT_IN_PROGRESS' } });
     await host.service.updatePresence(artifactId, { peerId: 'human-view', leave: true }, host.service.owner);
-    expect((await a.call('artifact_apply', { expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'self activity allowed' } }] })).error).toBe(false);
+    expect((await a.call('artifact_apply', { ...binding, expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'self activity allowed' } }] })).error).toBe(false);
+    expect((await a.call('artifact_activity', { action: 'end', ...binding, outcome: 'completed' })).error).toBe(false);
   });
 
-  it('allows reads but rejects another Agent writing an actively edited target', async () => {
+  it('allows bootstrap reads while rejecting another Agent claiming or borrowing an active work area', async () => {
     const a = await agentConnection('Active writer'), b = await agentConnection('Second agent');
+    const binding = await claimNode(a);
     let release!: () => void, admitted!: () => void, block = true;
     const gate = new Promise<void>(resolve => { release = resolve; }), accepted = new Promise<void>(resolve => { admitted = resolve; });
     const original = host.service.store.transaction.bind(host.service.store);
     vi.spyOn(host.service.store, 'transaction').mockImplementation(async (id, run) => { if (block) { block = false; admitted(); await gate; } return original(id, run); });
-    const pending = a.call('artifact_apply', { expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'first agent' } }] });
+    const pending = a.call('artifact_apply', { ...binding, expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'first agent' } }] });
     await accepted;
     try {
       expect((await b.call('artifact_read', { mode: 'objects', ids: ['node'] })).error).toBe(false);
-      const blocked = await b.call('artifact_apply', { expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'must wait' } }] });
-      expect(blocked.value).toMatchObject({ ok: false, error: { code: 'EDIT_IN_PROGRESS' } });
+      const claim = await b.call('artifact_activity', { action: 'begin', taskId: 'competing-work', phase: 'writing', scope: { ids: ['node'] } });
+      expect(claim.value).toMatchObject({ ok: false, error: { code: 'TASK_SCOPE_CONFLICT' } });
+      const blocked = await b.call('artifact_apply', { ...binding, expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'must wait' } }] });
+      expect(blocked.value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
     } finally { release(); }
-    expect((await pending).error).toBe(false); expect(host.service.getPresence(artifactId).filter(peer => peer.actor.kind === 'agent').every(peer => peer.context?.activity === 'idle' && !peer.context.editingIds?.length)).toBe(true);
+    expect((await pending).error).toBe(false);
+    expect((await a.call('artifact_activity', { action: 'end', ...binding, outcome: 'completed' })).error).toBe(false);
+    expect(host.service.getPresence(artifactId).filter(peer => peer.actor.kind === 'agent').every(peer => peer.context?.activity === 'idle' && !peer.context.editingIds?.length)).toBe(true);
+  });
+
+  it('does not let another participant on the same MCP connection borrow a task generation', async () => {
+    const a = await agentConnection('One connection'), main = { id: 'writer', name: 'Writer' }, other = { id: 'other', name: 'Other' };
+    const binding = await claimNode(a, main);
+    const operations = [{ op: 'update', id: 'node', changes: { text: 'Bound author' } }];
+    const rejected = await a.call('artifact_apply', { ...binding, participant: other, expectedVersions: { node: 1 }, operations });
+    expect(rejected.value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
+    const accepted = await a.call('artifact_apply', { ...binding, participant: main, expectedVersions: { node: 1 }, operations });
+    expect(accepted.error, JSON.stringify(accepted.value)).toBe(false);
+    expect(accepted.value.data.historyEntry.actor.name).toContain('Writer');
+    expect((await a.call('artifact_activity', { action: 'end', ...binding, participant: main, outcome: 'completed' })).error).toBe(false);
   });
 
   it('does not scope owner create to an irrelevant stale artifactId', async () => {

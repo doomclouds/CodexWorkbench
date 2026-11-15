@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowUpRight, Braces, ChevronDown, Circle, Copy, ExternalLink, Frame, Group, Hand, Link, Loader2, Lock, Maximize, MessageSquare, Minus, MousePointer2, PenLine, Plus, Redo2, RotateCcw, Smile, Square, StickyNote, Table2, Trash2, Type, Ungroup, Unlock, X } from 'lucide-react';
-import type { Actor, Anchor, Board, BoardElement, CollaborationRoom, ElementType, Feedback, HtmlSelection, Json, Operation, Presence, StudioClient } from '../../contracts/studio.js';
+import type { Actor, AgentTaskReleaseTarget, Anchor, Board, BoardElement, CollaborationRoom, ElementType, Feedback, HtmlSelection, Json, Operation, Presence, StudioClient } from '../../contracts/studio.js';
 import { contrastRatio, readableText, semanticColor } from '../../core/theme.js';
 import HtmlRegion from '../shared/html-region/HtmlRegion.js';
 import { anchorBounds, arrowGeometry, arrowHeads, assetDisplayUrl, boundsOf, canvasStyle, clamp, duplicateElements, elementBounds, expandMoveIds, fitViewport, intersects, makeElement, moveOperations, newId, normalizedRect, relativeElementPoint, safeHttpLink, tableRows, zoomAt, type Point, type Rect, type Viewport } from './canvas-model.js';
@@ -50,6 +50,7 @@ export interface WhiteboardCanvasProps {
   selfPeerId?: string;
   onCursorMove?: (point: Point | null) => void;
   onViewportInteract?: () => void;
+  onReleaseAgentTask?: (target: AgentTaskReleaseTarget) => Promise<void>;
   room?: CollaborationRoom;
   externalViewport?: Viewport;
   externalSelectedIds?: string[];
@@ -123,7 +124,7 @@ function drawnElement(gesture: Extract<Gesture, { kind: 'draw' }>, points = gest
     : { ...gesture.element, ...box, w: Math.max(1,box.w), h: Math.max(1,box.h), points: points.flatMap(point => [point.x - box.x, point.y - box.y]) };
 }
 
-export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onOpenHtml, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
+export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onOpenHtml, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
   const viewportElement = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const htmlInput = useRef<HTMLInputElement>(null);
@@ -1169,7 +1170,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
           const positioned = Number.isFinite(feedback.anchor.x) && Number.isFinite(feedback.anchor.y);
           return <button type="button" key={`pin-${feedback.id}`} className={`studio-feedback-pin${feedback.status === 'resolved' ? ' is-resolved' : ''}`} data-feedback-pin={feedback.id} data-native-interactive="true" aria-label={`备注 ${index + 1}：${feedback.text.slice(0, 80)}`} title={feedback.text} style={{ left: area.x + (positioned ? 0 : area.w), top: area.y, transform: `translate(-50%,-50%) scale(${1 / viewport.zoom})` }} onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); onFeedbackSelect?.(feedback, { x: rect.right + 8, y: rect.top }); }}>{index + 1}</button>;
         })}
-        <PeerPresenceOverlay peers={presence} geometryTargets={peerPreviewFrames.filter(({peer})=>peer.kind!=='upload').map(({peer})=>({peerId:peer.peerId,elementIds:peer.elements.map(element=>element.id)}))} elements={renderedElements} artifactId={board.artifact.id} selfActorId={actor.id} zoom={viewport.zoom} clockOffsetMs={clockOffsetMs} preview={preview} />
+        <PeerPresenceOverlay peers={presence} geometryTargets={peerPreviewFrames.filter(({peer})=>peer.kind!=='upload').map(({peer})=>({peerId:peer.peerId,elementIds:peer.elements.map(element=>element.id)}))} elements={renderedElements} artifactId={board.artifact.id} selfActorId={actor.id} zoom={viewport.zoom} clockOffsetMs={clockOffsetMs} preview={preview} onReleaseAgentTask={onReleaseAgentTask} />
         {(gesture?.kind === 'marquee' || gesture?.kind === 'annotate') && <div className="studio-marquee" style={{ left: Math.min(gesture.start.x, gesture.end.x), top: Math.min(gesture.start.y, gesture.end.y), width: Math.abs(gesture.end.x - gesture.start.x), height: Math.abs(gesture.end.y - gesture.start.y), borderWidth: 1 / viewport.zoom }} />}
       </div>
       {!board.elements.length && !gesture && <div className="studio-canvas-empty"><div className="studio-empty-symbol"><Square size={27} /><Circle size={25} /><ArrowUpRight size={24} /></div><strong>从一个想法开始</strong><p>{canEdit ? '添加文字、便签或图形，也可以导入 HTML 图解。' : '这块白板还没有内容。'}</p>{canEdit && <button type="button" data-native-interactive="true" onClick={() => void openHtmlEditor()}><Braces size={16} />添加 HTML 图解</button>}</div>}

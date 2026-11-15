@@ -100,8 +100,10 @@ describe('immutable history display batches and selected-unit restore', () => {
     await expect(apply(moved.board, [{ op: 'update', id: 'a', changes: { locked: false } }, { op: 'restore', versionId: savedId, id: 'a' }])).rejects.toMatchObject({ code: 'LOCKED' });
     await expect(apply(moved.board, [{ op: 'restore', versionId: savedId, ids: ['$style'] }], { expectedRevision: undefined, expectedVersions: { $style: 0 } })).rejects.toMatchObject({ code: 'VERSION_REQUIRED' });
     await service.updatePresence(artifactId, { peerId: 'view-b', context: { artifactId, viewId: 'view-b', selectedIds: [], editingIds: ['b'] } }, editor);
-    await expect(apply(moved.board, [{ op: 'restore', versionId: savedId, id: 'b' }], {}, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS' });
-    const independent = await apply(moved.board, [{ op: 'restore', versionId: savedId, id: 'a' }], {}, agent).catch(error => error);
+    const taskId = randomUUID(), claimed = await service.execute('artifact_activity', { artifactId, action: 'begin', taskId, scope: { ids: ['a', 'b'] } }, agent);
+    const task = { taskId, generation: claimed.tasks.find((value: { taskId: string }) => value.taskId === taskId).generation };
+    await expect(apply(moved.board, [{ op: 'restore', versionId: savedId, id: 'b' }], task, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS' });
+    const independent = await apply(moved.board, [{ op: 'restore', versionId: savedId, id: 'a' }], task, agent).catch(error => error);
     expect(independent).toMatchObject({ code: 'LOCKED' });
     expect((await read(artifactId)).elements[0]).toMatchObject({ x: 300, locked: true });
   });

@@ -41,7 +41,18 @@ export interface HistoryEntry { id: string; revision: number; createdAt: string;
 /** Display grouping only; every version remains independently addressable. */
 export interface HistoryBatch extends HistoryEntry { firstVersionId: string; firstRevision: number; firstCreatedAt: string; beforeVersionId?: string; versionIds: string[] }
 export interface AgentActivityScope { ids?: string[]; rect?: { x: number; y: number; w: number; h: number } }
-export interface AgentTask { taskId: string; scope: AgentActivityScope; label?: string; expiresAt: number }
+export const AGENT_TASK_LEASE_MS = 10 * 60_000;
+export const AGENT_TASK_STALE_MS = 2 * 60_000;
+export const AGENT_TASK_FADE_MS = 500;
+export type AgentTaskPhase = 'preparing' | 'writing' | 'verifying';
+export type AgentTaskOutcome = 'completed' | 'failed' | 'cancelled' | 'expired' | 'released';
+export interface AgentTaskBinding { taskId: string; generation: string }
+export interface AgentTaskReleaseTarget extends AgentTaskBinding { artifactId: string; targetActorId: string }
+export interface AgentTask extends AgentTaskBinding {
+  scope: AgentActivityScope; phase: AgentTaskPhase; label?: string;
+  startedAt: number; lastActivityAt: number; lastProgressAt: number; expiresAt: number;
+  endedAt?: number; outcome?: AgentTaskOutcome;
+}
 export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; savingIds?: string[]; agentTasks?: AgentTask[]; [key: string]: unknown }
 export interface Presence { peerId: string; actor: Actor; peerEpoch?: string; peerSeq?: number; context?: ViewContext; cursor?: { x: number; y: number; surface?: string; t?: number } | null; following?: string; chat?: string; chatExpiresAt?: number; color?: string; visible?: boolean; updatedAt: string }
 export interface RoomMessage { peerId: string; actor: Actor; seq: number; topic: string; data: Json; createdAt: string }

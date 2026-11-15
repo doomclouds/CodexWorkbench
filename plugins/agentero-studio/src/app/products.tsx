@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import type { Actor, Anchor, Artifact, CollaborationRoom, Feedback, Presence, StudioClient, StudioEvent } from '../contracts/studio';
+import type { Actor, AgentTaskReleaseTarget, Anchor, Artifact, CollaborationRoom, Feedback, Presence, StudioClient, StudioEvent } from '../contracts/studio';
 import { whiteboardProduct } from './products/whiteboard';
 
 /** The shell owns metadata; a product owns every other part of its document. */
@@ -15,6 +15,7 @@ export interface ProductEditorProps<Document = StudioDocument> {
   onSelectionChange: (ids: string[]) => void; onViewportChange: (viewport: Viewport) => void;
   onCursorMove: (point: { x: number; y: number } | null) => void;
   onViewportInteract?: () => void;
+  onReleaseAgentTask?: (target: AgentTaskReleaseTarget) => Promise<void>;
   room?: CollaborationRoom;
   onActivityChange?: (state: ProductActivity) => void; activities?: Feedback[];
   presence: Presence[]; selfPeerId: string; externalViewport?: Viewport; externalSelectedIds?: string[];

@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
-import { DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Artifact, type Board, type Feedback, type StudioClient, type ToolName } from '../src/contracts/studio';
+import { AGENT_TASK_LEASE_MS, DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Artifact, type Board, type Feedback, type Presence, type StudioClient, type ToolName } from '../src/contracts/studio';
 import { StudioService } from '../src/core/service';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
@@ -167,9 +167,12 @@ describe('Studio real management workflows', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
     client = { ...client, embedded: false, baseUrl: 'http://studio.test', token: 'fixture-owner' };
     await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    const peer = { peerId: 'preview-agent', actor: { ...LOCAL_ACTOR, id: 'preview-agent', name: 'Preview agent', kind: 'agent' }, context: { artifactId: fixture.board.artifact.id, viewId: 'preview-agent', selectedIds: [], agentTasks: [{ taskId: 'working', scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: Date.now() + 60000 }] }, updatedAt: new Date().toISOString() };
+    const startedAt = Date.now();
+    const peer = { peerId: 'preview-agent', actor: { ...LOCAL_ACTOR, id: 'preview-agent', name: 'Preview agent', kind: 'agent' }, context: { artifactId: fixture.board.artifact.id, viewId: 'preview-agent', selectedIds: [], agentTasks: [{ taskId: 'working', generation: 'preview-working-generation', phase: 'writing', startedAt, lastActivityAt: startedAt, lastProgressAt: startedAt, scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: startedAt + AGENT_TASK_LEASE_MS }] }, updatedAt: new Date(startedAt).toISOString() } satisfies Presence;
     await act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'presence', artifactId: fixture.board.artifact.id, peers: [peer] }) }));
-    await click(button('此刻在这里')); await click(container.querySelector<HTMLButtonElement>('.studio-online-row button')!);
+    await click(button('此刻在这里'));
+    expect(container.querySelector('[data-agent-task-release="working"]')).not.toBeNull();
+    await click(button('跟随'));
     await waitUntil(() => !!container.querySelector('.studio-follow-banner'));
     const live = container.querySelector('[aria-label="白板画布"]')!;
     await waitUntil(() => !!live.getAttribute('data-external-viewport'));
@@ -186,14 +189,15 @@ describe('Studio real management workflows', () => {
     expect(live.getAttribute('data-external-viewport')).toBeNull();
     // Keyboard activation does not outside-click-dismiss a hovered suggestion preview.
     await act(async () => button('此刻在这里').click());
-    const follow = container.querySelector<HTMLButtonElement>('.studio-online-row button')!;
+    const follow = button('跟随');
     expect(follow.disabled).toBe(true); expect(follow.title).toBe('预览期间不能跟随，请先退出预览');
     await act(async () => button('此刻在这里').click());
     if (mode === 'history') await click(button('退出预览'));
     else await act(async () => container.querySelector('.studio-suggestion-option')!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
     await waitUntil(() => container.querySelectorAll('[aria-label="白板画布"]').length === 1);
     expect(container.querySelector('.studio-follow-banner')).toBeNull(); expect(live.getAttribute('data-external-viewport')).toBeNull();
-    await click(button('此刻在这里')); expect(container.querySelector<HTMLButtonElement>('.studio-online-row button')!.disabled).toBe(false);
+    await click(button('此刻在这里')); expect(button('跟随').disabled).toBe(false);
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_activity' && args.action === 'release')).toBe(false);
   });
   it('refreshes live guest permissions without discarding an unsent comment', async () => {
     const fixture = await createFixture([region()]);
