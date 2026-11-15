@@ -25,6 +25,19 @@ async function runtime(source: string, overrides = {}) {
 }
 
 describe('HTML region rendering copy', () => {
+  it('sends annotation-mode numeric tools while preserving inputs, IME, modifiers and interactive HTML', async () => {
+    const { dom, sent } = await runtime('<p id="static">Static text</p><input id="input"><div id="edit" contenteditable="true"></div><div role="menu" id="menu"></div><div id="shadow"></div>');
+    const tools = () => sent.filter(value => value.type === 'studio-html-tool-shortcut');
+    const press = (target: Element, key: string, extra = {}) => target.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, composed: true, ...extra }));
+    press(dom.window.document.getElementById('static')!, '9'); press(dom.window.document.body, '1');
+    expect(tools()).toEqual([expect.objectContaining({ channel: options.channel, regionId: options.regionId, sourceRevision: options.sourceRevision, type: 'studio-html-tool-shortcut', key: '9' }), expect.objectContaining({ key: '1' })]);
+    for (const extra of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }]) press(dom.window.document.body, '2', extra);
+    for (const id of ['input','edit','menu']) press(dom.window.document.getElementById(id)!, '3');
+    const shadow = dom.window.document.getElementById('shadow')!.attachShadow({ mode: 'open' }), input = dom.window.document.createElement('input'); shadow.append(input); press(input, '4');
+    expect(tools()).toHaveLength(2);
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { type: 'studio-html-mode', ...options, enabled: false } }));
+    press(dom.window.document.body, '9'); expect(tools()).toHaveLength(2);
+  });
   it('lets an interactive HTML menu consume Escape before isolating an unhandled key', async () => {
     const { dom, sent } = await runtime('<button id="menu">Menu</button><script>document.getElementById("menu").addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();event.stopPropagation();window.closedMenu=true;}});</script>', { annotation: false });
     const handled = new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });

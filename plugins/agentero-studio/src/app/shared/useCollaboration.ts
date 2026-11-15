@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CollaborationRoom, Feedback, Json, Presence, RoomMessage, RoomTimer, StudioClient, StudioEvent, SyncBatch } from '../../contracts/studio';
+import type { CollaborationRoom, CollaborationStateEvent, Feedback, Json, Presence, RoomMessage, RoomTimer, StudioClient, StudioEvent, SyncBatch } from '../../contracts/studio';
 import { getProduct, type StudioDocument } from '../products';
 import { studioRequest } from '../transport';
 import { newClientId } from './client-id';
@@ -42,6 +42,7 @@ export function createCollaboration(options: Options) {
   let queued = 0, queuedBytes = 0, overflowCursor: string | undefined;
   let overflowReading = false;
   const listeners = new Map<string, Set<(message: RoomMessage) => void>>(), seenRooms = new Map<string, number>();
+  const stateListeners = new Set<(event: CollaborationStateEvent) => void>();
   const handledControls = new WeakSet<StudioEvent>();
   const roomOutbox: { topic: string; data: Json; resolve: (accepted: boolean) => void }[] = [];
   const timerOutbox: { data: Record<string, unknown>; resolve: () => void; reject: (error: unknown) => void }[] = [];
@@ -49,6 +50,13 @@ export function createCollaboration(options: Options) {
   const url = (path: string) => { const value = new URL(path, client.baseUrl); value.searchParams.set('artifactId', artifactId); return value; };
   const headers = () => ({ ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' });
   const alive = (serial: number) => !closed && generation === serial && document.visibilityState !== 'hidden';
+  const localState = (event: CollaborationStateEvent) => { for (const listener of stateListeners) listener(event); };
+  function documentState(message?: StudioEvent, appliedRevision = 0) {
+    const document = options.getDocument();
+    if (!document || document.artifact.id !== artifactId || document.artifact.revision < Math.max(appliedRevision, message?.revision ?? 0) || message?.cursor && position(message.cursor).epoch !== position(receivedCursor).epoch) return;
+    const watermark = message?.cursor || receivedCursor, epoch = position(watermark).epoch;
+    localState({ type: 'document', document, ...(watermark ? { cursor: watermark, epoch } : {}), ...(message?.operationId ? { operationId: message.operationId, ...(message.actorId ? { actorId: message.actorId } : {}) } : {}), ...(message?.revision !== undefined ? { commitRevision: message.revision } : {}), ...(message?.changedIds ? { changedIds: message.changedIds } : {}), ...(message?.unitVersions ? { unitVersions: message.unitVersions } : {}) });
+  }
   async function json(response: Response) {
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error?.message || `作品服务请求失败（${response.status}）`), { status: response.status, ...result.error });
@@ -72,6 +80,7 @@ export function createCollaboration(options: Options) {
     if (result.cursor) peerCursor = result.cursor;
     peers = result.peers; if ('timer' in result) timer = result.timer ?? null;
     options.onPresence(peers, timer);
+    localState({ type: 'peers', peers });
   }
   function deliver(messages: RoomMessage[]) {
     for (const message of messages) {
@@ -113,7 +122,7 @@ export function createCollaboration(options: Options) {
         const next = await readTool<StudioDocument>('artifact_read', { artifactId, mode: 'board' });
         if (!alive(serial) || epoch !== position(receivedCursor).epoch) return;
         const current = options.getDocument();
-        if (!current || next.artifact.revision >= current.artifact.revision) options.onDocument(next);
+        if (!current || next.artifact.revision >= current.artifact.revision) { options.onDocument(next); documentState(undefined, next.artifact.revision); }
         requestFeedback(serial);
       } while (snapshotAgain && alive(serial));
     } finally { if (ticket === snapshotTicket) snapshotReading = false; }
@@ -121,20 +130,22 @@ export function createCollaboration(options: Options) {
   async function recoverUnits(message: StudioEvent, serial: number) {
     const current = options.getDocument(), revision = Number(message.revision);
     const ids = [...new Set(Array.isArray(message.changedIds) ? message.changedIds : message.units?.map(unit => unit.id))];
-    if (!current || revision !== current.artifact.revision + 1 || !ids.length || ids.length > 200 || ids.some(id => typeof id !== 'string')) { await snapshot(serial); return; }
+    if (!current || revision !== current.artifact.revision + 1 || !ids.length || ids.length > 200 || ids.some(id => typeof id !== 'string')) { await snapshot(serial); documentState(message); return; }
     try {
       const result = await readTool<{ artifact: StudioDocument['artifact']; units: NonNullable<StudioEvent['units']> }>('artifact_read', { artifactId, mode: 'units', ids, atRevision: revision });
       if (!alive(serial) || message.cursor && position(message.cursor).epoch !== position(receivedCursor).epoch) return;
       const latest = options.getDocument();
-      if (latest && latest.artifact.revision >= revision) return;
-      if (!latest || latest.artifact.revision + 1 !== revision) { await snapshot(serial); return; }
+      if (latest && latest.artifact.revision >= revision) { documentState(message); return; }
+      if (!latest || latest.artifact.revision + 1 !== revision) { await snapshot(serial); documentState(message); return; }
       if (result.artifact.id !== artifactId || result.artifact.revision !== revision || !Array.isArray(result.units) || result.units.length !== ids.length || new Set(result.units.map(unit => unit.id)).size !== ids.length || result.units.some(unit => !ids.includes(unit.id) || !('after' in unit))) throw new Error('作品单元读取返回了不匹配的版本。');
       const next = getProduct(latest.artifact.type)?.applyRemoteEvent?.(latest, { ...message, artifact: result.artifact, units: result.units });
       if (!next) throw new Error('作品单元读取返回了无效的内容。');
       options.onDocument(next);
+      documentState(message);
     } catch (error) {
       if ((error as { code?: string })?.code !== 'VERSION_NOT_FOUND') throw error;
       await snapshot(serial);
+      documentState(message);
     }
   }
   async function event(message: StudioEvent, serial: number) {
@@ -146,9 +157,9 @@ export function createCollaboration(options: Options) {
     if (message.type === 'feedback') { feedbackVersion += 1; requestFeedback(serial); return; }
     if (typeof message.revision === 'number' || message.units) {
       const current = options.getDocument();
-      if (current && Number(message.revision) <= current.artifact.revision) return;
+      if (current && Number(message.revision) <= current.artifact.revision) { documentState(message); return; }
       const next = current && message.revision === current.artifact.revision + 1 && message.units ? getProduct(current.artifact.type)?.applyRemoteEvent?.(current, message) : undefined;
-      if (next) options.onDocument(next); else await recoverUnits(message, serial);
+      if (next) { options.onDocument(next); documentState(message); } else await recoverUnits(message, serial);
     } else if (!['ready', 'share', 'presence', 'room'].includes(message.type)) await snapshot(serial);
   }
   async function batch(result: Partial<SyncBatch> & StudioEvent, serial: number) {
@@ -173,7 +184,7 @@ export function createCollaboration(options: Options) {
       if (result.cursor) authorityCursor = result.cursor;
       options.onEvent({ type: 'ready', artifactId, actor: result.actor, access: result.access, cursor: result.cursor });
     }
-    if (result.reset) { seenRooms.clear(); options.onReset?.(); }
+    if (result.reset) { seenRooms.clear(); localState({ type: 'reset', reason: 'reset' }); options.onReset?.(); }
     if (typeof result.serverTime === 'number' && (!result.cursor || !peerCursor || result.cursor === peerCursor || cursorAfter(result.cursor, peerCursor) || result.reset && position(result.cursor).epoch !== position(peerCursor).epoch)) options.onClock?.(result.serverTime - Date.now());
     for (const message of result.type === 'share' ? [result] : result.events || []) if (message.type === 'share') { options.onEvent(message); handledControls.add(message); }
     // Presence and room updates are independent of slow snapshot reads.
@@ -238,7 +249,7 @@ export function createCollaboration(options: Options) {
     pause(false); options.onStatus('reconnecting'); options.onError(error);
     if (!closed && document.visibilityState !== 'hidden') reconnect = setTimeout(connect, 1000);
   }
-  function pause(leave: boolean) {
+  function pause(leave: boolean, reason: 'pause' | 'close' = 'pause') {
     generation += 1; connected = false; stream?.close(); stream = undefined; pollAbort?.abort(); presenceAbort?.abort(); roomAbort?.abort();
     clearTimeout(reconnect); clearTimeout(presenceTimer); clearTimeout(roomTimer);
     presenceTimer = roomTimer = undefined;
@@ -248,6 +259,7 @@ export function createCollaboration(options: Options) {
     for (const outgoing of roomOutbox.splice(0)) outgoing.resolve(false);
     for (const outgoing of timerOutbox.splice(0)) outgoing.reject(new Error('连接已暂停，计时操作未提交。'));
     pending = { ...pending, cursor: null, chat: '', visible: false }; presenceBusy = roomBusy = false;
+    peers = []; options.onPresence(peers, timer); localState({ type: 'reset', reason });
     if (leave) options.onCursorClear?.();
     if (leave && client.baseUrl) void studioRequest(client, url('/api/presence'), { method: 'POST', headers: headers(), body: JSON.stringify({ artifactId, peerId, peerEpoch, peerSeq: ++identity.presence, leave: true }), keepalive: !options.polling }).catch(() => {});
   }
@@ -297,6 +309,7 @@ export function createCollaboration(options: Options) {
       return new Promise(resolve => { roomOutbox.push({ topic, data, resolve }); roomTimer ??= setTimeout(() => { roomTimer = undefined; void flushRoom(); }, 0); });
     },
     subscribe(topic, listener) { const group = listeners.get(topic) || new Set(); group.add(listener); listeners.set(topic, group); return () => { group.delete(listener); if (!group.size) listeners.delete(topic); }; },
+    subscribeState(listener) { stateListeners.add(listener); return () => { stateListeners.delete(listener); }; },
   };
   function refresh() { const serial = generation; processing = processing.then(() => snapshot(serial)).catch(error => { if (alive(serial)) lost(error); }); return processing; }
   const clearCursor = () => { options.onCursorClear?.(); presence({ cursor: null, chat: '' }); };
@@ -310,7 +323,7 @@ export function createCollaboration(options: Options) {
     refreshFeedback: () => readFeedback(),
     timer(data: Record<string, unknown>): Promise<void> { if (!connected) return Promise.reject(new Error('请在连接恢复后重试计时操作。')); return new Promise((resolve, reject) => { timerOutbox.push({ data, resolve, reject }); void flushPresence(); }); },
     feedbackChanged() { feedbackVersion += 1; feedbackAgain = true; },
-    close() { if (closed) return; pause(true); closed = true; clearInterval(heartbeat); clearTimeout(idleTimer); listeners.clear(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); window.removeEventListener('blur', clearCursor); document.documentElement.removeEventListener('pointerleave', clearCursor); },
+    close() { if (closed) return; pause(true, 'close'); closed = true; clearInterval(heartbeat); clearTimeout(idleTimer); listeners.clear(); stateListeners.clear(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); window.removeEventListener('blur', clearCursor); document.documentElement.removeEventListener('pointerleave', clearCursor); },
   };
 }
 
@@ -320,16 +333,19 @@ export function useCollaboration(options: Options & { enabled: boolean }) {
   const identity = useRef<PageIdentity>({ epoch: newClientId('epoch'), presence: 0, room: 0 });
   const [resetVersion, resetRoom] = useState(0);
   const subscriptions = useRef(new Map<string, Set<(message: RoomMessage) => void>>());
+  const stateSubscriptions = useRef(new Set<(event: CollaborationStateEvent) => void>());
   const room = useMemo<CollaborationRoom>(() => ({
     send: (topic, data) => controller.current?.room.send(topic, data) || Promise.resolve(false),
     subscribe(topic, listener) { const group = subscriptions.current.get(topic) || new Set(); group.add(listener); subscriptions.current.set(topic, group); return () => { group.delete(listener); if (!group.size) subscriptions.current.delete(topic); }; },
+    subscribeState(listener) { stateSubscriptions.current.add(listener); return () => { stateSubscriptions.current.delete(listener); }; },
   }), [options.artifactId, options.enabled, resetVersion]);
   useEffect(() => {
     if (!options.enabled || !options.artifactId) return;
     const active = createCollaboration({ ...options, identity: identity.current, getDocument: () => callbacks.current.getDocument(), onDocument: value => callbacks.current.onDocument(value), onFeedback: value => callbacks.current.onFeedback(value), onPresence: (peers, timer) => callbacks.current.onPresence(peers, timer), onEvent: event => callbacks.current.onEvent(event), onStatus: status => callbacks.current.onStatus(status), onError: error => callbacks.current.onError(error), onClock: offset => callbacks.current.onClock?.(offset), onCursorClear: () => callbacks.current.onCursorClear?.(), onReset: () => resetRoom(value => value + 1) });
     controller.current = active;
     const unsubscribes = ['gesture', 'upload', 'chat', 'follow'].map(topic => active.room.subscribe(topic, message => { for (const listener of subscriptions.current.get(topic) || []) listener(message); }));
-    return () => { controller.current = undefined; unsubscribes.forEach(unsubscribe => unsubscribe()); active.close(); };
+    unsubscribes.push(active.room.subscribeState!(event => { for (const listener of stateSubscriptions.current) listener(event); }));
+    return () => { controller.current = undefined; active.close(); unsubscribes.forEach(unsubscribe => unsubscribe()); };
   }, [options.client, options.polling, options.artifactId, options.peerId, options.enabled]);
   return useMemo(() => ({ room, presence: (patch: PresencePatch) => controller.current?.presence(patch), refresh: () => controller.current?.refresh() || Promise.resolve(), refreshFeedback: () => controller.current?.refreshFeedback() || Promise.resolve(), timer: (data: Record<string, unknown>) => controller.current?.timer(data) || Promise.reject(new Error('白板连接尚未建立。')), feedbackChanged: () => controller.current?.feedbackChanged() }), [room]);
 }

@@ -34,6 +34,60 @@ function reads(next: () => Board) { return vi.fn(async (input: string | URL, ini
 const ready = (cursor = 'epoch:1') => ({ type: 'ready', cursor, reset: true, events: [], peers: [], timer: null, serverTime: Date.now(), actor: LOCAL_ACTOR });
 
 describe('collaboration client transport', () => {
+  it('publishes trusted document state only after the canonical commit is locally applied', async () => {
+    const slow = deferred<Response>(), request = reads(() => board(1)); request.mockImplementationOnce(() => slow.promise);
+    const view = fixture(request), states: any[] = [];
+    view.controller.room.subscribeState!(state => { states.push(state); if (state.type === 'document') expect(view.get()!.artifact.revision).toBeGreaterThanOrEqual(state.commitRevision ?? state.document.artifact.revision); });
+    await view.emit(ready());
+    await view.emit({ type: 'board', operationId: 'real-save', actorId: LOCAL_ACTOR.id, changedIds: ['one'], unitVersions: { one: 3 }, cursor: 'epoch:2', revision: 2, artifact: board(2).artifact, units: [{ id: 'one', after: board(2).elements[0] }] });
+    expect(states.filter(state => state.operationId === 'real-save')).toEqual([]);
+    slow.resolve(reply(board(1))); await tick();
+    const applied = states.find(state => state.operationId === 'real-save');
+    expect(applied).toMatchObject({ type: 'document', epoch: 'epoch', cursor: 'epoch:2', actorId: LOCAL_ACTOR.id, commitRevision: 2, changedIds: ['one'], unitVersions: { one: 3 }, document: { artifact: { revision: 2 } } });
+    expect(applied.document).toBe(view.get());
+    const count = states.length;
+    await view.emit({ type: 'room', cursor: 'epoch:3', events: [{ peerId: 'remote', actor: LOCAL_ACTOR, seq: 1, topic: 'document', data: { operationId: 'forged', commitRevision: 999 }, createdAt: '' }] });
+    expect(states).toHaveLength(count);
+    expect(await view.controller.room.send('document', { operationId: 'forged' })).toBe(false);
+  });
+
+  it('confirms an already-applied commit without replacing a newer document with an old body', async () => {
+    const view = fixture(reads(() => board(3))), states: any[] = [];
+    view.controller.room.subscribeState!(state => states.push(state)); await view.emit(ready());
+    const current = view.get();
+    await view.emit({ type: 'board', cursor: 'epoch:2', operationId: 'older-commit', actorId: LOCAL_ACTOR.id, changedIds: ['one'], unitVersions: { one: 3 }, revision: 2, artifact: board(2).artifact, units: [{ id: 'one', after: board(2).elements[0] }] });
+    expect(view.get()).toBe(current);
+    expect(states.at(-1)).toMatchObject({ type: 'document', operationId: 'older-commit', actorId: LOCAL_ACTOR.id, commitRevision: 2, unitVersions: { one: 3 }, document: { artifact: { revision: 3 } } });
+    expect(view.onDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears transient peers on connection loss while preserving the durable timer and emits local reset', async () => {
+    const view = fixture(reads(() => board(1))), states: any[] = [];
+    view.controller.room.subscribeState!(state => states.push(state));
+    const timer = { durationMs: 60000, deadline: Date.now() + 60000, remainingMs: 60000, paused: false, source: LOCAL_ACTOR };
+    const peer = { peerId: 'remote', actor: LOCAL_ACTOR, updatedAt: '' };
+    await view.emit({ ...ready(), peers: [peer], timer });
+    expect(states.some(state => state.type === 'peers' && state.peers.length === 1)).toBe(true);
+    view.streams[0].onerror(); await tick();
+    expect(view.onPresence.mock.calls.at(-1)).toEqual([[], timer]);
+    expect(states.at(-1)).toEqual({ type: 'reset', reason: 'pause' });
+    expect(view.get()?.artifact.revision).toBe(1);
+    view.controller.close(); expect(states.at(-1)).toEqual({ type: 'reset', reason: 'close' });
+  });
+
+  it('waits for exact unit repair before publishing an invalidated commit and resets transient state on hidden pages', async () => {
+    const slow = deferred<Response>(), request = reads(() => board(1)), original = request.getMockImplementation()!;
+    request.mockImplementation((input, init) => JSON.parse(String(init?.body || '{}')).mode === 'units' ? slow.promise : original(input, init));
+    const view = fixture(request), states: any[] = [];
+    view.controller.room.subscribeState!(state => states.push(state)); await view.emit(ready());
+    await view.emit({ type: 'board', cursor: 'epoch:2', operationId: 'repaired', actorId: LOCAL_ACTOR.id, revision: 2, changedIds: ['one'], unitVersions: { one: 3 }, invalidation: true });
+    expect(states.filter(state => state.operationId === 'repaired')).toEqual([]);
+    slow.resolve(Response.json({ ok: true, data: { artifact: board(2).artifact, units: [{ id: 'one', after: board(2).elements[0] }] } })); await tick();
+    expect(states.at(-1)).toMatchObject({ type: 'document', operationId: 'repaired', commitRevision: 2, unitVersions: { one: 3 } });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); await tick();
+    expect(states.at(-1)).toEqual({ type: 'reset', reason: 'pause' }); expect(view.get()?.artifact.revision).toBe(2);
+  });
+
   it('retains a board invalidation arriving during a slow snapshot and consumes subsequent after-units without another full pull', async () => {
     const slow = deferred<Response>(), request = reads(() => board(2));
     request.mockImplementationOnce(() => slow.promise);
@@ -62,11 +116,12 @@ describe('collaboration client transport', () => {
 
   it('handles access loss immediately while a snapshot is pending and ignores that snapshot afterward', async () => {
     const pending = deferred<Response>(), request = reads(() => board(1)); request.mockImplementationOnce(() => pending.promise);
-    const view = fixture(request); await view.emit(ready());
+    const view = fixture(request), states: any[] = []; view.controller.room.subscribeState!(state => states.push(state)); await view.emit(ready());
     await view.emit({ type: 'access-revoked', reason: 'removed', cursor: 'epoch:2' });
     expect(view.onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'access-revoked', reason: 'removed' }));
     expect(view.streams[0].close).toHaveBeenCalled(); pending.resolve(reply(board(1))); await tick();
     expect(view.get()).toBeNull();
+    expect(states.at(-1)).toEqual({ type: 'reset', reason: 'pause' }); expect(states.some(state => state.type === 'document')).toBe(false);
   });
 
   it('does not rewind streamed peers or clock samples when an earlier reset finishes its slow snapshot', async () => {
@@ -171,10 +226,11 @@ describe('collaboration client transport', () => {
 
   it('does not publish an old epoch snapshot after a newer reset was already received', async () => {
     const slow = deferred<Response>(), request = reads(() => board(2)); request.mockImplementationOnce(() => slow.promise);
-    const view = fixture(request); await view.emit(ready()); await view.emit(ready('replacement:1'));
+    const view = fixture(request), states: any[] = []; view.controller.room.subscribeState!(state => states.push(state)); await view.emit(ready()); await view.emit(ready('replacement:1'));
     slow.resolve(reply(board(1))); await tick();
     expect(view.get()?.artifact.revision).toBe(2);
     expect(view.onDocument.mock.calls.map(([next]) => next.artifact.revision)).toEqual([2]);
+    expect(states.filter(state => state.type === 'document').map(state => state.epoch)).toEqual(['replacement']);
   });
 
   it('ignores duplicate and older received event cursors before applying document callbacks', async () => {
@@ -306,10 +362,12 @@ it('assembles out-of-order gesture parts, ignores stale frames, clears cancellat
   receiver.receive(message(incomplete[0]));
   expect(receiver.read(board(0))[0]?.elements[0]?.x).toBe(10); // Missing parts keep the last complete frame.
   receiver.receive(message({ id: 'gesture', seq: ++seq, phase: 'end', kind: 'ink', frame: 3, cancelled: true })); expect(receiver.read(board(0))).toEqual([]);
-  const moving: NativeGesture = { id: 'move', kind: 'move', elements: board(2).elements };
+  const moving: NativeGesture = { id: 'move', kind: 'move', elements: board(2).elements.map(element => ({ ...element, version: 1 })) };
   for (const part of encodeGestureFrame(moving, 2, () => ++seq)) receiver.receive(message(part));
   receiver.receive(message({ id: 'move', seq: ++seq, phase: 'end', kind: 'move', frame: 2, storedIds: ['one'] }));
-  expect(receiver.read(board(0))).toHaveLength(1); expect(receiver.read(board(2))).toEqual([]);
+  expect(receiver.read(board(0))).toHaveLength(1);
+  receiver.authority({ type: 'document', document: board(2), operationId: 'move', actorId: LOCAL_ACTOR.id, commitRevision: 2, changedIds: ['one'], unitVersions: { one: 3 } });
+  expect(receiver.read(board(2))).toEqual([]);
   for (const part of encodeGestureFrame({ ...moving, id: 'expiry' }, 3, () => ++seq)) receiver.receive(message(part)); now += 3001; expect(receiver.read(board(0))).toEqual([]);
 });
 

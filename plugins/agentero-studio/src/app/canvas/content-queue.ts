@@ -62,14 +62,14 @@ export class NativeContentQueue {
   source(id: string, version: number) { return this.versions.get(`${id}@${version}`); }
   historyId(revision: number) { return this.histories.get(revision); }
   setEnabled(enabled: boolean) { this.enabled = enabled; if (enabled) this.drain(); }
-  enqueue(before: Board, operations: Operation[], summary: string, sources = before.elements, remember = true, stream?: string): Promise<ContentReceipt | null> {
+  enqueue(before: Board, operations: Operation[], summary: string, sources = before.elements, remember = true, stream?: string, operationId?: string): Promise<ContentReceipt | null> {
     const keys = [...new Set(operations.flatMap(op => contentTargets(before, op)))];
     if (operations.some(op => ['style', 'layout', 'restore', 'motion'].includes(op.op))) keys.push('$board');
     const previous = this.tasks.findLast(task => task.keys.some(key => keys.includes(key) || key === '$board' || keys.includes('$board')));
-    if (previous && equal(previous.operations, operations)) return this.promises.get(previous.id) ?? Promise.resolve(null);
+    if (previous && equal(previous.operations, operations) && (!operationId || previous.id === operationId)) return this.promises.get(previous.id) ?? Promise.resolve(null);
     let sourceElements = keys.flatMap(id => { const source = sources.find(element => element.id === id) ?? before.elements.find(element => element.id === id); return source ? [source] : []; });
     if (stream) sourceElements = overlayContent(sourceElements, this.tasks.filter(task => task.stream === stream));
-    const task: ContentTask = { id: newClientId('op'), keys, before: structuredClone({ ...before, elements: [] }), sources: structuredClone(sourceElements), operations: structuredClone(operations), summary, remember, stream, state: 'queued' };
+    const task: ContentTask = { id: operationId ?? newClientId('op'), keys, before: structuredClone({ ...before, elements: [] }), sources: structuredClone(sourceElements), operations: structuredClone(operations), summary, remember, stream, state: 'queued' };
     this.tasks.push(task);
     const completion = new Promise<ContentReceipt | null>(resolve => this.completions.set(task.id, resolve));
     this.promises.set(task.id, completion);

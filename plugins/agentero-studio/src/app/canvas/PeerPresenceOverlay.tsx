@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { BoardElement, Presence } from '../../contracts/studio.js';
 import { readableText } from '../../core/theme.js';
 import { participantColor } from '../shared/presence-members.js';
-import { elementBounds } from './canvas-model.js';
-import { activeAgentTasks, agentTaskBounds } from '../shared/agent-activity.js';
+import { boundsOf, elementBounds } from './canvas-model.js';
+import { activeAgentTasks, agentTaskBounds, agentWorkStatus } from '../shared/agent-activity.js';
 import { AgentWorkingMark } from '../shared/AgentWorkingMark.js';
 
 interface Props {
@@ -14,10 +14,11 @@ interface Props {
   zoom: number;
   clockOffsetMs?: number;
   preview?: boolean;
+  geometryTargets?: readonly { peerId: string; elementIds: readonly string[] }[];
 }
 const IDLE_AFTER = 60_000, EXPIRE_AFTER = 15 * 60_000, CHAT_FADE = 600;
 
-export default function PeerPresenceOverlay({ peers, elements, artifactId, selfActorId, zoom, clockOffsetMs = 0, preview = false }: Props) {
+export default function PeerPresenceOverlay({ peers, elements, artifactId, selfActorId, zoom, clockOffsetMs = 0, preview = false, geometryTargets = [] }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden');
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
@@ -62,17 +63,26 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
     const box = agentTaskBounds(task, elements);
     return box ? [{ peer, task, box }] : [];
   }));
-  const edits = new Map<string, { peer: Presence; element: BoardElement; moving: boolean }>();
+  type TargetState = 'editing' | 'moving' | 'saving';
+  const priority = { saving: 0, editing: 1, moving: 2 };
+  const targets = new Map<string, { peer: Presence; element: BoardElement; state: TargetState }>();
   for (const peer of active) {
     if (activeAgentTasks(peer, now).length) continue;
-    const editing = peer.context?.editingIds ?? [], moving = Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : [];
-    for (const id of new Set([...editing, ...moving])) {
+    const editing = new Set(peer.context?.editingIds ?? []), moving = new Set(Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : []), saving = peer.context?.savingIds ?? [];
+    const previewing = new Set(geometryTargets.filter(target => target.peerId === peer.peerId).flatMap(target => [...target.elementIds]));
+    for (const id of new Set([...editing, ...moving, ...saving])) {
       const element = byId.get(id);
       if (!element) continue;
-      const key = `${peer.actor.id}:${id}`, previous = edits.get(key), changing = moving.includes(id);
-      if (!previous || changing && !previous.moving || changing === previous.moving && previous.peer.updatedAt < peer.updatedAt) edits.set(key, { peer, element, moving: changing });
+      if (moving.has(id) && previewing.has(id) && !editing.has(id) && !saving.includes(id)) continue;
+      const key = `${peer.actor.id}:${id}`, previous = targets.get(key), state = moving.has(id) && !previewing.has(id) ? 'moving' : editing.has(id) ? 'editing' : 'saving';
+      if (!previous || priority[state] > priority[previous.state] || state === previous.state && previous.peer.updatedAt < peer.updatedAt) targets.set(key, { peer, element, state });
       schedule(Date.parse(peer.updatedAt) + EXPIRE_AFTER);
     }
+  }
+  const hints = new Map<string, { peer: Presence; elements: BoardElement[]; state: TargetState }>();
+  for (const { peer, element, state } of targets.values()) {
+    const key = `${peer.peerId}:${state}`, hint = hints.get(key);
+    if (hint) hint.elements.push(element); else hints.set(key, { peer, elements: [element], state });
   }
   for (const { peer, at } of cursors.values()) {
     schedule(at + IDLE_AFTER); schedule(at + EXPIRE_AFTER); schedule(Date.parse(peer.updatedAt) + EXPIRE_AFTER);
@@ -86,21 +96,27 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
 
   const slots = new Map<string, number>();
   const targetCounts = new Map<string, number>();
-  for (const { element } of edits.values()) targetCounts.set(element.id, (targetCounts.get(element.id) ?? 0) + 1);
+  for (const hint of hints.values()) { const key = hint.elements.map(element => element.id).sort().join('\0'); targetCounts.set(key, (targetCounts.get(key) ?? 0) + 1); }
   return <div ref={root} className="studio-peer-presence-overlay" aria-label="协作者在画布上的位置" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
     {taskAreas.map(({ peer, task, box }) => {
-      const color = participantColor(peer.actor, peer.color), label = task.label || '正在工作';
+      const color = participantColor(peer.actor, peer.color), label = agentWorkStatus(task.label);
       return <div key={`${peer.actor.id}:${task.taskId}`} className="studio-agent-task-area" data-agent-task={task.taskId} data-peer-actor={peer.actor.id} role="status" aria-label={`${peer.actor.name} · ${label}，工作区域提示`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, pointerEvents: 'none', '--agent-work-color': color, '--agent-work-stroke': `${1.5 / zoom}px`, '--agent-work-radius': `${8 / zoom}px`, '--agent-work-gap': `${4 / zoom}px`, '--agent-work-scale': 1 / zoom } as React.CSSProperties}><div className="studio-agent-task-label" style={{ background: color, color: readableText(color) }}><AgentWorkingMark /><span>{peer.actor.name} · {label}</span><i>.</i><i>.</i><i>.</i></div></div>;
     })}
-    {[...edits.entries()].map(([key, { peer, element, moving }]) => {
-      const box = elementBounds(element, elements), color = participantColor(peer.actor, peer.color), slot = slots.get(element.id) ?? 0;
-      slots.set(element.id, slot + 1);
+    {[...hints.entries()].map(([key, { peer, elements: changed, state }]) => {
+      const first = changed[0]!, ids = changed.map(element => element.id).sort(), targetKey = ids.join('\0');
+      const box = changed.length === 1 ? elementBounds(first, elements) : boundsOf(changed.map(element => {
+        const bounds = elementBounds(element, elements), angle = element.type === 'arrow' ? 0 : (element.rotation ?? 0) * Math.PI / 180;
+        const w = Math.abs(bounds.w * Math.cos(angle)) + Math.abs(bounds.h * Math.sin(angle)), h = Math.abs(bounds.w * Math.sin(angle)) + Math.abs(bounds.h * Math.cos(angle));
+        return { x: bounds.x + (bounds.w - w) / 2, y: bounds.y + (bounds.h - h) / 2, w, h };
+      }))!;
+      const color = participantColor(peer.actor, peer.color), slot = slots.get(targetKey) ?? 0, moving = state === 'moving';
+      slots.set(targetKey, slot + 1);
       if (slot >= 3) return null;
-      const extra = slot === 2 ? (targetCounts.get(element.id) ?? 0) - 3 : 0;
-      const padding = (3 + slot * 3) / zoom, rotation = element.type === 'arrow' ? 0 : element.rotation ?? 0;
-      const action = moving || peer.actor.kind === 'agent' ? '正在修改' : '正在编辑';
-      return <div key={key} data-peer-target={element.id} data-peer-actor={peer.actor.id} role="status" aria-label={`${peer.actor.name} ${action}此对象`} style={{ position: 'absolute', left: box.x - padding, top: box.y - padding, width: box.w + 2 * padding, height: box.h + 2 * padding, border: `${1.5 / zoom}px ${moving ? 'dashed' : 'solid'} ${color}`, borderRadius: 5 / zoom, transform: rotation ? `rotate(${rotation}deg)` : undefined, pointerEvents: 'none', zIndex: 72 }}>
-        <span style={{ position: 'absolute', left: 0, bottom: `calc(100% + ${(4 + slot * 20) / zoom}px)`, padding: '3px 6px', borderRadius: 4, background: color, color: readableText(color), font: '11px/1.4 Arial,"Microsoft YaHei",sans-serif', whiteSpace: 'nowrap', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', transform: `scale(${1 / zoom})${rotation ? ` rotate(${-rotation}deg)` : ''}`, transformOrigin: 'left bottom' }}>{peer.actor.name} · {action}{extra > 0 && ` · 另 ${extra} 人`}</span>
+      const extra = slot === 2 ? (targetCounts.get(targetKey) ?? 0) - 3 : 0;
+      const padding = (3 + slot * 3) / zoom, rotation = changed.length === 1 && first.type !== 'arrow' ? first.rotation ?? 0 : 0;
+      const action = state === 'saving' ? '正在保存' : moving || peer.actor.kind === 'agent' ? '正在修改' : '正在编辑';
+      return <div key={key} data-peer-target={changed.length === 1 ? first.id : undefined} data-peer-targets={ids.join(' ')} data-peer-state={state} data-peer-actor={peer.actor.id} data-peer-id={peer.peerId} role="status" aria-label={`${peer.actor.name} ${action}${changed.length === 1 ? '此对象' : ` ${changed.length} 个对象`}`} style={{ position: 'absolute', left: box.x - padding, top: box.y - padding, width: box.w + 2 * padding, height: box.h + 2 * padding, border: `${1.5 / zoom}px ${moving ? 'dashed' : 'solid'} ${color}`, borderRadius: 5 / zoom, transform: rotation ? `rotate(${rotation}deg)` : undefined, pointerEvents: 'none', zIndex: 72 }}>
+        <span style={{ position: 'absolute', left: 0, bottom: `calc(100% + ${(4 + slot * 20) / zoom}px)`, padding: '3px 6px', borderRadius: 4, background: color, color: readableText(color), font: '11px/1.4 Arial,"Microsoft YaHei",sans-serif', whiteSpace: 'nowrap', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', transform: `scale(${1 / zoom})${rotation ? ` rotate(${-rotation}deg)` : ''}`, transformOrigin: 'left bottom' }}>{peer.actor.name} · {action}{changed.length > 1 && ` · ${changed.length} 个对象`}{extra > 0 && ` · 另 ${extra} 人`}</span>
       </div>;
     })}
     {[...cursors.values()].map(({ peer, at }) => {

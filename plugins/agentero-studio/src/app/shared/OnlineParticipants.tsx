@@ -4,25 +4,26 @@ import type { Actor, Presence } from '../../contracts/studio';
 import { EditorPopover } from './editor-panels/EditorPopover';
 import { ParticipantActivity, type PresenceMember } from './presence-members';
 import type { StudioDocument } from '../products';
-import { activeAgentTasks, agentPeerBounds, documentElements } from './agent-activity';
-import { AgentWorkingMark } from './AgentWorkingMark';
+import { activeAgentTasks, agentPeerBounds, agentWorkStatus, documentElements } from './agent-activity';
 import './participants.css';
 
 function status(member: PresenceMember, now: number) {
   const context = member.peer.context;
   const tasks = activeAgentTasks(member.peer, now);
-  if (tasks.length) return (tasks[0]!.label || '正在工作') + (tasks.length > 1 ? ` · 另 ${tasks.length - 1} 项` : '');
-  if (context?.activity === 'reading') return '正在读取';
-  if (context?.activity === 'writing') return '正在修改';
-  if (member.actor.kind === 'agent' && ['idle', 'working'].includes(String(context?.activity))) return '刚刚活动';
+  if (tasks.length) return agentWorkStatus(tasks[0]!.label) + (tasks.length > 1 ? ` · 另 ${tasks.length - 1} 项` : '');
+  if (member.actor.kind === 'agent' && context?.activity === 'reading') return '正在读取';
+  if (member.actor.kind === 'agent' && context?.activity === 'writing') return '正在修改';
+  const pages = member.peers.filter(peer => peer.visible !== false);
+  if (pages.some(peer => peer.context?.editingIds?.length || Array.isArray(peer.context?.movingIds) && peer.context.movingIds.length)) return '正在编辑';
+  if (pages.some(peer => peer.context?.savingIds?.length)) return '正在保存';
   if (member.peer.visible === false) return '暂时离开此页';
-  if (Array.isArray(context?.editingIds) && context.editingIds.length || Array.isArray(context?.movingIds) && context.movingIds.length) return '正在编辑';
+  if (member.actor.kind === 'agent' && ['idle', 'working'].includes(String(context?.activity))) return '刚刚活动';
   return now - member.activeAt > 300000 ? '一会儿没动了' : '在画布上';
 }
 function Avatar({ member, now, followed }: { member: PresenceMember; now: number; followed?: boolean }) {
   const working = activeAgentTasks(member.peer, now).length > 0;
-  const busy = working || ['正在读取', '正在修改', '正在编辑'].includes(status(member, now));
-  return <span className={`studio-online-avatar${now - member.activeAt > 300000 ? ' is-idle' : ''}${busy ? ' is-busy' : ''}${followed ? ' is-followed' : ''}`} style={{ background: member.color, color: member.color === '#fbb315' ? '#201b0c' : '#fff', '--participant-color': member.color } as React.CSSProperties} aria-hidden="true">{member.actor.kind === 'agent' ? working ? <AgentWorkingMark /> : <Bot size={14} /> : (member.actor.name || '协').slice(0, 1)}</span>;
+  const busy = working || ['正在读取', '正在修改', '正在编辑', '正在保存'].includes(status(member, now));
+  return <span className={`studio-online-avatar${now - member.activeAt > 300000 ? ' is-idle' : ''}${busy ? ' is-busy' : ''}${followed ? ' is-followed' : ''}`} style={{ background: member.color, color: member.color === '#fbb315' ? '#201b0c' : '#fff', '--participant-color': member.color } as React.CSSProperties} aria-hidden="true">{member.actor.kind === 'agent' ? <Bot size={14} /> : (member.actor.name || '协').slice(0, 1)}</span>;
 }
 export function OnlineParticipants({ peers, actor, following, onFollow, document, clockOffsetMs = 0, preview = false }: { peers: Presence[]; actor: Actor; following: string; onFollow: (actorId: string) => void; document?: StudioDocument | null; clockOffsetMs?: number; preview?: boolean }) {
   const tracker = useRef(new ParticipantActivity()), anchor = useRef<HTMLButtonElement>(null);

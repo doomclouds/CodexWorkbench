@@ -42,12 +42,18 @@ export interface HistoryEntry { id: string; revision: number; createdAt: string;
 export interface HistoryBatch extends HistoryEntry { firstVersionId: string; firstRevision: number; firstCreatedAt: string; beforeVersionId?: string; versionIds: string[] }
 export interface AgentActivityScope { ids?: string[]; rect?: { x: number; y: number; w: number; h: number } }
 export interface AgentTask { taskId: string; scope: AgentActivityScope; label?: string; expiresAt: number }
-export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; agentTasks?: AgentTask[]; [key: string]: unknown }
+export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; savingIds?: string[]; agentTasks?: AgentTask[]; [key: string]: unknown }
 export interface Presence { peerId: string; actor: Actor; peerEpoch?: string; peerSeq?: number; context?: ViewContext; cursor?: { x: number; y: number; surface?: string; t?: number } | null; following?: string; chat?: string; chatExpiresAt?: number; color?: string; visible?: boolean; updatedAt: string }
 export interface RoomMessage { peerId: string; actor: Actor; seq: number; topic: string; data: Json; createdAt: string }
+/** Local notifications from the authenticated transport, never accepted through room.send. */
+export type CollaborationStateEvent =
+  | { type: 'document'; document: { artifact: Artifact }; epoch?: string; cursor?: string; operationId?: string; actorId?: string; commitRevision?: number; changedIds?: string[]; unitVersions?: Record<string, number> }
+  | { type: 'peers'; peers: Presence[] }
+  | { type: 'reset'; reason: 'pause' | 'reset' | 'close' };
 export interface CollaborationRoom {
   send(topic: string, data: Json): Promise<boolean>;
   subscribe(topic: string, listener: (message: RoomMessage) => void): () => void;
+  subscribeState?(listener: (event: CollaborationStateEvent) => void): () => void;
 }
 export interface SyncBatch { cursor: string; reset: boolean; events: StudioEvent[]; peers: Presence[]; timer: RoomTimer | null; serverTime: number; actor?: Actor; access?: 'local' | 'lan' }
 export interface RoomTimer { durationMs: number; deadline: number | null; remainingMs: number; paused: boolean; source: Actor }
@@ -73,6 +79,6 @@ export interface HtmlSelection { regionId: string; sourceRevision: number; targe
 export interface Connection { baseUrl: string; token: string; actor: Actor; artifactId?: string; access?: 'local' | 'lan' }
 export interface StudioUnitPatch { baseVersion: number; version: number; changes: Record<string, unknown>; removedKeys: string[] }
 export type StudioUnitEvent = { id: string; after: unknown | null; patch?: never } | { id: string; patch: StudioUnitPatch; after?: never };
-export interface StudioEvent { type: string; artifactId: string; cursor?: string; revision?: number; artifact?: Artifact; units?: StudioUnitEvent[]; [key: string]: unknown }
+export interface StudioEvent { type: string; artifactId: string; cursor?: string; revision?: number; operationId?: string; actorId?: string; changedIds?: string[]; unitVersions?: Record<string, number>; artifact?: Artifact; units?: StudioUnitEvent[]; [key: string]: unknown }
 export const DEFAULT_STYLE: StyleProfile = { name: 'Diagram', paper: '#f5f5f5', ink: '#2d3142', muted: '#4f5d75', accent: '#eb6c36', link: '#2e5aa8', fontFamily: 'Arial, "Microsoft YaHei", sans-serif', titleFont: 'Georgia, "Songti SC", serif', monoFont: 'Consolas, monospace' };
 export const LOCAL_ACTOR: Actor = { id: 'local', name: '我', kind: 'human', role: 'owner' };

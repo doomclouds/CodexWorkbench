@@ -61,8 +61,13 @@ export class StudioService {
       return Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)) ? compact : full;
     });
   }
-  private emitBoard(snapshot: Snapshot<unknown>, changedIds: string[], units = this.boardUnits(snapshot, changedIds)) {
-    this.emit({ type: 'board', artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds: [...new Set([...changedIds, ...units.map(unit => unit.id)])], artifact: copy(snapshot.artifact), ...(Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true }) });
+  private emitBoard(snapshot: Snapshot<unknown>, changedIds: string[], units = this.boardUnits(snapshot, changedIds), operationId?: string, actorId?: string) {
+    const unitVersions = Object.fromEntries(units.flatMap(unit => {
+      if (unit.id.startsWith('$')) return [];
+      const version = unit.patch ? unit.patch.version : unit.after === null ? 0 : object(unit.after) ? unit.after.version : undefined;
+      return Number.isSafeInteger(version) ? [[unit.id, Number(version)]] : [];
+    }));
+    this.emit({ type: 'board', artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, ...(operationId ? { operationId, actorId } : {}), changedIds: [...new Set([...changedIds, ...units.map(unit => unit.id)])], unitVersions, artifact: copy(snapshot.artifact), ...(Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true }) });
   }
   private authorizedActor(state: AuthorizationState, actor: Actor, authority?: StudioAuthority): Actor {
     if (!authority) return actor;
@@ -226,21 +231,21 @@ export class StudioService {
       const currentActor = this.authorizedActor(state, actor, authority);
       const adapter = this.products.get(state.artifact.type).adapter;
       if (currentActor.kind === 'agent' && !state.operations.some(operation => operation.id === args.operationId) && Array.isArray(args.operations)) {
-        const editing = new Set(this.getPresence(id).filter(peer => peer.actor.id !== currentActor.id && ['owner', 'editor'].includes(peer.actor.role)).flatMap(peer => [...(peer.context?.editingIds ?? []), ...(Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : [])]));
+        const editing = new Set(this.getPresence(id).filter(peer => peer.actor.id !== currentActor.id && ['owner', 'editor'].includes(peer.actor.role)).flatMap(peer => [...(peer.context?.editingIds ?? []), ...(peer.context?.savingIds ?? []), ...(Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : [])]));
         const conflicts = new Set<string>();
         for (const operation of args.operations) {
           if (!object(operation) || typeof operation.op !== 'string' || !editing.size) continue;
           const targets = mutationTargets(state.content, { ...operation, op: operation.op }, adapter);
           for (const target of targets ?? editing) if (editing.has(target)) conflicts.add(target);
         }
-        if (conflicts.size) throw new StudioError('EDIT_IN_PROGRESS', '目标内容正在其他视图中编辑，请等待编辑完成后重试。', { ids: [...conflicts] });
+        if (conflicts.size) throw new StudioError('EDIT_IN_PROGRESS', '目标内容正在其他视图中编辑或保存，请等待完成后重试。', { ids: [...conflicts] });
       }
       const before = state.content;
       const mutation = applyMutation(state, { operationId: args.operationId, operations: args.operations as ContentOperation[], expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
-      return { ...mutation, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
+      return { ...mutation, eventOperationId: state.operations.find(operation => operation.historyId === mutation.historyEntry.id)?.id, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
     });
     const snapshot = result.snapshot;
-    if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits);
+    if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits, result.eventOperationId, result.historyEntry.actor.id);
     return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
   }
   private async feedback(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {

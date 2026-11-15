@@ -69,6 +69,7 @@ function WhiteboardEditor(props: ProductEditorProps) {
   const { document, onChanged, onAnnotate, onOpenHtml, onActivityChange, onError, onNotice, ...rest } = props;
   const board = document as Board;
   const [sourceRequest, setSourceRequest] = useState<{ id: string; regionId?: string } | null>(null);
+  const [insertedElementId, setInsertedElementId] = useState<string>();
   const sourceClient = useRef(props.client); sourceClient.current = props.client;
   const sourceChanged = useRef(onChanged); sourceChanged.current = onChanged;
   const sourceBoard = useRef(board); sourceBoard.current = board;
@@ -82,16 +83,16 @@ function WhiteboardEditor(props: ProductEditorProps) {
   const report = useCallback((origin: 'canvas' | 'source', activity: ProductActivity) => {
     activities.current[origin] = activity;
     const values = Object.values(activities.current);
-    onActivityChange?.({ editingIds: [...new Set(values.flatMap(value => value.editingIds))], movingIds: [...new Set(values.flatMap(value => value.movingIds))], dirty: values.some(value => value.dirty), saving: values.some(value => value.saving), saveError: values.find(value => value.saveError)?.saveError || '', issues: values.flatMap(value => value.issues || []) });
+    onActivityChange?.({ editingIds: [...new Set(values.flatMap(value => value.editingIds))], movingIds: [...new Set(values.flatMap(value => value.movingIds))], savingIds: [...new Set(values.flatMap(value => value.savingIds ?? []))], dirty: values.some(value => value.dirty), saving: values.some(value => value.saving), saveError: values.find(value => value.saveError)?.saveError || '', issues: values.flatMap(value => value.issues || []) });
   }, [onActivityChange]);
   const canvasActivity = useCallback((activity: ProductActivity) => report('canvas', activity), [report]);
   const sourceActivity = useCallback((activity: ProductActivity) => report('source', activity), [report]);
-  return <><WhiteboardCanvas key={`canvas:${board.artifact.id}:${props.actor.id}`} {...rest} contentQueue={contentQueue} board={board} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onOpenHtml={element => onOpenHtml?.(element.id)} onEditHtml={element => setSourceRequest({ id: newClientId('source'), regionId: element?.id })} />
-    {!props.preview && <WhiteboardToolbar key={`source:${board.artifact.id}:${props.actor.id}`} document={board} client={props.client} actor={props.actor} selectedIds={[]} disabled={!!props.readOnly} onChanged={onChanged} onError={error => onError?.(error)} onNotice={message => onNotice?.(message)} onActivityChange={sourceActivity} request={sourceRequest} getQueue={getQueue} />}
+  return <><WhiteboardCanvas key={`canvas:${board.artifact.id}:${props.actor.id}`} {...rest} contentQueue={contentQueue} board={board} insertedElementId={insertedElementId} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onOpenHtml={element => onOpenHtml?.(element.id)} onEditHtml={element => setSourceRequest({ id: newClientId('source'), regionId: element?.id })} />
+    {!props.preview && <WhiteboardToolbar key={`source:${board.artifact.id}:${props.actor.id}`} document={board} client={props.client} actor={props.actor} selectedIds={[]} disabled={!!props.readOnly} onChanged={onChanged} onError={error => onError?.(error)} onNotice={message => onNotice?.(message)} onActivityChange={sourceActivity} request={sourceRequest} getQueue={getQueue} onInserted={setInsertedElementId} />}
   </>;
 }
 interface SourceDraft { regionId?: string; newRegionId?: string; version?: number; base?: BoardElement; title: string; html: string }
-function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedIds, disabled, onChanged, onError, onNotice, onActivityChange, request, getQueue }: ProductToolbarProps & { request?: { id: string; regionId?: string } | null; getQueue: () => NativeContentQueue | null }) {
+function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedIds, disabled, onChanged, onError, onNotice, onActivityChange, request, getQueue, onInserted }: ProductToolbarProps & { request?: { id: string; regionId?: string } | null; getQueue: () => NativeContentQueue | null; onInserted: (id: string) => void }) {
   const board = opaqueDocument as Board;
   const [source, setSource] = useState<SourceDraft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -112,7 +113,7 @@ function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedId
   useEffect(() => { try { const stored = localStorage.getItem(sourceStorage); if (stored) { setSource(JSON.parse(stored)); sourceHadDraft.current = true; } } catch { setSourceError('无法读取上次的 HTML 草稿。'); } }, [sourceStorage]);
   useEffect(() => { try { if (source && JSON.stringify(source) !== sourceBaseline.current) { localStorage.setItem(sourceStorage, JSON.stringify(source)); sourceHadDraft.current = true; } else if (!source && sourceHadDraft.current) { localStorage.removeItem(sourceStorage); sourceHadDraft.current = false; } } catch { setSourceError('本机草稿保存失败，请复制 HTML 源码后再关闭。'); } }, [source, sourceStorage]);
   useEffect(() => {
-    onActivityChange?.({ editingIds: source?.regionId ? [source.regionId] : [], movingIds: [], dirty: !!source && JSON.stringify(source) !== sourceBaseline.current, saving, saveError: source ? sourceError : '', issues: source && sourceError ? [{ type: 'source-save', message: sourceError, ids: source?.regionId ? [source.regionId] : [] }] : [] });
+    onActivityChange?.({ editingIds: !saving && source?.regionId ? [source.regionId] : [], movingIds: [], savingIds: saving && source ? [source.regionId ?? source.newRegionId!].filter(Boolean) : [], dirty: !!source && JSON.stringify(source) !== sourceBaseline.current, saving, saveError: source ? sourceError : '', issues: source && sourceError ? [{ type: 'source-save', message: sourceError, ids: source?.regionId ? [source.regionId] : [] }] : [] });
   }, [source, sourceError, saving, onActivityChange]);
   useEffect(() => () => onActivityChange?.({ editingIds: [], movingIds: [], dirty: false, issues: [] }), [onActivityChange]);
   function openSource(draft: SourceDraft) { const next = draft.regionId ? draft : { ...draft, newRegionId: draft.newRegionId ?? newClientId('html') }; sourceBaseline.current = JSON.stringify(next); setSourceError(''); setSource(next); }
@@ -159,7 +160,7 @@ function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedId
         result = await queue.enqueue(result?.board ?? current, operations, source.regionId || created ? '保存 HTML 源码' : '添加 HTML 图解', created ? [created] : source.base ? [source.base] : current.elements);
       }
       if (!result) { const failed = queue.tasks.find(task => task.state === 'failed' && task.operations.some(operation => operation.id === source.regionId || operation.element?.id === operations[0]?.element?.id)); if (failed && /CONFLICT|冲突|其他人|被删除/.test(failed.error ?? '')) showSourceConflict(failed); throw failed?.failure ?? new Error('HTML 草稿尚未保存，请比较双方内容或重试原操作。'); }
-      if (mounted.current && boardRef.current.artifact.id === current.artifact.id) { onChanged(result.board); pendingSave.current = null; setSourceConflict(null); setSource(null); onNotice(source.regionId ? 'HTML 源码已保存。' : 'HTML 图解已加入白板。'); }
+      if (mounted.current && boardRef.current.artifact.id === current.artifact.id) { onChanged(result.board); if (!source.regionId && targetId) onInserted(targetId); pendingSave.current = null; setSourceConflict(null); setSource(null); onNotice(source.regionId ? 'HTML 源码已保存。' : 'HTML 图解已加入白板。'); }
     } catch (error) { if (mounted.current && boardRef.current.artifact.id === current.artifact.id) setSourceError(error instanceof Error ? error.message : String(error)); onError(error); } finally { if (mounted.current) { setBusy(false); setSaving(false); } }
   }
   async function overwriteSource() {
@@ -168,7 +169,7 @@ function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedId
     const current = sourceComparisonBoard ?? boardRef.current, region = current.elements.find(element => element.id === source.regionId);
     const operation: Operation = region ? { op: 'update', id: region.id, changes: { html: source.html, text: source.title } } : { op: 'add', element: { ...(source.base ?? {}), id: newClientId('html'), type: 'html', x: source.base?.x ?? 80, y: source.base?.y ?? 80, w: source.base?.w ?? 1440, h: source.base?.h ?? 1120, html: source.html, text: source.title } };
     queue.discard(task.id); setSourceConflict(null); pendingSave.current = null; setBusy(true); setSaving(true);
-    try { const result = await queue.enqueue(current, [operation], region ? '应用已比较的 HTML 源码' : '另存 HTML 草稿', current.elements); if (!result) throw new Error('HTML 尚未保存，草稿已保留，请比较最新内容。'); if (!mounted.current) return; onChanged(result.board); setSource(null); setSourceError(''); onNotice('HTML 源码已保存。'); }
+    try { const result = await queue.enqueue(current, [operation], region ? '应用已比较的 HTML 源码' : '另存 HTML 草稿', current.elements); if (!result) throw new Error('HTML 尚未保存，草稿已保留，请比较最新内容。'); if (!mounted.current) return; onChanged(result.board); if (operation.op === 'add' && operation.element?.id) onInserted(operation.element.id); setSource(null); setSourceError(''); onNotice('HTML 源码已保存。'); }
     catch (error) { onError(error); setSourceError(error instanceof Error ? error.message : String(error)); }
     finally { if (mounted.current) { setBusy(false); setSaving(false); } }
   }
