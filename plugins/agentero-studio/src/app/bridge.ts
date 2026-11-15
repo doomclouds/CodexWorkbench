@@ -8,6 +8,7 @@ export { feedbackDraft } from './feedback-draft';
 import { STUDIO_ICON } from '../contracts/brand-icon';
 import { PLUGIN_VERSION } from '../contracts/version';
 import { APP_MAX_BYTES } from '../contracts/transport';
+import { createWebNavigation } from './web-navigation';
 
 declare global { interface Window { __STUDIO_BOOT__?: Connection } }
 export interface StudioBridge {
@@ -15,6 +16,7 @@ export interface StudioBridge {
   actor: Actor;
   artifactId?: string;
   view?: string;
+  navigate?: (artifactId?: string, view?: string) => void;
   attachContext?: (feedback: Feedback, document: ArtifactView) => Promise<void>;
   updateContext?: (context: ViewContext | null) => void;
   close(): Promise<void>;
@@ -39,7 +41,10 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
         return unwrap(await response.json() as ToolResponse<T>, response.status);
       },
     };
-    return { client, actor: boot.actor, artifactId: boot.artifactId, view: boot.artifactId ? 'editor' : 'library', close: async () => {} };
+    let standalone: StudioBridge;
+    const navigation = createWebNavigation(window, boot, (artifactId, view) => { standalone.artifactId = artifactId; standalone.view = view; onNavigate(artifactId, view); });
+    standalone = { client, actor: boot.actor, artifactId: navigation.route.artifactId, view: navigation.route.view, navigate: navigation.navigate, close: async () => navigation.close() };
+    return standalone;
   }
   const app = new App({ name: 'Agentero Studio', title: 'Agentero 创作', version: PLUGIN_VERSION, icons: [STUDIO_ICON] }, {}, { autoResize: false });
   const extensions = new OpenAIExtensions(app);

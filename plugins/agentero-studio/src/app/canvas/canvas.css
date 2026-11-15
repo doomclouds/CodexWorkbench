@@ -83,8 +83,9 @@
 .studio-shape-grid button { position: relative; height: 43px; border: 1px solid transparent; padding: 8px; }
 .studio-shape-grid button[aria-pressed="true"] { border-color: var(--canvas-accent); background: var(--canvas-ui-soft); }
 .studio-shape-grid .studio-shape-svg { position: static; width: 100%; height: 100%; }
-.studio-table-controls { position: absolute; top: calc(100% + 5px); left: 0; display: flex; gap: 4px; white-space: nowrap; }
-.studio-table-controls button { border: 1px solid var(--canvas-ui-border); border-radius: 4px; padding: 3px 5px; font-size: 11px; background: var(--canvas-ui); }
+.studio-table-controls { position: absolute; top: calc(100% + 5px); left: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; white-space: nowrap; }
+.studio-table-controls button { min-width: 30px; min-height: 30px; border: 1px solid var(--canvas-ui-border); border-radius: 4px; padding: 5px 8px; font-size: 12px; background: var(--canvas-ui); }
+.studio-table-controls [role="alert"] { white-space: normal; max-width: 100%; }
 .studio-board-table textarea { width: 100%; height: 100%; min-height: 36px; resize: none; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; }
 .studio-resize-handle { position: absolute; right: calc(-5px / var(--canvas-scale, 1)); bottom: calc(-5px / var(--canvas-scale, 1)); width: calc(10px / var(--canvas-scale, 1)); height: calc(10px / var(--canvas-scale, 1)); padding: 0; border: calc(1.5px / var(--canvas-scale, 1)) solid var(--canvas-accent); border-radius: 1px; background: var(--canvas-ui); cursor: nwse-resize !important; z-index: 8; touch-action: none; }
 .studio-lock-indicator { position: absolute; right: -6px; top: -20px; color: var(--canvas-accent); }

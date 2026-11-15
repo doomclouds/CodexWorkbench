@@ -136,7 +136,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.2";
+    PLUGIN_VERSION = "0.2.3";
   }
 });
 
@@ -12256,7 +12256,7 @@ var init_collaboration = __esm({
         const peerId = safeId(input2.peerId ?? actor.id, "\u53C2\u4E0E\u8005 ID"), previous = this.peers.get(artifactId)?.get(peerId)?.value;
         const context = input2.context === null ? void 0 : object2(input2.context) ? copy(input2.context) : copy(previous?.context);
         const ids = (value) => Array.isArray(value) && value.length <= 200 && value.every((id2) => typeof id2 === "string" && id2.length <= 200);
-        if (context && (context.artifactId !== artifactId || typeof context.viewId !== "string" || context.viewId.length > 120 || !ids(context.selectedIds) || context.editingIds !== void 0 && !ids(context.editingIds) || context.movingIds !== void 0 && !ids(context.movingIds) || context.dirty !== void 0 && typeof context.dirty !== "boolean")) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
+        if (context && (context.artifactId !== artifactId || typeof context.viewId !== "string" || context.viewId.length > 120 || !ids(context.selectedIds) || context.editingIds !== void 0 && !ids(context.editingIds) || context.savingIds !== void 0 && !ids(context.savingIds) || context.movingIds !== void 0 && !ids(context.movingIds) || context.dirty !== void 0 && typeof context.dirty !== "boolean")) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
         if (context && context.issues !== void 0) {
           if (!Array.isArray(context.issues)) throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u95EE\u9898\u65E0\u6548\u3002");
           context.issues = context.issues.slice(0, 5).map((issue2) => {
@@ -12265,6 +12265,9 @@ var init_collaboration = __esm({
           });
         }
         if (context && Buffer.byteLength(JSON.stringify(context)) > 6144) throw new StudioError("TOO_LARGE", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u8D85\u8FC7 6 KiB\u3002");
+        if (context && !["owner", "editor"].includes(actor.role)) {
+          for (const field of ["editingIds", "movingIds", "savingIds"]) if (context[field] !== void 0) context[field] = [];
+        }
         const cursor = input2.cursor === null ? null : object2(input2.cursor) ? { x: finite(input2.cursor.x, 0), y: finite(input2.cursor.y, 0), ...typeof input2.cursor.surface === "string" ? { surface: input2.cursor.surface.slice(0, 120) } : {}, t: Date.now() } : previous?.cursor;
         const following = input2.following === null ? void 0 : typeof input2.following === "string" ? input2.following.slice(0, 120) : previous?.following;
         const chat = input2.chat === null ? void 0 : typeof input2.chat === "string" ? [...input2.chat].slice(0, 50).join("") : previous?.chat;
@@ -14314,8 +14317,13 @@ var init_service = __esm({
           return Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)) ? compact : full;
         });
       }
-      emitBoard(snapshot, changedIds, units = this.boardUnits(snapshot, changedIds)) {
-        this.emit({ type: "board", artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds: [.../* @__PURE__ */ new Set([...changedIds, ...units.map((unit2) => unit2.id)])], artifact: copy(snapshot.artifact), ...Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true } });
+      emitBoard(snapshot, changedIds, units = this.boardUnits(snapshot, changedIds), operationId, actorId) {
+        const unitVersions = Object.fromEntries(units.flatMap((unit2) => {
+          if (unit2.id.startsWith("$")) return [];
+          const version3 = unit2.patch ? unit2.patch.version : unit2.after === null ? 0 : object2(unit2.after) ? unit2.after.version : void 0;
+          return Number.isSafeInteger(version3) ? [[unit2.id, Number(version3)]] : [];
+        }));
+        this.emit({ type: "board", artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, ...operationId ? { operationId, actorId } : {}, changedIds: [.../* @__PURE__ */ new Set([...changedIds, ...units.map((unit2) => unit2.id)])], unitVersions, artifact: copy(snapshot.artifact), ...Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true } });
       }
       authorizedActor(state, actor, authority) {
         if (!authority) return actor;
@@ -14514,21 +14522,21 @@ var init_service = __esm({
           const currentActor = this.authorizedActor(state, actor, authority);
           const adapter = this.products.get(state.artifact.type).adapter;
           if (currentActor.kind === "agent" && !state.operations.some((operation2) => operation2.id === args.operationId) && Array.isArray(args.operations)) {
-            const editing = new Set(this.getPresence(id2).filter((peer) => peer.actor.id !== currentActor.id && ["owner", "editor"].includes(peer.actor.role)).flatMap((peer) => [...peer.context?.editingIds ?? [], ...Array.isArray(peer.context?.movingIds) ? peer.context.movingIds : []]));
+            const editing = new Set(this.getPresence(id2).filter((peer) => peer.actor.id !== currentActor.id && ["owner", "editor"].includes(peer.actor.role)).flatMap((peer) => [...peer.context?.editingIds ?? [], ...peer.context?.savingIds ?? [], ...Array.isArray(peer.context?.movingIds) ? peer.context.movingIds : []]));
             const conflicts = /* @__PURE__ */ new Set();
             for (const operation2 of args.operations) {
               if (!object2(operation2) || typeof operation2.op !== "string" || !editing.size) continue;
               const targets = mutationTargets(state.content, { ...operation2, op: operation2.op }, adapter);
               for (const target of targets ?? editing) if (editing.has(target)) conflicts.add(target);
             }
-            if (conflicts.size) throw new StudioError("EDIT_IN_PROGRESS", "\u76EE\u6807\u5185\u5BB9\u6B63\u5728\u5176\u4ED6\u89C6\u56FE\u4E2D\u7F16\u8F91\uFF0C\u8BF7\u7B49\u5F85\u7F16\u8F91\u5B8C\u6210\u540E\u91CD\u8BD5\u3002", { ids: [...conflicts] });
+            if (conflicts.size) throw new StudioError("EDIT_IN_PROGRESS", "\u76EE\u6807\u5185\u5BB9\u6B63\u5728\u5176\u4ED6\u89C6\u56FE\u4E2D\u7F16\u8F91\u6216\u4FDD\u5B58\uFF0C\u8BF7\u7B49\u5F85\u5B8C\u6210\u540E\u91CD\u8BD5\u3002", { ids: [...conflicts] });
           }
           const before = state.content;
           const mutation = applyMutation(state, { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
-          return { ...mutation, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
+          return { ...mutation, eventOperationId: state.operations.find((operation2) => operation2.historyId === mutation.historyEntry.id)?.id, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
         });
         const snapshot = result.snapshot;
-        if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits);
+        if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits, result.eventOperationId, result.historyEntry.actor.id);
         return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
       }
       async feedback(id2, args, actor, authority) {

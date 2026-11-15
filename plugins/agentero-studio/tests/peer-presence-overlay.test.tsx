@@ -26,6 +26,82 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 async function mount(peers: Presence[], props: Partial<React.ComponentProps<typeof PeerPresenceOverlay>> = {}) { await act(async () => root.render(<PeerPresenceOverlay peers={peers} elements={elements} artifactId="board" selfActorId="self" zoom={2} {...props} />)); }
 async function advance(ms: number) { await act(async () => vi.advanceTimersByTime(ms)); }
 
+it('hides only the matching peer and target moving hint when its geometry preview is visible', async () => {
+  const alice = peer('alice', { context: context([], ['one', 'two']) });
+  const otherPage = peer('alice-other-page', { actor: alice.actor, context: context([], ['one']) });
+  const bob = peer('bob', { context: context([], ['one']) });
+  await mount([alice, bob], { geometryTargets: [{ peerId: 'alice', elementIds: ['one'] }] });
+  expect(host.querySelector('[data-peer-actor="alice"][data-peer-state="moving"]')!.getAttribute('data-peer-targets')).toBe('two');
+  expect(host.querySelector('[data-peer-actor="bob"][data-peer-state="moving"]')!.getAttribute('data-peer-targets')).toBe('one');
+  await mount([alice, otherPage, bob], { geometryTargets: [{ peerId: 'alice', elementIds: ['one'] }] });
+  expect(host.querySelector('[data-peer-id="alice"][data-peer-target="one"]')).toBeNull();
+  expect(host.querySelector('[data-peer-id="alice"][data-peer-target="two"]')).not.toBeNull();
+  expect(host.querySelector('[data-peer-id="alice-other-page"][data-peer-target="one"]')).not.toBeNull();
+  expect(host.querySelector('[data-peer-id="bob"][data-peer-target="one"]')).not.toBeNull();
+  await mount([{ ...alice, context: { ...context(['one'], ['one', 'two']), savingIds: ['two'] } }], { geometryTargets: [{ peerId: 'alice', elementIds: ['one', 'two'] }] });
+  expect(host.querySelector('[data-peer-target="one"]')!.getAttribute('aria-label')).toBe('alice 正在编辑此对象');
+  expect(host.querySelector('[data-peer-target="two"]')!.getAttribute('aria-label')).toBe('alice 正在保存此对象');
+  expect(host.querySelector('[data-peer-state="moving"]')).toBeNull();
+});
+
+it('does not turn missing canonical targets into a board-wide hint or mask an unrelated existing target', async () => {
+  const page = peer('alice', { context: context([], ['one']) });
+  await mount([page]); expect(host.querySelector('[data-peer-target="one"]')).not.toBeNull();
+  await mount([page], { elements: elements.filter(element => element.id !== 'one') }); expect(host.querySelector('[data-peer-state]')).toBeNull();
+  await mount([{ ...page, context: context([], ['new-preview', 'two']) }], { geometryTargets: [{ peerId: 'alice', elementIds: ['new-preview'] }] });
+  expect(host.querySelectorAll('[data-peer-state]')).toHaveLength(1); expect(host.querySelector('[data-peer-target="two"]')).not.toBeNull();
+});
+
+it('shows saving only on queued targets while input and geometry take priority on their own targets', async () => {
+  const page = peer('alice', { context: { ...context(['two'], ['arrow']), selectedIds: ['one', 'two', 'arrow'], savingIds: ['one', 'two', 'arrow'] } });
+  await mount([page]);
+  expect(host.querySelectorAll('[data-peer-target]')).toHaveLength(3);
+  expect(host.querySelector('[data-peer-target="one"]')!.getAttribute('aria-label')).toBe('alice 正在保存此对象');
+  expect(host.querySelector('[data-peer-target="two"]')!.getAttribute('aria-label')).toBe('alice 正在编辑此对象');
+  expect(host.querySelector('[data-peer-target="arrow"]')!.getAttribute('aria-label')).toBe('alice 正在修改此对象');
+  await mount([{ ...page, context: { ...context(), selectedIds: ['one', 'two', 'arrow'], savingIds: ['one'] } }]);
+  expect(host.querySelectorAll('[data-peer-target]')).toHaveLength(1); expect(host.querySelector('[data-peer-target="one"]')!.textContent).toContain('正在保存');
+  expect(host.querySelector('[data-peer-target="two"]')).toBeNull(); expect(host.querySelector('[data-peer-target="arrow"]')).toBeNull();
+});
+
+it('removes save hints after completion or failure without keeping selected objects marked as edited', async () => {
+  const page = peer('alice', { context: { ...context(), selectedIds: ['one', 'two'], savingIds: ['one'] } });
+  await mount([page]); expect(host.querySelector('[data-peer-target="one"]')!.textContent).toContain('正在保存');
+  await mount([{ ...page, context: { ...page.context!, savingIds: [] } }]); expect(host.querySelector('[data-peer-target]')).toBeNull();
+  await mount([page]); expect(host.querySelector('[data-peer-target]')).not.toBeNull();
+  await mount([{ ...page, context: { ...page.context!, savingIds: [], dirty: true, issues: [{ type: 'save-error', message: '保存失败', ids: ['one'] }] } }]);
+  expect(host.querySelector('[data-peer-target]')).toBeNull(); expect(host.textContent).not.toContain('正在编辑');
+});
+
+it('combines a peer\'s real targets of the same state into one outline without combining another peer', async () => {
+  const alice = peer('alice', { context: { ...context(['one', 'two']), selectedIds: ['one', 'two', 'arrow'] } });
+  await mount([alice, peer('bob', { context: context(['one']) })]);
+  const aliceHints = host.querySelectorAll<HTMLElement>('[data-peer-state][data-peer-actor="alice"]');
+  expect(aliceHints).toHaveLength(1); expect(aliceHints[0]!.dataset.peerTargets).toBe('one two');
+  expect(aliceHints[0]!.getAttribute('aria-label')).toBe('alice 正在编辑 2 个对象');
+  expect(aliceHints[0]!.style.width).toBe('583px'); expect(host.querySelector('[data-peer-target="arrow"]')).toBeNull();
+  expect(host.querySelector('[data-peer-target="one"][data-peer-actor="bob"]')).not.toBeNull();
+  const bob = peer('bob', { context: context(['one']) });
+  await mount([{ ...alice, context: { ...context(), selectedIds: ['arrow'], savingIds: ['one', 'two'] } }, bob]);
+  expect(host.querySelectorAll('[data-peer-state="saving"]')).toHaveLength(1);
+  expect(host.querySelector('[data-peer-state="saving"]')!.getAttribute('aria-label')).toBe('alice 正在保存 2 个对象');
+  await mount([{ ...alice, context: { ...context(), savingIds: [] } }, bob]);
+  expect(host.querySelector('[data-peer-state][data-peer-actor="alice"]')).toBeNull(); expect(host.querySelector('[data-peer-target="one"][data-peer-actor="bob"]')).not.toBeNull();
+});
+
+it('keeps work animation on each Agent area while separating its identity from normalized task status', async () => {
+  const peers = ['绘制服务图', '正在工作 · 绘制依赖图'].map((label, index) => peer(`agent-${index}`, { actor: { id: `agent-${index}`, name: `Agent ${index ? 'B' : 'A'} · ${index ? 'bb00' : 'aa00'}`, kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ taskId: `task-${index}`, label, scope: { rect: { x: index * 300, y: 0, w: 200, h: 100 } }, expiresAt: START + 60_000 }] } }));
+  await mount(peers);
+  for (const [index, agent] of peers.entries()) {
+    const area = host.querySelector<HTMLElement>(`[data-agent-task="task-${index}"]`)!;
+    expect(area.querySelectorAll('.studio-agent-working-mark')).toHaveLength(1);
+    expect(area.textContent).toContain(`${agent.actor.name} · 正在工作 · ${index ? '绘制依赖图' : '绘制服务图'}`);
+    expect(area.textContent!.match(/正在工作/g)).toHaveLength(1); expect(area.style.pointerEvents).toBe('none');
+  }
+  await mount(peers.map(agent => ({ ...agent, context: { ...agent.context!, activity: 'idle', agentTasks: [] } })));
+  expect(host.querySelector('.studio-agent-working-mark')).toBeNull();
+});
+
 it('renders an explicit empty-ground Agent task as a nonblocking animated area and expires it on the server clock', async () => {
   const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ taskId: 'task', label: '扩展架构图', scope: { rect: { x: 50, y: 70, w: 600, h: 400 } }, expiresAt: START + 2000 }] } });
   await mount([agent]);

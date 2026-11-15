@@ -53,6 +53,37 @@ function emitBoard(revision: number, text = 'synthetic') {
   collaboration.emit({ type: 'board', artifactId, revision, units: [{ id: 'item', after: { id: 'item', type: 'text', text } }] });
 }
 
+it('binds canonical board events to the real persisted operation without duplicating idempotent commits', async () => {
+  const cursor = host.service.cursor(), operationId = 'canonical-preview-handoff';
+  const args = { artifactId, operationId, operations: [{ op: 'add', element: { id: 'handoff', type: 'table', x: 0, y: 0, w: 200, h: 100 } }] };
+  await host.service.execute('artifact_apply', args); await host.service.execute('artifact_apply', args);
+  const result = await sync(cursor), events = result.events.filter(event => event.type === 'board');
+  expect(events).toHaveLength(1); expect(events[0]).toMatchObject({ operationId, actorId: host.service.owner.id, revision: 1, changedIds: expect.arrayContaining(['handoff', '$order']), unitVersions: { handoff: 1 } });
+  expect((await host.service.store.read(artifactId)).artifact.revision).toBe(1);
+});
+
+it('keeps an actual pending human save protected from Agent writes without calling it active editing', async () => {
+  await mutate('initial');
+  const invalid = await request('/api/presence', { method: 'POST', body: JSON.stringify({ artifactId, peerId: 'invalid-saving', context: { artifactId, viewId: 'invalid-saving', selectedIds: [], savingIds: 'item' } }) });
+  expect(invalid.status).toBe(400); expect((await invalid.json()).error.code).toBe('INVALID_ARGUMENT');
+  await host.service.updatePresence(artifactId, { peerId: 'human-saving', context: { artifactId, viewId: 'human-saving', selectedIds: [], editingIds: [], movingIds: [], savingIds: ['item'] } }, host.service.owner);
+  const args = { artifactId, operationId: 'agent-after-human-save', expectedVersions: { item: 1 }, operations: [{ op: 'update', id: 'item', changes: { text: 'Agent result' } }] };
+  const agent = { id: 'synthetic-agent', name: 'Synthetic Agent', kind: 'agent' as const, role: 'owner' as const };
+  await expect(host.service.execute('artifact_apply', args, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS' });
+  await host.service.updatePresence(artifactId, { peerId: 'human-saving', context: { artifactId, viewId: 'human-saving', selectedIds: [], editingIds: [], movingIds: [], savingIds: [] } }, host.service.owner);
+  expect((await host.service.execute('artifact_apply', args, agent)).board.elements[0].text).toBe('Agent result');
+});
+
+it('retains commit targets and versions when a large canonical unit becomes an invalidation and when it is deleted', async () => {
+  const cursor = host.service.cursor();
+  await host.service.execute('artifact_apply', { artifactId, operationId: 'large-handoff', operations: [{ op: 'add', element: { id: 'large-unit', type: 'html', html: `<div>${'x'.repeat(150000)}</div>` } }] });
+  const added = (await sync(cursor)).events.find(event => event.operationId === 'large-handoff')!;
+  expect(added).toMatchObject({ type: 'board', actorId: host.service.owner.id, revision: 1, unitVersions: { 'large-unit': 1 }, invalidation: true }); expect(added.units).toBeUndefined();
+  await host.service.execute('artifact_apply', { artifactId, operationId: 'delete-handoff', expectedVersions: { 'large-unit': 1 }, operations: [{ op: 'delete', id: 'large-unit' }] });
+  const deleted = (await sync(added.cursor)).events.find(event => event.operationId === 'delete-handoff')!;
+  expect(deleted).toMatchObject({ type: 'board', actorId: host.service.owner.id, revision: 2, unitVersions: { 'large-unit': 0 }, changedIds: expect.arrayContaining(['large-unit', '$order']) });
+});
+
 describe('HTTP collaboration change transport', () => {
   it('keeps a backpressured ready response open and drains a burst in cursor order', async () => {
     const pressure = holdSseWrite(), abort = new AbortController(); cancellations.push(abort);

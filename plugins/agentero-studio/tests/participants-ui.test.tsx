@@ -68,6 +68,64 @@ beforeEach(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REA
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 async function type(input: HTMLInputElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); }); }
 
+it('ignores human read/write activity labels when readonly peers have no real editing or saving targets', async () => {
+  const peers = (['viewer', 'commenter'] as const).map((role, index): Presence => ({ peerId: `${role}-page`, actor: { ...LOCAL_ACTOR, id: role, name: role, kind: 'human', role }, context: { artifactId: 'board', viewId: `${role}-page`, selectedIds: ['one'], editingIds: [], movingIds: [], savingIds: [], activity: index ? 'reading' : 'writing' }, updatedAt: new Date().toISOString() }));
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={peers} following="" onFollow={() => {}} />));
+  expect(container.querySelector('.is-busy')).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  for (const row of container.querySelectorAll('.studio-online-row')) {
+    expect(row.querySelector('p')!.textContent).toContain('在画布上');
+    expect(row.textContent).not.toContain('正在修改'); expect(row.textContent).not.toContain('正在读取');
+    expect(row.querySelector('.is-busy')).toBeNull(); expect(row.querySelector('strong small')).toBeNull();
+  }
+});
+
+it('distinguishes saving from live editing and clears busy after save completion or failure despite selection', async () => {
+  const page: Presence = { peerId: 'alice-page', actor: { ...LOCAL_ACTOR, id: 'alice', name: 'Alice', role: 'editor' }, context: { artifactId: 'board', viewId: 'alice-page', selectedIds: ['one', 'two'], editingIds: [], movingIds: [], savingIds: [] }, updatedAt: new Date().toISOString() };
+  const render = (context: NonNullable<Presence['context']>) => act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[{ ...page, context }]} following="" onFollow={() => {}} />));
+  await render({ ...page.context!, savingIds: ['one'], editingIds: ['two'] });
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const row = () => container.querySelector('.studio-online-row')!;
+  expect(row().querySelector('p')!.textContent).toContain('正在编辑'); expect(row().textContent).not.toContain('正在保存');
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[{ ...page, context: { ...page.context!, savingIds: ['one'] } }, { ...page, peerId: 'alice-other-page', context: { ...page.context!, viewId: 'alice-other-page', editingIds: ['two'] } }]} following="" onFollow={() => {}} />));
+  expect(row().querySelector('p')!.textContent).toContain('正在编辑'); expect(row().textContent).not.toContain('正在保存');
+  await render({ ...page.context!, savingIds: ['one'], movingIds: ['two'] }); expect(row().textContent).not.toContain('正在保存');
+  await render({ ...page.context!, savingIds: ['one'] }); expect(row().querySelector('p')!.textContent).toContain('正在保存'); expect(row().querySelector('.is-busy')).not.toBeNull();
+  await render(page.context!); expect(row().querySelector('p')!.textContent).toContain('在画布上'); expect(row().querySelector('.is-busy')).toBeNull();
+  await render({ ...page.context!, savingIds: ['one'] }); expect(row().querySelector('.is-busy')).not.toBeNull();
+  await render({ ...page.context!, dirty: true, issues: [{ type: 'save-error', message: '保存失败', ids: ['one'] }] });
+  expect(row().textContent).not.toContain('正在保存'); expect(row().textContent).not.toContain('正在编辑'); expect(row().querySelector('.is-busy')).toBeNull();
+});
+
+it('keeps both Agents as robots in the header and member list throughout working and idle changes', async () => {
+  const agent = (id: string, name: string, color: string, working: boolean): Presence => ({ peerId: `${id}-page`, actor: { ...LOCAL_ACTOR, id, name, kind: 'agent' }, color, context: { artifactId: 'board', viewId: `${id}-page`, selectedIds: [], activity: working ? 'working' : 'idle', agentTasks: working ? [{ taskId: `${id}-task`, label: '绘制图解', scope: { rect: { x: 0, y: 0, w: 200, h: 100 } }, expiresAt: Date.now() + 60_000 }] : [] }, updatedAt: new Date().toISOString() });
+  const render = (workingA: boolean, workingB: boolean) => act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[agent('agent-a', 'Agent A · aa00', '#785ee8', workingA), agent('agent-b', 'Agent B · bb00', '#d25f25', workingB)]} following="agent-a" onFollow={() => {}} />));
+  await render(true, true); await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const colors = [...container.querySelectorAll<HTMLElement>('.studio-online-avatar')].map(avatar => avatar.style.background);
+  for (const [a, b] of [[true, true], [false, true], [false, false], [true, false]]) {
+    await render(a!, b!);
+    const header = container.querySelectorAll('.studio-online-stack .studio-online-avatar'), list = container.querySelectorAll('.studio-online-row .studio-online-avatar');
+    expect(header).toHaveLength(2); expect(list).toHaveLength(2);
+    for (const avatar of [...header, ...list]) { expect(avatar.querySelector('svg.lucide-bot')).not.toBeNull(); expect(avatar.querySelector('.studio-agent-working-mark')).toBeNull(); }
+    expect([...container.querySelectorAll<HTMLElement>('.studio-online-avatar')].map(avatar => avatar.style.background).sort()).toEqual([...colors].sort());
+    expect(container.querySelectorAll('.studio-online-avatar.is-followed')).toHaveLength(2);
+    expect(container.querySelectorAll('.studio-online-avatar.is-busy')).toHaveLength((Number(a) + Number(b)) * 2);
+  }
+});
+
+it('keeps Agent identity separate from a normalized work status for plain and already-prefixed labels', async () => {
+  const peers = ['绘制服务图', '正在工作 · 绘制依赖图'].map((label, index): Presence => ({ peerId: `agent-${index}-page`, actor: { ...LOCAL_ACTOR, id: `agent-${index}`, name: `Agent ${index ? 'B' : 'A'} · ${index ? 'bb00' : 'aa00'}`, kind: 'agent' }, context: { artifactId: 'board', viewId: `agent-${index}-page`, selectedIds: [], agentTasks: [{ taskId: 'task', label, scope: { rect: { x: index * 300, y: 0, w: 200, h: 100 } }, expiresAt: Date.now() + 60_000 }] }, updatedAt: new Date().toISOString() }));
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={peers} following="" onFollow={() => {}} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const rows = [...container.querySelectorAll('.studio-online-row')];
+  for (const peer of peers) {
+    const row = rows.find(row => row.querySelector('strong')?.firstChild?.textContent === peer.actor.name)!;
+    expect(row).toBeDefined(); expect(row.querySelector('strong')!.textContent).not.toContain('绘制');
+    const status = row.querySelector('p')!.textContent!; expect(status).toBe(`正在工作 · ${peer.actor.id === 'agent-0' ? '绘制服务图' : '绘制依赖图'}`);
+    expect(status.match(/正在工作/g)).toHaveLength(1);
+  }
+});
+
 it('shows distinct live agents, their read/write status, and only other people in the header stack', async () => {
   const peer = (peerId: string, id: string, name: string, activity?: string): Presence => ({ peerId, actor: { ...LOCAL_ACTOR, id, name, kind: activity ? 'agent' : 'human' }, context: { viewId: peerId, artifactId: 'board', selectedIds: [], activity }, updatedAt: new Date().toISOString() });
   const peers = [peer('own-other-tab', LOCAL_ACTOR.id, '自己'), peer('human-page', 'human', '协作者'), peer('agent-one', 'agent-one', 'Codex · a1', 'reading'), peer('agent-two', 'agent-two', 'Codex · b2', 'writing')];
@@ -104,7 +162,10 @@ it('sends geometry during continuous pointer movement rather than debouncing unt
   await act(async () => root.render(<Fixture />));
   for (let x = 0; x < 12; x++) await act(async () => { publish({ id: 'drag', kind: 'move', elements: [{ id: 'shape', type: 'shape', version: 1, x, y: 0, w: 50, h: 50 }] }); await vi.advanceTimersByTimeAsync(16); });
   expect(send.mock.calls.filter(([, data]) => data.phase !== 'end').length).toBeGreaterThanOrEqual(3);
-  await act(async () => publish(undefined)); expect(send.mock.calls.at(-1)?.[1].phase).toBe('end');
+  await act(async () => { publish(undefined); await vi.advanceTimersByTimeAsync(40); });
+  expect(send.mock.calls.at(-1)?.[1].phase).toBe('end');
+  const finalFrame = send.mock.calls.filter(([, data]) => data.phase === 'start').at(-1)?.[1];
+  expect(finalFrame.atoms).toEqual(expect.arrayContaining([expect.objectContaining({ element: expect.objectContaining({ id: 'shape', x: 11 }) })]));
 });
 
 it('keeps a collision claim stable when its own acknowledgement returns', () => {

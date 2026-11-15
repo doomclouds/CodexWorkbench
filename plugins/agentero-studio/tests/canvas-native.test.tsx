@@ -159,10 +159,21 @@ describe('native canvas parity', () => {
     expect(host.querySelectorAll('.studio-processing-frame')).toHaveLength(2);
     expect(host.querySelector('[data-feedback-id="target"]')!.textContent).toContain('Codex Builder');
     await event(host.querySelector('[data-element-id="one"]')!, 'pointerdown');
-    expect(activity.mock.lastCall?.[0]).toMatchObject({ movingIds: ['one'], dirty: false });
+    expect(activity.mock.lastCall?.[0]).toMatchObject({ movingIds: [], dirty: false });
+    await act(async () => { host.querySelector('[aria-label="白板画布"]')!.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 20, clientY: 20 })); });
+    expect(activity.mock.lastCall?.[0]).toMatchObject({ movingIds: ['one'], dirty: true });
     await event(host.querySelector('[aria-label="白板画布"]')!, 'pointercancel');
     expect(activity.mock.lastCall?.[0]).toMatchObject({ movingIds: [], dirty: false });
     expect(activity.mock.lastCall?.[0].issues).toEqual([]);
+  });
+  it('does not turn a stationary click into a saved drag when the viewport changes before mouseup', async () => {
+    const call = vi.fn(), activity = vi.fn(), shared = { client: client(call), onActivityChange: activity };
+    await mount(board([element('one')]), { ...shared, externalViewport:{x:0,y:0,zoom:1} });
+    await act(async () => host.querySelector('[data-element-id="one"]')!.dispatchEvent(new MouseEvent('pointerdown',{bubbles:true,clientX:30,clientY:40})));
+    await mount(board([element('one')]), { ...shared, externalViewport:{x:200,y:120,zoom:.5} });
+    await act(async () => host.querySelector('[aria-label="白板画布"]')!.dispatchEvent(new MouseEvent('pointerup',{bubbles:true,clientX:30,clientY:40})));
+    expect(call).not.toHaveBeenCalled(); expect(activity.mock.lastCall?.[0]).toMatchObject({movingIds:[],dirty:false});
+    expect(host.querySelector('[data-element-id="one"]')?.classList.contains('is-selected')).toBe(true);
   });
   it('publishes live text before blur and drains newer input after an older ACK', async () => {
     vi.useFakeTimers();
@@ -196,7 +207,7 @@ describe('native canvas parity', () => {
     expect(call).toHaveBeenCalledTimes(1);
     current = board([element('one', { version: 2, color: '#2F7CC4' })], 2);
     await act(async () => { resolveFirst({ board: current }); });
-    expect(call).toHaveBeenCalledTimes(3); expect(call.mock.calls[2]![1]).toMatchObject({ expectedVersions: { one: 3 }, operations: [{ changes: { color: '#7C5CBF' } }] });
+    expect(call.mock.calls, JSON.stringify(call.mock.calls)).toHaveLength(3); expect(call.mock.calls[2]![1]).toMatchObject({ expectedVersions: { one: 3 }, operations: [{ changes: { color: '#7C5CBF' } }] });
     expect(current.elements[0]!.color).toBe('#7C5CBF');
   });
   it('keeps deleted text visible in a persisted recovery dialog and restores under a new id', async () => {

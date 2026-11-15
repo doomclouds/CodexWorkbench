@@ -5,13 +5,13 @@ import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlScrollMessage, va
 import { newClientId } from '../client-id.js';
 import { dismissEscapeLayer, isEscapeActive } from '../escape.js';
 
-interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
+interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
 interface SaveQueue {
   active: boolean; processing: boolean; paused: boolean; sequence: number; pending: HtmlStateSave | null;
   accepted: { baseVersion: number; submitted: Json; state: Json; version: number }[];
 }
 
-export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, onAnnotate, onStateChange }: Props) {
+export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, onAnnotate, onToolShortcut, onStateChange }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const sourceRevision = useMemo(() => typeof element.sourceRevision === 'number' ? element.sourceRevision : element.version, [element.id, element.html, element.sourceRevision]);
   const channel = useMemo(() => newClientId(), [element.id, element.html, sourceRevision]);
@@ -19,6 +19,7 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
   const source = useMemo(() => buildHtmlRegionDocument(element.html ?? '', { channel, regionId: element.id, sourceRevision, annotation, preserveScroll, state: element.state ?? null, elementVersion: element.version, writable: Boolean(onStateChange) }), [element.html, element.id, sourceRevision, channel]);
   const callback = useRef(onAnnotate);
   callback.current = onAnnotate;
+  const toolShortcut = useRef(onToolShortcut); toolShortcut.current = onToolShortcut;
   const annotationRef = useRef(annotation); annotationRef.current = annotation;
   const preserveScrollRef = useRef(preserveScroll); preserveScrollRef.current = preserveScroll;
   const scrollPosition = useRef<{ regionId: string; x: number; y: number } | null>(null);
@@ -78,6 +79,10 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
     if (scrollPosition.current?.regionId !== element.id) scrollPosition.current = null;
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || !event.data || event.data.channel !== channel) return;
+      if (event.data.type === 'studio-html-tool-shortcut' && event.data.regionId === element.id && event.data.sourceRevision === sourceRevision) {
+        if (annotationRef.current && typeof event.data.key === 'string' && /^[1-9]$/.test(event.data.key) && frame.current && isEscapeActive(frame.current)) toolShortcut.current?.(event.data.key);
+        return;
+      }
       if (event.data.type === 'studio-html-escape' && event.data.regionId === element.id && event.data.sourceRevision === sourceRevision) {
         if (frame.current && isEscapeActive(frame.current)) dismissEscapeLayer(window, frame.current);
         return;

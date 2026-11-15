@@ -51,8 +51,8 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-async function mount(options: { artifactId?: string; actor?: Actor; view?: 'trash' | 'recent'; attach?: (feedback: Feedback, board: Pick<Board, 'artifact'>) => Promise<void> } = {}) {
-  await act(async () => root.render(<StudioApp client={client} actor={options.actor || LOCAL_ACTOR} initialArtifactId={options.artifactId} initialView={options.view} attachContext={options.attach} />));
+async function mount(options: { artifactId?: string; actor?: Actor; view?: 'trash' | 'recent'; navigationRevision?: number; onNavigate?: (artifactId?: string, view?: string) => void; attach?: (feedback: Feedback, board: Pick<Board, 'artifact'>) => Promise<void> } = {}) {
+  await act(async () => root.render(<StudioApp client={client} actor={options.actor || LOCAL_ACTOR} initialArtifactId={options.artifactId} initialView={options.view} navigationRevision={options.navigationRevision} onNavigate={options.onNavigate} attachContext={options.attach} />));
 }
 async function waitUntil(check: () => boolean) {
   for (let attempt = 0; attempt < 80; attempt++) {
@@ -121,6 +121,38 @@ function readerTransport() {
 }
 
 describe('Studio real management workflows', () => {
+  it.each(['create', 'import'] as const)('keeps a later navigation when %s completes and retains the saved new work in the library', async action => {
+    const destination = await createFixture();
+    let release!: () => void, savedId = '';
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const navigations = vi.fn();
+    if (action === 'create') call.mockImplementation(async (name, args) => {
+      const result = await service.execute(name, args, LOCAL_ACTOR);
+      if (name === 'artifact_manage' && args.action === 'create') { savedId = (result as { artifact: Artifact }).artifact.id; await waiting; }
+      return result;
+    });
+    else client = { ...client, baseUrl: 'http://studio.test', request: vi.fn(async (input, init) => {
+      if (new URL(String(input)).pathname !== '/api/import') return appRequest(input, init);
+      const result = await service.execute('artifact_manage', { action: 'create', title: 'Imported archive' }, LOCAL_ACTOR) as { artifact: Artifact; board: Board };
+      savedId = result.artifact.id; await waiting; return Response.json({ ok: true, data: result });
+    }) };
+    await mount({ onNavigate: navigations }); await waitUntil(() => !!container.querySelector('.studio-create-card'));
+    if (action === 'create') await click(button('新建白板'));
+    else {
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, 'files', { configurable: true, value: [new File(['archive'], 'fixture.zip', { type: 'application/zip' })] });
+      await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+    }
+    await waitUntil(() => !!savedId);
+    await mount({ artifactId: destination.board.artifact.id, navigationRevision: 1, onNavigate: navigations });
+    await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-artifact') === destination.board.artifact.id);
+    await act(async () => release());
+    await waitUntil(() => container.textContent?.includes(action === 'create' ? '作品已创建，可从作品中心打开。' : '作品已导入，可从作品中心打开。') === true);
+    expect(container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-artifact')).toBe(destination.board.artifact.id);
+    expect(navigations.mock.calls.some(([id]) => id === savedId)).toBe(false);
+    expect((await service.execute('artifact_read', { artifactId: savedId }) as Board).artifact.id).toBe(savedId);
+  });
+
   it.each(['history', 'suggestion'] as const)('stops an existing follow before entering %s preview and does not resume it on return', async mode => {
     const fixture = await createFixture([region()]);
     const changed = await apply(fixture.board, [{ op: 'update', id: 'region-one', changes: { text: 'Current title' } }]);

@@ -7,7 +7,7 @@ import { whiteboardProduct } from './products/whiteboard';
 export interface StudioDocument { artifact: Artifact }
 export interface ProductAnnotation { anchor: Anchor; versions?: Record<string, number>; label: string; sourceLabel?: string; screenPoint?: { x: number; y: number } }
 export interface Viewport { x: number; y: number; zoom: number }
-export interface ProductActivity { editingIds: string[]; movingIds: string[]; dirty: boolean; saving?: boolean; saveError?: string; issues?: { type: string; message: string; ids: string[] }[] }
+export interface ProductActivity { editingIds: string[]; movingIds: string[]; savingIds?: string[]; dirty: boolean; saving?: boolean; saveError?: string; issues?: { type: string; message: string; ids: string[] }[] }
 export interface ProductEditorProps<Document = StudioDocument> {
   document: Document; client: StudioClient; actor: Actor; readOnly?: boolean; preview?: boolean; clockOffsetMs?: number;
   onChanged: (document: Document) => void; onAnnotate: (annotation: ProductAnnotation) => void;

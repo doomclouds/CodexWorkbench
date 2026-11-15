@@ -11,6 +11,19 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(
 
 const region: BoardElement = { id: 'region', type: 'html', x: 0, y: 0, w: 500, h: 300, version: 4, sourceRevision: 2, html: '<p data-studio-id="value">A poll</p>', state: { votes: 1 } };
 
+it('forwards only current visible annotation-frame numeric shortcuts', async () => {
+  const host = mount(), shortcut = vi.fn();
+  const render = (annotation: boolean) => host.root.render(<HtmlRegion element={region} annotation={annotation} interactive onAnnotate={() => {}} onToolShortcut={shortcut} />);
+  await act(async () => render(true));
+  const frame = host.dom.window.document.querySelector('iframe')!, { identity } = await host.messages(frame);
+  const message = { type: 'studio-html-tool-shortcut', ...identity, key: '2' };
+  host.send(frame, { ...message, channel: 'stale' }); host.send(frame, { ...message, sourceRevision: 1 }); host.send(frame, { ...message, regionId: 'other' }); host.send(frame, message, null); host.send(frame, { ...message, key: '0' });
+  expect(shortcut).not.toHaveBeenCalled();
+  host.send(frame, message); expect(shortcut).toHaveBeenLastCalledWith('2');
+  frame.hidden = true; host.send(frame, { ...message, key: '9' }); expect(shortcut).toHaveBeenCalledTimes(1);
+  frame.hidden = false; await act(async () => render(false)); host.send(frame, message); expect(shortcut).toHaveBeenCalledTimes(1);
+});
+
 it('routes only a current visible frame Escape into one parent layer', async () => {
   const host = mount(), close = vi.fn();
   await act(async () => host.root.render(<HtmlRegion element={region} annotation={false} interactive onAnnotate={() => {}} />));

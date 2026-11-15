@@ -6,6 +6,10 @@ export interface ActivityBounds { x: number; y: number; w: number; h: number }
 export function activeAgentTasks(peer: Presence, now: number): AgentTask[] {
   return peer.actor.kind === 'agent' ? (peer.context?.agentTasks ?? []).filter(task => task.expiresAt > now) : [];
 }
+export function agentWorkStatus(label?: string): string {
+  const action = (label ?? '').trim().replace(/^正在工作(?:\s*·\s*|$)/, '').trim();
+  return action ? `正在工作 · ${action}` : '正在工作';
+}
 export function documentElements(document?: StudioDocument | null): BoardElement[] {
   return document && 'elements' in document ? document.elements as BoardElement[] : [];
 }

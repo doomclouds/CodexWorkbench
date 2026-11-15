@@ -101,7 +101,7 @@ export class StudioCollaboration {
     const peerId = safeId(input.peerId ?? actor.id, '参与者 ID'), previous = this.peers.get(artifactId)?.get(peerId)?.value;
     const context = input.context === null ? undefined : object(input.context) ? copy(input.context) : copy(previous?.context);
     const ids = (value: unknown) => Array.isArray(value) && value.length <= 200 && value.every(id => typeof id === 'string' && id.length <= 200);
-    if (context && (context.artifactId !== artifactId || typeof context.viewId !== 'string' || context.viewId.length > 120 || !ids(context.selectedIds) || context.editingIds !== undefined && !ids(context.editingIds) || context.movingIds !== undefined && !ids(context.movingIds) || context.dirty !== undefined && typeof context.dirty !== 'boolean')) throw new StudioError('INVALID_ARGUMENT', '视图上下文无效。');
+    if (context && (context.artifactId !== artifactId || typeof context.viewId !== 'string' || context.viewId.length > 120 || !ids(context.selectedIds) || context.editingIds !== undefined && !ids(context.editingIds) || context.savingIds !== undefined && !ids(context.savingIds) || context.movingIds !== undefined && !ids(context.movingIds) || context.dirty !== undefined && typeof context.dirty !== 'boolean')) throw new StudioError('INVALID_ARGUMENT', '视图上下文无效。');
     if (context && context.issues !== undefined) {
       if (!Array.isArray(context.issues)) throw new StudioError('INVALID_ARGUMENT', '视图问题无效。');
       context.issues = context.issues.slice(0, 5).map(issue => {
@@ -110,6 +110,8 @@ export class StudioCollaboration {
       });
     }
     if (context && Buffer.byteLength(JSON.stringify(context)) > 6144) throw new StudioError('TOO_LARGE', '视图上下文超过 6 KiB。');
+    // Cursor-only updates may retain context from before a role downgrade.
+    if (context && !['owner', 'editor'].includes(actor.role)) for (const field of ['editingIds', 'movingIds', 'savingIds']) if (context[field] !== undefined) context[field] = [];
     const cursor = input.cursor === null ? null : object(input.cursor) ? { x: finite(input.cursor.x, 0), y: finite(input.cursor.y, 0), ...(typeof input.cursor.surface === 'string' ? { surface: input.cursor.surface.slice(0, 120) } : {}), t: Date.now() } : previous?.cursor;
     const following = input.following === null ? undefined : typeof input.following === 'string' ? input.following.slice(0, 120) : previous?.following;
     const chat = input.chat === null ? undefined : typeof input.chat === 'string' ? [...input.chat].slice(0, 50).join('') : previous?.chat;

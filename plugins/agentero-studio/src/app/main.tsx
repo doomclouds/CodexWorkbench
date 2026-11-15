@@ -26,7 +26,7 @@ function Root() {
   }, []);
   if (error) return <main style={{ padding: 36, fontFamily: 'system-ui', color: 'var(--color-text-primary, #d9dce5)' }}><h1>Agentero 创作</h1><p role="alert">{error}</p><button onClick={() => location.reload()}>重新连接</button></main>;
   if (!bridge) return <main style={{ padding: 36, fontFamily: 'system-ui' }}>正在连接作品库…</main>;
-  return <StudioApp client={bridge.client} actor={bridge.actor} initialArtifactId={navigation.artifactId} initialView={navigation.view} navigationRevision={navigation.revision} attachContext={bridge.attachContext} onViewContext={bridge.updateContext} />;
+  return <StudioApp client={bridge.client} actor={bridge.actor} initialArtifactId={navigation.artifactId} initialView={navigation.view} navigationRevision={navigation.revision} attachContext={bridge.attachContext} onViewContext={bridge.updateContext} onNavigate={bridge.navigate} />;
 }
 const reader = window.__STUDIO_READER_BOOT__;
 createRoot(document.getElementById('root')!).render(reader ? <HtmlReader {...reader} /> : <Root />);

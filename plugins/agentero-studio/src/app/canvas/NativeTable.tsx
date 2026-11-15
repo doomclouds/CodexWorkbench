@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { BoardElement } from '../../contracts/studio.js';
 import { tableRows } from './canvas-model.js';
 import RichText from './RichText.js';
@@ -22,6 +23,7 @@ interface Props {
   bodyPaint?: { background: string; color: string };
   headerPaint?: { background: string; color: string };
   editRequest?: number;
+  viewport?: { x: number; y: number; zoom: number };
 }
 function makeDraft(element: BoardElement): Draft {
   const source = tableRows(element), columns = Math.max(1, ...source.map(row => row.length));
@@ -40,11 +42,14 @@ function changeDraft(draft: Draft, changes: Partial<Pick<Draft, 'rows' | 'rowIds
 function draftChanges(draft: Draft): Partial<BoardElement> { return { data: { ...draft.base.data, rows: draft.rows, rowIds: draft.rowIds, columnIds: draft.columnIds, columnWidths: draft.widths, head: draft.head }, ...(draft.width !== draft.base.w ? { w: draft.width } : {}) }; }
 function restoreDraft(draft?: NativeTableDraft): Draft | null { return draft ? { ...makeDraft({ ...draft.base, ...draft.changes }), base: draft.base, dirty: true } : null; }
 
-export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint, editRequest }: Props) {
+export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint, editRequest, viewport }: Props) {
   const [active, setActive] = useState<Cell | null>(null), [draft, setDraft] = useState<Draft | null>(() => restoreDraft(initialDraft));
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [resizing, setResizing] = useState(false);
   const [menu, setMenu] = useState<{ cell: Cell; x: number; y: number } | null>(null);
   const root = useRef<HTMLDivElement>(null), input = useRef<InlineTextEditorHandle>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const [overlayHost, setOverlayHost] = useState<HTMLElement | null>(null);
+  const [controlsPosition, setControlsPosition] = useState({ left: 12, top: 12 });
   const elementRef = useRef(element); elementRef.current = element;
   const draftRef = useRef(draft); draftRef.current = draft;
   const busyRef = useRef(false), activity = useRef(onEditingChange); activity.current = onEditingChange;
@@ -56,6 +61,33 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
   const drag = useRef<{ col: number; x: number; scale: number; initial: Draft; next: Draft } | null>(null);
   const current = draft ? { ...makeDraft(applyContentIntent(draft.base, { ...draft.base, ...draftChanges(draft) }, element) as BoardElement), base: draft.base, dirty: draft.dirty } : makeDraft(element), { rows, widths, head } = current;
   const editing = Boolean(active || draft?.dirty || busy || resizing);
+  useLayoutEffect(() => { setOverlayHost(root.current?.closest<HTMLElement>('.studio-whiteboard') ?? null); }, []);
+  useLayoutEffect(() => {
+    if (!overlayHost || !selected || !canEdit) return;
+    const place = () => {
+      if (!root.current || !controlsRef.current) return;
+      const table = root.current.getBoundingClientRect(), host = overlayHost.getBoundingClientRect(), panel = controlsRef.current.getBoundingClientRect();
+      if (!host.width || !host.height || !panel.width) return;
+      const left = Math.max(12, Math.min(table.left-host.left, host.width-panel.width-12));
+      let top = Math.max(12, Math.min(table.bottom-host.top+6, host.height-panel.height-12));
+      const overlaps = (rect: DOMRect) => left+panel.width>rect.left-host.left && left<rect.right-host.left && top+panel.height>rect.top-host.top && top<rect.bottom-host.top;
+      const dock = overlayHost.querySelector('.studio-canvas-toolbar')?.getBoundingClientRect();
+      if (dock?.width && overlaps(dock) && table.top-host.top>panel.height+18) top = table.top-host.top-panel.height-6;
+      for (const selector of ['.studio-canvas-toolbar','.studio-selection-toolbar']) {
+        const blocker = overlayHost.querySelector(selector)?.getBoundingClientRect();
+        if (blocker?.width && overlaps(blocker)) {
+          top = Math.max(12, blocker.top-host.top-panel.height-8);
+          if (overlaps(blocker) && blocker.bottom-host.top+8+panel.height<=host.height-12) top=blocker.bottom-host.top+8;
+        }
+      }
+      setControlsPosition(current => current.left===left && current.top===top ? current : { left, top });
+    };
+    place();
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : undefined;
+    if (root.current) observer?.observe(root.current); if (controlsRef.current) observer?.observe(controlsRef.current); observer?.observe(overlayHost);
+    window.addEventListener('resize',place);
+    return () => { observer?.disconnect(); window.removeEventListener('resize',place); };
+  }, [overlayHost, selected, canEdit, viewport?.x, viewport?.y, viewport?.zoom, element.x, element.y, element.w, element.h, element.rotation, current.width, Boolean(active), error]);
   useEffect(() => { activity.current(editing); }, [editing]);
   useEffect(() => () => activity.current(false), []);
   useEffect(() => { if (active && !busy) input.current?.focus(); }, [active?.row, active?.col, busy]);
@@ -168,6 +200,11 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
     if (cancel) { stage(active || current.initial.dirty ? current.initial : null); return; }
     void save(current.next, active === null);
   };
+  const controls = selected && canEdit && <div ref={controlsRef} className="studio-table-controls" role="toolbar" aria-label="表格操作" data-table-controls={element.id} style={overlayHost?{...controlsPosition,zIndex:38,maxWidth:'calc(100% - 24px)'}:undefined} data-native-interactive="true" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') event.preventDefault(); }}>
+      <button type="button" aria-label="添加表格行" onClick={() => insert('row')} disabled={busy}>＋行</button><button type="button" aria-label="添加表格列" onClick={() => insert('col')} disabled={busy}>＋列</button><button type="button" aria-label="切换表头" aria-pressed={head} onClick={() => { const next = changeDraft(ensureDraft(), { head: !head }); stage(next); void save(next, !active); }} disabled={busy}>表头</button>
+      {active && <><button type="button" aria-label="删除当前行" onClick={() => remove('row')} disabled={rows.length < 2 || busy}>删除行</button><button type="button" aria-label="删除当前列" onClick={() => remove('col')} disabled={rows[0]!.length < 2 || busy}>删除列</button></>}
+      {error && <><span role="alert">{error}</span><button type="button" aria-label="重试保存表格" onClick={() => void save(ensureDraft(), !active)} disabled={busy}>重试保存</button><button type="button" aria-label="放弃表格草稿" onClick={() => { stage(null); setActive(null); setError(''); }}>放弃草稿</button></>}
+    </div>;
   let edge = 0;
   return <div ref={root} className="studio-native-table" style={{ position: 'relative', width: current.width, height: '100%' }} onDoubleClick={event => event.stopPropagation()} onPointerDownCapture={event => { if (menu && !(event.target as Element).closest('.studio-table-cell-menu')) setMenu(null); }}>
     <table className="studio-board-table" style={{ width: current.width, ...bodyPaint }}><colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup><tbody>{rows.map((row, r) => <tr key={r}>{row.map((cell, c) => {
@@ -181,7 +218,7 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
         const base = ensureDraft(); stage(changeDraft(base, { rows: base.rows.map((line, index) => index === r ? line.map((text, col) => col === c ? value : text) : line) }));
       }} onCommit={() => { if (!busyRef.current) void save(ensureDraft()); }} onBlur={event => {
         const target = event.relatedTarget as HTMLElement | null;
-        if (busyRef.current || root.current?.contains(target) || target?.closest('.studio-selection-toolbar')) event.preventDefault();
+        if (busyRef.current || root.current?.contains(target) || controlsRef.current?.contains(target) || target?.closest('.studio-selection-toolbar')) event.preventDefault();
       }} onKeyDown={event => {
         event.stopPropagation();
         if (event.nativeEvent.isComposing || busyRef.current) return;
@@ -199,13 +236,9 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
     })}</tr>)}</tbody></table>
     {selected && canEdit && !element.locked && widths.map((width, col) => {
       edge += width;
-      return <div key={col} className="studio-table-column-handle" data-native-interactive="true" role="separator" aria-label={`调整第${col + 1}列宽度`} aria-orientation="vertical" style={{ position: 'absolute', left: edge, top: 0, bottom: 0, width: 8, marginLeft: -4, cursor: 'col-resize', touchAction: 'none', zIndex: 4 }} onPointerDown={event => beginColumn(event, col)} onPointerMove={moveColumn} onPointerUp={event => endColumn(event)} onPointerCancel={event => endColumn(event, true)} onLostPointerCapture={event => endColumn(event, true)} />;
+      return <div key={col} className="studio-table-column-handle" data-native-interactive="true" role="separator" aria-label={`调整第${col + 1}列宽度`} aria-orientation="vertical" style={{ position: 'absolute', left: edge, top: 0, bottom: 0, width: 8/(viewport?.zoom ?? 1), marginLeft: -4/(viewport?.zoom ?? 1), cursor: 'col-resize', touchAction: 'none', zIndex: 4 }} onPointerDown={event => beginColumn(event, col)} onPointerMove={moveColumn} onPointerUp={event => endColumn(event)} onPointerCancel={event => endColumn(event, true)} onLostPointerCapture={event => endColumn(event, true)} />;
     })}
-    {selected && canEdit && <div className="studio-table-controls" data-native-interactive="true" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') event.preventDefault(); }}>
-      <button type="button" aria-label="添加表格行" onClick={() => insert('row')} disabled={busy}>＋行</button><button type="button" aria-label="添加表格列" onClick={() => insert('col')} disabled={busy}>＋列</button><button type="button" aria-label="切换表头" aria-pressed={head} onClick={() => { const next = changeDraft(ensureDraft(), { head: !head }); stage(next); void save(next, !active); }} disabled={busy}>表头</button>
-      {active && <><button type="button" aria-label="删除当前行" onClick={() => remove('row')} disabled={rows.length < 2 || busy}>删除行</button><button type="button" aria-label="删除当前列" onClick={() => remove('col')} disabled={rows[0]!.length < 2 || busy}>删除列</button></>}
-      {error && <><span role="alert">{error}</span><button type="button" aria-label="重试保存表格" onClick={() => void save(ensureDraft(), !active)} disabled={busy}>重试保存</button><button type="button" aria-label="放弃表格草稿" onClick={() => { stage(null); setActive(null); setError(''); }}>放弃草稿</button></>}
-    </div>}
+    {overlayHost ? createPortal(controls,overlayHost) : controls}
     {menu && <div className="studio-table-cell-menu" role="menu" data-native-interactive="true" style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 8 }} onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); setMenu(null); } }}>
       <button type="button" role="menuitem" disabled={busy} onClick={() => insert('row', menu.cell.row)}>在上方插入行</button><button type="button" role="menuitem" disabled={busy} onClick={() => insert('row', menu.cell.row + 1)}>在下方插入行</button><button type="button" role="menuitem" disabled={busy} onClick={() => insert('col', menu.cell.col)}>在左侧插入列</button><button type="button" role="menuitem" disabled={busy} onClick={() => insert('col', menu.cell.col + 1)}>在右侧插入列</button><button type="button" role="menuitem" disabled={busy || rows.length < 2} onClick={() => remove('row', menu.cell)}>删除行</button><button type="button" role="menuitem" disabled={busy || rows[0]!.length < 2} onClick={() => remove('col', menu.cell)}>删除列</button>
     </div>}

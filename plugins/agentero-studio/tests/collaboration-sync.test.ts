@@ -110,6 +110,28 @@ describe('bounded collaboration replay and peer ordering', () => {
     expect(collaboration.getPresence('board-a')).toHaveLength(2);
   });
 
+  it.each(['viewer', 'commenter', 'editor', 'owner'] as const)('normalizes advertised edit activity using the server %s role while retaining ordinary presence', async role => {
+    const collaboration = create(), actor: Actor = { id: `role-${role}`, name: role, kind: 'human', role };
+    const context = { artifactId: 'board-a', viewId: 'role-page', selectedIds: ['shape'], editingIds: ['shape'], movingIds: ['shape'], savingIds: ['shape'], dirty: true, viewport: { x: 1, y: 2, zoom: 1 } };
+    const result = await collaboration.update('board-a', { peerId: 'role-page', context, cursor: { x: 20, y: 30 }, chat: 'hello', actor: { ...actor, role: 'owner' } }, actor);
+    const allowed = ['editor', 'owner'].includes(role), ids = allowed ? ['shape'] : [];
+    expect(result.peers[0]).toMatchObject({ actor, context: { ...context, editingIds: ids, movingIds: ids, savingIds: ids }, cursor: { x: 20, y: 30 }, chat: 'hello' });
+    expect(context.editingIds).toEqual(['shape']);
+  });
+
+  it.each(['viewer', 'commenter'] as const)('drops inherited editor activity after fresh %s authorization even on a cursor-only update', async role => {
+    const collaboration = create(), actor: Actor = { ...editor, id: 'downgraded-member' };
+    await collaboration.update('board-a', { peerId: 'retained-page', context: { artifactId: 'board-a', viewId: 'retained-page', selectedIds: ['shape'], editingIds: ['shape'], movingIds: ['shape'], savingIds: ['shape'] }, chat: 'retained' }, actor);
+    const result = await collaboration.update('board-a', { peerId: 'retained-page', cursor: { x: 40, y: 50 } }, actor, async () => ({ ...actor, role }));
+    expect(result.peers[0]).toMatchObject({ actor: { id: actor.id, role }, context: { selectedIds: ['shape'], editingIds: [], movingIds: [], savingIds: [] }, cursor: { x: 40, y: 50 }, chat: 'retained' });
+  });
+
+  it('validates read-only edit activity fields before normalizing them', async () => {
+    const collaboration = create();
+    for (const field of ['editingIds', 'movingIds', 'savingIds']) await expect(collaboration.update('board-a', { peerId: `invalid-${field}`, context: { artifactId: 'board-a', viewId: 'invalid', selectedIds: [], [field]: 'not-an-array' } }, viewer)).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect(collaboration.getPresence('board-a')).toEqual([]);
+  });
+
   it('gives disconnected streams a grace period, renews RPC leases and rejects old-epoch leave', async () => {
     vi.useFakeTimers(); const collaboration = create(), base = { peerId: 'tab-a', peerEpoch: 'epoch-a', peerSeq: 0 };
     await collaboration.update('board-a', base, editor);

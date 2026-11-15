@@ -227,6 +227,12 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     suppressClick = false;
   };
   const sendEscape = () => window.parent.postMessage({ type: 'studio-html-escape', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision }, '*');
+  window.addEventListener('keydown', event => {
+    if (!enabled || !/^[1-9]$/.test(event.key) || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (event.composedPath().some(node => node instanceof Element && node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="menu"],[role="dialog"],[role="listbox"],[role="combobox"]'))) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    window.parent.postMessage({ type: 'studio-html-tool-shortcut', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, key: event.key }, '*');
+  }, true);
   const consumeEscape = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
   window.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !enabled && !event.repeat) return;

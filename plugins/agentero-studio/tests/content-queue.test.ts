@@ -13,6 +13,16 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: Erro
 const create = (send: (args: Record<string, unknown>) => Promise<ContentReceipt>) => new NativeContentQueue({ send, changed() {}, accepted() {} });
 
 describe('native content queue', () => {
+  it('carries explicit gesture operation ids and keeps distinct equal gestures as distinct commits', async () => {
+    const first = deferred<ContentReceipt>(), send = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue({ board: board([element('one', { version: 2, x: 10 })], 2) });
+    const queue = create(send), base = board(), operations = operation('one', { x: 10 });
+    const a = queue.enqueue(base, operations, 'drag', base.elements, true, undefined, 'gesture-a');
+    const b = queue.enqueue(base, operations, 'drag', base.elements, true, undefined, 'gesture-b');
+    expect(queue.tasks.map(task => task.id)).toEqual(['gesture-a','gesture-b']);
+    expect(send.mock.calls[0]![0]).toMatchObject({ operationId: 'gesture-a' });
+    first.resolve({ board: board([element('one', { version: 2, x: 10 })], 2) }); await a; await b;
+    expect(send.mock.calls[1]![0]).toMatchObject({ operationId: 'gesture-b', expectedVersions: { one: 2 } });
+  });
   it('serializes one unit, drains later input and lets independent units save in parallel', async () => {
     const first = deferred<ContentReceipt>(), independent = deferred<ContentReceipt>(), next = deferred<ContentReceipt>();
     const send = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(independent.promise).mockReturnValueOnce(next.promise), queue = create(send), base = board([element(), element('two')]);
