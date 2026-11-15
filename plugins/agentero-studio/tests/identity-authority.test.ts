@@ -175,6 +175,22 @@ describe('host owner and viewer-safe sharing identity', () => {
 });
 
 describe('fresh authority at the artifact transaction', () => {
+  it('throttles ordinary Cookie-only authentication and Presence writes without skipping fresh access checks', async () => {
+    const info = await share({ action: 'start', access: 'local' }), viewer = guest(tokenFor(info));
+    const actor = await viewer.join('Cookie-only touch'); viewer.use();
+    const write = vi.spyOn(host.service.store, 'write'), transaction = vi.spyOn(host.service.store, 'transaction');
+    expect((await viewer.session()).response.status).toBe(200);
+    expect((await viewer.call('artifact_read', { mode: 'summary' })).response.status).toBe(200);
+    expect((await viewer.request('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, peerId: 'touch-peer', visible: true }) })).status).toBe(200);
+    expect(transaction).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled();
+    await host.service.store.transaction(artifactId, state => { state.sharing.members![actor.id]!.lastSeenAt = new Date(Date.now() - 61_000).toISOString(); });
+    write.mockClear(); transaction.mockClear();
+    expect((await viewer.session()).response.status).toBe(200); expect(write).toHaveBeenCalledTimes(1);
+    expect((await viewer.session()).response.status).toBe(200); expect(write).toHaveBeenCalledTimes(1);
+    await share({ action: 'remove', memberId: actor.id }); write.mockClear(); transaction.mockClear();
+    expect((await viewer.session()).response.status).toBe(401); expect(write).not.toHaveBeenCalled();
+  });
+
   it('keeps hot authorization/context projections fresh when another service changes the grant', async () => {
     const info = await share({ action: 'start', access: 'local' }), viewer = guest(tokenFor(info)); const actor = await viewer.join('Projection freshness');
     await share({ action: 'role', memberId: actor.id, role: 'editor' });
@@ -213,7 +229,7 @@ describe('fresh authority at the artifact transaction', () => {
     expect(text).toContain('"type":"access-revoked"'); expect(text).toContain('"reason":"link-disabled"');
   });
 
-  it.each(['remove', 'canonical-remove', 'restore', 'canonical-restore', 'downgrade', 'reset', 'off', 'stop', 'local-only'])('rejects an already-authorized queued content write after %s commits first', async action => {
+  it.each(['remove', 'canonical-remove', 'restore', 'canonical-restore', 'forget', 'canonical-forget', 'downgrade', 'reset', 'off', 'stop', 'local-only'])('rejects an already-authorized queued content write after %s commits first', async action => {
     const info = await share({ action: 'start', access: action === 'local-only' ? 'lan' : 'local' });
     if (action === 'local-only') {
       const other = (await host.service.execute('artifact_manage', { action: 'create' })).artifact.id;
@@ -235,6 +251,7 @@ describe('fresh authority at the artifact transaction', () => {
       else if (action === 'off') await share({ action: 'link', role: 'editor', on: false });
       else if (action === 'local-only') await share({ action: 'start', access: 'local' });
       else if (action === 'restore' || action === 'canonical-restore') { await share({ action: 'remove', memberId: actor.id }); await share({ action: 'restore', memberId: actor.id, role: 'editor' }); }
+      else if (action === 'forget' || action === 'canonical-forget') { await share({ action: 'remove', memberId: actor.id }); await share({ action: 'forget', memberId: actor.id }); viewer.use(tokenFor(info)); expect((await viewer.session()).value.error.code).toBe('NAME_REQUIRED'); await viewer.join(actor.name); if (action === 'canonical-forget') viewer.use(); }
       else await share({ action: action === 'canonical-remove' ? 'remove' : action, role: 'editor', memberId: actor.id });
     } finally { release(); }
     const response = await pending;
@@ -242,7 +259,7 @@ describe('fresh authority at the artifact transaction', () => {
     const state = await host.service.store.read(artifactId);
     expect((state.content as { elements: { text?: string }[] }).elements[0]!.text).toBe('base'); expect(state.artifact.revision).toBe(0); expect(state.operations).toEqual([]);
     expect(JSON.stringify(state.history)).not.toContain(tokenFor(info));
-    if (action === 'restore' || action === 'canonical-restore') {
+    if (action === 'restore' || action === 'canonical-restore' || action === 'forget' || action === 'canonical-forget') {
       expect((await viewer.session()).value.actor).toMatchObject({ id: actor.id, name: actor.name, role: 'editor' });
       expect((await viewer.call('artifact_apply', { operationId: 'restored-mutation', expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'fresh authorized write' } }] })).response.status).toBe(200);
     }

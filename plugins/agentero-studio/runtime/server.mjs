@@ -116,7 +116,7 @@ var TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
 var init_studio = __esm({
   "src/contracts/studio.ts"() {
     "use strict";
-    TOOL_NAMES = ["studio_open", "artifact_list", "artifact_manage", "artifact_read", "artifact_apply", "artifact_feedback", "artifact_share", "artifact_export"];
+    TOOL_NAMES = ["studio_open", "artifact_list", "artifact_manage", "artifact_read", "artifact_apply", "artifact_feedback", "artifact_share", "artifact_export", "artifact_activity"];
     DEFAULT_STYLE = { name: "Diagram", paper: "#f5f5f5", ink: "#2d3142", muted: "#4f5d75", accent: "#eb6c36", link: "#2e5aa8", fontFamily: 'Arial, "Microsoft YaHei", sans-serif', titleFont: 'Georgia, "Songti SC", serif', monoFont: "Consolas, monospace" };
     LOCAL_ACTOR = { id: "local", name: "\u6211", kind: "human", role: "owner" };
   }
@@ -136,7 +136,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.1";
+    PLUGIN_VERSION = "0.2.2";
   }
 });
 
@@ -7690,6 +7690,557 @@ var init_whiteboard_geometry = __esm({
   }
 });
 
+// src/core/theme.ts
+function parseColor(input2) {
+  const value = (NAMED[input2.toLowerCase()] ?? input2).trim();
+  const hex3 = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value)?.[1];
+  if (hex3) {
+    const expanded = hex3.length <= 4 ? [...hex3].map((c) => c + c).join("") : hex3;
+    return [parseInt(expanded.slice(0, 2), 16), parseInt(expanded.slice(2, 4), 16), parseInt(expanded.slice(4, 6), 16), expanded.length === 8 ? parseInt(expanded.slice(6, 8), 16) / 255 : 1];
+  }
+  const rgb = /^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i.exec(value);
+  if (rgb) return [0, 1, 2].map((i2) => Math.min(255, Math.max(0, Number(rgb[i2 + 1])))).concat(Math.min(1, Math.max(0, Number(rgb[4] ?? 1))));
+  throw new Error(`\u4E0D\u652F\u6301\u7684\u989C\u8272\uFF1A${input2}`);
+}
+function composite(foreground, background) {
+  const alpha = foreground[3] + background[3] * (1 - foreground[3]);
+  if (!alpha) return [0, 0, 0, 0];
+  return [0, 1, 2].map((i2) => (foreground[i2] * foreground[3] + background[i2] * background[3] * (1 - foreground[3])) / alpha).concat(alpha);
+}
+function luminance(color) {
+  return color.slice(0, 3).map((v) => v / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4).reduce((sum, v, i2) => sum + v * [0.2126, 0.7152, 0.0722][i2], 0);
+}
+function contrastRatio(foreground, background, underneath = "#ffffff") {
+  const back = composite(parseColor(background), parseColor(underneath));
+  const front = composite(parseColor(foreground), back);
+  const a = luminance(front);
+  const b = luminance(back);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+function readableText(fill, underneath = "#ffffff") {
+  return contrastRatio("#111111", fill, underneath) >= contrastRatio("#f5f5f5", fill, underneath) ? "#111111" : "#f5f5f5";
+}
+function semanticColor(value, style, fallback) {
+  if (typeof value !== "string" || !value.trim()) return fallback;
+  if (value === "none") return "none";
+  return style[value] ?? NAMED[value.toLowerCase()] ?? (/^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(value) ? value : fallback);
+}
+var LIGHT_THEME, DARK_THEME, NAMED;
+var init_theme = __esm({
+  "src/core/theme.ts"() {
+    "use strict";
+    LIGHT_THEME = {
+      name: "Diagram \xB7 \u660E\u4EAE",
+      paper: "#f5f5f5",
+      ink: "#2d3142",
+      muted: "#4f5d75",
+      accent: "#eb6c36",
+      link: "#2e5aa8",
+      "paper-2": "#ececec",
+      soft: "#68738a",
+      rule: "#bfc0c0",
+      "ink-strong": "#111111",
+      fontFamily: 'Arial, "Microsoft YaHei", "PingFang SC", sans-serif',
+      titleFont: 'Georgia, "Songti SC", serif',
+      monoFont: "Consolas, monospace"
+    };
+    DARK_THEME = {
+      ...LIGHT_THEME,
+      name: "Diagram \xB7 \u6697\u8272",
+      paper: "#2d3142",
+      "paper-2": "#393e53",
+      ink: "#f5f5f5",
+      muted: "#bfc0c0",
+      soft: "#a4aec2",
+      rule: "#68738a",
+      accent: "#f08a59",
+      link: "#6a95d8"
+    };
+    NAMED = { white: "#ffffff", black: "#000000", transparent: "#00000000", yellow: "#f6e39c", peach: "#f4c3a4", pink: "#edbdd5", green: "#bcd6be", blue: "#b8d2ed", purple: "#d0c0e5", ink: "#2d3142", terracotta: "#b64e2a" };
+  }
+});
+
+// src/core/products/whiteboard-stickers.ts
+function getBoardSticker(id2) {
+  return typeof id2 === "string" ? byId.get(id2) : void 0;
+}
+function boardStickerMarkup(id2) {
+  const value = getBoardSticker(id2);
+  if (!value) return void 0;
+  return `<g stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="4">${value.body}</g><g stroke="#273443" stroke-width="1.3">${value.body}</g></g>`;
+}
+var yellow, orange, red, blue, green, pink, purple, path, circle, rect, sticker, BOARD_STICKERS, byId;
+var init_whiteboard_stickers = __esm({
+  "src/core/products/whiteboard-stickers.ts"() {
+    "use strict";
+    yellow = "#f5c75e";
+    orange = "#e99662";
+    red = "#e87970";
+    blue = "#8eb5dc";
+    green = "#b3c894";
+    pink = "#e9a9c7";
+    purple = "#bab0da";
+    path = (d, fill = "none") => `<path d="${d}" fill="${fill}"/>`;
+    circle = (cx, cy, r, fill) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
+    rect = (x2, y, w, h, fill, rx = 1) => `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}"/>`;
+    sticker = (id2, label, keywords, body2) => ({ id: id2, label, keywords, body: body2 });
+    BOARD_STICKERS = [
+      sticker("smile", "\u7B11\u8138", "smile happy \u5F00\u5FC3 \u8868\u60C5", circle(12, 12, 9, yellow) + path("M7 10q1-3 3 0m4 0q1-3 3 0M7 13h10q-1 6-5 6t-5-6Z", "#fff1be")),
+      sticker("plus", "\u52A0\u53F7", "plus add \u6DFB\u52A0 \u6B63\u5411", path("M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z", green)),
+      sticker("thumbs-up", "\u8D5E\u540C", "thumbs up agree good like \u8D5E \u70B9\u8D5E", path("M8 10c3-1 4-4 5-7 3 0 3 3 1 6h5q3 0 2 3l-2 8H8ZM3 10h5v10H3Z", yellow) + path("M16 12h5m-6 4h5")),
+      sticker("thumbs-down", "\u4E0D\u8D5E\u540C", "thumbs down disagree \u4E0D\u540C\u610F \u53CD\u5BF9", path("M8 14c3 1 4 4 5 7 3 0 3-3 1-6h5q3 0 2-3l-2-8H8ZM3 4h5v10H3Z", yellow) + path("M16 12h5m-6-4h5")),
+      sticker("heart", "\u7231\u5FC3", "heart love \u559C\u6B22 \u5173\u5FC3", path("M12 21C8 18 3 14 3 9 3 3 9 2 12 7c3-5 9-4 9 2 0 5-5 9-9 12Z", red)),
+      sticker("wave", "\u6325\u624B", "wave hand hello \u4F60\u597D \u62DB\u547C", path("m7 20-3-8q0-2 2-1l2 3-2-8q0-2 2-1l2 7V4q1-2 2 0v8l2-7q2-1 2 1l-1 7 2-4q2-1 2 1l-2 8q-3 5-10 2Z", yellow) + path("M3 5 5 3m14 1 2 2M2 8H1")),
+      sticker("clap", "\u9F13\u638C", "clap applause hands \u652F\u6301 \u62CD\u624B", path("M4 20V9q1-2 2 0v5-8q1-2 2 0v7-9q1-2 2 0v9-7q1-2 2 0v9l2-3q2-1 2 1l-3 7Z", yellow) + path("m14 20 4-7V7q2-2 2 0v13ZM5 2 4 1m10 2 1-2m6 3 1-1", "#f7d98b")),
+      sticker("handshake", "\u63E1\u624B", "handshake agree partnership \u5408\u4F5C \u5171\u8BC6", path("m2 9 5-5 5 2 5-2 5 5-4 7-5 4-8-5Z", yellow) + path("m8 9 4-3 4 3q0 3-3 2l-2-1-3 3m1 4 2-2m1 4 2-2m1 0 2-2")),
+      sticker("heart-hand", "\u7528\u5FC3\u652F\u6301", "care heart support \u5173\u6000 \u611F\u8C22", path("M11 12C7 10 5 8 5 5q2-4 6 0 4-4 6 0 1 3-6 7Z", red) + path("M3 15h4l4 2h6q2-1 1-3l3-1q2 4-3 7H6l-3 1Z", pink)),
+      sticker("bulb", "\u60F3\u6CD5", "lightbulb idea insight \u7075\u611F \u70B9\u5B50", path("M8 16c0-3-4-4-3-8 1-7 13-7 14 0 1 4-3 5-3 8ZM8 17h8v4H8Z", "#f8dda0") + path("m10 15-1-6 3 2 3-2-1 6M9 19h6")),
+      sticker("question", "\u95EE\u9898", "question help why \u7591\u95EE \u5E2E\u52A9", circle(12, 12, 9, purple) + path("M9 8q0-4 4-3 5 2 0 6-2 1-1 4m0 3h.1")),
+      sticker("alert", "\u63D0\u9192", "alert warning caution \u6CE8\u610F \u98CE\u9669 \u8B66\u544A", path("M12 3 22 21H2Z", yellow) + path("M12 8v6") + circle(12, 17.5, 0.65, "#273443")),
+      sticker("check", "\u5B8C\u6210", "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE", rect(4, 4, 16, 16, green, 2) + path("m7 11 4 4L22 5")),
+      sticker("cross", "\u53D6\u6D88", "cross no cancel stop \u62D2\u7EDD \u9519\u8BEF \u5173\u95ED", circle(12, 12, 9, red) + path("m8 8 8 8m0-8-8 8")),
+      sticker("flag", "\u65D7\u5E1C", "flag milestone mark \u91CC\u7A0B\u7891 \u6807\u8BB0", path("M5 21V3m1 1h15l-4 6 4 5H6Z", red) + circle(5, 3, 1.5, "#f7eee7")),
+      sticker("bolt", "\u95EA\u7535", "bolt lightning zap fast \u5FEB\u901F \u80FD\u91CF", path("m14 2-11 12h7l-1 8L22 9h-8Z", yellow)),
+      sticker("pin", "\u5730\u70B9", "pin location map \u5B9A\u4F4D \u4F4D\u7F6E", path("M12 22C8 16 4 13 4 9a8 8 0 0 1 16 0c0 4-4 7-8 13Z", red) + circle(12, 9, 3, "#f4aa9f")),
+      sticker("search", "\u53D1\u73B0", "search find discover \u641C\u7D22 \u67E5\u627E \u653E\u5927\u955C", circle(9, 9, 6.5, blue) + path("m14 13 8 7-3 3-7-8Z", "#b9d5ec")),
+      sticker("key", "\u94A5\u5319", "key access important \u5173\u952E \u6743\u9650", path("M14 11a6 6 0 1 0-5 4v6h4v-3h3v-3h-3Z", yellow) + circle(8, 8, 2.5, "#f8e1aa")),
+      sticker("party", "\u5E86\u795D", "party celebrate confetti \u5F69\u5E26 \u795D\u8D3A", path("M4 21 7 7l10 10Z", pink) + path("m11 5 2-3m4 7 4-1m-7 5 5-6m1 9 3 2M7 3l1 1") + circle(18, 3, 1, yellow) + circle(22, 12, 1, blue)),
+      sticker("trophy", "\u5956\u676F", "trophy win award \u51A0\u519B \u5956\u52B1", path("M7 3h10v9q-1 5-5 5t-5-5Zm3 14h4v3h-4ZM7 21h10M7 5H3q0 8 5 7M17 5h4q0 8-5 7", yellow)),
+      sticker("crown", "\u7687\u51A0", "crown royal best \u7B2C\u4E00 \u4F18\u79C0", path("M5 20 3 7l6 5 3-9 3 9 6-5-2 13Z", yellow) + circle(3, 6, 1.4, "#f8e1aa") + circle(12, 3, 1.4, "#f8e1aa") + circle(21, 6, 1.4, "#f8e1aa")),
+      sticker("gift", "\u793C\u7269", "gift present thanks \u8D60\u793C \u60CA\u559C", rect(4, 10, 16, 11, red) + rect(3, 7, 18, 4, "#f2a79b") + path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")),
+      sticker("clock", "\u65F6\u949F", "clock time deadline \u65F6\u95F4 \u622A\u6B62", circle(12, 12, 9, blue) + path("M12 6v7h5")),
+      sticker("calendar", "\u65E5\u5386", "calendar date plan \u65E5\u671F \u8BA1\u5212", rect(3, 5, 18, 16, red, 2) + path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")),
+      sticker("hourglass", "\u6C99\u6F0F", "hourglass wait patience \u7B49\u5F85 \u5012\u8BA1\u65F6", path("M5 3h14c0 6-2 6-5 9 3 3 5 3 5 9H5c0-6 2-6 5-9-3-3-5-3-5-9Z", "#f9e8ba") + path("M6 6h12l-6 5Zm0 13 6-6 6 6Z", yellow) + path("M4 2h16M4 22h16")),
+      sticker("messages", "\u8BA8\u8BBA", "messages chat discuss \u5BF9\u8BDD \u6C9F\u901A", path("M14 17H7l-4 3v-7a7 7 0 1 1 11 4Z", blue) + path("M14 10q8-2 8 5v7l-4-2q-7 1-8-5Z", "#aecbe5")),
+      sticker("megaphone", "\u516C\u544A", "megaphone announce broadcast \u5BA3\u5E03 \u901A\u77E5", path("m3 10 13-6v16L3 14Zm3 5 2 6h4l-2-7Z", orange) + path("M18 8q4 4 0 8m2-10q6 6 0 12")),
+      sticker("pencil", "\u94C5\u7B14", "pencil edit write \u7F16\u8F91 \u4E66\u5199", path("m4 15 11-12q2-2 5 1t1 4L9 20l-7 2Z", yellow) + path("m14 4 6 6M4 15l5 5m-6 1 2-5") + path("m3 22 5-1 4 1 3-2 4 1 3-2")),
+      sticker("chart", "\u589E\u957F\u56FE\u8868", "chart growth graph mountain \u6570\u636E \u8FDB\u5C55", path("M3 21V4h3v14h15v3Z", purple) + path("m7 15 4-5 4 2 6-8v14H7Z", green) + path("m16 4 5-1 1 5")),
+      sticker("trending-up", "\u5411\u4E0A\u8D8B\u52BF", "trending up progress improve \u63D0\u5347 \u8D8B\u52BF", path("M3 21V13h5v-4h5V5h6V2l4 5-4 5V9h-3v5h-5v4H7v3Z", purple)),
+      sticker("send", "\u7EB8\u98DE\u673A", "send paper plane launch \u53D1\u9001 \u51FA\u53D1", path("M2 8 22 2l-6 20-5-8Z", blue) + path("m3 8 8 6L22 2M11 14l-1 7 6-5")),
+      sticker("sun", "\u592A\u9633", "sun bright day \u9633\u5149 \u660E\u4EAE", path("m12 1 2 5 4-3-1 5 5 1-4 4 4 3-5 1 1 5-5-3-3 4-1-5-5 1 3-5-4-3 5-1-1-5 5 3Z", "#f7dc8a") + circle(12, 12, 4.5, yellow)),
+      sticker("sprout", "\u840C\u82BD", "sprout plant grow \u65B0\u82BD \u6210\u957F", path("M12 22V11M12 13C1 13 1 3 6 5c6 0 6 8 6 8Zm0-2C12 0 23 1 22 6c-1 6-10 5-10 5Z", green) + path("M5 22h14")),
+      sticker("flower", "\u82B1\u6735", "flower bloom beauty \u9C9C\u82B1 \u7EFD\u653E", path("M12 22V9m0 8q-9 0-9-6 7-1 9 6Zm0 3q9-1 9-7-7-1-9 7Z", green) + path("M12 3q4-4 5 1 5-1 3 4 2 4-4 4-3 4-5-1-6 0-4-4-3-4 1-5Z", pink) + circle(13, 6.5, 2, "#f6d58a")),
+      sticker("coffee", "\u5496\u5561", "coffee break cup \u4F11\u606F \u5496\u5561\u676F", path("M4 8h13v9q-1 4-6 4t-7-4Zm13 1h3q4 5-3 7Z", "#c8a589") + path("M2 22h18M7 5q-2-2 0-4m5 4q-2-2 0-4")),
+      sticker("piggy-bank", "\u50A8\u84C4\u7F50", "piggy bank save money \u5B58\u94B1 \u9884\u7B97", path("M6 7q-2-5 3-3l2 2q9-2 9 5l3 1v5l-4 1v4h-4v-3H9v3H5v-5Q0 15 3 10L1 8q3-2 5-1Z", pink) + path("M10 8h5") + circle(18, 11, 0.6, "#273443")),
+      sticker("arrow-right", "\u5411\u53F3", "arrow right next forward \u4E0B\u4E00\u6B65 \u524D\u8FDB", path("M3 9h11V3l8 9-8 9v-6H3Z", blue)),
+      sticker("arrow-up", "\u5411\u4E0A", "arrow up top \u4E0A\u5347 \u9876\u90E8", path("M9 22V11H3l9-9 9 9h-6v11Z", green)),
+      sticker("repeat", "\u5FAA\u73AF", "repeat loop cycle \u8FED\u4EE3 \u5FAA\u73AF", path("M5 9q1-7 10-5l2-2v6h-6l2-2q-5-1-6 4ZM19 15q-1 7-10 5l-2 2v-6h6l-2 2q5 1 6-4Z", green)),
+      sticker("target", "\u76EE\u6807", "target aim focus \u4E13\u6CE8 \u9776\u5FC3", circle(12, 12, 9, red) + circle(12, 12, 6, "#f9e8db") + circle(12, 12, 3, red) + path("m12 12 9-9m-5 0h5v5")),
+      sticker("rocket", "\u706B\u7BAD", "rocket launch release \u53D1\u5E03 \u542F\u52A8", path("M9 16 5 19l-1-7 4-3m7 6 0 5-6 1 3-4", orange) + path("M7 15Q7 3 21 2q1 13-11 15Z", blue) + circle(15, 8, 2.5, "#dcebf5") + path("m7 17-4 4 5-1", yellow))
+    ];
+    byId = new Map(BOARD_STICKERS.map((value) => [value.id, value]));
+  }
+});
+
+// src/core/shared/rich-text.ts
+function safeHttpLink(href) {
+  try {
+    const url2 = new URL(href ?? "");
+    return ["http:", "https:"].includes(url2.protocol) ? url2.href : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function parseInlineText(text2, inherited = {}) {
+  const segments = [];
+  const push = (value, code = false) => {
+    const type = inherited.href ? "link" : code ? "code" : inherited.bold ? "bold" : inherited.italic ? "italic" : "text";
+    const next = { type, text: value, ...inherited.href ? { href: inherited.href } : {}, ...inherited.bold && type !== "bold" ? { bold: true } : {}, ...inherited.italic && type !== "italic" ? { italic: true } : {}, ...code && type !== "code" ? { code: true } : {} };
+    const previous = segments.at(-1);
+    if (previous && previous.type === next.type && previous.href === next.href && previous.bold === next.bold && previous.italic === next.italic && previous.code === next.code) previous.text += value;
+    else segments.push(next);
+  };
+  let index = 0;
+  while (index < text2.length) {
+    if (text2[index] === "\\" && index + 1 < text2.length && /[\\*_`\[\]]/.test(text2[index + 1])) {
+      push(text2[index + 1]);
+      index += 2;
+      continue;
+    }
+    if (text2[index] === "`") {
+      const end = text2.indexOf("`", index + 1);
+      if (end > index + 1 && !text2.slice(index, end).includes("\n")) {
+        push(text2.slice(index + 1, end), true);
+        index = end + 1;
+        continue;
+      }
+    }
+    if (text2[index] === "[") {
+      let close = index + 1;
+      while (close < text2.length) {
+        if (text2[close] === "\\") {
+          close += 2;
+          continue;
+        }
+        if (text2[close] === "]") break;
+        close++;
+      }
+      if (text2[close + 1] === "(") {
+        const end = text2.indexOf(")", close + 2);
+        if (end > close + 2) {
+          const raw = text2.slice(index, end + 1), href = safeHttpLink(text2.slice(close + 2, end));
+          if (href) segments.push(...parseInlineText(text2.slice(index + 1, close), { ...inherited, href }));
+          else push(raw);
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+    if (text2[index] === "*" || text2[index] === "_") {
+      const opening = /^(?:\*+|_+)/.exec(text2.slice(index))[0], length = opening.length;
+      if (length <= 3) {
+        const runs = text2[index] === "_" ? /_+/g : /\*+/g;
+        runs.lastIndex = index + length;
+        let closing;
+        while (closing = runs.exec(text2)) {
+          if (text2.slice(index + length, closing.index).includes("\n")) break;
+          let escapes = 0;
+          for (let at = closing.index - 1; at >= 0 && text2[at] === "\\"; at--) escapes++;
+          if (escapes % 2 || closing[0].length !== length) continue;
+          if (closing.index > index + length) {
+            segments.push(...parseInlineText(text2.slice(index + length, closing.index), { ...inherited, ...length >= 2 ? { bold: true } : {}, ...length === 1 || length === 3 ? { italic: true } : {} }));
+            index = closing.index + length;
+            break;
+          }
+        }
+        if (closing && index === closing.index + length) continue;
+      }
+      push(opening);
+      index += length;
+      continue;
+    }
+    push(text2[index]);
+    index++;
+  }
+  if (!segments.length) push("");
+  return segments;
+}
+function parseRichText(text2) {
+  return text2.split(/\r?\n/).map((line) => {
+    const list = /^(\s*)(- |(\d+)\. )(.*)$/.exec(line);
+    return list ? { type: list[3] ? "ordered" : "bullet", marker: list[3] ? `${list[3]}.` : "\u2022", ...list[1].length ? { indent: Math.floor(list[1].length / 2) } : {}, segments: parseInlineText(list[4]) } : { type: "paragraph", segments: parseInlineText(line) };
+  });
+}
+var init_rich_text = __esm({
+  "src/core/shared/rich-text.ts"() {
+    "use strict";
+  }
+});
+
+// src/core/serialization.ts
+function escapeXml(value) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function filenameFor(title, extension) {
+  let name = title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").trim().slice(0, 100) || "\u767D\u677F";
+  if (/^(?:con|prn|aux|nul|com\d|lpt\d)(?:\.|$)/i.test(name)) name = `_${name}`;
+  return `${name}.${extension}`;
+}
+function selectedElements(board, options = {}) {
+  const id2 = options.regionId ?? options.elementId;
+  const ids = id2 ? [id2] : options.ids;
+  if (!ids) return board.elements;
+  const selected = board.elements.filter((e) => ids.includes(e.id));
+  if (selected.length !== new Set(ids).size) throw new ExportError("ELEMENT_NOT_FOUND", "\u90E8\u5206\u5BFC\u51FA\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002");
+  return selected;
+}
+async function inlineExportAssets(board, format, options, resolveSource) {
+  const cloned = structuredClone(board), resolved = /* @__PURE__ */ new Map();
+  const read = (source) => {
+    if (/^(?:data:|#)/i.test(source)) return Promise.resolve(source);
+    if (!resolved.has(source)) resolved.set(source, resolveSource(source));
+    return resolved.get(source);
+  };
+  for (const element of selectedElements(cloned, options)) {
+    if (element.type === "image") {
+      if (typeof element.src === "string") element.src = await read(element.src);
+      if (format === "html" && typeof element.video === "string") element.video = await read(element.video);
+    }
+    if (!isHtmlRegionElement(element) || typeof element.html !== "string") continue;
+    const attributes = /((?:src|href|poster)\s*=\s*["'])(\/assets\/[^"'<>]+)(["'])/gi;
+    const urls = /url\(\s*["']?(\/assets\/[^)"']+)["']?\s*\)/gi;
+    const references = new Set([...element.html.matchAll(attributes)].map((match) => match[2]).concat([...element.html.matchAll(urls)].map((match) => match[1])));
+    const values = /* @__PURE__ */ new Map();
+    for (const reference of references) values.set(reference, await read(reference.trim()));
+    element.html = element.html.replace(attributes, (_, prefix, reference, suffix) => `${prefix}${values.get(reference)}${suffix}`).replace(urls, (_, reference) => `url("${values.get(reference)}")`);
+  }
+  return cloned;
+}
+function scalar(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+function boardBounds(elements, padding = 32, scene = elements) {
+  if (!elements.length) return { x: 0, y: 0, width: 960, height: 540 };
+  const boxes = elements.map((e) => {
+    if (e.type === "arrow") {
+      endpoint(e.from, scene);
+      endpoint(e.to, scene);
+      const points = arrowGeometry(e, scene).points;
+      const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
+      return { x: Math.min(...xs) - 16, y: Math.min(...ys) - 28, w: Math.max(32, Math.max(...xs) - Math.min(...xs) + 32), h: Math.max(48, Math.max(...ys) - Math.min(...ys) + 48) };
+    }
+    if (e.type === "stroke" && e.points?.length) {
+      const xs = e.points.filter((_n, i2) => i2 % 2 === 0);
+      const ys = e.points.filter((_n, i2) => i2 % 2 === 1);
+      const pen = scalar(e.strokeWidth ?? e.width, 3);
+      return { x: e.x + Math.min(...xs) - pen, y: e.y + Math.min(...ys) - pen, w: Math.max(...xs) - Math.min(...xs) + pen * 2, h: Math.max(...ys) - Math.min(...ys) + pen * 2 };
+    }
+    const radians = scalar(e.rotation, 0) * Math.PI / 180;
+    const w = Math.max(1, scalar(e.w, 200));
+    const h = Math.max(1, scalar(e.h, 100));
+    const turnedWidth = Math.abs(w * Math.cos(radians)) + Math.abs(h * Math.sin(radians));
+    const turnedHeight = Math.abs(w * Math.sin(radians)) + Math.abs(h * Math.cos(radians));
+    return { x: scalar(e.x, 0) + (w - turnedWidth) / 2, y: scalar(e.y, 0) + (h - turnedHeight) / 2, w: turnedWidth, h: turnedHeight };
+  });
+  const left = Math.min(...boxes.map((e) => e.x));
+  const top = Math.min(...boxes.map((e) => e.y));
+  const right = Math.max(...boxes.map((e) => e.x + e.w));
+  const bottom = Math.max(...boxes.map((e) => e.y + e.h));
+  return { x: left - padding, y: top - padding, width: Math.max(1, Math.ceil(right - left + padding * 2)), height: Math.max(1, Math.ceil(bottom - top + padding * 2)) };
+}
+function extractRegionSvg(html2, prefix) {
+  const start = html2.search(/<svg\b/i);
+  if (start < 0) return void 0;
+  const tags = /<!--[^]*?-->|<!\[CDATA\[[^]*?\]\]>|<\/?svg\b[^>]*>/gi;
+  tags.lastIndex = start;
+  let depth = 0;
+  let end = -1;
+  let tag;
+  while (tag = tags.exec(html2)) {
+    if (tag[0].startsWith("<!--") || tag[0].startsWith("<![")) continue;
+    if (/^<\/svg/i.test(tag[0])) depth--;
+    else if (!/\/\s*>$/.test(tag[0])) depth++;
+    if (depth === 0) {
+      end = tags.lastIndex;
+      break;
+    }
+  }
+  if (end < 0) throw new ExportError("INVALID_SVG", "HTML \u533A\u57DF\u4E2D\u7684 SVG \u6CA1\u6709\u6B63\u786E\u95ED\u5408\u3002");
+  let svg = html2.slice(start, end);
+  const styles = [...html2.matchAll(/<style\b[^>]*>([^]*?)<\/style\s*>/gi)].map((m) => m[1]).join("\n").replace(/@import[^;]+;/gi, "").replace(/url\(\s*['"]?https?:[^)]*\)/gi, "none");
+  svg = svg.replace(/<script\b[^>]*>[^]*?<\/script\s*>/gi, "").replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/<!DOCTYPE[^>]*>/gi, "");
+  svg = svg.replace(/\s(?:href|xlink:href)\s*=\s*(["'])([^]*?)\1/gi, (match, quote, url2) => /^(?:#|data:image\/)/i.test(url2.trim()) ? match : "");
+  if (!/\bxmlns\s*=/.test(svg.slice(0, svg.indexOf(">")))) svg = svg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  if (styles) svg = svg.replace(/(<svg\b[^>]*>)/i, `$1<style><![CDATA[${styles.replace(/\]\]>/g, "]]]]><![CDATA[>")}]]></style>`);
+  const ids = [...svg.matchAll(/\bid\s*=\s*(["'])(.*?)\1/g)].map((m) => m[2]);
+  const safePrefix = prefix.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const names = new Map(ids.map((id2) => [id2, `${safePrefix}_${id2}`]));
+  svg = svg.replace(/(\bid\s*=\s*)(["'])(.*?)\2/g, (_match, before, quote, id2) => `${before}${quote}${names.get(id2) ?? id2}${quote}`);
+  svg = svg.replace(/url\(\s*(["']?)#([^\s)'" ]+)\1\s*\)/g, (_match, quote, id2) => `url(${quote}#${names.get(id2) ?? id2}${quote})`);
+  svg = svg.replace(/((?:href|xlink:href)\s*=\s*)(["'])#([^"']+)\2/g, (_match, before, quote, id2) => `${before}${quote}#${names.get(id2) ?? id2}${quote}`);
+  svg = svg.replace(/(aria-(?:labelledby|describedby)\s*=\s*)(["'])(.*?)\2/g, (_match, before, quote, values) => `${before}${quote}${values.split(/\s+/).map((id2) => names.get(id2) ?? id2).join(" ")}${quote}`);
+  svg = svg.replace(/(<style\b[^>]*>)([^]*?)(<\/style\s*>)/gi, (_match, startTag, css, endTag) => {
+    const selectors = css.replace(/([^{}]+)\{/g, (_selectorMatch, selector) => `${selector.replace(/#([\w-]+)/g, (match, id2) => names.has(id2) ? `#${names.get(id2)}` : match)}{`);
+    return startTag + selectors + endTag;
+  });
+  return svg;
+}
+function wrap(text2, width, size) {
+  const rows = [];
+  for (const line of parseRichText(text2)) {
+    const segments = [...line.marker ? [{ type: "text", text: `${"  ".repeat(line.indent ?? 0)}${line.marker} ` }] : [], ...line.segments];
+    let row = [];
+    let used = 0;
+    for (const segment of segments) for (const character of segment.text) {
+      const cost = /[\u2e80-\uffff]/u.test(character) ? size : size * (segment.type === "code" || segment.code ? 0.62 : 0.6);
+      if (used && used + cost > width) {
+        rows.push(row);
+        row = [];
+        used = 0;
+      }
+      const previous = row.at(-1);
+      if (previous?.type === segment.type && previous.href === segment.href && previous.bold === segment.bold && previous.italic === segment.italic && previous.code === segment.code) previous.text += character;
+      else row.push({ ...segment, text: character });
+      used += cost;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function textSvg(e, board, color, center = false) {
+  const size = Math.max(12, scalar(e.fontSize, e.type === "text" ? 20 : 16));
+  const lines = wrap(String(e.text ?? ""), Math.max(size, e.w - (center ? 24 : 4)), size);
+  const aligned = e.textAlign ?? (center ? "center" : "left");
+  const x2 = aligned === "center" ? e.x + e.w / 2 : aligned === "right" ? e.x + e.w - 12 : e.x + (center ? 12 : 0);
+  const y = center ? e.y + Math.max(16, (e.h - (lines.length - 1) * size * 1.45) / 2) + size * 0.35 : e.y + size;
+  const segment = (part) => {
+    const span = `<tspan${part.type === "bold" || part.bold ? ' font-weight="700"' : ""}${part.type === "italic" || part.italic ? ' font-style="italic"' : ""}${part.type === "code" || part.code ? ` font-family="${escapeXml(board.style.monoFont)}"` : ""}>${escapeXml(part.text)}</tspan>`;
+    return part.type === "link" && part.href ? `<a href="${escapeXml(part.href)}" fill="${escapeXml(board.style.link)}">${span}</a>` : span;
+  };
+  return `<text fill="${escapeXml(color)}" font-family="${escapeXml(e.fontFamily ?? board.style.fontFamily)}" font-size="${size}" font-weight="${e.bold ? 700 : 400}" font-style="${e.italic ? "italic" : "normal"}" text-anchor="${aligned === "center" ? "middle" : aligned === "right" ? "end" : "start"}">${lines.map((line, i2) => `<tspan x="${x2}" y="${y + i2 * size * 1.45}">${line.map(segment).join("")}</tspan>`).join("")}</text>`;
+}
+function shapeSvg(e, fill, stroke) {
+  const common = `fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}"${e.dash ? ' stroke-dasharray="6 5"' : ""}`;
+  const { x: x2, y, w, h } = e;
+  if (e.kind === "ellipse" || e.kind === "circle") return `<ellipse cx="${x2 + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" ${common}/>`;
+  const path2 = shapePath(e);
+  if (path2) return `<path transform="translate(${x2} ${y})" d="${path2}" ${common}/>`;
+  return `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${e.kind === "pill" ? h / 2 : e.kind === "rect" || e.kind === "queue" ? 0 : 7}" ${common}/>` + (e.kind === "queue" ? `<path d="M${x2 + 14},${y}V${y + h} M${x2 + w - 14},${y}V${y + h}" fill="none" stroke="${escapeXml(stroke)}"/>` : "");
+}
+function endpoint(value, elements) {
+  if (Array.isArray(value)) return value;
+  const target = elements.find((e) => e.id === value);
+  if (!target) throw new ExportError("INVALID_ARROW", "\u4E00\u6761\u8FDE\u7EBF\u5F15\u7528\u7684\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\uFF0C\u8BF7\u4FEE\u590D\u540E\u5BFC\u51FA\u3002");
+  return [target.x + target.w / 2, target.y + target.h / 2];
+}
+function headSvg(kind, tip, inside, color) {
+  if (kind === "none") return "";
+  if (kind === "circle") return `<circle cx="${tip.x}" cy="${tip.y}" r="4.5" fill="${escapeXml(color)}"/>`;
+  const length = Math.hypot(inside.x - tip.x, inside.y - tip.y) || 1;
+  const dx = (inside.x - tip.x) / length, dy = (inside.y - tip.y) / length;
+  return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color)}"/>`;
+}
+function elementSvg(e, board, options = {}) {
+  const style = board.style;
+  const ink = semanticColor(e.stroke, style, style.muted);
+  let markup = "";
+  if (isHtmlRegionElement(e)) {
+    const html2 = String(e.html ?? "");
+    if (options.svgRegions === true) {
+      const svg = extractRegionSvg(html2, e.id);
+      if (!svg) throw new ExportError("EXPORT_BROWSER_REQUIRED", "\u8BE5 HTML \u533A\u57DF\u6CA1\u6709\u5185\u8054 SVG\uFF0C\u8BF7\u5728\u754C\u9762\u5BFC\u51FA PNG\uFF0C\u6216\u5BFC\u51FA HTML \u4FDD\u7559\u5B8C\u6574\u5185\u5BB9\u3002");
+      markup = svg.replace(/<svg\b([^>]*)>/i, (_m, attrs) => `<svg${attrs.replace(/\s(?:x|y|width|height)\s*=\s*(["']).*?\1/gi, "")} x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}">`);
+    } else {
+      const body2 = /<body\b[^>]*>([^]*?)<\/body\s*>/i.exec(html2)?.[1] ?? html2.replace(/<!doctype[^>]*>|<\/?(?:html|head)\b[^>]*>/gi, "");
+      const styles = [...html2.matchAll(/<style\b[^>]*>[^]*?<\/style\s*>/gi)].map((m) => m[0]).join("");
+      const computed = typeof options.xhtmlRegions === "object" && options.xhtmlRegions ? options.xhtmlRegions[e.id] : void 0;
+      const safe = computed ?? (styles + body2).replace(/<script\b[^>]*>[^]*?<\/script\s*>/gi, "").replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^>]*?)(?<!\/)\s*>/gi, "<$1$2/>").replace(/&nbsp;/gi, "&#160;").replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);)/gi, "&amp;");
+      markup = `<foreignObject x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden">${safe}</div></foreignObject>`;
+    }
+  } else if (e.type === "sticker" && boardStickerMarkup(e.data?.stickerIconId)) markup = `<svg x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" viewBox="0 0 24 24" data-sticker-icon-id="${escapeXml(e.data?.stickerIconId)}">${boardStickerMarkup(e.data?.stickerIconId)}</svg>`;
+  else if (e.type === "text" || e.type === "sticker") markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
+  else if (e.type === "stroke") {
+    markup = `<path d="${strokePath(e.points, e)}" fill="none" stroke="${escapeXml(semanticColor(e.stroke ?? e.color, style, style.muted))}" stroke-width="${scalar(e.strokeWidth ?? e.width, 3)}"${e.dash ? ' stroke-dasharray="6 5"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
+  } else if (e.type === "arrow") {
+    endpoint(e.from, board.elements);
+    endpoint(e.to, board.elements);
+    const route = arrowGeometry(e, board.elements), heads = arrowHeads(e);
+    const color = semanticColor(e.stroke ?? e.color, style, style.muted);
+    markup = `<path d="${route.path}" fill="none" stroke="${escapeXml(color)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}" stroke-linejoin="round" ${e.dash ? 'stroke-dasharray="5 4"' : ""}/>` + headSvg(heads[0], route.points[0], route.points[1] ?? route.points[0], color) + headSvg(heads[1], route.points.at(-1), route.points.at(-2) ?? route.points.at(-1), color);
+    if (e.label) {
+      const width = Math.max(28, [...e.label].length * 14 + 16);
+      markup += `<rect x="${route.label.x - width / 2}" y="${route.label.y - 22}" width="${width}" height="20" fill="${escapeXml(style.paper)}"/>` + textSvg({ ...e, x: route.label.x - width / 2, y: route.label.y - 22, w: width, h: 20, text: e.label, fontSize: 12, textAlign: "center" }, board, style.muted, true);
+    }
+  } else if (e.type === "image") {
+    const source = typeof options.assets === "object" && options.assets ? options.assets[String(e.src)] ?? e.src : e.src;
+    if (source && /^data:image\//i.test(source)) {
+      if (e.crop) {
+        const naturalWidth = scalar(e.data?.naturalWidth, 0), naturalHeight = scalar(e.data?.naturalHeight, 0);
+        if (!naturalWidth || !naturalHeight) throw new ExportError("EXPORT_BROWSER_REQUIRED", "\u88C1\u526A\u56FE\u7247\u7F3A\u5C11\u539F\u59CB\u5C3A\u5BF8\uFF0C\u8BF7\u5728\u767D\u677F\u4E2D\u6253\u5F00\u88C1\u526A\u9762\u677F\u4FDD\u5B58\u540E\u5BFC\u51FA\u3002");
+        const zoom = Math.max(1, scalar(e.crop.zoom, 1)), x2 = Math.min(1, Math.max(0, scalar(e.crop.x, 0.5))), y = Math.min(1, Math.max(0, scalar(e.crop.y, 0.5)));
+        const scale = Math.max(e.w / naturalWidth, e.h / naturalHeight) * zoom, width = naturalWidth * scale, height = naturalHeight * scale;
+        const clipId = `studio-crop-${[...e.id].map((c) => c.codePointAt(0).toString(16)).join("_")}`;
+        markup = `<defs><clipPath id="${clipId}"><rect x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"/></clipPath></defs><g clip-path="url(#${clipId})"><image x="${e.x + (e.w - width) * x2}" y="${e.y + (e.h - height) * y}" width="${width}" height="${height}" href="${escapeXml(source)}" preserveAspectRatio="none"/></g>`;
+      } else markup = `<image x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" href="${escapeXml(source)}" preserveAspectRatio="xMidYMid meet"/>`;
+    } else throw new ExportError("ASSET_NOT_EMBEDDED", "\u5BFC\u51FA\u9700\u8981\u5D4C\u5165\u56FE\u7247\u8D44\u6E90\uFF0C\u8BF7\u4ECE\u767D\u677F\u754C\u9762\u5BFC\u51FA\u6216\u91CD\u65B0\u52A0\u8F7D\u56FE\u7247\u3002");
+    const href = !e.video && safeHttpLink(e.href);
+    if (href) markup = `<a href="${escapeXml(href)}" target="_blank" rel="noopener noreferrer">${markup}</a>`;
+  } else if (e.type === "table") {
+    const storedRows = e.data?.rows;
+    const rows = Array.isArray(storedRows) && storedRows.every(Array.isArray) && storedRows.length ? storedRows : typeof e.text === "string" && e.text.length ? e.text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").map((row) => row.split("	")) : [[""]];
+    const cols = Math.max(1, ...rows.map((row) => Array.isArray(row) ? row.length : 1));
+    const rowHeight = e.h / Math.max(1, rows.length);
+    const stored = e.data?.columnWidths;
+    const proportions = Array.isArray(stored) && stored.length === cols && stored.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0) ? stored : Array.from({ length: cols }, () => 1);
+    const total = proportions.reduce((sum, value) => sum + value, 0), widths = proportions.map((value) => value / total * e.w), offsets = [0];
+    for (const width of widths) offsets.push(offsets.at(-1) + width);
+    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri === 0 && e.data?.head !== false ? semanticColor(e.fill, style, style["paper-2"] ?? style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + offsets[ci] + 8, y: e.y + ri * rowHeight, w: widths[ci] - 16, h: rowHeight, text: String(cell), fontSize: e.fontSize ?? 14, bold: ri === 0 && e.data?.head !== false ? true : e.bold }, board, semanticColor(e.color, style, style.ink), true)}`).join("")).join("");
+  } else {
+    const fill = e.hollow ? "none" : semanticColor(e.fill, style, e.type === "container" ? "none" : e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
+    let textColor = semanticColor(e.color, style, style.ink);
+    if (contrastRatio(textColor, fill === "none" ? "transparent" : fill, style.paper) < 4.5) textColor = readableText(fill === "none" ? "transparent" : fill, style.paper);
+    markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
+  }
+  return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ""}>${markup}</g>`;
+}
+function buildBoardSvg(board, options = {}) {
+  const elements = selectedElements(board, options);
+  const bounds = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options)).join("")}</svg>`;
+}
+function offlineEmbedState(initial) {
+  let state = JSON.parse(JSON.stringify(initial));
+  const listeners = /* @__PURE__ */ new Set(), copy2 = () => JSON.parse(JSON.stringify(state));
+  const error62 = (message) => window.dispatchEvent(new CustomEvent("studio-embed-error", { detail: { message, localState: copy2() } }));
+  Object.defineProperty(window, "studioEmbed", { configurable: false, writable: false, value: Object.freeze({
+    load: copy2,
+    save(value) {
+      let encoded, next;
+      try {
+        encoded = JSON.stringify(value);
+      } catch {
+        error62("\u5D4C\u5165\u72B6\u6001\u5FC5\u987B\u662F\u53EF\u5E8F\u5217\u5316\u7684 JSON \u5BF9\u8C61\u3002");
+        return;
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value) || !encoded || new TextEncoder().encode(encoded).byteLength > 65536) {
+        error62("\u5D4C\u5165\u72B6\u6001\u5FC5\u987B\u662F 64 KB \u4EE5\u5185\u7684 JSON \u5BF9\u8C61\u3002");
+        return;
+      }
+      next = JSON.parse(encoded);
+      if (!next || typeof next !== "object" || Array.isArray(next)) {
+        error62("\u5D4C\u5165\u72B6\u6001\u5FC5\u987B\u662F\u53EF\u5E8F\u5217\u5316\u7684 JSON \u5BF9\u8C61\u3002");
+        return;
+      }
+      if (encoded === JSON.stringify(state)) return;
+      state = next;
+      for (const listener of listeners) {
+        try {
+          listener(copy2());
+        } catch (failure4) {
+          console.error("Offline embed state listener failed.", failure4);
+        }
+      }
+    },
+    onLoad(listener) {
+      if (typeof listener !== "function") throw new TypeError("onLoad \u9700\u8981\u4E00\u4E2A\u51FD\u6570\u3002");
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    }
+  }) });
+}
+function offlineRegionHtml(element) {
+  const source = String(element.html ?? ""), seed = JSON.stringify(element.state ?? null).replace(/</g, "\\u003c");
+  const bridge = `<script data-studio-export-runtime="state">(${offlineEmbedState.toString()})(${seed});</script>`;
+  const prefix = /^(?:\uFEFF|\s|<!--[^]*?-->)*<!doctype[^>]*>/i.exec(source)?.[0] ?? "";
+  return `${prefix}${bridge}${source.slice(prefix.length)}`;
+}
+function buildBoardHtml(board, options = {}) {
+  const elements = selectedElements(board, options);
+  const bounds = boardBounds(elements, 32, board.elements);
+  const layers = elements.map((e) => {
+    if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
+    if (e.type === "image" && e.video) {
+      if (!/^data:video\//i.test(e.video) || e.src && !/^data:image\//i.test(e.src)) throw new ExportError("ASSET_NOT_EMBEDDED", "HTML \u5BFC\u51FA\u9700\u8981\u5148\u5D4C\u5165\u89C6\u9891\u548C\u5C01\u9762\u8D44\u6E90\u3002");
+      return `<video data-studio-id="${escapeXml(e.id)}" controls playsinline preload="metadata" src="${escapeXml(e.video)}"${e.src ? ` poster="${escapeXml(e.src)}"` : ""} style="position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;object-fit:contain;transform:rotate(${scalar(e.rotation, 0)}deg)"></video>`;
+    }
+    const box = boardBounds([e], 2, board.elements);
+    const markerId = `arrow_${e.id.replace(/[^\w-]/g, "_")}`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
+  }).join("");
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
+`;
+}
+var ExportError, isHtmlRegionElement;
+var init_serialization = __esm({
+  "src/core/serialization.ts"() {
+    "use strict";
+    init_theme();
+    init_whiteboard_geometry();
+    init_whiteboard_stickers();
+    init_rich_text();
+    ExportError = class extends Error {
+      constructor(code, message) {
+        super(message);
+        this.code = code;
+        this.name = "ExportError";
+      }
+      code;
+    };
+    isHtmlRegionElement = (element) => element.type === "html" || element.type === "diagram" && typeof element.html === "string";
+  }
+});
+
 // ../../node_modules/.pnpm/@resvg+resvg-wasm@2.6.2/node_modules/@resvg/resvg-wasm/index.mjs
 function addHeapObject(obj) {
   if (heap_next === heap.length)
@@ -8273,484 +8824,6 @@ var init_resvg_wasm = __esm({
   }
 });
 
-// src/core/theme.ts
-function parseColor(input2) {
-  const value = (NAMED[input2.toLowerCase()] ?? input2).trim();
-  const hex3 = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value)?.[1];
-  if (hex3) {
-    const expanded = hex3.length <= 4 ? [...hex3].map((c) => c + c).join("") : hex3;
-    return [parseInt(expanded.slice(0, 2), 16), parseInt(expanded.slice(2, 4), 16), parseInt(expanded.slice(4, 6), 16), expanded.length === 8 ? parseInt(expanded.slice(6, 8), 16) / 255 : 1];
-  }
-  const rgb = /^rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i.exec(value);
-  if (rgb) return [0, 1, 2].map((i2) => Math.min(255, Math.max(0, Number(rgb[i2 + 1])))).concat(Math.min(1, Math.max(0, Number(rgb[4] ?? 1))));
-  throw new Error(`\u4E0D\u652F\u6301\u7684\u989C\u8272\uFF1A${input2}`);
-}
-function composite(foreground, background) {
-  const alpha = foreground[3] + background[3] * (1 - foreground[3]);
-  if (!alpha) return [0, 0, 0, 0];
-  return [0, 1, 2].map((i2) => (foreground[i2] * foreground[3] + background[i2] * background[3] * (1 - foreground[3])) / alpha).concat(alpha);
-}
-function luminance(color) {
-  return color.slice(0, 3).map((v) => v / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4).reduce((sum, v, i2) => sum + v * [0.2126, 0.7152, 0.0722][i2], 0);
-}
-function contrastRatio(foreground, background, underneath = "#ffffff") {
-  const back = composite(parseColor(background), parseColor(underneath));
-  const front = composite(parseColor(foreground), back);
-  const a = luminance(front);
-  const b = luminance(back);
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-}
-function readableText(fill, underneath = "#ffffff") {
-  return contrastRatio("#111111", fill, underneath) >= contrastRatio("#f5f5f5", fill, underneath) ? "#111111" : "#f5f5f5";
-}
-function semanticColor(value, style, fallback) {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  if (value === "none") return "none";
-  return style[value] ?? NAMED[value.toLowerCase()] ?? (/^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(value) ? value : fallback);
-}
-var LIGHT_THEME, DARK_THEME, NAMED;
-var init_theme = __esm({
-  "src/core/theme.ts"() {
-    "use strict";
-    LIGHT_THEME = {
-      name: "Diagram \xB7 \u660E\u4EAE",
-      paper: "#f5f5f5",
-      ink: "#2d3142",
-      muted: "#4f5d75",
-      accent: "#eb6c36",
-      link: "#2e5aa8",
-      "paper-2": "#ececec",
-      soft: "#68738a",
-      rule: "#bfc0c0",
-      "ink-strong": "#111111",
-      fontFamily: 'Arial, "Microsoft YaHei", "PingFang SC", sans-serif',
-      titleFont: 'Georgia, "Songti SC", serif',
-      monoFont: "Consolas, monospace"
-    };
-    DARK_THEME = {
-      ...LIGHT_THEME,
-      name: "Diagram \xB7 \u6697\u8272",
-      paper: "#2d3142",
-      "paper-2": "#393e53",
-      ink: "#f5f5f5",
-      muted: "#bfc0c0",
-      soft: "#a4aec2",
-      rule: "#68738a",
-      accent: "#f08a59",
-      link: "#6a95d8"
-    };
-    NAMED = { white: "#ffffff", black: "#000000", transparent: "#00000000", yellow: "#f6e39c", peach: "#f4c3a4", pink: "#edbdd5", green: "#bcd6be", blue: "#b8d2ed", purple: "#d0c0e5", ink: "#2d3142", terracotta: "#b64e2a" };
-  }
-});
-
-// src/core/products/whiteboard-stickers.ts
-function getBoardSticker(id2) {
-  return typeof id2 === "string" ? byId.get(id2) : void 0;
-}
-function boardStickerMarkup(id2) {
-  const value = getBoardSticker(id2);
-  if (!value) return void 0;
-  return `<g stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="4">${value.body}</g><g stroke="#273443" stroke-width="1.3">${value.body}</g></g>`;
-}
-var yellow, orange, red, blue, green, pink, purple, path, circle, rect, sticker, BOARD_STICKERS, byId;
-var init_whiteboard_stickers = __esm({
-  "src/core/products/whiteboard-stickers.ts"() {
-    "use strict";
-    yellow = "#f5c75e";
-    orange = "#e99662";
-    red = "#e87970";
-    blue = "#8eb5dc";
-    green = "#b3c894";
-    pink = "#e9a9c7";
-    purple = "#bab0da";
-    path = (d, fill = "none") => `<path d="${d}" fill="${fill}"/>`;
-    circle = (cx, cy, r, fill) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
-    rect = (x2, y, w, h, fill, rx = 1) => `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}"/>`;
-    sticker = (id2, label, keywords, body2) => ({ id: id2, label, keywords, body: body2 });
-    BOARD_STICKERS = [
-      sticker("smile", "\u7B11\u8138", "smile happy \u5F00\u5FC3 \u8868\u60C5", circle(12, 12, 9, yellow) + path("M7 10q1-3 3 0m4 0q1-3 3 0M7 13h10q-1 6-5 6t-5-6Z", "#fff1be")),
-      sticker("plus", "\u52A0\u53F7", "plus add \u6DFB\u52A0 \u6B63\u5411", path("M9 3h6v6h6v6h-6v6H9v-6H3V9h6Z", green)),
-      sticker("thumbs-up", "\u8D5E\u540C", "thumbs up agree good like \u8D5E \u70B9\u8D5E", path("M8 10c3-1 4-4 5-7 3 0 3 3 1 6h5q3 0 2 3l-2 8H8ZM3 10h5v10H3Z", yellow) + path("M16 12h5m-6 4h5")),
-      sticker("thumbs-down", "\u4E0D\u8D5E\u540C", "thumbs down disagree \u4E0D\u540C\u610F \u53CD\u5BF9", path("M8 14c3 1 4 4 5 7 3 0 3-3 1-6h5q3 0 2-3l-2-8H8ZM3 4h5v10H3Z", yellow) + path("M16 12h5m-6-4h5")),
-      sticker("heart", "\u7231\u5FC3", "heart love \u559C\u6B22 \u5173\u5FC3", path("M12 21C8 18 3 14 3 9 3 3 9 2 12 7c3-5 9-4 9 2 0 5-5 9-9 12Z", red)),
-      sticker("wave", "\u6325\u624B", "wave hand hello \u4F60\u597D \u62DB\u547C", path("m7 20-3-8q0-2 2-1l2 3-2-8q0-2 2-1l2 7V4q1-2 2 0v8l2-7q2-1 2 1l-1 7 2-4q2-1 2 1l-2 8q-3 5-10 2Z", yellow) + path("M3 5 5 3m14 1 2 2M2 8H1")),
-      sticker("clap", "\u9F13\u638C", "clap applause hands \u652F\u6301 \u62CD\u624B", path("M4 20V9q1-2 2 0v5-8q1-2 2 0v7-9q1-2 2 0v9-7q1-2 2 0v9l2-3q2-1 2 1l-3 7Z", yellow) + path("m14 20 4-7V7q2-2 2 0v13ZM5 2 4 1m10 2 1-2m6 3 1-1", "#f7d98b")),
-      sticker("handshake", "\u63E1\u624B", "handshake agree partnership \u5408\u4F5C \u5171\u8BC6", path("m2 9 5-5 5 2 5-2 5 5-4 7-5 4-8-5Z", yellow) + path("m8 9 4-3 4 3q0 3-3 2l-2-1-3 3m1 4 2-2m1 4 2-2m1 0 2-2")),
-      sticker("heart-hand", "\u7528\u5FC3\u652F\u6301", "care heart support \u5173\u6000 \u611F\u8C22", path("M11 12C7 10 5 8 5 5q2-4 6 0 4-4 6 0 1 3-6 7Z", red) + path("M3 15h4l4 2h6q2-1 1-3l3-1q2 4-3 7H6l-3 1Z", pink)),
-      sticker("bulb", "\u60F3\u6CD5", "lightbulb idea insight \u7075\u611F \u70B9\u5B50", path("M8 16c0-3-4-4-3-8 1-7 13-7 14 0 1 4-3 5-3 8ZM8 17h8v4H8Z", "#f8dda0") + path("m10 15-1-6 3 2 3-2-1 6M9 19h6")),
-      sticker("question", "\u95EE\u9898", "question help why \u7591\u95EE \u5E2E\u52A9", circle(12, 12, 9, purple) + path("M9 8q0-4 4-3 5 2 0 6-2 1-1 4m0 3h.1")),
-      sticker("alert", "\u63D0\u9192", "alert warning caution \u6CE8\u610F \u98CE\u9669 \u8B66\u544A", path("M12 3 22 21H2Z", yellow) + path("M12 8v6") + circle(12, 17.5, 0.65, "#273443")),
-      sticker("check", "\u5B8C\u6210", "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE", rect(4, 4, 16, 16, green, 2) + path("m7 11 4 4L22 5")),
-      sticker("cross", "\u53D6\u6D88", "cross no cancel stop \u62D2\u7EDD \u9519\u8BEF \u5173\u95ED", circle(12, 12, 9, red) + path("m8 8 8 8m0-8-8 8")),
-      sticker("flag", "\u65D7\u5E1C", "flag milestone mark \u91CC\u7A0B\u7891 \u6807\u8BB0", path("M5 21V3m1 1h15l-4 6 4 5H6Z", red) + circle(5, 3, 1.5, "#f7eee7")),
-      sticker("bolt", "\u95EA\u7535", "bolt lightning zap fast \u5FEB\u901F \u80FD\u91CF", path("m14 2-11 12h7l-1 8L22 9h-8Z", yellow)),
-      sticker("pin", "\u5730\u70B9", "pin location map \u5B9A\u4F4D \u4F4D\u7F6E", path("M12 22C8 16 4 13 4 9a8 8 0 0 1 16 0c0 4-4 7-8 13Z", red) + circle(12, 9, 3, "#f4aa9f")),
-      sticker("search", "\u53D1\u73B0", "search find discover \u641C\u7D22 \u67E5\u627E \u653E\u5927\u955C", circle(9, 9, 6.5, blue) + path("m14 13 8 7-3 3-7-8Z", "#b9d5ec")),
-      sticker("key", "\u94A5\u5319", "key access important \u5173\u952E \u6743\u9650", path("M14 11a6 6 0 1 0-5 4v6h4v-3h3v-3h-3Z", yellow) + circle(8, 8, 2.5, "#f8e1aa")),
-      sticker("party", "\u5E86\u795D", "party celebrate confetti \u5F69\u5E26 \u795D\u8D3A", path("M4 21 7 7l10 10Z", pink) + path("m11 5 2-3m4 7 4-1m-7 5 5-6m1 9 3 2M7 3l1 1") + circle(18, 3, 1, yellow) + circle(22, 12, 1, blue)),
-      sticker("trophy", "\u5956\u676F", "trophy win award \u51A0\u519B \u5956\u52B1", path("M7 3h10v9q-1 5-5 5t-5-5Zm3 14h4v3h-4ZM7 21h10M7 5H3q0 8 5 7M17 5h4q0 8-5 7", yellow)),
-      sticker("crown", "\u7687\u51A0", "crown royal best \u7B2C\u4E00 \u4F18\u79C0", path("M5 20 3 7l6 5 3-9 3 9 6-5-2 13Z", yellow) + circle(3, 6, 1.4, "#f8e1aa") + circle(12, 3, 1.4, "#f8e1aa") + circle(21, 6, 1.4, "#f8e1aa")),
-      sticker("gift", "\u793C\u7269", "gift present thanks \u8D60\u793C \u60CA\u559C", rect(4, 10, 16, 11, red) + rect(3, 7, 18, 4, "#f2a79b") + path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")),
-      sticker("clock", "\u65F6\u949F", "clock time deadline \u65F6\u95F4 \u622A\u6B62", circle(12, 12, 9, blue) + path("M12 6v7h5")),
-      sticker("calendar", "\u65E5\u5386", "calendar date plan \u65E5\u671F \u8BA1\u5212", rect(3, 5, 18, 16, red, 2) + path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")),
-      sticker("hourglass", "\u6C99\u6F0F", "hourglass wait patience \u7B49\u5F85 \u5012\u8BA1\u65F6", path("M5 3h14c0 6-2 6-5 9 3 3 5 3 5 9H5c0-6 2-6 5-9-3-3-5-3-5-9Z", "#f9e8ba") + path("M6 6h12l-6 5Zm0 13 6-6 6 6Z", yellow) + path("M4 2h16M4 22h16")),
-      sticker("messages", "\u8BA8\u8BBA", "messages chat discuss \u5BF9\u8BDD \u6C9F\u901A", path("M14 17H7l-4 3v-7a7 7 0 1 1 11 4Z", blue) + path("M14 10q8-2 8 5v7l-4-2q-7 1-8-5Z", "#aecbe5")),
-      sticker("megaphone", "\u516C\u544A", "megaphone announce broadcast \u5BA3\u5E03 \u901A\u77E5", path("m3 10 13-6v16L3 14Zm3 5 2 6h4l-2-7Z", orange) + path("M18 8q4 4 0 8m2-10q6 6 0 12")),
-      sticker("pencil", "\u94C5\u7B14", "pencil edit write \u7F16\u8F91 \u4E66\u5199", path("m4 15 11-12q2-2 5 1t1 4L9 20l-7 2Z", yellow) + path("m14 4 6 6M4 15l5 5m-6 1 2-5") + path("m3 22 5-1 4 1 3-2 4 1 3-2")),
-      sticker("chart", "\u589E\u957F\u56FE\u8868", "chart growth graph mountain \u6570\u636E \u8FDB\u5C55", path("M3 21V4h3v14h15v3Z", purple) + path("m7 15 4-5 4 2 6-8v14H7Z", green) + path("m16 4 5-1 1 5")),
-      sticker("trending-up", "\u5411\u4E0A\u8D8B\u52BF", "trending up progress improve \u63D0\u5347 \u8D8B\u52BF", path("M3 21V13h5v-4h5V5h6V2l4 5-4 5V9h-3v5h-5v4H7v3Z", purple)),
-      sticker("send", "\u7EB8\u98DE\u673A", "send paper plane launch \u53D1\u9001 \u51FA\u53D1", path("M2 8 22 2l-6 20-5-8Z", blue) + path("m3 8 8 6L22 2M11 14l-1 7 6-5")),
-      sticker("sun", "\u592A\u9633", "sun bright day \u9633\u5149 \u660E\u4EAE", path("m12 1 2 5 4-3-1 5 5 1-4 4 4 3-5 1 1 5-5-3-3 4-1-5-5 1 3-5-4-3 5-1-1-5 5 3Z", "#f7dc8a") + circle(12, 12, 4.5, yellow)),
-      sticker("sprout", "\u840C\u82BD", "sprout plant grow \u65B0\u82BD \u6210\u957F", path("M12 22V11M12 13C1 13 1 3 6 5c6 0 6 8 6 8Zm0-2C12 0 23 1 22 6c-1 6-10 5-10 5Z", green) + path("M5 22h14")),
-      sticker("flower", "\u82B1\u6735", "flower bloom beauty \u9C9C\u82B1 \u7EFD\u653E", path("M12 22V9m0 8q-9 0-9-6 7-1 9 6Zm0 3q9-1 9-7-7-1-9 7Z", green) + path("M12 3q4-4 5 1 5-1 3 4 2 4-4 4-3 4-5-1-6 0-4-4-3-4 1-5Z", pink) + circle(13, 6.5, 2, "#f6d58a")),
-      sticker("coffee", "\u5496\u5561", "coffee break cup \u4F11\u606F \u5496\u5561\u676F", path("M4 8h13v9q-1 4-6 4t-7-4Zm13 1h3q4 5-3 7Z", "#c8a589") + path("M2 22h18M7 5q-2-2 0-4m5 4q-2-2 0-4")),
-      sticker("piggy-bank", "\u50A8\u84C4\u7F50", "piggy bank save money \u5B58\u94B1 \u9884\u7B97", path("M6 7q-2-5 3-3l2 2q9-2 9 5l3 1v5l-4 1v4h-4v-3H9v3H5v-5Q0 15 3 10L1 8q3-2 5-1Z", pink) + path("M10 8h5") + circle(18, 11, 0.6, "#273443")),
-      sticker("arrow-right", "\u5411\u53F3", "arrow right next forward \u4E0B\u4E00\u6B65 \u524D\u8FDB", path("M3 9h11V3l8 9-8 9v-6H3Z", blue)),
-      sticker("arrow-up", "\u5411\u4E0A", "arrow up top \u4E0A\u5347 \u9876\u90E8", path("M9 22V11H3l9-9 9 9h-6v11Z", green)),
-      sticker("repeat", "\u5FAA\u73AF", "repeat loop cycle \u8FED\u4EE3 \u5FAA\u73AF", path("M5 9q1-7 10-5l2-2v6h-6l2-2q-5-1-6 4ZM19 15q-1 7-10 5l-2 2v-6h6l-2 2q5 1 6-4Z", green)),
-      sticker("target", "\u76EE\u6807", "target aim focus \u4E13\u6CE8 \u9776\u5FC3", circle(12, 12, 9, red) + circle(12, 12, 6, "#f9e8db") + circle(12, 12, 3, red) + path("m12 12 9-9m-5 0h5v5")),
-      sticker("rocket", "\u706B\u7BAD", "rocket launch release \u53D1\u5E03 \u542F\u52A8", path("M9 16 5 19l-1-7 4-3m7 6 0 5-6 1 3-4", orange) + path("M7 15Q7 3 21 2q1 13-11 15Z", blue) + circle(15, 8, 2.5, "#dcebf5") + path("m7 17-4 4 5-1", yellow))
-    ];
-    byId = new Map(BOARD_STICKERS.map((value) => [value.id, value]));
-  }
-});
-
-// src/core/shared/rich-text.ts
-function safeHttpLink(href) {
-  try {
-    const url2 = new URL(href ?? "");
-    return ["http:", "https:"].includes(url2.protocol) ? url2.href : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function parseInlineText(text2, inherited = {}) {
-  const segments = [];
-  const push = (value, code = false) => {
-    const type = inherited.href ? "link" : code ? "code" : inherited.bold ? "bold" : inherited.italic ? "italic" : "text";
-    const next = { type, text: value, ...inherited.href ? { href: inherited.href } : {}, ...inherited.bold && type !== "bold" ? { bold: true } : {}, ...inherited.italic && type !== "italic" ? { italic: true } : {}, ...code && type !== "code" ? { code: true } : {} };
-    const previous = segments.at(-1);
-    if (previous && previous.type === next.type && previous.href === next.href && previous.bold === next.bold && previous.italic === next.italic && previous.code === next.code) previous.text += value;
-    else segments.push(next);
-  };
-  let index = 0;
-  while (index < text2.length) {
-    if (text2[index] === "\\" && index + 1 < text2.length && /[\\*_`\[\]]/.test(text2[index + 1])) {
-      push(text2[index + 1]);
-      index += 2;
-      continue;
-    }
-    if (text2[index] === "`") {
-      const end = text2.indexOf("`", index + 1);
-      if (end > index + 1 && !text2.slice(index, end).includes("\n")) {
-        push(text2.slice(index + 1, end), true);
-        index = end + 1;
-        continue;
-      }
-    }
-    if (text2[index] === "[") {
-      let close = index + 1;
-      while (close < text2.length) {
-        if (text2[close] === "\\") {
-          close += 2;
-          continue;
-        }
-        if (text2[close] === "]") break;
-        close++;
-      }
-      if (text2[close + 1] === "(") {
-        const end = text2.indexOf(")", close + 2);
-        if (end > close + 2) {
-          const raw = text2.slice(index, end + 1), href = safeHttpLink(text2.slice(close + 2, end));
-          if (href) segments.push(...parseInlineText(text2.slice(index + 1, close), { ...inherited, href }));
-          else push(raw);
-          index = end + 1;
-          continue;
-        }
-      }
-    }
-    if (text2[index] === "*" || text2[index] === "_") {
-      const opening = /^(?:\*+|_+)/.exec(text2.slice(index))[0], length = opening.length;
-      if (length <= 3) {
-        const runs = text2[index] === "_" ? /_+/g : /\*+/g;
-        runs.lastIndex = index + length;
-        let closing;
-        while (closing = runs.exec(text2)) {
-          if (text2.slice(index + length, closing.index).includes("\n")) break;
-          let escapes = 0;
-          for (let at = closing.index - 1; at >= 0 && text2[at] === "\\"; at--) escapes++;
-          if (escapes % 2 || closing[0].length !== length) continue;
-          if (closing.index > index + length) {
-            segments.push(...parseInlineText(text2.slice(index + length, closing.index), { ...inherited, ...length >= 2 ? { bold: true } : {}, ...length === 1 || length === 3 ? { italic: true } : {} }));
-            index = closing.index + length;
-            break;
-          }
-        }
-        if (closing && index === closing.index + length) continue;
-      }
-      push(opening);
-      index += length;
-      continue;
-    }
-    push(text2[index]);
-    index++;
-  }
-  if (!segments.length) push("");
-  return segments;
-}
-function parseRichText(text2) {
-  return text2.split(/\r?\n/).map((line) => {
-    const list = /^(\s*)(- |(\d+)\. )(.*)$/.exec(line);
-    return list ? { type: list[3] ? "ordered" : "bullet", marker: list[3] ? `${list[3]}.` : "\u2022", ...list[1].length ? { indent: Math.floor(list[1].length / 2) } : {}, segments: parseInlineText(list[4]) } : { type: "paragraph", segments: parseInlineText(line) };
-  });
-}
-var init_rich_text = __esm({
-  "src/core/shared/rich-text.ts"() {
-    "use strict";
-  }
-});
-
-// src/core/serialization.ts
-function escapeXml(value) {
-  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-function filenameFor(title, extension) {
-  let name = title.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").trim().slice(0, 100) || "\u767D\u677F";
-  if (/^(?:con|prn|aux|nul|com\d|lpt\d)(?:\.|$)/i.test(name)) name = `_${name}`;
-  return `${name}.${extension}`;
-}
-function selectedElements(board, options = {}) {
-  const id2 = options.regionId ?? options.elementId;
-  const ids = id2 ? [id2] : options.ids;
-  if (!ids) return board.elements;
-  const selected = board.elements.filter((e) => ids.includes(e.id));
-  if (selected.length !== new Set(ids).size) throw new ExportError("ELEMENT_NOT_FOUND", "\u90E8\u5206\u5BFC\u51FA\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002");
-  return selected;
-}
-function scalar(value, fallback) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-function boardBounds(elements, padding = 32, scene = elements) {
-  if (!elements.length) return { x: 0, y: 0, width: 960, height: 540 };
-  const boxes = elements.map((e) => {
-    if (e.type === "arrow") {
-      endpoint(e.from, scene);
-      endpoint(e.to, scene);
-      const points = arrowGeometry(e, scene).points;
-      const xs = points.map((point) => point.x), ys = points.map((point) => point.y);
-      return { x: Math.min(...xs) - 16, y: Math.min(...ys) - 28, w: Math.max(32, Math.max(...xs) - Math.min(...xs) + 32), h: Math.max(48, Math.max(...ys) - Math.min(...ys) + 48) };
-    }
-    if (e.type === "stroke" && e.points?.length) {
-      const xs = e.points.filter((_n, i2) => i2 % 2 === 0);
-      const ys = e.points.filter((_n, i2) => i2 % 2 === 1);
-      const pen = scalar(e.strokeWidth ?? e.width, 3);
-      return { x: e.x + Math.min(...xs) - pen, y: e.y + Math.min(...ys) - pen, w: Math.max(...xs) - Math.min(...xs) + pen * 2, h: Math.max(...ys) - Math.min(...ys) + pen * 2 };
-    }
-    const radians = scalar(e.rotation, 0) * Math.PI / 180;
-    const w = Math.max(1, scalar(e.w, 200));
-    const h = Math.max(1, scalar(e.h, 100));
-    const turnedWidth = Math.abs(w * Math.cos(radians)) + Math.abs(h * Math.sin(radians));
-    const turnedHeight = Math.abs(w * Math.sin(radians)) + Math.abs(h * Math.cos(radians));
-    return { x: scalar(e.x, 0) + (w - turnedWidth) / 2, y: scalar(e.y, 0) + (h - turnedHeight) / 2, w: turnedWidth, h: turnedHeight };
-  });
-  const left = Math.min(...boxes.map((e) => e.x));
-  const top = Math.min(...boxes.map((e) => e.y));
-  const right = Math.max(...boxes.map((e) => e.x + e.w));
-  const bottom = Math.max(...boxes.map((e) => e.y + e.h));
-  return { x: left - padding, y: top - padding, width: Math.max(1, Math.ceil(right - left + padding * 2)), height: Math.max(1, Math.ceil(bottom - top + padding * 2)) };
-}
-function extractRegionSvg(html2, prefix) {
-  const start = html2.search(/<svg\b/i);
-  if (start < 0) return void 0;
-  const tags = /<!--[^]*?-->|<!\[CDATA\[[^]*?\]\]>|<\/?svg\b[^>]*>/gi;
-  tags.lastIndex = start;
-  let depth = 0;
-  let end = -1;
-  let tag;
-  while (tag = tags.exec(html2)) {
-    if (tag[0].startsWith("<!--") || tag[0].startsWith("<![")) continue;
-    if (/^<\/svg/i.test(tag[0])) depth--;
-    else if (!/\/\s*>$/.test(tag[0])) depth++;
-    if (depth === 0) {
-      end = tags.lastIndex;
-      break;
-    }
-  }
-  if (end < 0) throw new ExportError("INVALID_SVG", "HTML \u533A\u57DF\u4E2D\u7684 SVG \u6CA1\u6709\u6B63\u786E\u95ED\u5408\u3002");
-  let svg = html2.slice(start, end);
-  const styles = [...html2.matchAll(/<style\b[^>]*>([^]*?)<\/style\s*>/gi)].map((m) => m[1]).join("\n").replace(/@import[^;]+;/gi, "").replace(/url\(\s*['"]?https?:[^)]*\)/gi, "none");
-  svg = svg.replace(/<script\b[^>]*>[^]*?<\/script\s*>/gi, "").replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/<!DOCTYPE[^>]*>/gi, "");
-  svg = svg.replace(/\s(?:href|xlink:href)\s*=\s*(["'])([^]*?)\1/gi, (match, quote, url2) => /^(?:#|data:image\/)/i.test(url2.trim()) ? match : "");
-  if (!/\bxmlns\s*=/.test(svg.slice(0, svg.indexOf(">")))) svg = svg.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
-  if (styles) svg = svg.replace(/(<svg\b[^>]*>)/i, `$1<style><![CDATA[${styles.replace(/\]\]>/g, "]]]]><![CDATA[>")}]]></style>`);
-  const ids = [...svg.matchAll(/\bid\s*=\s*(["'])(.*?)\1/g)].map((m) => m[2]);
-  const safePrefix = prefix.replace(/[^a-zA-Z0-9_-]/g, "_");
-  const names = new Map(ids.map((id2) => [id2, `${safePrefix}_${id2}`]));
-  svg = svg.replace(/(\bid\s*=\s*)(["'])(.*?)\2/g, (_match, before, quote, id2) => `${before}${quote}${names.get(id2) ?? id2}${quote}`);
-  svg = svg.replace(/url\(\s*(["']?)#([^\s)'" ]+)\1\s*\)/g, (_match, quote, id2) => `url(${quote}#${names.get(id2) ?? id2}${quote})`);
-  svg = svg.replace(/((?:href|xlink:href)\s*=\s*)(["'])#([^"']+)\2/g, (_match, before, quote, id2) => `${before}${quote}#${names.get(id2) ?? id2}${quote}`);
-  svg = svg.replace(/(aria-(?:labelledby|describedby)\s*=\s*)(["'])(.*?)\2/g, (_match, before, quote, values) => `${before}${quote}${values.split(/\s+/).map((id2) => names.get(id2) ?? id2).join(" ")}${quote}`);
-  svg = svg.replace(/(<style\b[^>]*>)([^]*?)(<\/style\s*>)/gi, (_match, startTag, css, endTag) => {
-    const selectors = css.replace(/([^{}]+)\{/g, (_selectorMatch, selector) => `${selector.replace(/#([\w-]+)/g, (match, id2) => names.has(id2) ? `#${names.get(id2)}` : match)}{`);
-    return startTag + selectors + endTag;
-  });
-  return svg;
-}
-function wrap(text2, width, size) {
-  const rows = [];
-  for (const line of parseRichText(text2)) {
-    const segments = [...line.marker ? [{ type: "text", text: `${"  ".repeat(line.indent ?? 0)}${line.marker} ` }] : [], ...line.segments];
-    let row = [];
-    let used = 0;
-    for (const segment of segments) for (const character of segment.text) {
-      const cost = /[\u2e80-\uffff]/u.test(character) ? size : size * (segment.type === "code" || segment.code ? 0.62 : 0.6);
-      if (used && used + cost > width) {
-        rows.push(row);
-        row = [];
-        used = 0;
-      }
-      const previous = row.at(-1);
-      if (previous?.type === segment.type && previous.href === segment.href && previous.bold === segment.bold && previous.italic === segment.italic && previous.code === segment.code) previous.text += character;
-      else row.push({ ...segment, text: character });
-      used += cost;
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-function textSvg(e, board, color, center = false) {
-  const size = Math.max(12, scalar(e.fontSize, e.type === "text" ? 20 : 16));
-  const lines = wrap(String(e.text ?? ""), Math.max(size, e.w - (center ? 24 : 4)), size);
-  const aligned = e.textAlign ?? (center ? "center" : "left");
-  const x2 = aligned === "center" ? e.x + e.w / 2 : aligned === "right" ? e.x + e.w - 12 : e.x + (center ? 12 : 0);
-  const y = center ? e.y + Math.max(16, (e.h - (lines.length - 1) * size * 1.45) / 2) + size * 0.35 : e.y + size;
-  const segment = (part) => {
-    const span = `<tspan${part.type === "bold" || part.bold ? ' font-weight="700"' : ""}${part.type === "italic" || part.italic ? ' font-style="italic"' : ""}${part.type === "code" || part.code ? ` font-family="${escapeXml(board.style.monoFont)}"` : ""}>${escapeXml(part.text)}</tspan>`;
-    return part.type === "link" && part.href ? `<a href="${escapeXml(part.href)}" fill="${escapeXml(board.style.link)}">${span}</a>` : span;
-  };
-  return `<text fill="${escapeXml(color)}" font-family="${escapeXml(e.fontFamily ?? board.style.fontFamily)}" font-size="${size}" font-weight="${e.bold ? 700 : 400}" font-style="${e.italic ? "italic" : "normal"}" text-anchor="${aligned === "center" ? "middle" : aligned === "right" ? "end" : "start"}">${lines.map((line, i2) => `<tspan x="${x2}" y="${y + i2 * size * 1.45}">${line.map(segment).join("")}</tspan>`).join("")}</text>`;
-}
-function shapeSvg(e, fill, stroke) {
-  const common = `fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}"${e.dash ? ' stroke-dasharray="6 5"' : ""}`;
-  const { x: x2, y, w, h } = e;
-  if (e.kind === "ellipse" || e.kind === "circle") return `<ellipse cx="${x2 + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" ${common}/>`;
-  const path2 = shapePath(e);
-  if (path2) return `<path transform="translate(${x2} ${y})" d="${path2}" ${common}/>`;
-  return `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${e.kind === "pill" ? h / 2 : e.kind === "rect" || e.kind === "queue" ? 0 : 7}" ${common}/>` + (e.kind === "queue" ? `<path d="M${x2 + 14},${y}V${y + h} M${x2 + w - 14},${y}V${y + h}" fill="none" stroke="${escapeXml(stroke)}"/>` : "");
-}
-function endpoint(value, elements) {
-  if (Array.isArray(value)) return value;
-  const target = elements.find((e) => e.id === value);
-  if (!target) throw new ExportError("INVALID_ARROW", "\u4E00\u6761\u8FDE\u7EBF\u5F15\u7528\u7684\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\uFF0C\u8BF7\u4FEE\u590D\u540E\u5BFC\u51FA\u3002");
-  return [target.x + target.w / 2, target.y + target.h / 2];
-}
-function headSvg(kind, tip, inside, color) {
-  if (kind === "none") return "";
-  if (kind === "circle") return `<circle cx="${tip.x}" cy="${tip.y}" r="4.5" fill="${escapeXml(color)}"/>`;
-  const length = Math.hypot(inside.x - tip.x, inside.y - tip.y) || 1;
-  const dx = (inside.x - tip.x) / length, dy = (inside.y - tip.y) / length;
-  return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color)}"/>`;
-}
-function elementSvg(e, board, options = {}) {
-  const style = board.style;
-  const ink = semanticColor(e.stroke, style, style.muted);
-  let markup = "";
-  if (e.type === "html") {
-    const html2 = String(e.html ?? "");
-    if (options.svgRegions === true) {
-      const svg = extractRegionSvg(html2, e.id);
-      if (!svg) throw new ExportError("EXPORT_BROWSER_REQUIRED", "\u8BE5 HTML \u533A\u57DF\u6CA1\u6709\u5185\u8054 SVG\uFF0C\u8BF7\u5728\u754C\u9762\u5BFC\u51FA PNG\uFF0C\u6216\u5BFC\u51FA HTML \u4FDD\u7559\u5B8C\u6574\u5185\u5BB9\u3002");
-      markup = svg.replace(/<svg\b([^>]*)>/i, (_m, attrs) => `<svg${attrs.replace(/\s(?:x|y|width|height)\s*=\s*(["']).*?\1/gi, "")} x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}">`);
-    } else {
-      const body2 = /<body\b[^>]*>([^]*?)<\/body\s*>/i.exec(html2)?.[1] ?? html2.replace(/<!doctype[^>]*>|<\/?(?:html|head)\b[^>]*>/gi, "");
-      const styles = [...html2.matchAll(/<style\b[^>]*>[^]*?<\/style\s*>/gi)].map((m) => m[0]).join("");
-      const computed = typeof options.xhtmlRegions === "object" && options.xhtmlRegions ? options.xhtmlRegions[e.id] : void 0;
-      const safe = computed ?? (styles + body2).replace(/<script\b[^>]*>[^]*?<\/script\s*>/gi, "").replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b([^>]*?)(?<!\/)\s*>/gi, "<$1$2/>").replace(/&nbsp;/gi, "&#160;").replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[\da-f]+);)/gi, "&amp;");
-      markup = `<foreignObject x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden">${safe}</div></foreignObject>`;
-    }
-  } else if (e.type === "sticker" && boardStickerMarkup(e.data?.stickerIconId)) markup = `<svg x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" viewBox="0 0 24 24" data-sticker-icon-id="${escapeXml(e.data?.stickerIconId)}">${boardStickerMarkup(e.data?.stickerIconId)}</svg>`;
-  else if (e.type === "text" || e.type === "sticker") markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
-  else if (e.type === "stroke") {
-    markup = `<path d="${strokePath(e.points, e)}" fill="none" stroke="${escapeXml(semanticColor(e.stroke ?? e.color, style, style.muted))}" stroke-width="${scalar(e.strokeWidth ?? e.width, 3)}"${e.dash ? ' stroke-dasharray="6 5"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
-  } else if (e.type === "arrow") {
-    endpoint(e.from, board.elements);
-    endpoint(e.to, board.elements);
-    const route = arrowGeometry(e, board.elements), heads = arrowHeads(e);
-    const color = semanticColor(e.stroke ?? e.color, style, style.muted);
-    markup = `<path d="${route.path}" fill="none" stroke="${escapeXml(color)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}" stroke-linejoin="round" ${e.dash ? 'stroke-dasharray="5 4"' : ""}/>` + headSvg(heads[0], route.points[0], route.points[1] ?? route.points[0], color) + headSvg(heads[1], route.points.at(-1), route.points.at(-2) ?? route.points.at(-1), color);
-    if (e.label) {
-      const width = Math.max(28, [...e.label].length * 14 + 16);
-      markup += `<rect x="${route.label.x - width / 2}" y="${route.label.y - 22}" width="${width}" height="20" fill="${escapeXml(style.paper)}"/>` + textSvg({ ...e, x: route.label.x - width / 2, y: route.label.y - 22, w: width, h: 20, text: e.label, fontSize: 12, textAlign: "center" }, board, style.muted, true);
-    }
-  } else if (e.type === "image") {
-    const source = typeof options.assets === "object" && options.assets ? options.assets[String(e.src)] ?? e.src : e.src;
-    if (source && /^data:image\//i.test(source)) {
-      if (e.crop) {
-        const naturalWidth = scalar(e.data?.naturalWidth, 0), naturalHeight = scalar(e.data?.naturalHeight, 0);
-        if (!naturalWidth || !naturalHeight) throw new ExportError("EXPORT_BROWSER_REQUIRED", "\u88C1\u526A\u56FE\u7247\u7F3A\u5C11\u539F\u59CB\u5C3A\u5BF8\uFF0C\u8BF7\u5728\u767D\u677F\u4E2D\u6253\u5F00\u88C1\u526A\u9762\u677F\u4FDD\u5B58\u540E\u5BFC\u51FA\u3002");
-        const zoom = Math.max(1, scalar(e.crop.zoom, 1)), x2 = Math.min(1, Math.max(0, scalar(e.crop.x, 0.5))), y = Math.min(1, Math.max(0, scalar(e.crop.y, 0.5)));
-        const scale = Math.max(e.w / naturalWidth, e.h / naturalHeight) * zoom, width = naturalWidth * scale, height = naturalHeight * scale;
-        const clipId = `studio-crop-${[...e.id].map((c) => c.codePointAt(0).toString(16)).join("_")}`;
-        markup = `<defs><clipPath id="${clipId}"><rect x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"/></clipPath></defs><g clip-path="url(#${clipId})"><image x="${e.x + (e.w - width) * x2}" y="${e.y + (e.h - height) * y}" width="${width}" height="${height}" href="${escapeXml(source)}" preserveAspectRatio="none"/></g>`;
-      } else markup = `<image x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" href="${escapeXml(source)}" preserveAspectRatio="xMidYMid meet"/>`;
-    } else throw new ExportError("ASSET_NOT_EMBEDDED", "\u5BFC\u51FA\u9700\u8981\u5D4C\u5165\u56FE\u7247\u8D44\u6E90\uFF0C\u8BF7\u4ECE\u767D\u677F\u754C\u9762\u5BFC\u51FA\u6216\u91CD\u65B0\u52A0\u8F7D\u56FE\u7247\u3002");
-    const href = !e.video && safeHttpLink(e.href);
-    if (href) markup = `<a href="${escapeXml(href)}" target="_blank" rel="noopener noreferrer">${markup}</a>`;
-  } else if (e.type === "table") {
-    const storedRows = e.data?.rows;
-    const rows = Array.isArray(storedRows) && storedRows.every(Array.isArray) && storedRows.length ? storedRows : typeof e.text === "string" && e.text.length ? e.text.replace(/\r\n?/g, "\n").replace(/\n$/, "").split("\n").map((row) => row.split("	")) : [[""]];
-    const cols = Math.max(1, ...rows.map((row) => Array.isArray(row) ? row.length : 1));
-    const rowHeight = e.h / Math.max(1, rows.length);
-    const stored = e.data?.columnWidths;
-    const proportions = Array.isArray(stored) && stored.length === cols && stored.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0) ? stored : Array.from({ length: cols }, () => 1);
-    const total = proportions.reduce((sum, value) => sum + value, 0), widths = proportions.map((value) => value / total * e.w), offsets = [0];
-    for (const width of widths) offsets.push(offsets.at(-1) + width);
-    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri === 0 && e.data?.head !== false ? semanticColor(e.fill, style, style["paper-2"] ?? style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + offsets[ci] + 8, y: e.y + ri * rowHeight, w: widths[ci] - 16, h: rowHeight, text: String(cell), fontSize: e.fontSize ?? 14, bold: ri === 0 && e.data?.head !== false ? true : e.bold }, board, semanticColor(e.color, style, style.ink), true)}`).join("")).join("");
-  } else {
-    const fill = e.hollow ? "none" : semanticColor(e.fill, style, e.type === "container" ? "none" : e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
-    let textColor = semanticColor(e.color, style, style.ink);
-    if (contrastRatio(textColor, fill === "none" ? "transparent" : fill, style.paper) < 4.5) textColor = readableText(fill === "none" ? "transparent" : fill, style.paper);
-    markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
-  }
-  return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ""}>${markup}</g>`;
-}
-function buildBoardSvg(board, options = {}) {
-  const elements = selectedElements(board, options);
-  const bounds = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options)).join("")}</svg>`;
-}
-function buildBoardHtml(board, options = {}) {
-  const elements = selectedElements(board, options);
-  const bounds = boardBounds(elements, 32, board.elements);
-  const layers = elements.map((e) => {
-    if (e.type === "html") return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(String(e.html ?? ""))}"></iframe>`;
-    const box = boardBounds([e], 2, board.elements);
-    const markerId = `arrow_${e.id.replace(/[^\w-]/g, "_")}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
-  }).join("");
-  return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;frame-src 'self' data: blob:;connect-src 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
-`;
-}
-var ExportError;
-var init_serialization = __esm({
-  "src/core/serialization.ts"() {
-    "use strict";
-    init_theme();
-    init_whiteboard_geometry();
-    init_whiteboard_stickers();
-    init_rich_text();
-    ExportError = class extends Error {
-      constructor(code, message) {
-        super(message);
-        this.code = code;
-        this.name = "ExportError";
-      }
-      code;
-    };
-  }
-});
-
 // src/core/export.ts
 var export_exports = {};
 __export(export_exports, {
@@ -8826,7 +8899,7 @@ async function png(svg, options) {
 async function exportArtifact(board, format, options = {}) {
   const selected = selectedElements(board, options);
   const region = options.regionId ?? options.elementId;
-  const oneRegion = region && selected.length === 1 && selected[0].type === "html" ? selected[0] : void 0;
+  const oneRegion = region && selected.length === 1 && isHtmlRegionElement(selected[0]) ? selected[0] : void 0;
   const title = oneRegion?.text || board.artifact.title;
   if (format === "json") return { mimeType: "application/json", filename: filenameFor(title, "json"), encoding: "utf8", data: `${JSON.stringify({ ...board, elements: selected }, null, 2)}
 ` };
@@ -9006,6 +9079,7 @@ var init_whiteboard = __esm({
     init_common();
     init_safe_merge();
     init_whiteboard_geometry();
+    init_serialization();
     TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "table", "link", "note", "sticker", "diagram", "chart"]);
     LOCKED_GEOMETRY = ["type", "x", "y", "w", "h", "rotation", "parentId", "groupId", "from", "to", "fromSide", "toSide", "points", "bends", "crop"];
     whiteboardAdapter = {
@@ -9291,26 +9365,9 @@ var init_whiteboard = __esm({
         }
       },
       async export(snapshot, format, options, resources) {
-        const { exportArtifact: exportArtifact2 } = await Promise.resolve().then(() => (init_export(), export_exports));
-        const board = copy(boardView(snapshot));
-        if (resources && format !== "json") {
-          const cache = /* @__PURE__ */ new Map();
-          const inline = async (reference) => {
-            if (!cache.has(reference)) cache.set(reference, await resources.assetDataUri(reference));
-            return cache.get(reference);
-          };
-          for (const element of board.elements) {
-            for (const key of ["src", "video"]) if (typeof element[key] === "string" && element[key].startsWith("/assets/")) element[key] = await inline(element[key]);
-            if (typeof element.html === "string") {
-              const attributes = /((?:src|href|poster)\s*=\s*["'])(\/assets\/[^"'<>]+)(["'])/gi;
-              const urls = /url\(\s*["']?(\/assets\/[^)"']+)["']?\s*\)/gi;
-              for (const match of element.html.matchAll(attributes)) await inline(match[2]);
-              for (const match of element.html.matchAll(urls)) await inline(match[1]);
-              element.html = element.html.replace(attributes, (_, prefix, reference, suffix) => `${prefix}${cache.get(reference)}${suffix}`).replace(urls, (_, reference) => `url("${cache.get(reference)}")`);
-            }
-          }
-        }
-        return exportArtifact2(board, format, options);
+        const { exportArtifact: exportArtifact2 } = await Promise.resolve().then(() => (init_export(), export_exports)), board = boardView(snapshot);
+        const prepared = resources && format !== "json" ? await inlineExportAssets(board, format, options, (reference) => resources.assetDataUri(reference)) : board;
+        return exportArtifact2(prepared, format, options);
       },
       decodeLegacy: decodeWhiteboardState
     };
@@ -11746,8 +11803,15 @@ function updateSharing(artifact, sharing, action, actor, args) {
     result.revokedRoles = roles;
     return result;
   }
-  if (action === "role" || action === "remove" || action === "restore") {
+  if (action === "role" || action === "remove" || action === "restore" || action === "forget") {
     const id2 = safeId(args.memberId, "\u6210\u5458 ID"), member = sharing.members && Object.hasOwn(sharing.members, id2) ? sharing.members[id2] : void 0;
+    if (action === "forget") {
+      if (!member?.removed) throw new StudioError("NOT_FOUND", "\u5DF2\u79FB\u9664\u6210\u5458\u4E0D\u5B58\u5728\u3002");
+      delete sharing.members[id2];
+      sharing.generation++;
+      result.revokedMemberIds = [id2];
+      return result;
+    }
     if (action === "restore") {
       if (!member?.removed) throw new StudioError("NOT_FOUND", "\u5DF2\u79FB\u9664\u6210\u5458\u4E0D\u5B58\u5728\u3002");
       const role = checkedRole(args.role);
@@ -11938,7 +12002,11 @@ var init_collaboration_events = __esm({
       append(input2) {
         const sequence2 = ++this.sequence;
         const event = copy({ ...input2, cursor: this.cursor() });
-        if (Buffer.byteLength(JSON.stringify(event)) > 128 * 1024) delete event.units;
+        if (event.units && Buffer.byteLength(JSON.stringify(event)) > 128 * 1024) {
+          event.changedIds ??= event.units.map((unit2) => unit2.id);
+          event.invalidation = true;
+          delete event.units;
+        }
         const bytes = Buffer.byteLength(JSON.stringify(event));
         this.events.push({ sequence: sequence2, bytes, event });
         this.bytes += bytes;
@@ -12027,7 +12095,7 @@ var init_room_timers = __esm({
 
 // src/core/shared/collaboration.ts
 import { createHash as createHash6, randomUUID as randomUUID10 } from "node:crypto";
-var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, StudioCollaboration;
+var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, AGENT_TASK_LEASE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, StudioCollaboration;
 var init_collaboration = __esm({
   "src/core/shared/collaboration.ts"() {
     "use strict";
@@ -12038,6 +12106,9 @@ var init_collaboration = __esm({
     LEASE_MS = 45e3;
     DISCONNECT_MS = 4e3;
     AGENT_IDLE_MS = 2e4;
+    AGENT_TASK_LEASE_MS = 6e4;
+    MAX_AGENT_TASKS = 8;
+    MAX_BOARD_TASKS = 64;
     StudioCollaboration = class {
       listeners = /* @__PURE__ */ new Map();
       peers = /* @__PURE__ */ new Map();
@@ -12046,6 +12117,7 @@ var init_collaboration = __esm({
       rooms = /* @__PURE__ */ new Map();
       queues = /* @__PURE__ */ new Map();
       activities = /* @__PURE__ */ new Map();
+      agentTasks = /* @__PURE__ */ new Map();
       expiry;
       constructor(options = {}) {
         this.timers = new RoomTimers(options.dataRoot);
@@ -12278,6 +12350,7 @@ var init_collaboration = __esm({
       }
       expire() {
         const now = Date.now();
+        this.expireTasks(now);
         for (const [artifactId, group] of this.peers) {
           let changed = false;
           for (const [peerId, peer] of group) {
@@ -12297,6 +12370,81 @@ var init_collaboration = __esm({
           if (changed) this.publishPresence(artifactId);
           if (!group.size) this.peers.delete(artifactId);
         }
+      }
+      expireTasks(now) {
+        for (const [key, group] of this.agentTasks) {
+          let changed = false;
+          for (const [id2, task] of group.tasks) if (task.expiresAt <= now) {
+            group.tasks.delete(id2);
+            changed = true;
+          }
+          if (changed) {
+            if (!group.tasks.size) this.agentTasks.delete(key);
+            this.publishAgent(group.artifactId, group.actor);
+          }
+        }
+      }
+      /** A task is an expiring work hint, independent of individual tool calls and content locks. */
+      activity(artifactId, input2, actor) {
+        if (actor.kind !== "agent" || actor.role !== "owner") throw new StudioError("FORBIDDEN", "\u5DE5\u4F5C\u533A\u57DF\u53EA\u80FD\u7531\u5DF2\u6388\u6743\u7684\u6240\u6709\u8005 Agent \u58F0\u660E\u3002");
+        const taskId = safeId(input2.taskId, "\u4EFB\u52A1 ID"), action = input2.action;
+        if (!["begin", "update", "end"].includes(String(action))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u52A8\u4F5C\u65E0\u6548\u3002");
+        let scope;
+        if (input2.scope !== void 0) {
+          if (!object2(input2.scope)) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u65E0\u6548\u3002");
+          const ids = input2.scope.ids, rect2 = input2.scope.rect;
+          if (ids !== void 0 && (!Array.isArray(ids) || ids.length > 200 || !ids.every((id2) => typeof id2 === "string" && id2.length > 0 && id2.length <= 200))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5BF9\u8C61\u65E0\u6548\u6216\u8D85\u8FC7 200 \u4E2A\u3002");
+          scope = {};
+          if (Array.isArray(ids) && ids.length) scope.ids = [...new Set(ids)];
+          if (rect2 !== void 0) {
+            if (!object2(rect2) || !["x", "y", "w", "h"].every((field) => typeof rect2[field] === "number")) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5750\u6807\u65E0\u6548\u3002");
+            const box = { x: finite(rect2.x, 0), y: finite(rect2.y, 0), w: finite(rect2.w, 0), h: finite(rect2.h, 0) };
+            if (box.w <= 0 || box.h <= 0 || Math.abs(box.x + box.w) > 1e7 || Math.abs(box.y + box.h) > 1e7) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5C3A\u5BF8\u65E0\u6548\u3002");
+            scope.rect = box;
+          }
+          if (!scope.ids?.length && !scope.rect) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u9009\u62E9\u5DE5\u4F5C\u5BF9\u8C61\u6216\u58F0\u660E\u6709\u6548\u7684\u7A7A\u5730\u533A\u57DF\u3002");
+        }
+        if (input2.label !== void 0 && (typeof input2.label !== "string" || [...input2.label].length > 80)) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u63CF\u8FF0\u6700\u591A 80 \u4E2A\u5B57\u7B26\u3002");
+        if (action === "begin" && !scope) throw new StudioError("INVALID_ARGUMENT", "\u5F00\u59CB\u4EFB\u52A1\u65F6\u9700\u8981\u5DE5\u4F5C\u533A\u57DF\u3002");
+        this.getTimer(artifactId);
+        this.expireTasks(Date.now());
+        const key = `${artifactId}:${actor.id}`, group = this.agentTasks.get(key), previous = group?.tasks.get(taskId);
+        if (action === "end") {
+          if (group?.tasks.delete(taskId)) {
+            if (!group.tasks.size) this.agentTasks.delete(key);
+            this.publishAgent(artifactId, actor);
+          }
+          return { tasks: copy([...this.agentTasks.get(key)?.tasks.values() ?? []]) };
+        }
+        if (action === "update" && !previous) throw new StudioError("NOT_FOUND", "\u5DE5\u4F5C\u4EFB\u52A1\u5DF2\u7ED3\u675F\u6216\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u58F0\u660E\u3002");
+        if (!previous) {
+          const count = [...this.agentTasks.values()].filter((item) => item.artifactId === artifactId).reduce((sum, item) => sum + item.tasks.size, 0);
+          if ((group?.tasks.size ?? 0) >= MAX_AGENT_TASKS || count >= MAX_BOARD_TASKS) throw new StudioError("BUSY", "\u5E76\u884C\u5DE5\u4F5C\u4EFB\u52A1\u8FC7\u591A\uFF0C\u8BF7\u5148\u7ED3\u675F\u5DF2\u6709\u4EFB\u52A1\u3002");
+        }
+        const current = group ?? { artifactId, actor: copy(actor), tasks: /* @__PURE__ */ new Map() };
+        current.actor = copy(actor);
+        current.tasks.set(taskId, { taskId, scope: copy(scope ?? previous.scope), label: input2.label === void 0 ? previous?.label : String(input2.label).trim() || void 0, expiresAt: Date.now() + AGENT_TASK_LEASE_MS });
+        this.agentTasks.set(key, current);
+        this.publishAgent(artifactId, actor);
+        return { tasks: copy([...current.tasks.values()]) };
+      }
+      publishAgent(artifactId, actor, lastActivity) {
+        const key = `${artifactId}:${actor.id}`, entries = [...this.activities.get(key)?.values() ?? []], tasks = [...this.agentTasks.get(key)?.tasks.values() ?? []];
+        const peers = this.group(artifactId), peerId = `agent-${createHash6("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
+        let peer = peers.get(peerId);
+        if (!entries.length && !tasks.length) {
+          if (!peer?.value) return;
+          peer.leaseUntil = Date.now() + AGENT_IDLE_MS;
+          peer.value = { ...peer.value, context: { ...peer.value.context, editingIds: [], movingIds: [], agentTasks: [], activity: "idle", lastActivity: lastActivity ?? peer.value.context?.activity }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        } else {
+          if (!peer) {
+            peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: 0, streams: 0, retired: /* @__PURE__ */ new Set(), tokens: 80, budgetAt: Date.now() };
+            peers.set(peerId, peer);
+          }
+          peer.leaseUntil = entries.length ? Infinity : Math.max(...tasks.map((task) => task.expiresAt));
+          peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: entries[0]?.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap((item) => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap((item) => item.editingIds ?? []))], agentTasks: copy(tasks), activity: entries.some((item) => item.status === "writing") ? "writing" : entries.length ? "reading" : "working" }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        }
+        this.publishPresence(artifactId);
       }
       room(artifactId, input2, actor) {
         if (input2.peerEpoch === void 0 !== (input2.peerSeq === void 0) || input2.peerSeq !== void 0 && (!Number.isSafeInteger(input2.peerSeq) || Number(input2.peerSeq) < 0)) throw new StudioError("INVALID_ARGUMENT", "\u4E34\u65F6\u534F\u4F5C\u7684\u9875\u9762\u4EE3\u6B21\u6216\u5E8F\u53F7\u65E0\u6548\u3002");
@@ -12319,35 +12467,14 @@ var init_collaboration = __esm({
         const activityId = randomUUID10(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? /* @__PURE__ */ new Map();
         group.set(activityId, { actor: copy(actor), ...copy(input2) });
         this.activities.set(key, group);
-        const peerId = `agent-${createHash6("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
-        const publish = () => {
-          if (this.activities.get(key) !== group) return;
-          const entries = [...group.values()], peers = this.group(artifactId);
-          let peer = peers.get(peerId);
-          if (!entries.length) {
-            if (peer?.value) {
-              peer.leaseUntil = Date.now() + AGENT_IDLE_MS;
-              peer.value = { ...peer.value, context: { ...peer.value.context, editingIds: [], movingIds: [], activity: "idle", lastActivity: input2.status }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-            }
-            this.activities.delete(key);
-            this.publishPresence(artifactId);
-            return;
-          }
-          if (!peer) {
-            peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: Number.POSITIVE_INFINITY, streams: 0, retired: /* @__PURE__ */ new Set(), tokens: 80, budgetAt: Date.now() };
-            peers.set(peerId, peer);
-          }
-          peer.leaseUntil = Number.POSITIVE_INFINITY;
-          peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: input2.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap((item) => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap((item) => item.editingIds ?? []))], activity: entries.some((item) => item.status === "writing") ? "writing" : "reading" }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-          this.publishPresence(artifactId);
-        };
-        publish();
+        this.publishAgent(artifactId, actor);
         let done = false;
         return () => {
-          if (done) return;
+          if (done || this.activities.get(key) !== group) return;
           done = true;
           group.delete(activityId);
-          publish();
+          if (!group.size) this.activities.delete(key);
+          this.publishAgent(artifactId, actor, input2.status);
         };
       }
       revokeMembers(artifactId, memberIds) {
@@ -12365,12 +12492,14 @@ var init_collaboration = __esm({
         this.timers.forget(artifactId);
         this.rooms.delete(artifactId);
         for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key);
+        for (const key of this.agentTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.agentTasks.delete(key);
       }
       close() {
         clearInterval(this.expiry);
         for (const id2 of this.peers.keys()) this.forget(id2);
         this.listeners.clear();
         this.activities.clear();
+        this.agentTasks.clear();
         this.timers.close();
         this.events.clear();
       }
@@ -14131,6 +14260,7 @@ var init_service = __esm({
     init_files();
     init_thumbnails();
     init_archive();
+    init_safe_merge();
     init_store2();
     authorizationState = (state) => ({ artifact: state.artifact, sharing: state.sharing, guestNames: state.guestNames });
     StudioService = class {
@@ -14165,10 +14295,27 @@ var init_service = __esm({
       emit(event) {
         this.collaboration.emit(event);
       }
-      emitBoard(snapshot, changedIds) {
+      boardUnits(snapshot, changedIds, before) {
         const adapter = this.products.get(snapshot.artifact.type).adapter;
-        const units = [...new Set(changedIds)].map((id2) => ({ id: id2, after: copy(adapter.readUnit(snapshot.content, id2) ?? null) }));
-        this.emit({ type: "board", artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds, artifact: copy(snapshot.artifact), ...Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true } });
+        const ids = new Set(changedIds);
+        if (before !== void 0 && snapshot.artifact.type === "whiteboard" && !ids.has("$order") && !jsonEqual(adapter.readUnit(before, "$order"), adapter.readUnit(snapshot.content, "$order"))) ids.add("$order");
+        return [...ids].map((id2) => {
+          const after = adapter.readUnit(snapshot.content, id2) ?? null;
+          const previous = before === void 0 ? null : adapter.readUnit(before, id2);
+          const full = { id: id2, after: copy(after) };
+          if (snapshot.artifact.type !== "whiteboard" || id2.startsWith("$") || !object2(previous) || !object2(after) || previous.id !== id2 || after.id !== id2 || previous.type !== after.type || !Number.isSafeInteger(previous.version) || !Number.isSafeInteger(after.version)) return full;
+          const changes = {}, removedKeys = [];
+          for (const key of /* @__PURE__ */ new Set([...Object.keys(previous), ...Object.keys(after)])) {
+            if (["id", "type", "version"].includes(key) || jsonEqual(previous[key], after[key])) continue;
+            if (after[key] === void 0) removedKeys.push(key);
+            else changes[key] = copy(after[key]);
+          }
+          const compact = { id: id2, patch: { baseVersion: Number(previous.version), version: Number(after.version), changes, removedKeys } };
+          return Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)) ? compact : full;
+        });
+      }
+      emitBoard(snapshot, changedIds, units = this.boardUnits(snapshot, changedIds)) {
+        this.emit({ type: "board", artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds: [.../* @__PURE__ */ new Set([...changedIds, ...units.map((unit2) => unit2.id)])], artifact: copy(snapshot.artifact), ...Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true } });
       }
       authorizedActor(state, actor, authority) {
         if (!authority) return actor;
@@ -14197,7 +14344,7 @@ var init_service = __esm({
       async perform(name, args, actor, authority) {
         let finish;
         const createsArtifact = name === "artifact_manage" && ["create", "import"].includes(text(args.action, "create"));
-        if (actor.kind === "agent" && args.artifactId !== void 0 && !createsArtifact) {
+        if (actor.kind === "agent" && args.artifactId !== void 0 && !createsArtifact && name !== "artifact_activity") {
           const id2 = safeId(args.artifactId), projected = await this.store.readProjection(id2, (state) => {
             const adapter = this.products.get(state.artifact.type).adapter;
             const ids2 = name === "artifact_apply" && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap((operation2) => object2(operation2) && typeof operation2.op === "string" ? mutationTargets(state.content, operation2, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
@@ -14225,6 +14372,7 @@ var init_service = __esm({
         if (name === "artifact_manage") return this.manage(args, actor, authority);
         const id2 = safeId(args.artifactId);
         if (name === "artifact_read") return this.read(id2, args, actor, authority);
+        if (name === "artifact_activity") return this.activity(id2, args, actor, authority);
         if (name === "artifact_apply") return this.apply(id2, args, actor, authority);
         if (name === "artifact_feedback") return this.feedback(id2, args, actor, authority);
         if (name === "artifact_share") return this.share(id2, args, actor, authority);
@@ -14313,6 +14461,15 @@ var init_service = __esm({
       }
       async read(id2, args, actor, authority) {
         const mode = text(args.mode, "document");
+        if (mode === "units") return this.store.readProjection(id2, (current) => {
+          this.authorizedActor(current, actor, authority);
+          if (!Array.isArray(args.ids) || !args.ids.length || args.ids.length > 200 || args.ids.some((value) => typeof value !== "string")) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B 1 \u5230 200 \u4E2A\u5185\u5BB9\u5355\u5143 ID\u3002");
+          if (!Number.isSafeInteger(args.atRevision) || Number(args.atRevision) < 0) throw new StudioError("INVALID_ARGUMENT", "\u7CBE\u786E\u8865\u8BFB\u9700\u8981\u6709\u6548\u7684\u4F5C\u54C1\u7248\u672C\u3002");
+          const snapshot = current.artifact.revision === args.atRevision ? current : current.history.find((saved) => saved.artifact.revision === args.atRevision);
+          if (!snapshot) throw new StudioError("VERSION_NOT_FOUND", "\u8BE5\u540C\u6B65\u7248\u672C\u5DF2\u4E0D\u5728\u4FDD\u7559\u5386\u53F2\u4E2D\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u4F5C\u54C1\u3002");
+          const adapter = this.products.get(current.artifact.type).adapter;
+          return { artifact: copy(snapshot.artifact), units: [...new Set(args.ids)].map((unitId) => ({ id: unitId, after: copy(adapter.readUnit(snapshot.content, unitId) ?? null) })) };
+        });
         if (mode === "source" && args.contextId !== void 0 && args.feedbackId === void 0) args = { ...args, feedbackId: safeId(args.contextId, "\u53CD\u9988 ID") };
         if (mode === "assets") requireRole(actor, ["owner"]);
         if (mode === "context") return this.store.readProjection(id2, (state2) => {
@@ -14366,10 +14523,12 @@ var init_service = __esm({
             }
             if (conflicts.size) throw new StudioError("EDIT_IN_PROGRESS", "\u76EE\u6807\u5185\u5BB9\u6B63\u5728\u5176\u4ED6\u89C6\u56FE\u4E2D\u7F16\u8F91\uFF0C\u8BF7\u7B49\u5F85\u7F16\u8F91\u5B8C\u6210\u540E\u91CD\u8BD5\u3002", { ids: [...conflicts] });
           }
-          return applyMutation(state, { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
+          const before = state.content;
+          const mutation = applyMutation(state, { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
+          return { ...mutation, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
         });
         const snapshot = result.snapshot;
-        if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds);
+        if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits);
         return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
       }
       async feedback(id2, args, actor, authority) {
@@ -14393,15 +14552,36 @@ var init_service = __esm({
           return { feedback };
         }
         if (["suggest", "choose", "withdraw"].includes(action)) {
-          const result2 = await this.store.transaction(id2, (state) => updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
+          const result2 = await this.store.transaction(id2, (state) => {
+            const before = state.content;
+            const next = updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter);
+            return { ...next, eventUnits: next.changed && next.snapshot && next.historyEntry ? this.boardUnits(next.snapshot, next.historyEntry.changedIds, before) : [] };
+          });
           this.emit({ type: "feedback", artifactId: id2 });
-          if (result2.changed && result2.snapshot && result2.historyEntry) this.emitBoard(result2.snapshot, result2.historyEntry.changedIds);
-          const { snapshot, changed: _changed, ...response } = result2;
+          if (result2.changed && result2.snapshot && result2.historyEntry) this.emitBoard(result2.snapshot, result2.historyEntry.changedIds, result2.eventUnits);
+          const { snapshot, changed: _changed, eventUnits: _eventUnits, ...response } = result2;
           return { ...response, ...snapshot ? this.products.get(snapshot.artifact.type).result(snapshot) : {} };
         }
         const result = await this.store.transaction(id2, (state) => updateFeedback(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
         this.emit({ type: "feedback", artifactId: id2 });
         return result;
+      }
+      async activity(id2, args, actor, authority) {
+        const currentActor = await this.store.readProjection(id2, (state) => {
+          const current = this.authorizedActor(state, actor, authority);
+          requireRole(current, ["owner"]);
+          assertAlive(state.artifact);
+          if (current.kind !== "agent") throw new StudioError("FORBIDDEN", "\u5DE5\u4F5C\u533A\u57DF\u58F0\u660E\u4EC5\u4F9B Agent \u4F7F\u7528\u3002");
+          if (state.artifact.type !== "whiteboard") throw new StudioError("INVALID_ARGUMENT", "\u8BE5\u4F5C\u54C1\u4E0D\u652F\u6301\u767D\u677F\u5DE5\u4F5C\u533A\u57DF\u3002");
+          if (object2(args.scope) && args.scope.ids !== void 0) {
+            const ids = args.scope.ids;
+            if (!Array.isArray(ids) || !ids.length || ids.length > 200 || ids.some((value) => typeof value !== "string" || value.startsWith("$"))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u9700\u8981 1 \u5230 200 \u4E2A\u5BF9\u8C61 ID\u3002");
+            const adapter = this.products.get(state.artifact.type).adapter;
+            for (const target of ids) if (adapter.readUnit(state.content, safeId(target, "\u5BF9\u8C61 ID")) == null) throw new StudioError("NOT_FOUND", "\u5DE5\u4F5C\u533A\u57DF\u4E2D\u7684\u5BF9\u8C61\u4E0D\u5B58\u5728\u3002", { id: target });
+          }
+          return current;
+        });
+        return this.collaboration.activity(id2, args, currentActor);
       }
       async share(id2, args, actor, authority) {
         const action = text(args.action, "status");
@@ -14410,7 +14590,7 @@ var init_service = __esm({
         const info = (state) => shareInfo(id2, state.sharing, sharingAccess(state.sharing) === "local" ? this.localOrigin : this.sharingOrigin, this.getPresence(id2), this.owner, actor);
         if (action === "status") return info(current);
         requireRole(actor, ["owner"]);
-        if (!["start", "stop", "reset", "link", "role", "remove", "restore"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
+        if (!["start", "stop", "reset", "link", "role", "remove", "restore", "forget"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5206\u4EAB\u64CD\u4F5C\u3002");
         assertAlive(current.artifact);
         let opened = false;
         try {
@@ -14423,11 +14603,12 @@ var init_service = __esm({
           const committed = await this.store.transaction(id2, (state) => {
             rememberGuestNames(state);
             const revoked2 = updateSharing(state.artifact, state.sharing, action, this.authorizedActor(state, actor, authority), args);
+            if (action === "forget") delete state.guestNames?.[safeId(args.memberId, "\u6210\u5458 ID")];
             return { info: info(state), ...revoked2 };
           });
           const revokedMembers = [...committed.revokedMemberIds, ...this.getPresence(id2).filter((peer) => committed.revokedRoles.includes(peer.actor.role)).map((peer) => peer.actor.id)];
           if (revokedMembers.length) this.collaboration.revokeMembers(id2, revokedMembers);
-          const reason = action === "restore" ? "access-restored" : action === "role" ? "role-changed" : action === "remove" ? "removed" : action === "reset" ? "link-reset" : action === "link" ? "link-disabled" : action === "start" && args.access === "local" ? "local-only" : "sharing-closed";
+          const reason = action === "restore" ? "access-restored" : action === "role" ? "role-changed" : action === "remove" || action === "forget" ? "removed" : action === "reset" ? "link-reset" : action === "link" ? "link-disabled" : action === "start" && args.access === "local" ? "local-only" : "sharing-closed";
           this.emit({ type: "share", artifactId: id2, enabled: committed.info.enabled, access: committed.info.access, reason, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
           if (action === "stop" || action === "start" && args.access === "local") await this.shareHandler?.(false);
           return committed.info;
@@ -14479,7 +14660,7 @@ var init_service = __esm({
           return { id: id2, name, kind: "human", role: access.role };
         };
         const state = await this.store.readProjection(artifactId, authorizationState), hadName = state.guestNames?.[id2] !== void 0, actor = resolve4(state), member = state.sharing.members?.[id2];
-        if (!registration && hadName && member && (member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 6e4) return { actor, grantId: member.grantId };
+        if (!registration && hadName && member && (!token || member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 6e4) return { actor, grantId: member.grantId };
         let roleChanged = false, joinedAccess = sharingAccess(state.sharing);
         const joined = await this.store.transaction(artifactId, (current) => {
           const previousRole = current.sharing.members?.[id2]?.role;
@@ -37062,7 +37243,7 @@ async function writeRecord(root2, record3) {
   await rename2(temp, target);
 }
 var delay2 = (ms) => new Promise((resolve4) => setTimeout(resolve4, ms));
-async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(import.meta.url)) {
+async function discoverService(root2, entry) {
   await mkdir2(root2, { recursive: true });
   let record3 = await probe(root2);
   if (!record3) {
@@ -37124,9 +37305,25 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
     }
     if (!record3) throw new Error("Studio \u672C\u673A\u670D\u52A1\u672A\u80FD\u542F\u52A8\uFF1B\u8BF7\u68C0\u67E5 Node.js \u7248\u672C\u548C\u6570\u636E\u76EE\u5F55\u6743\u9650\u3002");
   }
-  const current = record3;
+  return record3;
+}
+var sameService = (left, right) => left.origin === right.origin && left.token === right.token && left.pid === right.pid && left.instanceId === right.instanceId;
+async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(import.meta.url)) {
+  let current = await discoverService(root2, entry);
   const agentConnectionId = randomUUID3();
   let owner;
+  async function freshRecord() {
+    const saved = await readRecord(root2);
+    if (!saved && isAlive(current.pid)) throw new StudioError("SERVICE_RECORD_UNAVAILABLE", "\u5DF2\u8FDE\u63A5\u7684 Studio \u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u4F46\u6682\u65F6\u65E0\u6CD5\u8BFB\u53D6\u5176\u8FDE\u63A5\u8BB0\u5F55\uFF1B\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u672A\u542F\u52A8\u7B2C\u4E8C\u4E2A\u670D\u52A1\u3002");
+    if (!saved || !sameService(saved, current) || !isAlive(saved.pid)) {
+      const next = await discoverService(root2, entry);
+      if (!sameService(current, next)) {
+        current = next;
+        owner = void 0;
+      }
+    }
+    return current;
+  }
   const leaseDirectory = join2(root2, "leases");
   await mkdir2(leaseDirectory, { recursive: true });
   const lease = join2(leaseDirectory, `${process.pid}-${randomUUID3()}.json`);
@@ -37139,13 +37336,16 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
   timer.unref();
   return {
     connection: async () => {
-      if (!owner) {
-        const response = await fetch(`${current.origin}/api/session`, { headers: { Authorization: `Bearer ${current.token}` }, signal: AbortSignal.timeout(5e3) });
+      const target = await freshRecord();
+      let actor = owner && sameService(owner.record, target) ? owner.actor : void 0;
+      if (!actor) {
+        const response = await fetch(`${target.origin}/api/session`, { headers: { Authorization: `Bearer ${target.token}` }, signal: AbortSignal.timeout(5e3) });
         const session = await response.json();
         if (!response.ok || !session.owner || session.actor?.id !== "local" || session.actor.kind !== "human" || session.actor.role !== "owner") throw new Error("\u672C\u673A\u670D\u52A1\u672A\u8FD4\u56DE\u6709\u6548\u7684\u6240\u6709\u8005\u8EAB\u4EFD\u3002");
-        owner = session.actor;
+        actor = session.actor;
+        owner = { record: target, actor };
       }
-      return { baseUrl: current.origin, token: current.token, actor: owner };
+      return { baseUrl: target.origin, token: target.token, actor };
     },
     async execute(name, args, context) {
       const { participant: participant2, ...operationArgs } = args;
@@ -37156,18 +37356,20 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
       if (!displayName) throw new StudioError("INVALID_ARGUMENT", "Agent participant \u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\u3002");
       const agentId = `agent-${createHash("sha256").update(JSON.stringify({ connection: agentConnectionId, participant: participantId ?? null })).digest("hex").slice(0, 32)}`;
       const agentName = `${Array.from(displayName).slice(0, 24).join("")} \xB7 ${agentId.slice(-8)}`;
-      const response = await fetch(`${current.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${current.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": agentId, "X-Studio-Agent-Name": encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(9e4) });
+      const target = await freshRecord();
+      const response = await fetch(`${target.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${target.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": agentId, "X-Studio-Agent-Name": encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(9e4) });
       const result = await response.json();
       if (!result.ok) throw Object.assign(new Error(result.error?.message || "Studio \u64CD\u4F5C\u5931\u8D25"), { code: result.error?.code, details: result.error?.details });
       return result.data;
     },
     async requestUi(input2, signal) {
       const request = validateUiRequest(input2);
-      const url2 = new URL(request.path, current.origin);
-      if (url2.origin !== current.origin) throw Object.assign(new Error("\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u5207\u6362\u670D\u52A1\u5730\u5740\u3002"), { code: "FORBIDDEN" });
+      const target = await freshRecord();
+      const url2 = new URL(request.path, target.origin);
+      if (url2.origin !== target.origin) throw Object.assign(new Error("\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u5207\u6362\u670D\u52A1\u5730\u5740\u3002"), { code: "FORBIDDEN" });
       return fetch(url2, {
         method: request.method,
-        headers: { ...request.headers, Authorization: `Bearer ${current.token}`, "X-Studio-Actor": "human" },
+        headers: { ...request.headers, Authorization: `Bearer ${target.token}`, "X-Studio-Actor": "human" },
         ...request.body !== void 0 ? { body: Buffer.from(request.body) } : {},
         redirect: "error",
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(9e4)]) : AbortSignal.timeout(9e4)
@@ -45286,11 +45488,12 @@ var schemas = {
   studio_open: external_exports.object({ view: external_exports.enum(["library", "editor", "board", "trash"]).optional(), artifactId: id.optional() }),
   artifact_list: external_exports.object({ query: external_exports.string().optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().optional(), sort: external_exports.string().optional() }),
   artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "purge", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), artifactIds: external_exports.array(id).min(1).max(100).optional().describe("purge \u6279\u91CF\u6C38\u4E45\u5220\u9664\u7684\u4F5C\u54C1 ID\uFF0C1..100 \u4E2A\u3002\u4E0E\u5355\u4E2A artifactId \u4E8C\u9009\u4E00\uFF1B\u53EA\u5141\u8BB8\u623F\u4E3B\u5220\u9664\u56DE\u6536\u7AD9\u5185\u4F5C\u54C1\uFF0C\u8FD4\u56DE deletedIds \u548C\u9010\u9879 failures\u3002"), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
-  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
+  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), atRevision: external_exports.number().int().nonnegative().optional().describe("units \u540C\u6B65\u8865\u8BFB\u5FC5\u987B\u6307\u5B9A\u7CBE\u786E\u4F5C\u54C1\u7248\u672C\uFF0C\u914D\u5408 1..200 \u4E2A ids\u3002\u8FD4\u56DE\u8BE5\u7248\u672C\u7684 artifact \u548C\u5B8C\u6574 units\uFF1B\u5386\u53F2\u5DF2\u6E05\u7406\u5219 VERSION_NOT_FOUND\uFF0C\u4E0D\u4EE5\u6700\u65B0\u7248\u672C\u66FF\u4EE3\u3002"), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
   artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), merge: external_exports.literal("safe").optional().describe("\u5B89\u5168\u5408\u5E76\u8FC7\u671F update\uFF1A\u4ECE\u670D\u52A1\u5668\u4FDD\u7559\u5386\u53F2\u53D6\u53EF\u4FE1\u57FA\u7EBF\uFF0C\u4EC5\u5408\u5E76\u4E0D\u51B2\u7A81\u5B57\u6BB5/\u6587\u672C\u884C\uFF1B\u540C\u5B57\u6BB5\u51B2\u7A81\u4FDD\u7559\u539F\u5185\u5BB9\u5E76\u8FD4\u56DE CONFLICT\uFF0C\u4E0D\u9759\u9ED8\u8986\u76D6\u3002\u7F3A\u7701\u4FDD\u6301\u4E25\u683C\u7248\u672C\u68C0\u67E5\u3002"), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
   artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
-  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove", "restore"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional().describe("role/restore \u5FC5\u586B\uFF1Brestore \u7684\u76EE\u6807\u89D2\u8272\u94FE\u63A5\u5FC5\u987B\u5DF2\u542F\u7528\u3002"), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u6307\u5B9A\u5DF2\u52A0\u5165\u6210\u5458 ID\uFF1B\u6539\u89D2\u8272\u548C\u79FB\u9664\u4F1A\u64A4\u9500\u8BE5\u6210\u5458\u73B0\u6709\u8FDE\u63A5\u4E0E\u9605\u8BFB\u9875\u3002restore \u6307\u5B9A status.removedMembers \u4E2D\u7684 ID\uFF0C\u7531\u623F\u4E3B\u4E3A\u539F\u6D4F\u89C8\u5668\u6062\u590D\u8BBF\u95EE\uFF1B\u4E0D\u80FD\u51ED\u59D3\u540D\u521B\u5EFA\u8EAB\u4EFD\u3002") }),
-  artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() })
+  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove", "restore", "forget"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional().describe("role/restore \u5FC5\u586B\uFF1Brestore \u7684\u76EE\u6807\u89D2\u8272\u94FE\u63A5\u5FC5\u987B\u5DF2\u542F\u7528\u3002"), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u8BBF\u95EE\u3002forget \u53EA\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u53CA\u6B64\u677F\u59D3\u540D\u767B\u8BB0\uFF1B\u4FDD\u7559\u5386\u53F2\u4F5C\u8005\u548C\u5176\u4ED6\u767D\u677F\uFF0C\u4E4B\u540E\u51ED\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u5165\u59D3\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u4F1A\u6062\u590D\u65E7\u9605\u8BFB\u9875\u6216\u6392\u961F\u8BF7\u6C42\u3002") }),
+  artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() }),
+  artifact_activity: external_exports.object({ artifactId: id, action: external_exports.enum(["begin", "update", "end"]), taskId: id, scope: external_exports.object({ ids: external_exports.array(id).min(1).max(200).optional(), rect: external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) }).optional() }).optional(), label: external_exports.string().trim().min(1).max(80).optional() })
 };
 var descriptions = {
   studio_open: "\u6253\u5F00 Agentero \u521B\u4F5C\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
@@ -45299,8 +45502,9 @@ var descriptions = {
   artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
   artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
   artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
-  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5C40\u57DF\u7F51\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5F00\u542F\u5C40\u57DF\u7F51\uFF1Baccess:local \u53EA\u542F\u7528\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0C\u590D\u5236\u94FE\u63A5\u4E0D\u81EA\u52A8\u5F00\u653E\u5C40\u57DF\u7F51\u3002\u5207\u6362\u8BBF\u95EE\u8303\u56F4\u4FDD\u7559\u9080\u8BF7\u548C\u6210\u5458\uFF0C\u5207\u4E3A\u672C\u673A\u65F6\u64A4\u9500\u539F\u5C40\u57DF\u7F51\u8FDE\u63A5\uFF1Bstop \u64A4\u9500\u6240\u6709\u9080\u8BF7\u4E0E\u6210\u5458\u6388\u6743\uFF1Blink \u72EC\u7ACB\u542F\u7528/\u5173\u95ED\u89D2\u8272\u94FE\u63A5\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u4E0E\u5BF9\u5E94\u6210\u5458\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u5E76\u7ACB\u5373\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u7531\u623F\u4E3B\u6307\u5B9A\u5DF2\u79FB\u9664\u6210\u5458 ID \u548C\u5DF2\u542F\u7528\u89D2\u8272\uFF0C\u6062\u590D\u539F\u6D4F\u89C8\u5668\u8BBF\u95EE\uFF0C\u4E0D\u6062\u590D\u65E7\u9605\u8BFB\u9875\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
-  artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002"
+  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5C40\u57DF\u7F51\uFF0Caccess:local \u53EA\u542F\u7528\u672C\u673A\u9080\u8BF7\uFF1B\u5207\u6362\u8303\u56F4\u4FDD\u7559\u6210\u5458\uFF0Cstop \u64A4\u9500\u5168\u90E8\u6388\u6743\uFF1Blink \u5F00\u5173\u89D2\u8272\u9080\u8BF7\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u548C\u5BF9\u5E94\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u6210\u5458\u5E76\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u3002forget \u4EC5\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u548C\u8BE5\u677F\u59D3\u540D\u767B\u8BB0\uFF0C\u65E7\u8BC4\u8BBA\u5386\u53F2\u4E0D\u53D8\uFF1B\u4E4B\u540E\u9700\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u590D\u6D3B\u65E7\u9605\u8BFB\u9875\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
+  artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002",
+  artifact_activity: "Agent \u58F0\u660E\u767D\u677F\u4EFB\u52A1\u5DE5\u4F5C\u533A\u57DF\uFF0C\u4E0D\u9501\u4F4F\u4EBA\u7C7B\u7F16\u8F91\u3002\u4F7F\u7528\u7A33\u5B9A participant \u548C taskId\uFF1Bbegin \u6307\u5B9A\u73B0\u6709\u5BF9\u8C61 ids \u6216\u7A7A\u5730\u4E16\u754C rect\u3001\u53EF\u8BFB label\uFF1Bupdate \u7EED\u671F\u6216\u66F4\u65B0\u8303\u56F4\uFF0Cend \u5B8C\u6210\u6216\u53D6\u6D88\u3002\u56FA\u5B9A 60 \u79D2\u79DF\u7EA6\uFF0C\u957F\u4EFB\u52A1\u5728\u540E\u7EED\u5DE5\u5177\u524D\u663E\u5F0F\u7EED\u671F\uFF0C\u7ED3\u675F\u65F6\u6E05\u7406\uFF1B\u4EC5 Agent \u6240\u6709\u8005\u8EAB\u4EFD\u53EF\u58F0\u660E\u3002\u8303\u56F4\u7528\u4E8E\u5DE5\u4F5C\u63D0\u793A\u548C\u7528\u6237\u4E3B\u52A8\u8DDF\u968F\uFF0C\u4E0D\u6388\u4E88\u5199\u6743\u9650\u6216\u7ED5\u8FC7\u7248\u672C\u3001\u6B63\u5728\u7F16\u8F91\u68C0\u67E5\u3002"
 };
 function record2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;

@@ -21,7 +21,7 @@ const tokenFor = (info: any, role = 'editor') => new URL(info.links[role]).searc
 function browser(token: string, baseUrl = host.origin) {
   let cookie = '', lastCookie = '';
   async function request(path: string, init: RequestInit = {}) {
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${token}`);
+    const headers = new Headers(init.headers); if (token) headers.set('Authorization', `Bearer ${token}`);
     if (cookie && !headers.has('Cookie')) headers.set('Cookie', cookie);
     const response = await fetch(baseUrl + path, { ...init, headers, redirect: 'manual' });
     const issued = response.headers.get('set-cookie'); if (issued) { lastCookie = issued; cookie = issued.split(';')[0]!; }
@@ -55,6 +55,44 @@ async function region(guest: ReturnType<typeof browser>, baseUrl = host.origin) 
 }
 
 describe('persistent named anonymous guests', () => {
+  it('forgets only a removed member on this board, frees its name and requires registration for a fresh grant', async () => {
+    const info = await share({ action: 'start', access: 'local' }), guest = browser(tokenFor(info)), other = browser(tokenFor(info));
+    const actor = (await guest.name('Released name')).body.actor, cookie = guest.cookie;
+    await other.name('Other guest');
+    const source = await region(guest);
+    await guest.tool('artifact_apply', { operations: [{ op: 'add', element: { type: 'text', text: 'Original authored content' } }] });
+    await guest.tool('artifact_feedback', { action: 'create', text: 'Original author snapshot' });
+    const otherId = (await host.service.execute('artifact_manage', { action: 'create' })).artifact.id;
+    const otherShare = await host.service.execute('artifact_share', { artifactId: otherId, action: 'start', access: 'local' });
+    guest.use(tokenFor(otherShare));
+    expect((await guest.request(`/api/session?artifactId=${otherId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: actor.name }) })).status).toBe(200);
+    guest.use(tokenFor(info));
+    await expect(share({ action: 'forget', memberId: actor.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await share({ action: 'remove', memberId: actor.id }); const reset = await share({ action: 'reset', role: 'editor' });
+    other.use(tokenFor(reset));
+    expect((await other.tool('artifact_share', { action: 'forget', memberId: actor.id })).response.status).toBe(403);
+    const before = await host.service.store.read(artifactId), foreignBefore = await host.service.store.read(otherId);
+    const forgotten = await share({ action: 'forget', memberId: actor.id });
+    expect(forgotten.removedMembers).toEqual([]);
+    const after = await host.service.store.read(artifactId);
+    expect(after.sharing.members).not.toHaveProperty(actor.id); expect(after.guestNames).not.toHaveProperty(actor.id);
+    expect(after.history).toEqual(before.history); expect(after.feedback).toEqual(before.feedback);
+    expect(await host.service.store.read(otherId)).toEqual(foreignBefore);
+    expect((await source.read()).status).toBe(401);
+    await expect(share({ action: 'forget', memberId: actor.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    guest.use(''); expect((await guest.session()).response.status).toBe(401);
+    guest.use(tokenFor(reset));
+    const unnamed = await guest.session(); expect(unnamed.response.status).toBe(428); expect(unnamed.body.error.code).toBe('NAME_REQUIRED');
+    expect(guest.cookie).toBe(cookie);
+    const newcomer = browser(tokenFor(reset)); const claimed = await newcomer.name(actor.name);
+    expect(claimed.response.status).toBe(200); expect(claimed.body.actor.id).not.toBe(actor.id);
+    const renamed = await guest.name('Registered again');
+    expect(renamed.body.actor).toMatchObject({ id: actor.id, name: 'Registered again' });
+    expect((await host.service.store.read(artifactId)).sharing.members![actor.id]!.grantId).not.toBe(before.sharing.members![actor.id]!.grantId);
+    expect((await source.read()).status).toBe(401);
+    expect((await host.service.store.read(artifactId)).feedback[0]!.author).toMatchObject({ id: actor.id, name: actor.name });
+  });
+
   it.each([['editor', '编辑'], ['commenter', '评论'], ['viewer', '查看']])('shows only the authorized invitation title and %s role before naming', async (role, label) => {
     const title = '产品 <研究> & 规划';
     await host.service.execute('artifact_manage', { artifactId, action: 'rename', title });

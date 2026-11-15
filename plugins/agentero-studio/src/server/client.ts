@@ -39,7 +39,7 @@ export async function writeRecord(root: string, record: ServiceRecord) {
   await rename(temp, target);
 }
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-export async function connectStudio(root = dataDirectory(), entry = fileURLToPath(import.meta.url)) {
+async function discoverService(root: string, entry: string): Promise<ServiceRecord> {
   await mkdir(root, { recursive: true });
   let record = await probe(root);
   if (!record) {
@@ -77,22 +77,38 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
     }
     if (!record) throw new Error('Studio 本机服务未能启动；请检查 Node.js 版本和数据目录权限。');
   }
-  const current = record;
+  return record;
+}
+const sameService = (left: ServiceRecord, right: ServiceRecord) => left.origin === right.origin && left.token === right.token && left.pid === right.pid && left.instanceId === right.instanceId;
+export async function connectStudio(root = dataDirectory(), entry = fileURLToPath(import.meta.url)) {
+  let current = await discoverService(root, entry);
   const agentConnectionId = randomUUID();
-  let owner: Actor | undefined;
+  let owner: { record: ServiceRecord; actor: Actor } | undefined;
+  // Refresh authority without recreating this MCP identity/lease or replaying a failed request.
+  async function freshRecord(): Promise<ServiceRecord> {
+    const saved = await readRecord(root);
+    if (!saved && isAlive(current.pid)) throw new StudioError('SERVICE_RECORD_UNAVAILABLE', '已连接的 Studio 服务仍在运行，但暂时无法读取其连接记录；请稍后重试，未启动第二个服务。');
+    if (!saved || !sameService(saved, current) || !isAlive(saved.pid)) {
+      const next = await discoverService(root, entry);
+      if (!sameService(current, next)) { current = next; owner = undefined; }
+    }
+    return current;
+  }
   const leaseDirectory = join(root, 'leases'); await mkdir(leaseDirectory, { recursive: true });
   const lease = join(leaseDirectory, `${process.pid}-${randomUUID()}.json`);
   const heartbeat = () => writeFile(lease, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 35_000 })).catch(() => {});
   await heartbeat(); const timer = setInterval(() => { void heartbeat(); }, 10_000); timer.unref();
   return {
     connection: async (): Promise<Connection> => {
-      if (!owner) {
-        const response = await fetch(`${current.origin}/api/session`, { headers: { Authorization: `Bearer ${current.token}` }, signal: AbortSignal.timeout(5000) });
+      const target = await freshRecord();
+      let actor = owner && sameService(owner.record, target) ? owner.actor : undefined;
+      if (!actor) {
+        const response = await fetch(`${target.origin}/api/session`, { headers: { Authorization: `Bearer ${target.token}` }, signal: AbortSignal.timeout(5000) });
         const session = await response.json() as { owner?: boolean; actor?: Actor };
         if (!response.ok || !session.owner || session.actor?.id !== 'local' || session.actor.kind !== 'human' || session.actor.role !== 'owner') throw new Error('本机服务未返回有效的所有者身份。');
-        owner = session.actor;
+        actor = session.actor; owner = { record: target, actor };
       }
-      return { baseUrl: current.origin, token: current.token, actor: owner };
+      return { baseUrl: target.origin, token: target.token, actor };
     },
     async execute(name: ToolName, args: Record<string, unknown>, context?: StudioExecutionContext) {
       const { participant, ...operationArgs } = args;
@@ -103,18 +119,20 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
       if (!displayName) throw new StudioError('INVALID_ARGUMENT', 'Agent participant 名称不能为空。');
       const agentId = `agent-${createHash('sha256').update(JSON.stringify({ connection: agentConnectionId, participant: participantId ?? null })).digest('hex').slice(0, 32)}`;
       const agentName = `${Array.from(displayName).slice(0, 24).join('')} · ${agentId.slice(-8)}`;
-      const response = await fetch(`${current.origin}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${current.token}`, 'Content-Type': 'application/json', 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': agentId, 'X-Studio-Agent-Name': encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(90_000) });
+      const target = await freshRecord();
+      const response = await fetch(`${target.origin}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${target.token}`, 'Content-Type': 'application/json', 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': agentId, 'X-Studio-Agent-Name': encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(90_000) });
       const result = await response.json() as ToolResponse;
       if (!result.ok) throw Object.assign(new Error(result.error?.message || 'Studio 操作失败'), { code: result.error?.code, details: result.error?.details });
       return result.data;
     },
     async requestUi(input: UiHttpRequest, signal?: AbortSignal) {
       const request = validateUiRequest(input);
-      const url = new URL(request.path, current.origin);
-      if (url.origin !== current.origin) throw Object.assign(new Error('作品请求不能切换服务地址。'), { code: 'FORBIDDEN' });
+      const target = await freshRecord();
+      const url = new URL(request.path, target.origin);
+      if (url.origin !== target.origin) throw Object.assign(new Error('作品请求不能切换服务地址。'), { code: 'FORBIDDEN' });
       return fetch(url, {
         method: request.method,
-        headers: { ...request.headers, Authorization: `Bearer ${current.token}`, 'X-Studio-Actor': 'human' },
+        headers: { ...request.headers, Authorization: `Bearer ${target.token}`, 'X-Studio-Actor': 'human' },
         ...(request.body !== undefined ? { body: Buffer.from(request.body) } : {}),
         redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
       });

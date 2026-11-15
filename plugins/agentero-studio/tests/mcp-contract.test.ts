@@ -52,11 +52,11 @@ describe('model MCP contracts through the real SDK', () => {
     }
     expect((tools.find(tool => tool.name === 'artifact_apply')!.inputSchema.properties as Record<string, any>).merge.const).toBe('safe');
   });
-  it('publishes coordinate/version/lock semantics with eight model tools and one app-only transport', async () => {
+  it('publishes coordinate/version/lock semantics with all model tools and one app-only transport', async () => {
     const { tools } = await client.listTools();
     const visible = tools.filter(tool => !(tool._meta?.ui as { visibility?: string[] } | undefined)?.visibility || (tool._meta?.ui as { visibility: string[] }).visibility.includes('model'));
     expect(visible.map(tool => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(tools).toHaveLength(9);
+    expect(tools).toHaveLength(TOOL_NAMES.length + 1);
     expect(tools.find(tool => tool.name === APP_TOOL_NAME)?._meta).toMatchObject({ ui: { visibility: ['app'] } });
     const feedback = tools.find(tool => tool.name === 'artifact_feedback')!, fields = feedback.inputSchema.properties as Record<string, any>;
     expect(fields.versions).toMatchObject({ type: 'object', description: expect.stringContaining('选取时') });
@@ -71,6 +71,19 @@ describe('model MCP contracts through the real SDK', () => {
     expect(manageFields.artifactIds).toMatchObject({ type: 'array', minItems: 1, maxItems: 100, description: expect.stringContaining('二选一') });
     expect(manage.annotations?.destructiveHint).toBe(true);
     expect(tools.some(tool => /reader/.test(tool.name))).toBe(false);
+  });
+
+  it('declares, renews and ends an Agent working area through the public SDK contract', async () => {
+    await add([{ id: 'work-target', type: 'text', text: 'Work target' }]);
+    const declared = await call('artifact_activity', { action: 'begin', taskId: 'task', scope: { ids: ['work-target'] }, label: 'Review diagram' });
+    expect(declared.tasks).toMatchObject([{ taskId: 'task', scope: { ids: ['work-target'] }, label: 'Review diagram', expiresAt: expect.any(Number) }]);
+    const renewed = await call('artifact_activity', { action: 'update', taskId: 'task', label: 'Finish review' });
+    expect(renewed.tasks).toMatchObject([{ taskId: 'task', scope: { ids: ['work-target'] }, label: 'Finish review' }]);
+    await failure('artifact_activity', { action: 'begin', taskId: 'missing', scope: { ids: ['missing'] } }, 'NOT_FOUND');
+    await failure('artifact_activity', { action: 'begin', taskId: 'invalid', scope: { rect: { x: 0, y: 0, w: -1, h: 1 } } });
+    expect(await call('artifact_activity', { action: 'end', taskId: 'task' })).toMatchObject({ tasks: [] });
+    const read = await call('artifact_read', { mode: 'units', ids: ['work-target'], atRevision: 1 });
+    expect(read).toMatchObject({ artifact: { revision: 1 }, units: [{ id: 'work-target', after: { text: 'Work target', version: 1 } }] });
   });
 
   it('preserves create versions through schema parsing, freezes the clicked native source and deduplicates retries', async () => {

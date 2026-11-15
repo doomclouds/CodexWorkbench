@@ -7,6 +7,7 @@ const REQUEST_HEADERS = new Set(['content-type', 'x-filename', 'x-content-type']
 type Send = (args: Record<string, unknown>, signal?: AbortSignal) => Promise<any>;
 interface WireResponse { status: number; headers: Record<string, string>; body?: string; downloadId?: string; size: number }
 interface CachedAsset { url: string; size: number }
+interface AssetState { status: 'loading' | 'ready' | 'error'; message?: string }
 interface RequestSlots { active: number; queue: Array<() => void> }
 
 function failure(message: string, code = 'INVALID_RESPONSE') { return Object.assign(new Error(message), { code }); }
@@ -42,9 +43,13 @@ export function createRpcTransport(baseUrl: string, send: Send) {
   const lifetime = new AbortController();
   const assets = new Map<string, CachedAsset>();
   const preparing = new Map<string, Promise<void>>();
+  const assetQueue = new Map<string, AbortSignal>();
+  const assetErrors = new Map<string, string>();
+  const assetListeners = new Set<() => void>();
   const transfers = new Set<string>();
   const requests: RequestSlots = { active: 0, queue: [] }, waits: RequestSlots = { active: 0, queue: [] };
-  let closed = false, assetBytes = 0;
+  let closed = false, assetBytes = 0, assetWorkers = 0;
+  const assetsChanged = () => { for (const listener of assetListeners) listener(); };
 
   function canonical(input: string | URL) {
     const url = new URL(input, base);
@@ -82,9 +87,10 @@ export function createRpcTransport(baseUrl: string, send: Send) {
     const signal = AbortSignal.timeout(3000);
     try { await waitFor(send({ action: 'release', transferId }, signal), signal); } catch { /* Server teardown also disposes its bounded temporary transfers. */ }
   }
-  async function wire(args: Record<string, unknown>, signal: AbortSignal) {
+  async function wire(args: Record<string, unknown>, signal: AbortSignal, resource = false) {
     checkSignal(signal);
     if (closed) throw failure('作品连接已关闭。', 'CLOSED');
+    const unlock = resource ? await acquire(signal, false) : undefined;
     const pending = Promise.resolve().then(() => { checkSignal(signal); return send(args, signal); }).then(value => {
       const id = args.action === 'upload' ? value?.transferId : args.action === 'request' ? value?.downloadId : undefined;
       if (typeof id === 'string') {
@@ -94,7 +100,7 @@ export function createRpcTransport(baseUrl: string, send: Send) {
       }
       return value;
     });
-    return waitFor(pending, signal);
+    try { return await waitFor(pending, signal); } finally { unlock?.(); }
   }
   async function bodyBytes(body: BodyInit | null | undefined, signal: AbortSignal) {
     if (body == null) return undefined;
@@ -108,7 +114,7 @@ export function createRpcTransport(baseUrl: string, send: Send) {
     checkSignal(signal);
     return bytes;
   }
-  async function perform(path: string, init: RequestInit, signal: AbortSignal) {
+  async function perform(path: string, init: RequestInit, signal: AbortSignal, resource = false) {
     const method = (init.method ?? 'GET').toUpperCase();
     if (method !== 'GET' && method !== 'POST') throw failure('作品请求方法无效。', 'INVALID_ARGUMENT');
     if (method === 'GET' && init.body != null) throw failure('读取作品时不能附带请求内容。', 'INVALID_ARGUMENT');
@@ -122,13 +128,13 @@ export function createRpcTransport(baseUrl: string, send: Send) {
       if (bytes && bytes.byteLength > CHUNK_BYTES) {
         for (let offset = 0; offset < bytes.byteLength; offset += CHUNK_BYTES) {
           const data = bytes.subarray(offset, offset + CHUNK_BYTES);
-          const part = await wire({ action: 'upload', ...(uploadId ? { transferId: uploadId } : {}), offset, size: bytes.byteLength, data: encode(data) }, signal);
+          const part = await wire({ action: 'upload', ...(uploadId ? { transferId: uploadId } : {}), offset, size: bytes.byteLength, data: encode(data) }, signal, resource);
           if (typeof part?.transferId === 'string') owned.add(part.transferId);
           if (typeof part?.transferId !== 'string' || !part.transferId || (uploadId && part.transferId !== uploadId) || part.nextOffset !== offset + data.byteLength) throw failure('作品上传分块未被完整确认。');
           uploadId = part.transferId;
         }
       }
-      const result = await wire({ action: 'request', path, method, ...(Object.keys(headers).length ? { headers } : {}), ...(uploadId ? { uploadId } : bytes ? { body: encode(bytes) } : {}) }, signal) as WireResponse;
+      const result = await wire({ action: 'request', path, method, ...(Object.keys(headers).length ? { headers } : {}), ...(uploadId ? { uploadId } : bytes ? { body: encode(bytes) } : {}) }, signal, resource) as WireResponse;
       if (typeof result?.downloadId === 'string') owned.add(result.downloadId);
       checkSize(result?.size);
       if (!Number.isInteger(result.status) || result.status < 200 || result.status > 599 || !result.headers || typeof result.headers !== 'object') throw failure('作品服务返回了无效的响应。');
@@ -138,7 +144,7 @@ export function createRpcTransport(baseUrl: string, send: Send) {
         content = new Uint8Array(result.size);
         let offset = 0;
         do {
-          const part = await wire({ action: 'download', transferId: result.downloadId, offset }, signal);
+          const part = await wire({ action: 'download', transferId: result.downloadId, offset }, signal, resource);
           const bytes = decode(part?.data, Math.min(CHUNK_BYTES, result.size - offset));
           if (part.nextOffset !== offset + bytes.length || typeof part.done !== 'boolean' || (!bytes.length && !part.done) || part.done !== (part.nextOffset === result.size)) throw failure('作品下载分块不完整。');
           content.set(bytes, offset); offset = part.nextOffset;
@@ -158,7 +164,7 @@ export function createRpcTransport(baseUrl: string, send: Send) {
     if (existing) return waitFor(existing, signal);
     const pending = (async () => {
       const response = await requestInternal(key, { signal }, false);
-      if (!response.ok) return;
+      if (!response.ok) throw failure(`媒体读取失败（${response.status}）。`, 'ASSET_UNAVAILABLE');
       const blob = await response.blob();
       checkSignal(signal);
       if (blob.size > MAX_BYTES || closed) return;
@@ -173,6 +179,30 @@ export function createRpcTransport(baseUrl: string, send: Send) {
     preparing.set(key, pending);
     try { await pending; } finally { preparing.delete(key); }
   }
+  function queueAsset(key: string, signal: AbortSignal) {
+    if (closed || signal.aborted || assets.has(key) || preparing.has(key) || assetQueue.has(key)) return;
+    if (assetQueue.size + preparing.size >= MAX_ASSETS) {
+      assetErrors.set(key, '媒体加载队列已满，请刷新后重试。');
+      while (assetErrors.size > MAX_ASSETS) assetErrors.delete(assetErrors.keys().next().value!);
+      return;
+    }
+    assetErrors.delete(key); assetQueue.set(key, signal);
+    runAssets();
+  }
+  function runAssets() {
+    while (!closed && assetWorkers < MAX_CONCURRENT && assetQueue.size) {
+      const [key, signal] = assetQueue.entries().next().value!;
+      assetQueue.delete(key);
+      if (signal.aborted) continue;
+      assetWorkers++;
+      void cacheAsset(key, signal).catch(error => {
+        if (!closed && !signal.aborted) {
+          assetErrors.set(key, error instanceof Error ? error.message : '媒体未能加载。');
+          while (assetErrors.size > MAX_ASSETS) assetErrors.delete(assetErrors.keys().next().value!);
+        }
+      }).finally(() => { assetWorkers--; if (!closed) { assetsChanged(); runAssets(); } });
+    }
+  }
   async function prepareAssets(response: Response, signal: AbortSignal) {
     if (!response.ok || !/\b(?:application\/json|[\w.+-]+\/[\w.+-]+\+json)\b/i.test(response.headers.get('content-type') ?? '')) return;
     let value: unknown;
@@ -185,25 +215,19 @@ export function createRpcTransport(baseUrl: string, send: Send) {
       if (typeof current === 'string') { const key = assetKey(current); if (key) keys.add(key); }
       else if (current && typeof current === 'object') for (const child of Object.values(current)) pending.push(child);
     }
-    const list = [...keys]; let index = 0;
-    await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, list.length) }, async () => {
-      while (index < list.length) {
-        checkSignal(signal);
-        const key = list[index++]!;
-        try { await cacheAsset(key, signal); } catch { checkSignal(signal); /* A missing preview must not hide the document. */ }
-      }
-    }));
+    for (const key of keys) queueAsset(key, signal);
+    if (keys.size) assetsChanged();
   }
   async function requestInternal(input: string | URL, init: RequestInit = {}, prepare = true): Promise<Response> {
     if (closed) throw failure('作品连接已关闭。', 'CLOSED');
     const path = canonical(input);
     const signal = init.signal ? AbortSignal.any([lifetime.signal, init.signal]) : lifetime.signal;
     const endpoint = new URL(path, base);
-    const unlock = await acquire(signal, endpoint.pathname === '/api/sync' && Number(endpoint.searchParams.get('wait')) > 0);
+    const unlock = prepare ? await acquire(signal, endpoint.pathname === '/api/sync' && Number(endpoint.searchParams.get('wait')) > 0) : undefined;
     let response: Response;
-    try { response = await perform(path, init, signal); } finally { unlock(); }
-    // Release the request slot before fetching previews to avoid nested-request deadlocks.
-    if (prepare) await prepareAssets(response, signal);
+    try { response = await perform(path, init, signal, !prepare); } finally { unlock?.(); }
+    // Media fills the bounded cache independently; metadata and sync events are usable immediately.
+    if (prepare) void prepareAssets(response, signal).catch(error => { if (!closed && !signal.aborted) console.warn('Studio media preparation failed', error); });
     checkSignal(signal);
     return response;
   }
@@ -214,11 +238,20 @@ export function createRpcTransport(baseUrl: string, send: Send) {
       if (key && cached) { assets.delete(key); assets.set(key, cached); }
       return cached?.url;
     },
+    assetState(reference: string): AssetState | undefined {
+      const key = assetKey(reference);
+      if (!key) return;
+      if (assets.has(key)) return { status: 'ready' };
+      const message = assetErrors.get(key);
+      if (message) return { status: 'error', message };
+      if (preparing.has(key) || assetQueue.has(key)) return { status: 'loading' };
+    },
+    subscribeAssets(listener: () => void) { assetListeners.add(listener); return () => { assetListeners.delete(listener); }; },
     close() {
       if (closed) return;
       closed = true; lifetime.abort(failure('作品连接已关闭。', 'CLOSED'));
       for (const asset of assets.values()) URL.revokeObjectURL(asset.url);
-      assets.clear(); preparing.clear(); transfers.clear(); assetBytes = 0;
+      assets.clear(); preparing.clear(); assetQueue.clear(); assetErrors.clear(); assetListeners.clear(); transfers.clear(); assetBytes = 0;
     },
   };
 }

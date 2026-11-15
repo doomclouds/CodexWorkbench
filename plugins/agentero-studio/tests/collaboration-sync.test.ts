@@ -9,6 +9,53 @@ const editor: Actor = { id: 'editor', name: 'Editor', kind: 'human', role: 'edit
 const viewer: Actor = { id: 'viewer', name: 'Viewer', kind: 'human', role: 'viewer' };
 const instances: StudioCollaboration[] = [], folders: string[] = [];
 const create = (dataRoot?: string) => { const instance = new StudioCollaboration({ dataRoot }); instances.push(instance); return instance; };
+
+describe('explicit Agent work areas', () => {
+  const agent: Actor = { id: 'agent-builder', name: 'Builder', kind: 'agent', role: 'owner' };
+  it('keeps an explicit task across tool completions and isolates parallel agents and tasks', () => {
+    const collaboration = create();
+    collaboration.activity('board-a', { action: 'begin', taskId: 'diagram', scope: { rect: { x: 100, y: 200, w: 600, h: 400 } }, label: '扩展架构图' }, agent);
+    const done = collaboration.beginActivity('board-a', agent, { status: 'writing', editingIds: ['shape'] }); done();
+    expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'working', editingIds: [], agentTasks: [{ taskId: 'diagram', label: '扩展架构图' }] });
+    collaboration.activity('board-a', { action: 'begin', taskId: 'second', scope: { ids: ['other'] } }, agent);
+    const other = { ...agent, id: 'agent-other' };
+    collaboration.activity('board-a', { action: 'begin', taskId: 'diagram', scope: { ids: ['another'] } }, other);
+    collaboration.activity('board-a', { action: 'end', taskId: 'diagram' }, agent);
+    const peers = collaboration.getPresence('board-a');
+    expect(peers.find(peer => peer.actor.id === agent.id)!.context!.agentTasks).toEqual([expect.objectContaining({ taskId: 'second' })]);
+    expect(peers.find(peer => peer.actor.id === other.id)!.context!.agentTasks).toEqual([expect.objectContaining({ taskId: 'diagram' })]);
+  });
+  it('renews a bounded lease, expires the task without a final message, and rejects stale updates', () => {
+    vi.useFakeTimers(); vi.setSystemTime(1000); const collaboration = create();
+    collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape'] } }, agent);
+    vi.advanceTimersByTime(59_000);
+    expect(collaboration.activity('board-a', { action: 'update', taskId: 'work', label: '正在整理' }, agent).tasks[0]!.expiresAt).toBe(120_000);
+    vi.advanceTimersByTime(59_999); expect(collaboration.getPresence('board-a')[0]!.context!.agentTasks).toHaveLength(1);
+    vi.advanceTimersByTime(1001); expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'idle', editingIds: [], agentTasks: [] });
+    expect(() => collaboration.activity('board-a', { action: 'update', taskId: 'work' }, agent)).toThrow(/失效/);
+    expect(collaboration.activity('board-a', { action: 'end', taskId: 'work' }, agent).tasks).toEqual([]);
+    vi.advanceTimersByTime(20_000); expect(collaboration.getPresence('board-a')).toEqual([]);
+  });
+  it('accepts only owner Agents and valid nonempty scopes, with an explicit parallel-task bound', () => {
+    const collaboration = create();
+    for (const actor of [LOCAL_ACTOR, { ...agent, role: 'editor' as const }]) expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape'] } }, actor)).toThrow();
+    for (const scope of [{}, { ids: [] }, { rect: { x: 0, y: 0, w: 0, h: 100 } }, { rect: { x: Infinity, y: 0, w: 100, h: 100 } }]) expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope }, agent)).toThrow();
+    for (let i = 0; i < 8; i++) collaboration.activity('board-a', { action: 'begin', taskId: `task-${i}`, scope: { ids: ['shape'] } }, agent);
+    expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'ninth', scope: { ids: ['shape'] } }, agent)).toThrow(/并行/);
+    for (let n = 1; n < 8; n++) for (let i = 0; i < 8; i++) collaboration.activity('board-a', { action: 'begin', taskId: `task-${i}`, scope: { ids: ['shape'] } }, { ...agent, id: `agent-${n}` });
+    expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'overflow', scope: { ids: ['shape'] } }, { ...agent, id: 'agent-overflow' })).toThrow(/并行/);
+    expect(collaboration.getPresence('board-a')).toHaveLength(8);
+  });
+  it('ending a task does not hide an in-flight tool, and forgetting the board prevents late completion resurrection', () => {
+    const collaboration = create();
+    collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape', 'shape'] } }, agent);
+    expect(collaboration.getPresence('board-a')[0]!.context!.agentTasks![0]!.scope.ids).toEqual(['shape']);
+    const done = collaboration.beginActivity('board-a', agent, { status: 'writing', editingIds: ['shape'] });
+    collaboration.activity('board-a', { action: 'end', taskId: 'work' }, agent);
+    expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'writing', editingIds: ['shape'], agentTasks: [] });
+    collaboration.forget('board-a'); done(); expect(collaboration.getPresence('board-a')).toEqual([]);
+  });
+});
 afterEach(async () => { for (const instance of instances.splice(0)) instance.close(); vi.restoreAllMocks(); vi.useRealTimers(); for (const folder of folders.splice(0)) { if (!resolve(folder).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test directory'); await rm(folder, { recursive: true, force: true }); } });
 
 describe('bounded collaboration replay and peer ordering', () => {
@@ -42,7 +89,11 @@ describe('bounded collaboration replay and peer ordering', () => {
     expect((await collaboration.sync('board-a', { after }, LOCAL_ACTOR)).reset).toBe(true);
     const cursor = collaboration.cursor(); collaboration.emit({ type: 'board', artifactId: 'board-a', revision: 30, units: [{ id: 'item', after: { text: 'x'.repeat(150_000) } }] });
     const batch = await collaboration.sync('board-a', { after: cursor }, LOCAL_ACTOR);
-    expect(batch.events).toHaveLength(1); expect(batch.events[0]).toMatchObject({ type: 'board', revision: 30 }); expect(batch.events[0]!.units).toBeUndefined();
+    expect(batch.events).toHaveLength(1); expect(batch.events[0]).toMatchObject({ type: 'board', revision: 30, invalidation: true, changedIds: ['item'] }); expect(batch.events[0]!.units).toBeUndefined();
+    const patchCursor = collaboration.cursor();
+    collaboration.emit({ type: 'board', artifactId: 'board-a', revision: 31, units: [{ id: 'item', patch: { baseVersion: 1, version: 2, changes: { html: 'h'.repeat(150_000) }, removedKeys: [] } }] });
+    const patched = await collaboration.sync('board-a', { after: patchCursor }, LOCAL_ACTOR);
+    expect(patched.events[0]).toMatchObject({ revision: 31, invalidation: true, changedIds: ['item'] }); expect(patched.events[0]!.units).toBeUndefined();
   });
 
   it('keeps modern peer state monotonic and cursor:null clears only the cursor', async () => {

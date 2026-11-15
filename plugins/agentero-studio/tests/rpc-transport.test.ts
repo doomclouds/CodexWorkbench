@@ -173,6 +173,7 @@ describe('MCP App RPC transport', () => {
     });
     const response = await client.request('/api/tools/artifact_read', { method: 'POST' });
     expect(await response.json()).toEqual(document);
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(3));
     expect(paths.filter(path => path === '/assets/image.png')).toHaveLength(1);
     expect(paths).not.toContain('/assets/inline.png'); expect(paths.some(path => path?.includes('other.example'))).toBe(false);
     expect(create).toHaveBeenCalledTimes(3);
@@ -200,11 +201,75 @@ describe('MCP App RPC transport', () => {
       return binary(new Uint8Array([1]));
     });
     await client.request('/api/tools/artifact_list', { method: 'POST' });
+    await vi.waitFor(() => expect(sequence).toBe(64));
     expect(maximum).toBe(4); expect(sequence).toBe(64);
     second = true; await client.request('/api/tools/artifact_read', { method: 'POST' });
+    await vi.waitFor(() => expect(sequence).toBe(65));
     expect(sequence).toBe(65); expect(revoke).toHaveBeenCalledTimes(1);
     expect(client.assetUrl('/assets/new.png')).toBe('blob:preview-65');
     client.close(); expect(revoke).toHaveBeenCalledTimes(65);
+  });
+
+  it('returns a sync event before media is ready and publishes loading, error and completion states', async () => {
+    let finish!: (value: ReturnType<typeof binary>) => void;
+    const media = new Promise<ReturnType<typeof binary>>(resolve => { finish = resolve; });
+    const client = transport(async args => {
+      if (args.path === '/assets/slow.png') return media;
+      if (args.path === '/assets/missing.png') return reply({ ok: false }, 404);
+      return reply({ events: [{ type: 'board', units: [{ id: 'image', after: { src: '/assets/slow.png' } }, { id: 'missing', after: { src: '/assets/missing.png' } }] }] });
+    });
+    const listener = vi.fn(), unsubscribe = client.subscribeAssets(listener);
+    const response = await client.request('/api/sync?artifactId=a&wait=20000');
+    expect((await response.json()).events[0].type).toBe('board');
+    await vi.waitFor(() => expect(client.assetState('/assets/slow.png')).toEqual({ status: 'loading' }));
+    await vi.waitFor(() => expect(client.assetState('/assets/missing.png')).toMatchObject({ status: 'error', message: expect.stringContaining('404') }));
+    expect(client.assetUrl('/assets/slow.png')).toBeUndefined();
+    finish(binary(new Uint8Array([1, 2, 3])));
+    await vi.waitFor(() => expect(client.assetState('/assets/slow.png')).toEqual({ status: 'ready' }));
+    expect(client.assetUrl('/assets/slow.png')).toMatch(/^blob:/); expect(listener).toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('lets foreground metadata enter between resource chunks even with four active large media downloads', async () => {
+    const first: (() => void)[] = [], paths: string[] = [], size = CHUNK + 1;
+    const client = transport(async args => {
+      if (args.action === 'request') {
+        paths.push(args.path);
+        if (args.path === '/api/session') return reply({ owner: true });
+        if (args.path.startsWith('/assets/')) return { status: 200, headers: {}, size, downloadId: args.path };
+        return reply({ elements: Array.from({ length: 4 }, (_, index) => ({ src: `/assets/${index}.png` })) });
+      }
+      if (args.action === 'release') return {};
+      const bytes = new Uint8Array(Math.min(CHUNK, size - args.offset));
+      const value = { data: Buffer.from(bytes).toString('base64'), nextOffset: args.offset + bytes.length, done: args.offset + bytes.length === size };
+      if (args.offset === 0) return new Promise(resolve => first.push(() => resolve(value)));
+      return value;
+    });
+    await client.request('/api/tools/artifact_read', { method: 'POST' });
+    await vi.waitFor(() => expect(first).toHaveLength(4));
+    const foreground = client.request('/api/session');
+    expect(paths).not.toContain('/api/session');
+    first[0]!();
+    expect(await (await foreground).json()).toEqual({ owner: true });
+    expect(client.assetUrl('/assets/1.png')).toBeUndefined();
+    first.slice(1).forEach(finish => finish());
+    await vi.waitFor(() => expect(client.assetState('/assets/3.png')?.status).toBe('ready'));
+  });
+
+  it('cancels background preparation with its caller and releases an unfinished resource transfer', async () => {
+    const released: string[] = [], abort = new AbortController(); let pending = false;
+    const client = transport(async args => {
+      if (args.action === 'release') { released.push(args.transferId); return {}; }
+      if (args.action === 'download') { pending = true; return new Promise(() => {}); }
+      if (args.path === '/assets/cancel.png') return { status: 200, headers: {}, size: CHUNK + 1, downloadId: 'cancel-resource' };
+      return reply({ src: '/assets/cancel.png' });
+    });
+    await client.request('/api/sync?wait=20000', { signal: abort.signal });
+    await vi.waitFor(() => expect(pending).toBe(true));
+    abort.abort();
+    await vi.waitFor(() => expect(released).toEqual(['cancel-resource']));
+    expect(client.assetUrl('/assets/cancel.png')).toBeUndefined();
+    expect(client.assetState('/assets/cancel.png')).toBeUndefined();
   });
 
   it('rejects external origins, unsupported methods, credentials and arbitrary paths without sending', async () => {

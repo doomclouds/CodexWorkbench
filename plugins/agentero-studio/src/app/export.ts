@@ -1,9 +1,8 @@
 import type { Board } from '../contracts/studio.js';
-import { boardBounds, buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg, filenameFor, selectedElements, type ExportOptions } from '../core/serialization.js';
+import { boardBounds, buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg, filenameFor, inlineExportAssets, isHtmlRegionElement, selectedElements, type ExportOptions } from '../core/serialization.js';
 
-async function embedImages(board: Board, options: ExportOptions): Promise<Board> {
+async function embedImages(board: Board, options: ExportOptions, format = 'svg'): Promise<Board> {
   const baseUrl = typeof options.baseUrl === 'string' ? options.baseUrl : location.origin;
-  const cloned = structuredClone(board);
   const cache = new Map<string, Promise<string>>();
   const read = (source: string): Promise<string> => {
     if (source.startsWith('data:')) return Promise.resolve(source);
@@ -18,9 +17,9 @@ async function embedImages(board: Board, options: ExportOptions): Promise<Board>
     })());
     return cache.get(source)!;
   };
-  await Promise.all(cloned.elements.map(async element => {
-    if (element.type === 'image' && element.src) element.src = await read(element.src);
-    if (element.type === 'html' && element.html) {
+  const cloned = await inlineExportAssets(board, format, options, read);
+  if (format !== 'html') await Promise.all(selectedElements(cloned, options).map(async element => {
+    if (isHtmlRegionElement(element) && element.html) {
       const document = new DOMParser().parseFromString(element.html, 'text/html');
       await Promise.all([...document.querySelectorAll('img[src],image[href]')].map(async image => {
         const attribute = image.tagName.toLowerCase() === 'img' ? 'src' : 'href'; const source = image.getAttribute(attribute);
@@ -86,11 +85,11 @@ async function rasterize(svg: string, width: number, height: number): Promise<Bl
 }
 export async function renderBoardPng(board: Board, options: ExportOptions = {}): Promise<Blob> {
   board = await embedImages(board, options);
-  const elements = selectedElements(board, options); const selectedRegion = (options.regionId || options.elementId) && elements.length === 1 && elements[0].type === 'html' ? elements[0] : undefined;
+  const elements = selectedElements(board, options); const selectedRegion = (options.regionId || options.elementId) && elements.length === 1 && isHtmlRegionElement(elements[0]) ? elements[0] : undefined;
   let svg = selectedRegion ? extractRegionSvg(String(selectedRegion.html ?? ''), selectedRegion.id) : undefined;
   if (!svg) {
     const xhtmlRegions: Record<string, string> = {};
-    await Promise.all(elements.filter(element => element.type === 'html').map(async element => { xhtmlRegions[element.id] = await captureRegion(String(element.html ?? ''), element.w, element.h); }));
+    await Promise.all(elements.filter(isHtmlRegionElement).map(async element => { xhtmlRegions[element.id] = await captureRegion(String(element.html ?? ''), element.w, element.h); }));
     svg = buildBoardSvg(board, { ...options, xhtmlRegions });
   }
   const bounds = boardBounds(elements, typeof options.padding === 'number' ? options.padding : 32, board.elements);
@@ -103,8 +102,8 @@ export async function renderBoardPng(board: Board, options: ExportOptions = {}):
 export async function downloadBoard(board: Board, format: string, options: ExportOptions = {}, save: (blob: Blob, filename: string) => Promise<void> = download): Promise<void> {
   const originalTitle = selectedElements(board, options)[0]?.text || board.artifact.title;
   if (format === 'png') { await save(await renderBoardPng(board, options), filenameFor((options.regionId || options.elementId) ? originalTitle : board.artifact.title, 'png')); return; }
-  if (format === 'svg') board = await embedImages(board, options);
-  const elements = selectedElements(board, options); const selectedRegion = (options.regionId || options.elementId) && elements.length === 1 && elements[0].type === 'html' ? elements[0] : undefined;
+  if (format === 'svg' || format === 'html') board = await embedImages(board, options, format);
+  const elements = selectedElements(board, options); const selectedRegion = (options.regionId || options.elementId) && elements.length === 1 && isHtmlRegionElement(elements[0]) ? elements[0] : undefined;
   const title = selectedRegion?.text || board.artifact.title;
   if (format === 'json') { await save(new Blob([JSON.stringify({ ...board, elements }, null, 2)], { type: 'application/json; charset=utf-8' }), filenameFor(title, 'json')); return; }
   if (format === 'html') { await save(new Blob([selectedRegion ? String(selectedRegion.html ?? '') : buildBoardHtml(board, options)], { type: 'text/html; charset=utf-8' }), filenameFor(title, 'html')); return; }

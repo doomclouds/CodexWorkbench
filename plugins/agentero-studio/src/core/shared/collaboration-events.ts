@@ -16,9 +16,13 @@ export class CollaborationEvents {
   cursor(): string { return `${this.epoch}:${this.sequence}`; }
   append(input: StudioEvent): StudioEvent {
     const sequence = ++this.sequence;
-    const event = copy({ ...input, cursor: this.cursor() });
+    const event: StudioEvent = copy({ ...input, cursor: this.cursor() });
     // Content units are an optimization; an invalidation remains valid at any size.
-    if (Buffer.byteLength(JSON.stringify(event)) > 128 * 1024) delete event.units;
+    if (event.units && Buffer.byteLength(JSON.stringify(event)) > 128 * 1024) {
+      event.changedIds ??= event.units.map(unit => unit.id);
+      event.invalidation = true;
+      delete event.units;
+    }
     const bytes = Buffer.byteLength(JSON.stringify(event));
     this.events.push({ sequence, bytes, event }); this.bytes += bytes;
     while (this.events.length > MAX_EVENTS || this.bytes > MAX_BYTES) {

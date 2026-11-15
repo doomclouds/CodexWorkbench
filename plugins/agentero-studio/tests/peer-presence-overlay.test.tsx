@@ -26,6 +26,32 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 async function mount(peers: Presence[], props: Partial<React.ComponentProps<typeof PeerPresenceOverlay>> = {}) { await act(async () => root.render(<PeerPresenceOverlay peers={peers} elements={elements} artifactId="board" selfActorId="self" zoom={2} {...props} />)); }
 async function advance(ms: number) { await act(async () => vi.advanceTimersByTime(ms)); }
 
+it('renders an explicit empty-ground Agent task as a nonblocking animated area and expires it on the server clock', async () => {
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ taskId: 'task', label: '扩展架构图', scope: { rect: { x: 50, y: 70, w: 600, h: 400 } }, expiresAt: START + 2000 }] } });
+  await mount([agent]);
+  const area = host.querySelector<HTMLElement>('[data-agent-task="task"]')!;
+  expect(area).not.toBeNull(); expect(area.style.left).toBe('50px'); expect(area.style.width).toBe('600px'); expect(area.style.pointerEvents).toBe('none');
+  expect(area.textContent).toContain('Builder'); expect(area.textContent).toContain('扩展架构图'); expect(area.querySelector('.studio-agent-working-mark')).not.toBeNull();
+  await advance(2000); expect(host.querySelector('[data-agent-task]')).toBeNull();
+});
+
+it('resolves task IDs against current geometry and keeps independent Agent regions visible', async () => {
+  const task = (id: string, actorId: string) => peer(actorId, { actor: { id: actorId, name: actorId, kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [{ taskId: id, scope: { ids: ['one', 'two'] }, expiresAt: START + 60_000 }] } });
+  const peers = [task('first', 'agent-one'), task('second', 'agent-two')]; await mount(peers);
+  expect(host.querySelectorAll('[data-agent-task]')).toHaveLength(2);
+  const before = host.querySelector<HTMLElement>('[data-agent-task="first"]')!.style.width;
+  await mount(peers, { elements: elements.map(element => element.id === 'two' ? { ...element, x: 900 } : element) });
+  expect(host.querySelector<HTMLElement>('[data-agent-task="first"]')!.style.width).not.toBe(before);
+  await mount(peers, { preview: true }); expect(host.querySelector('[data-agent-task]')).toBeNull();
+});
+
+it('clears Agent claims on the server deadline despite a different client clock and no new presence event', async () => {
+  vi.setSystemTime(START - 7200_000);
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [{ taskId: 'work', scope: { ids: ['one'] }, expiresAt: START + 1000 }] } });
+  await mount([agent], { clockOffsetMs: 7200_000 }); expect(host.querySelector('[data-agent-task]')).not.toBeNull();
+  await advance(1000); expect(host.querySelector('[data-agent-task]')).toBeNull();
+});
+
 it('uses the claimed palette and chooses the freshest cursor per other actor while hiding every self page', async () => {
   const actor = { id: 'alice', name: 'Alice', kind: 'human' as const, role: 'editor' as const };
   await mount([

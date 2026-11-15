@@ -59,6 +59,60 @@ it('delivers committed canvas changes while an unrelated feedback read is still 
   } finally { releaseFeedback(); }
 });
 
+it('applies a real guest geometry patch without pulling unchanged large HTML or embedded state', async () => {
+  const created = await host.service.execute('artifact_manage', { action: 'create', title: 'HTML 轻量反向同步' }), id = created.artifact.id;
+  const html = `<html><body>${'unchanged HTML '.repeat(40000)}</body></html>`, state = { selected: 'preserved' };
+  await host.service.execute('artifact_apply', { artifactId: id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'region', type: 'html', html, state, x: 10, y: 20, w: 800, h: 600 } }] });
+  const shared = await host.service.execute('artifact_share', { artifactId: id, action: 'start', access: 'local' });
+  const invite = new URL(shared.links.editor, host.origin), joined = await fetch(`${host.origin}/api/session${invite.search}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Geometry visitor' }) });
+  expect(joined.status).toBe(200); const cookie = joined.headers.get('set-cookie')!.split(';')[0]!; await joined.json();
+  let current: Board | null = null; const batches: any[] = [], errors: unknown[] = [];
+  const owner = client(host.token), original = owner.request!;
+  owner.request = vi.fn(async (input, init) => {
+    const response = await original(input, init);
+    if (new URL(String(input)).pathname === '/api/sync') batches.push(await response.clone().json());
+    return response;
+  });
+  const controller = createCollaboration({ client: owner, polling: true, artifactId: id, peerId: 'html-patch-page', getDocument: () => current, onDocument: value => { current = value as Board; }, onFeedback: () => {}, onPresence: () => {}, onStatus: () => {}, onEvent: () => {}, onError: error => errors.push(error) }); closes.push(controller.close);
+  await until(() => current?.artifact.revision === 1);
+  await client('', cookie).call('artifact_apply', { artifactId: id, operationId: randomUUID(), expectedVersions: { region: 1 }, operations: [{ op: 'update', id: 'region', changes: { x: 420 } }] });
+  await until(() => current?.artifact.revision === 2);
+  expect(current!.elements[0]).toMatchObject({ x: 420, version: 2, html, state, sourceRevision: 1 });
+  const event = batches.flatMap(batch => batch.events).find(value => value.type === 'board' && value.revision === 2);
+  expect(event.units).toEqual([{ id: 'region', patch: { baseVersion: 1, version: 2, changes: { x: 420 }, removedKeys: [] } }]);
+  expect(Buffer.byteLength(JSON.stringify(event))).toBeLessThan(2048);
+  const reads = vi.mocked(owner.request!).mock.calls.filter(([input]) => new URL(String(input)).pathname.endsWith('/artifact_read'));
+  expect(reads.map(([, init]) => JSON.parse(String(init?.body)).mode)).toEqual(['board']);
+  expect(errors).toEqual([]);
+});
+
+it('repairs an exact historical unit while a later concurrent commit continues arriving', async () => {
+  const created = await host.service.execute('artifact_manage', { action: 'create', title: '精确单元历史补读' }), id = created.artifact.id;
+  const html = '<p>keep source</p>'.repeat(20000);
+  await host.service.execute('artifact_apply', { artifactId: id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'region', type: 'html', html, state: { kept: true } } }, { op: 'add', element: { id: 'other', type: 'note', text: 'another object' } }] });
+  let current: Board | null = null, repairing = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; }), owner = client(host.token), original = owner.request!, errors: unknown[] = [];
+  owner.request = vi.fn(async (input, init) => {
+    const args = init?.body ? JSON.parse(String(init.body)) : {};
+    if (args.mode === 'units') { repairing = true; await gate; }
+    return original(input, init);
+  });
+  const controller = createCollaboration({ client: owner, polling: true, artifactId: id, peerId: 'unit-repair-page', getDocument: () => current, onDocument: value => { current = value as Board; }, onFeedback: () => {}, onPresence: () => {}, onStatus: () => {}, onEvent: () => {}, onError: error => errors.push(error) }); closes.push(controller.close);
+  try {
+    await until(() => current?.artifact.revision === 1);
+    current = { ...current!, elements: current!.elements.map(element => element.id === 'region' ? { ...element, version: 0 } : element) };
+    await host.service.execute('artifact_apply', { artifactId: id, operationId: randomUUID(), expectedVersions: { region: 1 }, operations: [{ op: 'update', id: 'region', changes: { x: 300 } }] });
+    await until(() => repairing);
+    await host.service.execute('artifact_apply', { artifactId: id, operationId: randomUUID(), expectedVersions: { other: 1 }, operations: [{ op: 'update', id: 'other', changes: { y: 700 } }] });
+    release(); await until(() => current?.artifact.revision === 3);
+    expect(current!.elements.find(element => element.id === 'region')).toMatchObject({ x: 300, version: 2, html, state: { kept: true } });
+    expect(current!.elements.find(element => element.id === 'other')).toMatchObject({ y: 700, version: 2 });
+    const reads = vi.mocked(owner.request!).mock.calls.filter(([input]) => new URL(String(input)).pathname.endsWith('/artifact_read')).map(([, init]) => JSON.parse(String(init?.body)));
+    expect(reads).toEqual([{ artifactId: id, mode: 'board' }, { artifactId: id, mode: 'units', ids: ['region'], atRevision: 2 }]);
+    expect(errors).toEqual([]);
+  } finally { release(); }
+});
+
 it('recovers an asynchronously failed feedback read without requiring another edit', async () => {
   const created = await host.service.execute('artifact_manage', { action: 'create', title: '评论读取恢复' }), id = created.artifact.id;
   let current: Board | null = null, attempts = 0, recovered = false;

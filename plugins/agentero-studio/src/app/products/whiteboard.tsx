@@ -24,12 +24,15 @@ function thumbnailUrl(client: StudioClient, thumbnail: string): string | undefin
   } catch { return undefined; }
 }
 function WhiteboardPreview({ artifact, cached, client }: { artifact: Artifact; cached?: Board; client: StudioClient }) {
+  const [, assetsChanged] = useState(0);
+  useEffect(() => client.subscribeAssets?.(() => assetsChanged(value => value + 1)), [client]);
   const image = artifact.thumbnail ? thumbnailUrl(client, artifact.thumbnail) : undefined;
+  const assetState = artifact.thumbnail ? client.assetState?.(artifact.thumbnail) : undefined;
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [image]);
   if (image && !failed) return <div className="studio-artifact-preview"><img src={image} alt="" loading="lazy" onError={() => setFailed(true)} /></div>;
   const elements = cached?.elements.filter(element => element.type !== 'arrow' && element.type !== 'stroke') || [];
-  if (!elements.length) return <div className="studio-artifact-preview studio-blank-preview"><div className="studio-preview-paper"><span /><span /><span /></div><span>{failed ? '预览暂不可用' : cached ? '空白白板' : '打开作品查看内容'}</span></div>;
+  if (!elements.length) return <div className="studio-artifact-preview studio-blank-preview"><div className="studio-preview-paper"><span /><span /><span /></div><span role={assetState?.status === 'error' ? 'alert' : assetState?.status === 'loading' ? 'status' : undefined}>{assetState?.status === 'error' ? assetState.message : assetState?.status === 'loading' ? '正在加载预览…' : failed ? '预览暂不可用' : cached ? '空白白板' : '打开作品查看内容'}</span></div>;
   const left = Math.min(...elements.map(element => element.x)) - 32;
   const top = Math.min(...elements.map(element => element.y)) - 32;
   const width = Math.max(480, ...elements.map(element => element.x + element.w - left)) + 32;
@@ -200,7 +203,7 @@ export const whiteboardProduct: ProductDescriptor = {
     if (anchor.coordinateSpace === 'board' && typeof anchor.x === 'number' && typeof anchor.y === 'number') return { ids: [], bounds: { x: anchor.x, y: anchor.y, w: anchor.w || 200, h: anchor.h || 120 } };
     return undefined;
   },
-  exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'svg', label: 'SVG 图片' }, { format: 'html', label: '交互页面 (.html)' }, { format: 'json', label: '白板文件 (.json)' }],
+  exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'svg', label: 'SVG 图片' }, { format: 'html', label: '整板网页（HTML）' }, { format: 'json', label: '白板文件 (.json)' }],
   exportDocument: exportWhiteboard,
 };
 
@@ -209,7 +212,18 @@ export function applyWhiteboardRemoteEvent(board: Board, event: StudioEvent): Bo
   let elements = [...board.elements], style = board.style, motion = board.motion, orderVersion = board.orderVersion;
   let order: string[] | undefined;
   for (const unit of event.units) {
-    if (unit.id === '$style') { if (!unit.after || typeof unit.after !== 'object' || Array.isArray(unit.after)) return; style = unit.after as Board['style']; }
+    if ('patch' in unit) {
+      if (unit.id.startsWith('$')) return;
+      const patch = unit.patch, index = elements.findIndex(element => element.id === unit.id), current = elements[index];
+      if (!current || !patch || !Number.isSafeInteger(patch.baseVersion) || patch.baseVersion < 1 || current.version !== patch.baseVersion || !Number.isSafeInteger(patch.version) || patch.version <= patch.baseVersion || !patch.changes || typeof patch.changes !== 'object' || Array.isArray(patch.changes) || !Array.isArray(patch.removedKeys)) return;
+      const reserved = ['id', 'type', 'version'];
+      if (Object.keys(patch.changes).some(key => reserved.includes(key)) || patch.removedKeys.some(key => typeof key !== 'string' || reserved.includes(key) || Object.hasOwn(patch.changes, key))) return;
+      const next: BoardElement = { ...current, ...patch.changes, version: patch.version };
+      for (const key of patch.removedKeys) delete next[key];
+      if (![next.x, next.y, next.w, next.h].every(Number.isFinite) || next.w < 0 || next.h < 0) return;
+      elements[index] = next;
+    }
+    else if (unit.id === '$style') { if (!unit.after || typeof unit.after !== 'object' || Array.isArray(unit.after)) return; style = unit.after as Board['style']; }
     else if (unit.id === '$motion') { if (unit.after !== null && (typeof unit.after !== 'object' || Array.isArray(unit.after))) return; motion = unit.after as Board['motion'] ?? undefined; }
     else if (unit.id === '$order') { const next = unit.after as { ids?: unknown; version?: unknown } | null; if (!next || !Array.isArray(next.ids) || !next.ids.every(id => typeof id === 'string') || !Number.isSafeInteger(next.version)) return; order = next.ids; orderVersion = Number(next.version); }
     else if (unit.id.startsWith('$')) return;

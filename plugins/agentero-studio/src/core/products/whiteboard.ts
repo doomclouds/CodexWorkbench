@@ -5,6 +5,7 @@ import type { ArtifactState, ContentChange, ProductAdapter, Snapshot, UnitClock 
 import { jsonEqual, mergeConflictDetails, mergeJson } from '../shared/safe-merge.js';
 import type { ProductDefinition } from '../shared/products.js';
 import { arrowGeometry } from './whiteboard-geometry.js';
+import { inlineExportAssets } from '../serialization.js';
 
 export type WhiteboardContent = Omit<Board, 'artifact'>;
 export type SourceSnapshot = { version: number; artifactId: string; feedbackId?: string; element?: BoardElement } & (
@@ -384,22 +385,9 @@ export const whiteboardProduct: ProductDefinition<WhiteboardContent, Operation, 
     catch (error) { if ((error as { code?: string }).code !== 'EXPORT_BROWSER_REQUIRED') throw error; return whiteboardProduct.export(snapshot, 'svg', { padding: 16 }, resources); }
   },
   async export(snapshot, format, options, resources) {
-    const { exportArtifact } = await import('../export.js'); const board = copy(boardView(snapshot));
-    if (resources && format !== 'json') {
-      const cache = new Map<string, string>();
-      const inline = async (reference: string) => { if (!cache.has(reference)) cache.set(reference, await resources.assetDataUri(reference)); return cache.get(reference)!; };
-      for (const element of board.elements) {
-        for (const key of ['src', 'video'] as const) if (typeof element[key] === 'string' && element[key]!.startsWith('/assets/')) element[key] = await inline(element[key]!);
-        if (typeof element.html === 'string') {
-          const attributes = /((?:src|href|poster)\s*=\s*["'])(\/assets\/[^"'<>]+)(["'])/gi;
-          const urls = /url\(\s*["']?(\/assets\/[^)"']+)["']?\s*\)/gi;
-          for (const match of element.html.matchAll(attributes)) await inline(match[2]);
-          for (const match of element.html.matchAll(urls)) await inline(match[1]);
-          element.html = element.html.replace(attributes, (_, prefix, reference, suffix) => `${prefix}${cache.get(reference)}${suffix}`).replace(urls, (_, reference) => `url("${cache.get(reference)}")`);
-        }
-      }
-    }
-    return exportArtifact(board, format, options);
+    const { exportArtifact } = await import('../export.js'), board = boardView(snapshot);
+    const prepared = resources && format !== 'json' ? await inlineExportAssets(board, format, options, reference => resources.assetDataUri(reference)) : board;
+    return exportArtifact(prepared, format, options);
   },
   decodeLegacy: decodeWhiteboardState,
 };

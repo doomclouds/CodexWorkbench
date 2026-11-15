@@ -9,6 +9,60 @@ import { useNativeGestureSync, type NativeGesture } from '../src/app/shared/useN
 import { claimParticipantColor, participantColor } from '../src/app/shared/presence-members';
 import { useViewportFollow } from '../src/app/shared/useViewportFollow';
 
+it.each(['human', 'agent'] as const)('keeps %s identity visible but disables follow throughout a preview', async kind => {
+  const onFollow = vi.fn(), peer: Presence = { peerId: 'preview-peer', actor: { id: 'preview-member', name: 'Preview member', kind, role: 'owner' }, context: { artifactId: 'board', viewId: 'preview-peer', selectedIds: [], viewport: { x: 30, y: 20, zoom: 1 }, agentTasks: [{ taskId: 'task', scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: Date.now() + 60000 }] }, updatedAt: new Date().toISOString() };
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[peer]} following="" onFollow={onFollow} preview />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  const follow = container.querySelector<HTMLButtonElement>('.studio-online-row button')!;
+  expect(container.textContent).toContain(peer.actor.name); expect(follow.disabled).toBe(true); expect(follow.title).toBe('预览期间不能跟随，请先退出预览');
+  await act(async () => follow.click()); expect(onFollow).not.toHaveBeenCalled();
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[peer]} following="" onFollow={onFollow} />));
+  expect(follow.disabled).toBe(false); await act(async () => follow.click()); expect(onFollow).toHaveBeenCalledWith(peer.actor.id);
+});
+
+it('offers explicit Agent-area follow without inventing a viewport, and disables it on lease expiry', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000); const onFollow = vi.fn();
+  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', name: 'Builder', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], activity: 'working', agentTasks: [{ taskId: 'work', label: '扩展架构图', scope: { rect: { x: 100, y: 100, w: 500, h: 300 } }, expiresAt: 2000 }] }, updatedAt: new Date().toISOString() };
+  await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={[peer]} following="" onFollow={onFollow} />));
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  expect(container.textContent).toContain('扩展架构图');
+  const follow = container.querySelector<HTMLButtonElement>('.studio-online-row button')!;
+  expect(follow.disabled).toBe(false); await act(async () => follow.click()); expect(onFollow).toHaveBeenCalledWith('agent');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  await act(async () => vi.advanceTimersByTimeAsync(1001));
+  expect(container.querySelector<HTMLButtonElement>('.studio-online-row button')!.disabled).toBe(true);
+});
+
+it('follows the Agent world area with pan and zoom, yields while editing, and stops on task expiry', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  const onStop = vi.fn(), room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} };
+  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], agentTasks: [{ taskId: 'work', scope: { rect: { x: 100, y: 200, w: 600, h: 400 } }, expiresAt: 2000 }] }, updatedAt: new Date().toISOString() };
+  function Fixture({ busy }: { busy: boolean }) {
+    const area = useRef<HTMLDivElement>(null);
+    const follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers: [peer], following: 'agent', room, area, busy, onStop });
+    return <div ref={node => { area.current = node; if (node) { Object.defineProperty(node, 'clientWidth', { configurable: true, value: 400 }); Object.defineProperty(node, 'clientHeight', { configurable: true, value: 400 }); } }}><output>{JSON.stringify(follow.viewport)}</output></div>;
+  }
+  await act(async () => root.render(<Fixture busy />)); expect(container.querySelector('output')!.textContent).toBe('');
+  await act(async () => root.render(<Fixture busy={false} />));
+  const view = JSON.parse(container.querySelector('output')!.textContent!); expect(view.zoom).toBeLessThan(1); expect(view.x).toBeLessThan(0); expect(view.y).toBeLessThan(0);
+  await act(async () => vi.advanceTimersByTimeAsync(1001)); expect(onStop).toHaveBeenCalledOnce();
+});
+
+it('keeps an Agent ID target on current board geometry and exits when that target disappears', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  const room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} }, onStop = vi.fn();
+  const peer: Presence = { peerId: 'agent-peer', actor: { ...LOCAL_ACTOR, id: 'agent', kind: 'agent' }, context: { artifactId: 'board', viewId: 'agent-peer', selectedIds: [], agentTasks: [{ taskId: 'work', scope: { ids: ['shape'] }, expiresAt: 62000 }] }, updatedAt: new Date().toISOString() };
+  const board: Board = { artifact: { id: 'board', type: 'whiteboard', title: '', revision: 0, createdAt: '', updatedAt: '', pinned: false }, elements: [{ id: 'shape', type: 'shape', x: 0, y: 0, w: 100, h: 100, version: 1 }], style: DEFAULT_STYLE };
+  function Fixture({ document }: { document: Board }) {
+    const area = useRef<HTMLDivElement>(null), follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers: [peer], following: 'agent', room, area, busy: false, onStop, document });
+    return <div ref={area}><output>{JSON.stringify(follow.viewport)}</output></div>;
+  }
+  await act(async () => root.render(<Fixture document={board} />)); const first = JSON.parse(container.querySelector('output')!.textContent!);
+  await act(async () => root.render(<Fixture document={{ ...board, elements: [{ ...board.elements[0]!, x: 1000 }] }} />)); const moved = JSON.parse(container.querySelector('output')!.textContent!);
+  expect(moved.x).toBeLessThan(first.x - 900); expect(onStop).not.toHaveBeenCalled();
+  await act(async () => root.render(<Fixture document={{ ...board, elements: [] }} />)); expect(onStop).toHaveBeenCalledOnce(); expect(container.querySelector('output')!.textContent).toBe('');
+});
+
 let root: Root, container: HTMLDivElement;
 beforeEach(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; container = document.createElement('div'); container.className = 'studio'; document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });

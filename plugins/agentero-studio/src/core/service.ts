@@ -1,4 +1,4 @@
-import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Presence, type Role, type StudioEvent, type ToolName } from '../contracts/studio.js';
+import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Presence, type Role, type StudioEvent, type StudioUnitEvent, type ToolName } from '../contracts/studio.js';
 import { copy, safeId, StudioError, StudioStore, type ArtifactState } from './store.js';
 import { assertAlive, object, requireRole, text } from './shared/common.js';
 import { createArtifact, listArtifacts, manageArtifact } from './shared/artifacts.js';
@@ -14,6 +14,7 @@ import { duplicateAssets, importAsset, deleteAsset, listAssets, putAsset, getAss
 import { ThumbnailCache } from './shared/thumbnails.js';
 import { exportArchive, importArchive as importArtifactArchive, readArchiveInput } from './shared/archive.js';
 import { userInfo } from 'node:os';
+import { jsonEqual } from './shared/safe-merge.js';
 
 export { StudioError } from './store.js';
 export type { ExportRecord } from './shared/files.js';
@@ -42,10 +43,26 @@ export class StudioService {
   configureLocalOrigin(origin: string) { this.localOrigin = origin; }
   subscribe(artifactId: string, listener: (event: StudioEvent) => void): () => void { return this.collaboration.subscribe(artifactId, listener); }
   private emit(event: StudioEvent) { this.collaboration.emit(event); }
-  private emitBoard(snapshot: Snapshot<unknown>, changedIds: string[]) {
+  private boardUnits(snapshot: Snapshot<unknown>, changedIds: string[], before?: unknown): StudioUnitEvent[] {
     const adapter = this.products.get(snapshot.artifact.type).adapter;
-    const units = [...new Set(changedIds)].map(id => ({ id, after: copy(adapter.readUnit(snapshot.content, id) ?? null) }));
-    this.emit({ type: 'board', artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds, artifact: copy(snapshot.artifact), ...(Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true }) });
+    const ids = new Set(changedIds);
+    if (before !== undefined && snapshot.artifact.type === 'whiteboard' && !ids.has('$order') && !jsonEqual(adapter.readUnit(before, '$order'), adapter.readUnit(snapshot.content, '$order'))) ids.add('$order');
+    return [...ids].map(id => {
+      const after = adapter.readUnit(snapshot.content, id) ?? null;
+      const previous = before === undefined ? null : adapter.readUnit(before, id);
+      const full = { id, after: copy(after) };
+      if (snapshot.artifact.type !== 'whiteboard' || id.startsWith('$') || !object(previous) || !object(after) || previous.id !== id || after.id !== id || previous.type !== after.type || !Number.isSafeInteger(previous.version) || !Number.isSafeInteger(after.version)) return full;
+      const changes: Record<string, unknown> = {}, removedKeys: string[] = [];
+      for (const key of new Set([...Object.keys(previous), ...Object.keys(after)])) {
+        if (['id', 'type', 'version'].includes(key) || jsonEqual(previous[key], after[key])) continue;
+        if (after[key] === undefined) removedKeys.push(key); else changes[key] = copy(after[key]);
+      }
+      const compact = { id, patch: { baseVersion: Number(previous.version), version: Number(after.version), changes, removedKeys } };
+      return Buffer.byteLength(JSON.stringify(compact)) < Buffer.byteLength(JSON.stringify(full)) ? compact : full;
+    });
+  }
+  private emitBoard(snapshot: Snapshot<unknown>, changedIds: string[], units = this.boardUnits(snapshot, changedIds)) {
+    this.emit({ type: 'board', artifactId: snapshot.artifact.id, revision: snapshot.artifact.revision, changedIds: [...new Set([...changedIds, ...units.map(unit => unit.id)])], artifact: copy(snapshot.artifact), ...(Buffer.byteLength(JSON.stringify(units)) <= 128 * 1024 ? { units } : { invalidation: true }) });
   }
   private authorizedActor(state: AuthorizationState, actor: Actor, authority?: StudioAuthority): Actor {
     if (!authority) return actor;
@@ -69,7 +86,7 @@ export class StudioService {
   private async perform(name: ToolName, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<any> {
     let finish: (() => void) | undefined;
     const createsArtifact = name === 'artifact_manage' && ['create', 'import'].includes(text(args.action, 'create'));
-    if (actor.kind === 'agent' && args.artifactId !== undefined && !createsArtifact) {
+    if (actor.kind === 'agent' && args.artifactId !== undefined && !createsArtifact && name !== 'artifact_activity') {
       const id = safeId(args.artifactId), projected = await this.store.readProjection(id, state => {
         const adapter = this.products.get(state.artifact.type).adapter;
         const ids = name === 'artifact_apply' && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap(operation => object(operation) && typeof operation.op === 'string' ? mutationTargets(state.content, operation as unknown as ContentOperation, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
@@ -88,6 +105,7 @@ export class StudioService {
     if (name === 'artifact_manage') return this.manage(args, actor, authority);
     const id = safeId(args.artifactId);
     if (name === 'artifact_read') return this.read(id, args, actor, authority);
+    if (name === 'artifact_activity') return this.activity(id, args, actor, authority);
     if (name === 'artifact_apply') return this.apply(id, args, actor, authority);
     if (name === 'artifact_feedback') return this.feedback(id, args, actor, authority);
     if (name === 'artifact_share') return this.share(id, args, actor, authority);
@@ -156,6 +174,15 @@ export class StudioService {
   }
   private async read(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     const mode = text(args.mode, 'document');
+    if (mode === 'units') return this.store.readProjection(id, current => {
+      this.authorizedActor(current, actor, authority);
+      if (!Array.isArray(args.ids) || !args.ids.length || args.ids.length > 200 || args.ids.some(value => typeof value !== 'string')) throw new StudioError('INVALID_ARGUMENT', '请提供 1 到 200 个内容单元 ID。');
+      if (!Number.isSafeInteger(args.atRevision) || Number(args.atRevision) < 0) throw new StudioError('INVALID_ARGUMENT', '精确补读需要有效的作品版本。');
+      const snapshot = current.artifact.revision === args.atRevision ? current : current.history.find(saved => saved.artifact.revision === args.atRevision);
+      if (!snapshot) throw new StudioError('VERSION_NOT_FOUND', '该同步版本已不在保留历史中，请重新读取作品。');
+      const adapter = this.products.get(current.artifact.type).adapter;
+      return { artifact: copy(snapshot.artifact), units: [...new Set(args.ids as string[])].map(unitId => ({ id: unitId, after: copy(adapter.readUnit(snapshot.content, unitId) ?? null) })) };
+    });
     if (mode === 'source' && args.contextId !== undefined && args.feedbackId === undefined) args = { ...args, feedbackId: safeId(args.contextId, '反馈 ID') };
     if (mode === 'assets') requireRole(actor, ['owner']);
     if (mode === 'context') return this.store.readProjection(id, state => {
@@ -208,10 +235,12 @@ export class StudioService {
         }
         if (conflicts.size) throw new StudioError('EDIT_IN_PROGRESS', '目标内容正在其他视图中编辑，请等待编辑完成后重试。', { ids: [...conflicts] });
       }
-      return applyMutation(state, { operationId: args.operationId, operations: args.operations as ContentOperation[], expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
+      const before = state.content;
+      const mutation = applyMutation(state, { operationId: args.operationId, operations: args.operations as ContentOperation[], expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
+      return { ...mutation, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
     });
     const snapshot = result.snapshot;
-    if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds);
+    if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits);
     return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
   }
   private async feedback(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
@@ -231,15 +260,35 @@ export class StudioService {
       return { feedback };
     }
     if (['suggest', 'choose', 'withdraw'].includes(action)) {
-      const result = await this.store.transaction(id, state => updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
+      const result = await this.store.transaction(id, state => {
+        const before = state.content;
+        const next = updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter);
+        return { ...next, eventUnits: next.changed && next.snapshot && next.historyEntry ? this.boardUnits(next.snapshot, next.historyEntry.changedIds, before) : [] };
+      });
       // SSE is a shared channel. Publish only a refresh notification, never private options.
       this.emit({ type: 'feedback', artifactId: id });
-      if (result.changed && result.snapshot && result.historyEntry) this.emitBoard(result.snapshot, result.historyEntry.changedIds);
-      const { snapshot, changed: _changed, ...response } = result;
+      if (result.changed && result.snapshot && result.historyEntry) this.emitBoard(result.snapshot, result.historyEntry.changedIds, result.eventUnits);
+      const { snapshot, changed: _changed, eventUnits: _eventUnits, ...response } = result;
       return { ...response, ...(snapshot ? this.products.get(snapshot.artifact.type).result(snapshot) : {}) };
     }
     const result = await this.store.transaction(id, state => updateFeedback(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
     this.emit({ type: 'feedback', artifactId: id }); return result;
+  }
+  private async activity(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
+    const currentActor = await this.store.readProjection(id, state => {
+      const current = this.authorizedActor(state, actor, authority);
+      requireRole(current, ['owner']); assertAlive(state.artifact);
+      if (current.kind !== 'agent') throw new StudioError('FORBIDDEN', '工作区域声明仅供 Agent 使用。');
+      if (state.artifact.type !== 'whiteboard') throw new StudioError('INVALID_ARGUMENT', '该作品不支持白板工作区域。');
+      if (object(args.scope) && args.scope.ids !== undefined) {
+        const ids = args.scope.ids;
+        if (!Array.isArray(ids) || !ids.length || ids.length > 200 || ids.some(value => typeof value !== 'string' || value.startsWith('$'))) throw new StudioError('INVALID_ARGUMENT', '工作区域需要 1 到 200 个对象 ID。');
+        const adapter = this.products.get(state.artifact.type).adapter;
+        for (const target of ids) if (adapter.readUnit(state.content, safeId(target, '对象 ID')) == null) throw new StudioError('NOT_FOUND', '工作区域中的对象不存在。', { id: target });
+      }
+      return current;
+    });
+    return this.collaboration.activity(id, args, currentActor);
   }
   private async share(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     const action = text(args.action, 'status');
@@ -248,7 +297,7 @@ export class StudioService {
     const info = (state: AuthorizationState) => shareInfo(id, state.sharing, sharingAccess(state.sharing) === 'local' ? this.localOrigin : this.sharingOrigin, this.getPresence(id), this.owner, actor);
     if (action === 'status') return info(current);
     requireRole(actor, ['owner']);
-    if (!['start', 'stop', 'reset', 'link', 'role', 'remove', 'restore'].includes(action)) throw new StudioError('INVALID_ARGUMENT', '不支持的分享操作。');
+    if (!['start', 'stop', 'reset', 'link', 'role', 'remove', 'restore', 'forget'].includes(action)) throw new StudioError('INVALID_ARGUMENT', '不支持的分享操作。');
     // Validate before opening LAN, and close a newly opened listener if the commit fails.
     assertAlive(current.artifact); let opened = false;
     try {
@@ -257,11 +306,12 @@ export class StudioService {
       const committed = await this.store.transaction(id, state => {
         rememberGuestNames(state);
         const revoked = updateSharing(state.artifact, state.sharing, action, this.authorizedActor(state, actor, authority), args);
+        if (action === 'forget') delete state.guestNames?.[safeId(args.memberId, '成员 ID')];
         return { info: info(state), ...revoked };
       });
       const revokedMembers = [...committed.revokedMemberIds, ...this.getPresence(id).filter(peer => committed.revokedRoles.includes(peer.actor.role as Exclude<Role, 'owner'>)).map(peer => peer.actor.id)];
       if (revokedMembers.length) this.collaboration.revokeMembers(id, revokedMembers);
-      const reason = action === 'restore' ? 'access-restored' : action === 'role' ? 'role-changed' : action === 'remove' ? 'removed' : action === 'reset' ? 'link-reset' : action === 'link' ? 'link-disabled' : action === 'start' && args.access === 'local' ? 'local-only' : 'sharing-closed';
+      const reason = action === 'restore' ? 'access-restored' : action === 'role' ? 'role-changed' : action === 'remove' || action === 'forget' ? 'removed' : action === 'reset' ? 'link-reset' : action === 'link' ? 'link-disabled' : action === 'start' && args.access === 'local' ? 'local-only' : 'sharing-closed';
       this.emit({ type: 'share', artifactId: id, enabled: committed.info.enabled, access: committed.info.access, reason, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
       if (action === 'stop' || action === 'start' && args.access === 'local') await this.shareHandler?.(false);
       return committed.info;
@@ -295,7 +345,7 @@ export class StudioService {
     };
     const state = await this.store.readProjection(artifactId, authorizationState), hadName = state.guestNames?.[id] !== undefined, actor = resolve(state), member = state.sharing.members?.[id];
     // Persist last-seen at most once a minute rather than writing on every cursor heartbeat.
-    if (!registration && hadName && member && (member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 60_000) return { actor, grantId: member.grantId };
+    if (!registration && hadName && member && (!token || member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 60_000) return { actor, grantId: member.grantId };
     let roleChanged = false, joinedAccess = sharingAccess(state.sharing);
     const joined = await this.store.transaction(artifactId, current => {
       const previousRole = current.sharing.members?.[id]?.role;

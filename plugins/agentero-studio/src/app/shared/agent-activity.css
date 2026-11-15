@@ -1,0 +1,13 @@
+.studio .studio-agent-working-mark{display:inline-block;flex:none;vertical-align:middle;animation:studio-agent-orbit 2.8s linear infinite;transform-origin:center}
+.studio .studio-agent-working-mark circle{animation:studio-agent-breathe 1.4s ease-in-out infinite;transform-origin:center}
+.studio .studio-agent-task-area{position:absolute;box-sizing:border-box;pointer-events:none;background:color-mix(in srgb,var(--agent-work-color) 6%,transparent);border:var(--agent-work-stroke) solid var(--agent-work-color);border-radius:var(--agent-work-radius);color:var(--agent-work-color);z-index:71;transition:left .26s ease,top .26s ease,width .26s ease,height .26s ease}
+.studio .studio-agent-task-area::after{content:"";position:absolute;inset:calc(-1 * var(--agent-work-stroke));border:var(--agent-work-stroke) solid currentColor;border-radius:inherit;pointer-events:none;animation:studio-agent-edge 1.8s ease-in-out infinite}
+.studio .studio-agent-task-label{position:absolute;left:0;bottom:calc(100% + var(--agent-work-gap));display:flex;align-items:center;gap:4px;max-width:340px;padding:3px 8px;border-radius:999px;white-space:nowrap;font:11px/16px Arial,"Microsoft YaHei",sans-serif;transform:scale(var(--agent-work-scale));transform-origin:left bottom;pointer-events:none}
+.studio .studio-agent-task-label>span{overflow:hidden;text-overflow:ellipsis}
+.studio .studio-agent-task-label i{font-style:normal;animation:studio-agent-breathe 1.8s ease-in-out infinite}
+.studio .studio-agent-task-label i+i{animation-delay:.2s}.studio .studio-agent-task-label i+i+i{animation-delay:.4s}
+@keyframes studio-agent-orbit{to{transform:rotate(360deg)}}
+@keyframes studio-agent-breathe{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes studio-agent-edge{0%,100%{opacity:.2}50%{opacity:.65}}
+.studio [hidden] .studio-agent-working-mark,.studio [hidden] .studio-agent-task-area::after{animation-play-state:paused}
+@media(prefers-reduced-motion:reduce){.studio .studio-agent-working-mark,.studio .studio-agent-working-mark circle,.studio .studio-agent-task-label i,.studio .studio-agent-task-area::after{animation:none}.studio .studio-agent-task-area{transition:none}}

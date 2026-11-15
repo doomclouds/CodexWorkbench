@@ -97,6 +97,7 @@
 .studio-image-link { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--canvas-ui-border); border-radius: 5px; color: var(--canvas-ui-text); background: var(--canvas-ui); }
 .studio-crop-preview { max-width: 100%; margin: 0 auto; overflow: hidden; background: var(--canvas-ui-soft); border: 1px solid var(--canvas-ui-border); }
 .studio-media-missing { display: grid; width: 100%; height: 100%; place-items: center; border: 1px solid var(--canvas-ui-border); background: var(--canvas-ui-soft); color: var(--canvas-ui-muted); font-size: 14px; }
+.studio-media-state { position: absolute; inset: 0; padding: 10px; text-align: center; }
 .studio-board-table { width: 100%; height: 100%; border-spacing: 0; border-collapse: separate; border: 1px solid #cdd0d5; border-radius: 5px; overflow: hidden; background: var(--canvas-paper); color: inherit; table-layout: fixed; font-size: inherit; line-height: 1.4; }
 .studio-board-table td, .studio-board-table th { padding: 11px 13px; border-right: 1px solid #e1e2e5; border-bottom: 1px solid #e1e2e5; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: middle; }
 .studio-board-table th { background: #eff0f1; font-weight: 600; }
@@ -134,6 +135,7 @@
 .studio-selection-toolbar { position: absolute; transform: translateX(-50%); display: block; width: max-content; min-height: 42px; max-width: calc(100% - 24px); padding: 5px 7px; border: 1px solid var(--canvas-ui-border); border-radius: 10px; background: var(--canvas-ui); box-shadow: 0 5px 18px #0002; color: var(--canvas-ui-text); z-index: 39; }
 .studio-selection-toolbar button { display: grid; place-items: center; flex-shrink: 0; width: 29px; height: 30px; border: 0; border-radius: 5px; background: transparent; padding: 0; }
 .studio-selection-toolbar button:hover:not(:disabled), .studio-selection-toolbar button[aria-pressed="true"] { background: var(--canvas-ui-soft); }
+.studio-selection-toolbar button.studio-lock-toggle[aria-pressed="true"] { color: var(--canvas-accent); background: color-mix(in srgb, var(--canvas-accent) 22%, var(--canvas-ui)); box-shadow: inset 0 0 0 1.5px var(--canvas-accent); }
 .studio-selection-toolbar .is-active { color: var(--canvas-accent); background: color-mix(in srgb, var(--canvas-accent) 12%, transparent); }
 .studio-selection-toolbar select { width: 48px; height: 28px; border: 0; border-radius: 4px; background: var(--canvas-ui-soft); color: var(--canvas-ui-text); padding: 3px; font-size: 11px; }
 .studio-selection-label { font-size: 12px; padding: 0 7px; white-space: nowrap; }

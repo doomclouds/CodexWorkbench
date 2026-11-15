@@ -8,6 +8,7 @@
 | --- | --- |
 | 读全板、集合、单个文档 | `artifact_read` 的白板、概要、对象或源码读取 |
 | 批量写入、部分更新与删除 | `artifact_apply`，使用稳定对象 ID、操作 ID 和版本前置条件 |
+| 声明 Agent 任务范围、工作提示与可跟随区域 | `artifact_activity`，显式 begin/update/end，临时租约而非内容锁 |
 | 打开编辑器 | `studio_open`；创建另由 `artifact_manage` 完成 |
 | 当前视图上下文 | `artifact_read` 的明确视图或反馈上下文 |
 | 读评论、回复、编辑本人消息、删除讨论、解决与重开 | `artifact_feedback` |
@@ -180,6 +181,28 @@ draw();
 每个 MCP 连接有稳定独立的 Agent 身份，显示名来自公开的 MCP `clientInfo` 并带短标识。多个 Agent 共用一个 MCP 连接时，在各工具调用中显式携带 `participant:{id,name}`，为各自使用不同且稳定的非空 `id`（最多120字符，例如 `main` 或 `/root/child`）；id只用于连接内身份命名空间，不当作文件路径。重试同一操作也保留 participant。该扩展通过现有所有者授权连接生效，访客请求头、名字或页面 peerId不能冒充 Agent，不依赖未公开的宿主 thread/subagent 字段自动猜测身份。
 
 Agent读取或写入作品时，在线协作会显示 `reading`/`writing` 活动；同一身份并发调用合并状态，成功或失败都在最后一个调用结束时清除忙碌与编辑占用，并短暂保留20秒空闲租约后过期。目标页面 `viewId` 只用于读取用户指定的视图上下文，不能作为 Agent 自己的视图身份，也不能用它绕过正在编辑的人类或其他 Agent。遇到 `EDIT_IN_PROGRESS` 保留任务和读取依据，等待相应编辑完成后再核对版本，不用更换 participant 或连续重试绕过占用。
+
+跨多次工具调用的任务另用 `artifact_activity` 声明。只有已授权的所有者 Agent 可调用，普通人类页面和访客不能冒充；同一 MCP 连接内固定 participant，同一任务固定 taskId（字母／数字开头、后续字母数字横线下划线、最多120字符）。每个 Agent 最多8个并行任务、同作品最多64个。任务在内存中保持60秒租约，不写作品、历史或持久锁；单次读取／写入工具的 finally 不会结束显式任务。
+
+```json
+{"artifactId":"实际作品ID","action":"begin","taskId":"extend-diagram","scope":{"rect":{"x":100,"y":200,"w":800,"h":500}},"label":"扩展架构图","participant":{"id":"diagram-builder","name":"图解扩展"}}
+```
+
+`begin` 必须提供非空 scope：已有对象使用 `ids`（最多200个，去重，必须在当前白板存在），新增空地使用 `rect:{x,y,w,h}`（白板世界坐标、有限正尺寸，坐标边界1e7）。label 是最多80字的自然活动描述，不放内部 schema 或虚构进度。`begin` 对同一身份／taskId 可幂等续租；`update` 可以只续租，或带新的 scope/label；`end` 只需 artifactId、taskId、action 与同一 participant，可重复调用。
+
+在任务仍实际进行时、60秒到期前适时 `update`；完成、用户取消、失败或决定放弃该范围时明确 `end`。租约超时会清除区域和工作动画，正在跟随该区域的用户也会退出；收到更新 `NOT_FOUND` 后，先核实任务仍需继续，再重新 begin。不要承诺 Codex 宿主会持续发模型心跳，也不为了保留动画伪造仍在工作的任务。
+
+工作范围会显示淡色非阻塞区域与通用工作动画，用户点击“跟随”后才按区域平移／缩放；本地镜头操作停止跟随，正在编辑／保存时让出。对象型范围使用当前对象位置；范围已删光或任务结束时没有可跟随目标。其他人仍可编辑，任务声明不授予排他锁、额外权限或绕过 `EDIT_IN_PROGRESS` 的能力。
+
+## 精确版本单元补读
+
+`artifact_read {artifactId,mode:"units",ids:[...],atRevision:N}` 返回 `{artifact,units:[{id,after}]}`，units 是数组，`after:null` 表示该单元在指定版本不存在。它主要用于 UI 同步对一个**确切 revision**补齐被有界事件省略的单元；从当前或保留历史读取，不能拿最新 metadata 冒充 N 以跳过期间更新。遇到 `VERSION_NOT_FOUND` 时改读权威快照并重建同步水位，不猜缺失内容。普通模型任务仍优先 summary/objects/source；units 不代替反馈冻结源码、原始 HTML 或版本前置条件。
+
+## 遗忘已移除成员
+
+房主明确要求清除一条已移除成员记录时，使用 `artifact_share {artifactId,action:"forget",memberId}`。仅 owner 可以遗忘 removed 记录；正在有效访问的成员须先明确移除。它只清此作品的旧授权记录和该板姓名占用，不清全局 cookie、不影响同一浏览器的其他作品身份。
+
+遗忘不恢复旧 grant、旧 Reader 或排队请求。对方重新加入须使用仍有效的角色邀请、重新输入姓名并取得新 grant；不能凭同名冒认房主或复活旧请求。过去的评论和历史署名保留原样。`restore` 则是按原成员记录明确恢复访问，两种动作不可混用。
 
 历史记录、本人撤销、整板恢复与回收站不同。预览不写当前板；恢复产生新记录；撤销不能覆盖后来他人的修改；回收不是永久清理。刷新、关闭、断线后的恢复，以服务确认的内容和待同步状态为准，不把画面还留着当作已经保存。
 

@@ -6,6 +6,7 @@ import InlineTextEditor, { type InlineTextEditorHandle, type InlineTextFormat, t
 import { newClientId } from '../shared/client-id.js';
 import { applyContentIntent } from './content-queue.js';
 import { mergeJson } from '../../core/shared/safe-merge.js';
+import { isEscapeActive } from '../shared/escape.js';
 
 interface Cell { row: number; col: number }
 interface Draft { base: BoardElement; rows: string[][]; rowIds: string[]; columnIds: string[]; widths: number[]; head: boolean; width: number; dirty: boolean }
@@ -20,6 +21,7 @@ interface Props {
   onDraftChange?: (draft: NativeTableDraft | null) => void;
   bodyPaint?: { background: string; color: string };
   headerPaint?: { background: string; color: string };
+  editRequest?: number;
 }
 function makeDraft(element: BoardElement): Draft {
   const source = tableRows(element), columns = Math.max(1, ...source.map(row => row.length));
@@ -38,7 +40,7 @@ function changeDraft(draft: Draft, changes: Partial<Pick<Draft, 'rows' | 'rowIds
 function draftChanges(draft: Draft): Partial<BoardElement> { return { data: { ...draft.base.data, rows: draft.rows, rowIds: draft.rowIds, columnIds: draft.columnIds, columnWidths: draft.widths, head: draft.head }, ...(draft.width !== draft.base.w ? { w: draft.width } : {}) }; }
 function restoreDraft(draft?: NativeTableDraft): Draft | null { return draft ? { ...makeDraft({ ...draft.base, ...draft.changes }), base: draft.base, dirty: true } : null; }
 
-export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint }: Props) {
+export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint, editRequest }: Props) {
   const [active, setActive] = useState<Cell | null>(null), [draft, setDraft] = useState<Draft | null>(() => restoreDraft(initialDraft));
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [resizing, setResizing] = useState(false);
   const [menu, setMenu] = useState<{ cell: Cell; x: number; y: number } | null>(null);
@@ -120,6 +122,7 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
     return () => clearTimeout(timeout);
   }, [draft?.rows, canEdit, error]);
   const start = (row: number, col: number) => { if (!canEdit || busyRef.current) return; stage(ensureDraft()); setActive({ row, col }); setMenu(null); };
+  useEffect(() => { if (editRequest && selected && canEdit && root.current && isEscapeActive(root.current)) start(0, 0); }, [editRequest]);
   const navigate = async (cell: Cell, next = ensureDraft()) => { stage(next); if (!await save(next, false, cell)) setActive(cell); };
   const insert = (axis: 'row' | 'col', at?: number) => {
     if (!canEdit || busyRef.current) return;
