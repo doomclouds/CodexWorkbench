@@ -82,7 +82,6 @@ export interface StudioClient {
   assetUrl?: (reference: string) => string | undefined;
   subscribeAssets?: (listener: () => void) => () => void;
   assetState?: (reference: string) => { status: 'loading' | 'ready' | 'error'; message?: string } | undefined;
-  openLink?: (url: string) => Promise<void>;
   downloadFile?: (blob: Blob, filename: string) => Promise<void>;
   baseUrl?: string; token?: string; embedded: boolean;
 }

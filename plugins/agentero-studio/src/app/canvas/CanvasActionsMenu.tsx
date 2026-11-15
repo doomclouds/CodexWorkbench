@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { LibraryMenu } from '../LibraryArtifactMenu.js';
-export type CanvasCommand = 'cut' | 'copy' | 'paste' | 'duplicate' | 'front' | 'back' | 'forward' | 'backward' | 'group' | 'ungroup' | 'tidy' | 'delete' | 'lock' | 'select-all' | 'fit';
+export type CanvasCommand = 'cut' | 'copy' | 'paste' | 'duplicate' | 'front' | 'back' | 'forward' | 'backward' | 'group' | 'ungroup' | 'tidy' | 'delete' | 'lock' | 'select-all' | 'fit' | 'fit-selection';
 const rows: { id: CanvasCommand; label: string; shortcut?: string; edit?: boolean; selection?: boolean; geometry?: boolean }[] = [
   { id: 'cut', label: '剪切', shortcut: 'Ctrl/⌘ X', edit: true, selection: true, geometry: true }, { id: 'copy', label: '复制', shortcut: 'Ctrl/⌘ C', selection: true }, { id: 'paste', label: '粘贴', shortcut: 'Ctrl/⌘ V', edit: true }, { id: 'duplicate', label: '重复', shortcut: 'Ctrl/⌘ D', edit: true, selection: true },
   { id: 'front', label: '置于顶层', edit: true, selection: true, geometry: true }, { id: 'back', label: '置于底层', edit: true, selection: true, geometry: true }, { id: 'forward', label: '上移一层', edit: true, selection: true, geometry: true }, { id: 'backward', label: '下移一层', edit: true, selection: true, geometry: true },
   { id: 'group', label: '组合', edit: true, selection: true, geometry: true }, { id: 'ungroup', label: '取消组合', edit: true, selection: true, geometry: true }, { id: 'tidy', label: '整理', edit: true, selection: true, geometry: true }, { id: 'lock', label: '锁定位置与尺寸', shortcut: 'Ctrl/⌘ Shift L', edit: true, selection: true }, { id: 'delete', label: '删除', shortcut: 'Delete', edit: true, selection: true, geometry: true }, { id: 'select-all', label: '全选' }, { id: 'fit', label: '适应白板', shortcut: 'Shift 1' },
+  { id: 'fit-selection', label: '适应选区', shortcut: 'Shift 2', selection: true },
 ];
 export default function CanvasActionsMenu({ point, canEdit, selected, locked, hasClipboard, onCommand, onClose }: { point: { x: number; y: number }; canEdit: boolean; selected: number; locked: boolean; hasClipboard: boolean; onCommand: (command: CanvasCommand) => void; onClose: () => void }) {
   const anchor = useRef<HTMLSpanElement>(null);

@@ -48,7 +48,7 @@ it.each(['light', 'dark'] as const)('keeps the canvas action menu inside a short
   expect(menu.style.top).toBe('8px');
   expect(menu.style.maxHeight).toBe('244px');
   await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })));
-  expect(document.activeElement?.textContent).toBe('适应白板Shift 1');
+  expect(document.activeElement?.textContent).toBe('适应选区Shift 2');
   const remove = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === '删除Delete')!;
   expect(remove.disabled).toBe(false);
   await click(remove);

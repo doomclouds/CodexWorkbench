@@ -53,14 +53,6 @@ async function streamUntil(reader: ReadableStreamDefaultReader<Uint8Array>, matc
   try { while (!value.includes(match)) { const part = await reader.read(); if (part.done) break; value += new TextDecoder().decode(part.value); } return value; }
   finally { clearTimeout(timeout); }
 }
-async function readerFor(guest: ReturnType<typeof browser>) {
-  const response = await guest.request('/api/region-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, regionId: 'html', viewId: 'guest-view' }) });
-  expect(response.status).toBe(200);
-  const link = (await response.json()).data.url;
-  const capability = new URLSearchParams(new URL(link).hash.slice(1)).get('cap');
-  return () => fetch(`${host.origin}/api/region-reader/${artifactId}/html`, { headers: { Authorization: `Bearer ${capability}` } });
-}
-
 describe('shared feedback and invitation permissions through Node HTTP', () => {
   it('edits only own messages, reopens a resolved reply and deletes the thread with its frozen source', async () => {
     const info = await share({ action: 'start' }), author = browser(tokenFor(info, 'commenter'), 'Author'), other = browser(tokenFor(info, 'editor'), 'Other');
@@ -112,19 +104,18 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
     expect((await viewer.session()).response.status).toBe(401);
   });
 
-  it('changes member permissions and revokes existing SSE, readers and presence, then removes access', async () => {
+  it('changes member permissions and revokes existing SSE and presence, then removes access', async () => {
     const info = await share({ action: 'start' }), guest = browser(tokenFor(info, 'editor'), 'Joined editor'), viewer = browser(tokenFor(info, 'viewer'));
     const actor = (await guest.session()).body.actor;
     await guest.request(`/api/presence?artifactId=${artifactId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ peerId: 'member-peer' }) });
     expect((await share()).members.find((member: any) => member.id === actor.id)).toMatchObject({ name: 'Joined editor', online: true, active: true });
     expect((await viewer.call('artifact_share', { action: 'remove', memberId: actor.id })).response.status).toBe(403);
     await expect(share({ action: 'remove', memberId: 'toString' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    const read = await readerFor(guest); expect((await read()).status).toBe(200);
     const stream = await guest.request(`/api/events?artifactId=${artifactId}`), streamReader = stream.body!.getReader();
     expect(await streamUntil(streamReader, 'ready')).toContain('ready');
     await share({ action: 'role', memberId: actor.id, role: 'viewer' });
     expect(await streamUntil(streamReader, 'access-revoked')).toContain('access-revoked'); await streamReader.cancel();
-    expect((await read()).status).toBe(401); expect(host.service.getPresence(artifactId)).toEqual([]);
+    expect(host.service.getPresence(artifactId)).toEqual([]);
     expect((await guest.session()).body.actor).toMatchObject({ id: actor.id, role: 'viewer' });
     expect((await guest.call('artifact_read', {})).response.status).toBe(200);
     expect((await guest.call('artifact_apply', { operations: [{ op: 'add', element: { type: 'text', text: 'Denied' } }] })).response.status).toBe(403);
@@ -134,11 +125,10 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
     // A role change moves the member onto the new role's lifecycle.
     await share({ action: 'reset', role: 'editor' });
     expect((await guest.session()).body.actor.role).toBe('viewer');
-    const viewerRead = await readerFor(guest), viewerStream = await guest.request(`/api/events?artifactId=${artifactId}`), viewerStreamReader = viewerStream.body!.getReader();
+    const viewerStream = await guest.request(`/api/events?artifactId=${artifactId}`), viewerStreamReader = viewerStream.body!.getReader();
     await streamUntil(viewerStreamReader, 'ready');
     await share({ action: 'remove', memberId: actor.id });
     expect(await streamUntil(viewerStreamReader, 'access-revoked')).toContain('access-revoked'); await viewerStreamReader.cancel();
-    expect((await viewerRead()).status).toBe(401);
     expect((await guest.session()).response.status).toBe(401);
     expect((await share()).members.some((member: any) => member.id === actor.id)).toBe(false);
     expect((await viewer.session()).response.status).toBe(200);
@@ -157,21 +147,19 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
     expect((await share()).members).toHaveLength(1);
   });
 
-  it('preserves an owner-assigned role across invitation switches in bootstrap, writes, SSE and readers', async () => {
+  it('preserves an owner-assigned role across invitation switches in bootstrap, writes and SSE', async () => {
     const info = await share({ action: 'start' }), guest = browser(tokenFor(info, 'editor'));
-    const id = (await guest.session()).body.actor.id, originalRead = await readerFor(guest);
+    const id = (await guest.session()).body.actor.id;
     const originalStream = await guest.request(`/api/events?artifactId=${artifactId}`), originalStreamReader = originalStream.body!.getReader();
     await streamUntil(originalStreamReader, 'ready');
     await share({ action: 'role', memberId: id, role: 'viewer' });
     expect(await streamUntil(originalStreamReader, 'access-revoked')).toContain('access-revoked'); await originalStreamReader.cancel();
-    expect((await originalRead()).status).toBe(401);
     for (const role of ['viewer', 'commenter', 'editor']) {
       guest.use(tokenFor(info, role));
       expect((await guest.page()).actor).toMatchObject({ id, role: 'viewer' });
       expect((await guest.session()).body.actor).toMatchObject({ id, role: 'viewer' });
       expect((await guest.call('artifact_apply', { operations: [{ op: 'add', element: { type: 'text', text: 'Escalation denied' } }] })).response.status).toBe(403);
       expect((await guest.call('artifact_feedback', { action: 'create', text: 'Comment denied' })).response.status).toBe(403);
-      const read = await readerFor(guest); expect((await (await read()).json()).data.canAnnotate).toBe(false);
       const stream = await guest.request(`/api/events?artifactId=${artifactId}`), streamReader = stream.body!.getReader();
       expect(await streamUntil(streamReader, 'ready')).toContain('"role":"viewer"'); await streamReader.cancel();
     }
@@ -192,24 +180,22 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
 
   it('keeps a removed signed identity denied across every existing invitation and revokes its live capabilities', async () => {
     const info = await share({ action: 'start' }), guest = browser(tokenFor(info, 'editor'));
-    const id = (await guest.session()).body.actor.id, read = await readerFor(guest);
+    const id = (await guest.session()).body.actor.id;
     const stream = await guest.request(`/api/events?artifactId=${artifactId}`), streamReader = stream.body!.getReader(); await streamUntil(streamReader, 'ready');
     await share({ action: 'remove', memberId: id });
     expect(await streamUntil(streamReader, 'access-revoked')).toContain('access-revoked'); await streamReader.cancel();
-    expect((await read()).status).toBe(401);
     for (const role of ['viewer', 'commenter', 'editor']) {
       guest.use(tokenFor(info, role));
       expect((await guest.page()).response.status).toBe(401); expect((await guest.session()).response.status).toBe(401);
       expect((await guest.call('artifact_apply', { operations: [{ op: 'add', element: { type: 'text' } }] })).response.status).toBe(401);
-      expect((await guest.request('/api/region-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, regionId: 'html', viewId: 'removed-view' }) })).status).toBe(401);
       expect((await guest.request(`/api/events?artifactId=${artifactId}`)).status).toBe(401);
     }
     expect((await browser(tokenFor(info, 'editor')).session()).response.status).toBe(200);
   });
 
-  it('lets only the owner restore the original signed identity with an explicit role and a fresh reader', async () => {
+  it('lets only the owner restore the original signed identity with an explicit role', async () => {
     const info = await share({ action: 'start', access: 'local' }), guest = browser(tokenFor(info, 'editor'), 'Restored author'), other = browser(tokenFor(info, 'viewer'), 'Other identity');
-    const actor = (await guest.session()).body.actor, previousReader = await readerFor(guest);
+    const actor = (await guest.session()).body.actor;
     const originalComment = (await guest.call('artifact_feedback', { action: 'create', text: 'Before removal' })).body.data.feedback[0];
     await other.session();
     const removed = await share({ action: 'remove', memberId: actor.id });
@@ -235,8 +221,6 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
     guest.use('');
     expect((await guest.page()).actor).toMatchObject({ id: actor.id, name: actor.name, role: 'commenter' });
     expect((await guest.session()).body.actor).toMatchObject({ id: actor.id, name: actor.name, role: 'commenter' });
-    expect((await previousReader()).status).toBe(401);
-    const freshReader = await readerFor(guest); expect((await freshReader()).status).toBe(200);
     expect((await guest.call('artifact_feedback', { action: 'edit', feedbackId: originalComment.id, text: 'Same author after restoration' })).body.data.feedback[0].author.id).toBe(actor.id);
     guest.use(tokenFor(reset, 'editor')); expect((await guest.session()).body.actor.role).toBe('commenter');
     expect((await guest.call('artifact_apply', { operations: [{ op: 'add', element: { type: 'text' } }] })).response.status).toBe(403);
@@ -259,13 +243,13 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
     guest.use(tokenFor(restarted, 'editor')); expect((await guest.session()).body.actor).toMatchObject({ id: actor.id, name: actor.name, role: 'editor' });
   });
 
-  it.each(['link', 'reset', 'stop'])('revokes already-open readers and SSE for %s', async action => {
+  it.each(['link', 'reset', 'stop'])('revokes already-open SSE for %s', async action => {
     const info = await share({ action: 'start' }), guest = browser(tokenFor(info, 'commenter'));
-    const read = await readerFor(guest), stream = await guest.request(`/api/events?artifactId=${artifactId}`), streamReader = stream.body!.getReader();
+    const stream = await guest.request(`/api/events?artifactId=${artifactId}`), streamReader = stream.body!.getReader();
     await streamUntil(streamReader, 'ready');
     await share({ action, role: 'commenter', ...(action === 'link' ? { on: false } : {}) });
     expect(await streamUntil(streamReader, 'access-revoked')).toContain('access-revoked'); await streamReader.cancel();
-    expect((await read()).status).toBe(401); expect((await guest.session()).response.status).toBe(401);
+    expect((await guest.session()).response.status).toBe(401);
   });
 
   it('keeps private suggestions inaccessible through edit/delete and frozen-source reads', async () => {

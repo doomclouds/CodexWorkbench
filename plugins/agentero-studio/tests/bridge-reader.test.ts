@@ -7,12 +7,11 @@ import { downloadBoard } from '../src/app/export';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { APP_MAX_BYTES } from '../src/contracts/transport';
 
-const mocks = vi.hoisted(() => ({ openLink: vi.fn(), downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), capabilities: {} as Record<string, unknown> }));
+const mocks = vi.hoisted(() => ({ downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), capabilities: {} as Record<string, unknown> }));
 vi.mock('@modelcontextprotocol/ext-apps', () => ({
   App: class {
     connect = mocks.connect;
     close = mocks.close;
-    openLink = mocks.openLink;
     downloadFile = mocks.downloadFile;
     callServerTool = mocks.callServerTool;
     getHostContext() { return undefined; }
@@ -24,7 +23,56 @@ vi.mock('@openai/mcp-extensions/app', () => ({ OpenAIExtensions: class {} }));
 beforeEach(() => { mocks.capabilities = {}; mocks.close.mockResolvedValue(undefined); mocks.callServerTool.mockReset().mockResolvedValue({ _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
-describe('reader link host adaptation', () => {
+describe('host connection adaptation', () => {
+  it('bootstraps through the app-only transport without invoking the tool that opens the UI', async () => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    try {
+      const bridge = await createStudioBridge(() => {});
+      expect(mocks.callServerTool).toHaveBeenCalledExactlyOnceWith({ name: 'studio_app_request', arguments: { action: 'connect' } }, { signal: expect.any(AbortSignal) });
+      await bridge.close();
+    } finally { dom.window.close(); }
+  });
+
+  it('uses the connection delivered by the host without an extra bootstrap call', async () => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    mocks.connect.mockImplementationOnce(async function (this: { ontoolinput(value: unknown): void; ontoolresult(value: unknown): void }) {
+      this.ontoolinput({ arguments: { artifactId: 'selected-board', view: 'editor' } });
+      this.ontoolresult({ structuredContent: { ok: true, data: {} }, _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: LOCAL_ACTOR } } });
+    });
+    try {
+      const bridge = await createStudioBridge(() => {});
+      expect(mocks.callServerTool).not.toHaveBeenCalled();
+      expect(bridge.artifactId).toBe('selected-board'); expect(bridge.view).toBe('editor');
+      await bridge.close();
+    } finally { dom.window.close(); }
+  });
+
+  it('does not ask a retired host view to discover or open a connection after teardown', async () => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    mocks.connect.mockImplementationOnce(async function (this: { onteardown(): Promise<unknown> }) { await this.onteardown(); });
+    try {
+      await expect(createStudioBridge(() => {})).rejects.toThrow('作品页面已关闭');
+      expect(mocks.callServerTool).not.toHaveBeenCalled(); expect(mocks.close).not.toHaveBeenCalled();
+    } finally { dom.window.close(); }
+  });
+
+  it('cancels a pending bootstrap when its host view is torn down', async () => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    let teardown!: () => Promise<unknown>;
+    mocks.connect.mockImplementationOnce(async function (this: { onteardown(): Promise<unknown> }) { teardown = () => this.onteardown(); });
+    mocks.callServerTool.mockImplementationOnce((_request, options: { signal: AbortSignal }) => new Promise((_resolve, reject) => { options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true }); }));
+    try {
+      const rejected = expect(createStudioBridge(() => {})).rejects.toThrow('作品页面已关闭');
+      await vi.waitFor(() => expect(mocks.callServerTool).toHaveBeenCalledOnce());
+      await teardown(); await rejected;
+      expect(mocks.callServerTool.mock.calls[0]![1].signal.aborted).toBe(true); expect(mocks.close).not.toHaveBeenCalled();
+    } finally { dom.window.close(); }
+  });
+
   it('preserves a backend bootstrap failure instead of replacing it with a missing-connection error', async () => {
     const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
     vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -46,33 +94,7 @@ describe('reader link host adaptation', () => {
     await bridge.close(); dom.window.close();
   });
 
-  it('uses only the public URL openLink request and surfaces a host refusal', async () => {
-    const dom = new JSDOM('<div></div>');
-    Object.defineProperty(dom.window, 'parent', { value: {} });
-    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
-    mocks.openLink.mockResolvedValueOnce({ isError: true }).mockResolvedValueOnce({});
-    const bridge = await createStudioBridge(() => {});
-    const url = 'http://127.0.0.1:5000/region/board/region#cap=limited';
-    await expect(bridge.client.openLink!(url)).rejects.toThrow('宿主未打开阅读页');
-    await bridge.client.openLink!(url);
-    expect(mocks.openLink).toHaveBeenLastCalledWith({ url });
-    expect(Object.keys(mocks.openLink.mock.calls[0]![0])).toEqual(['url']);
-    await bridge.close(); dom.window.close();
-  });
 
-  it('uses a normal new browser window and reports a blocked popup for the caller fallback', async () => {
-    const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000/' });
-    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
-    dom.window.__STUDIO_BOOT__ = { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: LOCAL_ACTOR };
-    const opened = { opener: dom.window };
-    const open = vi.spyOn(dom.window, 'open').mockReturnValueOnce(null).mockReturnValueOnce(opened as unknown as Window);
-    const bridge = await createStudioBridge(() => {});
-    const url = 'http://127.0.0.1:5000/region/board/region#cap=limited';
-    await expect(bridge.client.openLink!(url)).rejects.toThrow('浏览器未打开阅读页');
-    await bridge.client.openLink!(url);
-    expect(open).toHaveBeenLastCalledWith(url, '_blank'); expect(opened.opener).toBeNull();
-    await bridge.close(); dom.window.close();
-  });
 });
 
 describe('host file downloads', () => {

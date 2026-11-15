@@ -22,7 +22,7 @@ export interface ProductEditorProps<Document = StudioDocument> {
   annotationActive?: boolean; onAnnotationModeChange?: (active: boolean) => void;
   annotationTarget?: Anchor;
   onFeedbackSelect?: (feedback: Feedback, screenPoint: { x: number; y: number }) => void;
-  onOpenHtml?: (regionId: string) => void; documentControls?: ReactNode;
+  onReadingChange?: (active: boolean) => void; documentControls?: ReactNode;
 }
 export interface ProductToolbarProps<Document = StudioDocument> {
   document: Document; client: StudioClient; actor: Actor; selectedIds: string[]; disabled: boolean;

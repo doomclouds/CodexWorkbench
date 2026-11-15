@@ -25,6 +25,22 @@
 .studio-whiteboard[data-tool="shape"] .studio-canvas-viewport, .studio-whiteboard[data-tool="container"] .studio-canvas-viewport, .studio-whiteboard[data-tool="arrow"] .studio-canvas-viewport, .studio-whiteboard[data-tool="stroke"] .studio-canvas-viewport { cursor: crosshair; }
 .studio-whiteboard[data-tool="text"] .studio-canvas-viewport { cursor: text; }
 .studio-canvas-world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+.studio-whiteboard.is-reading { min-height: 0; }
+.studio-whiteboard.is-reading > .studio-canvas-top-tools,
+.studio-whiteboard.is-reading > .studio-canvas-toolbar,
+.studio-whiteboard.is-reading .studio-html-caption,
+.studio-whiteboard.is-reading .studio-feedback-pin,
+.studio-whiteboard.is-reading .studio-current-comment-target,
+.studio-whiteboard.is-reading .studio-processing-frame,
+.studio-whiteboard.is-reading .studio-peer-presence-overlay { display: none; }
+.studio-reading-exit, .studio-reading-hint { position: absolute; z-index: 75; display: flex; align-items: center; gap: 8px; border: 1px solid var(--canvas-ui-border); background: var(--canvas-ui); color: var(--canvas-ui-text); border-radius: 9px; box-shadow: 0 3px 16px #00000012; font-size: 12px; }
+.studio-reading-exit { top: 14px; right: 14px; min-height: 36px; padding: 7px 11px; opacity: .4; transition: opacity .18s; }
+.studio-reading-exit:hover, .studio-reading-exit:focus-visible { opacity: 1; }
+.studio-reading-exit kbd, .studio-reading-hint kbd { padding: 1px 4px; border: 1px solid var(--canvas-ui-border); border-radius: 4px; font-family: inherit; font-size: 10px; line-height: 1.4; color: var(--canvas-ui-muted); }
+.studio-reading-hint { bottom: 20px; left: 50%; transform: translateX(-50%); padding: 9px 14px; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .2s; }
+.studio-reading-hint.is-visible { opacity: 1; }
+.studio-reading-hint.is-visible ~ .studio-reading-exit { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .studio-reading-exit, .studio-reading-hint { transition: none; } }
 .studio-board-element { position: absolute; user-select: none; cursor: inherit; outline: none; }
 .studio-whiteboard[data-tool="select"] .studio-board-element:not(.is-locked) { cursor: grab; }
 .studio-board-element.is-selected { outline: none; }

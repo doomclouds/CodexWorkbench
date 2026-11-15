@@ -139,7 +139,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.4";
+    PLUGIN_VERSION = "0.2.5";
   }
 });
 
@@ -14799,12 +14799,12 @@ var init_service = __esm({
           return { document: product.project(snapshot) };
         }
         if (action === "list" || action === "get") {
-          let state = await this.store.read(id2);
+          let state = await this.store.readProjection(id2, (current) => ({ ...authorizationState(current), feedback: current.feedback }));
           actor = this.authorizedActor(state, actor, authority);
           if (state.feedback.some((item) => proposalExpired(item))) state = await this.store.transaction(id2, (current) => {
             this.authorizedActor(current, actor, authority);
             clearExpiredProposals(current);
-            return copy(current);
+            return copy({ ...authorizationState(current), feedback: current.feedback });
           });
           const feedback = visibleFeedback(state.feedback, actor).filter((item) => (args.status === void 0 || item.status === args.status) && (args.feedbackId === void 0 || item.id === args.feedbackId));
           if (action === "get" && !feedback.length) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0D\u5B58\u5728\u3002");
@@ -15113,110 +15113,6 @@ var init_guest_session = __esm({
   }
 });
 
-// src/server/region-reader.ts
-import { randomBytes as randomBytes3 } from "node:crypto";
-function createRegionReaders(service, now = () => Date.now()) {
-  const grants = /* @__PURE__ */ new Map();
-  const sweep = () => {
-    for (const [key, grant] of grants) if (grant.expiresAt <= now()) grants.delete(key);
-  };
-  const unsubscribe = service.subscribe("*", (event) => {
-    if (event.type === "purged") {
-      for (const [key, grant] of grants) if (grant.artifactId === event.artifactId) grants.delete(key);
-      return;
-    }
-    if (event.type !== "share") return;
-    for (const [key, grant] of grants) if (grant.artifactId === event.artifactId && (event.access === "local" && grant.source.viaLan || !grant.source.owner && (event.enabled === false || Array.isArray(event.revokedRoles) && event.revokedRoles.includes(grant.source.actor.role) || Array.isArray(event.revokedMemberIds) && event.revokedMemberIds.includes(grant.source.actor.id)))) grants.delete(key);
-  });
-  async function read(grant) {
-    await service.accessMode(grant.artifactId, grant.source.viaLan);
-    if (!grant.source.owner && await service.shareRole(grant.artifactId, grant.source.token, grant.source.actor.id) !== grant.source.actor.role) throw new StudioError("UNAUTHORIZED", "\u539F\u5206\u4EAB\u6743\u9650\u5DF2\u53D8\u66F4\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
-    const result = await service.execute("artifact_read", { artifactId: grant.artifactId, mode: "objects", ids: [grant.regionId] }, grant.source.actor, grant.source.authority);
-    if (result.artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
-    const element = result.elements?.find((value) => value.id === grant.regionId && value.type === "html");
-    if (!element) throw new StudioError("NOT_FOUND", "\u539F HTML \u533A\u57DF\u4E0D\u5B58\u5728\uFF0C\u8BF7\u8FD4\u56DE\u767D\u677F\u67E5\u770B\u3002");
-    return {
-      artifactId: grant.artifactId,
-      artifactTitle: result.artifact.title,
-      regionId: grant.regionId,
-      title: element.text || "HTML \u56FE\u89E3",
-      sourceRevision: element.sourceRevision ?? element.version,
-      version: element.version,
-      width: element.w,
-      height: element.h,
-      canAnnotate: grant.source.actor.role !== "viewer",
-      element: { id: element.id, text: element.text, html: element.html ?? "", sourceRevision: element.sourceRevision ?? element.version, version: element.version, state: element.state ?? null }
-    };
-  }
-  async function grantFor(capability, artifactId, regionId) {
-    sweep();
-    const grant = grants.get(capability);
-    if (!grant) throw new StudioError("UNAUTHORIZED", "\u9605\u8BFB\u94FE\u63A5\u5DF2\u5931\u6548\uFF0C\u8BF7\u4ECE\u767D\u677F\u91CD\u65B0\u6253\u5F00\u3002");
-    if (grant.artifactId !== artifactId || grant.regionId !== regionId) throw new StudioError("FORBIDDEN", "\u9605\u8BFB\u94FE\u63A5\u53EA\u80FD\u8BBF\u95EE\u539F HTML \u533A\u57DF\u3002");
-    try {
-      return { grant, content: await read(grant) };
-    } catch (error62) {
-      delete grant.activeUntil;
-      throw error62;
-    }
-  }
-  return {
-    async create(source, input2, origin) {
-      sweep();
-      const artifactId = safeId(input2.artifactId), regionId = safeId(input2.regionId, "\u533A\u57DF ID"), viewId = safeId(input2.viewId, "\u89C6\u56FE ID");
-      if (!source.owner && source.artifactId !== artifactId) throw new StudioError("FORBIDDEN", "\u5206\u4EAB\u94FE\u63A5\u53EA\u80FD\u8BBF\u95EE\u5BF9\u5E94\u7684\u4F5C\u54C1\u3002");
-      if (grants.size >= MAX_GRANTS) throw new StudioError("BUSY", "\u6253\u5F00\u7684\u9605\u8BFB\u9875\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
-      const grant = { artifactId, regionId, viewId, source, expiresAt: now() + LIFETIME_MS };
-      await read(grant);
-      const capability = randomBytes3(32).toString("base64url");
-      grants.set(capability, grant);
-      return { url: `${origin}/region/${encodeURIComponent(artifactId)}/${encodeURIComponent(regionId)}#cap=${capability}`, expiresAt: grant.expiresAt };
-    },
-    async source(capability, artifactId, regionId, metadataOnly) {
-      const { grant, content } = await grantFor(capability, artifactId, regionId);
-      grant.activeUntil = Math.min(grant.expiresAt, now() + 45e3);
-      const { element, ...metadata } = content;
-      return metadataOnly ? metadata : { ...metadata, element };
-    },
-    async returnToBoard(capability, artifactId, regionId, annotate) {
-      const { grant, content } = await grantFor(capability, artifactId, regionId);
-      if (annotate && !content.canAnnotate) throw new StudioError("FORBIDDEN", "\u5F53\u524D\u9605\u8BFB\u6743\u9650\u4E0D\u80FD\u521B\u5EFA\u5907\u6CE8\u3002");
-      grant.returned = { artifactId: grant.artifactId, regionId: grant.regionId, viewId: grant.viewId, annotate };
-      return { requested: true };
-    },
-    async takeReturn(source, artifactId, viewId) {
-      safeId(artifactId);
-      safeId(viewId, "\u89C6\u56FE ID");
-      sweep();
-      for (const grant of grants.values()) if (grant.artifactId === artifactId && grant.viewId === viewId && grant.source.actor.id === source.actor.id && grant.source.token === source.token && grant.returned) {
-        await read(grant);
-        const navigation = grant.returned;
-        delete grant.returned;
-        return { navigation };
-      }
-      return {};
-    },
-    hasActiveReaders() {
-      sweep();
-      return [...grants.values()].some((grant) => (grant.activeUntil ?? 0) > now());
-    },
-    close() {
-      unsubscribe();
-      grants.clear();
-    }
-  };
-}
-var LIFETIME_MS, MAX_GRANTS;
-var init_region_reader = __esm({
-  "src/server/region-reader.ts"() {
-    "use strict";
-    init_service();
-    init_common();
-    LIFETIME_MS = 15 * 6e4;
-    MAX_GRANTS = 128;
-  }
-});
-
 // src/server/lan-addresses.ts
 import { networkInterfaces } from "node:os";
 function lanAddresses(interfaces = networkInterfaces()) {
@@ -15426,7 +15322,7 @@ var http_exports = {};
 __export(http_exports, {
   startStudioHost: () => startStudioHost
 });
-import { randomBytes as randomBytes4, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { randomBytes as randomBytes3, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 import { createServer } from "node:http";
 function equal(a, b) {
   const left = Buffer.from(a), right = Buffer.from(b);
@@ -15527,9 +15423,8 @@ function exportContentType(mimeType) {
 }
 async function startStudioHost(options = {}) {
   if (options.port && BROWSER_BLOCKED_PORTS.has(options.port)) throw new StudioError("INVALID_ARGUMENT", `\u6D4F\u89C8\u5668\u7981\u6B62\u8BBF\u95EE\u7AEF\u53E3 ${options.port}\uFF0C\u8BF7\u9009\u62E9\u5176\u4ED6\u7AEF\u53E3\u3002`);
-  const service = new StudioService({ dataRoot: options.dataRoot, ownerName: options.ownerName }), token = randomBytes4(32).toString("base64url");
+  const service = new StudioService({ dataRoot: options.dataRoot, ownerName: options.ownerName }), token = randomBytes3(32).toString("base64url");
   const guestSession = await createGuestSessions(service.dataRoot);
-  const regionReaders = createRegionReaders(service);
   const servers = /* @__PURE__ */ new Set(), sockets = /* @__PURE__ */ new Set();
   let origin = "", lan, sharingOrigin = "", startingLan, stopping = false;
   function server() {
@@ -15621,39 +15516,6 @@ async function startStudioHost(options = {}) {
       return;
     }
     if (await collaborationRoutes.handle(request, response, url2)) return;
-    if (url2.pathname === "/api/region-view" && (request.method === "POST" || request.method === "GET")) {
-      const input2 = request.method === "POST" ? await readJson(request) : {}, artifactId = typeof input2.artifactId === "string" ? input2.artifactId : url2.searchParams.get("artifactId") ?? "";
-      const auth = await authorize(request, response, url2, artifactId);
-      scope(auth, artifactId);
-      const readerOrigin = request.socket.localPort === local.address()?.port ? origin : sharingOrigin;
-      const data = request.method === "POST" ? await regionReaders.create(auth, input2, readerOrigin) : await regionReaders.takeReturn(auth, artifactId, url2.searchParams.get("viewId") ?? "");
-      json2(response, 200, { ok: true, data });
-      return;
-    }
-    const reader = /^\/api\/region-reader\/([^/]+)\/([^/]+)(\/return)?$/.exec(url2.pathname);
-    if (reader && (request.method === "GET" && !reader[3] || request.method === "POST" && reader[3])) {
-      const capability = header(request, "authorization").replace(/^Bearer\s+/i, "");
-      const artifactId = decodeURIComponent(reader[1]), regionId = decodeURIComponent(reader[2]);
-      await service.accessMode(artifactId, viaLan(request));
-      if ([...url2.searchParams.keys()].some((key) => key !== "metadata") || url2.searchParams.has("metadata") && url2.searchParams.get("metadata") !== "1") throw new StudioError("INVALID_ARGUMENT", "\u9605\u8BFB\u8BF7\u6C42\u53C2\u6570\u65E0\u6548\u3002");
-      let data;
-      if (reader[3]) {
-        const input2 = await readJson(request);
-        if (Object.keys(input2).some((key) => key !== "annotate") || typeof input2.annotate !== "boolean") throw new StudioError("INVALID_ARGUMENT", "\u8FD4\u56DE\u767D\u677F\u8BF7\u6C42\u65E0\u6548\u3002");
-        data = await regionReaders.returnToBoard(capability, artifactId, regionId, input2.annotate);
-      } else data = await regionReaders.source(capability, artifactId, regionId, url2.searchParams.get("metadata") === "1");
-      json2(response, 200, { ok: true, data });
-      return;
-    }
-    const readerPage = /^\/region\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})$/.exec(url2.pathname);
-    if (readerPage && request.method === "GET") {
-      const boot = JSON.stringify({ artifactId: readerPage[1], regionId: readerPage[2] }).replace(/</g, "\\u003c");
-      const script = `<script>window.__STUDIO_READER_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
-      const html2 = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, (opening) => opening + script) : `${script}${raw}`;
-      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Content-Length": Buffer.byteLength(html2) });
-      response.end(html2);
-      return;
-    }
     if (request.method === "GET" && url2.pathname.startsWith("/api/thumbnails/")) {
       const artifactId = decodeURIComponent(url2.pathname.slice("/api/thumbnails/".length));
       const auth = await authorize(request, response, url2, artifactId);
@@ -15771,11 +15633,10 @@ async function startStudioHost(options = {}) {
     await service.close();
     throw error62;
   }
-  return { service, origin, token, hasActiveReaders: regionReaders.hasActiveReaders, async close() {
+  return { service, origin, token, async close() {
     if (stopping) return;
     stopping = true;
     collaborationRoutes.close();
-    regionReaders.close();
     await Promise.all([...servers].map(closeServer));
     for (const socket of sockets) socket.destroy();
     await service.resetSharingSessions();
@@ -15791,7 +15652,6 @@ var init_http = __esm({
     init_common();
     init_archive();
     init_guest_session();
-    init_region_reader();
     init_lan_addresses();
     init_collaboration_routes();
     init_service_protocol();
@@ -37297,12 +37157,12 @@ function validateUiRequest(request) {
   if (url2.origin !== "http://studio.invalid" || url2.pathname.split("/").some((segment) => segment === "." || segment === "..") || path2.split("?")[0] !== url2.pathname) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u8DEF\u5F84\u65E0\u6548\u3002");
   if (method !== "GET" && method !== "POST") throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u8BF7\u6C42\u65B9\u6CD5\u65E0\u6548\u3002");
   const tool = /^\/api\/tools\/([^/]+)$/.exec(url2.pathname);
-  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/sync" ? method === "GET" : url2.pathname === "/api/room" ? method === "POST" : url2.pathname === "/api/session" ? method === "GET" : url2.pathname === "/api/region-view" ? true : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
+  const allowed = tool ? method === "POST" && TOOL_NAMES.includes(tool[1]) : url2.pathname === "/api/presence" ? true : url2.pathname === "/api/sync" ? method === "GET" : url2.pathname === "/api/room" ? method === "POST" : url2.pathname === "/api/session" ? method === "GET" : ["/api/import", "/api/assets"].includes(url2.pathname) ? method === "POST" : /^\/(?:assets\/[^/]+\/[^/]+|api\/(?:assets\/[^/]+(?:\/[^/]+)?|exports\/[^/]+|thumbnails\/[^/]+))$/.test(url2.pathname) && method === "GET";
   if (!allowed) throw failure2("FORBIDDEN", "\u6B64\u5730\u5740\u4E0D\u80FD\u901A\u8FC7\u4F5C\u54C1\u754C\u9762\u8BBF\u95EE\u3002");
   const thumbnail = method === "GET" && /^\/api\/thumbnails\/[^/]+$/.test(url2.pathname);
   const seen = /* @__PURE__ */ new Set();
   for (const [key, value] of url2.searchParams) {
-    if (seen.has(key) || (thumbnail ? key !== "revision" : url2.pathname === "/api/region-view" ? !["artifactId", "viewId"].includes(key) : url2.pathname === "/api/sync" ? !["artifactId", "after", "wait", "peerId", "peerEpoch"].includes(key) : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
+    if (seen.has(key) || (thumbnail ? key !== "revision" : url2.pathname === "/api/sync" ? !["artifactId", "after", "wait", "peerId", "peerEpoch"].includes(key) : key !== "artifactId")) throw failure2("FORBIDDEN", "\u4F5C\u54C1\u8BF7\u6C42\u4E0D\u80FD\u6307\u5B9A\u8FDE\u63A5\u51ED\u636E\u3001\u91CD\u590D\u6216\u672A\u77E5\u67E5\u8BE2\u53C2\u6570\u3002");
     if (key === "revision" && (!/^(?:0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value)))) throw failure2("INVALID_ARGUMENT", "\u4F5C\u54C1\u7F29\u7565\u56FE\u7248\u672C\u53F7\u65E0\u6548\u3002");
     if (url2.pathname === "/api/sync") {
       if (key === "wait" && (!/^(?:0|[1-9]\d*)$/.test(value) || Number(value) > 2e4)) throw failure2("INVALID_ARGUMENT", "\u540C\u6B65\u7B49\u5F85\u65F6\u95F4\u5E94\u4E3A 0 \u5230 20000 \u6BEB\u79D2\u3002");
@@ -45815,7 +45675,7 @@ var schemas = {
   artifact_read: external_exports.object({ artifactId: id, ...taskBinding, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), atRevision: external_exports.number().int().nonnegative().optional().describe("units \u540C\u6B65\u8865\u8BFB\u5FC5\u987B\u6307\u5B9A\u7CBE\u786E\u4F5C\u54C1\u7248\u672C\uFF0C\u914D\u5408 1..200 \u4E2A ids\u3002\u8FD4\u56DE\u8BE5\u7248\u672C\u7684 artifact \u548C\u5B8C\u6574 units\uFF1B\u5386\u53F2\u5DF2\u6E05\u7406\u5219 VERSION_NOT_FOUND\uFF0C\u4E0D\u4EE5\u6700\u65B0\u7248\u672C\u66FF\u4EE3\u3002"), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
   artifact_apply: external_exports.object({ artifactId: id, ...taskBinding, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), merge: external_exports.literal("safe").optional().describe("\u5B89\u5168\u5408\u5E76\u8FC7\u671F update\uFF1A\u4ECE\u670D\u52A1\u5668\u4FDD\u7559\u5386\u53F2\u53D6\u53EF\u4FE1\u57FA\u7EBF\uFF0C\u4EC5\u5408\u5E76\u4E0D\u51B2\u7A81\u5B57\u6BB5/\u6587\u672C\u884C\uFF1B\u540C\u5B57\u6BB5\u51B2\u7A81\u4FDD\u7559\u539F\u5185\u5BB9\u5E76\u8FD4\u56DE CONFLICT\uFF0C\u4E0D\u9759\u9ED8\u8986\u76D6\u3002\u7F3A\u7701\u4FDD\u6301\u4E25\u683C\u7248\u672C\u68C0\u67E5\u3002"), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
   artifact_feedback: external_exports.object({ artifactId: id, ...taskBinding, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
-  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove", "restore", "forget"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional().describe("role/restore \u5FC5\u586B\uFF1Brestore \u7684\u76EE\u6807\u89D2\u8272\u94FE\u63A5\u5FC5\u987B\u5DF2\u542F\u7528\u3002"), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u8BBF\u95EE\u3002forget \u53EA\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u53CA\u6B64\u677F\u59D3\u540D\u767B\u8BB0\uFF1B\u4FDD\u7559\u5386\u53F2\u4F5C\u8005\u548C\u5176\u4ED6\u767D\u677F\uFF0C\u4E4B\u540E\u51ED\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u5165\u59D3\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u4F1A\u6062\u590D\u65E7\u9605\u8BFB\u9875\u6216\u6392\u961F\u8BF7\u6C42\u3002") }),
+  artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove", "restore", "forget"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional().describe("role/restore \u5FC5\u586B\uFF1Brestore \u7684\u76EE\u6807\u89D2\u8272\u94FE\u63A5\u5FC5\u987B\u5DF2\u542F\u7528\u3002"), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u8BBF\u95EE\u3002forget \u53EA\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u53CA\u6B64\u677F\u59D3\u540D\u767B\u8BB0\uFF1B\u4FDD\u7559\u5386\u53F2\u4F5C\u8005\u548C\u5176\u4ED6\u767D\u677F\uFF0C\u4E4B\u540E\u51ED\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u5165\u59D3\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u4F1A\u6062\u590D\u79FB\u9664\u524D\u6392\u961F\u8BF7\u6C42\u3002") }),
   artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() }),
   artifact_activity: external_exports.object({ artifactId: id, action: external_exports.enum(["begin", "update", "end", "status", "release"]), ...taskBinding, taskId: id.optional().describe("begin \u6307\u5B9A\u903B\u8F91\u4EFB\u52A1\uFF1Bstatus \u53EF\u7701\u7565\u4EE5\u5217\u51FA\u81EA\u5DF1\u7684\u4EFB\u52A1\uFF0C\u6216\u53EA\u7ED9 taskId \u67E5\u8BE2\u672C\u4EFB\u52A1\uFF1Bupdate/end/release \u540C\u65F6\u9700\u8981 generation\u3002"), phase: external_exports.enum(["preparing", "writing", "verifying"]).optional(), outcome: external_exports.enum(["completed", "failed", "cancelled"]).optional(), targetActorId: id.optional().describe("\u623F\u4E3B\u754C\u9762 release \u7684\u76EE\u6807 Agent actor.id\uFF0C\u4E0D\u662F participant.id\uFF1B\u4E0D\u80FD\u4EE5\u76EE\u6807\u8EAB\u4EFD\u5192\u5145\u8C03\u7528\u8005\u3002"), scope: external_exports.object({ ids: external_exports.array(id).min(1).max(200).optional(), rect: external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) }).optional() }).optional(), label: external_exports.string().trim().min(1).max(80).optional() })
 };
@@ -45826,7 +45686,7 @@ var descriptions = {
   artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
   artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
   artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002Agent\u9009\u62E9\u6216\u64A4\u56DE\u5DF2\u5E94\u7528\u65B9\u6848\u4EA7\u751F\u5185\u5BB9\u53D8\u5316\u65F6\u4E5F\u9700\u6709\u6548taskId/generation\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
-  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5C40\u57DF\u7F51\uFF0Caccess:local \u53EA\u542F\u7528\u672C\u673A\u9080\u8BF7\uFF1B\u5207\u6362\u8303\u56F4\u4FDD\u7559\u6210\u5458\uFF0Cstop \u64A4\u9500\u5168\u90E8\u6388\u6743\uFF1Blink \u5F00\u5173\u89D2\u8272\u9080\u8BF7\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u548C\u5BF9\u5E94\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u6210\u5458\u5E76\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u3002forget \u4EC5\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u548C\u8BE5\u677F\u59D3\u540D\u767B\u8BB0\uFF0C\u65E7\u8BC4\u8BBA\u5386\u53F2\u4E0D\u53D8\uFF1B\u4E4B\u540E\u9700\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u590D\u6D3B\u65E7\u9605\u8BFB\u9875\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
+  artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5C40\u57DF\u7F51\uFF0Caccess:local \u53EA\u542F\u7528\u672C\u673A\u9080\u8BF7\uFF1B\u5207\u6362\u8303\u56F4\u4FDD\u7559\u6210\u5458\uFF0Cstop \u64A4\u9500\u5168\u90E8\u6388\u6743\uFF1Blink \u5F00\u5173\u89D2\u8272\u9080\u8BF7\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u548C\u5BF9\u5E94\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u6210\u5458\u5E76\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u3002forget \u4EC5\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u548C\u8BE5\u677F\u59D3\u540D\u767B\u8BB0\uFF0C\u65E7\u8BC4\u8BBA\u5386\u53F2\u4E0D\u53D8\uFF1B\u4E4B\u540E\u9700\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u590D\u6D3B\u79FB\u9664\u524D\u6392\u961F\u8BF7\u6C42\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
   artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002",
   artifact_activity: "Agent\u58F0\u660E\u975E\u91CD\u53E0\u767D\u677F\u4EFB\u52A1\uFF0C\u4E0D\u9501\u4F4F\u4EBA\u7C7B\u7F16\u8F91\u3002begin\u6307\u5B9A\u7A33\u5B9Aparticipant/taskId\u3001scope.ids\u6216\u7A7A\u5730rect\uFF0C\u8FD4\u56DEgeneration\uFF1B\u6D3B\u8DC3\u540C\u8303\u56F4\u5E42\u7B49\uFF0C\u81EA\u884C\u7ED3\u675F\u6216\u8FC7\u671F\u540E\u987B\u5E26\u4E0A\u4E00\u4EE3\u660E\u786E\u91CD\u65B0\u7533\u8BF7\uFF0C\u4E0D\u81EA\u52A8\u7EED\u5199\u3002update/end\u5E26\u56DE\u540C\u4EE3\u7ED1\u5B9A\uFF0Cphase\u4E3Apreparing/writing/verifying\uFF0Cend\u53EF\u6807completed/failed/cancelled\u3002status\u67E5\u8BE2\u81EA\u5DF1\u7684active\u53CA\u6709\u754C\u7ED3\u675F\u8BB0\u5F55\uFF0C\u4E0D\u7EED\u79DF\uFF0C\u53EF\u53EA\u7ED9taskId\u6062\u590D\u4E22\u5931\u56DE\u6267\u3002\u6D3B\u52A8\u79DF\u7EA610\u5206\u949F\uFF0C2\u5206\u949F\u65E0\u5B9E\u8D28\u8FDB\u5C55\u53D8\u7070\u4FDD\u7559\uFF1B\u91CD\u590D\u5FC3\u8DF3\u4E0D\u4F2A\u9020\u8FDB\u5EA6\u3002release\u4EC5\u623F\u4E3B\u754C\u9762\u6309targetActorId/taskId/generation\u7ED3\u675F\u5177\u4F53\u4EFB\u52A1\uFF0CAgent\u4E0D\u80FD\u62A2\u91CA\u653E\u522B\u4EBA\u6216\u91CD\u65B0\u7533\u8BF7\u8BE5\u88AB\u91CA\u653E\u4EFB\u52A1\u3002\u8303\u56F4\u4E0D\u6388\u4E88\u989D\u5916\u6743\u9650\uFF0C\u4E0D\u7ED5\u8FC7CAS\u3001\u9501\u6216\u6B63\u5728\u7F16\u8F91\u68C0\u67E5\u3002"
 };
@@ -45914,11 +45774,13 @@ function createStudioServer(executor, html2) {
   server.registerTool(APP_TOOL_NAME, {
     title: "\u4F5C\u54C1\u754C\u9762\u4F20\u8F93",
     description: "\u4EC5\u4F9B\u4F5C\u54C1\u754C\u9762\u8BBF\u95EE\u5F53\u524D\u672C\u673A\u4F5C\u54C1\u670D\u52A1\uFF1B\u5B8C\u6574\u6587\u6863\u548C\u6587\u4EF6\u5B57\u8282\u4E0D\u8FDB\u5165\u6A21\u578B\u5185\u5BB9\u3002",
-    inputSchema: appTransportSchema,
+    inputSchema: external_exports.union([appTransportSchema, external_exports.object({ action: external_exports.literal("connect") }).strict()]),
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     _meta: { ui: { visibility: ["app"] } }
   }, async (input2, extra) => {
     try {
+      extra.signal.throwIfAborted();
+      if (input2.action === "connect") return { content: [], structuredContent: { ok: true }, _meta: { connection: await executor.connection() } };
       return { content: [], structuredContent: { ok: true }, _meta: { response: await appTransport.execute(input2, extra.signal) } };
     } catch (error62) {
       const failure4 = error62;
@@ -45963,7 +45825,7 @@ if (process.argv.includes("--serve")) {
     let lastActive = Date.now();
     setInterval(() => {
       void hasActiveLeases(root).then((active) => {
-        if (active || host.hasActiveReaders()) lastActive = Date.now();
+        if (active) lastActive = Date.now();
         else if (Date.now() - lastActive > 45e3) void close().finally(() => process.exit(0));
       });
     }, 1e4).unref();

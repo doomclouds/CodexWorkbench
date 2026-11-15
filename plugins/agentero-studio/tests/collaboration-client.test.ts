@@ -143,6 +143,24 @@ describe('collaboration client transport', () => {
     expect(view.onFeedback.mock.calls.map(([items]) => items.map((item: { id: string }) => item.id))).toEqual([['latest']]);
   });
 
+  it.each([false, true])('handles a background feedback failure without rejecting a completed write (closed=%s)', async closed => {
+    const request = reads(() => board(1)), view = fixture(request);
+    await view.emit(ready());
+    let reject!: (error: Error) => void;
+    const waiting = new Promise<Response>((_resolve, fail) => { reject = fail; });
+    const original = request.getMockImplementation()!;
+    request.mockImplementation((input, init) => new URL(String(input)).pathname === '/api/tools/artifact_feedback' ? waiting : original(input, init));
+    view.controller.feedbackChanged();
+    expect(view.controller.refreshFeedback()).toBeUndefined();
+    if (closed) view.controller.close();
+    const failure = new Error('备注列表读取失败'); reject(failure); await tick();
+    if (closed) expect(view.onError).not.toHaveBeenCalled();
+    else {
+      expect(view.onError).toHaveBeenCalledExactlyOnceWith(failure);
+      expect(view.streams[0].close).toHaveBeenCalled();
+    }
+  });
+
   it('delivers room messages independently and never turns an upload preview into a full-board read', async () => {
     const request = reads(() => board(1)), view = fixture(request), listener = vi.fn(); view.controller.room.subscribe('upload', listener);
     await view.emit(ready());

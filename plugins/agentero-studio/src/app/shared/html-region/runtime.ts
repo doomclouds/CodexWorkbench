@@ -227,6 +227,24 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     suppressClick = false;
   };
   const sendEscape = () => window.parent.postMessage({ type: 'studio-html-escape', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision }, '*');
+  let pointerTimer: number | undefined, pointerActive = false;
+  let pointerPosition = { x: 0, y: 0 };
+  const sendPointer = (point: HtmlPointerPosition | null) => window.parent.postMessage({ type: 'studio-html-pointer', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, point }, '*');
+  const clearPointer = () => {
+    if (pointerTimer !== undefined) { window.clearTimeout(pointerTimer); pointerTimer = undefined; }
+    if (pointerActive) sendPointer(null);
+    pointerActive = false;
+  };
+  const reportPointer = (event: PointerEvent) => {
+    if (event.clientX < 0 || event.clientY < 0 || event.clientX > window.innerWidth || event.clientY > window.innerHeight) { clearPointer(); return; }
+    pointerPosition = { x: event.clientX / window.innerWidth, y: event.clientY / window.innerHeight };
+    pointerActive = true;
+    if (pointerTimer === undefined) pointerTimer = window.setTimeout(() => { pointerTimer = undefined; sendPointer(pointerPosition); }, 16);
+  };
+  window.addEventListener('pointerout', event => { if (!event.relatedTarget) clearPointer(); }, true);
+  window.addEventListener('pointercancel', clearPointer, true);
+  window.addEventListener('blur', event => { if (event.target === window) clearPointer(); }, true);
+  window.addEventListener('pagehide', clearPointer);
   window.addEventListener('keydown', event => {
     if (!enabled || !/^[1-9]$/.test(event.key) || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     if (event.composedPath().some(node => node instanceof Element && node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="menu"],[role="dialog"],[role="listbox"],[role="combobox"]'))) return;
@@ -298,6 +316,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     send([element], visibleText(element), rectOf(bounds), { x: event.clientX, y: event.clientY });
   }, true);
   window.addEventListener('pointermove', (event: PointerEvent) => {
+    reportPointer(event);
     if (!enabled) return;
     event.stopImmediatePropagation();
     if (areaStart && area) {
@@ -439,6 +458,20 @@ export function validateHtmlSelectionMessage(value: unknown, expected: Pick<Html
 }
 
 export interface HtmlScrollPosition { x: number; y: number; maxX: number; maxY: number }
+
+/** Pointer position within the visible iframe, normalized independently of canvas transforms. */
+export interface HtmlPointerPosition { x: number; y: number }
+
+export function validateHtmlPointerMessage(value: unknown, expected: Pick<HtmlRuntimeOptions, 'channel' | 'regionId' | 'sourceRevision'>): { point: HtmlPointerPosition | null } | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Record<string, unknown>;
+  if (input.type !== 'studio-html-pointer' || input.channel !== expected.channel || input.regionId !== expected.regionId || input.sourceRevision !== expected.sourceRevision) return null;
+  if (input.point === null) return { point: null };
+  if (!input.point || typeof input.point !== 'object') return null;
+  const point = input.point as Record<string, unknown>;
+  if (!['x', 'y'].every(key => typeof point[key] === 'number' && Number.isFinite(point[key]) && (point[key] as number) >= 0 && (point[key] as number) <= 1)) return null;
+  return { point: { x: point.x as number, y: point.y as number } };
+}
 
 export function validateHtmlScrollMessage(value: unknown, expected: Pick<HtmlRuntimeOptions, 'channel' | 'regionId' | 'sourceRevision'>): HtmlScrollPosition | null {
   if (!value || typeof value !== 'object') return null;

@@ -66,7 +66,7 @@ function whiteboardAnnotation(board: Board, selection: HtmlSelection): ProductAn
   return { label: 'HTML 内部选区', sourceLabel: `选区来源版本 ${selection.sourceRevision} · 保存时冻结上下文`, screenPoint: selection.screenPoint, anchor: { coordinateSpace: 'html', regionId: selection.regionId, targetIds: selection.targetIds, sourceRevision: selection.sourceRevision, quote: selection.quote, excerpt: selection.excerpt, selector: selection.selector, ...selection.rect }, versions: region ? { [region.id]: region.version } : undefined };
 }
 function WhiteboardEditor(props: ProductEditorProps) {
-  const { document, onChanged, onAnnotate, onOpenHtml, onActivityChange, onError, onNotice, ...rest } = props;
+  const { document, onChanged, onAnnotate, onActivityChange, onError, onNotice, ...rest } = props;
   const board = document as Board;
   const [sourceRequest, setSourceRequest] = useState<{ id: string; regionId?: string } | null>(null);
   const [insertedElementId, setInsertedElementId] = useState<string>();
@@ -87,7 +87,7 @@ function WhiteboardEditor(props: ProductEditorProps) {
   }, [onActivityChange]);
   const canvasActivity = useCallback((activity: ProductActivity) => report('canvas', activity), [report]);
   const sourceActivity = useCallback((activity: ProductActivity) => report('source', activity), [report]);
-  return <><WhiteboardCanvas key={`canvas:${board.artifact.id}:${props.actor.id}`} {...rest} contentQueue={contentQueue} board={board} insertedElementId={insertedElementId} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onOpenHtml={element => onOpenHtml?.(element.id)} onEditHtml={element => setSourceRequest({ id: newClientId('source'), regionId: element?.id })} />
+  return <><WhiteboardCanvas key={`canvas:${board.artifact.id}:${props.actor.id}`} {...rest} contentQueue={contentQueue} board={board} insertedElementId={insertedElementId} onChanged={onChanged} onActivityChange={canvasActivity} onAnnotate={selection => onAnnotate(whiteboardAnnotation(board, selection))} onAnnotateNative={onAnnotate} onEditHtml={element => setSourceRequest({ id: newClientId('source'), regionId: element?.id })} />
     {!props.preview && <WhiteboardToolbar key={`source:${board.artifact.id}:${props.actor.id}`} document={board} client={props.client} actor={props.actor} selectedIds={[]} disabled={!!props.readOnly} onChanged={onChanged} onError={error => onError?.(error)} onNotice={message => onNotice?.(message)} onActivityChange={sourceActivity} request={sourceRequest} getQueue={getQueue} onInserted={setInsertedElementId} />}
   </>;
 }

@@ -320,7 +320,7 @@ export function createCollaboration(options: Options) {
   connect();
   return {
     room, presence, refresh,
-    refreshFeedback: () => readFeedback(),
+    refreshFeedback: () => requestFeedback(generation),
     timer(data: Record<string, unknown>): Promise<void> { if (!connected) return Promise.reject(new Error('请在连接恢复后重试计时操作。')); return new Promise((resolve, reject) => { timerOutbox.push({ data, resolve, reject }); void flushPresence(); }); },
     feedbackChanged() { feedbackVersion += 1; feedbackAgain = true; },
     close() { if (closed) return; pause(true, 'close'); closed = true; clearInterval(heartbeat); clearTimeout(idleTimer); listeners.clear(); stateListeners.clear(); document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pagehide', pagehide); window.removeEventListener('blur', clearCursor); document.documentElement.removeEventListener('pointerleave', clearCursor); },
@@ -347,5 +347,5 @@ export function useCollaboration(options: Options & { enabled: boolean }) {
     unsubscribes.push(active.room.subscribeState!(event => { for (const listener of stateSubscriptions.current) listener(event); }));
     return () => { controller.current = undefined; active.close(); unsubscribes.forEach(unsubscribe => unsubscribe()); };
   }, [options.client, options.polling, options.artifactId, options.peerId, options.enabled]);
-  return useMemo(() => ({ room, presence: (patch: PresencePatch) => controller.current?.presence(patch), refresh: () => controller.current?.refresh() || Promise.resolve(), refreshFeedback: () => controller.current?.refreshFeedback() || Promise.resolve(), timer: (data: Record<string, unknown>) => controller.current?.timer(data) || Promise.reject(new Error('白板连接尚未建立。')), feedbackChanged: () => controller.current?.feedbackChanged() }), [room]);
+  return useMemo(() => ({ room, presence: (patch: PresencePatch) => controller.current?.presence(patch), refresh: () => controller.current?.refresh() || Promise.resolve(), refreshFeedback: () => controller.current?.refreshFeedback(), timer: (data: Record<string, unknown>) => controller.current?.timer(data) || Promise.reject(new Error('白板连接尚未建立。')), feedbackChanged: () => controller.current?.feedbackChanged() }), [room]);
 }
