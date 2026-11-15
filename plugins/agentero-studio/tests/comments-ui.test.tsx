@@ -117,5 +117,11 @@ it('describes actual table content and resolves saved pin coordinates before sta
   host.innerHTML = '<span data-feedback-pin="thread"></span>';
   vi.spyOn(host.firstElementChild!, 'getBoundingClientRect').mockReturnValue({ left: 80, top: 90, width: 22, height: 22 } as DOMRect);
   expect(liveCommentPoint(host, board, feedback.anchor, { x: 0, y: 0, zoom: 1 }, 'thread', { x: 999, y: 999 })).toEqual({ x: 80, y: 90, width: 22, height: 22 });
-  host.innerHTML = '';
+  host.innerHTML = '<div class="studio-canvas-viewport"></div>';
+  vi.spyOn(host.firstElementChild!, 'getBoundingClientRect').mockReturnValue({ left: 40, top: 60 } as DOMRect);
+  const anchor = { elementIds: ['table'], coordinateSpace: 'element' as const, x: .92, y: .16 };
+  const first = liveCommentPoint(host, board, anchor, { x: 100, y: 50, zoom: .5 })!;
+  expect(first.x).toBeCloseTo(237); expect(first.y).toBeCloseTo(128);
+  const panned = liveCommentPoint(host, board, anchor, { x: 150, y: 80, zoom: .5 })!;
+  expect(panned.x - first.x).toBe(50); expect(panned.y - first.y).toBe(30);
 });

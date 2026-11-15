@@ -5,6 +5,7 @@ import type { ReaderMark } from '../../contracts/reader';
 import { KIND_LABEL, markText } from './geometry';
 import { messageOf } from '../model';
 import { placeMarkPopover, type ScreenBounds } from './mark-pins';
+import { registerEscapeLayer } from '../ui/escape';
 
 const commentText = (mark: ReaderMark) => mark.kind === 'translate' ? mark.result ?? mark.note : mark.comment ?? mark.note;
 function previewBoundary(viewport: HTMLElement | null): ScreenBounds {
@@ -32,10 +33,10 @@ export function MarkPopover({ marks, anchor, viewport, sourceBounds, textBounds,
     return () => { window.removeEventListener('resize', position); viewport?.removeEventListener('scroll', position); observer.disconnect(); };
   }, [anchor, viewport, mark.id, sourceBounds, textBounds, onClose]);
   useEffect(() => {
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); if (!busy) { onClose(); anchor.focus(); } } };
+    const unregisterEscape = registerEscapeLayer(root.current!, () => { if (!busy) { onClose(); anchor.focus(); } });
     const outside = (event: PointerEvent) => { if (!busy && event.target instanceof Node && !root.current?.contains(event.target) && !anchor.contains(event.target)) onClose(); };
-    window.addEventListener('keydown', escape, true); document.addEventListener('pointerdown', outside);
-    return () => { window.removeEventListener('keydown', escape, true); document.removeEventListener('pointerdown', outside); };
+    document.addEventListener('pointerdown', outside);
+    return () => { unregisterEscape(); document.removeEventListener('pointerdown', outside); };
   }, [anchor, busy, onClose]);
   async function save() { if (!onSave || saving.current) return; saving.current = true; setBusy(true); setError(''); try { await onSave(mark, draft); cache.delete(mark.id); onDraftsChange?.(); } catch (cause) { setError(messageOf(cause)); } finally { saving.current = false; setBusy(false); } }
   return createPortal(<section ref={root} className="pdf-mark-popover pdf-annotation-preview" role="dialog" aria-label="页内批注" style={{ ...position, maxWidth: Math.max(1, Math.min(310, boundary.right - boundary.left)), maxHeight: Math.max(1, boundary.bottom - boundary.top) }}><header><strong>第 {mark.page} 页 · {KIND_LABEL[mark.kind]}</strong><button className="icon-button" disabled={busy} aria-label="关闭页内批注" onClick={() => { onClose(); anchor.focus(); }}><X size={14} /></button></header>

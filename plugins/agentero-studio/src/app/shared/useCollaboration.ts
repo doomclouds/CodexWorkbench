@@ -97,6 +97,10 @@ export function createCollaboration(options: Options) {
       } while (feedbackAgain && alive(serial));
     } finally { if (ticket === feedbackTicket) feedbackReading = false; }
   }
+  function requestFeedback(serial: number) {
+    // A slow comment read must not hold the ordered stream of canvas changes.
+    void readFeedback(serial).catch(error => { if (alive(serial)) lost(error); });
+  }
   async function snapshot(serial = generation) {
     if (snapshotReading) { snapshotAgain = true; return; }
     snapshotReading = true;
@@ -108,7 +112,7 @@ export function createCollaboration(options: Options) {
         if (!alive(serial)) return;
         const current = options.getDocument();
         if (!current || next.artifact.revision >= current.artifact.revision) options.onDocument(next);
-        await readFeedback(serial);
+        requestFeedback(serial);
       } while (snapshotAgain && alive(serial));
     } finally { if (ticket === snapshotTicket) snapshotReading = false; }
   }
@@ -118,7 +122,7 @@ export function createCollaboration(options: Options) {
     if (message.type === 'access-revoked') { pause(false); return; }
     if (message.type === 'room' && Array.isArray(message.events)) { deliver(message.events as RoomMessage[]); return; }
     if (message.type === 'presence') { acceptPresence(message as unknown as SyncBatch); return; }
-    if (message.type === 'feedback') { await readFeedback(serial); return; }
+    if (message.type === 'feedback') { feedbackVersion += 1; requestFeedback(serial); return; }
     if (typeof message.revision === 'number' || message.units) {
       const current = options.getDocument();
       if (current && Number(message.revision) <= current.artifact.revision) return;

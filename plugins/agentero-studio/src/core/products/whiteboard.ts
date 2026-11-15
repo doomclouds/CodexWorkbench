@@ -289,10 +289,14 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     const changedOrder = !same(current.elements.map(element => element.id), saved.elements.map(element => element.id));
     return { elements: saved.elements.map(item => restoredElement(item, current.elements.find(element => element.id === item.id), historical.get(item.id))), style: copy(saved.style), motion: copy(saved.motion), orderVersion: Math.max(current.orderVersion ?? 0, ...history.map(snapshot => snapshot.orderVersion ?? 0)) + (changedOrder ? 1 : 0) };
   },
-  validateRestore(current, restored, baseline) {
+  validateRestore(current, restored, baseline, mode) {
     assertLockedGeometry(current, restored, baseline);
     const unlocked = current.elements.find(element => element.locked && restored.elements.some(next => next.id === element.id && !next.locked));
-    if (unlocked) throw new StudioError('LOCKED', '恢复历史不能隐式解锁对象，请先单独明确解锁。', { elementId: unlocked.id });
+    if (unlocked) {
+      const contentFields = (element: BoardElement) => { const { locked: _locked, ...fields } = mergeFields(element); return fields; };
+      const onlyLocks = current.elements.length === restored.elements.length && current.elements.every((element, index) => element.id === restored.elements[index]?.id && jsonEqual(contentFields(element), contentFields(restored.elements[index]!))) && jsonEqual(current.style, restored.style) && jsonEqual(current.motion, restored.motion);
+      if (mode !== 'undo' || !onlyLocks) throw new StudioError('LOCKED', '恢复历史不能隐式解锁对象，请先单独明确解锁。', { elementId: unlocked.id });
+    }
   },
   snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
     const anchor: Anchor = object(value) ? copy(value) : {};

@@ -25,6 +25,32 @@ async function runtime(source: string, overrides = {}) {
 }
 
 describe('HTML region rendering copy', () => {
+  it('lets an interactive HTML menu consume Escape before isolating an unhandled key', async () => {
+    const { dom, sent } = await runtime('<button id="menu">Menu</button><script>document.getElementById("menu").addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();event.stopPropagation();window.closedMenu=true;}});</script>', { annotation: false });
+    const handled = new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    dom.window.document.getElementById('menu')!.dispatchEvent(handled);
+    expect(dom.window.eval('window.closedMenu')).toBe(true); expect(handled.defaultPrevented).toBe(true);
+    expect(sent.filter(value => value.type === 'studio-html-escape')).toHaveLength(0);
+    dom.window.document.body.dispatchEvent(new dom.window.KeyboardEvent('keyup', { key: 'Escape', bubbles: true, cancelable: true }));
+    const unhandled = new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    dom.window.document.body.dispatchEvent(unhandled);
+    expect(unhandled.defaultPrevented).toBe(true);
+    expect(sent.filter(value => value.type === 'studio-html-escape')).toHaveLength(1);
+    const release = new dom.window.KeyboardEvent('keyup', { key: 'Escape', bubbles: true, cancelable: true }); dom.window.document.body.dispatchEvent(release);
+    expect(release.defaultPrevented).toBe(true); expect(sent.filter(value => value.type === 'studio-html-escape')).toHaveLength(1);
+  });
+  it('lets source window handlers close a menu and emits only one annotation Escape per press', async () => {
+    const interactive = await runtime('<script>window.addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();window.closedMenu=true;}});</script>', { annotation: false });
+    const local = new interactive.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }); interactive.dom.window.document.body.dispatchEvent(local);
+    expect(interactive.dom.window.eval('window.closedMenu')).toBe(true); expect(local.defaultPrevented).toBe(true);
+    expect(interactive.sent.filter(value => value.type === 'studio-html-escape')).toHaveLength(0);
+    const annotating = await runtime('<input id="source"><script>window.called=0;window.addEventListener("keydown",()=>window.called++);</script>');
+    for (const [type, repeat] of [['keydown', false], ['keydown', true], ['keyup', false]] as const) {
+      const event = new annotating.dom.window.KeyboardEvent(type, { key: 'Escape', bubbles: true, cancelable: true, repeat }); annotating.dom.window.document.getElementById('source')!.dispatchEvent(event); expect(event.defaultPrevented).toBe(true);
+    }
+    expect(annotating.dom.window.eval('window.called')).toBe(0);
+    expect(annotating.sent.filter(value => value.type === 'studio-html-escape')).toEqual([expect.objectContaining({ channel: options.channel, regionId: options.regionId, sourceRevision: options.sourceRevision })]);
+  });
   it('retains inline diagrams and animations without modifying the canonical source', () => {
     parser();
     const source = '<html><head><style>.node{fill:#eb6c36}</style><link href="https://fonts.example/font.css" rel="stylesheet"><script src="https://example.com/track.js"></script></head><body><svg viewBox="0 0 200 100"><g data-studio-id="api"><rect width="200" height="100" class="node"/><text>Gateway</text></g></svg><script>document.body.dataset.playing="yes";</script><iframe src="https://example.com"></iframe><a href="https://example.com">link</a><form action="https://example.com"><button>submit</button></form></body></html>';
@@ -174,6 +200,39 @@ describe('HTML region rendering copy', () => {
     expect(dom.window.getComputedStyle(button).cursor).toBe('pointer');
     expect(dom.window.document.documentElement.style.cursor).toBe('help');
     expect(source).not.toContain('data-studio-runtime');
+  });
+
+  it('overrides important inline and pseudo-element cursors and restores their exact source declarations', async () => {
+    const source = '<style>#line::before{content:"Label";cursor:crosshair!important}#line{cursor:text!important}</style><p id="line" style="color: red; cursor: crosshair!important">Selectable text</p>';
+    const { dom, select } = await runtime(source, { annotation: false });
+    const line = dom.window.document.getElementById('line')!;
+    const original = line.getAttribute('style');
+    const sheet = [...dom.window.document.styleSheets].find(sheet => [...sheet.cssRules].some(rule => rule.cssText.includes('#line::before')))!;
+    const pseudo = sheet.cssRules[0] as CSSStyleRule, originalPseudo = pseudo.style.cssText;
+    const mode = { type: 'studio-html-mode', ...options, enabled: true };
+    const setMode = (enabled: boolean) => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { source: dom.window as unknown as MessageEventSource, data: { ...mode, enabled } }));
+    setMode(true);
+    expect(dom.window.getComputedStyle(line).cursor).toBe(COMMENT_CURSOR);
+    expect(pseudo.style.getPropertyValue('cursor')).toBe(COMMENT_CURSOR);
+    const down = new dom.window.MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+    line.dispatchEvent(down); expect(down.defaultPrevented).toBe(false);
+    const range = dom.window.document.createRange(); range.selectNodeContents(line);
+    dom.window.getSelection()!.addRange(range);
+    range.getBoundingClientRect = () => ({ x: 10, y: 20, width: 100, height: 20 } as DOMRect);
+    line.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true }));
+    expect(select()).toHaveLength(1);
+    setMode(false);
+    expect(line.getAttribute('style')).toBe(original);
+    expect(pseudo.style.cssText).toBe(originalPseudo);
+    expect(dom.window.getComputedStyle(line).cursor).toBe('crosshair');
+    setMode(true);
+    const dynamic = dom.window.document.createElement('p'); dynamic.setAttribute('style', 'cursor:text!important;color:red'); dynamic.textContent = 'New text';
+    dom.window.document.body.append(dynamic); await Promise.resolve();
+    expect(dom.window.getComputedStyle(dynamic).cursor).toBe(COMMENT_CURSOR);
+    dynamic.style.color = 'blue'; await Promise.resolve();
+    setMode(false);
+    expect(dynamic.style.cursor).toBe('text'); expect(dynamic.style.getPropertyPriority('cursor')).toBe('important'); expect(dynamic.style.color).toBe('blue');
+    expect(line.getAttribute('style')).toBe(original); expect(pseudo.style.cssText).toBe(originalPseudo);
   });
 });
 

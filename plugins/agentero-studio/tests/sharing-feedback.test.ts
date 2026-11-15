@@ -29,7 +29,7 @@ function browser(token: string, name = `Guest ${++guestSequence}`) {
       const joined = await fetch(`${host.origin}/api/session?artifactId=${artifactId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
       cookie = joined.headers.get('set-cookie')?.split(';')[0] ?? ''; enrolled = true;
     }
-    const headers = new Headers(init.headers); headers.set('Authorization', `Bearer ${token}`);
+    const headers = new Headers(init.headers); if (token) headers.set('Authorization', `Bearer ${token}`);
     if (cookie) headers.set('Cookie', cookie);
     const response = await fetch(host.origin + path, { ...init, headers });
     const issued = response.headers.get('set-cookie'); if (issued) cookie = issued.split(';')[0]!;
@@ -207,6 +207,58 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
     expect((await browser(tokenFor(info, 'editor')).session()).response.status).toBe(200);
   });
 
+  it('lets only the owner restore the original signed identity with an explicit role and a fresh reader', async () => {
+    const info = await share({ action: 'start', access: 'local' }), guest = browser(tokenFor(info, 'editor'), 'Restored author'), other = browser(tokenFor(info, 'viewer'), 'Other identity');
+    const actor = (await guest.session()).body.actor, previousReader = await readerFor(guest);
+    const originalComment = (await guest.call('artifact_feedback', { action: 'create', text: 'Before removal' })).body.data.feedback[0];
+    await other.session();
+    const removed = await share({ action: 'remove', memberId: actor.id });
+    expect(removed.removedMembers).toEqual([expect.objectContaining({ id: actor.id, name: actor.name, active: false, online: false })]);
+    const saved = (await host.service.store.read(artifactId)).sharing.members![actor.id]!;
+    expect(JSON.stringify(removed)).not.toContain(saved.grantId);
+    expect(JSON.stringify(removed.removedMembers)).not.toMatch(/credential|roleToken|ownerAssigned|removed/);
+    const projection = (await other.call('artifact_share', { action: 'status' })).body.data;
+    expect(projection).not.toHaveProperty('removedMembers'); expect(projection).not.toHaveProperty('members'); expect(projection).not.toHaveProperty('owner');
+    expect((await other.call('artifact_share', { action: 'restore', memberId: actor.id, role: 'editor' })).response.status).toBe(403);
+    await expect(share({ action: 'restore', memberId: 'guest-unknown', role: 'viewer' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(share({ action: 'restore', memberId: actor.id })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    const duplicateName = await fetch(`${host.origin}/api/session?artifactId=${artifactId}&share=${tokenFor(info, 'editor')}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-studio-actor': 'owner', 'x-studio-actor-id': actor.id }, body: JSON.stringify({ name: actor.name, memberId: actor.id }) });
+    expect(duplicateName.status).toBe(409); expect((await duplicateName.json()).error.code).toBe('NAME_TAKEN');
+    const reset = await share({ action: 'reset', role: 'editor' }); guest.use(tokenFor(reset, 'editor'));
+    expect((await guest.session()).body.error.details.reason).toBe('removed');
+    await share({ action: 'link', role: 'commenter', on: false });
+    await expect(share({ action: 'restore', memberId: actor.id, role: 'commenter' })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    await share({ action: 'link', role: 'commenter', on: true });
+    const restored = await share({ action: 'restore', memberId: actor.id, role: 'commenter' });
+    expect(restored.removedMembers).toEqual([]); expect(restored.members.find((member: any) => member.id === actor.id)).toMatchObject({ name: actor.name, role: 'commenter', active: true });
+    await expect(share({ action: 'restore', memberId: actor.id, role: 'editor' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    guest.use('');
+    expect((await guest.page()).actor).toMatchObject({ id: actor.id, name: actor.name, role: 'commenter' });
+    expect((await guest.session()).body.actor).toMatchObject({ id: actor.id, name: actor.name, role: 'commenter' });
+    expect((await previousReader()).status).toBe(401);
+    const freshReader = await readerFor(guest); expect((await freshReader()).status).toBe(200);
+    expect((await guest.call('artifact_feedback', { action: 'edit', feedbackId: originalComment.id, text: 'Same author after restoration' })).body.data.feedback[0].author.id).toBe(actor.id);
+    guest.use(tokenFor(reset, 'editor')); expect((await guest.session()).body.actor.role).toBe('commenter');
+    expect((await guest.call('artifact_apply', { operations: [{ op: 'add', element: { type: 'text' } }] })).response.status).toBe(403);
+  });
+
+  it('keeps restored access on its assigned link lifecycle and clears recovery records on stop/start', async () => {
+    const info = await share({ action: 'start', access: 'local' }), guest = browser(tokenFor(info, 'editor'));
+    const actor = (await guest.session()).body.actor;
+    await share({ action: 'remove', memberId: actor.id }); await share({ action: 'reset', role: 'viewer' });
+    await share({ action: 'restore', memberId: actor.id, role: 'viewer' }); guest.use('');
+    expect((await guest.session()).body.actor.role).toBe('viewer');
+    await share({ action: 'link', role: 'viewer', on: false }); expect((await guest.session()).body.error.details.reason).toBe('link-disabled');
+    await share({ action: 'link', role: 'viewer', on: true }); expect((await guest.session()).body.actor.role).toBe('viewer');
+    await share({ action: 'reset', role: 'viewer' }); expect((await guest.session()).body.error.details.reason).toBe('link-reset');
+    guest.use(tokenFor(info, 'editor')); expect((await guest.session()).body.error.details.reason).toBe('link-reset');
+    await share({ action: 'stop' }); const restarted = await share({ action: 'start', access: 'local' });
+    expect(restarted.removedMembers).toEqual([]);
+    await expect(share({ action: 'restore', memberId: actor.id, role: 'viewer' })).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    guest.use(''); expect((await guest.session()).response.status).toBe(401);
+    guest.use(tokenFor(restarted, 'editor')); expect((await guest.session()).body.actor).toMatchObject({ id: actor.id, name: actor.name, role: 'editor' });
+  });
+
   it.each(['link', 'reset', 'stop'])('revokes already-open readers and SSE for %s', async action => {
     const info = await share({ action: 'start' }), guest = browser(tokenFor(info, 'commenter'));
     const read = await readerFor(guest), stream = await guest.request(`/api/events?artifactId=${artifactId}`), streamReader = stream.body!.getReader();
@@ -250,6 +302,11 @@ describe('feedback and sharing schema through the real MCP SDK', () => {
       expect((await call('artifact_share', { action: 'link', role: 'editor', on: false })).structuredContent).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
       actor = { ...LOCAL_ACTOR };
       expect((await call('artifact_share', { action: 'link', role: 'editor', on: false })).structuredContent).toMatchObject({ ok: true, data: { roleEnabled: { editor: false } } });
+      const sharing = (await call('artifact_share', { action: 'start', access: 'local' })).structuredContent as any;
+      const visitor = browser(tokenFor(sharing.data, 'viewer'), 'SDK restored visitor'), visitorId = (await visitor.session()).body.actor.id;
+      expect((await call('artifact_share', { action: 'remove', memberId: visitorId })).structuredContent).toMatchObject({ ok: true });
+      expect((await call('artifact_share', { action: 'restore', memberId: visitorId, role: 'commenter' })).structuredContent).toMatchObject({ ok: true, data: { removedMembers: [] } });
+      expect((await visitor.session()).body.actor).toMatchObject({ id: visitorId, role: 'commenter' });
       expect((await call('artifact_feedback', { action: 'delete', feedbackId })).structuredContent).toMatchObject({ ok: true, data: { feedback: [] } });
     } finally { await client.close(); await server.close(); }
   });

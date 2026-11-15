@@ -1,3 +1,4 @@
+import { handleDialogEscape } from '../ui/escape';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, FileText, Folder, FolderPlus, Link, Search, X } from 'lucide-react';
 import type { Paper, PaperPage } from '../../contracts/types';
@@ -10,7 +11,7 @@ interface DialogProps { onClose(): void; children: ReactNode; title: string; bus
 function NoteDialog({ onClose, children, title, busy }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => { ref.current?.showModal(); return () => ref.current?.close(); }, []);
-  return <dialog ref={ref} className="compact-modal note-location-dialog" onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><header className="modal-heading"><h2>{title}</h2><button type="button" className="icon-button" aria-label={`关闭${title}`} disabled={busy} onClick={onClose}><X size={17} /></button></header>{children}</dialog>;
+  return <dialog ref={ref} className="compact-modal note-location-dialog" onKeyDown={event => handleDialogEscape(event, () => { if (!busy) onClose(); })} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}><header className="modal-heading"><h2>{title}</h2><button type="button" className="icon-button" aria-label={`关闭${title}`} disabled={busy} onClick={onClose}><X size={17} /></button></header>{children}</dialog>;
 }
 
 export function FolderPicker({ items, value, onChange, disabled, automaticLabel, exclude }: {

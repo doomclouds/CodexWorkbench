@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { once } from 'node:events';
+import { ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { SyncBatch } from '../src/contracts/studio.js';
@@ -33,7 +35,94 @@ async function guest(role: 'editor' | 'viewer') {
   return { actor, request: (path: string, init: RequestInit = {}) => fetch(`${host.origin}${path}`, { ...init, headers: { ...headers, ...init.headers } }) };
 }
 
+function holdSseWrite(matches: (text: string) => boolean = () => true) {
+  const original = ServerResponse.prototype.write, writes: string[] = [];
+  let response: ServerResponse | undefined;
+  // Forward the accepted frame to a real socket, then model one full buffer until manual drain.
+  vi.spyOn(ServerResponse.prototype, 'write').mockImplementation(function (this: ServerResponse, ...args) {
+    const accepted = original.apply(this, args);
+    if (this.getHeader('Content-Type') !== 'text/event-stream' || response && response !== this) return accepted;
+    const text = String(args[0]); writes.push(text);
+    if (!response && matches(text)) { response = this; return false; }
+    return accepted;
+  });
+  return { writes, get response() { if (!response) throw new Error('Expected a held SSE write'); return response; }, drain() { this.response.emit('drain'); } };
+}
+function emitBoard(revision: number, text = 'synthetic') {
+  const collaboration = (host.service as unknown as { collaboration: StudioCollaboration }).collaboration;
+  collaboration.emit({ type: 'board', artifactId, revision, units: [{ id: 'item', after: { id: 'item', type: 'text', text } }] });
+}
+
 describe('HTTP collaboration change transport', () => {
+  it('keeps a backpressured ready response open and drains a burst in cursor order', async () => {
+    const pressure = holdSseWrite(), abort = new AbortController(); cancellations.push(abort);
+    const response = await request(`/api/events?artifactId=${artifactId}`, { signal: abort.signal }), reader = response.body!.getReader();
+    const ready = await frame(reader);
+    expect(pressure.response.writableEnded).toBe(false);
+    for (let revision = 1; revision <= 64; revision++) emitBoard(revision);
+    expect(pressure.writes).toHaveLength(1); expect(pressure.response.listenerCount('drain')).toBe(1);
+    pressure.drain();
+    const ids = [ready.id];
+    for (let revision = 1; revision <= 64; revision++) { const update = await frame(reader); expect(update.data.revision).toBe(revision); ids.push(update.id); }
+    expect(new Set(ids).size).toBe(65); expect(pressure.response.writableEnded).toBe(false); expect(pressure.response.listenerCount('drain')).toBe(0);
+  });
+
+  it('does not resend an accepted backpressured event or write later events before drain', async () => {
+    const pressure = holdSseWrite(text => text.includes('"type":"board"')), abort = new AbortController(); cancellations.push(abort);
+    const response = await request(`/api/events?artifactId=${artifactId}`, { signal: abort.signal }), reader = response.body!.getReader(); await frame(reader);
+    emitBoard(1); expect((await frame(reader)).data.revision).toBe(1);
+    emitBoard(2); emitBoard(3);
+    expect(pressure.response.writableEnded).toBe(false); expect(pressure.writes).toHaveLength(2);
+    pressure.drain();
+    expect((await frame(reader)).data.revision).toBe(2); expect((await frame(reader)).data.revision).toBe(3);
+    expect(pressure.writes).toHaveLength(4);
+  });
+
+  it('waits for drain when a heartbeat encounters temporary backpressure', async () => {
+    const original = globalThis.setInterval; let heartbeat!: () => void;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, delay?: number) => { if (delay === 15_000) heartbeat = callback; return original(callback, delay); }) as typeof setInterval);
+    const pressure = holdSseWrite(text => text === ': keep-alive\n\n'), abort = new AbortController(); cancellations.push(abort);
+    const response = await request(`/api/events?artifactId=${artifactId}`, { signal: abort.signal }), reader = response.body!.getReader(); await frame(reader);
+    heartbeat(); emitBoard(1);
+    expect(pressure.response.writableEnded).toBe(false); expect(pressure.writes).toHaveLength(2);
+    pressure.drain(); expect(pressure.writes).toHaveLength(3); expect(pressure.writes[2]).toContain('"revision":1');
+  });
+
+  it.each([{ budget: 'frame count', count: 512, text: 'synthetic' }, { budget: 'bytes', count: 15, text: 'x'.repeat(64 * 1024) }])('closes only when the pending $budget budget overflows', async ({ count, text }) => {
+    const pressure = holdSseWrite(), response = await request(`/api/events?artifactId=${artifactId}`, { signal: AbortSignal.timeout(3000) }), reader = response.body!.getReader();
+    const ready = await frame(reader);
+    for (let revision = 1; revision <= count; revision++) emitBoard(revision, text);
+    expect(pressure.response.writableEnded).toBe(false); expect(pressure.writes).toHaveLength(1);
+    emitBoard(count + 1, text);
+    expect(pressure.response.writableEnded).toBe(true); expect(pressure.response.listenerCount('drain')).toBe(0);
+    pressure.drain(); expect(pressure.writes).toHaveLength(1); expect((await reader.read()).done).toBe(true);
+    const replay = await sync(ready.id); expect(replay.reset).toBe(true); expect(replay.cursor).toBe(host.service.cursor());
+  });
+
+  it('drops pending frames and removes drain handlers when a member is removed', async () => {
+    const person = await guest('viewer'), pressure = holdSseWrite();
+    const response = await person.request(`/api/events?artifactId=${artifactId}&peerId=removed-pending&peerEpoch=epoch-a`, { signal: AbortSignal.timeout(3000) }), reader = response.body!.getReader(); await frame(reader);
+    emitBoard(1, 'pending-before-removal');
+    await host.service.execute('artifact_share', { artifactId, action: 'remove', memberId: person.actor.id });
+    expect((await frame(reader)).data.type).toBe('access-revoked'); expect((await reader.read()).done).toBe(true);
+    expect(pressure.response.listenerCount('drain')).toBe(0);
+    const written = pressure.writes.length; pressure.drain(); emitBoard(2, 'after-removal');
+    expect(pressure.writes).toHaveLength(written); expect(pressure.writes.join('')).not.toContain('pending-before-removal');
+  });
+
+  it('cleans pending writes on client disconnect and host close', async () => {
+    const pressure = holdSseWrite(), abort = new AbortController(); cancellations.push(abort);
+    const response = await request(`/api/events?artifactId=${artifactId}`, { signal: abort.signal }); await frame(response.body!.getReader());
+    emitBoard(1); const closed = once(pressure.response, 'close'); abort.abort(); await closed;
+    expect(pressure.response.listenerCount('drain')).toBe(0); pressure.drain(); expect(pressure.writes).toHaveLength(1);
+    vi.restoreAllMocks();
+    const closing = holdSseWrite(), second = await request(`/api/events?artifactId=${artifactId}`), reader = second.body!.getReader(); await frame(reader);
+    emitBoard(2, 'pending-before-close'); await host.close();
+    expect(closing.response.listenerCount('drain')).toBe(0); const written = closing.writes.length; closing.drain();
+    expect(closing.writes).toHaveLength(written); expect(closing.writes.join('')).not.toContain('pending-before-close');
+    expect((await frame(reader)).data).toMatchObject({ type: 'access-revoked', reason: 'sharing-closed' }); expect((await reader.read()).done).toBe(true);
+  });
+
   it('closes the snapshot-to-subscribe gap with cursor replay and streams incremental units with SSE IDs', async () => {
     const initial = await sync(); expect(initial.reset).toBe(true);
     const created = await mutate('first');

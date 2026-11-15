@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type Reac
 import { ArrowUp, Loader2, X } from 'lucide-react';
 import type { CommentPoint } from './comment-target';
 import './comments.css';
+import { registerEscapeLayer } from '../escape';
 
 interface Props { point?: CommentPoint; locate?: () => CommentPoint | undefined; label?: string; draft?: boolean; pinLabel?: string; onClose: () => void; onOutside?: () => void; children: ReactNode }
 
@@ -40,9 +41,9 @@ export function CommentPopover({ point, locate, label, draft, pinLabel, onClose,
   }, []);
   useEffect(() => {
     const outside = (event: PointerEvent) => { if (event.target instanceof Element && event.target.closest('[data-studio-comment-menu]')) return; if (event.target instanceof Node && !root.current?.contains(event.target)) outsideClose.current(); };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing) { event.preventDefault(); event.stopPropagation(); close.current(); } };
-    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', escape); };
+    const unregister = registerEscapeLayer(root.current!, () => close.current());
+    document.addEventListener('pointerdown', outside, true);
+    return () => { document.removeEventListener('pointerdown', outside, true); unregister(); };
   }, []);
   return <>{draft && pin && <span className="studio-comment-draft-pin" aria-hidden="true" style={{ left: pin.x, top: pin.y }}>{(pinLabel || '我').slice(0, 1)}</span>}<section ref={root} className={`studio-comment-popover${draft ? ' is-draft' : ''}`} role="dialog" aria-label={draft ? '新建备注' : '备注线程'} style={position} onPointerDown={event => event.stopPropagation()}>
     {label && <div className="studio-comment-target"><span title={label}>{label}</span><button type="button" className="studio-icon-button" aria-label="关闭备注" onClick={onClose}><X size={15} /></button></div>}

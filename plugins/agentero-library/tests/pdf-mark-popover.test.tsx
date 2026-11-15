@@ -6,7 +6,7 @@ const harness = vi.hoisted(() => ({ states: [] as any[], stateIndex: 0, refs: []
 vi.mock('react', async original => ({
   ...await original<typeof import('react')>(),
   useState: (initial: any) => { const index = harness.stateIndex++; if (!(index in harness.states)) harness.states[index] = typeof initial === 'function' ? initial() : initial; return [harness.states[index], (next: any) => { harness.states[index] = typeof next === 'function' ? next(harness.states[index]) : next; }]; },
-  useRef: (initial: any) => { const index = harness.refIndex++; return harness.refs[index] ??= { current: initial === null ? { getBoundingClientRect: () => ({ width: 310, height: 280 }), contains: () => false } : initial }; },
+  useRef: (initial: any) => { const index = harness.refIndex++; return harness.refs[index] ??= { current: initial === null ? { ownerDocument: document, isConnected: true, closest: () => null, getBoundingClientRect: () => ({ width: 310, height: 280 }), contains: () => false } : initial }; },
   useLayoutEffect: (effect: () => void) => harness.layouts.push(effect), useEffect: (effect: () => void) => harness.effects.push(effect),
 }));
 vi.mock('react-dom', () => ({ createPortal: (node: unknown) => node }));
@@ -21,8 +21,8 @@ function find(node: ReactNode, predicate: (node: ReactElement<Record<string, any
 const mark = (id: string): ReaderMark => ({ id, kind: 'highlight', page: 7, space: 'pt', rects: [], quote: `source ${id}`, note: '', comment: `saved ${id}` });
 function setup(overrides: Record<string, unknown> = {}) {
   const addEventListener = (name: string, callback: (event: any) => void) => { harness.events.set(name, callback); };
-  vi.stubGlobal('window', { innerWidth: 1000, innerHeight: 800, addEventListener, removeEventListener: vi.fn() });
-  vi.stubGlobal('document', { body: {}, addEventListener, removeEventListener: vi.fn() });
+  vi.stubGlobal('window', { innerWidth: 1000, innerHeight: 800, addEventListener, removeEventListener: vi.fn(), getComputedStyle: () => ({}) });
+  vi.stubGlobal('document', { defaultView: window, body: {}, addEventListener, removeEventListener: vi.fn() });
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   const drafts = new Map<string, string>(), onSelect = vi.fn(), onClose = vi.fn(), onSave = vi.fn(async () => {}), onActiveChange = vi.fn();
   const props = { marks: [mark('a'), mark('b')], anchor: { isConnected: true, getBoundingClientRect: () => ({ left: 510, top: 274, right: 532, bottom: 296 }), focus: vi.fn(), contains: () => false } as unknown as HTMLElement, viewport: { clientWidth: 600, clientHeight: 780, getBoundingClientRect: () => ({ left: 10, top: 20, right: 610, bottom: 800 }), addEventListener, removeEventListener: vi.fn() } as unknown as HTMLElement, sourceBounds: () => ({ left: 50, top: 300, right: 500, bottom: 350 }), textBounds: () => [{ left: 10, top: 20, right: 610, bottom: 800 }], drafts, onSelect, onClose, onSave, onActiveChange, ...overrides };

@@ -13,8 +13,9 @@ export const appTransportSchema = z.discriminatedUnion('action', [
 ]);
 const REQUEST_HEADERS = new Set(['content-type', 'x-filename', 'x-content-type']);
 const RESPONSE_HEADERS = new Set(['content-type', 'content-disposition', 'cache-control', 'content-length']);
-const TTL_MS = 120_000, MAX_TRANSFERS = 8, MAX_CONCURRENT = 4, MAX_BUDGET = APP_MAX_BYTES * 2;
+const TTL_MS = 120_000, MAX_TRANSFERS = 8, MAX_CONCURRENT = 4, MAX_QUEUED = 64, MAX_SYNC_WAITERS = 64, MAX_BUDGET = APP_MAX_BYTES * 2;
 interface Transfer { kind: 'upload' | 'download'; bytes: Buffer; offset: number; expiresAt: number }
+interface RequestSlots { active: number; queue: Array<() => void> }
 function failure(code: string, message: string) { return Object.assign(new Error(message), { code }); }
 
 /** Resolve only the existing UI endpoints; never accept a caller-controlled authority. */
@@ -66,8 +67,23 @@ function decode(value: string) {
 /** Per-MCP-connection transfer storage. Bytes are private to the App result metadata. */
 export function createAppTransport(requestUi: UiRequester) {
   const transfers = new Map<string, Transfer>();
-  let budget = 0, active = 0, closed = false;
+  let budget = 0, closed = false;
+  const requests: RequestSlots = { active: 0, queue: [] }, waits: RequestSlots = { active: 0, queue: [] };
   const lifetime = new AbortController();
+  async function acquire(signal: AbortSignal, waiting: boolean) {
+    const slots = waiting ? waits : requests, maximum = waiting ? MAX_SYNC_WAITERS : MAX_CONCURRENT;
+    signal.throwIfAborted();
+    if (slots.active >= maximum) {
+      if (waiting || slots.queue.length >= MAX_QUEUED) throw failure('BUSY', waiting ? '同时打开的同步页面过多，请关闭不使用的作品页面。' : '作品请求队列已满，请稍后重试。');
+      await new Promise<void>((resolve, reject) => {
+        const enter = () => { signal.removeEventListener('abort', abort); slots.active++; resolve(); };
+        const abort = () => { const index = slots.queue.indexOf(enter); if (index !== -1) slots.queue.splice(index, 1); reject(signal.reason); };
+        slots.queue.push(enter); signal.addEventListener('abort', abort, { once: true });
+      });
+    } else slots.active++;
+    let released = false;
+    return () => { if (!released) { released = true; slots.active--; slots.queue.shift()?.(); } };
+  }
   function reserve(size: number) { if (budget + size > MAX_BUDGET) throw failure('BUSY', '作品传输缓存已满，请稍后重试。'); budget += size; }
   function remove(id: string) { const value = transfers.get(id); if (value) { transfers.delete(id); budget -= value.bytes.length; } return !!value; }
   function sweep() { const now = Date.now(); for (const [id, value] of transfers) if (value.expiresAt <= now) remove(id); }
@@ -107,19 +123,21 @@ export function createAppTransport(requestUi: UiRequester) {
         const data = download.bytes.subarray(input.offset, end).toString('base64'); download.offset = end;
         return { data, nextOffset: end, done: end === download.bytes.length };
       }
-      if (active >= MAX_CONCURRENT) throw failure('BUSY', '同时进行的作品请求过多，请稍后重试。');
       if (input.body !== undefined && input.uploadId) throw failure('INVALID_ARGUMENT', '作品请求不能重复指定内容。');
       let uploaded: Transfer | undefined, responseBytes = 0;
       const bytes = input.body === undefined ? undefined : decode(input.body);
       const request = validateUiRequest({ path: input.path, method: input.method ?? 'GET', headers: input.headers ?? {}, ...(bytes ? { body: bytes } : {}) });
-      if (input.uploadId) {
-        uploaded = get(input.uploadId, 'upload');
-        if (uploaded.offset !== uploaded.bytes.length) throw failure('INVALID_ARGUMENT', '作品上传尚未完成。');
-        if (request.method !== 'POST') throw failure('INVALID_ARGUMENT', '读取请求不能包含上传内容。');
-        transfers.delete(input.uploadId); request.body = uploaded.bytes;
-      }
-      active++;
+      const endpoint = new URL(request.path, 'http://studio.invalid');
+      // Parked subscriptions must not consume the slots needed to publish changes that wake them.
+      const unlock = await acquire(requestSignal, endpoint.pathname === '/api/sync' && Number(endpoint.searchParams.get('wait')) > 0);
       try {
+        requestSignal.throwIfAborted();
+        if (input.uploadId) {
+          const upload = get(input.uploadId, 'upload');
+          if (upload.offset !== upload.bytes.length) throw failure('INVALID_ARGUMENT', '作品上传尚未完成。');
+          if (request.method !== 'POST') throw failure('INVALID_ARGUMENT', '读取请求不能包含上传内容。');
+          uploaded = upload; transfers.delete(input.uploadId); request.body = uploaded.bytes;
+        }
         const response = await requestUi(request, requestSignal);
         const declaredSize = Number(response.headers.get('content-length'));
         if (Number.isFinite(declaredSize) && declaredSize > APP_MAX_BYTES) { await response.body?.cancel(); throw failure('TOO_LARGE', '作品响应超过 128 MB。'); }
@@ -141,7 +159,7 @@ export function createAppTransport(requestUi: UiRequester) {
         if (body.length <= APP_CHUNK_BYTES) return { ...result, body: body.toString('base64') };
         const downloadId = add('download', body); responseBytes = 0;
         return { ...result, downloadId };
-      } finally { active--; budget -= responseBytes; if (uploaded) budget -= uploaded.bytes.length; }
+      } finally { unlock(); budget -= responseBytes; if (uploaded) budget -= uploaded.bytes.length; }
     },
     close() { if (!closed) { closed = true; lifetime.abort(failure('CLOSED', '作品连接已关闭。')); clearInterval(timer); for (const id of transfers.keys()) remove(id); } },
   };

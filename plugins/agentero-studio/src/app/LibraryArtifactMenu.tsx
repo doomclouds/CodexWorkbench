@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Copy, FileCode2, MoreHorizontal, Pin, Share2, Trash2 } from 'lucide-react';
 import type { Artifact } from '../contracts/studio';
 import './library.css';
+import { registerEscapeLayer } from './shared/escape';
 
 interface MenuPlacement { left: number; top: number; maxHeight: number; maxWidth: number; side: 'above' | 'below' | 'point' }
 export interface LibraryMenuProps {
@@ -51,7 +52,8 @@ export function LibraryMenu({ anchorRef, label, onClose, children, className = '
     document.addEventListener('pointerdown', outside, true);
     document.addEventListener('scroll', reposition, true);
     window.addEventListener('resize', reposition);
-    return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); };
+    const unregister = registerEscapeLayer(menu!, () => { closeRef.current(); anchorRef.current?.focus(); });
+    return () => { unregister(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('scroll', reposition, true); window.removeEventListener('resize', reposition); };
   }, [anchorRef]);
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {

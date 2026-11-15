@@ -17,7 +17,7 @@ import { userInfo } from 'node:os';
 
 export { StudioError } from './store.js';
 export type { ExportRecord } from './shared/files.js';
-export interface StudioAuthority { owner: boolean; actorId: string; credential?: string; viaLan: boolean }
+export interface StudioAuthority { owner: boolean; actorId: string; credential?: string; grantId?: string; viaLan: boolean }
 type AuthorizationState = Pick<ArtifactState, 'artifact' | 'sharing' | 'guestNames'>;
 const authorizationState = (state: Readonly<ArtifactState>): AuthorizationState => ({ artifact: state.artifact, sharing: state.sharing, guestNames: state.guestNames });
 function ownerActor(name?: string): Actor {
@@ -54,6 +54,7 @@ export class StudioService {
     if (authority.owner) return actor.kind === 'human' && actor.id === this.owner.id ? copy(this.owner) : actor;
     const access = shareAccess(state.artifact, state.sharing, authority.credential, actor.id);
     if (!access.role) throw new StudioError('UNAUTHORIZED', '分享权限已失效。', { reason: access.reason });
+    if (state.sharing.members?.[actor.id]?.grantId !== authority.grantId) throw new StudioError('UNAUTHORIZED', '访问权限已更新，请重新打开白板。', { reason: 'invalid-link' });
     const name = guestName(state, actor.id, this.owner.name);
     if (!name) throw new StudioError('NAME_REQUIRED', '请输入你的名字后加入白板。');
     return { id: actor.id, name, kind: 'human', role: access.role };
@@ -247,7 +248,7 @@ export class StudioService {
     const info = (state: AuthorizationState) => shareInfo(id, state.sharing, sharingAccess(state.sharing) === 'local' ? this.localOrigin : this.sharingOrigin, this.getPresence(id), this.owner, actor);
     if (action === 'status') return info(current);
     requireRole(actor, ['owner']);
-    if (!['start', 'stop', 'reset', 'link', 'role', 'remove'].includes(action)) throw new StudioError('INVALID_ARGUMENT', '不支持的分享操作。');
+    if (!['start', 'stop', 'reset', 'link', 'role', 'remove', 'restore'].includes(action)) throw new StudioError('INVALID_ARGUMENT', '不支持的分享操作。');
     // Validate before opening LAN, and close a newly opened listener if the commit fails.
     assertAlive(current.artifact); let opened = false;
     try {
@@ -260,7 +261,7 @@ export class StudioService {
       });
       const revokedMembers = [...committed.revokedMemberIds, ...this.getPresence(id).filter(peer => committed.revokedRoles.includes(peer.actor.role as Exclude<Role, 'owner'>)).map(peer => peer.actor.id)];
       if (revokedMembers.length) this.collaboration.revokeMembers(id, revokedMembers);
-      const reason = action === 'role' ? 'role-changed' : action === 'remove' ? 'removed' : action === 'reset' ? 'link-reset' : action === 'link' ? 'link-disabled' : action === 'start' && args.access === 'local' ? 'local-only' : 'sharing-closed';
+      const reason = action === 'restore' ? 'access-restored' : action === 'role' ? 'role-changed' : action === 'remove' ? 'removed' : action === 'reset' ? 'link-reset' : action === 'link' ? 'link-disabled' : action === 'start' && args.access === 'local' ? 'local-only' : 'sharing-closed';
       this.emit({ type: 'share', artifactId: id, enabled: committed.info.enabled, access: committed.info.access, reason, generation: committed.info.generation, revokedRoles: committed.revokedRoles, revokedMemberIds: committed.revokedMemberIds });
       if (action === 'stop' || action === 'start' && args.access === 'local') await this.shareHandler?.(false);
       return committed.info;
@@ -278,7 +279,7 @@ export class StudioService {
     if (viaLan && access === 'local') throw new StudioError('UNAUTHORIZED', state.sharing.enabled ? '这块白板仅允许在所有者电脑上访问。' : '这块白板的分享已关闭。', { reason: state.sharing.enabled ? 'local-only' : 'sharing-closed' });
     return access;
   }
-  async guestActor(artifactId: string, token: string | undefined, id: string, registration?: { name: unknown }, viaLan = false): Promise<Actor> {
+  async guestSession(artifactId: string, token: string | undefined, id: string, registration?: { name: unknown }, viaLan = false): Promise<{ actor: Actor; grantId?: string }> {
     await this.accessMode(artifactId, viaLan);
     const resolve = (state: AuthorizationState) => {
       if (viaLan && sharingAccess(state.sharing) === 'local') throw new StudioError('UNAUTHORIZED', '这块白板仅允许在所有者电脑上访问。', { reason: state.sharing.enabled ? 'local-only' : 'sharing-closed' });
@@ -294,7 +295,7 @@ export class StudioService {
     };
     const state = await this.store.readProjection(artifactId, authorizationState), hadName = state.guestNames?.[id] !== undefined, actor = resolve(state), member = state.sharing.members?.[id];
     // Persist last-seen at most once a minute rather than writing on every cursor heartbeat.
-    if (!registration && hadName && member && (member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 60_000) return actor;
+    if (!registration && hadName && member && (member.ownerAssigned || member.credential === token) && member.name === actor.name && Date.now() - Date.parse(member.lastSeenAt) < 60_000) return { actor, grantId: member.grantId };
     let roleChanged = false, joinedAccess = sharingAccess(state.sharing);
     const joined = await this.store.transaction(artifactId, current => {
       const previousRole = current.sharing.members?.[id]?.role;
@@ -302,7 +303,7 @@ export class StudioService {
       if (!joined) throw new StudioError('UNAUTHORIZED', '分享权限已变更，请重新连接。', { reason: shareAccess(current.artifact, current.sharing, token, id).reason });
       roleChanged = previousRole !== undefined && previousRole !== joined.role;
       joinedAccess = sharingAccess(current.sharing);
-      return joined;
+      return { actor: joined, grantId: current.sharing.members![id]!.grantId };
     });
     if (roleChanged) { this.collaboration.revokeMembers(artifactId, [id]); this.emit({ type: 'share', artifactId, enabled: true, access: joinedAccess, reason: 'role-changed', revokedMemberIds: [id] }); }
     return joined;

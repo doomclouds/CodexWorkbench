@@ -1,8 +1,18 @@
 import type { Anchor, Board, BoardElement } from '../../../contracts/studio';
 import type { StudioDocument, Viewport } from '../../products';
-import { anchorBounds, tableRows } from '../../canvas/canvas-model';
+import { anchorBounds, tableRows, type Point, type Rect } from '../../canvas/canvas-model';
 
 export interface CommentPoint { x: number; y: number; width?: number; height?: number }
+
+/** The original editor pins quick comments 16 screen pixels inside the visible corner. */
+export function visibleCommentCorner(bounds: Rect, viewport: Viewport, host: { width: number; height: number }): Point {
+  const x = bounds.x * viewport.zoom + viewport.x, y = bounds.y * viewport.zoom + viewport.y;
+  const left = Math.max(x, 0), top = Math.max(y, 0);
+  const right = Math.min(x + bounds.w * viewport.zoom, host.width), bottom = Math.min(y + bounds.h * viewport.zoom, host.height);
+  const visible = right > left && bottom > top ? { x: left, y: top, w: right - left, h: bottom - top } : { x, y, w: bounds.w * viewport.zoom, h: bounds.h * viewport.zoom };
+  const inset = Math.min(16, visible.w / 4, visible.h / 4);
+  return { x: (visible.x + visible.w - inset - viewport.x) / viewport.zoom, y: (visible.y + inset - viewport.y) / viewport.zoom };
+}
 
 const shapes: Record<string, string> = { rect: '矩形', rounded: '圆角矩形', ellipse: '圆形', diamond: '菱形', pill: '胶囊', hexagon: '六边形', parallelogram: '平行四边形', database: '数据库', queue: '队列', document: '文档', cloud: '云', person: '人物' };
 function quote(text = ''): string {
@@ -59,5 +69,5 @@ export function liveCommentPoint(canvas: HTMLElement | null, document: StudioDoc
   if (!canvas || !document || !('elements' in document) || !viewport) return fallback;
   const bounds = anchorBounds(anchor, (document as Board).elements), host = canvas.querySelector('.studio-canvas-viewport')?.getBoundingClientRect();
   if (!bounds || !host) return fallback;
-  return { x: host.left + viewport.x + (bounds.x + (anchor.x === undefined ? bounds.w : 0)) * viewport.zoom, y: host.top + viewport.y + bounds.y * viewport.zoom + 4, width: 36, height: 36 };
+  return { x: host.left + viewport.x + (bounds.x + (anchor.x === undefined ? bounds.w : 0)) * viewport.zoom, y: host.top + viewport.y + bounds.y * viewport.zoom + (anchor.y === undefined ? 4 : 0), width: 36, height: 36 };
 }

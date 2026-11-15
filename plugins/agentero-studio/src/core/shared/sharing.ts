@@ -1,7 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { LOCAL_ACTOR, type Actor, type Presence, type Role } from '../../contracts/studio.js';
 import { assertAlive, copy, requireRole, safeId, StudioError, text } from './common.js';
-import type { ArtifactMetadata, ArtifactState, SharingState } from './model.js';
+import type { ArtifactMetadata, ArtifactState, SharingMember, SharingState } from './model.js';
 
 export const SHARE_ROLES = ['editor', 'commenter', 'viewer'] as const;
 type GuestRole = Exclude<Role, 'owner'>;
@@ -53,11 +53,13 @@ export function shareInfo(artifactId: string, sharing: SharingState, origin: str
   const canonicalPath = `/?${new URLSearchParams({ artifactId })}`;
   if (actor.role !== 'owner') return { enabled: sharing.enabled, access: sharingAccess(sharing), role: actor.role, roles, links, canonicalPath };
   const roleEnabled = Object.fromEntries(SHARE_ROLES.map(role => [role, roleOn(sharing, role)]));
-  const members = Object.values(sharing.members ?? {}).filter(member => !member.removed && sharing.tokens[member.role] === member.roleToken).map(({ credential: _credential, roleToken: _roleToken, ownerAssigned: _ownerAssigned, removed: _removed, ...member }) => ({
-    ...copy(member), active: sharing.enabled && roleOn(sharing, member.role),
-    online: sharing.enabled && roleOn(sharing, member.role) && peers.some(peer => peer.actor.id === member.id && peer.actor.role === member.role),
-  })).sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeenAt.localeCompare(a.lastSeenAt));
-  return { enabled: sharing.enabled, access: sharingAccess(sharing), generation: sharing.generation, links, roles: [...SHARE_ROLES], roleEnabled, members, owner: copy(owner), canonicalPath };
+  const projectMember = (member: SharingMember) => {
+    const active = !member.removed && sharing.enabled && roleOn(sharing, member.role) && sharing.tokens[member.role] === member.roleToken;
+    return { id: member.id, name: member.name, role: member.role, joinedAt: member.joinedAt, lastSeenAt: member.lastSeenAt, active, online: active && peers.some(peer => peer.actor.id === member.id && peer.actor.role === member.role) };
+  };
+  const members = Object.values(sharing.members ?? {}).filter(member => !member.removed && sharing.tokens[member.role] === member.roleToken).map(projectMember).sort((a, b) => Number(b.online) - Number(a.online) || b.lastSeenAt.localeCompare(a.lastSeenAt));
+  const removedMembers = Object.values(sharing.members ?? {}).filter(member => member.removed).map(projectMember).sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
+  return { enabled: sharing.enabled, access: sharingAccess(sharing), generation: sharing.generation, links, roles: [...SHARE_ROLES], roleEnabled, members, removedMembers, owner: copy(owner), canonicalPath };
 }
 export function updateSharing(artifact: ArtifactMetadata, sharing: SharingState, action: string, actor: Actor, args: Record<string, unknown>): { revokedRoles: GuestRole[]; revokedMemberIds: string[] } {
   requireRole(actor, ['owner']); assertAlive(artifact);
@@ -83,8 +85,17 @@ export function updateSharing(artifact: ArtifactMetadata, sharing: SharingState,
     for (const role of roles) sharing.tokens[role] = newToken(); sharing.generation++;
     result.revokedRoles = roles; return result;
   }
-  if (action === 'role' || action === 'remove') {
+  if (action === 'role' || action === 'remove' || action === 'restore') {
     const id = safeId(args.memberId, '成员 ID'), member = sharing.members && Object.hasOwn(sharing.members, id) ? sharing.members[id] : undefined;
+    if (action === 'restore') {
+      if (!member?.removed) throw new StudioError('NOT_FOUND', '已移除成员不存在。');
+      const role = checkedRole(args.role);
+      if (!sharing.enabled || !roleOn(sharing, role) || !sharing.tokens[role]) throw new StudioError('INVALID_ARGUMENT', '请先启用该角色的邀请链接。');
+      member.role = role; member.roleToken = sharing.tokens[role]!; member.credential = sharing.tokens[role]!;
+      // A restored grant must not authorize requests queued before removal.
+      member.grantId = newToken(); member.ownerAssigned = true; delete member.removed;
+      sharing.generation++; return result;
+    }
     if (!member || member.removed || sharing.tokens[member.role] !== member.roleToken) throw new StudioError('NOT_FOUND', '成员不存在。');
     if (action === 'role') {
       const role = checkedRole(args.role);
@@ -128,7 +139,7 @@ export function shareRole(artifact: ArtifactMetadata, sharing: SharingState, tok
 export function joinSharingMember(artifact: ArtifactMetadata, sharing: SharingState, token: string | undefined, id: string, name: string): Actor | undefined {
   const role = shareRole(artifact, sharing, token, id); if (!role) return;
   sharing.members ??= {}; const current = sharing.members[id], now = new Date().toISOString();
-  if (!current && token) sharing.members[id] = { id, name, role, credential: token, roleToken: sharing.tokens[role]!, joinedAt: now, lastSeenAt: now };
+  if (!current && token) sharing.members[id] = { id, name, role, credential: token, roleToken: sharing.tokens[role]!, grantId: newToken(), joinedAt: now, lastSeenAt: now };
   else {
     if (!current) return;
     if (!current.ownerAssigned && token) { current.role = role; current.roleToken = sharing.tokens[role]!; current.credential = token; }

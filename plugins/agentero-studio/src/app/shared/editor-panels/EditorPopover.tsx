@@ -2,6 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import './editor-panels.css';
+import { registerEscapeLayer } from '../escape';
 
 export interface EditorPopoverProps {
   title: string;
@@ -58,17 +59,15 @@ export function EditorPopover({ title, onClose, anchorRef, children, className =
       if (!(event.target instanceof Node) || root.current?.contains(event.target) || anchorRef?.current?.contains(event.target)) return;
       close.current();
     };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || isEditableTarget(event.target)) return;
-      if (persistent && (!(event.target instanceof Node) || !node?.contains(event.target))) return;
-      event.stopPropagation();
+    const unregister = registerEscapeLayer(node!, target => {
+      if (persistent && (!(target instanceof Node) || !node?.contains(target))) return false;
+      if (isEditableTarget(target)) return;
       close.current();
-    };
+    });
     document.addEventListener('pointerdown', outside, true);
-    document.addEventListener('keydown', escape);
     return () => {
       document.removeEventListener('pointerdown', outside, true);
-      document.removeEventListener('keydown', escape);
+      unregister();
       if (document.activeElement === document.body || (document.activeElement && node?.contains(document.activeElement))) {
         const target = anchorRef?.current || previousFocus;
         if (target?.isConnected) target.focus({ preventScroll: true });

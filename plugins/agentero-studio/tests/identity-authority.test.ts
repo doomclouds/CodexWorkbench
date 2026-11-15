@@ -113,7 +113,7 @@ describe('host owner and viewer-safe sharing identity', () => {
     const result = await viewer.call('artifact_share', { action: 'status' }); expect(result.response.status).toBe(200);
     const allowed = ['editor', 'commenter', 'viewer'].slice(['editor', 'commenter', 'viewer'].indexOf(role));
     expect(result.value.data).toEqual({ enabled: true, access: 'local', role, roles: allowed, links: Object.fromEntries(allowed.map(key => [key, info.links[key]])), canonicalPath: `/?artifactId=${artifactId}` });
-    for (const action of ['start', 'stop', 'reset', 'link', 'role', 'remove']) expect((await viewer.call('artifact_share', { action, role: 'viewer', on: false, memberId: 'any' })).response.status).toBe(403);
+    for (const action of ['start', 'stop', 'reset', 'link', 'role', 'remove', 'restore']) expect((await viewer.call('artifact_share', { action, role: 'viewer', on: false, memberId: 'any' })).response.status).toBe(403);
     expect((await viewer.call('artifact_manage', { action: 'create' })).response.status).toBe(403);
     if (role !== 'viewer') {
       await share({ action: 'link', role: 'viewer', on: false });
@@ -200,8 +200,8 @@ describe('fresh authority at the artifact transaction', () => {
     const info = await share({ action: 'start', access: 'local' }), viewer = guest(tokenFor(info)); const actor = await viewer.join('Ready race');
     let release!: () => void, admitted!: () => void, block = true;
     const gate = new Promise<void>(resolve => { release = resolve; }), accepted = new Promise<void>(resolve => { admitted = resolve; });
-    const original = host.service.guestActor.bind(host.service);
-    vi.spyOn(host.service, 'guestActor').mockImplementation(async (...input: Parameters<StudioService['guestActor']>) => { const result = await original(...input); if (block) { block = false; admitted(); await gate; } return result; });
+    const original = host.service.guestSession.bind(host.service);
+    vi.spyOn(host.service, 'guestSession').mockImplementation(async (...input: Parameters<StudioService['guestSession']>) => { const result = await original(...input); if (block) { block = false; admitted(); await gate; } return result; });
     const pending = viewer.request(`/api/events?artifactId=${artifactId}`);
     await accepted; try { await share({ action: 'role', memberId: actor.id, role: 'viewer' }); } finally { release(); }
     const stream = await pending, reader = stream.body!.getReader();
@@ -213,14 +213,14 @@ describe('fresh authority at the artifact transaction', () => {
     expect(text).toContain('"type":"access-revoked"'); expect(text).toContain('"reason":"link-disabled"');
   });
 
-  it.each(['remove', 'canonical-remove', 'downgrade', 'reset', 'off', 'stop', 'local-only'])('rejects an already-authorized queued content write after %s commits first', async action => {
+  it.each(['remove', 'canonical-remove', 'restore', 'canonical-restore', 'downgrade', 'reset', 'off', 'stop', 'local-only'])('rejects an already-authorized queued content write after %s commits first', async action => {
     const info = await share({ action: 'start', access: action === 'local-only' ? 'lan' : 'local' });
     if (action === 'local-only') {
       const other = (await host.service.execute('artifact_manage', { action: 'create' })).artifact.id;
       await host.service.execute('artifact_share', { artifactId: other, action: 'start' });
     }
     const viewer = guest(tokenFor(info), action === 'local-only' ? new URL(info.links.editor).origin : host.origin), actor = await viewer.join('Queued editor');
-    if (action === 'canonical-remove') viewer.use();
+    if (action.startsWith('canonical-')) viewer.use();
     let release!: () => void, admitted!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; }), accepted = new Promise<void>(resolve => { admitted = resolve; });
     const original = host.service.execute.bind(host.service);
@@ -234,6 +234,7 @@ describe('fresh authority at the artifact transaction', () => {
       if (action === 'downgrade') await share({ action: 'role', memberId: actor.id, role: 'viewer' });
       else if (action === 'off') await share({ action: 'link', role: 'editor', on: false });
       else if (action === 'local-only') await share({ action: 'start', access: 'local' });
+      else if (action === 'restore' || action === 'canonical-restore') { await share({ action: 'remove', memberId: actor.id }); await share({ action: 'restore', memberId: actor.id, role: 'editor' }); }
       else await share({ action: action === 'canonical-remove' ? 'remove' : action, role: 'editor', memberId: actor.id });
     } finally { release(); }
     const response = await pending;
@@ -241,6 +242,10 @@ describe('fresh authority at the artifact transaction', () => {
     const state = await host.service.store.read(artifactId);
     expect((state.content as { elements: { text?: string }[] }).elements[0]!.text).toBe('base'); expect(state.artifact.revision).toBe(0); expect(state.operations).toEqual([]);
     expect(JSON.stringify(state.history)).not.toContain(tokenFor(info));
+    if (action === 'restore' || action === 'canonical-restore') {
+      expect((await viewer.session()).value.actor).toMatchObject({ id: actor.id, name: actor.name, role: 'editor' });
+      expect((await viewer.call('artifact_apply', { operationId: 'restored-mutation', expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'fresh authorized write' } }] })).response.status).toBe(200);
+    }
   });
 
   it('rechecks queued feedback before creating frozen context', async () => {

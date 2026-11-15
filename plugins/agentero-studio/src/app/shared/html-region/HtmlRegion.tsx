@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HtmlRegionContent, HtmlSelection, Json } from '../../../contracts/studio.js';
 import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlStateSave } from './runtime.js';
 import { newClientId } from '../client-id.js';
+import { dismissEscapeLayer, isEscapeActive } from '../escape.js';
 
 interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
 interface SaveQueue {
@@ -77,6 +78,10 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
     if (scrollPosition.current?.regionId !== element.id) scrollPosition.current = null;
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || !event.data || event.data.channel !== channel) return;
+      if (event.data.type === 'studio-html-escape' && event.data.regionId === element.id && event.data.sourceRevision === sourceRevision) {
+        if (frame.current && isEscapeActive(frame.current)) dismissEscapeLayer(window, frame.current);
+        return;
+      }
       if (event.data.type === 'studio-html-ready' && event.data.regionId === element.id && event.data.sourceRevision === sourceRevision) {
         if (readyDocument.current !== channel) {
           readyDocument.current = channel;

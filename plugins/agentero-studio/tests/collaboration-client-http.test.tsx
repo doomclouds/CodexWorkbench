@@ -39,6 +39,40 @@ it('consumes concurrent committed unit changes through real long polling and coa
   expect(cursorRequests.length).toBeGreaterThan(0); expect(cursorRequests.length).toBeLessThanOrEqual(2);
 });
 
+it('delivers committed canvas changes while an unrelated feedback read is still waiting', async () => {
+  const created = await host.service.execute('artifact_manage', { action: 'create', title: '评论慢读' }), id = created.artifact.id;
+  let current: Board | null = null, releaseFeedback!: () => void, waiting = false;
+  const delayed = new Promise<void>(resolve => { releaseFeedback = resolve; });
+  const transport = client(host.token), request = transport.request!;
+  transport.request = async (input, init) => {
+    const response = await request(input, init);
+    if (new URL(String(input)).pathname.endsWith('/artifact_feedback')) { waiting = true; await delayed; }
+    return response;
+  };
+  const errors: unknown[] = [];
+  const controller = createCollaboration({ client: transport, polling: true, artifactId: id, peerId: 'slow-feedback-page', getDocument: () => current, onDocument: value => { current = value as Board; }, onFeedback: () => {}, onPresence: () => {}, onStatus: () => {}, onEvent: () => {}, onError: error => errors.push(error) }); closes.push(controller.close);
+  try {
+    await until(() => current !== null && waiting);
+    await host.service.execute('artifact_apply', { artifactId: id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'arrived', type: 'text', text: '先看到内容' } }] });
+    await until(() => current?.elements.some(element => element.id === 'arrived') === true);
+    expect(errors).toEqual([]);
+  } finally { releaseFeedback(); }
+});
+
+it('recovers an asynchronously failed feedback read without requiring another edit', async () => {
+  const created = await host.service.execute('artifact_manage', { action: 'create', title: '评论读取恢复' }), id = created.artifact.id;
+  let current: Board | null = null, attempts = 0, recovered = false;
+  const transport = client(host.token), request = transport.request!;
+  transport.request = async (input, init) => {
+    if (new URL(String(input)).pathname.endsWith('/artifact_feedback') && ++attempts === 1) return Response.json({ error: { code: 'UNAVAILABLE', message: '评论暂时不可读' } }, { status: 503 });
+    return request(input, init);
+  };
+  const errors: unknown[] = [];
+  const controller = createCollaboration({ client: transport, polling: true, artifactId: id, peerId: 'feedback-retry-page', getDocument: () => current, onDocument: value => { current = value as Board; }, onFeedback: () => { recovered = true; }, onPresence: () => {}, onStatus: () => {}, onEvent: () => {}, onError: error => errors.push(error) }); closes.push(controller.close);
+  await until(() => recovered);
+  expect(attempts).toBe(2); expect(errors).toHaveLength(1); expect(current).not.toBeNull();
+});
+
 it('uses a real cookie-only guest projection and applies an owner role change without losing the page', async () => {
   const created = await host.service.execute('artifact_manage', { action: 'create', title: '访客白板' }), id = created.artifact.id;
   const shared = await host.service.execute('artifact_share', { artifactId: id, action: 'start', access: 'local' });

@@ -8,6 +8,7 @@ import { callTool } from '../api';
 import { attachReadingContext, openExternalLink, registerBeforeTeardown } from '../bridge';
 import { formatBytes, messageOf, PDF_CHUNK_BYTES, readPdfChunks } from '../model';
 import { NotesView } from '../NotesView';
+import { registerEscapeLayer } from '../ui/escape';
 import { createPdfWorker, pdfjs } from '../pdf-runtime';
 import { PageView, type RegisteredPage, type VisualSelection } from './PageView';
 import { MarksPanel, OutlinePanel, SelectionToolbar, TranslationCard, type FloatingTranslation, type MarkEditorDraft, type ReaderSelection, type SelectionDraft } from './ReaderPanels';
@@ -319,9 +320,9 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
   useEffect(() => {
     if (!moreOpen) return;
     const close = (event: PointerEvent) => { if (event.target instanceof Node && !moreRoot.current?.contains(event.target)) setMoreOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMoreOpen(false); };
-    window.document.addEventListener('pointerdown', close); window.addEventListener('keydown', escape);
-    return () => { window.document.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape); };
+    const unregisterEscape = registerEscapeLayer(moreRoot.current!, () => setMoreOpen(false));
+    window.document.addEventListener('pointerdown', close);
+    return () => { unregisterEscape(); window.document.removeEventListener('pointerdown', close); };
   }, [moreOpen]);
 
   function suspendSelection() { if (selectionRef.current) setSelectionSuspended(true); }
@@ -489,12 +490,23 @@ export function PdfReader({ active, vaultId, paper, preview, canSend, canParse, 
     if (current && viewport.current && locatedHit.current !== key) { const rect = current.getBoundingClientRect(); const bounds = viewport.current.getBoundingClientRect(); viewport.current.scrollTop += rect.top - bounds.top - viewport.current.clientHeight / 3; locatedHit.current = key; }
   }, [hits, hitIndex, scale, active, renderRevision]);
 
+  const escapeAction = useRef<(target: EventTarget | null) => void>(() => {});
+  escapeAction.current = target => {
+    if (managerRef.current) { if (selectedMark) setSelectedMark(null); else returnFromAnnotationManager(); return; }
+    if (target instanceof Element && target.closest('.pdf-notes-sidebar,.pdf-marks-panel')) return;
+    if (translationCard) { setTranslationCard(null); selectionTranslationAbort.current?.abort(); translationRun.current += 1; }
+    else if (selectionRef.current && !selectionSuspendedRef.current) suspendSelection();
+    else if (crop) setCrop(false);
+    else if (translationOpen) { setTranslationOpen(false); translationRun.current += 1; }
+    else if (searchOpen) { setSearchOpen(false); cancelSearch(); }
+  };
+  useEffect(() => active ? registerEscapeLayer(host.current!, target => escapeAction.current(target), 0) : undefined, [active]);
+
   useEffect(() => {
     if (!active) return;
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || managerRef.current || event.target instanceof Element && event.target.closest('.pdf-notes-sidebar,.pdf-marks-panel')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearchOpen(true); requestAnimationFrame(() => searchInput.current?.focus()); return; }
-      if (event.key === 'Escape') { if (selectionRef.current && !selectionSuspendedRef.current) { event.preventDefault(); event.stopPropagation(); suspendSelection(); return; } setTranslationCard(null); setTranslationOpen(false); selectionTranslationAbort.current?.abort(); setCrop(false); setSearchOpen(false); cancelSearch(); translationRun.current += 1; return; }
       if (editable(event.target)) return;
       if ((event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key)) { event.preventDefault(); zoom(event.key === '0' ? 1 : scale + (event.key === '-' ? -.1 : .1), event.key === '0'); return; }
       if ((event.key === ' ' || event.code === 'Space') && !(event.target instanceof Element && event.target.closest('button,a,[role="button"]'))) { event.preventDefault(); setSpace(true); }
