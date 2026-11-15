@@ -57,7 +57,24 @@ export function createCollaborationRoutes({ service, authorize, scope, readJson,
         finally { pending.delete(controller); response.removeListener('close', abort); }
         return true;
       }
-      const queued: StudioEvent[] = []; let queuedBytes = 0, overflow = false, ready = false, disposed = false, last = -1, releasePeer = () => {};
+      const queued: StudioEvent[] = [], frames: { text: string; bytes: number }[] = [];
+      let queuedBytes = 0, frameBytes = 0, blocked = false, overflow = false, ready = false, disposed = false, last = -1, releasePeer = () => {};
+      const drain = () => {
+        blocked = false;
+        while (!disposed && !response.writableEnded && frames.length) {
+          const frame = frames.shift()!; frameBytes -= frame.bytes;
+          // A false return still accepts this frame; resume with the next one after drain.
+          if (!response.write(frame.text)) { blocked = true; response.once('drain', drain); break; }
+        }
+      };
+      const write = (text: string) => {
+        if (disposed || response.writableEnded) return;
+        if (blocked) {
+          const bytes = Buffer.byteLength(text); frames.push({ text, bytes }); frameBytes += bytes;
+          // Bound only frames waiting behind Node's accepted write; reconnect replays the cursor.
+          if (frames.length > 512 || frameBytes > 1024 * 1024) { live.dispose(); response.end(); }
+        } else if (!response.write(text)) { blocked = true; response.once('drain', drain); }
+      };
       const send = (event: StudioEvent) => {
         if (disposed || response.writableEnded) return;
         if (!ready) {
@@ -66,12 +83,11 @@ export function createCollaborationRoutes({ service, authorize, scope, readJson,
         }
         if (sequence(event.cursor) <= last) return;
         last = sequence(event.cursor);
-        // Closing a slow consumer bounds Node's output queue; its cursor replays on reconnect.
-        if (!response.write(`id: ${event.cursor ?? ''}\ndata: ${JSON.stringify(event)}\n\n`)) response.end();
+        write(`id: ${event.cursor ?? ''}\ndata: ${JSON.stringify(event)}\n\n`);
       };
       const stop = service.subscribe(artifactId, send);
-      const heartbeat = setInterval(() => { if (!response.writableEnded && !response.write(': keep-alive\n\n')) response.end(); }, 15_000); heartbeat.unref();
-      const live: Live = { response, auth, artifactId, dispose: () => { if (disposed) return; disposed = true; lives.delete(live); stop(); releasePeer(); clearInterval(heartbeat); pending.delete(controller); response.removeListener('close', abort); } }; lives.add(live);
+      const heartbeat = setInterval(() => write(': keep-alive\n\n'), 15_000); heartbeat.unref();
+      const live: Live = { response, auth, artifactId, dispose: () => { if (disposed) return; disposed = true; lives.delete(live); stop(); releasePeer(); clearInterval(heartbeat); pending.delete(controller); response.removeListener('close', abort); response.removeListener('drain', drain); queued.length = 0; frames.length = 0; queuedBytes = frameBytes = 0; } }; lives.add(live);
       response.once('close', live.dispose);
       try {
         // Listener precedes the first snapshot. Later queued events are filtered by its watermark.
@@ -85,8 +101,8 @@ export function createCollaborationRoutes({ service, authorize, scope, readJson,
         if (overflow) data = { ...data, cursor: service.cursor(), reset: true, events: [] };
         response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
         last = sequence(data.cursor);
-        if (!response.write(`retry: 1500\nid: ${data.cursor}\ndata: ${JSON.stringify({ type: 'ready', artifactId, ...data })}\n\n`)) response.end();
-        ready = true; for (const event of queued) send(event);
+        write(`retry: 1500\nid: ${data.cursor}\ndata: ${JSON.stringify({ type: 'ready', artifactId, ...data })}\n\n`);
+        ready = true; for (const event of queued) send(event); queued.length = 0; queuedBytes = 0;
       } catch (error) { const failed = !disposed && !controller.signal.aborted; live.dispose(); releasePeer(); if (failed) throw error; }
       return true;
     },

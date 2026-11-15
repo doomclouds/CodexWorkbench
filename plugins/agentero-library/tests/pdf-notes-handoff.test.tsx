@@ -3,6 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { Paper } from '../src/contracts/types';
 
 const harness = vi.hoisted(() => ({ states: [] as any[], index: 0, refs: [] as any[], refIndex: 0, effects: [] as { effect: () => (() => void) | void; dependencies: unknown[] }[] }));
+const escapeLayer = vi.hoisted(() => ({ dismiss: null as null | ((target: EventTarget | null) => void) }));
+vi.mock('../src/app/ui/escape', () => ({ registerEscapeLayer: (_root: unknown, dismiss: (target: EventTarget | null) => void) => { escapeLayer.dismiss = dismiss; return () => { escapeLayer.dismiss = null; }; } }));
 vi.mock('react', async original => ({
   ...await original<typeof import('react')>(),
   useState: (initial: unknown) => { const index = harness.index++; if (!(index in harness.states)) harness.states[index] = typeof initial === 'function' ? initial() : initial; return [harness.states[index], (next: unknown) => { harness.states[index] = typeof next === 'function' ? next(harness.states[index]) : next; }]; },
@@ -135,7 +137,7 @@ it('opening the explicit annotation editor preserves the reading page and transf
   expect(panel.props.onLocate).toBeTypeOf('function');
 });
 
-it('Escape closes a visible selection first, then exits active tools while retaining its suspended draft', () => {
+it('Escape closes a visible selection, then one active tool per press while retaining its suspended draft', () => {
   const addEventListener = vi.fn(); vi.stubGlobal('Element', class {});
   vi.stubGlobal('window', { innerWidth: 1000, innerHeight: 800, document: { body: {} }, addEventListener, removeEventListener: vi.fn() });
   vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
@@ -144,17 +146,20 @@ it('Escape closes a visible selection first, then exits active tools while retai
   harness.states[22] = { mode: 'comment', text: 'retained draft', color: 'green' };
   const render = () => { harness.index = 0; harness.refIndex = 0; harness.effects = []; return PdfReader({ active: true, vaultId: 'owned', paper, preview: false, canSend: false, canParse: false, onNotes: vi.fn(), onOperation: vi.fn(), onBack: vi.fn(), readerToolsHost: {} as HTMLElement }); };
   let tree = render();
-  const keyboard = harness.effects.find(({ dependencies }) => dependencies.length === 3 && dependencies[0] === true && typeof dependencies[1] === 'number' && typeof dependencies[2] === 'function')!;
-  const cleanup = keyboard.effect(); const keydown = addEventListener.mock.calls.find(([name]) => name === 'keydown')![1];
-  const event = { key: 'Escape', target: null, preventDefault: vi.fn(), stopPropagation: vi.fn() };
-  keydown(event); tree = render(); expect(find(tree, SelectionToolbar)).toBeUndefined(); expect(event.preventDefault).toHaveBeenCalledOnce();
+  const keyboard = harness.effects.find(({ effect, dependencies }) => dependencies.length === 1 && dependencies[0] === true && String(effect).includes('registerEscapeLayer'))!;
+  const cleanup = keyboard.effect();
+  escapeLayer.dismiss!(null); tree = render(); expect(find(tree, SelectionToolbar)).toBeUndefined();
   find(tree, ReaderTools).props.actions.toggleSearch(); find(tree, ReaderTools).props.actions.toggleTranslation();
   findProps(tree, props => props['aria-label'] === '更多阅读操作' && props['aria-haspopup'] === 'menu').props.onClick(); tree = render();
   findProps(tree, props => props.role === 'menuitemcheckbox').props.onClick(); tree = render();
   expect(find(tree, ReaderTools).props.state.searchOpen).toBe(true); expect(find(tree, ReaderTools).props.state.translationOpen).toBe(true);
   expect(findProps(tree, props => props.children === '拖动框选区域，Esc 退出')).toBeDefined();
-  keydown(event); tree = render();
-  expect(find(tree, ReaderTools).props.state.searchOpen).toBe(false); expect(find(tree, ReaderTools).props.state.translationOpen).toBe(false);
+  escapeLayer.dismiss!(null); tree = render();
+  expect(find(tree, ReaderTools).props.state.searchOpen).toBe(true); expect(find(tree, ReaderTools).props.state.translationOpen).toBe(true);
+  expect(findProps(tree, props => props.children === '拖动框选区域，Esc 退出')).toBeUndefined();
+  escapeLayer.dismiss!(null); tree = render();
+  expect(find(tree, ReaderTools).props.state.translationOpen).toBe(false); expect(find(tree, ReaderTools).props.state.searchOpen).toBe(true);
+  escapeLayer.dismiss!(null); tree = render(); expect(find(tree, ReaderTools).props.state.searchOpen).toBe(false);
   expect(findProps(tree, props => props.className?.includes('reader-toast'))).toBeUndefined();
   expect(harness.states[22].text).toBe('retained draft'); expect(findProps(tree, props => props.className === 'pdf-selection-resume')).toBeDefined();
   cleanup?.();

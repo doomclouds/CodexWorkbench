@@ -29,10 +29,17 @@ function historyProps(extra: Partial<HistoryPanelProps> = {}): HistoryPanelProps
   return { history: [], currentRevision: 3, actor: LOCAL_ACTOR, canRestore: true, onRefresh: vi.fn(), onPreview: vi.fn(), onRestore: vi.fn().mockResolvedValue(true), onLoadChanges: vi.fn(async (entry: HistoryBatch) => [...new Set(entry.changedIds)].map(id => ({ id, before: null, after: { text: '新增内容' } }))), ...extra };
 }
 function shareProps(extra: Partial<SharePanelProps> = {}): SharePanelProps {
-  return { title: '测试作品', actor: LOCAL_ACTOR, share: { enabled: false, owner: LOCAL_ACTOR, members: [], roleEnabled: { editor: true, commenter: true, viewer: true } }, exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'json', label: 'JSON 数据' }], canBackup: true, onStart: vi.fn().mockResolvedValue(true), onReset: vi.fn().mockResolvedValue(true), onToggleRole: vi.fn().mockResolvedValue(true), onMemberRole: vi.fn().mockResolvedValue(true), onRemoveMember: vi.fn().mockResolvedValue(true), onCopy: vi.fn(), onExport: vi.fn(), ...extra };
+  return { title: '测试作品', actor: LOCAL_ACTOR, share: { enabled: false, owner: LOCAL_ACTOR, members: [], roleEnabled: { editor: true, commenter: true, viewer: true } }, exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'json', label: 'JSON 数据' }], canBackup: true, onStart: vi.fn().mockResolvedValue(true), onReset: vi.fn().mockResolvedValue(true), onToggleRole: vi.fn().mockResolvedValue(true), onMemberRole: vi.fn().mockResolvedValue(true), onRemoveMember: vi.fn().mockResolvedValue(true), onRestoreMember: vi.fn().mockResolvedValue(true), onCopy: vi.fn(), onExport: vi.fn(), ...extra };
 }
 
 describe('history popover content', () => {
+  it('consumes Escape once in the newest popover without closing an underlying panel', async () => {
+    const underneath = vi.fn(), top = vi.fn();
+    await render(<><EditorPopover title="Underneath" onClose={underneath}><button>Under</button></EditorPopover><EditorPopover title="Top" onClose={top}><button>Top</button></EditorPopover></>);
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await act(async () => document.activeElement!.dispatchEvent(event));
+    expect(top).toHaveBeenCalledOnce(); expect(underneath).not.toHaveBeenCalled(); expect(event.defaultPrevented).toBe(true);
+  });
   it('groups local calendar dates without changing source order and keeps unknown dates readable', () => {
     const now = new Date(2026, 10, 14, 0, 10), source = [version('older', 1, new Date(2026, 10, 10).toISOString()), version('yesterday', 2, new Date(2026, 10, 13, 23, 59).toISOString()), version('today', 3, new Date(2026, 10, 14, 0, 1).toISOString()), version('unknown', 0, 'invalid')];
     const grouped = groupHistoryByDate(source, now);
@@ -128,16 +135,30 @@ describe('share and export popover content', () => {
   });
 
   it('uses the guest invitation projection and canonical link without owner management or tabs', async () => {
-    const props = shareProps({ actor: { ...person, role: 'viewer' }, share: { enabled: true, role: 'viewer', roles: ['viewer'], links: { viewer: 'viewer-link' } }, canonicalLink: 'http://local.test/?artifactId=board', canBackup: false });
+    const props = shareProps({ actor: { ...person, role: 'viewer' }, share: { enabled: true, role: 'viewer', roles: ['viewer'], links: { viewer: 'viewer-link' }, removedMembers: [{ ...member, name: 'Removed private name', active: false, online: false }] }, canonicalLink: 'http://local.test/?artifactId=board', canBackup: false });
     await render(<SharePanel {...props} />);
     expect(host.querySelector(`[aria-label="管理成员：${member.name}"]`)).toBeNull();
     expect(host.querySelector('[aria-label="复制可编辑链接"]')).toBeNull();
     expect(host.textContent).toContain('仅查看');
     expect(host.querySelector('[role="tablist"]')).toBeNull();
     expect(host.textContent).not.toContain('作品所有者'); expect(host.textContent).not.toContain('完整作品备份');
+    expect(host.textContent).not.toContain('Removed private name'); expect(host.textContent).not.toContain('恢复访问');
     await click('复制仅查看链接'); expect(props.onCopy).toHaveBeenCalledWith('viewer-link', 'viewer');
     await click('复制页面链接'); expect(props.onCopy).toHaveBeenCalledWith('http://local.test/?artifactId=board');
     expect(props.onStart).not.toHaveBeenCalled();
+  });
+
+  it('restores a removed member only through an explicitly selected enabled role', async () => {
+    const props = shareProps({ share: { enabled: true, members: [], removedMembers: [{ ...member, active: false, online: false }], roleEnabled: { editor: false, commenter: true, viewer: true } } });
+    await render(<SharePanel {...props} />);
+    expect(host.textContent).toContain('已移除的成员'); expect(host.textContent).toContain('访问权限已移除');
+    expect(host.querySelector(`[aria-label="管理成员：${member.name}"]`)).toBeNull();
+    await click(`恢复访问：${member.name}`);
+    expect(props.onRestoreMember).not.toHaveBeenCalled(); expect(button('恢复为可编辑').disabled).toBe(true);
+    await click('恢复为仅查看'); expect(props.onRestoreMember).toHaveBeenCalledWith(member.id, 'viewer');
+    expect(props.onMemberRole).not.toHaveBeenCalled(); expect(props.onRemoveMember).not.toHaveBeenCalled();
+    await render(<SharePanel {...props} share={{ ...props.share!, roleEnabled: { editor: false, commenter: false, viewer: false } }} />);
+    expect(button(`恢复访问：${member.name}`).disabled).toBe(true);
   });
 
   it('focuses an available member role when the member current role link is disabled', async () => {
@@ -321,11 +342,11 @@ describe('non-modal editor popover', () => {
     } finally { Object.defineProperty(window, 'innerWidth', { configurable: true, value: viewport.width }); Object.defineProperty(window, 'innerHeight', { configurable: true, value: viewport.height }); }
   });
 
-  it('leaves contenteditable keys alone and closes on outside pointerdown without blocking it', async () => {
+  it('retains contenteditable input while isolating Escape and keeps outside pointerdown unblocked', async () => {
     const onClosed = vi.fn(); await render(<Example onClosed={onClosed} />); await click('打开');
     const text = host.querySelector('[contenteditable]')!, escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     await act(async () => text.dispatchEvent(escape));
-    expect(escape.defaultPrevented).toBe(false); expect(host.querySelector('[role="dialog"]')).not.toBeNull(); expect(onClosed).not.toHaveBeenCalled();
+    expect(escape.defaultPrevented).toBe(true); expect(host.querySelector('[role="dialog"]')).not.toBeNull(); expect(onClosed).not.toHaveBeenCalled();
     const event = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
     await act(async () => button('外部').dispatchEvent(event));
     expect(event.defaultPrevented).toBe(false); expect(onClosed).toHaveBeenCalledOnce(); expect(host.querySelector('[role="dialog"]')).toBeNull();

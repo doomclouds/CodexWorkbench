@@ -5,6 +5,7 @@ import { getBoardSticker } from '../../core/products/whiteboard-stickers.js';
 import { arrowHeads, placeFormatToolbar } from './canvas-model.js';
 import type { InlineTextFormatState } from './InlineTextEditor.js';
 import ColorPalette from './ColorPalette.js';
+import { registerEscapeLayer } from '../shared/escape.js';
 
 interface Props {
   elements: BoardElement[]; style: CSSProperties; canEdit: boolean; canAnnotate: boolean; saving: boolean; interactive: boolean; theme: 'light' | 'dark';
@@ -18,6 +19,7 @@ interface Props {
 export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnotate, saving, interactive, theme, onChange, onEditText, onTextFormat, onAnnotate, onToggleInteractive, onOpenHtml, onEditHtml, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
   const [popover, setPopover] = useState<string | null>(null), [link, setLink] = useState('');
   const toolbar = useRef<HTMLDivElement>(null);
+  useEffect(() => popover ? registerEscapeLayer(toolbar.current!, () => setPopover(null)) : undefined, [Boolean(popover)]);
   const [position, setPosition] = useState<{ left: number; top: number }>();
   useLayoutEffect(() => {
     const node = toolbar.current, host = node?.parentElement;
@@ -60,7 +62,7 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
       {selected?.type === 'image' && onCrop && <button type="button" aria-label="裁剪图片" title="裁剪图片" disabled={allLocked} onClick={onCrop}><Crop size={17}/></button>}
       {elements.length > 1 && <button type="button" aria-label="对齐对象" title="对齐对象" disabled={allLocked} onClick={() => toggle('对齐对象')}><AlignCenter size={17}/></button>}
     </>}
-    <span className="studio-tool-divider"/>{canAnnotate && <button type="button" aria-label="备注所选元素" title="备注" onClick={onAnnotate}><MessageSquare size={18}/></button>}{canEdit && <button type="button" aria-label={allLocked?'解锁元素':'锁定元素'} title={allLocked?'解锁位置':'锁定位置与尺寸'} aria-pressed={allLocked} disabled={saving} onClick={() => onChange({locked:!allLocked})}>{allLocked?<Unlock size={18}/>:<Lock size={18}/>}</button>}<button type="button" aria-label="更多操作" title="更多操作" onClick={event => {const rect=event.currentTarget.getBoundingClientRect();onMore({x:rect.left,y:rect.bottom+6});}}><MoreHorizontal size={19}/></button>
+    <span className="studio-tool-divider"/>{canAnnotate && <button type="button" aria-label="备注所选元素" title="备注" onClick={onAnnotate}><MessageSquare size={18}/></button>}{canEdit && <button type="button" aria-label={allLocked?'解锁元素':'锁定元素'} title={allLocked?'解锁位置与尺寸':'锁定位置与尺寸（仍可编辑内容）'} aria-pressed={allLocked} disabled={saving} onClick={() => onChange({locked:!allLocked})}>{allLocked?<Unlock size={18}/>:<Lock size={18}/>}</button>}<button type="button" aria-label="更多操作" title="更多操作" onClick={event => {const rect=event.currentTarget.getBoundingClientRect();onMore({x:rect.left,y:rect.bottom+6});}}><MoreHorizontal size={19}/></button>
     </div>{panel('文字颜色',<ColorPalette theme={theme} value={selected?.color} onChange={color => onChange({color})} custom={customColors} onCustomChange={onCustomColorsChange}/>)}
     {panel('填充颜色',<ColorPalette theme={theme} kind="fill" value={selected?.fill} onChange={fill => onChange({fill,hollow:false})} none={elements.every(element => element.type === 'shape') ? () => onChange({hollow:true}) : undefined}/>)}
     {panel('边框与线条',<><div className="studio-format-row"><button type="button" aria-pressed={elements.every(element=>element.stroke==='transparent')} onClick={() => onChange({stroke:'transparent',dash:false})}>无边框</button><button type="button" aria-pressed={elements.every(element=>element.stroke!=='transparent'&&!element.dash)} onClick={() => onChange({stroke:selected?.stroke==='transparent'?'#0B0B0B':selected?.stroke || '#0B0B0B',dash:false})}>实线</button><button type="button" aria-pressed={elements.every(element=>element.stroke!=='transparent'&&element.dash===true)} onClick={() => onChange({stroke:selected?.stroke==='transparent'?'#0B0B0B':selected?.stroke || '#0B0B0B',dash:true})}>虚线</button></div><ColorPalette theme={theme} value={selected?.stroke} onChange={stroke => onChange({stroke})} custom={customColors} onCustomChange={onCustomColorsChange}/><label>线宽<input aria-label="线条宽度" type="number" min="0.5" max="40" step="0.5" value={selected?.strokeWidth??(selected?.type==='container'?1:3)} onChange={event => onChange({strokeWidth:Number(event.target.value)})}/></label></>)}

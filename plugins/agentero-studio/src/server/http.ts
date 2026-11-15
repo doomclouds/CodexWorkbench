@@ -125,8 +125,8 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
         const requestOrigin = header(request, 'origin'), expectedOrigin = `http://${header(request, 'host')}`;
         if (requestOrigin && requestOrigin !== expectedOrigin) throw new StudioError('FORBIDDEN', '不能从其他来源使用白板会话修改内容。');
       }
-      const actor = await service.guestActor(scope, provided || undefined, `guest-${id}`, registration, lanRequest);
-      return { actor, token: provided, artifactId: scope, owner: false, access, viaLan: lanRequest, authority: { owner: false, actorId: actor.id, credential: provided || undefined, viaLan: lanRequest } };
+      const { actor, grantId } = await service.guestSession(scope, provided || undefined, `guest-${id}`, registration, lanRequest);
+      return { actor, token: provided, artifactId: scope, owner: false, access, viaLan: lanRequest, authority: { owner: false, actorId: actor.id, credential: provided || undefined, grantId, viaLan: lanRequest } };
     }
     throw new StudioError('UNAUTHORIZED', '分享链接无效。', { reason: 'invalid-link' });
   }

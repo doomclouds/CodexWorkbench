@@ -227,6 +227,9 @@ describe('Studio real management workflows', () => {
 
   it('counts people by actor while preserving their page peers and follows an active viewport', async () => {
     const fixture = await createFixture([region()]);
+    // jsdom's native frame timestamps can retain a different origin after Vitest replaces performance.
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => window.setTimeout(() => callback(performance.now()), 16));
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(handle => window.clearTimeout(handle));
     const streams: { onmessage: ((event: { data: string }) => void) | null }[] = [];
     vi.stubGlobal('EventSource', class {
       onmessage: ((event: { data: string }) => void) | null = null; onopen = null; onerror = null;
@@ -809,6 +812,22 @@ describe('Studio real management workflows', () => {
     expect(local).toMatchObject({ enabled: true, access: 'local' });
     for (const role of ['editor', 'commenter', 'viewer'] as const) expect(new URL(local.links[role], 'http://studio.test').searchParams.get('share')).toBe(new URL(after.links[role], 'http://studio.test').searchParams.get('share'));
     expect(container.querySelector('[aria-label="局域网共享已开启"]')).toBeNull();
+  });
+
+  it('restores a removed browser identity through the owner share panel with its chosen role', async () => {
+    const fixture = await createFixture(), artifactId = fixture.board.artifact.id;
+    const sharing = await service.execute('artifact_share', { artifactId, action: 'start', access: 'local' });
+    const invitation = new URL(sharing.links.editor, 'http://studio.test').searchParams.get('share')!;
+    const { actor } = await service.guestSession(artifactId, invitation, 'guest-restore-ui', { name: 'Returned collaborator' });
+    await service.execute('artifact_share', { artifactId, action: 'remove', memberId: actor.id });
+    await mount({ artifactId }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('分享')); await waitUntil(() => !!container.querySelector(`[aria-label="恢复访问：${actor.name}"]`));
+    expect(call.mock.calls.some(([name, args]) => name === 'artifact_share' && args.action === 'restore')).toBe(false);
+    await click(button(`恢复访问：${actor.name}`)); await click(button('恢复为仅查看'));
+    await waitUntil(() => !!container.querySelector(`[aria-label="管理成员：${actor.name}"]`));
+    expect(call).toHaveBeenCalledWith('artifact_share', { artifactId, action: 'restore', memberId: actor.id, role: 'viewer' });
+    expect(container.querySelector(`[aria-label="恢复访问：${actor.name}"]`)).toBeNull();
+    expect((await service.guestSession(artifactId, undefined, actor.id)).actor).toMatchObject({ id: actor.id, name: actor.name, role: 'viewer' });
   });
 });
 

@@ -4,11 +4,24 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
 import HtmlRegion from '../src/app/shared/html-region/HtmlRegion.js';
 import type { BoardElement, Json } from '../src/contracts/studio.js';
+import { registerEscapeLayer } from '../src/app/shared/escape.js';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 const region: BoardElement = { id: 'region', type: 'html', x: 0, y: 0, w: 500, h: 300, version: 4, sourceRevision: 2, html: '<p data-studio-id="value">A poll</p>', state: { votes: 1 } };
+
+it('routes only a current visible frame Escape into one parent layer', async () => {
+  const host = mount(), close = vi.fn();
+  await act(async () => host.root.render(<HtmlRegion element={region} annotation={false} interactive onAnnotate={() => {}} />));
+  const frame = host.dom.window.document.querySelector('iframe')!, { identity } = await host.messages(frame);
+  const unregister = registerEscapeLayer(host.dom.window.document.getElementById('root')!, close, 0); cleanups.push(async () => unregister());
+  const message = { type: 'studio-html-escape', ...identity };
+  host.send(frame, message, host.dom.window as unknown as MessageEventSource); host.send(frame, { ...message, channel: 'other' }); host.send(frame, { ...message, sourceRevision: identity.sourceRevision + 1 });
+  expect(close).not.toHaveBeenCalled();
+  host.send(frame, message); expect(close).toHaveBeenCalledOnce();
+  frame.hidden = true; host.send(frame, message); expect(close).toHaveBeenCalledOnce();
+});
 
 function mount() {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/?token=owner-secret' });

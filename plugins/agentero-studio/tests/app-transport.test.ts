@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { APP_CHUNK_BYTES, APP_MAX_BYTES, type AppResponse, type AppUploadResult, type AppDownloadResult, type UiHttpRequest } from '../src/contracts/transport.js';
+import { APP_CHUNK_BYTES, APP_MAX_BYTES, type AppResponse, type AppUploadResult, type AppDownloadResult, type UiRequester } from '../src/contracts/transport.js';
 import { createAppTransport, validateUiRequest } from '../src/server/app-transport.js';
 
 const transports: ReturnType<typeof createAppTransport>[] = [];
 afterEach(() => { for (const transport of transports.splice(0)) transport.close(); vi.useRealTimers(); });
-function transport(run: (request: UiHttpRequest) => Promise<Response> = async () => new Response('{}')) {
+function transport(run: UiRequester = async () => new Response('{}')) {
   const value = createAppTransport(run); transports.push(value); return value;
 }
 const request = (path = '/api/tools/artifact_list', body = '{}') => ({ action: 'request' as const, path, method: 'POST' as const, headers: { 'content-type': 'application/json' }, body: Buffer.from(body).toString('base64') });
@@ -72,14 +72,48 @@ describe('App-only backend transport', () => {
     await expect(oversized.execute(request())).rejects.toMatchObject({ code: 'TOO_LARGE' });
   });
 
-  it('bounds concurrent requests and rejects requests after teardown', async () => {
+  it('bounds active requests while queueing another App request and rejects requests after teardown', async () => {
     const resolvers: Array<(value: Response) => void> = [];
     const app = transport(() => new Promise(resolve => resolvers.push(resolve)));
-    const pending = Array.from({ length: 4 }, () => app.execute(request()));
-    await expect(app.execute(request())).rejects.toMatchObject({ code: 'BUSY' });
-    for (const resolve of resolvers) resolve(new Response('ok'));
+    const pending = Array.from({ length: 5 }, () => app.execute(request()));
+    await vi.waitFor(() => expect(resolvers).toHaveLength(4));
+    for (const resolve of resolvers.slice(0, 4)) resolve(new Response('ok'));
+    await Promise.all(pending.slice(0, 4));
+    expect(resolvers).toHaveLength(5); resolvers[4]!(new Response('queued'));
     await Promise.all(pending);
     app.close(); await expect(app.execute(request())).rejects.toMatchObject({ code: 'CLOSED' });
+  });
+
+  it('keeps four parked sync requests out of the business budget shared by App views', async () => {
+    const waits: Array<(value: Response) => void> = [];
+    const app = transport(async input => input.path.startsWith('/api/sync') ? new Promise(resolve => waits.push(resolve)) : new Response('published'));
+    const pending = Array.from({ length: 4 }, (_, index) => app.execute({ action: 'request', path: `/api/sync?artifactId=board&wait=20000&peerId=page-${index}` }));
+    await vi.waitFor(() => expect(waits).toHaveLength(4));
+    const result = await app.execute(request('/api/presence')) as AppResponse;
+    expect(Buffer.from(result.body!, 'base64').toString()).toBe('published');
+    waits.forEach(resolve => resolve(new Response('{}'))); await Promise.all(pending);
+  });
+
+  it('cancels queued business requests without starting them and keeps both budgets usable', async () => {
+    const resolvers: Array<(value: Response) => void> = [];
+    const app = transport(() => new Promise(resolve => resolvers.push(resolve)));
+    const active = Array.from({ length: 4 }, () => app.execute(request()));
+    await vi.waitFor(() => expect(resolvers).toHaveLength(4));
+    const abort = new AbortController(), queued = app.execute(request(), abort.signal);
+    abort.abort(); await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(resolvers).toHaveLength(4);
+    resolvers.forEach(resolve => resolve(new Response('{}'))); await Promise.all(active);
+    expect(resolvers).toHaveLength(4);
+  });
+
+  it('bounds parked waits and releases their slots when their fetch is aborted', async () => {
+    const app = transport((_input, signal) => new Promise((_resolve, reject) => signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })));
+    const abort = new AbortController(), input = { action: 'request' as const, path: '/api/sync?artifactId=board&wait=20000' };
+    const pending = Array.from({ length: 64 }, () => app.execute(input, abort.signal).catch(error => error));
+    await expect(app.execute(input)).rejects.toMatchObject({ code: 'BUSY' });
+    abort.abort(); expect((await Promise.all(pending)).every(error => error.name === 'AbortError')).toBe(true);
+    const nextAbort = new AbortController(), next = app.execute(input, nextAbort.signal); await Promise.resolve();
+    nextAbort.abort(); await expect(next).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it.each([

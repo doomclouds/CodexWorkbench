@@ -149,6 +149,18 @@ describe('MCP App RPC transport', () => {
     expect(send).toHaveBeenCalledTimes(11);
   });
 
+  it('does not make foreground requests wait behind a parked sync poll', async () => {
+    const acknowledgements: Array<() => void> = [];
+    const send = vi.fn(async (args: Args) => new Promise(resolve => acknowledgements.push(() => resolve(reply({ path: args.path })))));
+    const client = transport(send);
+    const pending = client.request('/api/sync?artifactId=board&wait=20000');
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const foreground = Array.from({ length: 4 }, () => client.request('/api/session'));
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(5));
+    expect(send.mock.calls.slice(1).every(([args]) => args.path === '/api/session')).toBe(true);
+    acknowledgements.splice(0).forEach(ack => ack()); await Promise.all([pending, ...foreground]);
+  });
+
   it('prepares internal resource blobs while retaining canonical references and original HTML in the response', async () => {
     const create = vi.spyOn(URL, 'createObjectURL'), revoke = vi.spyOn(URL, 'revokeObjectURL');
     const document = { ok: true, data: { elements: [{ src: '/assets/image.png?token=secret', nested: { src: `${ORIGIN}/assets/image.png` } }, { src: '/api/assets/movie.mp4' }], thumbnail: '/api/thumbnails/board?revision=7', missing: '/assets/missing.png', external: 'https://other.example/assets/a.png', html: '<img src="/assets/inline.png">' } };

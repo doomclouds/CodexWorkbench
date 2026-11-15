@@ -1,3 +1,4 @@
+import { handleDialogEscape } from './ui/escape';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CircleHelp, ExternalLink, LoaderCircle, X } from 'lucide-react';
 import type { LibrarySettings, LibraryStatus } from '../contracts/types';
@@ -143,7 +144,7 @@ export function SettingsPanel({ settings, status, preview, dirty, standalone = f
     <footer className="modal-footer">{!standalone && <button onClick={() => void requestClose()} disabled={busy || closing}>{closing ? '正在关闭选择器…' : '关闭'}</button>}<button className="primary" onClick={() => void save()} disabled={locked || preview}>{busy && <LoaderCircle className="spin" size={15} />}保存配置</button></footer>
   </>;
 
-  return standalone ? <section className="settings-page">{content}</section> : <dialog className="settings-modal" ref={dialog} onCancel={e => { e.preventDefault(); void requestClose(); }}>{content}</dialog>;
+  return standalone ? <section className="settings-page">{content}</section> : <dialog className="settings-modal" ref={dialog} onKeyDown={event => handleDialogEscape(event, () => { void requestClose(); })} onCancel={e => { e.preventDefault(); void requestClose(); }}>{content}</dialog>;
 }
 
 function Capability({ label, available, detail }: { label: string; available: boolean | null; detail: string }) {

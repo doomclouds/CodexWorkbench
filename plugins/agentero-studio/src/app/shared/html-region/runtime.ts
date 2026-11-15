@@ -129,14 +129,82 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
     return element;
   };
   const show = (element: HTMLDivElement, box: { x: number; y: number; width: number; height: number }) => Object.assign(element.style, { display: 'block', left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` });
+  const cursorDocument = document;
+  const cursorOverrides = new Map<CSSStyleDeclaration, { value: string; priority: string; element?: HTMLElement | SVGElement; sourceStyle?: string | null; appliedStyle?: string | null }>();
+  const overrideCursor = (style: CSSStyleDeclaration, element?: HTMLElement | SVGElement) => {
+    const value = style.getPropertyValue('cursor'), priority = style.getPropertyPriority('cursor');
+    if (!value || value === config.commentCursor && priority === 'important') return;
+    const previous = { value, priority, ...(element ? { element, sourceStyle: element.getAttribute('style'), appliedStyle: null as string | null } : {}) };
+    cursorOverrides.set(style, previous);
+    style.setProperty('cursor', config.commentCursor, 'important');
+    if (element) previous.appliedStyle = element.getAttribute('style');
+  };
+  const syncCursorRules = () => {
+    const rules = (list: CSSRuleList) => {
+      for (const rule of list) {
+        const style = (rule as CSSStyleRule).style;
+        if (style) overrideCursor(style);
+        const nested = (rule as CSSGroupingRule).cssRules;
+        if (nested) rules(nested);
+      }
+    };
+    // Stylesheet declarations also include pseudo-elements, whose own cursor does not inherit.
+    for (const sheet of cursorDocument.styleSheets) rules(sheet.cssRules);
+  };
+  const syncInlineCursor = (element: HTMLElement | SVGElement) => {
+    if (element.style?.getPropertyPriority('cursor') === 'important') overrideCursor(element.style, element);
+  };
+  const cursorObserver = new MutationObserver(records => {
+    if (!enabled) return;
+    let changedRules = false;
+    for (const record of records) {
+      const target = record.target instanceof Element ? record.target : record.target.parentElement;
+      if (target?.closest('[data-studio-runtime]')) continue;
+      if (record.type === 'attributes') syncInlineCursor(target as HTMLElement | SVGElement);
+      else {
+        changedRules ||= target?.tagName === 'STYLE';
+        for (const node of record.addedNodes) if (node instanceof Element) {
+          changedRules ||= node.tagName === 'STYLE' || !!node.querySelector('style');
+          syncInlineCursor(node as HTMLElement | SVGElement);
+          node.querySelectorAll<HTMLElement | SVGElement>('[style]').forEach(syncInlineCursor);
+        }
+      }
+    }
+    if (changedRules) syncCursorRules();
+  });
+  window.addEventListener('pointerover', () => { if (enabled) syncCursorRules(); }, true);
+  window.addEventListener('pagehide', () => cursorObserver.disconnect());
+  const restoreCursors = () => {
+    cursorObserver.disconnect();
+    for (const [style, original] of cursorOverrides) {
+      if (style.getPropertyValue('cursor') !== config.commentCursor || style.getPropertyPriority('cursor') !== 'important') continue;
+      if (original.element && original.element.getAttribute('style') === original.appliedStyle) {
+        if (original.sourceStyle === null) original.element.removeAttribute('style'); else original.element.setAttribute('style', original.sourceStyle!);
+      } else style.setProperty('cursor', original.value, original.priority);
+    }
+    cursorOverrides.clear();
+  };
   const setAnnotation = () => {
-    if (cursorStyle) cursorStyle.textContent = enabled ? `:root, :root * { cursor: ${config.commentCursor} !important; }` : '';
+    if (cursorStyle) cursorStyle.textContent = enabled ? `:root, :root * { cursor: ${config.commentCursor} !important; } :root::before, :root::after, :root *::before, :root *::after { cursor: ${config.commentCursor} !important; }` : '';
+    if (enabled) {
+      syncCursorRules();
+      cursorDocument.querySelectorAll<HTMLElement | SVGElement>('[style]').forEach(syncInlineCursor);
+      cursorObserver.observe(cursorDocument.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
+    } else restoreCursors();
     if (outline) outline.style.display = 'none';
     if (area) area.style.display = 'none';
     areaStart = null;
     pointerStart = null;
     suppressClick = false;
   };
+  const sendEscape = () => window.parent.postMessage({ type: 'studio-html-escape', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision }, '*');
+  const consumeEscape = (event: KeyboardEvent) => { event.preventDefault(); event.stopImmediatePropagation(); };
+  window.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !enabled && !event.repeat) return;
+    consumeEscape(event);
+    if (!event.repeat && !event.isComposing) { if (areaStart) setAnnotation(); else if (enabled) sendEscape(); }
+  }, true);
+  window.addEventListener('keyup', event => { if (event.key === 'Escape') consumeEscape(event); }, true);
   const scrollBounds = () => ({
     maxX: Math.min(1e7, Math.max(0, Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth ?? 0) - window.innerWidth)),
     maxY: Math.min(1e7, Math.max(0, Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight ?? 0) - window.innerHeight)),
@@ -248,6 +316,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
   window.addEventListener('pointercancel', (event) => { if (enabled) { event.stopImmediatePropagation(); setAnnotation(); } }, true);
   for (const name of ['mousedown', 'mouseup', 'mousemove', 'dblclick', 'auxclick', 'contextmenu', 'dragstart', 'beforeinput', 'input', 'change', 'keydown', 'keyup', 'focus', 'blur', 'focusin', 'focusout']) {
     window.addEventListener(name, (event) => {
+      if (event instanceof KeyboardEvent && event.key === 'Escape') return;
       if (!enabled) return;
       event.stopImmediatePropagation();
       if (['dblclick', 'auxclick', 'contextmenu', 'dragstart', 'beforeinput', 'input', 'change'].includes(name) || (name === 'mousedown' && areaStart) || ((name === 'keydown' || name === 'keyup') && toElement(event.target)?.closest('input,textarea,select,[contenteditable]'))) event.preventDefault();
@@ -256,6 +325,12 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
   window.addEventListener('scroll', reportScroll, { passive: true });
   window.addEventListener('load', () => { restoreScroll(); scrollTarget = null; });
   const setup = () => {
+    // Source scripts have installed their local/window handlers before this tail handler.
+    window.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      if (!event.defaultPrevented && !event.isComposing) sendEscape();
+      consumeEscape(event);
+    });
     cursorStyle = document.createElement('style');
     cursorStyle.setAttribute('data-studio-runtime', 'annotation-cursor');
     document.head.append(cursorStyle);

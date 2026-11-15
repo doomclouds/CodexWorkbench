@@ -7,7 +7,7 @@ export interface SavedVersion<Content> extends Snapshot<Content> { entry: Histor
 export interface AssetRecord { id: string; filename: string; mimeType: string; size: number }
 /** High water marks survive deletion and history retention. Never expose them as client supplied versions. */
 export interface UnitClock { version: number; incarnationStart: number; sourceRevision?: number }
-export interface SharingMember extends Omit<ShareMember, 'active' | 'online'> { credential: string; roleToken: string; ownerAssigned?: boolean; removed?: boolean }
+export interface SharingMember extends Omit<ShareMember, 'active' | 'online'> { credential: string; roleToken: string; grantId?: string; ownerAssigned?: boolean; removed?: boolean }
 export interface SharingState { enabled: boolean; generation: number; tokens: Partial<Record<Exclude<Role, 'owner'>, string>>; access?: 'local' | 'lan'; roleEnabled?: Partial<Record<Exclude<Role, 'owner'>, boolean>>; members?: Record<string, SharingMember>; retiredTokens?: Record<string, 'link-reset' | 'sharing-closed'> }
 export type FeedbackRecord<Anchor> = Omit<Feedback, 'anchor'> & { anchor: Anchor; creationReceipt?: { operationId: string; fingerprint: string } };
 export interface ArtifactState<Content, Anchor = unknown, Source = unknown> extends Snapshot<Content> {
@@ -44,7 +44,7 @@ export interface ProductAdapter<Content, Operation extends ContentOperation, Anc
   undoUnit?(content: Content, change: ContentChange, history?: readonly Content[]): void;
   restore(current: Content, saved: Content, history?: readonly Content[]): Content;
   /** Product constraints also apply when historical content replaces current units. */
-  validateRestore?(current: Content, restored: Content, baseline: Content): void;
+  validateRestore?(current: Content, restored: Content, baseline: Content, mode?: 'undo'): void;
   snapshotFeedback(artifactId: string, feedbackId: string, snapshots: readonly Snapshot<Content>[], anchor: unknown, versions?: Record<string, number>, clocks?: Record<string, UnitClock>): FeedbackSnapshot<Anchor, Source>;
 }
 export interface MutationArguments<Operation> {

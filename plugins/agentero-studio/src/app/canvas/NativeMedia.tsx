@@ -1,6 +1,7 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { X } from 'lucide-react';
 import type { BoardElement } from '../../contracts/studio.js';
+import { registerEscapeLayer } from '../shared/escape.js';
 
 export interface ImageCrop { zoom: number; x: number; y: number }
 export function imageCrop(value: unknown): ImageCrop {
@@ -25,9 +26,12 @@ export function CroppedImage({ element, src, onNaturalSize }: { element: BoardEl
 }
 
 export function ImageCropDialog({ element, src, onClose, onSave, onDirtyChange }: { element: BoardElement; src: string; onClose: () => void; onSave: (changes: Partial<BoardElement>) => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
+  const modal = useRef<HTMLElement>(null), close = useRef(() => {});
   const [crop, setCrop] = useState(() => imageCrop(element.crop));
   const [natural, setNatural] = useState({ w: Number(element.data?.naturalWidth) || 0, h: Number(element.data?.naturalHeight) || 0 });
   const [busy, setBusy] = useState(false);
+  close.current = () => { if (!busy) onClose(); };
+  useEffect(() => registerEscapeLayer(modal.current!, () => close.current(), 20), []);
   const original = JSON.stringify(element.crop ?? null);
   useEffect(() => { onDirtyChange(JSON.stringify(crop) !== original); }, [crop, original, onDirtyChange]);
   const ratio = Math.min(1, 480 / Math.max(1, element.w), 300 / Math.max(1, element.h));
@@ -36,7 +40,7 @@ export function ImageCropDialog({ element, src, onClose, onSave, onDirtyChange }
     setBusy(true);
     try { await onSave({ crop, data: { ...element.data, naturalWidth: natural.w, naturalHeight: natural.h } }); } finally { setBusy(false); }
   };
-  return <div className="studio-canvas-modal-backdrop" data-native-interactive="true"><section className="studio-canvas-modal is-wide" role="dialog" aria-modal="true" aria-label="裁剪图片">
+  return <div className="studio-canvas-modal-backdrop" data-native-interactive="true"><section ref={modal} className="studio-canvas-modal is-wide" role="dialog" aria-modal="true" aria-label="裁剪图片">
     <header><h2>裁剪图片</h2><button type="button" aria-label="关闭裁剪" disabled={busy} onClick={onClose}><X size={18} /></button></header>
     <div className="studio-crop-preview" style={{ width: element.w * ratio, height: element.h * ratio }}><CroppedImage element={{ ...element, crop }} src={src} onNaturalSize={setNatural} /></div>
     <p>缩放图片，并调整画面位置。裁剪只改变显示范围，原始图片保持完整。</p>

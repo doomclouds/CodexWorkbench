@@ -3,6 +3,9 @@ import { useEffect, useState } from 'react';
 import StudioApp from './StudioApp';
 import { createStudioBridge, type StudioBridge } from './bridge';
 import HtmlReader from './HtmlReader';
+import { installEscapeBoundary } from './shared/escape';
+
+installEscapeBoundary(window);
 
 function Root() {
   const [bridge, setBridge] = useState<StudioBridge>();

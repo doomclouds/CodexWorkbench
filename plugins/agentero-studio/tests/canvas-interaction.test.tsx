@@ -11,6 +11,7 @@ import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type BoardElement, type Feedbac
 import { StudioService } from '../src/core/service.js';
 import { boardStickerMarkup, BOARD_STICKERS } from '../src/core/products/whiteboard-stickers.js';
 import { buildBoardHtml, buildBoardSvg } from '../src/core/serialization.js';
+import { CommentComposer } from '../src/app/shared/comments/CommentPopover.js';
 
 let host: HTMLDivElement, root: Root;
 const element = (id: string, extra: Partial<BoardElement> = {}): BoardElement => ({ id, type: 'shape', x: 100, y: 120, w: 200, h: 100, version: 1, text: 'A', ...extra });
@@ -53,6 +54,100 @@ async function input(node: HTMLInputElement | HTMLTextAreaElement, value: string
 async function key(node: Element, value: string, options: KeyboardEventInit = {}) { await act(async () => node.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: value, ...options }))); }
 
 describe('whiteboard direct interaction', () => {
+  it.each([0, 35])('keeps a clicked native target fully highlighted while the comment composer focuses at rotation %s', async rotation => {
+    const target = element('clicked', { x: 100, y: 120, w: 130, h: 70, rotation });
+    const annotate = vi.fn();
+    function Harness() {
+      const [annotation, setAnnotation] = useState<NativeAnnotation | null>(null);
+      return <><WhiteboardCanvas board={board([target])} client={{ embedded: true, call: vi.fn() }} actor={LOCAL_ACTOR} onChanged={() => {}} onAnnotate={() => {}} externalViewport={initialViewport} annotationActive annotationTarget={annotation?.anchor} onAnnotateNative={value => { annotate(value); setAnnotation(value); }} />
+        {annotation && <CommentComposer text="" attach={false} busy={false} saved={false} error="" onTextChange={() => {}} onAttachChange={() => {}} onSubmit={() => {}} />}</>;
+    }
+    await act(async () => root.render(<Harness />));
+    await event(host.querySelector('[data-element-id="clicked"]')!, 'pointerdown', 165, 155);
+    await event(query('白板画布'), 'pointerup', 165, 155);
+    expect(document.activeElement).toBe(query('批注内容'));
+    expect(host.querySelector('[data-annotation-hover]')).toBeNull();
+    expect(annotate.mock.lastCall![0]).toMatchObject({ anchor: { coordinateSpace: 'element', elementIds: ['clicked'], x: .5, y: .5 }, screenPoint: { x: 165, y: 155 } });
+    const outline = host.querySelector<HTMLElement>('[data-comment-target]')!;
+    expect(outline.style.left).toBe('100px'); expect(outline.style.top).toBe('120px');
+    expect(outline.style.width).toBe('130px'); expect(outline.style.height).toBe('70px');
+    expect(outline.style.transform).toBe(rotation ? `rotate(${rotation}deg)` : '');
+  });
+
+  it('highlights the whole native multi-target while leaving board points small and HTML selections to the frame', async () => {
+    const elements = [element('a'), element('b', { x: 400 }), element('html', { type: 'html', html: '<p>Hello</p>' })];
+    await mount(elements, { annotationActive: true, annotationTarget: { coordinateSpace: 'board', elementIds: ['a', 'b'], x: 44, y: 55 } });
+    let outline = host.querySelector<HTMLElement>('[data-comment-target]')!;
+    expect(outline.style.left).toBe('100px'); expect(outline.style.width).toBe('500px'); expect(outline.style.height).toBe('100px');
+    await mount(elements, { annotationActive: true, annotationTarget: { coordinateSpace: 'board', elementIds: [], x: 44, y: 55 } });
+    outline = host.querySelector<HTMLElement>('[data-comment-target]')!;
+    expect(outline.style.left).toBe('44px'); expect(outline.style.top).toBe('55px'); expect(outline.style.width).toBe('12px'); expect(outline.style.height).toBe('12px');
+    await mount(elements, { annotationActive: true, annotationTarget: { coordinateSpace: 'html', regionId: 'html', targetIds: ['paragraph'], x: 4, y: 5, w: 50, h: 20 } });
+    expect(host.querySelector('[data-comment-target]')).toBeNull();
+  });
+
+  it('previews native annotation hits without changing selection and clears them across lifecycle boundaries', async () => {
+    const selection = vi.fn(), target = element('hover', { rotation: 35 });
+    const props = { annotationActive: true, onSelectionChange: selection, externalViewport: { x: 10, y: 20, zoom: .5 } };
+    await mount([target], props);
+    const hit = () => host.querySelector('[data-annotation-hover="hover"]') as HTMLElement | null;
+    await event(host.querySelector('[data-element-id="hover"]')!, 'pointermove', 150, 145);
+    expect(hit()).not.toBeNull(); expect(hit()!.style.transform).toBe('rotate(35deg)'); expect(hit()!.style.borderWidth).toBe('4px');
+    expect(host.querySelector('.studio-selection-frame')).toBeNull(); expect(selection.mock.lastCall?.[0] ?? []).toEqual([]);
+    await event(query('白板画布'), 'pointerout'); expect(hit()).toBeNull();
+    await event(host.querySelector('[data-element-id="hover"]')!, 'pointermove');
+    await event(query('白板画布'), 'pointercancel'); expect(hit()).toBeNull();
+    await event(host.querySelector('[data-element-id="hover"]')!, 'pointermove');
+    await act(async () => { host.hidden = true; }); expect(hit()).toBeNull();
+    await act(async () => { host.hidden = false; }); expect(hit()).toBeNull();
+    await event(host.querySelector('[data-element-id="hover"]')!, 'pointermove');
+    await mount([target], { ...props, annotationActive: false }); expect(hit()).toBeNull();
+  });
+
+  it('pins a quick comment inside the visible top-right corner of a huge element at the current zoom', async () => {
+    const annotate = vi.fn();
+    const target = element('huge', { x: -300, y: -200, w: 2000, h: 1500 });
+    await mount([target], { onAnnotateNative: annotate, externalViewport: { x: 100, y: 50, zoom: .5 } });
+    vi.spyOn(query('白板画布'), 'getBoundingClientRect').mockReturnValue({ left: 40, top: 60, right: 840, bottom: 660, width: 800, height: 600 } as DOMRect);
+    await select('huge'); await click('备注所选元素');
+    const annotation = annotate.mock.lastCall![0] as NativeAnnotation;
+    expect(annotation.screenPoint).toEqual({ x: 824, y: 76 });
+    expect(annotation.anchor.coordinateSpace).toBe('element'); expect(annotation.anchor.x).toBeCloseTo(.834); expect(annotation.anchor.y).toBeCloseTo(.088);
+    const attached = anchorBounds(annotation.anchor, [target])!;
+    expect(attached.x * .5 + 140).toBeCloseTo(824); expect(attached.y * .5 + 110).toBeCloseTo(76);
+  });
+
+  it('keeps quick-comment relative anchors consistent for rotated and multiple elements', async () => {
+    const annotate = vi.fn(), target = element('turn', { rotation: 90 });
+    await mount([target], { onAnnotateNative: annotate });
+    vi.spyOn(query('白板画布'), 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 } as DOMRect);
+    await select('turn'); await click('备注所选元素');
+    let annotation = annotate.mock.lastCall![0] as NativeAnnotation;
+    expect(annotation.screenPoint).toEqual({ x: 234, y: 86 });
+    expect(anchorBounds(annotation.anchor, [target])).toMatchObject({ x: 234, y: 86 });
+    await mount([element('a'), element('b', { x: 400 })], { onAnnotateNative: annotate, externalSelectedIds: ['a', 'b'] });
+    await click('备注所选元素'); annotation = annotate.mock.lastCall![0] as NativeAnnotation;
+    expect(annotation.screenPoint).toEqual({ x: 584, y: 136 });
+    expect(anchorBounds(annotation.anchor, [element('a'), element('b', { x: 400 })])).toMatchObject({ x: 584, y: 136 });
+  });
+  it('closes the tool menu before changing the current tool or selection', async () => {
+    const onSelectionChange = vi.fn(); await mount([element('a')], { onSelectionChange }); await select('a'); await click('形状');
+    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await act(async () => query('白板画布').dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(true); expect(host.querySelector('.studio-insert-menu')).toBeNull();
+    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('shape');
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['a']);
+    await key(query('白板画布'), 'Escape'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['a']);
+    await key(query('白板画布'), 'Escape'); expect(onSelectionChange).toHaveBeenLastCalledWith([]);
+  });
+  it('only lets the visible preview respond while the live canvas remains mounted under hidden', async () => {
+    const live = vi.fn(), preview = vi.fn();
+    const common = { board: board([]), client: { embedded: true, call: vi.fn() }, actor: LOCAL_ACTOR, onChanged: vi.fn(), onAnnotate: vi.fn(), annotationActive: true };
+    await act(async () => root.render(<><div hidden><WhiteboardCanvas {...common} onAnnotationModeChange={live} /></div><WhiteboardCanvas {...common} onAnnotationModeChange={preview} /></>));
+    await key(host.querySelectorAll('.studio-canvas-viewport')[1]!, 'Escape');
+    expect(preview).toHaveBeenCalledWith(false); expect(live).not.toHaveBeenCalled();
+  });
   it('hides all of this identity’s cursors across refreshes and shows one current cursor per other member', async () => {
     const now = Date.now(), other = { ...LOCAL_ACTOR, id: 'other-member', name: '协作者' };
     const peers: NonNullable<WhiteboardCanvasProps['presence']> = [
@@ -162,7 +257,8 @@ describe('whiteboard direct interaction', () => {
     await select('locked'); expect(query('调整元素大小')).toBeNull();
     expect(activity.mock.lastCall?.[0].movingIds).toEqual([]);
     await click('加粗'); expect(call.mock.calls[0]![1].operations[0]!.changes).toEqual({ bold: true });
-    await click('备注所选元素'); expect(annotate.mock.lastCall?.[0]).toMatchObject({ anchor: { elementIds: ['locked'], coordinateSpace: 'element', x: 1, y: .5 } });
+    await click('备注所选元素'); expect(annotate.mock.lastCall?.[0]).toMatchObject({ anchor: { elementIds: ['locked'], coordinateSpace: 'element' } });
+    expect(annotate.mock.lastCall![0].anchor.x).toBeCloseTo(.92); expect(annotate.mock.lastCall![0].anchor.y).toBeCloseTo(.16);
     await event(host.querySelector('[data-element-id="locked"]')!, 'dblclick'); await input(query('编辑文字') as HTMLTextAreaElement, 'Still editable'); await key(query('编辑文字'), 'Escape');
     await key(query('白板画布'), 'Delete'); expect(call).toHaveBeenCalledTimes(2);
     expect(host.querySelectorAll('.studio-selection-corner.is-locked')).toHaveLength(4); await click('更多操作'); expect([...host.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button=>button.textContent==='删除Delete')?.disabled).toBe(true);

@@ -11,6 +11,7 @@ import { countLiteralMatches, resolveNoteLink, splitNoteMarkdown } from './markd
 import { NoteEnvironmentContext, type NoteEnvironment } from './NoteElements';
 import { deserializeNote, noteFindPlugin, notePlugins, serializeNote } from './note-kit';
 import './notes.css';
+import { handleDialogEscape } from '../ui/escape';
 
 type Mode = 'rich' | 'source' | 'preview';
 interface Props {
@@ -58,7 +59,7 @@ export const MarkdownEditor = memo(function MarkdownEditor({ value, onChange, en
     }} onKeyDown={event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); if (!saveDisabled) onSave(); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setFindOpen(true); }
-      if (event.key === 'Escape') setFindOpen(false);
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.nativeEvent.isComposing && findOpen) { event.preventDefault(); event.stopPropagation(); setFindOpen(false); }
     }}>
       <div className="note-editor-modes">{compact ? <><select aria-label="Markdown 显示方式" value={mode} disabled={attachmentBusy} onChange={event => { setMode(event.target.value as Mode); setError(''); }}><option value="rich">编辑</option><option value="source">Markdown</option><option value="preview">预览</option></select><button aria-label="格式与文档信息" title="格式与文档信息" aria-expanded={toolsOpen} onClick={() => setToolsOpen(value => !value)}><SlidersHorizontal size={15} /></button></> : <div className="note-mode-switch" role="group" aria-label="Markdown 显示方式">{([['rich', '编辑'], ['source', 'Markdown'], ['preview', '预览']] as const).map(([key, label]) => <button key={key} className={mode === key ? 'selected' : ''} disabled={attachmentBusy} aria-pressed={mode === key} onClick={() => { setMode(key); setError(''); }}>{label}</button>)}</div>}<span className="toolbar-spacer" /><button onClick={() => setFindOpen(value => !value)} aria-label="查找和替换" title="查找和替换"><Search size={15} /></button><button disabled={saveDisabled} onClick={onSave}>保存</button></div>
       {parts.prefix && mode !== 'source' && (!compact || toolsOpen) && <details className="note-metadata"><summary>文档元数据（保持原样）</summary><pre>{parts.prefix}</pre></details>}
@@ -167,7 +168,7 @@ function SourceFind({ text, onChange, textarea, onClose }: { text: string; onCha
 function LinkDialog({ wiki, notePath, onInsert, onClose }: { wiki: boolean; notePath: string; onInsert(target: string, label: string): void; onClose(): void }) {
   const dialog = useRef<HTMLDialogElement>(null); const [target, setTarget] = useState(wiki ? 'notes/' : 'https://'); const [label, setLabel] = useState(''); const [error, setError] = useState('');
   useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close(); }, []);
-  return <dialog ref={dialog} className="compact-modal" onCancel={event => { event.preventDefault(); onClose(); }}><form onSubmit={event => {
+  return <dialog ref={dialog} className="compact-modal" onKeyDown={event => handleDialogEscape(event, onClose)} onCancel={event => { event.preventDefault(); onClose(); }}><form onSubmit={event => {
     event.preventDefault(); const url = wiki ? `workbench-wiki:${encodeURIComponent(target)}` : target;
     if (!resolveNoteLink(url, notePath) || /[\[\]\n|]/.test(target) || /[\[\]\n|]/.test(label)) { setError('请输入安全的网址、notes/ 下笔记路径或 papers/ 下论文路径。'); return; } onInsert(target, label);
   }}><header className="modal-heading"><h2>{wiki ? '插入双链或论文引用' : '插入链接'}</h2><button type="button" className="icon-button" aria-label="关闭链接对话框" onClick={onClose}><X size={16} /></button></header><div className="modal-content"><label>目标<input autoFocus value={target} onChange={event => setTarget(event.target.value)} /></label><label>显示文字<input value={label} onChange={event => setLabel(event.target.value)} /></label><p className="field-help">{wiki ? '例如 notes/方法比较.md 或 papers/ReAct。链接在当前知识库内解析。' : '支持 https、mailto、笔记和论文相对路径。'}</p>{error && <p className="error-text" role="alert">{error}</p>}</div><footer className="modal-footer"><button type="button" onClick={onClose}>取消</button><button className="primary">插入</button></footer></form></dialog>;

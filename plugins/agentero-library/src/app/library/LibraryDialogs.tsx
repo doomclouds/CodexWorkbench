@@ -1,3 +1,4 @@
+import { handleDialogEscape } from '../ui/escape';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FileText, FolderOpen, LoaderCircle, Trash2, X } from 'lucide-react';
 import type { LibraryOperation, Paper } from '../../contracts/types';
@@ -24,7 +25,7 @@ export function TagEditor({ vaultId, paper, onClose, onChanged }: { vaultId: str
       if (op === 'add') setText(''); onChanged();
     } catch (reason) { setError(messageOf(reason)); } finally { setBusy(false); }
   }
-  return <dialog ref={dialog} className="compact-modal tag-editor" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
+  return <dialog ref={dialog} className="compact-modal tag-editor" onKeyDown={event => handleDialogEscape(event, () => { if (!busy) onClose(); })} onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
     <header className="modal-heading"><div><h2>编辑标签</h2><p>{paper.title}</p></div><button className="icon-button" aria-label="关闭标签编辑" disabled={busy} onClick={onClose}><X size={17} /></button></header>
     <div className="modal-content"><div className="tag-editor-list">{current.tags.map(tag => <div key={tag}><span className="tag" style={tagStyle(current, tag)}>{tag}</span><button className="icon-button" aria-label={`删除标签 ${tag}`} disabled={busy} onClick={() => void change('rm', tag)}><X size={14} /></button></div>)}{current.tags.length === 0 && <p className="field-help">尚无标签</p>}</div>
       <form className="tag-editor-form" onSubmit={e => { e.preventDefault(); void change('add', `${text.trim()}${color ? `:${color}` : ''}`); }}><label htmlFor="new-paper-tag">新增标签</label><input autoFocus id="new-paper-tag" value={text} maxLength={900} disabled={busy} onChange={e => setText(e.target.value)} /><label htmlFor="new-tag-color">颜色</label><select id="new-tag-color" value={color} disabled={busy} onChange={e => setColor(e.target.value)}><option value="">默认</option>{Object.keys(tagColors).map(id => <option value={id} key={id}>{({ red: '红色', orange: '橙色', yellow: '黄色', green: '绿色', teal: '青色', blue: '蓝色', indigo: '靛色', purple: '紫色' } as Record<string, string>)[id]}</option>)}</select><button className="primary" disabled={busy || !text.trim()}>{busy && <LoaderCircle size={14} className="spin" />}添加标签</button></form>
@@ -36,7 +37,7 @@ export function TagEditor({ vaultId, paper, onClose, onChanged }: { vaultId: str
 export function DeletePaperDialog({ vaultId, paper, onClose, onDeleted }: { vaultId: string; paper: Paper; onClose(): void; onDeleted(): void }) {
   const dialog = useModal(); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   async function remove() { setBusy(true); setError(''); try { await callTool('paper_delete', { vaultId, paperPath: paper.path }); onDeleted(); onClose(); } catch (reason) { setError(messageOf(reason)); } finally { setBusy(false); } }
-  return <dialog ref={dialog} className="compact-modal" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}><header className="modal-heading"><h2>移入回收站？</h2><button className="icon-button" aria-label="关闭删除确认" disabled={busy} onClick={onClose}><X size={17} /></button></header><div className="modal-content"><strong>{paper.title}</strong><p>论文文件与对应文献记录会移入当前知识库回收站，可通过 Agentero 恢复。</p>{error && <p className="callout error" role="alert">{error}</p>}</div><footer className="modal-footer"><button disabled={busy} onClick={onClose}>取消</button><button className="danger" disabled={busy} onClick={() => void remove()}><Trash2 size={15} />移入回收站</button></footer></dialog>;
+  return <dialog ref={dialog} className="compact-modal" onKeyDown={event => handleDialogEscape(event, () => { if (!busy) onClose(); })} onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}><header className="modal-heading"><h2>移入回收站？</h2><button className="icon-button" aria-label="关闭删除确认" disabled={busy} onClick={onClose}><X size={17} /></button></header><div className="modal-content"><strong>{paper.title}</strong><p>论文文件与对应文献记录会移入当前知识库回收站，可通过 Agentero 恢复。</p>{error && <p className="callout error" role="alert">{error}</p>}</div><footer className="modal-footer"><button disabled={busy} onClick={onClose}>取消</button><button className="danger" disabled={busy} onClick={() => void remove()}><Trash2 size={15} />移入回收站</button></footer></dialog>;
 }
 
 export function ImportPdfDialog({ vaultId, onClose, onOperation }: { vaultId: string; onClose(): void; onOperation(operation: LibraryOperation): void }) {
@@ -61,7 +62,7 @@ export function ImportPdfDialog({ vaultId, onClose, onOperation }: { vaultId: st
     try { const operation = await callTool<LibraryOperation>('paper_import', { vaultId, filePaths: selected, noRecognize }); onOperation(operation); onClose(); }
     catch (reason) { setError(messageOf(reason)); setBusy(false); }
   }
-  return <dialog ref={dialog} className="compact-modal pdf-import-dialog" onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
+  return <dialog ref={dialog} className="compact-modal pdf-import-dialog" onKeyDown={event => handleDialogEscape(event, () => { if (!busy) onClose(); })} onCancel={e => { e.preventDefault(); if (!busy) onClose(); }}>
     <header className="modal-heading"><div><h2>导入本地 PDF</h2><p>可一次选择多个文件</p></div><button className="icon-button" aria-label="关闭导入" disabled={busy} onClick={onClose}><X size={17} /></button></header>
     <div className="modal-content"><button className="primary picker-primary" disabled={busy || picking} onClick={() => void choose()}>{picking ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}{picking ? '等待系统选择器…' : paths.length ? '重新选择 PDF 文件…' : '选择 PDF 文件…'}</button>
       {paths.length > 0 && <ul className="import-file-list" aria-label="待导入的PDF">{paths.map(path => <li key={path}><FileText size={15} /><span title={path}>{path.split(/[\\/]/).at(-1)}</span><button className="icon-button" aria-label={`移除 ${path.split(/[\\/]/).at(-1)}`} disabled={busy || picking} onClick={() => setPaths(values => values.filter(item => item !== path))}><X size={13} /></button></li>)}</ul>}

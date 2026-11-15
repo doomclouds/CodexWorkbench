@@ -62592,7 +62592,7 @@ import { realpath as realpath2 } from "node:fs/promises";
 import { normalize } from "node:path";
 
 // src/contracts/version.ts
-var PLUGIN_VERSION = "0.5.1";
+var PLUGIN_VERSION = "0.5.2";
 
 // src/infrastructure/native-mcp.ts
 var replayableReads = /* @__PURE__ */ new Set(["vault_list", "paper_get", "paper_paths", "vault_search", "page_read", "paper_text_get", "file_read", "file_list", "paper_notes_get"]);

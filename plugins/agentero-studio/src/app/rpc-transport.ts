@@ -7,6 +7,7 @@ const REQUEST_HEADERS = new Set(['content-type', 'x-filename', 'x-content-type']
 type Send = (args: Record<string, unknown>, signal?: AbortSignal) => Promise<any>;
 interface WireResponse { status: number; headers: Record<string, string>; body?: string; downloadId?: string; size: number }
 interface CachedAsset { url: string; size: number }
+interface RequestSlots { active: number; queue: Array<() => void> }
 
 function failure(message: string, code = 'INVALID_RESPONSE') { return Object.assign(new Error(message), { code }); }
 function encode(bytes: Uint8Array) {
@@ -42,8 +43,8 @@ export function createRpcTransport(baseUrl: string, send: Send) {
   const assets = new Map<string, CachedAsset>();
   const preparing = new Map<string, Promise<void>>();
   const transfers = new Set<string>();
-  const queue: Array<() => void> = [];
-  let closed = false, active = 0, assetBytes = 0;
+  const requests: RequestSlots = { active: 0, queue: [] }, waits: RequestSlots = { active: 0, queue: [] };
+  let closed = false, assetBytes = 0;
 
   function canonical(input: string | URL) {
     const url = new URL(input, base);
@@ -60,19 +61,20 @@ export function createRpcTransport(baseUrl: string, send: Send) {
       return /^\/(?:assets|api\/(?:assets|thumbnails))\/[^/]/.test(key) ? key : undefined;
     } catch { return undefined; }
   }
-  async function acquire(signal: AbortSignal) {
+  async function acquire(signal: AbortSignal, waiting: boolean) {
+    const slots = waiting ? waits : requests, maximum = waiting ? 1 : MAX_CONCURRENT;
     checkSignal(signal);
-    if (active >= MAX_CONCURRENT) {
-      if (queue.length >= 64) throw failure('作品请求过多，请稍后重试。', 'BUSY');
+    if (slots.active >= maximum) {
+      if (slots.queue.length >= 64) throw failure('作品请求过多，请稍后重试。', 'BUSY');
       await new Promise<void>((resolve, reject) => {
-        const enter = () => { signal.removeEventListener('abort', abort); active++; resolve(); };
-        const abort = () => { const index = queue.indexOf(enter); if (index !== -1) queue.splice(index, 1); reject(abortReason(signal)); };
-        queue.push(enter);
+        const enter = () => { signal.removeEventListener('abort', abort); slots.active++; resolve(); };
+        const abort = () => { const index = slots.queue.indexOf(enter); if (index !== -1) slots.queue.splice(index, 1); reject(abortReason(signal)); };
+        slots.queue.push(enter);
         signal.addEventListener('abort', abort, { once: true });
       });
-    } else active++;
+    } else slots.active++;
     let released = false;
-    return () => { if (!released) { released = true; active--; queue.shift()?.(); } };
+    return () => { if (!released) { released = true; slots.active--; slots.queue.shift()?.(); } };
   }
   async function release(transferId: string) {
     if (!transfers.delete(transferId) || closed) return;
@@ -196,7 +198,8 @@ export function createRpcTransport(baseUrl: string, send: Send) {
     if (closed) throw failure('作品连接已关闭。', 'CLOSED');
     const path = canonical(input);
     const signal = init.signal ? AbortSignal.any([lifetime.signal, init.signal]) : lifetime.signal;
-    const unlock = await acquire(signal);
+    const endpoint = new URL(path, base);
+    const unlock = await acquire(signal, endpoint.pathname === '/api/sync' && Number(endpoint.searchParams.get('wait')) > 0);
     let response: Response;
     try { response = await perform(path, init, signal); } finally { unlock(); }
     // Release the request slot before fetching previews to avoid nested-request deadlocks.

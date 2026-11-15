@@ -29,6 +29,29 @@ const add = (element: Partial<BoardElement>) => apply([{ op: 'add', element }]);
 const createFeedback = (anchor: unknown, extra: Record<string, unknown> = {}, actor = commenter) => service.execute('artifact_feedback', { artifactId, action: 'create', text: 'Review this target', anchor, ...extra }, actor);
 
 describe('whiteboard geometry locks', () => {
+  it('undoes and redoes a standalone lock while keeping concurrent text and rejecting ordinary restore unlocks', async () => {
+    const added = await add({ id: 'a', type: 'text', text: 'Before' });
+    const locked = await apply([{ op: 'update', id: 'a', changes: { locked: true } }]);
+    await apply([{ op: 'update', id: 'a', changes: { text: 'Concurrent text' } }], agent);
+    await expect(apply([{ op: 'restore', versionId: added.historyEntry.id }])).rejects.toMatchObject({ code: 'LOCKED' });
+    const undone = await apply([{ op: 'restore', versionId: locked.historyEntry.id, data: { mode: 'undo' } }]);
+    expect(undone.board.elements[0].locked).not.toBe(true);
+    expect(undone.board.elements[0].text).toBe('Concurrent text');
+    const redone = await apply([{ op: 'restore', versionId: undone.historyEntry.id, data: { mode: 'undo' } }]);
+    expect(redone.board.elements[0]).toMatchObject({ locked: true, text: 'Concurrent text' });
+    await expect(apply([{ op: 'update', id: 'a', changes: { text: 'Stale' } }], LOCAL_ACTOR, { expectedVersions: { a: locked.board.elements[0].version } })).rejects.toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('does not undo a combined lock and geometry, deletion, or content transaction through the unlock exception', async () => {
+    await add({ id: 'a', type: 'text', text: 'Before', x: 10 });
+    const combined = await apply([{ op: 'update', id: 'a', changes: { x: 100, locked: true } }]);
+    await expect(apply([{ op: 'restore', versionId: combined.historyEntry.id, data: { mode: 'undo' } }])).rejects.toMatchObject({ code: 'LOCKED' });
+    await apply([{ op: 'update', id: 'a', changes: { locked: false } }]);
+    const content = await apply([{ op: 'update', id: 'a', changes: { text: 'Combined', locked: true } }]);
+    await expect(apply([{ op: 'restore', versionId: content.historyEntry.id, data: { mode: 'undo' } }])).rejects.toMatchObject({ code: 'LOCKED' });
+    const createdLocked = await add({ id: 'new', type: 'text', text: 'Keep', locked: true });
+    await expect(apply([{ op: 'restore', versionId: createdLocked.historyEntry.id, data: { mode: 'undo' } }])).rejects.toMatchObject({ code: 'LOCKED' });
+  });
   it.each([LOCAL_ACTOR, agent])('allows locked content and style edits for $kind actors while enforcing role and CAS', async actor => {
     await add({ id: 'html-a', type: 'html', html: '<h1>Before</h1>', locked: true, x: 20, y: 30, w: 400, h: 300 });
     const first = await apply([{ op: 'update', id: 'html-a', changes: { html: '<h2>After</h2>', state: { active: true }, text: 'Updated', fill: '#ffeedd', stroke: '#333', fontSize: 28 } }], actor);

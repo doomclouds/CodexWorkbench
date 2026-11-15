@@ -35,12 +35,12 @@ const cleanups: (() => void)[] = [];
 afterEach(() => { cleanups.splice(0).forEach(cleanup => cleanup()); hooks.current = null; });
 
 function surface() {
-  const view = Object.assign(new EventTarget(), { innerWidth: 800, innerHeight: 600 });
+  const view = Object.assign(new EventTarget(), { innerWidth: 800, innerHeight: 600, getComputedStyle: () => ({}) });
   const body = {}, owner = Object.assign(new EventTarget(), { defaultView: view, body, activeElement: body as any });
   const button = { focus: vi.fn(() => { if (menu.visibility === 'visible') owner.activeElement = button; }) };
   const lastButton = { focus: vi.fn(() => { if (menu.visibility === 'visible') owner.activeElement = lastButton; }) };
   const anchor = { ownerDocument: owner, isConnected: true, getBoundingClientRect: () => ({ left: 40, right: 60, top: 100, bottom: 124 }), contains: (node: unknown) => node === anchor, focus: vi.fn(() => { owner.activeElement = anchor; }) };
-  const menu = { visibility: 'hidden', querySelector: () => button, querySelectorAll: () => [button, lastButton], focus: vi.fn(() => { if (menu.visibility === 'visible') owner.activeElement = menu; }), getBoundingClientRect: () => ({ width: 190, height: 160 }), contains: (node: unknown) => [menu, button, lastButton].includes(node as any) };
+  const menu = { ownerDocument: owner, isConnected: true, closest: () => null, visibility: 'hidden', querySelector: () => button, querySelectorAll: () => [button, lastButton], focus: vi.fn(() => { if (menu.visibility === 'visible') owner.activeElement = menu; }), getBoundingClientRect: () => ({ width: 190, height: 160 }), contains: (node: unknown) => [menu, button, lastButton].includes(node as any) };
   owner.activeElement = anchor;
   const render: HookRender = { menu, slots: [], index: 0, pending: [] };
   const menuAnchor = { element: anchor as unknown as HTMLElement };

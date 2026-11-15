@@ -22,7 +22,8 @@ import { adjacentElement, canShowConnectionPorts, connectionAtPoint, connectionP
 import InlineTextEditor, { type InlineTextEditorHandle, type InlineTextFormatState } from './InlineTextEditor.js';
 import { newClientId } from '../shared/client-id.js';
 import { nativePaint, PEN_CURSOR } from './native-palette.js';
-import { alignSelection, tidySelection, selectionBounds as nativeSelectionBounds, resizeBox, resizeElement, resizeSelection, rotateSelection, snapMove, type ResizeHandle, type AlignmentGuide } from './native-geometry.js';
+import { alignSelection, tidySelection, geometryBounds, selectionBounds as nativeSelectionBounds, resizeBox, resizeElement, resizeSelection, rotateSelection, snapMove, type ResizeHandle, type AlignmentGuide } from './native-geometry.js';
+import { visibleCommentCorner } from '../shared/comments/comment-target.js';
 import { copyPlainText } from '../clipboard.js';
 import { studioRequest } from '../transport.js';
 import { participantColor } from '../shared/presence-members.js';
@@ -34,6 +35,7 @@ import ContentConflictDialog from './ContentConflictDialog.js';
 import { encodeGestureFrame, useNativeGestureSync, type NativeGesture } from '../shared/useNativeGestureSync.js';
 import { mergeJson } from '../../core/shared/safe-merge.js';
 import './canvas.css';
+import { isEscapeActive, registerEscapeLayer } from '../shared/escape.js';
 
 export interface WhiteboardCanvasProps {
   board: Board;
@@ -127,6 +129,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const [lastShapeTool,setLastShapeTool]=useState<'shape'|'table'>('shape');
   const [lastDrawTool,setLastDrawTool]=useState<'stroke'|'arrow'>('stroke');
   const [selection, setSelection] = useState<string[]>([]);
+  const [annotationHoverId, setAnnotationHoverId] = useState<string | null>(null);
   const selectionRef = useRef(selection); selectionRef.current = selection;
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
@@ -240,13 +243,26 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const selectedElements = contentElements.filter((element) => selection.includes(element.id));
   const selected = selectedElements.length === 1 ? selectedElements[0] : undefined;
   const updateGesture = (value: Gesture | null) => { gestureRef.current = value; setGesture(value); };
-  const cancelGesture = () => { if (publishedGesture.current) publishGesture({ ...publishedGesture.current, cancelled: true }); publishedGesture.current = undefined; updateGesture(null); };
+  const cancelGesture = () => { setAnnotationHoverId(null); if (publishedGesture.current) publishGesture({ ...publishedGesture.current, cancelled: true }); publishedGesture.current = undefined; updateGesture(null); };
   const beginEditing = (element: BoardElement) => {let text=(element.type==='arrow'?element.label:element.text)??'';if(element.bold)text=`**${text}**`;if(element.italic)text=`_${text}_`;setEditing({id:element.id,text,base:element,initialText:text});};
 
   useEffect(() => {
+    setAnnotationHoverId(null);
     if (annotationActive === true) { setTool('annotate'); setInteractiveId(null); setToolMenu(null); updateGesture(null); }
     else if (annotationActive === false) {setTool(current => current === 'annotate' ? 'select' : current);setLocalAnnotationTarget(null);}
   }, [annotationActive]);
+
+  useEffect(() => {
+    setAnnotationHoverId(null);
+    if (!annotating) return;
+    const host = viewportElement.current!;
+    const clearHidden = () => { if (document.hidden || !isEscapeActive(host)) setAnnotationHoverId(null); };
+    const clear = () => setAnnotationHoverId(null);
+    const observer = new MutationObserver(clearHidden);
+    for (let ancestor: HTMLElement | null = host; ancestor; ancestor = ancestor.parentElement) observer.observe(ancestor, { attributes: true, attributeFilter: ['hidden', 'inert', 'aria-hidden', 'style', 'class'] });
+    document.addEventListener('visibilitychange', clearHidden); window.addEventListener('blur', clear);
+    return () => { observer.disconnect(); document.removeEventListener('visibilitychange', clearHidden); window.removeEventListener('blur', clear); };
+  }, [annotating]);
 
   useEffect(() => {
     const host = viewportElement.current;
@@ -442,7 +458,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if(action==='fit'){fit('all');return;}
     if(action==='group'){void group();return;}
     if(action==='ungroup'){void updateSelected({groupId:''},'取消组合');return;}
-    if(action==='lock'){void updateSelected({locked:!elements.filter(element=>ids.includes(element.id)).every(element=>element.locked)},'锁定位置');return;}
+    if(action==='lock'){void updateSelected({locked:!elements.filter(element=>ids.includes(element.id)).every(element=>element.locked)},'锁定位置与尺寸');return;}
     if(action==='tidy'){void apply(tidySelection(elements,ids),'整理元素',elements);return;}
     if(['front','back','forward','backward'].includes(action))void apply([{op:'layout',preset:action,ids}],'调整层级',elements);
   };
@@ -482,6 +498,20 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
 
   const actionsRef = useRef({ remove, duplicate, changeHistory, fit, command, stepZoom, updateSelected });
   actionsRef.current = { remove, duplicate, changeHistory, fit, command, stepZoom, updateSelected };
+  const escapeAction = useRef<(target: EventTarget | null) => boolean>(() => false);
+  escapeAction.current = target => {
+    if (target instanceof Element && target.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]')) return false;
+    if (menu) setMenu(null);
+    else if (zoomMenu) setZoomMenu(false);
+    else if (toolMenu) setToolMenu(null);
+    else if (gestureRef.current) cancelGesture();
+    else if (interactiveId) setInteractiveId(null);
+    else if (annotationMode.current.annotating) { setAnnotationHoverId(null); setTool('select'); annotationMode.current.onAnnotationModeChange?.(false); }
+    else if (tool !== 'select') setTool('select');
+    else selectIds([]);
+    return true;
+  };
+  useEffect(() => registerEscapeLayer(viewportElement.current!.closest<HTMLElement>('.studio-whiteboard')!, target => escapeAction.current(target), 0), []);
   useEffect(() => {
     const host = viewportElement.current;
     if (!host) return;
@@ -499,6 +529,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   }, []);
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || !isEscapeActive(viewportElement.current!)) return;
       const target = event.target as HTMLElement;
       if (target?.closest('input,textarea,select,[contenteditable="true"],iframe,[role="dialog"]')) return;
       if (event.code === 'Space') { spaceHeld.current = true; setSpacePan(true); event.preventDefault(); return; }
@@ -513,7 +544,6 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       else if (canEdit && command && event.key.toLowerCase() === 'z') { event.preventDefault(); void actionsRef.current.changeHistory(event.shiftKey ? 'redo' : 'undo'); }
       else if (canEdit && command && event.key.toLowerCase() === 'y') { event.preventDefault(); void actionsRef.current.changeHistory('redo'); }
       else if (canEdit && ['Delete', 'Backspace'].includes(event.key) && selectionRef.current.length) { event.preventDefault(); actionsRef.current.remove(); }
-      else if (event.key === 'Escape') { setTool('select'); setInteractiveId(null); setToolMenu(null); setZoomMenu(false); cancelGesture(); selectIds([]); if (annotationMode.current.annotating) annotationMode.current.onAnnotationModeChange?.(false); }
       else if (command && ['+','='].includes(event.key)) {event.preventDefault();actionsRef.current.stepZoom(1.2);}
       else if(command && event.key==='-'){event.preventDefault();actionsRef.current.stepZoom(1/1.2);}
       else if(command && event.shiftKey && event.key.toLowerCase()==='l'){event.preventDefault();actionsRef.current.command('lock');}
@@ -546,6 +576,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     }
     const point = boardPoint(event.clientX, event.clientY);
     if (annotating) {
+      setAnnotationHoverId(null);
       event.preventDefault(); event.stopPropagation(); host.setPointerCapture(event.pointerId);
       selectIds(element?[element.id]:[]);setLocalAnnotationTarget(null);
       updateGesture({ kind: 'annotate', start: point, end: point, element }); return;
@@ -599,6 +630,11 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const move = (event: ReactPointerEvent) => {
     const hovering=boardPoint(event.clientX,event.clientY);onCursorMove?.(hovering);if(canEdit&&!annotating&&['text','shape','note','container','table','sticker'].includes(tool))setPointer(hovering);
     const current = gestureRef.current;
+    if (annotating && !current && isEscapeActive(viewportElement.current!)) {
+      const id = (event.target as Element).closest('[data-element-id]')?.getAttribute('data-element-id');
+      const target = contentElements.find(element => element.id === id);
+      setAnnotationHoverId(target && target.type !== 'html' && !(target.type === 'diagram' && target.html) ? target.id : null);
+    }
     if (!current) return;
     let point = boardPoint(event.clientX, event.clientY);
     if (event.shiftKey && current.kind === 'draw' && current.element.type==='arrow') { const angle=Math.round(Math.atan2(point.y-current.start.y,point.x-current.start.x)/(Math.PI/4))*(Math.PI/4); const distance=Math.hypot(point.x-current.start.x,point.y-current.start.y); point={x:current.start.x+Math.cos(angle)*distance,y:current.start.y+Math.sin(angle)*distance}; }
@@ -874,7 +910,12 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const selectionBounds = nativeSelectionBounds(renderedElements,selection);
   const selectionElement=selected&&renderedElements.find(element=>element.id===selected.id);
   const commentTarget=annotationTarget??localAnnotationTarget;
-  const commentBounds=commentTarget?anchorBounds(commentTarget,renderedElements):null;
+  const nativeCommentIds = commentTarget && !commentTarget.regionId && commentTarget.coordinateSpace !== 'html' ? commentTarget.elementIds ?? [] : [];
+  const nativeCommentElement = nativeCommentIds.length === 1 ? renderedElements.find(element => element.id === nativeCommentIds[0] && element.type !== 'arrow' && element.type !== 'stroke') : undefined;
+  // Highlight the subject independently of the point anchor used by the pin and composer.
+  const commentBounds = !commentTarget || commentTarget.regionId || commentTarget.coordinateSpace === 'html' ? null : nativeCommentElement ?? (nativeCommentIds.length ? nativeSelectionBounds(renderedElements, nativeCommentIds) : anchorBounds(commentTarget, renderedElements));
+  const annotationHover = annotating && !gesture ? renderedElements.find(element => element.id === annotationHoverId) : undefined;
+  const annotationHoverBounds = annotationHover && (annotationHover.type === 'arrow' || annotationHover.type === 'stroke' ? geometryBounds(annotationHover, renderedElements) : annotationHover);
   const annotateSelected = async () => {
     const ids = [...selectionRef.current];
     const unchangedBase=editing&&editing.text===(editing.initialText??((editing.base?.type==='arrow'?editing.base.label:editing.base?.text)??''))?editing.base:undefined;
@@ -882,13 +923,17 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if (editing && ids.includes(editing.id) && !await commitEditing()) return;
     if (ids.some(id => draftsRef.current[id]) && !await savePropertyDrafts(ids)) return;
     const elements = boardRef.current.elements.filter(element => ids.includes(element.id)).map(element=>unchangedBase?.id===element.id?unchangedBase:element);
-    const bounds = boundsOf(elements.map(element => elementBounds(element, boardRef.current.elements)));
+    const bounds = nativeSelectionBounds(boardRef.current.elements, ids);
     if (!elements.length || !bounds) return;
     const element = elements.length === 1 ? elements[0] : undefined;
     const host = viewportElement.current?.getBoundingClientRect();
     const view = viewportRef.current;
-    const point = { x: (host?.left ?? 0) + (bounds.x + bounds.w) * view.zoom + view.x, y: (host?.top ?? 0) + (bounds.y + bounds.h / 2) * view.zoom + view.y };
-    onAnnotateNative?.({ anchor: element ? { elementIds: ids, coordinateSpace: 'element', x: 1, y: .5 } : { elementIds: ids, coordinateSpace: 'board', ...bounds }, label: element ? `${element.type === 'note' ? '便签' : element.type === 'container' ? '分区' : '对象'} · ${(element.text || element.label || element.type).slice(0, 100)}` : `${elements.length} 个对象`, versions: Object.fromEntries(elements.map(element => [element.id, element.version])), screenPoint: point });
+    const corner = visibleCommentCorner(bounds, view, host ?? { width: window.innerWidth, height: window.innerHeight });
+    const relative = element && relativeElementPoint(elementBounds(element, boardRef.current.elements) as BoardElement, corner);
+    const anchor: Anchor = relative ? { elementIds: ids, coordinateSpace: 'element', ...relative } : { elementIds: ids, coordinateSpace: 'board', ...corner };
+    const attached = anchorBounds(anchor, boardRef.current.elements)!;
+    const point = { x: (host?.left ?? 0) + attached.x * view.zoom + view.x, y: (host?.top ?? 0) + attached.y * view.zoom + view.y };
+    onAnnotateNative?.({ anchor, label: element ? `${element.type === 'note' ? '便签' : element.type === 'container' ? '分区' : '对象'} · ${(element.text || element.label || element.type).slice(0, 100)}` : `${elements.length} 个对象`, versions: Object.fromEntries(elements.map(element => [element.id, element.version])), screenPoint: point });
   };
   const formatText = (format: 'bold' | 'italic' | 'list' | 'link' | 'numbered', value?: string) => {
     const cell=viewportElement.current?.querySelector('.studio-native-table [contenteditable="true"]');if(cell){cell.closest('.studio-native-table')?.dispatchEvent(new CustomEvent('studio-table-format',{detail:{format:format==='list'?'bullets':format,url:value}}));return;}
@@ -938,7 +983,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         <details><summary>视图设置</summary><label><input type="checkbox" checked={showGrid} onChange={event => setShowGrid(event.target.checked)} />显示网格</label><label><input type="checkbox" checked={singleKeys} onChange={event=>setSingleKeys(event.target.checked)}/>单键工具快捷键</label></details>
       </div>}
     </div>
-    <div ref={viewportElement} className="studio-canvas-viewport" tabIndex={0} aria-label="白板画布" onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('[data-native-interactive]')) { setToolMenu(null); setZoomMenu(false); } begin(event); }} onDoubleClick={event => { if (!canEdit || annotating || tool !== 'select' || editing || dialog || (event.target as HTMLElement).closest('[data-element-id],[data-native-interactive]')) return; updateGesture(null); void addElements([makeElement('text', boardPoint(event.clientX, event.clientY), { text: '' })], '添加文字', { edit: true }); }} onPointerMove={move} onPointerLeave={()=>{setPointer(null);onCursorMove?.(null);}} onPointerUp={finish} onPointerCancel={cancelGesture} onLostPointerCapture={()=>{if(gestureRef.current)cancelGesture();}} onContextMenu={event=>{if((event.target as HTMLElement).closest('[data-native-interactive]'))return;event.preventDefault();const id=(event.target as HTMLElement).closest('[data-element-id]')?.getAttribute('data-element-id');if(id&&!selectionRef.current.includes(id))selectIds([id]);openMenu({x:event.clientX,y:event.clientY});}} onDragOver={(event) => { if (canEdit && event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); void uploadMedia(event.dataTransfer.files, boardPoint(event.clientX, event.clientY)); }} style={{ backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px`, ...(!showGrid ? { backgroundImage: 'none' } : {}) }}>
+    <div ref={viewportElement} className="studio-canvas-viewport" tabIndex={0} aria-label="白板画布" onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('[data-native-interactive]')) { setToolMenu(null); setZoomMenu(false); } begin(event); }} onDoubleClick={event => { if (!canEdit || annotating || tool !== 'select' || editing || dialog || (event.target as HTMLElement).closest('[data-element-id],[data-native-interactive]')) return; updateGesture(null); void addElements([makeElement('text', boardPoint(event.clientX, event.clientY), { text: '' })], '添加文字', { edit: true }); }} onPointerMove={move} onPointerLeave={()=>{setPointer(null);setAnnotationHoverId(null);onCursorMove?.(null);}} onPointerUp={finish} onPointerCancel={cancelGesture} onLostPointerCapture={()=>{if(gestureRef.current)cancelGesture();}} onContextMenu={event=>{if((event.target as HTMLElement).closest('[data-native-interactive]'))return;event.preventDefault();const id=(event.target as HTMLElement).closest('[data-element-id]')?.getAttribute('data-element-id');if(id&&!selectionRef.current.includes(id))selectIds([id]);openMenu({x:event.clientX,y:event.clientY});}} onDragOver={(event) => { if (canEdit && event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); void uploadMedia(event.dataTransfer.files, boardPoint(event.clientX, event.clientY)); }} style={{ backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px`, ...(!showGrid ? { backgroundImage: 'none' } : {}) }}>
       <div className="studio-canvas-world" style={{ transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})` }}>
         {renderedElements.map(renderElement)}
         {!preview && mediaUpload && mediaUpload.placeholders.map((placeholder,index)=>{const element=mediaUpload.elements[index]??placeholder;return <div key={`upload-${placeholder.id}`} data-upload-placeholder={placeholder.id} data-upload-phase={mediaUpload.phase} style={{position:'absolute',left:element.x,top:element.y,width:element.w,height:element.h,border:`${1/viewport.zoom}px dashed var(--studio-accent)`,background:mediaUpload.phase==='uploading'?'color-mix(in srgb, var(--canvas-ui) 85%, transparent)':undefined,pointerEvents:'none',zIndex:73}}><div style={{position:'absolute',left:8/viewport.zoom,top:8/viewport.zoom,transform:`scale(${1/viewport.zoom})`,transformOrigin:'left top',padding:'6px 8px',borderRadius:5,background:'var(--canvas-ui)',color:'var(--canvas-ui-text)',font:'12px/1.5 Arial,"Microsoft YaHei",sans-serif',maxWidth:280}}>{mediaUpload.phase!=='failed'&&<Loader2 size={13} className="studio-spin" aria-hidden="true"/>} {mediaUpload.phase==='uploading'?'正在上传':mediaUpload.phase==='queued'?'正在加入白板':'尚未加入白板'} · {mediaUpload.files[index]!.name}{mediaUpload.phase==='failed'&&index===0&&<div data-native-interactive="true" style={{pointerEvents:'auto'}} onPointerDown={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}><p role="alert">{mediaUpload.error}</p><button type="button" className="studio-button" disabled={!canEdit} onClick={()=>{const batch=mediaUploadRef.current;if(batch)void runMediaUpload(batch);}}>重试加入白板</button><button type="button" className="studio-button" onClick={()=>{const batch=mediaUploadRef.current;if(batch){batch.abort.abort();queue.discardFor(batch.placeholders.map(element=>element.id));finishUpload(batch);setError('');}}}>移除上传草稿</button></div>}</div></div>;})}
@@ -947,7 +992,8 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         {selectionBounds && selection.length>0 && (selected?.type!=='arrow'||annotating||selected.locked) && (annotating || tool==='select') && !editing && <SelectionChrome bounds={selectionElement&&selectionElement.rotation?{x:selectionElement.x,y:selectionElement.y,w:selectionElement.w,h:selectionElement.h}:selectionBounds} rotation={selectionElement?.rotation??0} zoom={viewport.zoom} locked={annotating || !canEdit || selectedElements.some(element=>element.locked)} resizable={selectedElements.some(element=>!['arrow','link'].includes(element.type))} rotatable={selectedElements.every(element=>element.type==='arrow'||ROTATABLE_TYPES.has(element.type))} edges={selected?.type==='text'?['w','e']:selectedElements.some(element=>element.type==='image')||selected?.type==='sticker'||selection.length>1&&selectedElements.some(element=>element.rotation)?[]:undefined} onResize={resizeBegin} onRotate={rotateBegin}/>}
         {selected && canEdit && !annotating && tool==='select' && !editing && !gesture && canShowConnectionPorts(selected,viewport.zoom) && <ConnectionPorts element={selected} zoom={viewport.zoom} onBegin={connectBegin}/>}
         {selected?.type==='arrow' && canEdit && !selected.locked && !annotating && tool==='select' && !editing && (()=>{const points=arrowGeometry(selected,renderedElements).points;return points.map((point,index)=><button type="button" key={`arrow-handle-${index}`} className="studio-arrow-handle" aria-label={index===0?'连接线起点位置':index===points.length-1?'连接线终点位置':`连接线折点 ${index}`} style={{left:point.x,top:point.y,width:10/viewport.zoom,height:10/viewport.zoom,borderWidth:1.5/viewport.zoom}} onPointerDown={event=>{event.preventDefault();event.stopPropagation();viewportElement.current?.setPointerCapture(event.pointerId);updateGesture({kind:'arrow-point',start:boardPoint(event.clientX,event.clientY),element:selected,end:index===0?'from':index===points.length-1?'to':'bends',bendIndex:index-1,points,operations:[]});}}/>);})()}
-        {commentBounds && <div className="studio-current-comment-target" data-comment-target="true" aria-hidden="true" style={{left:commentBounds.x,top:commentBounds.y,width:Math.max(commentBounds.w,12/viewport.zoom),height:Math.max(commentBounds.h,12/viewport.zoom),borderWidth:2/viewport.zoom}}/>}
+        {annotationHoverBounds && <div className="studio-annotation-hover" data-annotation-hover={annotationHover!.id} aria-hidden="true" style={{ left: annotationHoverBounds.x, top: annotationHoverBounds.y, width: annotationHoverBounds.w, height: annotationHoverBounds.h, borderWidth: 2 / viewport.zoom, transform: annotationHover!.type !== 'stroke' && annotationHover!.rotation ? `rotate(${annotationHover!.rotation}deg)` : undefined }} />}
+        {commentBounds && <div className="studio-current-comment-target" data-comment-target="true" aria-hidden="true" style={{left:commentBounds.x,top:commentBounds.y,width:Math.max(commentBounds.w,12/viewport.zoom),height:Math.max(commentBounds.h,12/viewport.zoom),borderWidth:2/viewport.zoom,transform:nativeCommentElement?.rotation?`rotate(${nativeCommentElement.rotation}deg)`:undefined}}/>}
         {guides.map((guide,index)=><div key={index} className="studio-snap-guide" style={guide.axis==='x'?{left:guide.at,top:guide.from,height:guide.to-guide.from,width:1/viewport.zoom}:{top:guide.at,left:guide.from,width:guide.to-guide.from,height:1/viewport.zoom}}/>)}
         {activities.filter(activity => activity.status === 'processing').map(activity => {
           const area = (activity.anchor as typeof activity.anchor & { area?: Rect }).area;
@@ -996,9 +1042,12 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
 }
 
 function CanvasDialog({ dialog, onClose, onSave, onDirtyChange }: { dialog: Dialog; onClose: () => void; onSave: (data: Partial<BoardElement>) => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
+  const modal = useRef<HTMLElement>(null);
   const [title, setTitle] = useState(dialog.element?.text ?? (dialog.type === 'html' ? 'HTML 图解' : dialog.type === 'link' ? '链接' : ''));
   const [value, setValue] = useState(dialog.type === 'table' ? tableRows(dialog.element ?? makeElement('table', { x: 0, y: 0 })).map((row) => row.join('\t')).join('\n') : dialog.type === 'link' ? dialog.element?.href ?? '' : dialog.type === 'sticker' ? '★' : dialog.element?.html ?? '');
   const [busy, setBusy] = useState(false);
+  const close = useRef(() => {}); close.current = () => { if (!busy) onClose(); };
+  useEffect(() => registerEscapeLayer(modal.current!, () => close.current(), 20), []);
   const originalValue = dialog.type === 'table' ? tableRows(dialog.element ?? makeElement('table', { x: 0, y: 0 })).map(row => row.join('\t')).join('\n') : dialog.type === 'link' ? dialog.element?.href ?? '' : dialog.type === 'sticker' ? dialog.element?.text ?? '★' : dialog.element?.html ?? '';
   useEffect(() => { onDirtyChange(!dialog.element || value !== originalValue || (['html', 'link'].includes(dialog.type) && title !== (dialog.element.text ?? ''))); }, [dialog.element, dialog.type, value, title, originalValue, onDirtyChange]);
   const valid = dialog.type === 'link' ? Boolean(safeHttpLink(value)) : Boolean(value.trim());
@@ -1007,7 +1056,7 @@ function CanvasDialog({ dialog, onClose, onSave, onDirtyChange }: { dialog: Dial
     setBusy(true);
     try { await onSave(dialog.type === 'html' ? { html: value, text: title || 'HTML 图解' } : dialog.type === 'table' ? { data: { ...dialog.element?.data, rows: value.split('\n').map((row) => row.split('\t')) } } : dialog.type === 'link' ? { href: value, text: title || new URL(value).hostname } : { text: value.slice(0, 12) }); } finally { setBusy(false); }
   };
-  return <div className="studio-canvas-modal-backdrop" data-native-interactive="true" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className={`studio-canvas-modal${dialog.type === 'html' ? ' is-wide' : ''}`} role="dialog" aria-modal="true" aria-label={dialog.type === 'html' ? '添加 HTML 图解' : dialog.type === 'table' ? '编辑表格' : dialog.type === 'link' ? '添加链接' : '添加贴纸'}>
+  return <div className="studio-canvas-modal-backdrop" data-native-interactive="true" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={modal} className={`studio-canvas-modal${dialog.type === 'html' ? ' is-wide' : ''}`} role="dialog" aria-modal="true" aria-label={dialog.type === 'html' ? '添加 HTML 图解' : dialog.type === 'table' ? '编辑表格' : dialog.type === 'link' ? '添加链接' : '添加贴纸'}>
     <header><h2>{dialog.type === 'html' ? '添加 HTML 图解' : dialog.type === 'table' ? '表格内容' : dialog.type === 'link' ? '链接' : '贴纸'}</h2><button type="button" aria-label="关闭" onClick={onClose}><X size={18} /></button></header>
     {(dialog.type === 'html' || dialog.type === 'link') && <label>名称<input value={title} onChange={(event) => setTitle(event.target.value)} /></label>}
     <label>{dialog.type === 'html' ? '粘贴 HTML 源码' : dialog.type === 'table' ? '每行一条记录，列之间用 Tab 分隔（可从电子表格粘贴）' : dialog.type === 'link' ? '网页地址' : '符号或简短文字'}{dialog.type === 'link' || dialog.type === 'sticker' ? <input autoFocus value={value} placeholder={dialog.type === 'link' ? 'https://' : '★'} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void save(); }} /> : <textarea className={dialog.type === 'html' ? 'studio-html-source-input' : ''} autoFocus rows={dialog.type === 'html' ? 14 : 8} value={value} placeholder={dialog.type === 'html' ? '<!doctype html>\n<html>…</html>' : ''} onChange={(event) => setValue(event.target.value)} />}</label>

@@ -78,7 +78,7 @@ export function TimerControl({ timer, canEdit, busy, clockOffsetMs = 0, onAction
   function keyDown(field: number, event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing) return;
     if (event.key === 'Enter') { event.preventDefault(); finishDraft(); }
-    else if (event.key === 'Escape' && draft) { event.stopPropagation(); firstDigit.current = true; setDraft(null); setEntryMessage(''); }
+    else if (event.key === 'Escape' && draft) { event.preventDefault(); event.stopPropagation(); firstDigit.current = true; setDraft(null); setEntryMessage(''); }
     else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault(); firstDigit.current = true;
       const step = event.key === 'ArrowUp' ? 1 : -1;

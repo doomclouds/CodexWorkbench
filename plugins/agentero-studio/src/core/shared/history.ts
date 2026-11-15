@@ -89,7 +89,7 @@ export function restoreVersion<C, O extends ContentOperation, A, S>(state: Artif
       adapter.restoreUnit(restored, difference, history);
     }
   }
-  adapter.validateRestore?.(current, restored, baseline); state.content = restored;
+  adapter.validateRestore?.(current, restored, baseline, 'undo'); state.content = restored;
   return differences.map(change => change.id);
 }
 /** Common idempotency, object CAS and history transaction policy, used by every product. */

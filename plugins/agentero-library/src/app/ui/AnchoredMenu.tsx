@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './anchored-menu.css';
+import { registerEscapeLayer } from './escape';
 
 export type MenuAnchor = { element: HTMLElement } | { point: { x: number; y: number } };
 interface Props { anchor: MenuAnchor; onClose(): void; children: ReactNode; ariaLabel?: string; className?: string }
@@ -36,8 +37,7 @@ export function AnchoredMenu({ anchor, onClose, children, ariaLabel = '操作', 
     const items = () => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
     place();
     const key = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); requestClose(); }
-      else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
         event.preventDefault(); event.stopPropagation();
         const entries = items(), index = entries.indexOf(owner.activeElement as HTMLElement);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length;
@@ -53,9 +53,11 @@ export function AnchoredMenu({ anchor, onClose, children, ariaLabel = '操作', 
       if ('element' in anchor) place(); else requestClose();
     };
     view.addEventListener('keydown', key, true); owner.addEventListener('pointerdown', outside, true);
+    const unregisterEscape = registerEscapeLayer(menu, requestClose);
     owner.addEventListener('scroll', scroll, true); view.addEventListener('resize', place);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place); observer?.observe(menu);
     return () => {
+      unregisterEscape();
       view.removeEventListener('keydown', key, true); owner.removeEventListener('pointerdown', outside, true);
       owner.removeEventListener('scroll', scroll, true); view.removeEventListener('resize', place); observer?.disconnect();
       if (closeCurrentMenu === requestClose) closeCurrentMenu = null;
