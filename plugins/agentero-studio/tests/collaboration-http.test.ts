@@ -67,11 +67,14 @@ it('keeps an actual pending human save protected from Agent writes without calli
   const invalid = await request('/api/presence', { method: 'POST', body: JSON.stringify({ artifactId, peerId: 'invalid-saving', context: { artifactId, viewId: 'invalid-saving', selectedIds: [], savingIds: 'item' } }) });
   expect(invalid.status).toBe(400); expect((await invalid.json()).error.code).toBe('INVALID_ARGUMENT');
   await host.service.updatePresence(artifactId, { peerId: 'human-saving', context: { artifactId, viewId: 'human-saving', selectedIds: [], editingIds: [], movingIds: [], savingIds: ['item'] } }, host.service.owner);
-  const args = { artifactId, operationId: 'agent-after-human-save', expectedVersions: { item: 1 }, operations: [{ op: 'update', id: 'item', changes: { text: 'Agent result' } }] };
   const agent = { id: 'synthetic-agent', name: 'Synthetic Agent', kind: 'agent' as const, role: 'owner' as const };
+  const begun = await host.service.execute('artifact_activity', { artifactId, action: 'begin', taskId: 'after-human-save', phase: 'writing', scope: { ids: ['item'] } }, agent);
+  const binding = { taskId: 'after-human-save', generation: begun.tasks[0].generation };
+  const args = { artifactId, ...binding, operationId: 'agent-after-human-save', expectedVersions: { item: 1 }, operations: [{ op: 'update', id: 'item', changes: { text: 'Agent result' } }] };
   await expect(host.service.execute('artifact_apply', args, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS' });
   await host.service.updatePresence(artifactId, { peerId: 'human-saving', context: { artifactId, viewId: 'human-saving', selectedIds: [], editingIds: [], movingIds: [], savingIds: [] } }, host.service.owner);
   expect((await host.service.execute('artifact_apply', args, agent)).board.elements[0].text).toBe('Agent result');
+  await host.service.execute('artifact_activity', { artifactId, action: 'end', ...binding, outcome: 'completed' }, agent);
 });
 
 it('retains commit targets and versions when a large canonical unit becomes an invalidation and when it is deleted', async () => {

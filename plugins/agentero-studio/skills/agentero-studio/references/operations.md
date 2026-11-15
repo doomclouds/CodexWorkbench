@@ -8,7 +8,7 @@
 | --- | --- |
 | 读全板、集合、单个文档 | `artifact_read` 的白板、概要、对象或源码读取 |
 | 批量写入、部分更新与删除 | `artifact_apply`，使用稳定对象 ID、操作 ID 和版本前置条件 |
-| 声明 Agent 任务范围、工作提示与可跟随区域 | `artifact_activity`，显式 begin/update/end，临时租约而非内容锁 |
+| 声明 Agent 任务范围、阶段、工作提示与可跟随区域 | `artifact_activity`，begin/update/status/end；房主界面可release，不锁住人类 |
 | 打开编辑器 | `studio_open`；创建另由 `artifact_manage` 完成 |
 | 当前视图上下文 | `artifact_read` 的明确视图或反馈上下文 |
 | 读评论、回复、编辑本人消息、删除讨论、解决与重开 | `artifact_feedback` |
@@ -200,21 +200,47 @@ draw();
 
 每个 MCP 连接有稳定独立的 Agent 身份，显示名来自公开的 MCP `clientInfo` 并带短标识。多个 Agent 共用一个 MCP 连接时，在各工具调用中显式携带 `participant:{id,name}`，为各自使用不同且稳定的非空 `id`（最多120字符，例如 `main` 或 `/root/child`）；id只用于连接内身份命名空间，不当作文件路径。`name` 同样固定，使用可识别的 Agent 名（如 Agent A、Agent B），不能用“绘制架构图”等任务动作代替身份，也不随工作切换改名。重试保留同一 participant。该扩展通过现有所有者授权连接生效，访客请求头、名字或页面 peerId不能冒充 Agent，不依赖未公开的宿主 thread/subagent 字段自动猜测身份。
 
-Agent读取或写入作品时，在线协作会显示工具级 `reading`/`writing` 活动；同一身份并发调用合并状态，成功或失败都在最后一个调用结束时清除该工具级忙碌与编辑占用。没有仍有效的显式工作任务时，才短暂保留20秒空闲租约后过期。目标页面 `viewId` 只用于读取用户指定的视图上下文，不能作为 Agent 自己的视图身份，也不能用它绕过正在编辑的人类或其他 Agent。遇到 `EDIT_IN_PROGRESS` 保留任务和读取依据，等待相应编辑完成后再核对版本，不用更换 participant 或连续重试绕过占用。
+Agent读取或写入作品时，在线协作仍可显示单次工具的 `reading`/`writing` 活动；finally只清理该次忙碌，不结束跨调用的工作任务。目标页面 `viewId` 只用于读取用户指定的视图上下文，不能作为 Agent 自己的页面身份，也不能用它绕过正在编辑的人类或其他 Agent。遇到 `EDIT_IN_PROGRESS` 保留任务和读取依据，等待相应编辑完成后再核对版本，不用更换 participant 或连续重试绕过占用。
 
-跨多次工具调用的任务另用 `artifact_activity` 声明。只有已授权的所有者 Agent 可调用，普通人类页面和访客不能冒充；同一 MCP 连接内固定 participant，同一任务固定 taskId（字母／数字开头、后续字母数字横线下划线、最多120字符）。每个 Agent 最多8个并行任务、同作品最多64个。任务在内存中保持60秒租约，不写作品、历史或持久锁；单次读取／写入工具的 finally 不会结束显式任务。
+跨调用任务使用 `artifact_activity`。同一 MCP 连接内固定 participant，同一逻辑任务固定 taskId（字母／数字开头、后续字母数字横线下划线、最多120字符）。每个 Agent 最多8个并行任务、同作品最多64个。任务在内存中记录，不写作品正文或历史，也不是人类禁编锁；Agent内容提交须通过当前有效任务及范围检查。`generation`由服务端返回，和taskId共同绑定这一代任务，不能从“最近任务”、对象版本或参与者名字推测。
 
 并行写入前明确各 Agent 的对象／区域，保证不同 Agent 范围不重叠。同一原生对象或同一 HTML Region 的任意内部 DOM 都算同一写入范围。需要扩大、移动范围或交接时，前一 Agent 先停止该范围的修改并 `end`；接手者重读目标内容与当前版本，确认新范围与其他 Agent 不重叠后再 `begin`。同一 Agent 改变范围也先结束旧声明、重读新范围再声明。拿不到可靠边界时协调或串行，不以租约过期或没有动画推断前一 Agent 已停止操作。
 
+首次查找作品、空地或参考内容时，允许不带绑定的只读 `artifact_read`，它不续任何任务。确认分工后开始准备阶段：
+
 ```json
-{"artifactId":"实际作品ID","action":"begin","taskId":"extend-diagram","scope":{"rect":{"x":100,"y":200,"w":800,"h":500}},"label":"扩展架构图","participant":{"id":"diagram-builder","name":"Agent A"}}
+{"artifactId":"实际作品ID","action":"begin","taskId":"extend-diagram","phase":"preparing","scope":{"ids":["目标对象ID"]},"label":"准备修改图解","participant":{"id":"diagram-builder","name":"Agent A"}}
 ```
 
-`begin` 必须提供非空 scope：已有对象使用 `ids`（最多200个，去重，必须在当前白板存在），新增空地使用 `rect:{x,y,w,h}`（白板世界坐标、有限正尺寸，坐标边界1e7）。`label` 只写最多80字的任务动作，如“扩展架构图”；UI 自带“正在工作”前缀，调用方不要重复添加，不放 Agent 名、内部 schema 或虚构进度。`begin` 对同一身份／taskId 和已核实范围可幂等恢复／续租；`update` 用于已知仍有效且范围未变的任务续租或更新动作描述，不能借它跳过范围变更／交接。`end` 只需 artifactId、taskId、action 与同一 participant，可重复调用。
+从成功返回的 `tasks` 取本任务真实 `generation`。下面的代次和对象版本均是占位说明，必须分别替换为实际返回值；后续调用保持同一participant：
 
-依据工具返回的真实 `expiresAt` 判断任务租约，不只按本地估计60秒或画面是否还有动画。每段实际操作隔了较长时间后，先核实原范围仍由自己负责、未交接且目标范围仍适用，再用同一 `taskId`／scope 幂等 `begin` 恢复或续租；已知租约仍有效时用 `update`。已知过期或状态不明时不要先盲目 update；若仍收到 `NOT_FOUND`，核实任务与范围后再 begin。完成、用户取消、失败或决定放弃范围时明确 `end`。超时会清除区域／动画并结束该区域跟随，但不会替 Agent 证明任务已完成。不要伪造无限心跳或进度，也不要承诺 Codex 宿主会持续发模型心跳。
+```json
+{"artifactId":"实际作品ID","taskId":"extend-diagram","generation":"begin返回的generation","mode":"objects","ids":["目标对象ID"],"participant":{"id":"diagram-builder","name":"Agent A"}}
+```
 
-工作范围会显示淡色非阻塞区域与通用工作动画，用户点击“跟随”后才按区域平移／缩放；本地镜头操作停止跟随，正在编辑／保存时让出。对象型范围使用当前对象位置；范围已删光或任务结束时没有可跟随目标。其他人仍可编辑，任务声明不授予排他锁、额外权限或绕过 `EDIT_IN_PROGRESS` 的能力。
+准备完成后用 `artifact_activity update` 携带本绑定及 `phase:"writing"`。真实内容提交带回同一绑定，仍需独立核对对象CAS版本：
+
+```json
+{"artifactId":"实际作品ID","taskId":"extend-diagram","generation":"begin返回的generation","operationId":"本次稳定操作ID","expectedVersions":{"目标对象ID":7},"operations":[{"op":"update","id":"目标对象ID","changes":{"text":"更新后的内容"}}],"participant":{"id":"diagram-builder","name":"Agent A"}}
+```
+
+保存后进入 `verifying` 并读回实际目标；完成时结束本代任务：
+
+```json
+{"artifactId":"实际作品ID","action":"end","taskId":"extend-diagram","generation":"begin返回的generation","outcome":"completed","participant":{"id":"diagram-builder","name":"Agent A"}}
+```
+
+`begin` 提供非空scope：已有对象使用 `ids`（最多200个，去重，必须实际存在），新增空地使用覆盖完整几何的 `rect:{x,y,w,h}`。`label`最多80字，只写可读任务动作，不重复UI阶段前缀或身份。phase为 `preparing/writing/verifying`；只有实际换阶段才更新进度，重复同阶段／label的update只续活动。任务活跃且scope相同时重复begin保留generation；不能在同一代里扩大或改变范围。
+
+活动租约是10分钟，成功且确实命中任务范围的绑定读取和有效更新可续 `lastActivityAt/expiresAt`；不相关或不带绑定的读取、status、失败请求和幂等旧回执不续任务。真实changed内容提交、实际阶段转换更新 `lastProgressAt`；2分钟无实质进展会变灰保留框并停止区域动画，不能用心跳或反复切阶段伪造进度。准备耗时可自然变灰，不等于内容丢失或任务被取消。`artifact_export`不承诺续租，页面隐藏／关闭／SSE断流也不结束模型任务。
+
+申请结果不明时，先 `artifact_activity {artifactId,action:"status",taskId,participant}` 查询自身，status也可不带taskId列出自己的active任务和有界结束回执；它不续租。查询时若给generation则必须匹配。不要取另一任务的代次，或因为界面动画消失就假定可以继续写。
+
+遇到 `TASK_REQUIRED` 补齐明确申请的绑定；`TASK_STALE`／`TASK_CLOSED` 保留原意图并查状态，不把新代套在旧全文上重试。自己结束或活动超时后，只有仍有继续授权、重新读取并核实分工，才可在begin中携上一generation明确申请新代。房主人工释放的逻辑任务不能重新申请抢回；不得用换participant/taskId逃避。服务重启导致旧代未知时，先重新读取，再为明确的新逻辑工作声明新任务。用户取消之后没有继续授权，不能自作主张恢复。
+
+`end`带本代generation，结果可为 `completed/failed/cancelled`，默认completed；旧end不能结束新代，重复同代end幂等。房主界面可按 `targetActorId/taskId/generation` release某个任务；targetActorId来自Presence的真实actor，不是participant.id，Agent不能冒充房主释放别人。释放后旧代不再授权写入。正常MCP连接关闭会尽力取消该连接明确登记的任务，失败不重启离线服务；异常退出靠有限超时回收，不能替代显式end。
+
+工作范围支持用户主动跟随；本地镜头操作停止跟随，正在编辑／保存时让出。终态不参与跟随、冲突或写入授权，只短暂淡出。scope.ids不因parentId/groupId隐含越区权限；分区移动、旋转、笔迹实际点、绑定箭头和删除级联均按真实结果检查范围。全板style/motion/restore需覆盖全板且没有其他有效任务，局部任务不能借空targets获得整板权限。人类仍可编辑，CAS、锁、EDIT_IN_PROGRESS和$order约束不变。
 
 ## 精确版本单元补读
 

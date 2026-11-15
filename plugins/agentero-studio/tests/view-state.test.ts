@@ -5,7 +5,7 @@ import { join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { StudioService } from '../src/core/service.js';
 import { StudioCollaboration } from '../src/core/shared/collaboration.js';
-import { LOCAL_ACTOR, type Actor, type Board } from '../src/contracts/studio.js';
+import { LOCAL_ACTOR, type Actor, type AgentTask, type Board } from '../src/contracts/studio.js';
 
 const agent: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
 const editor: Actor = { id: 'editor', name: '同事', kind: 'human', role: 'editor' };
@@ -14,6 +14,12 @@ let directory: string, service: StudioService;
 beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'studio-view-state-')); service = new StudioService({ dataRoot: directory }); });
 afterEach(async () => { vi.restoreAllMocks(); await service.close(); if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }); });
 async function create(): Promise<Board> { return (await service.execute('artifact_manage', { action: 'create', elements: [{ id: 'a', type: 'text', text: 'A' }, { id: 'b', type: 'text', text: 'B' }] })).board; }
+async function agentTask(board: Board) {
+  const result = await service.execute('artifact_activity', { artifactId: board.artifact.id, action: 'begin', taskId: 'view-state-fixture', phase: 'writing', scope: { ids: ['a', 'b'] } }, agent) as { tasks: AgentTask[] };
+  const task = result.tasks.find(item => item.taskId === 'view-state-fixture');
+  if (!task) throw new Error('The fixture Agent task was not created');
+  return { taskId: task.taskId, generation: task.generation };
+}
 function operation(board: Board, id = 'a') { return { artifactId: board.artifact.id, operationId: randomUUID(), expectedVersions: { [id]: board.elements.find(element => element.id === id)!.version }, operations: [{ op: 'update', id, changes: { text: '更新' } }] }; }
 
 describe('live view activity and Agent coordination', () => {
@@ -28,28 +34,30 @@ describe('live view activity and Agent coordination', () => {
   });
   it('blocks Agent targets being edited, while independent objects and human CAS remain usable', async () => {
     const board = await create(), artifactId = board.artifact.id;
+    const binding = await agentTask(board);
     await service.updatePresence(artifactId, { peerId: 'peer-a', context: { artifactId, viewId: 'view-a', selectedIds: [], editingIds: ['a'] } }, editor);
-    await expect(service.execute('artifact_apply', operation(board), agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS', details: { ids: ['a'] } });
-    const independent = await service.execute('artifact_apply', operation(board, 'b'), agent);
+    await expect(service.execute('artifact_apply', { ...operation(board), ...binding }, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS', details: { ids: ['a'] } });
+    const independent = await service.execute('artifact_apply', { ...operation(board, 'b'), ...binding }, agent);
     expect(independent.board.elements.find((element: { id: string }) => element.id === 'b').text).toBe('更新');
     const human = await service.execute('artifact_apply', operation(board), LOCAL_ACTOR);
     expect(human.board.elements.find((element: { id: string }) => element.id === 'a').text).toBe('更新');
   });
   it('keeps successful retries idempotent and ignores departed views', async () => {
-    const board = await create(), args = operation(board), artifactId = board.artifact.id;
+    const board = await create(), args = { ...operation(board), ...await agentTask(board) }, artifactId = board.artifact.id;
     const first = await service.execute('artifact_apply', args, agent);
     await service.updatePresence(artifactId, { peerId: 'peer-a', context: { artifactId, viewId: 'view-a', selectedIds: [], editingIds: ['a'] } }, editor);
     expect(await service.execute('artifact_apply', args, agent)).toEqual(first);
     await service.updatePresence(artifactId, { peerId: 'peer-a', leave: true }, editor);
-    expect(await service.execute('artifact_apply', operation(first.board), agent)).toHaveProperty('board');
+    expect(await service.execute('artifact_apply', { ...operation(first.board), taskId: args.taskId, generation: args.generation }, agent)).toHaveProperty('board');
   });
   it('does not treat a viewer selection as an editor lock and expires stale editing views', async () => {
     const board = await create(), artifactId = board.artifact.id;
+    const binding = await agentTask(board);
     await service.updatePresence(artifactId, { peerId: 'viewer-a', context: { artifactId, viewId: 'viewer-view', selectedIds: ['a'], editingIds: ['a'] } }, viewer);
-    const first = await service.execute('artifact_apply', operation(board), agent);
+    const first = await service.execute('artifact_apply', { ...operation(board), ...binding }, agent);
     await service.updatePresence(artifactId, { peerId: 'editor-a', context: { artifactId, viewId: 'editor-view', selectedIds: [], editingIds: ['a'] } }, editor);
     const now = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(now + 46_000);
-    expect(await service.execute('artifact_apply', operation(first.board), agent)).toHaveProperty('board');
+    expect(await service.execute('artifact_apply', { ...operation(first.board), ...binding }, agent)).toHaveProperty('board');
   });
   it('retains the processing actor through replies and clears it only on an explicit state transition', async () => {
     const board = await create(), artifactId = board.artifact.id;

@@ -34,8 +34,15 @@ describe('UI requests through the real connected authority', () => {
     const created = await ui('artifact_manage', { action: 'create', title: 'Human-created board' });
     const human = await ui('artifact_apply', { artifactId: created.artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'human-object', type: 'text', text: 'Human input' } }] });
     expect(human.board.elements).toHaveLength(1); expect(human.historyEntry.actor).toMatchObject({ id: 'local', kind: 'human', role: 'owner' });
-    const agent = await client.execute('artifact_apply', { artifactId: created.artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'agent-object', type: 'text', text: 'Agent input' } }] }) as any;
+    const declared = await client.execute('artifact_activity', { artifactId: created.artifact.id, action: 'begin', taskId: 'agent-input', phase: 'writing', scope: { rect: { x: 400, y: 80, w: 400, h: 200 } } }) as { tasks: { generation: string }[] };
+    const binding = { taskId: 'agent-input', generation: declared.tasks[0]!.generation };
+    const agent = await client.execute('artifact_apply', { artifactId: created.artifact.id, ...binding, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'agent-object', type: 'text', x: 420, y: 100, w: 200, h: 80, text: 'Agent input' } }] }) as any;
     expect(agent.historyEntry.actor).toMatchObject({ id: expect.stringMatching(/^agent-/), kind: 'agent', role: 'owner' });
+    const released = await ui('artifact_activity', { artifactId: created.artifact.id, action: 'release', targetActorId: agent.historyEntry.actor.id, ...binding });
+    expect(released.tasks).toEqual([]);
+    await expect(client.execute('artifact_apply', { artifactId: created.artifact.id, ...binding, expectedVersions: { 'agent-object': 1 }, operations: [{ op: 'update', id: 'agent-object', changes: { text: 'Late Agent input' } }] })).rejects.toMatchObject({ code: 'TASK_CLOSED' });
+    const continued = await ui('artifact_apply', { artifactId: created.artifact.id, expectedVersions: { 'agent-object': 1 }, operations: [{ op: 'update', id: 'agent-object', changes: { text: 'Human remains allowed' } }] });
+    expect(continued.historyEntry.actor.kind).toBe('human');
   });
 
   it('rejects credential and identity injection before contacting HTTP', async () => {

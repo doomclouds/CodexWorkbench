@@ -83,8 +83,14 @@ describe('Studio authenticated local and LAN host', () => {
   });
   it('records agent authorship only for an authenticated local owner', async () => {
     const artifact = await work();
-    const result = await call('artifact_apply', { artifactId: artifact.id, operationId: randomUUID(), operations: [{ op: 'add', element: { type: 'text' } }] }, host.token, { 'X-Studio-Actor': 'agent' });
+    const headers = { 'X-Studio-Actor': 'agent' };
+    const begun = await call('artifact_activity', { artifactId: artifact.id, action: 'begin', taskId: 'owner-agent-edit', phase: 'writing', scope: { rect: { x: 0, y: 0, w: 800, h: 600 } } }, host.token, headers);
+    expect(begun.response.status).toBe(200);
+    const binding = { taskId: 'owner-agent-edit', generation: begun.value.data.tasks[0].generation };
+    const result = await call('artifact_apply', { artifactId: artifact.id, ...binding, operationId: randomUUID(), operations: [{ op: 'add', element: { id: 'agent-auth-node', type: 'text' } }] }, host.token, headers);
+    expect(result.response.status).toBe(200);
     expect(result.value.data.historyEntry.actor).toMatchObject({ id: 'codex', kind: 'agent', role: 'owner' });
+    expect((await call('artifact_activity', { artifactId: artifact.id, action: 'end', ...binding, outcome: 'completed' }, host.token, headers)).response.status).toBe(200);
   });
   it('keeps recycle bin thumbnail previews owner-only without restoring the work', async () => {
     const artifact = await work(), shared = await sharing(artifact.id), viewer = shareToken(shared, 'viewer');

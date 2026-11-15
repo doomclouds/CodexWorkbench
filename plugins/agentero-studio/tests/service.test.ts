@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { StudioService } from '../src/core/service.js';
-import { LOCAL_ACTOR, type Actor, type Board, type HistoryEntry, type Operation } from '../src/contracts/studio.js';
+import { LOCAL_ACTOR, type Actor, type AgentTask, type Board, type HistoryEntry, type Operation } from '../src/contracts/studio.js';
 
 const agent: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
 const editor: Actor = { id: 'editor-1', name: '同事', kind: 'human', role: 'editor' };
@@ -14,6 +14,12 @@ let directory: string, service: StudioService;
 beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'agentero-studio-service-')); service = new StudioService({ dataRoot: directory }); });
 afterEach(async () => { await service.close(); if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }); });
 async function create(title = '架构讨论') { return (await service.execute('artifact_manage', { action: 'create', title })).board as Board; }
+async function agentTask(board: Board) {
+  const result = await service.execute('artifact_activity', { artifactId: board.artifact.id, action: 'begin', taskId: 'service-fixture-edit', phase: 'writing', scope: { rect: { x: -100, y: -100, w: 3000, h: 3000 } } }, agent) as { tasks: AgentTask[] };
+  const task = result.tasks.find(item => item.taskId === 'service-fixture-edit');
+  if (!task) throw new Error('The fixture Agent task was not created');
+  return { taskId: task.taskId, generation: task.generation };
+}
 async function apply(board: Board, operations: Operation[], actor = LOCAL_ACTOR, extra: Record<string, unknown> = {}) {
   return await service.execute('artifact_apply', { artifactId: board.artifact.id, operationId: randomUUID(), expectedRevision: board.artifact.revision, operations, ...extra }, actor) as { board: Board; historyEntry: HistoryEntry };
 }
@@ -61,7 +67,7 @@ describe('Studio work and content persistence', () => {
     const original = await create();
     const { board } = await apply(original, [{ op: 'add', element: { id: 'a', type: 'text' } }, { op: 'add', element: { id: 'b', type: 'text' } }]);
     await apply(board, [{ op: 'update', id: 'a', changes: { text: 'A' } }]);
-    await expect(apply(board, [{ op: 'update', id: 'a', changes: { text: '覆盖' } }], agent, { expectedVersions: { a: 1 } })).rejects.toMatchObject({ code: 'CONFLICT' });
+    await expect(apply(board, [{ op: 'update', id: 'a', changes: { text: '覆盖' } }], agent, { ...await agentTask(board), expectedVersions: { a: 1 } })).rejects.toMatchObject({ code: 'CONFLICT' });
     const independent = await apply(board, [{ op: 'update', id: 'b', changes: { text: 'B' } }], editor, { expectedVersions: { b: 1 } });
     expect(independent.board.elements.map(item => item.text)).toEqual(['A', 'B']);
   });
@@ -75,7 +81,7 @@ describe('Studio work and content persistence', () => {
   });
   it('records preview/diff and restores as a new revision without truncating history', async () => {
     const original = await create();
-    const first = await apply(original, [{ op: 'add', element: { id: 'a', type: 'text', text: '一' } }], agent, { summary: '生成图解' });
+    const first = await apply(original, [{ op: 'add', element: { id: 'a', type: 'text', text: '一' } }], agent, { ...await agentTask(original), summary: '生成图解' });
     const second = await apply(first.board, [{ op: 'update', id: 'a', changes: { text: '二' } }], editor);
     const preview = await service.execute('artifact_read', { artifactId: original.artifact.id, mode: 'version', versionId: first.historyEntry.id });
     expect(preview.board.elements[0].text).toBe('一');
@@ -107,7 +113,7 @@ describe('HTML feedback, sharing and scope', () => {
     expect(board.elements[0]!.sourceRevision).toBe(revision);
     const created = await service.execute('artifact_feedback', { action: 'create', artifactId: board.artifact.id, type: 'request', text: '把标题调小', anchor: { regionId: 'html-a', targetIds: ['heading'], sourceRevision: revision, quote: '原始标题', excerpt: '<h1>原始标题</h1>' } }, commenter);
     board = await service.execute('artifact_read', { artifactId: board.artifact.id });
-    ({ board } = await apply(board, [{ op: 'update', id: 'html-a', changes: { html: '<h2>改过的标题</h2>' } }], agent));
+    ({ board } = await apply(board, [{ op: 'update', id: 'html-a', changes: { html: '<h2>改过的标题</h2>' } }], agent, await agentTask(board)));
     expect(board.elements[0]!.sourceRevision).toBe(Number(revision) + 1);
     const frozen = await service.execute('artifact_read', { mode: 'source', artifactId: board.artifact.id, feedbackId: created.contextId, regionId: 'html-a' });
     expect(frozen.html).toContain('原始标题'); expect(frozen.sourceRevision).toBe(revision);

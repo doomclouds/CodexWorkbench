@@ -21,11 +21,11 @@
 ## 读取与更新
 
 1. 读取 `artifact_feedback` 返回的反馈内容和锚点；用户已给反馈 ID 时直接使用，不遍历所有其他作品。
-2. 用 `artifact_read` 的源码读取能力取得冻结来源，再读取目标区域的当前内容和版本。只有当前内容需要修改时才写入；两份源相同则不必重复比较整板。
+2. 首次定位可不带任务只读。明确要修改后，用 `artifact_activity begin` 的preparing阶段声明该region的scope.ids，记录taskId/generation；以绑定读取冻结来源及目标区域当前内容和版本。只有当前内容需要修改时才写入；两份源相同则不必重复比较整板。
 3. 根据备注在当前源中定位。涉及一段样式时，检查受同一选择器影响的内容，避免把节点级要求误改成整图设置。
-4. 用 `artifact_apply` 提交 `update`，通过 `changes.html` 更新目标区域，以 `expectedVersions` 约束实际读取的对象版本。仅更新 HTML 时不同时写入旧的坐标、尺寸或其他内容。
+4. 实际写入阶段使用writing，调用 `artifact_apply` 时显式带taskId/generation和 `update`，通过 `changes.html` 更新目标区域，以 `expectedVersions` 约束实际读取的对象版本。仅更新HTML时不同时写入旧坐标、尺寸或其他内容；generation不是sourceRevision或对象CAS版本。
 5. 写入失败时按明确错误处理。目标已不存在、锚点无法唯一定位或需求出现实质歧义时，说明具体缺口；版本冲突时读取新内容再判断，不盲目重试。
-6. 成功后使用对应反馈 ID 回复改动。工具返回的版本和保存状态是结果依据；视觉检查用于发现显示问题。
+6. 保存后进入verifying读回并按需视觉检查，以工具确认的版本和保存状态为准。完成或放弃修改时用本代绑定end并标明completed/failed/cancelled，再按明确任务回复对应反馈；普通回复不冒充内容写入或自动续租。任务过期或被房主释放时，按[协作规则](operations.md#多-agent-身份与活动)处理，不给旧全文换新代盲写。
 
 MCP 源码读取返回 `offset`、`totalLength`、`complete`；有 `nextOffset` 时继续按该位置读取，直到取得完整目标源后再修改。不要把第一段源码当作完整区域写回。HTTP 界面读取完整内容；模型的创建和修改结果以作品元数据、版本和历史引用为主，不回传整块白板。
 

@@ -2,18 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { LOCAL_ACTOR, type Actor, type Board, type Operation } from '../src/contracts/studio.js';
+import { LOCAL_ACTOR, type Actor, type AgentTaskBinding, type Board, type Operation } from '../src/contracts/studio.js';
 import { StudioService } from '../src/core/service.js';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=', 'base64');
 const agent: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
 let directory: string, service: StudioService, artifactId: string;
+let contentTask: AgentTaskBinding | undefined;
 beforeEach(async () => {
+  contentTask = undefined;
   directory = await mkdtemp(join(tmpdir(), 'studio-assets-')); service = new StudioService({ dataRoot: join(directory, 'data') });
   artifactId = (await service.execute('artifact_manage', { action: 'create' })).artifact.id;
 });
 afterEach(async () => {
-  vi.restoreAllMocks(); await service.close();
+  vi.restoreAllMocks();
+  if (contentTask) await service.execute('artifact_activity', { artifactId, action: 'end', ...contentTask, outcome: 'completed' }, agent);
+  await service.close();
   if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test directory');
   await rm(directory, { recursive: true, force: true });
 });
@@ -24,7 +28,11 @@ async function upload(filename = 'generated.png', bytes: Buffer = png) {
 const remove = (assetId: string) => service.execute('artifact_manage', { action: 'asset-delete', artifactId, assetId }, agent);
 async function apply(operations: Operation[]) {
   const board = await service.execute('artifact_read', { artifactId }) as Board;
-  return service.execute('artifact_apply', { artifactId, expectedRevision: board.artifact.revision, operations }, agent);
+  if (!contentTask) {
+    const begun = await service.execute('artifact_activity', { artifactId, action: 'begin', taskId: 'asset-content', phase: 'writing', scope: { rect: { x: -200, y: -200, w: 2000, h: 1600 } } }, agent);
+    contentTask = { taskId: 'asset-content', generation: begun.tasks[0].generation };
+  }
+  return service.execute('artifact_apply', { artifactId, ...contentTask, expectedRevision: board.artifact.revision, operations }, agent);
 }
 
 describe('model-side local asset lifecycle', () => {

@@ -23,7 +23,11 @@ it('lets an editor inspect the batch before/after in place and restore only that
   const wait = async (predicate: () => boolean) => { for (let index = 0; index < 100; index++) { if (predicate()) return; await act(async () => { await new Promise(done => setTimeout(done, 5)); }); } throw new Error(`UI did not settle: ${host.textContent}`); };
   try {
     const created = await service.execute('artifact_manage', { action: 'create', title: '对象恢复', elements: ['a', 'b'].map(id => ({ id, type: 'shape', x: 0, y: 0, w: 100, h: 50, text: `初始 ${id}` })) }, LOCAL_ACTOR) as { board: Board };
-    const first = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, expectedRevision: 0, operationId: 'change-a', operations: [{ op: 'update', id: 'a', changes: { text: '参考文字' } }] }, { ...LOCAL_ACTOR, id: 'agent-one', name: 'Agent', kind: 'agent' }) as { board: Board };
+    const agent: Actor = { ...LOCAL_ACTOR, id: 'agent-one', name: 'Agent', kind: 'agent' };
+    const begun = await service.execute('artifact_activity', { artifactId: created.board.artifact.id, action: 'begin', taskId: 'reference-edit', phase: 'writing', scope: { ids: ['a'] } }, agent);
+    const binding = { taskId: 'reference-edit', generation: begun.tasks[0].generation };
+    const first = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, ...binding, expectedRevision: 0, operationId: 'change-a', operations: [{ op: 'update', id: 'a', changes: { text: '参考文字' } }] }, agent) as { board: Board };
+    await service.execute('artifact_activity', { artifactId: created.board.artifact.id, action: 'end', ...binding, outcome: 'completed' }, agent);
     const head = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, expectedRevision: first.board.artifact.revision, operationId: 'change-head', operations: [{ op: 'update', id: 'a', changes: { text: '后续文字' } }, { op: 'update', id: 'b', changes: { text: '保留其他对象' } }] }, LOCAL_ACTOR) as { board: Board };
     const history = await service.execute('artifact_read', { artifactId: created.board.artifact.id, mode: 'history' }, actor);
     const selected = history.batches.find((entry: { revision: number }) => entry.revision === 1);

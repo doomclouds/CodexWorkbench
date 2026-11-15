@@ -1,6 +1,8 @@
 import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Presence, type Role, type StudioEvent, type StudioUnitEvent, type ToolName } from '../contracts/studio.js';
 import { copy, safeId, StudioError, StudioStore, type ArtifactState } from './store.js';
 import { assertAlive, object, requireRole, text } from './shared/common.js';
+import { assertWorkspaceMutation, taskBinding, workspaceReadRelated } from './shared/agent-workspaces.js';
+import type { WhiteboardContent } from './products/whiteboard.js';
 import { createArtifact, listArtifacts, manageArtifact } from './shared/artifacts.js';
 import { applyMutation, historyBatches, initializeVersionClocks, mutationTargets, version } from './shared/history.js';
 import { updateFeedback } from './shared/feedback.js';
@@ -90,18 +92,45 @@ export class StudioService {
   }
   private async perform(name: ToolName, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<any> {
     let finish: (() => void) | undefined;
+    const binding = name === 'artifact_activity' ? undefined : taskBinding(args);
+    let replay = false;
     const createsArtifact = name === 'artifact_manage' && ['create', 'import'].includes(text(args.action, 'create'));
     if (actor.kind === 'agent' && args.artifactId !== undefined && !createsArtifact && name !== 'artifact_activity') {
       const id = safeId(args.artifactId), projected = await this.store.readProjection(id, state => {
         const adapter = this.products.get(state.artifact.type).adapter;
         const ids = name === 'artifact_apply' && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap(operation => object(operation) && typeof operation.op === 'string' ? mutationTargets(state.content, operation as unknown as ContentOperation, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
-        return { authorization: authorizationState(state), ids };
+        const replay = name === 'artifact_apply' && state.operations.some(operation => operation.id === args.operationId) || name === 'artifact_feedback' && ['choose', 'withdraw'].includes(text(args.action, '')) && state.feedback.some(item => item.id === args.feedbackId && item.proposal?.receipts.some(receipt => receipt.id === args.operationId));
+        const option = name === 'artifact_feedback' ? state.feedback.find(item => item.id === args.feedbackId)?.proposal?.options.find(item => item.id === args.optionId) : undefined;
+        const requiresTask = state.artifact.type === 'whiteboard' && (name === 'artifact_apply' || name === 'artifact_feedback' && (args.action === 'choose' || args.action === 'withdraw' && args.optionId !== undefined && option?.active));
+        return { authorization: authorizationState(state), ids, replay, requiresTask };
       }), currentActor = this.authorizedActor(projected.authorization, actor, authority);
+      replay = projected.replay;
+      if (projected.requiresTask && !replay && !binding) taskBinding(args, true);
+      if (binding && !replay) this.collaboration.assertTask(id, currentActor, binding);
       const writing = name === 'artifact_apply' || name === 'artifact_manage' || name === 'artifact_share' && args.action !== 'status' || name === 'artifact_feedback' && !['list', 'get', 'preview'].includes(text(args.action, 'list'));
       const ids = projected.ids;
-      finish = this.collaboration.beginActivity(id, currentActor, { status: writing ? 'writing' : 'reading', editingIds: writing ? ids : [], selectedIds: Array.isArray(args.ids) ? args.ids.filter((id): id is string => typeof id === 'string').slice(0, 200) : ids });
+      if (!replay) finish = this.collaboration.beginActivity(id, currentActor, { status: writing ? 'writing' : 'reading', editingIds: writing ? ids : [], selectedIds: Array.isArray(args.ids) ? args.ids.filter((id): id is string => typeof id === 'string').slice(0, 200) : ids, ...(binding ? { binding } : {}) });
     }
-    try { return await this.dispatch(name, args, actor, authority); }
+    try {
+      const result = await this.dispatch(name, args, actor, authority);
+      if (actor.kind === 'agent' && binding && !replay && name === 'artifact_read') {
+        const targetIds = new Set<string>();
+        if (object(result)) {
+          for (const key of ['elements', 'items', 'units']) if (Array.isArray(result[key])) for (const item of result[key]) if (object(item) && typeof item.id === 'string') targetIds.add(item.id);
+          if (typeof result.regionId === 'string') targetIds.add(result.regionId);
+          if (object(result.element) && typeof result.element.id === 'string') targetIds.add(result.element.id);
+        }
+        const current = await this.store.readProjection(safeId(args.artifactId), state => ({ authorization: authorizationState(state), type: state.artifact.type, content: state.content }));
+        const currentActor = this.authorizedActor(current.authorization, actor, authority);
+        if (current.type === 'whiteboard') {
+          let task;
+          try { task = this.collaboration.assertTask(safeId(args.artifactId), currentActor, binding); }
+          catch (error) { if (!(error instanceof StudioError) || error.code !== 'TASK_STALE') throw error; }
+          if (task && workspaceReadRelated(task.scope, (current.content as WhiteboardContent).elements, [...targetIds])) this.collaboration.touchTask(safeId(args.artifactId), currentActor, binding);
+        }
+      }
+      return result;
+    }
     finally { finish?.(); }
   }
   private async dispatch(name: ToolName, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<any> {
@@ -227,9 +256,21 @@ export class StudioService {
     return product.read(state, mode, args);
   }
   private async apply(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
+    if (actor.kind === 'agent' && typeof args.operationId === 'string' && await this.store.readProjection(id, state => state.operations.some(operation => operation.id === args.operationId))) {
+      const replay = await this.store.withSnapshotLock(id, state => {
+        const currentActor = this.authorizedActor(state, actor, authority);
+        if (!state.operations.some(operation => operation.id === args.operationId)) return;
+        const mutation = applyMutation(copy(state), { operationId: args.operationId, operations: args.operations as ContentOperation[], expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, this.products.get(state.artifact.type).adapter);
+        return { ...this.products.get(state.artifact.type).result(mutation.snapshot), historyEntry: mutation.historyEntry };
+      });
+      if (replay) return replay;
+    }
     const result = await this.store.transaction(id, state => {
       const currentActor = this.authorizedActor(state, actor, authority);
       const adapter = this.products.get(state.artifact.type).adapter;
+      const duplicate = state.operations.some(operation => operation.id === args.operationId);
+      const binding = currentActor.kind === 'agent' && state.artifact.type === 'whiteboard' && !duplicate ? taskBinding(args, true)! : undefined;
+      const task = binding && this.collaboration.assertTask(id, currentActor, binding);
       if (currentActor.kind === 'agent' && !state.operations.some(operation => operation.id === args.operationId) && Array.isArray(args.operations)) {
         const editing = new Set(this.getPresence(id).filter(peer => peer.actor.id !== currentActor.id && ['owner', 'editor'].includes(peer.actor.role)).flatMap(peer => [...(peer.context?.editingIds ?? []), ...(peer.context?.savingIds ?? []), ...(Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : [])]));
         const conflicts = new Set<string>();
@@ -242,9 +283,14 @@ export class StudioService {
       }
       const before = state.content;
       const mutation = applyMutation(state, { operationId: args.operationId, operations: args.operations as ContentOperation[], expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
-      return { ...mutation, eventOperationId: state.operations.find(operation => operation.historyId === mutation.historyEntry.id)?.id, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
+      if (mutation.changed && task && binding) {
+        this.collaboration.assertTask(id, currentActor, binding);
+        assertWorkspaceMutation(before as WhiteboardContent, state.content as WhiteboardContent, args.operations as Record<string, unknown>[], task, currentActor.id, this.collaboration.workspaces(id, { actorId: currentActor.id, binding }));
+      }
+      return { ...mutation, binding, actor: currentActor, eventOperationId: state.operations.find(operation => operation.historyId === mutation.historyEntry.id)?.id, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
     });
     const snapshot = result.snapshot;
+    if (result.changed && result.binding) this.collaboration.touchTask(id, result.actor, result.binding, true);
     if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits, result.eventOperationId, result.historyEntry.actor.id);
     return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
   }
@@ -265,25 +311,49 @@ export class StudioService {
       return { feedback };
     }
     if (['suggest', 'choose', 'withdraw'].includes(action)) {
+      if (actor.kind === 'agent' && ['choose', 'withdraw'].includes(action) && typeof args.operationId === 'string' && await this.store.readProjection(id, state => state.feedback.some(item => item.id === args.feedbackId && item.proposal?.receipts.some(receipt => receipt.id === args.operationId)))) {
+        const replay = await this.store.withSnapshotLock(id, state => {
+          const currentActor = this.authorizedActor(state, actor, authority);
+          if (!state.feedback.some(item => item.id === args.feedbackId && item.proposal?.receipts.some(receipt => receipt.id === args.operationId))) return;
+          const next = updateProposal(copy(state), args, currentActor, this.products.get(state.artifact.type).adapter);
+          const { snapshot, changed: _changed, ...response } = next;
+          return { ...response, ...(snapshot ? this.products.get(snapshot.artifact.type).result(snapshot) : {}) };
+        });
+        if (replay) return replay;
+      }
       const result = await this.store.transaction(id, state => {
+        const currentActor = this.authorizedActor(state, actor, authority);
+        const duplicate = state.feedback.some(item => item.id === args.feedbackId && item.proposal?.receipts.some(receipt => receipt.id === args.operationId));
+        const proposal = state.feedback.find(item => item.id === args.feedbackId)?.proposal;
+        const option = proposal?.options.find(item => item.id === args.optionId);
+        const proposalOperations = proposal?.options.filter(item => item.active || item.id === args.optionId).flatMap(item => item.operations) ?? [];
+        const writesContent = action === 'choose' || action === 'withdraw' && args.optionId !== undefined && option?.active;
+        const binding = currentActor.kind === 'agent' && state.artifact.type === 'whiteboard' && writesContent && !duplicate ? taskBinding(args, true)! : undefined;
+        const task = binding && this.collaboration.assertTask(id, currentActor, binding);
         const before = state.content;
-        const next = updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter);
-        return { ...next, eventUnits: next.changed && next.snapshot && next.historyEntry ? this.boardUnits(next.snapshot, next.historyEntry.changedIds, before) : [] };
+        const next = updateProposal(state, args, currentActor, this.products.get(state.artifact.type).adapter);
+        if (next.changed && task && binding) {
+          this.collaboration.assertTask(id, currentActor, binding);
+          const other = this.collaboration.workspaces(id, { actorId: currentActor.id, binding });
+          assertWorkspaceMutation(before as WhiteboardContent, state.content as WhiteboardContent, proposalOperations, task, currentActor.id, other);
+        }
+        return { ...next, binding, actor: currentActor, eventUnits: next.changed && next.snapshot && next.historyEntry ? this.boardUnits(next.snapshot, next.historyEntry.changedIds, before) : [] };
       });
+      if (result.changed && result.binding) this.collaboration.touchTask(id, result.actor, result.binding, true);
       // SSE is a shared channel. Publish only a refresh notification, never private options.
       this.emit({ type: 'feedback', artifactId: id });
       if (result.changed && result.snapshot && result.historyEntry) this.emitBoard(result.snapshot, result.historyEntry.changedIds, result.eventUnits);
-      const { snapshot, changed: _changed, eventUnits: _eventUnits, ...response } = result;
+      const { snapshot, changed: _changed, eventUnits: _eventUnits, binding: _binding, actor: _actor, ...response } = result;
       return { ...response, ...(snapshot ? this.products.get(snapshot.artifact.type).result(snapshot) : {}) };
     }
     const result = await this.store.transaction(id, state => updateFeedback(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
     this.emit({ type: 'feedback', artifactId: id }); return result;
   }
   private async activity(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
-    const currentActor = await this.store.readProjection(id, state => {
+    const execute = (state: Readonly<ArtifactState>) => {
       const current = this.authorizedActor(state, actor, authority);
       requireRole(current, ['owner']); assertAlive(state.artifact);
-      if (current.kind !== 'agent') throw new StudioError('FORBIDDEN', '工作区域声明仅供 Agent 使用。');
+      if (args.action === 'release' ? current.kind !== 'human' : current.kind !== 'agent') throw new StudioError('FORBIDDEN', args.action === 'release' ? '只有房主本人可以结束其他 Agent 的工作。' : '工作区域声明仅供 Agent 使用。');
       if (state.artifact.type !== 'whiteboard') throw new StudioError('INVALID_ARGUMENT', '该作品不支持白板工作区域。');
       if (object(args.scope) && args.scope.ids !== undefined) {
         const ids = args.scope.ids;
@@ -291,9 +361,12 @@ export class StudioService {
         const adapter = this.products.get(state.artifact.type).adapter;
         for (const target of ids) if (adapter.readUnit(state.content, safeId(target, '对象 ID')) == null) throw new StudioError('NOT_FOUND', '工作区域中的对象不存在。', { id: target });
       }
-      return current;
-    });
-    return this.collaboration.activity(id, args, currentActor);
+      return this.collaboration.activity(id, args, current, (state.content as WhiteboardContent).elements);
+    };
+    if (args.action === 'begin' || args.action === 'update') return this.store.withSnapshotLock(id, state => execute(state));
+    const result = await this.store.readProjection(id, state => execute(state));
+    if (args.action === 'end' || args.action === 'release') await this.store.withProjectionLock(id, authorizationState, state => { requireRole(this.authorizedActor(state, actor, authority), ['owner']); });
+    return result;
   }
   private async share(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     const action = text(args.action, 'status');

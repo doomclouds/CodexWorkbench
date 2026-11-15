@@ -84,8 +84,12 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
   let current = await discoverService(root, entry);
   const agentConnectionId = randomUUID();
   let owner: { record: ServiceRecord; actor: Actor } | undefined;
+  const knownTasks = new Map<string, { artifactId: string; taskId: string; generation: string; agentId: string; agentName: string; record: ServiceRecord }>();
+  const taskKey = (artifactId: string, agentId: string, taskId: string, generation: string) => JSON.stringify([artifactId, agentId, taskId, generation]);
+  let closing: Promise<void> | undefined;
   // Refresh authority without recreating this MCP identity/lease or replaying a failed request.
   async function freshRecord(): Promise<ServiceRecord> {
+    if (closing) throw new StudioError('CLOSED', 'Studio 连接已关闭。');
     const saved = await readRecord(root);
     if (!saved && isAlive(current.pid)) throw new StudioError('SERVICE_RECORD_UNAVAILABLE', '已连接的 Studio 服务仍在运行，但暂时无法读取其连接记录；请稍后重试，未启动第二个服务。');
     if (!saved || !sameService(saved, current) || !isAlive(saved.pid)) {
@@ -123,6 +127,14 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
       const response = await fetch(`${target.origin}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${target.token}`, 'Content-Type': 'application/json', 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': agentId, 'X-Studio-Agent-Name': encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(90_000) });
       const result = await response.json() as ToolResponse;
       if (!result.ok) throw Object.assign(new Error(result.error?.message || 'Studio 操作失败'), { code: result.error?.code, details: result.error?.details });
+      if (!closing && name === 'artifact_activity' && typeof operationArgs.artifactId === 'string' && ['begin', 'update', 'status', 'end'].includes(String(operationArgs.action))) {
+        const artifactId = operationArgs.artifactId;
+        if (operationArgs.action === 'end' && typeof operationArgs.taskId === 'string' && typeof operationArgs.generation === 'string') knownTasks.delete(taskKey(artifactId, agentId, operationArgs.taskId, operationArgs.generation));
+        const tasks = object(result.data) && Array.isArray(result.data.tasks) ? result.data.tasks : [];
+        for (const task of tasks) if (object(task) && typeof task.taskId === 'string' && task.taskId && typeof task.generation === 'string' && task.generation && task.endedAt === undefined && task.outcome === undefined) {
+          knownTasks.set(taskKey(artifactId, agentId, task.taskId, task.generation), { artifactId, taskId: task.taskId, generation: task.generation, agentId, agentName, record: target });
+        }
+      }
       return result.data;
     },
     async requestUi(input: UiHttpRequest, signal?: AbortSignal) {
@@ -137,7 +149,26 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
         redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
       });
     },
-    async close() { clearInterval(timer); await unlink(lease).catch(() => {}); },
+    close() {
+      return closing ??= (async () => {
+        clearInterval(timer);
+        const tasks = [...knownTasks.values()]; knownTasks.clear();
+        try {
+          if (!tasks.length) return;
+          // Cleanup never discovers or restarts an authority, nor guesses an active model task.
+          const saved = await readRecord(root);
+          if (!saved || !isAlive(saved.pid)) return;
+          const signal = AbortSignal.timeout(1500);
+          await Promise.allSettled(tasks.filter(task => sameService(task.record, saved)).map(async task => {
+            const response = await fetch(`${saved.origin}/api/tools/artifact_activity`, {
+              method: 'POST', headers: { Authorization: `Bearer ${saved.token}`, 'Content-Type': 'application/json', 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': task.agentId, 'X-Studio-Agent-Name': encodeURIComponent(task.agentName) },
+              body: JSON.stringify({ artifactId: task.artifactId, action: 'end', taskId: task.taskId, generation: task.generation, outcome: 'cancelled' }), signal,
+            });
+            await response.arrayBuffer();
+          }));
+        } finally { await unlink(lease).catch(() => {}); }
+      })();
+    },
   };
 }
 export function isAlive(pid: number) { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } }

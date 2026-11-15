@@ -112,10 +112,13 @@ var init_common = __esm({
 });
 
 // src/contracts/studio.ts
-var TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
+var AGENT_TASK_LEASE_MS, AGENT_TASK_STALE_MS, AGENT_TASK_FADE_MS, TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
 var init_studio = __esm({
   "src/contracts/studio.ts"() {
     "use strict";
+    AGENT_TASK_LEASE_MS = 10 * 6e4;
+    AGENT_TASK_STALE_MS = 2 * 6e4;
+    AGENT_TASK_FADE_MS = 500;
     TOOL_NAMES = ["studio_open", "artifact_list", "artifact_manage", "artifact_read", "artifact_apply", "artifact_feedback", "artifact_share", "artifact_export", "artifact_activity"];
     DEFAULT_STYLE = { name: "Diagram", paper: "#f5f5f5", ink: "#2d3142", muted: "#4f5d75", accent: "#eb6c36", link: "#2e5aa8", fontFamily: 'Arial, "Microsoft YaHei", sans-serif', titleFont: 'Georgia, "Songti SC", serif', monoFont: "Consolas, monospace" };
     LOCAL_ACTOR = { id: "local", name: "\u6211", kind: "human", role: "owner" };
@@ -127,7 +130,7 @@ var SERVICE_PROTOCOL_VERSION;
 var init_service_protocol = __esm({
   "src/server/service-protocol.ts"() {
     "use strict";
-    SERVICE_PROTOCOL_VERSION = 2;
+    SERVICE_PROTOCOL_VERSION = 3;
   }
 });
 
@@ -136,7 +139,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.3";
+    PLUGIN_VERSION = "0.2.4";
   }
 });
 
@@ -8155,8 +8158,8 @@ function elementSvg(e, board, options = {}) {
 }
 function buildBoardSvg(board, options = {}) {
   const elements = selectedElements(board, options);
-  const bounds = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options)).join("")}</svg>`;
+  const bounds2 = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds2.width}" height="${bounds2.height}" viewBox="${bounds2.x} ${bounds2.y} ${bounds2.width} ${bounds2.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds2.x}" y="${bounds2.y}" width="${bounds2.width}" height="${bounds2.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options)).join("")}</svg>`;
 }
 function offlineEmbedState(initial) {
   let state = JSON.parse(JSON.stringify(initial));
@@ -8206,19 +8209,19 @@ function offlineRegionHtml(element) {
 }
 function buildBoardHtml(board, options = {}) {
   const elements = selectedElements(board, options);
-  const bounds = boardBounds(elements, 32, board.elements);
+  const bounds2 = boardBounds(elements, 32, board.elements);
   const layers = elements.map((e) => {
-    if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
+    if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
     if (e.type === "image" && e.video) {
       if (!/^data:video\//i.test(e.video) || e.src && !/^data:image\//i.test(e.src)) throw new ExportError("ASSET_NOT_EMBEDDED", "HTML \u5BFC\u51FA\u9700\u8981\u5148\u5D4C\u5165\u89C6\u9891\u548C\u5C01\u9762\u8D44\u6E90\u3002");
-      return `<video data-studio-id="${escapeXml(e.id)}" controls playsinline preload="metadata" src="${escapeXml(e.video)}"${e.src ? ` poster="${escapeXml(e.src)}"` : ""} style="position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;object-fit:contain;transform:rotate(${scalar(e.rotation, 0)}deg)"></video>`;
+      return `<video data-studio-id="${escapeXml(e.id)}" controls playsinline preload="metadata" src="${escapeXml(e.video)}"${e.src ? ` poster="${escapeXml(e.src)}"` : ""} style="position:absolute;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;object-fit:contain;transform:rotate(${scalar(e.rotation, 0)}deg)"></video>`;
     }
     const box = boardBounds([e], 2, board.elements);
     const markerId = `arrow_${e.id.replace(/[^\w-]/g, "_")}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds2.x}px;top:${box.y - bounds2.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
   }).join("");
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds2.width}px;height:${bounds2.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
 `;
 }
 var ExportError, isHtmlRegionElement;
@@ -9049,12 +9052,12 @@ function assertLockedGeometry(before, after, baseline) {
   const protectedIds = new Set([...baseline.elements, ...before.elements].filter((element) => element.locked).map((element) => element.id));
   if (!protectedIds.size) return;
   const beforeById = new Map(before.elements.map((element) => [element.id, element])), afterById = new Map(after.elements.map((element) => [element.id, element]));
-  const bounds = (element) => element && [element.x, element.y, element.w, element.h, element.rotation];
+  const bounds2 = (element) => element && [element.x, element.y, element.w, element.h, element.rotation];
   for (const current of before.elements) {
     if (!protectedIds.has(current.id)) continue;
     const next = afterById.get(current.id);
     const removedParent = current.parentId && beforeById.has(current.parentId) && !afterById.has(current.parentId);
-    const endpointMoved = current.type === "arrow" && [current.from, current.to].some((id2) => typeof id2 === "string" && !same(bounds(beforeById.get(id2)), bounds(afterById.get(id2))));
+    const endpointMoved = current.type === "arrow" && [current.from, current.to].some((id2) => typeof id2 === "string" && !same(bounds2(beforeById.get(id2)), bounds2(afterById.get(id2))));
     if (!next || removedParent || LOCKED_GEOMETRY.some((key) => !same(current[key], next[key])) || endpointMoved && !same(arrowGeometry(current, before.elements).points, arrowGeometry(next, after.elements).points)) {
       throw new StudioError("LOCKED", "\u5BF9\u8C61\u7684\u4F4D\u7F6E\u4E0E\u5C3A\u5BF8\u5DF2\u9501\u5B9A\uFF0C\u8BF7\u5148\u5355\u72EC\u89E3\u9501\u540E\u4FEE\u6539\u51E0\u4F55\u6216\u5220\u9664\u3002", { elementId: current.id });
     }
@@ -11395,6 +11398,104 @@ var init_store2 = __esm({
   }
 });
 
+// src/core/shared/agent-workspaces.ts
+function taskBinding2(input2, required2 = false) {
+  if (input2.taskId === void 0 && input2.generation === void 0) {
+    if (required2) throw new StudioError("TASK_REQUIRED", "Agent \u4FEE\u6539\u767D\u677F\u524D\u987B\u5148\u58F0\u660E\u5DE5\u4F5C\u533A\u57DF\uFF0C\u5E76\u4F20\u5165\u8FD4\u56DE\u7684 taskId \u4E0E generation\u3002");
+    return;
+  }
+  if (input2.taskId === void 0 || input2.generation === void 0) throw new StudioError("INVALID_ARGUMENT", "taskId \u4E0E generation \u5FC5\u987B\u6210\u5BF9\u63D0\u4F9B\u3002");
+  return { taskId: safeId(input2.taskId, "\u4EFB\u52A1 ID"), generation: safeId(input2.generation, "\u4EFB\u52A1\u4EE3\u6B21") };
+}
+function sameTaskScope(left, right) {
+  return same([...left.ids ?? []].sort(), [...right.ids ?? []].sort()) && same(left.rect, right.rect);
+}
+function bounds(points, padding = 0) {
+  let x2 = Infinity, y = Infinity, right = -Infinity, bottom = -Infinity;
+  for (const point of points) {
+    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new StudioError("TASK_SCOPE", "\u5BF9\u8C61\u7684\u5B9E\u9645\u51E0\u4F55\u65E0\u6548\uFF0C\u65E0\u6CD5\u786E\u8BA4\u5DE5\u4F5C\u8303\u56F4\u3002");
+    x2 = Math.min(x2, point.x);
+    y = Math.min(y, point.y);
+    right = Math.max(right, point.x);
+    bottom = Math.max(bottom, point.y);
+  }
+  return { x: x2 - padding, y: y - padding, w: Math.max(0, right - x2) + 2 * padding, h: Math.max(0, bottom - y) + 2 * padding };
+}
+function workspaceElementBounds(element, elements) {
+  if (element.type === "arrow") return bounds(arrowGeometry(element, elements).points, Number(element.strokeWidth ?? element.width ?? 1.4) / 2);
+  const angle = Number(element.rotation ?? 0) * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
+  const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
+  const turn = (x2, y) => ({ x: center.x + x2 * c - y * s, y: center.y + x2 * s + y * c });
+  if (element.type === "stroke" && element.points?.length) {
+    if (element.points.length % 2) throw new StudioError("TASK_SCOPE", "\u7B14\u8FF9\u5750\u6807\u4E0D\u5B8C\u6574\uFF0C\u65E0\u6CD5\u786E\u8BA4\u5DE5\u4F5C\u8303\u56F4\u3002");
+    const points = [];
+    for (let index = 0; index < element.points.length; index += 2) points.push(turn(element.points[index] - element.w / 2, element.points[index + 1] - element.h / 2));
+    return bounds(points, Number(element.strokeWidth ?? element.width ?? 3) / 2);
+  }
+  return bounds([turn(-element.w / 2, -element.h / 2), turn(element.w / 2, -element.h / 2), turn(element.w / 2, element.h / 2), turn(-element.w / 2, element.h / 2)]);
+}
+function contains(outer, inner) {
+  const epsilon = 1e-7;
+  return inner.x >= outer.x - epsilon && inner.y >= outer.y - epsilon && inner.x + inner.w <= outer.x + outer.w + epsilon && inner.y + inner.h <= outer.y + outer.h + epsilon;
+}
+function overlaps(left, right) {
+  return left.x < right.x + right.w && left.x + left.w > right.x && left.y < right.y + right.h && left.y + left.h > right.y;
+}
+function scopeAreas(scope, elements) {
+  const ids = new Set(scope.ids ?? []), areas = elements.filter((element) => ids.has(element.id)).map((element) => workspaceElementBounds(element, elements));
+  if (scope.rect) areas.push(scope.rect);
+  return areas;
+}
+function owns(scope, element, elements) {
+  return !!scope.ids?.includes(element.id) || !!scope.rect && contains(scope.rect, workspaceElementBounds(element, elements));
+}
+function assertWorkspaceAvailable(scope, actorId, others, elements) {
+  const ids = new Set(scope.ids ?? []), areas = scopeAreas(scope, elements);
+  for (const other of others) {
+    if (other.actorId === actorId) continue;
+    const otherAreas = scopeAreas(other.task.scope, elements);
+    if ((other.task.scope.ids ?? []).some((id2) => ids.has(id2)) || areas.some((area) => otherAreas.some((otherArea) => overlaps(area, otherArea)))) {
+      throw new StudioError("TASK_SCOPE_CONFLICT", "\u5DE5\u4F5C\u8303\u56F4\u4E0E\u53E6\u4E00\u4F4D Agent \u7684\u6709\u6548\u4EFB\u52A1\u91CD\u53E0\uFF0C\u8BF7\u5148\u534F\u8C03\u6216\u7ED3\u675F\u539F\u4EFB\u52A1\u3002", { taskId: other.task.taskId, actorId: other.actorId });
+    }
+  }
+}
+function workspaceReadRelated(scope, elements, ids) {
+  return elements.some((element) => ids.includes(element.id) && owns(scope, element, elements));
+}
+function assertWorkspaceMutation(before, after, operations, task, actorId, others) {
+  assertWorkspaceAvailable(task.scope, actorId, others, before.elements);
+  assertWorkspaceAvailable(task.scope, actorId, others, after.elements);
+  const global2 = !same(before.style, after.style) || !same(before.motion, after.motion) || operations.some((operation2) => ["style", "motion"].includes(String(operation2.op)) || operation2.op === "restore" && operation2.id === void 0 && operation2.ids === void 0);
+  const coversBoard = () => before.elements.every((element) => owns(task.scope, element, before.elements)) && after.elements.every((element) => owns(task.scope, element, after.elements));
+  if (global2 && (others.length || !coversBoard())) {
+    throw new StudioError("TASK_SCOPE", "\u6574\u4F53\u6837\u5F0F\u3001\u52A8\u753B\u6216\u6574\u677F\u6062\u590D\u9700\u8981\u8986\u76D6\u6574\u5757\u767D\u677F\uFF0C\u4E14\u4E0D\u80FD\u6709\u5176\u4ED6\u6709\u6548\u4EFB\u52A1\u3002");
+  }
+  const a = new Map(before.elements.map((element) => [element.id, element])), b = new Map(after.elements.map((element) => [element.id, element]));
+  const affected = new Set([...a.keys(), ...b.keys()].filter((id2) => !same(a.get(id2), b.get(id2))));
+  for (const element of before.elements) {
+    const next = b.get(element.id);
+    if (next && element.type === "arrow" && next.type === "arrow" && !same(arrowGeometry(element, before.elements).points, arrowGeometry(next, after.elements).points)) affected.add(element.id);
+    if (next?.parentId && a.has(next.parentId) && !b.has(next.parentId)) affected.add(next.id);
+  }
+  for (const id2 of affected) {
+    const previous = a.get(id2), next = b.get(id2);
+    if (previous && !owns(task.scope, previous, before.elements) || next && !owns(task.scope, next, after.elements)) throw new StudioError("TASK_SCOPE", "\u672C\u6B21\u4FEE\u6539\u8D85\u51FA\u5DF2\u58F0\u660E\u7684\u5DE5\u4F5C\u5BF9\u8C61\u6216\u5B8C\u6574\u51E0\u4F55\u8303\u56F4\uFF0C\u8BF7\u5148\u7ED3\u675F\u5E76\u91CD\u65B0\u58F0\u660E\u5408\u9002\u8303\u56F4\u3002", { elementId: id2 });
+    if (next && (!previous || previous.parentId !== next.parentId || previous.groupId !== next.groupId)) {
+      const references = after.elements.filter((element) => element.id === next.parentId || next.groupId && element.groupId === next.groupId && element.id !== next.id);
+      for (const referenced of references) if (!owns(task.scope, referenced, after.elements)) throw new StudioError("TASK_SCOPE", "\u4E0D\u80FD\u901A\u8FC7\u7236\u5206\u533A\u6216\u5206\u7EC4\u628A\u5DE5\u4F5C\u8303\u56F4\u8FDE\u63A5\u5230\u672A\u6388\u6743\u5BF9\u8C61\u3002", { elementId: next.id, referenceId: referenced.id });
+    }
+  }
+  const restoresGlobalUnit = operations.some((operation2) => operation2.op === "restore" && (String(operation2.id ?? "").startsWith("$") || Array.isArray(operation2.ids) && operation2.ids.some((id2) => typeof id2 === "string" && id2.startsWith("$"))));
+  if (restoresGlobalUnit && (others.length || !coversBoard())) throw new StudioError("TASK_SCOPE", "\u6062\u590D\u6574\u4F53\u5185\u5BB9\u5355\u5143\u9700\u8981\u8986\u76D6\u6574\u5757\u767D\u677F\uFF0C\u4E14\u4E0D\u80FD\u6709\u5176\u4ED6\u6709\u6548\u4EFB\u52A1\u3002");
+}
+var init_agent_workspaces = __esm({
+  "src/core/shared/agent-workspaces.ts"() {
+    "use strict";
+    init_whiteboard_geometry();
+    init_common();
+  }
+});
+
 // src/core/shared/artifacts.ts
 import { randomUUID as randomUUID6 } from "node:crypto";
 function createArtifact(type, title, content, actor, summary, changedIds) {
@@ -12095,20 +12196,22 @@ var init_room_timers = __esm({
 
 // src/core/shared/collaboration.ts
 import { createHash as createHash6, randomUUID as randomUUID10 } from "node:crypto";
-var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, AGENT_TASK_LEASE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, StudioCollaboration;
+var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, MAX_CLOSED_TASKS, StudioCollaboration;
 var init_collaboration = __esm({
   "src/core/shared/collaboration.ts"() {
     "use strict";
+    init_studio();
     init_common();
     init_collaboration_events();
     init_collaboration_room();
     init_room_timers();
+    init_agent_workspaces();
     LEASE_MS = 45e3;
     DISCONNECT_MS = 4e3;
     AGENT_IDLE_MS = 2e4;
-    AGENT_TASK_LEASE_MS = 6e4;
     MAX_AGENT_TASKS = 8;
     MAX_BOARD_TASKS = 64;
+    MAX_CLOSED_TASKS = 512;
     StudioCollaboration = class {
       listeners = /* @__PURE__ */ new Map();
       peers = /* @__PURE__ */ new Map();
@@ -12118,6 +12221,9 @@ var init_collaboration = __esm({
       queues = /* @__PURE__ */ new Map();
       activities = /* @__PURE__ */ new Map();
       agentTasks = /* @__PURE__ */ new Map();
+      closedTasks = /* @__PURE__ */ new Map();
+      terminalTasks = /* @__PURE__ */ new Map();
+      taskDeadline;
       expiry;
       constructor(options = {}) {
         this.timers = new RoomTimers(options.dataRoot);
@@ -12345,6 +12451,7 @@ var init_collaboration = __esm({
             delete value.chat;
             delete value.chatExpiresAt;
           }
+          if (value.context?.agentTasks) value.context.agentTasks = value.context.agentTasks.filter((task) => task.outcome ? task.endedAt + AGENT_TASK_FADE_MS > now : task.expiresAt > now);
           return [value];
         }));
       }
@@ -12375,23 +12482,107 @@ var init_collaboration = __esm({
         }
       }
       expireTasks(now) {
+        const changed = /* @__PURE__ */ new Map();
         for (const [key, group] of this.agentTasks) {
-          let changed = false;
-          for (const [id2, task] of group.tasks) if (task.expiresAt <= now) {
-            group.tasks.delete(id2);
-            changed = true;
-          }
-          if (changed) {
-            if (!group.tasks.size) this.agentTasks.delete(key);
-            this.publishAgent(group.artifactId, group.actor);
+          for (const task of [...group.tasks.values()]) if (task.expiresAt <= now) {
+            this.retireTask(group.artifactId, group.actor, task, "expired", now);
+            changed.set(key, group);
           }
         }
+        for (const [key, terminal] of this.terminalTasks) if (terminal.task.endedAt + AGENT_TASK_FADE_MS <= now) {
+          this.terminalTasks.delete(key);
+          changed.set(`${terminal.artifactId}:${terminal.actor.id}`, terminal);
+        }
+        for (const item of changed.values()) this.publishAgent(item.artifactId, item.actor);
+        this.scheduleTaskDeadline();
       }
-      /** A task is an expiring work hint, independent of individual tool calls and content locks. */
-      activity(artifactId, input2, actor) {
-        if (actor.kind !== "agent" || actor.role !== "owner") throw new StudioError("FORBIDDEN", "\u5DE5\u4F5C\u533A\u57DF\u53EA\u80FD\u7531\u5DF2\u6388\u6743\u7684\u6240\u6709\u8005 Agent \u58F0\u660E\u3002");
-        const taskId = safeId(input2.taskId, "\u4EFB\u52A1 ID"), action = input2.action;
-        if (!["begin", "update", "end"].includes(String(action))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u52A8\u4F5C\u65E0\u6548\u3002");
+      scheduleTaskDeadline() {
+        if (this.taskDeadline) clearTimeout(this.taskDeadline);
+        const times = [...this.agentTasks.values()].flatMap((group) => [...group.tasks.values()].map((task) => task.expiresAt));
+        times.push(...[...this.terminalTasks.values()].map((item) => item.task.endedAt + AGENT_TASK_FADE_MS));
+        this.taskDeadline = times.length ? setTimeout(() => this.expireTasks(Date.now()), Math.max(0, Math.min(...times) - Date.now())) : void 0;
+        this.taskDeadline?.unref();
+      }
+      retireTask(artifactId, actor, task, outcome, endedAt = Date.now()) {
+        const key = `${artifactId}:${actor.id}`, group = this.agentTasks.get(key);
+        group?.tasks.delete(task.taskId);
+        if (!group?.tasks.size) this.agentTasks.delete(key);
+        const ended = { taskId: task.taskId, generation: task.generation, endedAt, outcome };
+        const closedKey = `${key}:${task.taskId}`;
+        this.closedTasks.delete(closedKey);
+        this.closedTasks.set(closedKey, ended);
+        while (this.closedTasks.size > MAX_CLOSED_TASKS) this.closedTasks.delete(this.closedTasks.keys().next().value);
+        this.terminalTasks.set(`${closedKey}:${task.generation}`, { artifactId, actor: copy(actor), task: { ...copy(task), endedAt, outcome } });
+        for (const [id2, activity] of this.activities.get(key) ?? []) if (activity.binding?.taskId === task.taskId && activity.binding.generation === task.generation) this.activities.get(key).delete(id2);
+        if (!this.activities.get(key)?.size) this.activities.delete(key);
+        this.scheduleTaskDeadline();
+        return ended;
+      }
+      workspaces(artifactId, except) {
+        this.expireTasks(Date.now());
+        return [...this.agentTasks.values()].filter((group) => group.artifactId === artifactId).flatMap((group) => [...group.tasks.values()].filter((task) => !except || group.actor.id !== except.actorId || task.taskId !== except.binding.taskId || task.generation !== except.binding.generation).map((task) => ({ actorId: group.actor.id, task: copy(task) })));
+      }
+      assertTask(artifactId, actor, binding) {
+        this.expireTasks(Date.now());
+        const task = this.agentTasks.get(`${artifactId}:${actor.id}`)?.tasks.get(binding.taskId);
+        if (!task || task.generation !== binding.generation) {
+          const ended = this.closedTasks.get(`${artifactId}:${actor.id}:${binding.taskId}`);
+          if (!task && ended?.generation === binding.generation && ended.outcome !== "expired") throw new StudioError("TASK_CLOSED", "\u5DE5\u4F5C\u4EFB\u52A1\u5DF2\u7ECF\u7ED3\u675F\uFF0C\u539F\u4EE3\u6B21\u4E0D\u80FD\u7EE7\u7EED\u4FEE\u6539\u767D\u677F\u3002", { outcome: ended.outcome });
+          throw new StudioError("TASK_STALE", "\u5DE5\u4F5C\u4EFB\u52A1\u5DF2\u8FC7\u671F\u6216\u6765\u81EA\u65E7\u670D\u52A1\uFF0C\u8BF7\u67E5\u8BE2\u5F53\u524D\u4EFB\u52A1\u72B6\u6001\u540E\u91CD\u65B0\u5B89\u6392\u3002", { ...binding });
+        }
+        return copy(task);
+      }
+      touchTask(artifactId, actor, binding, progress = false) {
+        this.expireTasks(Date.now());
+        const task = this.agentTasks.get(`${artifactId}:${actor.id}`)?.tasks.get(binding.taskId);
+        if (!task || task.generation !== binding.generation) return false;
+        const now = Date.now();
+        task.lastActivityAt = now;
+        task.expiresAt = now + AGENT_TASK_LEASE_MS;
+        if (progress) task.lastProgressAt = now;
+        this.scheduleTaskDeadline();
+        this.publishAgent(artifactId, actor);
+        return true;
+      }
+      /** Lifecycle is independent of page streams; a retired generation never regains write permission. */
+      activity(artifactId, input2, actor, elements = []) {
+        const action = input2.action;
+        if (!["begin", "update", "end", "status", "release"].includes(String(action))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u52A8\u4F5C\u65E0\u6548\u3002");
+        if (action === "release" ? actor.kind !== "human" || actor.role !== "owner" : actor.kind !== "agent" || actor.role !== "owner") throw new StudioError("FORBIDDEN", action === "release" ? "\u53EA\u6709\u623F\u4E3B\u672C\u4EBA\u53EF\u4EE5\u7ED3\u675F\u5176\u4ED6 Agent \u7684\u5DE5\u4F5C\u3002" : "\u5DE5\u4F5C\u533A\u57DF\u53EA\u80FD\u7531\u5DF2\u6388\u6743\u7684\u6240\u6709\u8005 Agent \u58F0\u660E\u3002");
+        this.getTimer(artifactId);
+        this.expireTasks(Date.now());
+        const targetActorId = action === "release" ? safeId(input2.targetActorId, "\u76EE\u6807 Agent ID") : actor.id;
+        const key = `${artifactId}:${targetActorId}`, group = this.agentTasks.get(key);
+        const active = () => copy([...this.agentTasks.get(key)?.tasks.values() ?? []]);
+        if (action === "status") {
+          if (input2.generation === void 0) {
+            if (input2.taskId !== void 0) {
+              const requested = safeId(input2.taskId, "\u4EFB\u52A1 ID"), ended2 = this.closedTasks.get(`${key}:${requested}`);
+              return { tasks: active().filter((task2) => task2.taskId === requested), ...ended2 ? { ended: copy(ended2) } : {} };
+            }
+            const endedTasks = [...this.closedTasks].filter(([closedKey]) => closedKey.startsWith(`${key}:`)).slice(-MAX_AGENT_TASKS).map(([, ended2]) => copy(ended2));
+            return { tasks: active(), endedTasks };
+          }
+          const binding = taskBinding2(input2, true);
+          const task = group?.tasks.get(binding.taskId), ended = this.closedTasks.get(`${key}:${binding.taskId}`);
+          if (task?.generation === binding.generation) return { tasks: active() };
+          if (!task && ended?.generation === binding.generation) return { tasks: active(), ended: copy(ended) };
+          throw new StudioError("TASK_STALE", "\u5DE5\u4F5C\u4EFB\u52A1\u4EE3\u6B21\u5DF2\u5931\u6548\uFF0C\u8BF7\u67E5\u8BE2\u5F53\u524D\u4EFB\u52A1\u72B6\u6001\u3002");
+        }
+        const taskId = safeId(input2.taskId, "\u4EFB\u52A1 ID"), previous = group?.tasks.get(taskId);
+        if (action === "end" || action === "release") {
+          const binding = taskBinding2(input2, true);
+          const ended = this.closedTasks.get(`${key}:${taskId}`);
+          if (!previous) {
+            if (ended?.generation === binding.generation) return { tasks: active(), ended: copy(ended) };
+            throw new StudioError("TASK_STALE", "\u5DE5\u4F5C\u4EFB\u52A1\u5DF2\u7ED3\u675F\u6216\u4EE3\u6B21\u5DF2\u5931\u6548\uFF0C\u8BF7\u67E5\u8BE2\u5F53\u524D\u4EFB\u52A1\u72B6\u6001\u3002");
+          }
+          if (previous.generation !== binding.generation) throw new StudioError("TASK_STALE", "\u65E7\u4EFB\u52A1\u4EE3\u6B21\u4E0D\u80FD\u7ED3\u675F\u5F53\u524D\u5DE5\u4F5C\u3002");
+          if (input2.outcome !== void 0 && !["completed", "failed", "cancelled"].includes(String(input2.outcome))) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u7ED3\u675F\u72B6\u6001\u65E0\u6548\u3002");
+          const result = this.retireTask(artifactId, group.actor, previous, action === "release" ? "released" : input2.outcome ?? "completed");
+          this.publishAgent(artifactId, group.actor);
+          return { tasks: active(), ended: result };
+        }
         let scope;
         if (input2.scope !== void 0) {
           if (!object2(input2.scope)) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u65E0\u6548\u3002");
@@ -12409,30 +12600,35 @@ var init_collaboration = __esm({
         }
         if (input2.label !== void 0 && (typeof input2.label !== "string" || [...input2.label].length > 80)) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u63CF\u8FF0\u6700\u591A 80 \u4E2A\u5B57\u7B26\u3002");
         if (action === "begin" && !scope) throw new StudioError("INVALID_ARGUMENT", "\u5F00\u59CB\u4EFB\u52A1\u65F6\u9700\u8981\u5DE5\u4F5C\u533A\u57DF\u3002");
-        this.getTimer(artifactId);
-        this.expireTasks(Date.now());
-        const key = `${artifactId}:${actor.id}`, group = this.agentTasks.get(key), previous = group?.tasks.get(taskId);
-        if (action === "end") {
-          if (group?.tasks.delete(taskId)) {
-            if (!group.tasks.size) this.agentTasks.delete(key);
-            this.publishAgent(artifactId, actor);
-          }
-          return { tasks: copy([...this.agentTasks.get(key)?.tasks.values() ?? []]) };
+        if (input2.phase !== void 0 && !["preparing", "writing", "verifying"].includes(String(input2.phase))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u4EFB\u52A1\u9636\u6BB5\u65E0\u6548\u3002");
+        if (action === "update") this.assertTask(artifactId, actor, taskBinding2(input2, true));
+        const closed = this.closedTasks.get(`${key}:${taskId}`);
+        if (action === "begin" && input2.generation !== void 0) {
+          const generation = safeId(input2.generation, "\u4EFB\u52A1\u4EE3\u6B21");
+          if (previous ? previous.generation !== generation : closed?.generation !== generation) throw new StudioError("TASK_STALE", "\u65E7\u4EFB\u52A1\u4EE3\u6B21\u4E0D\u80FD\u91CD\u65B0\u5F00\u59CB\u5DE5\u4F5C\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u5185\u5BB9\u540E\u58F0\u660E\u65B0\u7684\u4EFB\u52A1\u3002");
         }
-        if (action === "update" && !previous) throw new StudioError("NOT_FOUND", "\u5DE5\u4F5C\u4EFB\u52A1\u5DF2\u7ED3\u675F\u6216\u5931\u6548\uFF0C\u8BF7\u91CD\u65B0\u58F0\u660E\u3002");
+        if (previous && scope && !sameTaskScope(previous.scope, scope)) throw new StudioError("TASK_SCOPE", "\u6D3B\u8DC3\u4EFB\u52A1\u4E0D\u80FD\u76F4\u63A5\u66F4\u6362\u5DE5\u4F5C\u8303\u56F4\uFF0C\u8BF7\u5148\u7ED3\u675F\u5E76\u4E3A\u65B0\u5DE5\u4F5C\u58F0\u660E\u65B0\u4EFB\u52A1\u3002");
+        if (!previous && closed && (closed.outcome === "released" || input2.generation !== closed.generation)) throw new StudioError("TASK_CLOSED", closed.outcome === "released" ? "\u623F\u4E3B\u5DF2\u7ED3\u675F\u6B64\u4EFB\u52A1\uFF0C\u4E0D\u80FD\u81EA\u52A8\u91CD\u65B0\u7533\u8BF7\uFF1B\u6536\u5230\u65B0\u4EFB\u52A1\u540E\u8BF7\u4F7F\u7528\u65B0\u7684\u4EFB\u52A1 ID\u3002" : "\u8BE5\u4EFB\u52A1\u5DF2\u7ECF\u7ED3\u675F\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u5185\u5BB9\uFF0C\u5E76\u5E26\u4E0A\u6700\u8FD1\u7ED3\u675F\u7684\u4EE3\u6B21\u660E\u786E\u91CD\u65B0\u7533\u8BF7\u3002", { outcome: closed.outcome });
         if (!previous) {
           const count = [...this.agentTasks.values()].filter((item) => item.artifactId === artifactId).reduce((sum, item) => sum + item.tasks.size, 0);
           if ((group?.tasks.size ?? 0) >= MAX_AGENT_TASKS || count >= MAX_BOARD_TASKS) throw new StudioError("BUSY", "\u5E76\u884C\u5DE5\u4F5C\u4EFB\u52A1\u8FC7\u591A\uFF0C\u8BF7\u5148\u7ED3\u675F\u5DF2\u6709\u4EFB\u52A1\u3002");
         }
         const current = group ?? { artifactId, actor: copy(actor), tasks: /* @__PURE__ */ new Map() };
         current.actor = copy(actor);
-        current.tasks.set(taskId, { taskId, scope: copy(scope ?? previous.scope), label: input2.label === void 0 ? previous?.label : String(input2.label).trim() || void 0, expiresAt: Date.now() + AGENT_TASK_LEASE_MS });
+        const nextScope = scope ?? previous.scope;
+        assertWorkspaceAvailable(nextScope, actor.id, this.workspaces(artifactId), elements);
+        if (previous && this.agentTasks.get(key)?.tasks.get(taskId) !== previous) throw new StudioError("TASK_STALE", "\u4EFB\u52A1\u5728\u91CD\u65B0\u7533\u8BF7\u524D\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u67E5\u8BE2\u6700\u8FD1\u4EE3\u6B21\u540E\u660E\u786E\u91CD\u65B0\u7533\u8BF7\u3002");
+        const now = Date.now(), phase = input2.phase ?? previous?.phase ?? "preparing";
+        current.tasks.set(taskId, { taskId, generation: previous?.generation ?? randomUUID10(), scope: copy(nextScope), phase, label: input2.label === void 0 ? previous?.label : String(input2.label).trim() || void 0, startedAt: previous?.startedAt ?? now, lastActivityAt: now, lastProgressAt: !previous || previous.phase !== phase ? now : previous.lastProgressAt, expiresAt: now + AGENT_TASK_LEASE_MS });
         this.agentTasks.set(key, current);
         this.publishAgent(artifactId, actor);
+        this.scheduleTaskDeadline();
         return { tasks: copy([...current.tasks.values()]) };
       }
       publishAgent(artifactId, actor, lastActivity) {
-        const key = `${artifactId}:${actor.id}`, entries = [...this.activities.get(key)?.values() ?? []], tasks = [...this.agentTasks.get(key)?.tasks.values() ?? []];
+        const key = `${artifactId}:${actor.id}`, live = [...this.agentTasks.get(key)?.tasks.values() ?? []];
+        const entries = [...this.activities.get(key)?.values() ?? []].filter((entry) => !entry.binding || live.some((task) => task.taskId === entry.binding.taskId && task.generation === entry.binding.generation));
+        const terminal = [...this.terminalTasks.values()].filter((item) => item.artifactId === artifactId && item.actor.id === actor.id && item.task.endedAt + AGENT_TASK_FADE_MS > Date.now()).map((item) => item.task), tasks = [...live, ...terminal];
         const peers = this.group(artifactId), peerId = `agent-${createHash6("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
         let peer = peers.get(peerId);
         if (!entries.length && !tasks.length) {
@@ -12444,8 +12640,8 @@ var init_collaboration = __esm({
             peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: 0, streams: 0, retired: /* @__PURE__ */ new Set(), tokens: 80, budgetAt: Date.now() };
             peers.set(peerId, peer);
           }
-          peer.leaseUntil = entries.length ? Infinity : Math.max(...tasks.map((task) => task.expiresAt));
-          peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: entries[0]?.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap((item) => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap((item) => item.editingIds ?? []))], agentTasks: copy(tasks), activity: entries.some((item) => item.status === "writing") ? "writing" : entries.length ? "reading" : "working" }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+          peer.leaseUntil = entries.length ? Infinity : live.length ? Math.max(...live.map((task) => task.expiresAt)) : Date.now() + AGENT_IDLE_MS;
+          peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: entries[0]?.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap((item) => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap((item) => item.editingIds ?? []))], agentTasks: copy(tasks), activity: entries.some((item) => item.status === "writing") ? "writing" : entries.length ? "reading" : live.length ? "working" : "idle" }, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
         }
         this.publishPresence(artifactId);
       }
@@ -12466,6 +12662,7 @@ var init_collaboration = __esm({
       }
       beginActivity(artifactId, actor, input2) {
         if (actor.kind !== "agent") throw new StudioError("FORBIDDEN", "\u4EE3\u7406\u6D3B\u52A8\u5FC5\u987B\u7531\u670D\u52A1\u7AEF\u767B\u8BB0\u3002");
+        if (input2.binding) this.assertTask(artifactId, actor, input2.binding);
         this.getTimer(artifactId);
         const activityId = randomUUID10(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? /* @__PURE__ */ new Map();
         group.set(activityId, { actor: copy(actor), ...copy(input2) });
@@ -12496,6 +12693,9 @@ var init_collaboration = __esm({
         this.rooms.delete(artifactId);
         for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key);
         for (const key of this.agentTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.agentTasks.delete(key);
+        for (const key of this.closedTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.closedTasks.delete(key);
+        for (const [key, task] of this.terminalTasks) if (task.artifactId === artifactId) this.terminalTasks.delete(key);
+        this.scheduleTaskDeadline();
       }
       close() {
         clearInterval(this.expiry);
@@ -12503,6 +12703,9 @@ var init_collaboration = __esm({
         this.listeners.clear();
         this.activities.clear();
         this.agentTasks.clear();
+        this.closedTasks.clear();
+        this.terminalTasks.clear();
+        if (this.taskDeadline) clearTimeout(this.taskDeadline);
         this.timers.close();
         this.events.clear();
       }
@@ -14253,6 +14456,7 @@ var init_service = __esm({
     init_studio();
     init_store2();
     init_common();
+    init_agent_workspaces();
     init_artifacts();
     init_history();
     init_feedback();
@@ -14351,19 +14555,49 @@ var init_service = __esm({
       }
       async perform(name, args, actor, authority) {
         let finish;
+        const binding = name === "artifact_activity" ? void 0 : taskBinding2(args);
+        let replay = false;
         const createsArtifact = name === "artifact_manage" && ["create", "import"].includes(text(args.action, "create"));
         if (actor.kind === "agent" && args.artifactId !== void 0 && !createsArtifact && name !== "artifact_activity") {
           const id2 = safeId(args.artifactId), projected = await this.store.readProjection(id2, (state) => {
             const adapter = this.products.get(state.artifact.type).adapter;
             const ids2 = name === "artifact_apply" && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap((operation2) => object2(operation2) && typeof operation2.op === "string" ? mutationTargets(state.content, operation2, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
-            return { authorization: authorizationState(state), ids: ids2 };
+            const replay2 = name === "artifact_apply" && state.operations.some((operation2) => operation2.id === args.operationId) || name === "artifact_feedback" && ["choose", "withdraw"].includes(text(args.action, "")) && state.feedback.some((item) => item.id === args.feedbackId && item.proposal?.receipts.some((receipt) => receipt.id === args.operationId));
+            const option2 = name === "artifact_feedback" ? state.feedback.find((item) => item.id === args.feedbackId)?.proposal?.options.find((item) => item.id === args.optionId) : void 0;
+            const requiresTask = state.artifact.type === "whiteboard" && (name === "artifact_apply" || name === "artifact_feedback" && (args.action === "choose" || args.action === "withdraw" && args.optionId !== void 0 && option2?.active));
+            return { authorization: authorizationState(state), ids: ids2, replay: replay2, requiresTask };
           }), currentActor = this.authorizedActor(projected.authorization, actor, authority);
+          replay = projected.replay;
+          if (projected.requiresTask && !replay && !binding) taskBinding2(args, true);
+          if (binding && !replay) this.collaboration.assertTask(id2, currentActor, binding);
           const writing = name === "artifact_apply" || name === "artifact_manage" || name === "artifact_share" && args.action !== "status" || name === "artifact_feedback" && !["list", "get", "preview"].includes(text(args.action, "list"));
           const ids = projected.ids;
-          finish = this.collaboration.beginActivity(id2, currentActor, { status: writing ? "writing" : "reading", editingIds: writing ? ids : [], selectedIds: Array.isArray(args.ids) ? args.ids.filter((id3) => typeof id3 === "string").slice(0, 200) : ids });
+          if (!replay) finish = this.collaboration.beginActivity(id2, currentActor, { status: writing ? "writing" : "reading", editingIds: writing ? ids : [], selectedIds: Array.isArray(args.ids) ? args.ids.filter((id3) => typeof id3 === "string").slice(0, 200) : ids, ...binding ? { binding } : {} });
         }
         try {
-          return await this.dispatch(name, args, actor, authority);
+          const result = await this.dispatch(name, args, actor, authority);
+          if (actor.kind === "agent" && binding && !replay && name === "artifact_read") {
+            const targetIds = /* @__PURE__ */ new Set();
+            if (object2(result)) {
+              for (const key of ["elements", "items", "units"]) if (Array.isArray(result[key])) {
+                for (const item of result[key]) if (object2(item) && typeof item.id === "string") targetIds.add(item.id);
+              }
+              if (typeof result.regionId === "string") targetIds.add(result.regionId);
+              if (object2(result.element) && typeof result.element.id === "string") targetIds.add(result.element.id);
+            }
+            const current = await this.store.readProjection(safeId(args.artifactId), (state) => ({ authorization: authorizationState(state), type: state.artifact.type, content: state.content }));
+            const currentActor = this.authorizedActor(current.authorization, actor, authority);
+            if (current.type === "whiteboard") {
+              let task;
+              try {
+                task = this.collaboration.assertTask(safeId(args.artifactId), currentActor, binding);
+              } catch (error62) {
+                if (!(error62 instanceof StudioError) || error62.code !== "TASK_STALE") throw error62;
+              }
+              if (task && workspaceReadRelated(task.scope, current.content.elements, [...targetIds])) this.collaboration.touchTask(safeId(args.artifactId), currentActor, binding);
+            }
+          }
+          return result;
         } finally {
           finish?.();
         }
@@ -14518,9 +14752,21 @@ var init_service = __esm({
         return product.read(state, mode, args);
       }
       async apply(id2, args, actor, authority) {
+        if (actor.kind === "agent" && typeof args.operationId === "string" && await this.store.readProjection(id2, (state) => state.operations.some((operation2) => operation2.id === args.operationId))) {
+          const replay = await this.store.withSnapshotLock(id2, (state) => {
+            const currentActor = this.authorizedActor(state, actor, authority);
+            if (!state.operations.some((operation2) => operation2.id === args.operationId)) return;
+            const mutation = applyMutation(copy(state), { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, this.products.get(state.artifact.type).adapter);
+            return { ...this.products.get(state.artifact.type).result(mutation.snapshot), historyEntry: mutation.historyEntry };
+          });
+          if (replay) return replay;
+        }
         const result = await this.store.transaction(id2, (state) => {
           const currentActor = this.authorizedActor(state, actor, authority);
           const adapter = this.products.get(state.artifact.type).adapter;
+          const duplicate = state.operations.some((operation2) => operation2.id === args.operationId);
+          const binding = currentActor.kind === "agent" && state.artifact.type === "whiteboard" && !duplicate ? taskBinding2(args, true) : void 0;
+          const task = binding && this.collaboration.assertTask(id2, currentActor, binding);
           if (currentActor.kind === "agent" && !state.operations.some((operation2) => operation2.id === args.operationId) && Array.isArray(args.operations)) {
             const editing = new Set(this.getPresence(id2).filter((peer) => peer.actor.id !== currentActor.id && ["owner", "editor"].includes(peer.actor.role)).flatMap((peer) => [...peer.context?.editingIds ?? [], ...peer.context?.savingIds ?? [], ...Array.isArray(peer.context?.movingIds) ? peer.context.movingIds : []]));
             const conflicts = /* @__PURE__ */ new Set();
@@ -14533,9 +14779,14 @@ var init_service = __esm({
           }
           const before = state.content;
           const mutation = applyMutation(state, { operationId: args.operationId, operations: args.operations, expectedRevision: args.expectedRevision, expectedVersions: args.expectedVersions, summary: args.summary, merge: args.merge }, currentActor, adapter);
-          return { ...mutation, eventOperationId: state.operations.find((operation2) => operation2.historyId === mutation.historyEntry.id)?.id, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
+          if (mutation.changed && task && binding) {
+            this.collaboration.assertTask(id2, currentActor, binding);
+            assertWorkspaceMutation(before, state.content, args.operations, task, currentActor.id, this.collaboration.workspaces(id2, { actorId: currentActor.id, binding }));
+          }
+          return { ...mutation, binding, actor: currentActor, eventOperationId: state.operations.find((operation2) => operation2.historyId === mutation.historyEntry.id)?.id, eventUnits: mutation.changed ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before) : [] };
         });
         const snapshot = result.snapshot;
+        if (result.changed && result.binding) this.collaboration.touchTask(id2, result.actor, result.binding, true);
         if (result.changed) this.emitBoard(snapshot, result.historyEntry.changedIds, result.eventUnits, result.eventOperationId, result.historyEntry.actor.id);
         return { ...this.products.get(snapshot.artifact.type).result(snapshot), historyEntry: result.historyEntry };
       }
@@ -14560,14 +14811,38 @@ var init_service = __esm({
           return { feedback };
         }
         if (["suggest", "choose", "withdraw"].includes(action)) {
+          if (actor.kind === "agent" && ["choose", "withdraw"].includes(action) && typeof args.operationId === "string" && await this.store.readProjection(id2, (state) => state.feedback.some((item) => item.id === args.feedbackId && item.proposal?.receipts.some((receipt) => receipt.id === args.operationId)))) {
+            const replay = await this.store.withSnapshotLock(id2, (state) => {
+              const currentActor = this.authorizedActor(state, actor, authority);
+              if (!state.feedback.some((item) => item.id === args.feedbackId && item.proposal?.receipts.some((receipt) => receipt.id === args.operationId))) return;
+              const next = updateProposal(copy(state), args, currentActor, this.products.get(state.artifact.type).adapter);
+              const { snapshot: snapshot2, changed: _changed2, ...response2 } = next;
+              return { ...response2, ...snapshot2 ? this.products.get(snapshot2.artifact.type).result(snapshot2) : {} };
+            });
+            if (replay) return replay;
+          }
           const result2 = await this.store.transaction(id2, (state) => {
+            const currentActor = this.authorizedActor(state, actor, authority);
+            const duplicate = state.feedback.some((item) => item.id === args.feedbackId && item.proposal?.receipts.some((receipt) => receipt.id === args.operationId));
+            const proposal = state.feedback.find((item) => item.id === args.feedbackId)?.proposal;
+            const option2 = proposal?.options.find((item) => item.id === args.optionId);
+            const proposalOperations = proposal?.options.filter((item) => item.active || item.id === args.optionId).flatMap((item) => item.operations) ?? [];
+            const writesContent = action === "choose" || action === "withdraw" && args.optionId !== void 0 && option2?.active;
+            const binding = currentActor.kind === "agent" && state.artifact.type === "whiteboard" && writesContent && !duplicate ? taskBinding2(args, true) : void 0;
+            const task = binding && this.collaboration.assertTask(id2, currentActor, binding);
             const before = state.content;
-            const next = updateProposal(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter);
-            return { ...next, eventUnits: next.changed && next.snapshot && next.historyEntry ? this.boardUnits(next.snapshot, next.historyEntry.changedIds, before) : [] };
+            const next = updateProposal(state, args, currentActor, this.products.get(state.artifact.type).adapter);
+            if (next.changed && task && binding) {
+              this.collaboration.assertTask(id2, currentActor, binding);
+              const other = this.collaboration.workspaces(id2, { actorId: currentActor.id, binding });
+              assertWorkspaceMutation(before, state.content, proposalOperations, task, currentActor.id, other);
+            }
+            return { ...next, binding, actor: currentActor, eventUnits: next.changed && next.snapshot && next.historyEntry ? this.boardUnits(next.snapshot, next.historyEntry.changedIds, before) : [] };
           });
+          if (result2.changed && result2.binding) this.collaboration.touchTask(id2, result2.actor, result2.binding, true);
           this.emit({ type: "feedback", artifactId: id2 });
           if (result2.changed && result2.snapshot && result2.historyEntry) this.emitBoard(result2.snapshot, result2.historyEntry.changedIds, result2.eventUnits);
-          const { snapshot, changed: _changed, eventUnits: _eventUnits, ...response } = result2;
+          const { snapshot, changed: _changed, eventUnits: _eventUnits, binding: _binding, actor: _actor, ...response } = result2;
           return { ...response, ...snapshot ? this.products.get(snapshot.artifact.type).result(snapshot) : {} };
         }
         const result = await this.store.transaction(id2, (state) => updateFeedback(state, args, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).adapter));
@@ -14575,11 +14850,11 @@ var init_service = __esm({
         return result;
       }
       async activity(id2, args, actor, authority) {
-        const currentActor = await this.store.readProjection(id2, (state) => {
+        const execute = (state) => {
           const current = this.authorizedActor(state, actor, authority);
           requireRole(current, ["owner"]);
           assertAlive(state.artifact);
-          if (current.kind !== "agent") throw new StudioError("FORBIDDEN", "\u5DE5\u4F5C\u533A\u57DF\u58F0\u660E\u4EC5\u4F9B Agent \u4F7F\u7528\u3002");
+          if (args.action === "release" ? current.kind !== "human" : current.kind !== "agent") throw new StudioError("FORBIDDEN", args.action === "release" ? "\u53EA\u6709\u623F\u4E3B\u672C\u4EBA\u53EF\u4EE5\u7ED3\u675F\u5176\u4ED6 Agent \u7684\u5DE5\u4F5C\u3002" : "\u5DE5\u4F5C\u533A\u57DF\u58F0\u660E\u4EC5\u4F9B Agent \u4F7F\u7528\u3002");
           if (state.artifact.type !== "whiteboard") throw new StudioError("INVALID_ARGUMENT", "\u8BE5\u4F5C\u54C1\u4E0D\u652F\u6301\u767D\u677F\u5DE5\u4F5C\u533A\u57DF\u3002");
           if (object2(args.scope) && args.scope.ids !== void 0) {
             const ids = args.scope.ids;
@@ -14587,9 +14862,14 @@ var init_service = __esm({
             const adapter = this.products.get(state.artifact.type).adapter;
             for (const target of ids) if (adapter.readUnit(state.content, safeId(target, "\u5BF9\u8C61 ID")) == null) throw new StudioError("NOT_FOUND", "\u5DE5\u4F5C\u533A\u57DF\u4E2D\u7684\u5BF9\u8C61\u4E0D\u5B58\u5728\u3002", { id: target });
           }
-          return current;
+          return this.collaboration.activity(id2, args, current, state.content.elements);
+        };
+        if (args.action === "begin" || args.action === "update") return this.store.withSnapshotLock(id2, (state) => execute(state));
+        const result = await this.store.readProjection(id2, (state) => execute(state));
+        if (args.action === "end" || args.action === "release") await this.store.withProjectionLock(id2, authorizationState, (state) => {
+          requireRole(this.authorizedActor(state, actor, authority), ["owner"]);
         });
-        return this.collaboration.activity(id2, args, currentActor);
+        return result;
       }
       async share(id2, args, actor, authority) {
         const action = text(args.action, "status");
@@ -37320,7 +37600,11 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
   let current = await discoverService(root2, entry);
   const agentConnectionId = randomUUID3();
   let owner;
+  const knownTasks = /* @__PURE__ */ new Map();
+  const taskKey = (artifactId, agentId, taskId, generation) => JSON.stringify([artifactId, agentId, taskId, generation]);
+  let closing;
   async function freshRecord() {
+    if (closing) throw new StudioError("CLOSED", "Studio \u8FDE\u63A5\u5DF2\u5173\u95ED\u3002");
     const saved = await readRecord(root2);
     if (!saved && isAlive(current.pid)) throw new StudioError("SERVICE_RECORD_UNAVAILABLE", "\u5DF2\u8FDE\u63A5\u7684 Studio \u670D\u52A1\u4ECD\u5728\u8FD0\u884C\uFF0C\u4F46\u6682\u65F6\u65E0\u6CD5\u8BFB\u53D6\u5176\u8FDE\u63A5\u8BB0\u5F55\uFF1B\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u672A\u542F\u52A8\u7B2C\u4E8C\u4E2A\u670D\u52A1\u3002");
     if (!saved || !sameService(saved, current) || !isAlive(saved.pid)) {
@@ -37368,6 +37652,14 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
       const response = await fetch(`${target.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${target.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": agentId, "X-Studio-Agent-Name": encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(9e4) });
       const result = await response.json();
       if (!result.ok) throw Object.assign(new Error(result.error?.message || "Studio \u64CD\u4F5C\u5931\u8D25"), { code: result.error?.code, details: result.error?.details });
+      if (!closing && name === "artifact_activity" && typeof operationArgs.artifactId === "string" && ["begin", "update", "status", "end"].includes(String(operationArgs.action))) {
+        const artifactId = operationArgs.artifactId;
+        if (operationArgs.action === "end" && typeof operationArgs.taskId === "string" && typeof operationArgs.generation === "string") knownTasks.delete(taskKey(artifactId, agentId, operationArgs.taskId, operationArgs.generation));
+        const tasks = object2(result.data) && Array.isArray(result.data.tasks) ? result.data.tasks : [];
+        for (const task of tasks) if (object2(task) && typeof task.taskId === "string" && task.taskId && typeof task.generation === "string" && task.generation && task.endedAt === void 0 && task.outcome === void 0) {
+          knownTasks.set(taskKey(artifactId, agentId, task.taskId, task.generation), { artifactId, taskId: task.taskId, generation: task.generation, agentId, agentName, record: target });
+        }
+      }
       return result.data;
     },
     async requestUi(input2, signal) {
@@ -37383,10 +37675,30 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
         signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(9e4)]) : AbortSignal.timeout(9e4)
       });
     },
-    async close() {
-      clearInterval(timer);
-      await unlink(lease).catch(() => {
-      });
+    close() {
+      return closing ??= (async () => {
+        clearInterval(timer);
+        const tasks = [...knownTasks.values()];
+        knownTasks.clear();
+        try {
+          if (!tasks.length) return;
+          const saved = await readRecord(root2);
+          if (!saved || !isAlive(saved.pid)) return;
+          const signal = AbortSignal.timeout(1500);
+          await Promise.allSettled(tasks.filter((task) => sameService(task.record, saved)).map(async (task) => {
+            const response = await fetch(`${saved.origin}/api/tools/artifact_activity`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${saved.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": task.agentId, "X-Studio-Agent-Name": encodeURIComponent(task.agentName) },
+              body: JSON.stringify({ artifactId: task.artifactId, action: "end", taskId: task.taskId, generation: task.generation, outcome: "cancelled" }),
+              signal
+            });
+            await response.arrayBuffer();
+          }));
+        } finally {
+          await unlink(lease).catch(() => {
+          });
+        }
+      })();
     }
   };
 }
@@ -45467,6 +45779,10 @@ init_studio();
 var id = external_exports.string().min(1).max(200);
 var participant = external_exports.object({ id: external_exports.string().trim().min(1).max(120), name: external_exports.string().trim().min(1).max(60) }).optional().describe("\u4EC5\u6240\u6709\u8005\u7684 MCP \u8C03\u7528\u53EF\u63D0\u4F9B\uFF1A\u540C\u4E00\u8FDE\u63A5\u4E2D\u591A\u4E2A Agent \u4F7F\u7528\u7A33\u5B9A id/name \u533A\u5206\u534F\u4F5C\u8EAB\u4EFD\uFF1Bid \u662F\u4E0D\u900F\u660E\u6807\u8BC6\uFF0C\u53EF\u4EE5\u4F7F\u7528 Agent \u7684\u4EFB\u52A1\u8DEF\u5F84\uFF0C\u4E0D\u4F5C\u6587\u4EF6\u8DEF\u5F84\u89E3\u91CA\u3002\u8EAB\u4EFD\u7531\u670D\u52A1\u7AEF\u6309\u8FDE\u63A5\u547D\u540D\u7A7A\u95F4\u6D3E\u751F\uFF0C\u4E0D\u80FD\u7528\u4E8E\u8BBF\u5BA2\u63D0\u6743\u3002");
 var coordinate = external_exports.number().min(-1e7).max(1e7);
+var taskBinding = {
+  taskId: id.optional().describe("\u4E0E generation \u6210\u5BF9\u643A\u5E26\u7684\u672C\u6B21 Agent \u5DE5\u4F5C\u4EFB\u52A1 ID\uFF0C\u4E0D\u4ECE\u4E0A\u6B21\u4EFB\u52A1\u63A8\u65AD\u3002"),
+  generation: external_exports.string().min(1).max(120).optional().describe("artifact_activity \u8FD4\u56DE\u7684\u539F\u6837\u4EFB\u52A1\u4EE3\u6B21\uFF1B\u4E0E taskId \u6210\u5BF9\uFF0C\u4E0D\u80FD\u7528\u65E7\u4EE3\u7EED\u5199\u3001\u6362\u53F7\u76F2\u91CD\u8BD5\u6216\u7ED5\u8FC7\u4EBA\u5DE5\u7ED3\u675F\u3002")
+};
 var anchor2 = external_exports.object({
   coordinateSpace: external_exports.enum(["board", "element", "html"]).optional().describe("board: x/y/w/h \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement: x/y \u4E3A elementIds[0] \u5185\u7684 0..1 \u76F8\u5BF9\u5750\u6807\uFF1Bhtml: x/y/w/h \u4E3A regionId \u5185\u90E8 CSS \u50CF\u7D20\u3002\u7701\u7565\u65F6\u6CBF\u7528\u65E7\u951A\u70B9\u542B\u4E49\u3002"),
   elementIds: external_exports.array(id).optional().describe("\u5DF2\u5B58\u5728\u5BF9\u8C61\u7684\u7A33\u5B9A ID\uFF1Belement \u5750\u6807\u4EE5\u9996\u4E2A\u5BF9\u8C61\u4E3A\u57FA\u51C6\u3002"),
@@ -45496,23 +45812,23 @@ var schemas = {
   studio_open: external_exports.object({ view: external_exports.enum(["library", "editor", "board", "trash"]).optional(), artifactId: id.optional() }),
   artifact_list: external_exports.object({ query: external_exports.string().optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().optional(), sort: external_exports.string().optional() }),
   artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "purge", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), artifactIds: external_exports.array(id).min(1).max(100).optional().describe("purge \u6279\u91CF\u6C38\u4E45\u5220\u9664\u7684\u4F5C\u54C1 ID\uFF0C1..100 \u4E2A\u3002\u4E0E\u5355\u4E2A artifactId \u4E8C\u9009\u4E00\uFF1B\u53EA\u5141\u8BB8\u623F\u4E3B\u5220\u9664\u56DE\u6536\u7AD9\u5185\u4F5C\u54C1\uFF0C\u8FD4\u56DE deletedIds \u548C\u9010\u9879 failures\u3002"), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
-  artifact_read: external_exports.object({ artifactId: id, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), atRevision: external_exports.number().int().nonnegative().optional().describe("units \u540C\u6B65\u8865\u8BFB\u5FC5\u987B\u6307\u5B9A\u7CBE\u786E\u4F5C\u54C1\u7248\u672C\uFF0C\u914D\u5408 1..200 \u4E2A ids\u3002\u8FD4\u56DE\u8BE5\u7248\u672C\u7684 artifact \u548C\u5B8C\u6574 units\uFF1B\u5386\u53F2\u5DF2\u6E05\u7406\u5219 VERSION_NOT_FOUND\uFF0C\u4E0D\u4EE5\u6700\u65B0\u7248\u672C\u66FF\u4EE3\u3002"), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
-  artifact_apply: external_exports.object({ artifactId: id, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), merge: external_exports.literal("safe").optional().describe("\u5B89\u5168\u5408\u5E76\u8FC7\u671F update\uFF1A\u4ECE\u670D\u52A1\u5668\u4FDD\u7559\u5386\u53F2\u53D6\u53EF\u4FE1\u57FA\u7EBF\uFF0C\u4EC5\u5408\u5E76\u4E0D\u51B2\u7A81\u5B57\u6BB5/\u6587\u672C\u884C\uFF1B\u540C\u5B57\u6BB5\u51B2\u7A81\u4FDD\u7559\u539F\u5185\u5BB9\u5E76\u8FD4\u56DE CONFLICT\uFF0C\u4E0D\u9759\u9ED8\u8986\u76D6\u3002\u7F3A\u7701\u4FDD\u6301\u4E25\u683C\u7248\u672C\u68C0\u67E5\u3002"), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
-  artifact_feedback: external_exports.object({ artifactId: id, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
+  artifact_read: external_exports.object({ artifactId: id, ...taskBinding, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), atRevision: external_exports.number().int().nonnegative().optional().describe("units \u540C\u6B65\u8865\u8BFB\u5FC5\u987B\u6307\u5B9A\u7CBE\u786E\u4F5C\u54C1\u7248\u672C\uFF0C\u914D\u5408 1..200 \u4E2A ids\u3002\u8FD4\u56DE\u8BE5\u7248\u672C\u7684 artifact \u548C\u5B8C\u6574 units\uFF1B\u5386\u53F2\u5DF2\u6E05\u7406\u5219 VERSION_NOT_FOUND\uFF0C\u4E0D\u4EE5\u6700\u65B0\u7248\u672C\u66FF\u4EE3\u3002"), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
+  artifact_apply: external_exports.object({ artifactId: id, ...taskBinding, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), merge: external_exports.literal("safe").optional().describe("\u5B89\u5168\u5408\u5E76\u8FC7\u671F update\uFF1A\u4ECE\u670D\u52A1\u5668\u4FDD\u7559\u5386\u53F2\u53D6\u53EF\u4FE1\u57FA\u7EBF\uFF0C\u4EC5\u5408\u5E76\u4E0D\u51B2\u7A81\u5B57\u6BB5/\u6587\u672C\u884C\uFF1B\u540C\u5B57\u6BB5\u51B2\u7A81\u4FDD\u7559\u539F\u5185\u5BB9\u5E76\u8FD4\u56DE CONFLICT\uFF0C\u4E0D\u9759\u9ED8\u8986\u76D6\u3002\u7F3A\u7701\u4FDD\u6301\u4E25\u683C\u7248\u672C\u68C0\u67E5\u3002"), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
+  artifact_feedback: external_exports.object({ artifactId: id, ...taskBinding, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
   artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove", "restore", "forget"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional().describe("role/restore \u5FC5\u586B\uFF1Brestore \u7684\u76EE\u6807\u89D2\u8272\u94FE\u63A5\u5FC5\u987B\u5DF2\u542F\u7528\u3002"), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u8BBF\u95EE\u3002forget \u53EA\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u53CA\u6B64\u677F\u59D3\u540D\u767B\u8BB0\uFF1B\u4FDD\u7559\u5386\u53F2\u4F5C\u8005\u548C\u5176\u4ED6\u767D\u677F\uFF0C\u4E4B\u540E\u51ED\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u5165\u59D3\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u4F1A\u6062\u590D\u65E7\u9605\u8BFB\u9875\u6216\u6392\u961F\u8BF7\u6C42\u3002") }),
   artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() }),
-  artifact_activity: external_exports.object({ artifactId: id, action: external_exports.enum(["begin", "update", "end"]), taskId: id, scope: external_exports.object({ ids: external_exports.array(id).min(1).max(200).optional(), rect: external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) }).optional() }).optional(), label: external_exports.string().trim().min(1).max(80).optional() })
+  artifact_activity: external_exports.object({ artifactId: id, action: external_exports.enum(["begin", "update", "end", "status", "release"]), ...taskBinding, taskId: id.optional().describe("begin \u6307\u5B9A\u903B\u8F91\u4EFB\u52A1\uFF1Bstatus \u53EF\u7701\u7565\u4EE5\u5217\u51FA\u81EA\u5DF1\u7684\u4EFB\u52A1\uFF0C\u6216\u53EA\u7ED9 taskId \u67E5\u8BE2\u672C\u4EFB\u52A1\uFF1Bupdate/end/release \u540C\u65F6\u9700\u8981 generation\u3002"), phase: external_exports.enum(["preparing", "writing", "verifying"]).optional(), outcome: external_exports.enum(["completed", "failed", "cancelled"]).optional(), targetActorId: id.optional().describe("\u623F\u4E3B\u754C\u9762 release \u7684\u76EE\u6807 Agent actor.id\uFF0C\u4E0D\u662F participant.id\uFF1B\u4E0D\u80FD\u4EE5\u76EE\u6807\u8EAB\u4EFD\u5192\u5145\u8C03\u7528\u8005\u3002"), scope: external_exports.object({ ids: external_exports.array(id).min(1).max(200).optional(), rect: external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) }).optional() }).optional(), label: external_exports.string().trim().min(1).max(80).optional() })
 };
 var descriptions = {
   studio_open: "\u6253\u5F00 Agentero \u521B\u4F5C\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
   artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
   artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
-  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
-  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
-  artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
+  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
+  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
+  artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002Agent\u9009\u62E9\u6216\u64A4\u56DE\u5DF2\u5E94\u7528\u65B9\u6848\u4EA7\u751F\u5185\u5BB9\u53D8\u5316\u65F6\u4E5F\u9700\u6709\u6548taskId/generation\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
   artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5C40\u57DF\u7F51\uFF0Caccess:local \u53EA\u542F\u7528\u672C\u673A\u9080\u8BF7\uFF1B\u5207\u6362\u8303\u56F4\u4FDD\u7559\u6210\u5458\uFF0Cstop \u64A4\u9500\u5168\u90E8\u6388\u6743\uFF1Blink \u5F00\u5173\u89D2\u8272\u9080\u8BF7\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u548C\u5BF9\u5E94\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u6210\u5458\u5E76\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u3002forget \u4EC5\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u548C\u8BE5\u677F\u59D3\u540D\u767B\u8BB0\uFF0C\u65E7\u8BC4\u8BBA\u5386\u53F2\u4E0D\u53D8\uFF1B\u4E4B\u540E\u9700\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u590D\u6D3B\u65E7\u9605\u8BFB\u9875\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
   artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002",
-  artifact_activity: "Agent \u58F0\u660E\u767D\u677F\u4EFB\u52A1\u5DE5\u4F5C\u533A\u57DF\uFF0C\u4E0D\u9501\u4F4F\u4EBA\u7C7B\u7F16\u8F91\u3002\u4F7F\u7528\u7A33\u5B9A participant \u548C taskId\uFF1Bbegin \u6307\u5B9A\u73B0\u6709\u5BF9\u8C61 ids \u6216\u7A7A\u5730\u4E16\u754C rect\u3001\u53EF\u8BFB label\uFF1Bupdate \u7EED\u671F\u6216\u66F4\u65B0\u8303\u56F4\uFF0Cend \u5B8C\u6210\u6216\u53D6\u6D88\u3002\u56FA\u5B9A 60 \u79D2\u79DF\u7EA6\uFF0C\u957F\u4EFB\u52A1\u5728\u540E\u7EED\u5DE5\u5177\u524D\u663E\u5F0F\u7EED\u671F\uFF0C\u7ED3\u675F\u65F6\u6E05\u7406\uFF1B\u4EC5 Agent \u6240\u6709\u8005\u8EAB\u4EFD\u53EF\u58F0\u660E\u3002\u8303\u56F4\u7528\u4E8E\u5DE5\u4F5C\u63D0\u793A\u548C\u7528\u6237\u4E3B\u52A8\u8DDF\u968F\uFF0C\u4E0D\u6388\u4E88\u5199\u6743\u9650\u6216\u7ED5\u8FC7\u7248\u672C\u3001\u6B63\u5728\u7F16\u8F91\u68C0\u67E5\u3002"
+  artifact_activity: "Agent\u58F0\u660E\u975E\u91CD\u53E0\u767D\u677F\u4EFB\u52A1\uFF0C\u4E0D\u9501\u4F4F\u4EBA\u7C7B\u7F16\u8F91\u3002begin\u6307\u5B9A\u7A33\u5B9Aparticipant/taskId\u3001scope.ids\u6216\u7A7A\u5730rect\uFF0C\u8FD4\u56DEgeneration\uFF1B\u6D3B\u8DC3\u540C\u8303\u56F4\u5E42\u7B49\uFF0C\u81EA\u884C\u7ED3\u675F\u6216\u8FC7\u671F\u540E\u987B\u5E26\u4E0A\u4E00\u4EE3\u660E\u786E\u91CD\u65B0\u7533\u8BF7\uFF0C\u4E0D\u81EA\u52A8\u7EED\u5199\u3002update/end\u5E26\u56DE\u540C\u4EE3\u7ED1\u5B9A\uFF0Cphase\u4E3Apreparing/writing/verifying\uFF0Cend\u53EF\u6807completed/failed/cancelled\u3002status\u67E5\u8BE2\u81EA\u5DF1\u7684active\u53CA\u6709\u754C\u7ED3\u675F\u8BB0\u5F55\uFF0C\u4E0D\u7EED\u79DF\uFF0C\u53EF\u53EA\u7ED9taskId\u6062\u590D\u4E22\u5931\u56DE\u6267\u3002\u6D3B\u52A8\u79DF\u7EA610\u5206\u949F\uFF0C2\u5206\u949F\u65E0\u5B9E\u8D28\u8FDB\u5C55\u53D8\u7070\u4FDD\u7559\uFF1B\u91CD\u590D\u5FC3\u8DF3\u4E0D\u4F2A\u9020\u8FDB\u5EA6\u3002release\u4EC5\u623F\u4E3B\u754C\u9762\u6309targetActorId/taskId/generation\u7ED3\u675F\u5177\u4F53\u4EFB\u52A1\uFF0CAgent\u4E0D\u80FD\u62A2\u91CA\u653E\u522B\u4EBA\u6216\u91CD\u65B0\u7533\u8BF7\u8BE5\u88AB\u91CA\u653E\u4EFB\u52A1\u3002\u8303\u56F4\u4E0D\u6388\u4E88\u989D\u5916\u6743\u9650\uFF0C\u4E0D\u7ED5\u8FC7CAS\u3001\u9501\u6216\u6B63\u5728\u7F16\u8F91\u68C0\u67E5\u3002"
 };
 function record2(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;

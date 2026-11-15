@@ -1,16 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Actor, AgentActivityScope, AgentTask, Presence, RoomTimer, StudioEvent, SyncBatch } from '../../contracts/studio.js';
+import { AGENT_TASK_FADE_MS, AGENT_TASK_LEASE_MS, type Actor, type AgentActivityScope, type AgentTask, type AgentTaskBinding, type AgentTaskOutcome, type Presence, type RoomTimer, type StudioEvent, type SyncBatch } from '../../contracts/studio.js';
 import { copy, finite, object, requireRole, safeId, StudioError } from './common.js';
 import { CollaborationEvents } from './collaboration-events.js';
 import { CollaborationRoom } from './collaboration-room.js';
 import { RoomTimers } from './room-timers.js';
+import { assertWorkspaceAvailable, sameTaskScope, taskBinding, type AgentWorkspace } from './agent-workspaces.js';
+import type { BoardElement } from '../../contracts/studio.js';
 
 export interface SyncOptions { after?: string; wait?: number; signal?: AbortSignal; peerId?: string; peerEpoch?: string }
 interface PeerState { actorId: string; epoch?: string; sequence: number; roomSequence: number; value?: Presence; departed?: boolean; leaseUntil: number; streams: number; disconnect?: ReturnType<typeof setTimeout>; retired: Set<string>; tokens: number; budgetAt: number }
-interface Activity { actor: Actor; status: 'reading' | 'writing'; editingIds?: string[]; selectedIds?: string[]; viewId?: string }
+interface Activity { actor: Actor; status: 'reading' | 'writing'; editingIds?: string[]; selectedIds?: string[]; viewId?: string; binding?: AgentTaskBinding }
 interface AgentTasks { artifactId: string; actor: Actor; tasks: Map<string, AgentTask> }
+interface EndedTask extends AgentTaskBinding { endedAt: number; outcome: AgentTaskOutcome }
+interface TaskResult { tasks: AgentTask[]; ended?: EndedTask; endedTasks?: EndedTask[] }
 const LEASE_MS = 45_000, DISCONNECT_MS = 4000, AGENT_IDLE_MS = 20_000;
-const AGENT_TASK_LEASE_MS = 60_000, MAX_AGENT_TASKS = 8, MAX_BOARD_TASKS = 64;
+const MAX_AGENT_TASKS = 8, MAX_BOARD_TASKS = 64, MAX_CLOSED_TASKS = 512;
 
 /** Ephemeral view state and notifications never become product content or history. */
 export class StudioCollaboration {
@@ -22,6 +26,9 @@ export class StudioCollaboration {
   private queues = new Map<string, Promise<unknown>>();
   private activities = new Map<string, Map<string, Activity>>();
   private agentTasks = new Map<string, AgentTasks>();
+  private closedTasks = new Map<string, EndedTask>();
+  private terminalTasks = new Map<string, { artifactId: string; actor: Actor; task: AgentTask }>();
+  private taskDeadline?: ReturnType<typeof setTimeout>;
   private readonly expiry: ReturnType<typeof setInterval>;
   constructor(options: { dataRoot?: string } = {}) { this.timers = new RoomTimers(options.dataRoot); this.expiry = setInterval(() => this.expire(), 1000); this.expiry.unref(); }
   subscribe(artifactId: string, listener: (event: StudioEvent) => void): () => void {
@@ -172,6 +179,7 @@ export class StudioCollaboration {
     return copy([...group.values()].flatMap(peer => {
       if (!peer.value || !peer.streams && peer.leaseUntil <= now) return [];
       const value = copy(peer.value); if (value.chatExpiresAt !== undefined && value.chatExpiresAt <= now) { delete value.chat; delete value.chatExpiresAt; }
+      if (value.context?.agentTasks) value.context.agentTasks = value.context.agentTasks.filter(task => task.outcome ? task.endedAt! + AGENT_TASK_FADE_MS > now : task.expiresAt > now);
       return [value];
     }));
   }
@@ -192,20 +200,96 @@ export class StudioCollaboration {
     }
   }
   private expireTasks(now: number): void {
+    const changed = new Map<string, { artifactId: string; actor: Actor }>();
     for (const [key, group] of this.agentTasks) {
-      let changed = false;
-      for (const [id, task] of group.tasks) if (task.expiresAt <= now) { group.tasks.delete(id); changed = true; }
-      if (changed) {
-        if (!group.tasks.size) this.agentTasks.delete(key);
-        this.publishAgent(group.artifactId, group.actor);
+      for (const task of [...group.tasks.values()]) if (task.expiresAt <= now) {
+        this.retireTask(group.artifactId, group.actor, task, 'expired', now);
+        changed.set(key, group);
       }
     }
+    for (const [key, terminal] of this.terminalTasks) if (terminal.task.endedAt! + AGENT_TASK_FADE_MS <= now) { this.terminalTasks.delete(key); changed.set(`${terminal.artifactId}:${terminal.actor.id}`, terminal); }
+    for (const item of changed.values()) this.publishAgent(item.artifactId, item.actor);
+    this.scheduleTaskDeadline();
   }
-  /** A task is an expiring work hint, independent of individual tool calls and content locks. */
-  activity(artifactId: string, input: Record<string, unknown>, actor: Actor): { tasks: AgentTask[] } {
-    if (actor.kind !== 'agent' || actor.role !== 'owner') throw new StudioError('FORBIDDEN', '工作区域只能由已授权的所有者 Agent 声明。');
-    const taskId = safeId(input.taskId, '任务 ID'), action = input.action;
-    if (!['begin', 'update', 'end'].includes(String(action))) throw new StudioError('INVALID_ARGUMENT', '工作区域动作无效。');
+  private scheduleTaskDeadline(): void {
+    if (this.taskDeadline) clearTimeout(this.taskDeadline);
+    const times = [...this.agentTasks.values()].flatMap(group => [...group.tasks.values()].map(task => task.expiresAt));
+    times.push(...[...this.terminalTasks.values()].map(item => item.task.endedAt! + AGENT_TASK_FADE_MS));
+    this.taskDeadline = times.length ? setTimeout(() => this.expireTasks(Date.now()), Math.max(0, Math.min(...times) - Date.now())) : undefined;
+    this.taskDeadline?.unref();
+  }
+  private retireTask(artifactId: string, actor: Actor, task: AgentTask, outcome: AgentTaskOutcome, endedAt = Date.now()): EndedTask {
+    const key = `${artifactId}:${actor.id}`, group = this.agentTasks.get(key);
+    group?.tasks.delete(task.taskId); if (!group?.tasks.size) this.agentTasks.delete(key);
+    const ended = { taskId: task.taskId, generation: task.generation, endedAt, outcome };
+    const closedKey = `${key}:${task.taskId}`;
+    this.closedTasks.delete(closedKey); this.closedTasks.set(closedKey, ended);
+    while (this.closedTasks.size > MAX_CLOSED_TASKS) this.closedTasks.delete(this.closedTasks.keys().next().value!);
+    this.terminalTasks.set(`${closedKey}:${task.generation}`, { artifactId, actor: copy(actor), task: { ...copy(task), endedAt, outcome } });
+    for (const [id, activity] of this.activities.get(key) ?? []) if (activity.binding?.taskId === task.taskId && activity.binding.generation === task.generation) this.activities.get(key)!.delete(id);
+    if (!this.activities.get(key)?.size) this.activities.delete(key);
+    this.scheduleTaskDeadline();
+    return ended;
+  }
+  workspaces(artifactId: string, except?: { actorId: string; binding: AgentTaskBinding }): AgentWorkspace[] {
+    this.expireTasks(Date.now());
+    return [...this.agentTasks.values()].filter(group => group.artifactId === artifactId).flatMap(group => [...group.tasks.values()].filter(task => !except || group.actor.id !== except.actorId || task.taskId !== except.binding.taskId || task.generation !== except.binding.generation).map(task => ({ actorId: group.actor.id, task: copy(task) })));
+  }
+  assertTask(artifactId: string, actor: Actor, binding: AgentTaskBinding): AgentTask {
+    this.expireTasks(Date.now());
+    const task = this.agentTasks.get(`${artifactId}:${actor.id}`)?.tasks.get(binding.taskId);
+    if (!task || task.generation !== binding.generation) {
+      const ended = this.closedTasks.get(`${artifactId}:${actor.id}:${binding.taskId}`);
+      if (!task && ended?.generation === binding.generation && ended.outcome !== 'expired') throw new StudioError('TASK_CLOSED', '工作任务已经结束，原代次不能继续修改白板。', { outcome: ended.outcome });
+      throw new StudioError('TASK_STALE', '工作任务已过期或来自旧服务，请查询当前任务状态后重新安排。', { ...binding });
+    }
+    return copy(task);
+  }
+  touchTask(artifactId: string, actor: Actor, binding: AgentTaskBinding, progress = false): boolean {
+    this.expireTasks(Date.now());
+    const task = this.agentTasks.get(`${artifactId}:${actor.id}`)?.tasks.get(binding.taskId);
+    if (!task || task.generation !== binding.generation) return false;
+    const now = Date.now(); task.lastActivityAt = now; task.expiresAt = now + AGENT_TASK_LEASE_MS;
+    if (progress) task.lastProgressAt = now;
+    this.scheduleTaskDeadline(); this.publishAgent(artifactId, actor); return true;
+  }
+  /** Lifecycle is independent of page streams; a retired generation never regains write permission. */
+  activity(artifactId: string, input: Record<string, unknown>, actor: Actor, elements: readonly BoardElement[] = []): TaskResult {
+    const action = input.action;
+    if (!['begin', 'update', 'end', 'status', 'release'].includes(String(action))) throw new StudioError('INVALID_ARGUMENT', '工作区域动作无效。');
+    if (action === 'release' ? actor.kind !== 'human' || actor.role !== 'owner' : actor.kind !== 'agent' || actor.role !== 'owner') throw new StudioError('FORBIDDEN', action === 'release' ? '只有房主本人可以结束其他 Agent 的工作。' : '工作区域只能由已授权的所有者 Agent 声明。');
+    this.getTimer(artifactId); this.expireTasks(Date.now());
+    const targetActorId = action === 'release' ? safeId(input.targetActorId, '目标 Agent ID') : actor.id;
+    const key = `${artifactId}:${targetActorId}`, group = this.agentTasks.get(key);
+    const active = () => copy([...(this.agentTasks.get(key)?.tasks.values() ?? [])]);
+    if (action === 'status') {
+      if (input.generation === undefined) {
+        if (input.taskId !== undefined) {
+          const requested = safeId(input.taskId, '任务 ID'), ended = this.closedTasks.get(`${key}:${requested}`);
+          return { tasks: active().filter(task => task.taskId === requested), ...(ended ? { ended: copy(ended) } : {}) };
+        }
+        const endedTasks = [...this.closedTasks].filter(([closedKey]) => closedKey.startsWith(`${key}:`)).slice(-MAX_AGENT_TASKS).map(([, ended]) => copy(ended));
+        return { tasks: active(), endedTasks };
+      }
+      const binding = taskBinding(input, true)!;
+      const task = group?.tasks.get(binding.taskId), ended = this.closedTasks.get(`${key}:${binding.taskId}`);
+      if (task?.generation === binding.generation) return { tasks: active() };
+      if (!task && ended?.generation === binding.generation) return { tasks: active(), ended: copy(ended) };
+      throw new StudioError('TASK_STALE', '工作任务代次已失效，请查询当前任务状态。');
+    }
+    const taskId = safeId(input.taskId, '任务 ID'), previous = group?.tasks.get(taskId);
+    if (action === 'end' || action === 'release') {
+      const binding = taskBinding(input, true)!;
+      const ended = this.closedTasks.get(`${key}:${taskId}`);
+      if (!previous) {
+        if (ended?.generation === binding.generation) return { tasks: active(), ended: copy(ended) };
+        throw new StudioError('TASK_STALE', '工作任务已结束或代次已失效，请查询当前任务状态。');
+      }
+      if (previous.generation !== binding.generation) throw new StudioError('TASK_STALE', '旧任务代次不能结束当前工作。');
+      if (input.outcome !== undefined && !['completed', 'failed', 'cancelled'].includes(String(input.outcome))) throw new StudioError('INVALID_ARGUMENT', '任务结束状态无效。');
+      const result = this.retireTask(artifactId, group!.actor, previous, action === 'release' ? 'released' : input.outcome as AgentTaskOutcome ?? 'completed');
+      this.publishAgent(artifactId, group!.actor); return { tasks: active(), ended: result };
+    }
     let scope: AgentActivityScope | undefined;
     if (input.scope !== undefined) {
       if (!object(input.scope)) throw new StudioError('INVALID_ARGUMENT', '工作区域无效。');
@@ -223,25 +307,34 @@ export class StudioCollaboration {
     }
     if (input.label !== undefined && (typeof input.label !== 'string' || [...input.label].length > 80)) throw new StudioError('INVALID_ARGUMENT', '工作描述最多 80 个字符。');
     if (action === 'begin' && !scope) throw new StudioError('INVALID_ARGUMENT', '开始任务时需要工作区域。');
-    this.getTimer(artifactId); this.expireTasks(Date.now());
-    const key = `${artifactId}:${actor.id}`, group = this.agentTasks.get(key), previous = group?.tasks.get(taskId);
-    if (action === 'end') {
-      if (group?.tasks.delete(taskId)) { if (!group.tasks.size) this.agentTasks.delete(key); this.publishAgent(artifactId, actor); }
-      return { tasks: copy([...(this.agentTasks.get(key)?.tasks.values() ?? [])]) };
+    if (input.phase !== undefined && !['preparing', 'writing', 'verifying'].includes(String(input.phase))) throw new StudioError('INVALID_ARGUMENT', '工作任务阶段无效。');
+    if (action === 'update') this.assertTask(artifactId, actor, taskBinding(input, true)!);
+    const closed = this.closedTasks.get(`${key}:${taskId}`);
+    if (action === 'begin' && input.generation !== undefined) {
+      const generation = safeId(input.generation, '任务代次');
+      if (previous ? previous.generation !== generation : closed?.generation !== generation) throw new StudioError('TASK_STALE', '旧任务代次不能重新开始工作，请读取最新内容后声明新的任务。');
     }
-    if (action === 'update' && !previous) throw new StudioError('NOT_FOUND', '工作任务已结束或失效，请重新声明。');
+    if (previous && scope && !sameTaskScope(previous.scope, scope)) throw new StudioError('TASK_SCOPE', '活跃任务不能直接更换工作范围，请先结束并为新工作声明新任务。');
+    if (!previous && closed && (closed.outcome === 'released' || input.generation !== closed.generation)) throw new StudioError('TASK_CLOSED', closed.outcome === 'released' ? '房主已结束此任务，不能自动重新申请；收到新任务后请使用新的任务 ID。' : '该任务已经结束，请读取最新内容，并带上最近结束的代次明确重新申请。', { outcome: closed.outcome });
     if (!previous) {
       const count = [...this.agentTasks.values()].filter(item => item.artifactId === artifactId).reduce((sum, item) => sum + item.tasks.size, 0);
       if ((group?.tasks.size ?? 0) >= MAX_AGENT_TASKS || count >= MAX_BOARD_TASKS) throw new StudioError('BUSY', '并行工作任务过多，请先结束已有任务。');
     }
     const current = group ?? { artifactId, actor: copy(actor), tasks: new Map<string, AgentTask>() };
     current.actor = copy(actor);
-    current.tasks.set(taskId, { taskId, scope: copy(scope ?? previous!.scope), label: input.label === undefined ? previous?.label : String(input.label).trim() || undefined, expiresAt: Date.now() + AGENT_TASK_LEASE_MS });
+    const nextScope = scope ?? previous!.scope;
+    assertWorkspaceAvailable(nextScope, actor.id, this.workspaces(artifactId), elements);
+    if (previous && this.agentTasks.get(key)?.tasks.get(taskId) !== previous) throw new StudioError('TASK_STALE', '任务在重新申请前已过期，请查询最近代次后明确重新申请。');
+    const now = Date.now(), phase = input.phase as AgentTask['phase'] ?? previous?.phase ?? 'preparing';
+    current.tasks.set(taskId, { taskId, generation: previous?.generation ?? randomUUID(), scope: copy(nextScope), phase, label: input.label === undefined ? previous?.label : String(input.label).trim() || undefined, startedAt: previous?.startedAt ?? now, lastActivityAt: now, lastProgressAt: !previous || previous.phase !== phase ? now : previous.lastProgressAt, expiresAt: now + AGENT_TASK_LEASE_MS });
     this.agentTasks.set(key, current); this.publishAgent(artifactId, actor);
+    this.scheduleTaskDeadline();
     return { tasks: copy([...current.tasks.values()]) };
   }
   private publishAgent(artifactId: string, actor: Actor, lastActivity?: string): void {
-    const key = `${artifactId}:${actor.id}`, entries = [...(this.activities.get(key)?.values() ?? [])], tasks = [...(this.agentTasks.get(key)?.tasks.values() ?? [])];
+    const key = `${artifactId}:${actor.id}`, live = [...(this.agentTasks.get(key)?.tasks.values() ?? [])];
+    const entries = [...(this.activities.get(key)?.values() ?? [])].filter(entry => !entry.binding || live.some(task => task.taskId === entry.binding!.taskId && task.generation === entry.binding!.generation));
+    const terminal = [...this.terminalTasks.values()].filter(item => item.artifactId === artifactId && item.actor.id === actor.id && item.task.endedAt! + AGENT_TASK_FADE_MS > Date.now()).map(item => item.task), tasks = [...live, ...terminal];
     const peers = this.group(artifactId), peerId = `agent-${createHash('sha256').update(actor.id).digest('hex').slice(0, 24)}`;
     let peer = peers.get(peerId);
     if (!entries.length && !tasks.length) {
@@ -250,8 +343,8 @@ export class StudioCollaboration {
       peer.value = { ...peer.value, context: { ...peer.value.context!, editingIds: [], movingIds: [], agentTasks: [], activity: 'idle', lastActivity: lastActivity ?? peer.value.context?.activity }, updatedAt: new Date().toISOString() };
     } else {
       if (!peer) { peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: 0, streams: 0, retired: new Set(), tokens: 80, budgetAt: Date.now() }; peers.set(peerId, peer); }
-      peer.leaseUntil = entries.length ? Infinity : Math.max(...tasks.map(task => task.expiresAt));
-      peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: entries[0]?.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap(item => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap(item => item.editingIds ?? []))], agentTasks: copy(tasks), activity: entries.some(item => item.status === 'writing') ? 'writing' : entries.length ? 'reading' : 'working' }, updatedAt: new Date().toISOString() };
+      peer.leaseUntil = entries.length ? Infinity : live.length ? Math.max(...live.map(task => task.expiresAt)) : Date.now() + AGENT_IDLE_MS;
+      peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: entries[0]?.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap(item => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap(item => item.editingIds ?? []))], agentTasks: copy(tasks), activity: entries.some(item => item.status === 'writing') ? 'writing' : entries.length ? 'reading' : live.length ? 'working' : 'idle' }, updatedAt: new Date().toISOString() };
     }
     this.publishPresence(artifactId);
   }
@@ -268,6 +361,7 @@ export class StudioCollaboration {
   }
   beginActivity(artifactId: string, actor: Actor, input: Omit<Activity, 'actor'>): () => void {
     if (actor.kind !== 'agent') throw new StudioError('FORBIDDEN', '代理活动必须由服务端登记。');
+    if (input.binding) this.assertTask(artifactId, actor, input.binding);
     this.getTimer(artifactId);
     const activityId = randomUUID(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? new Map<string, Activity>();
     group.set(activityId, { actor: copy(actor), ...copy(input) }); this.activities.set(key, group);
@@ -279,6 +373,6 @@ export class StudioCollaboration {
     for (const [peerId, peer] of group) if (revoked.has(peer.actorId)) { if (peer.disconnect) clearTimeout(peer.disconnect); group.delete(peerId); }
     this.publishPresence(artifactId);
   }
-  forget(artifactId: string): void { for (const peer of this.peers.get(artifactId)?.values() ?? []) if (peer.disconnect) clearTimeout(peer.disconnect); this.peers.delete(artifactId); this.timers.forget(artifactId); this.rooms.delete(artifactId); for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key); for (const key of this.agentTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.agentTasks.delete(key); }
-  close(): void { clearInterval(this.expiry); for (const id of this.peers.keys()) this.forget(id); this.listeners.clear(); this.activities.clear(); this.agentTasks.clear(); this.timers.close(); this.events.clear(); }
+  forget(artifactId: string): void { for (const peer of this.peers.get(artifactId)?.values() ?? []) if (peer.disconnect) clearTimeout(peer.disconnect); this.peers.delete(artifactId); this.timers.forget(artifactId); this.rooms.delete(artifactId); for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key); for (const key of this.agentTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.agentTasks.delete(key); for (const key of this.closedTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.closedTasks.delete(key); for (const [key, task] of this.terminalTasks) if (task.artifactId === artifactId) this.terminalTasks.delete(key); this.scheduleTaskDeadline(); }
+  close(): void { clearInterval(this.expiry); for (const id of this.peers.keys()) this.forget(id); this.listeners.clear(); this.activities.clear(); this.agentTasks.clear(); this.closedTasks.clear(); this.terminalTasks.clear(); if (this.taskDeadline) clearTimeout(this.taskDeadline); this.timers.close(); this.events.clear(); }
 }

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { LOCAL_ACTOR, type Actor, type StudioEvent } from '../src/contracts/studio.js';
+import { AGENT_TASK_LEASE_MS, LOCAL_ACTOR, type Actor, type StudioEvent } from '../src/contracts/studio.js';
 import { StudioCollaboration } from '../src/core/shared/collaboration.js';
 
 const editor: Actor = { id: 'editor', name: 'Editor', kind: 'human', role: 'editor' };
@@ -14,26 +14,26 @@ describe('explicit Agent work areas', () => {
   const agent: Actor = { id: 'agent-builder', name: 'Builder', kind: 'agent', role: 'owner' };
   it('keeps an explicit task across tool completions and isolates parallel agents and tasks', () => {
     const collaboration = create();
-    collaboration.activity('board-a', { action: 'begin', taskId: 'diagram', scope: { rect: { x: 100, y: 200, w: 600, h: 400 } }, label: '扩展架构图' }, agent);
+    const task = collaboration.activity('board-a', { action: 'begin', taskId: 'diagram', scope: { rect: { x: 100, y: 200, w: 600, h: 400 } }, label: '扩展架构图' }, agent).tasks[0]!;
     const done = collaboration.beginActivity('board-a', agent, { status: 'writing', editingIds: ['shape'] }); done();
     expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'working', editingIds: [], agentTasks: [{ taskId: 'diagram', label: '扩展架构图' }] });
     collaboration.activity('board-a', { action: 'begin', taskId: 'second', scope: { ids: ['other'] } }, agent);
     const other = { ...agent, id: 'agent-other' };
     collaboration.activity('board-a', { action: 'begin', taskId: 'diagram', scope: { ids: ['another'] } }, other);
-    collaboration.activity('board-a', { action: 'end', taskId: 'diagram' }, agent);
+    collaboration.activity('board-a', { action: 'end', taskId: 'diagram', generation: task.generation }, agent);
     const peers = collaboration.getPresence('board-a');
-    expect(peers.find(peer => peer.actor.id === agent.id)!.context!.agentTasks).toEqual([expect.objectContaining({ taskId: 'second' })]);
+    expect(peers.find(peer => peer.actor.id === agent.id)!.context!.agentTasks!.filter(item => !item.outcome)).toEqual([expect.objectContaining({ taskId: 'second' })]);
     expect(peers.find(peer => peer.actor.id === other.id)!.context!.agentTasks).toEqual([expect.objectContaining({ taskId: 'diagram' })]);
   });
   it('renews a bounded lease, expires the task without a final message, and rejects stale updates', () => {
     vi.useFakeTimers(); vi.setSystemTime(1000); const collaboration = create();
-    collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape'] } }, agent);
+    const task = collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape'] } }, agent).tasks[0]!;
     vi.advanceTimersByTime(59_000);
-    expect(collaboration.activity('board-a', { action: 'update', taskId: 'work', label: '正在整理' }, agent).tasks[0]!.expiresAt).toBe(120_000);
-    vi.advanceTimersByTime(59_999); expect(collaboration.getPresence('board-a')[0]!.context!.agentTasks).toHaveLength(1);
+    expect(collaboration.activity('board-a', { action: 'update', taskId: 'work', generation: task.generation, label: '正在整理' }, agent).tasks[0]!.expiresAt).toBe(60_000 + AGENT_TASK_LEASE_MS);
+    vi.advanceTimersByTime(AGENT_TASK_LEASE_MS - 1); expect(collaboration.getPresence('board-a')[0]!.context!.agentTasks).toHaveLength(1);
     vi.advanceTimersByTime(1001); expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'idle', editingIds: [], agentTasks: [] });
-    expect(() => collaboration.activity('board-a', { action: 'update', taskId: 'work' }, agent)).toThrow(/失效/);
-    expect(collaboration.activity('board-a', { action: 'end', taskId: 'work' }, agent).tasks).toEqual([]);
+    expect(() => collaboration.activity('board-a', { action: 'update', taskId: 'work', generation: task.generation }, agent)).toThrowError(expect.objectContaining({ code: 'TASK_STALE' }));
+    expect(collaboration.activity('board-a', { action: 'end', taskId: 'work', generation: task.generation }, agent).tasks).toEqual([]);
     vi.advanceTimersByTime(20_000); expect(collaboration.getPresence('board-a')).toEqual([]);
   });
   it('accepts only owner Agents and valid nonempty scopes, with an explicit parallel-task bound', () => {
@@ -42,17 +42,17 @@ describe('explicit Agent work areas', () => {
     for (const scope of [{}, { ids: [] }, { rect: { x: 0, y: 0, w: 0, h: 100 } }, { rect: { x: Infinity, y: 0, w: 100, h: 100 } }]) expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope }, agent)).toThrow();
     for (let i = 0; i < 8; i++) collaboration.activity('board-a', { action: 'begin', taskId: `task-${i}`, scope: { ids: ['shape'] } }, agent);
     expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'ninth', scope: { ids: ['shape'] } }, agent)).toThrow(/并行/);
-    for (let n = 1; n < 8; n++) for (let i = 0; i < 8; i++) collaboration.activity('board-a', { action: 'begin', taskId: `task-${i}`, scope: { ids: ['shape'] } }, { ...agent, id: `agent-${n}` });
+    for (let n = 1; n < 8; n++) for (let i = 0; i < 8; i++) collaboration.activity('board-a', { action: 'begin', taskId: `task-${i}`, scope: { ids: [`shape-${n}`] } }, { ...agent, id: `agent-${n}` });
     expect(() => collaboration.activity('board-a', { action: 'begin', taskId: 'overflow', scope: { ids: ['shape'] } }, { ...agent, id: 'agent-overflow' })).toThrow(/并行/);
     expect(collaboration.getPresence('board-a')).toHaveLength(8);
   });
   it('ending a task does not hide an in-flight tool, and forgetting the board prevents late completion resurrection', () => {
     const collaboration = create();
-    collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape', 'shape'] } }, agent);
+    const task = collaboration.activity('board-a', { action: 'begin', taskId: 'work', scope: { ids: ['shape', 'shape'] } }, agent).tasks[0]!;
     expect(collaboration.getPresence('board-a')[0]!.context!.agentTasks![0]!.scope.ids).toEqual(['shape']);
     const done = collaboration.beginActivity('board-a', agent, { status: 'writing', editingIds: ['shape'] });
-    collaboration.activity('board-a', { action: 'end', taskId: 'work' }, agent);
-    expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'writing', editingIds: ['shape'], agentTasks: [] });
+    collaboration.activity('board-a', { action: 'end', taskId: 'work', generation: task.generation }, agent);
+    expect(collaboration.getPresence('board-a')[0]!.context).toMatchObject({ activity: 'writing', editingIds: ['shape'], agentTasks: [expect.objectContaining({ outcome: 'completed' })] });
     collaboration.forget('board-a'); done(); expect(collaboration.getPresence('board-a')).toEqual([]);
   });
 });

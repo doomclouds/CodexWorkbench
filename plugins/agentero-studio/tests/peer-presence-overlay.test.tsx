@@ -9,6 +9,7 @@ import type { BoardElement, Presence } from '../src/contracts/studio.js';
 import { OnlineParticipants } from '../src/app/shared/OnlineParticipants.js';
 
 const START = Date.UTC(2026, 10, 15, 3, 0);
+const taskMeta = (at = START) => ({ generation: 'generation-1', phase: 'writing' as const, startedAt: at, lastActivityAt: at, lastProgressAt: at });
 const elements: BoardElement[] = [
   { id: 'one', type: 'shape', x: 100, y: 200, w: 240, h: 120, version: 1 },
   { id: 'two', type: 'shape', x: 500, y: 400, w: 180, h: 100, version: 1 },
@@ -90,29 +91,30 @@ it('combines a peer\'s real targets of the same state into one outline without c
 });
 
 it('keeps work animation on each Agent area while separating its identity from normalized task status', async () => {
-  const peers = ['绘制服务图', '正在工作 · 绘制依赖图'].map((label, index) => peer(`agent-${index}`, { actor: { id: `agent-${index}`, name: `Agent ${index ? 'B' : 'A'} · ${index ? 'bb00' : 'aa00'}`, kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ taskId: `task-${index}`, label, scope: { rect: { x: index * 300, y: 0, w: 200, h: 100 } }, expiresAt: START + 60_000 }] } }));
+  const peers = ['绘制服务图', '正在工作 · 绘制依赖图'].map((label, index) => peer(`agent-${index}`, { actor: { id: `agent-${index}`, name: `Agent ${index ? 'B' : 'A'} · ${index ? 'bb00' : 'aa00'}`, kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ ...taskMeta(), taskId: `task-${index}`, label, scope: { rect: { x: index * 300, y: 0, w: 200, h: 100 } }, expiresAt: START + 60_000 }] } }));
   await mount(peers);
   for (const [index, agent] of peers.entries()) {
     const area = host.querySelector<HTMLElement>(`[data-agent-task="task-${index}"]`)!;
     expect(area.querySelectorAll('.studio-agent-working-mark')).toHaveLength(1);
-    expect(area.textContent).toContain(`${agent.actor.name} · 正在工作 · ${index ? '绘制依赖图' : '绘制服务图'}`);
-    expect(area.textContent!.match(/正在工作/g)).toHaveLength(1); expect(area.style.pointerEvents).toBe('none');
+    expect(area.textContent).toContain(`${agent.actor.name} · 修改中 · ${index ? '绘制依赖图' : '绘制服务图'}`);
+    expect(area.textContent!.match(/修改中/g)).toHaveLength(1); expect(area.style.pointerEvents).toBe('none');
   }
   await mount(peers.map(agent => ({ ...agent, context: { ...agent.context!, activity: 'idle', agentTasks: [] } })));
   expect(host.querySelector('.studio-agent-working-mark')).toBeNull();
 });
 
 it('renders an explicit empty-ground Agent task as a nonblocking animated area and expires it on the server clock', async () => {
-  const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ taskId: 'task', label: '扩展架构图', scope: { rect: { x: 50, y: 70, w: 600, h: 400 } }, expiresAt: START + 2000 }] } });
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'working', agentTasks: [{ ...taskMeta(), taskId: 'task', label: '扩展架构图', scope: { rect: { x: 50, y: 70, w: 600, h: 400 } }, expiresAt: START + 2000 }] } });
   await mount([agent]);
   const area = host.querySelector<HTMLElement>('[data-agent-task="task"]')!;
   expect(area).not.toBeNull(); expect(area.style.left).toBe('50px'); expect(area.style.width).toBe('600px'); expect(area.style.pointerEvents).toBe('none');
   expect(area.textContent).toContain('Builder'); expect(area.textContent).toContain('扩展架构图'); expect(area.querySelector('.studio-agent-working-mark')).not.toBeNull();
-  await advance(2000); expect(host.querySelector('[data-agent-task]')).toBeNull();
+  await advance(2000); expect(host.querySelector('[data-agent-task]')?.classList.contains('is-ending')).toBe(true);
+  await advance(500); expect(host.querySelector('[data-agent-task]')).toBeNull();
 });
 
 it('resolves task IDs against current geometry and keeps independent Agent regions visible', async () => {
-  const task = (id: string, actorId: string) => peer(actorId, { actor: { id: actorId, name: actorId, kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [{ taskId: id, scope: { ids: ['one', 'two'] }, expiresAt: START + 60_000 }] } });
+  const task = (id: string, actorId: string) => peer(actorId, { actor: { id: actorId, name: actorId, kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [{ ...taskMeta(), taskId: id, scope: { ids: ['one', 'two'] }, expiresAt: START + 60_000 }] } });
   const peers = [task('first', 'agent-one'), task('second', 'agent-two')]; await mount(peers);
   expect(host.querySelectorAll('[data-agent-task]')).toHaveLength(2);
   const before = host.querySelector<HTMLElement>('[data-agent-task="first"]')!.style.width;
@@ -123,9 +125,10 @@ it('resolves task IDs against current geometry and keeps independent Agent regio
 
 it('clears Agent claims on the server deadline despite a different client clock and no new presence event', async () => {
   vi.setSystemTime(START - 7200_000);
-  const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [{ taskId: 'work', scope: { ids: ['one'] }, expiresAt: START + 1000 }] } });
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Builder', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [{ ...taskMeta(), taskId: 'work', scope: { ids: ['one'] }, expiresAt: START + 1000 }] } });
   await mount([agent], { clockOffsetMs: 7200_000 }); expect(host.querySelector('[data-agent-task]')).not.toBeNull();
-  await advance(1000); expect(host.querySelector('[data-agent-task]')).toBeNull();
+  await advance(1000); expect(host.querySelector('[data-agent-task]')?.classList.contains('is-ending')).toBe(true);
+  await advance(500); expect(host.querySelector('[data-agent-task]')).toBeNull();
 });
 
 it('uses the claimed palette and chooses the freshest cursor per other actor while hiding every self page', async () => {
@@ -217,4 +220,74 @@ it('removes chat without an animation when reduced motion is enabled', async () 
   vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
   await mount([peer('alice', { cursor: { x: 10, y: 20, t: START }, chat: 'quiet', chatExpiresAt: START + 5000 })]);
   expect(host.querySelector('p')!.style.transition).toBe('none'); await advance(5000); expect(host.querySelector('p')).toBeNull();
+});
+
+it.each([-7_200_000, 7_200_000])('keeps a workspace after a minute and marks stale progress on server time %s without peer updates', async offset => {
+  vi.setSystemTime(START - offset);
+  const task = { ...taskMeta(), taskId: 'long-work', generation: 'long-generation', phase: 'preparing' as const, label: '准备房屋笔迹', scope: { rect: { x: 30, y: 40, w: 500, h: 300 } }, expiresAt: START + 600_000 };
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Agent A', kind: 'agent', role: 'owner' }, context: { ...context(), activity: 'writing', agentTasks: [task] } });
+  await mount([agent], { clockOffsetMs: offset });
+  const area = () => host.querySelector<HTMLElement>('[data-agent-task="long-work"]')!;
+  expect(area().textContent).toContain('准备中');
+  await advance(60_001); expect(area()).not.toBeNull(); expect(area().classList.contains('is-stale')).toBe(false);
+  await advance(59_999); expect(area().classList.contains('is-stale')).toBe(true); expect(area().textContent).toContain('暂未收到新进度');
+  expect(area().style.getPropertyValue('--agent-work-play-state')).toBe('paused');
+  await mount([{ ...agent, updatedAt: new Date(START + 120_000).toISOString(), context: { ...agent.context!, agentTasks: [{ ...task, lastActivityAt: START + 120_000, expiresAt: START + 720_000 }] } }], { clockOffsetMs: offset });
+  expect(area().classList.contains('is-stale')).toBe(true);
+  await mount([{ ...agent, context: { ...agent.context!, agentTasks: [{ ...task, phase: 'verifying', lastProgressAt: START + 120_000, lastActivityAt: START + 120_000, expiresAt: START + 720_000 }] } }], { clockOffsetMs: offset });
+  expect(area().classList.contains('is-stale')).toBe(false); expect(area().textContent).toContain('检查中');
+  expect(area().style.getPropertyValue('--agent-work-play-state')).toBe('running');
+});
+
+it('fades a terminal workspace for 500 ms without showing a release action or reusing a newer generation', async () => {
+  const task = { ...taskMeta(), taskId: 'work', generation: 'old-generation', scope: { ids: ['one'] }, expiresAt: START + 600_000 };
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Agent A', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [task] } });
+  const release = vi.fn().mockResolvedValue(undefined);
+  await mount([agent], { onReleaseAgentTask: release });
+  const terminal = { ...task, endedAt: START, outcome: 'released' as const };
+  await mount([{ ...agent, context: { ...agent.context!, agentTasks: [terminal, { ...task, generation: 'new-generation', scope: { rect: { x: 800, y: 40, w: 100, h: 100 } } }] } }], { onReleaseAgentTask: release });
+  const old = host.querySelector<HTMLElement>('[data-agent-generation="old-generation"]')!;
+  expect(old).not.toBeNull(); expect(old.classList.contains('is-ending')).toBe(true); expect(old.querySelector('button')).toBeNull();
+  expect(host.querySelectorAll('[data-agent-task="work"]')).toHaveLength(2);
+  await advance(499); expect(host.querySelector('[data-agent-generation="old-generation"]')).not.toBeNull();
+  await advance(1); expect(host.querySelector('[data-agent-generation="old-generation"]')).toBeNull();
+  const newer = host.querySelector<HTMLElement>('[data-agent-generation="new-generation"]')!;
+  expect(newer).not.toBeNull(); await act(async () => newer.querySelector<HTMLButtonElement>('button')!.click());
+  expect(release).toHaveBeenCalledWith({ artifactId: 'board', targetActorId: 'builder', taskId: 'work', generation: 'new-generation' });
+});
+
+it('ends an expired workspace locally with a short fade even if no further presence event arrives', async () => {
+  const task = { ...taskMeta(), taskId: 'work', scope: { rect: { x: 20, y: 30, w: 400, h: 200 } }, expiresAt: START + 600_000 };
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Agent A', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [task] } });
+  await mount([agent]); await advance(600_000);
+  expect(host.querySelector('[data-agent-task="work"]')?.classList.contains('is-ending')).toBe(true);
+  await advance(500); expect(host.querySelector('[data-agent-task]')).toBeNull();
+  await mount([{ ...agent, context: { ...agent.context!, agentTasks: [{ ...task, outcome: 'expired', endedAt: START + 600_200 }] } }]);
+  expect(host.querySelector('[data-agent-task]')).toBeNull();
+});
+
+it('keeps the last visible bounds only for a terminal fade and never revives an already empty active scope', async () => {
+  const task = { ...taskMeta(), taskId: 'work', scope: { ids: ['one'] }, expiresAt: START + 600_000 };
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Agent A', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [task] } });
+  await mount([agent]); const before = host.querySelector<HTMLElement>('[data-agent-task]')!.style.left;
+  await mount([{ ...agent, context: { ...agent.context!, agentTasks: [{ ...task, endedAt: START, outcome: 'completed' }] } }], { elements: [] });
+  expect(host.querySelector<HTMLElement>('[data-agent-task]')!.style.left).toBe(before);
+  await advance(500); expect(host.querySelector('[data-agent-task]')).toBeNull();
+  await mount([agent], { elements: [] }); expect(host.querySelector('[data-agent-task]')).toBeNull();
+  await mount([{ ...agent, context: { ...agent.context!, agentTasks: [{ ...task, endedAt: START + 500, outcome: 'completed' }] } }], { elements: [] });
+  expect(host.querySelector('[data-agent-task]')).toBeNull();
+});
+
+it('keeps an owner release failure recoverable and never automatically targets another generation', async () => {
+  const task = { ...taskMeta(), taskId: 'work', scope: { rect: { x: 20, y: 30, w: 400, h: 200 } }, expiresAt: START + 600_000 };
+  const agent = peer('builder', { actor: { id: 'builder', name: 'Agent A', kind: 'agent', role: 'owner' }, context: { ...context(), agentTasks: [task] } });
+  let reject!: (cause: Error) => void;
+  const release = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
+  await mount([agent], { onReleaseAgentTask: release });
+  const button = host.querySelector<HTMLButtonElement>('[data-agent-task] button'); expect(button).not.toBeNull();
+  await act(async () => button!.click()); expect(button!.disabled).toBe(true);
+  await act(async () => reject(new Error('工作区版本已改变，请重新核对')));
+  expect(host.querySelector('[data-agent-task]')).not.toBeNull(); expect(button!.disabled).toBe(false);
+  expect(host.querySelector('[role="alert"]')!.textContent).toContain('工作区版本已改变'); expect(release).toHaveBeenCalledTimes(1);
+  await mount([agent], { preview: true, onReleaseAgentTask: release }); expect(host.querySelector('button')).toBeNull();
 });
