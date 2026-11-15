@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Actor, Presence, RoomTimer, StudioEvent, SyncBatch } from '../../contracts/studio.js';
+import type { Actor, AgentActivityScope, AgentTask, Presence, RoomTimer, StudioEvent, SyncBatch } from '../../contracts/studio.js';
 import { copy, finite, object, requireRole, safeId, StudioError } from './common.js';
 import { CollaborationEvents } from './collaboration-events.js';
 import { CollaborationRoom } from './collaboration-room.js';
@@ -8,7 +8,9 @@ import { RoomTimers } from './room-timers.js';
 export interface SyncOptions { after?: string; wait?: number; signal?: AbortSignal; peerId?: string; peerEpoch?: string }
 interface PeerState { actorId: string; epoch?: string; sequence: number; roomSequence: number; value?: Presence; departed?: boolean; leaseUntil: number; streams: number; disconnect?: ReturnType<typeof setTimeout>; retired: Set<string>; tokens: number; budgetAt: number }
 interface Activity { actor: Actor; status: 'reading' | 'writing'; editingIds?: string[]; selectedIds?: string[]; viewId?: string }
+interface AgentTasks { artifactId: string; actor: Actor; tasks: Map<string, AgentTask> }
 const LEASE_MS = 45_000, DISCONNECT_MS = 4000, AGENT_IDLE_MS = 20_000;
+const AGENT_TASK_LEASE_MS = 60_000, MAX_AGENT_TASKS = 8, MAX_BOARD_TASKS = 64;
 
 /** Ephemeral view state and notifications never become product content or history. */
 export class StudioCollaboration {
@@ -19,6 +21,7 @@ export class StudioCollaboration {
   private rooms = new Map<string, CollaborationRoom>();
   private queues = new Map<string, Promise<unknown>>();
   private activities = new Map<string, Map<string, Activity>>();
+  private agentTasks = new Map<string, AgentTasks>();
   private readonly expiry: ReturnType<typeof setInterval>;
   constructor(options: { dataRoot?: string } = {}) { this.timers = new RoomTimers(options.dataRoot); this.expiry = setInterval(() => this.expire(), 1000); this.expiry.unref(); }
   subscribe(artifactId: string, listener: (event: StudioEvent) => void): () => void {
@@ -173,6 +176,7 @@ export class StudioCollaboration {
   private publishPresence(artifactId: string): void { this.emit({ type: 'presence', artifactId, peers: this.getPresence(artifactId), timer: this.getTimer(artifactId), serverTime: Date.now() }); }
   private expire(): void {
     const now = Date.now();
+    this.expireTasks(now);
     for (const [artifactId, group] of this.peers) {
       let changed = false;
       for (const [peerId, peer] of group) {
@@ -184,6 +188,70 @@ export class StudioCollaboration {
       if (changed) this.publishPresence(artifactId);
       if (!group.size) this.peers.delete(artifactId);
     }
+  }
+  private expireTasks(now: number): void {
+    for (const [key, group] of this.agentTasks) {
+      let changed = false;
+      for (const [id, task] of group.tasks) if (task.expiresAt <= now) { group.tasks.delete(id); changed = true; }
+      if (changed) {
+        if (!group.tasks.size) this.agentTasks.delete(key);
+        this.publishAgent(group.artifactId, group.actor);
+      }
+    }
+  }
+  /** A task is an expiring work hint, independent of individual tool calls and content locks. */
+  activity(artifactId: string, input: Record<string, unknown>, actor: Actor): { tasks: AgentTask[] } {
+    if (actor.kind !== 'agent' || actor.role !== 'owner') throw new StudioError('FORBIDDEN', '工作区域只能由已授权的所有者 Agent 声明。');
+    const taskId = safeId(input.taskId, '任务 ID'), action = input.action;
+    if (!['begin', 'update', 'end'].includes(String(action))) throw new StudioError('INVALID_ARGUMENT', '工作区域动作无效。');
+    let scope: AgentActivityScope | undefined;
+    if (input.scope !== undefined) {
+      if (!object(input.scope)) throw new StudioError('INVALID_ARGUMENT', '工作区域无效。');
+      const ids = input.scope.ids, rect = input.scope.rect;
+      if (ids !== undefined && (!Array.isArray(ids) || ids.length > 200 || !ids.every(id => typeof id === 'string' && id.length > 0 && id.length <= 200))) throw new StudioError('INVALID_ARGUMENT', '工作区域对象无效或超过 200 个。');
+      scope = {};
+      if (Array.isArray(ids) && ids.length) scope.ids = [...new Set(ids)] as string[];
+      if (rect !== undefined) {
+        if (!object(rect) || !['x', 'y', 'w', 'h'].every(field => typeof rect[field] === 'number')) throw new StudioError('INVALID_ARGUMENT', '工作区域坐标无效。');
+        const box = { x: finite(rect.x, 0), y: finite(rect.y, 0), w: finite(rect.w, 0), h: finite(rect.h, 0) };
+        if (box.w <= 0 || box.h <= 0 || Math.abs(box.x + box.w) > 1e7 || Math.abs(box.y + box.h) > 1e7) throw new StudioError('INVALID_ARGUMENT', '工作区域尺寸无效。');
+        scope.rect = box;
+      }
+      if (!scope.ids?.length && !scope.rect) throw new StudioError('INVALID_ARGUMENT', '请选择工作对象或声明有效的空地区域。');
+    }
+    if (input.label !== undefined && (typeof input.label !== 'string' || [...input.label].length > 80)) throw new StudioError('INVALID_ARGUMENT', '工作描述最多 80 个字符。');
+    if (action === 'begin' && !scope) throw new StudioError('INVALID_ARGUMENT', '开始任务时需要工作区域。');
+    this.getTimer(artifactId); this.expireTasks(Date.now());
+    const key = `${artifactId}:${actor.id}`, group = this.agentTasks.get(key), previous = group?.tasks.get(taskId);
+    if (action === 'end') {
+      if (group?.tasks.delete(taskId)) { if (!group.tasks.size) this.agentTasks.delete(key); this.publishAgent(artifactId, actor); }
+      return { tasks: copy([...(this.agentTasks.get(key)?.tasks.values() ?? [])]) };
+    }
+    if (action === 'update' && !previous) throw new StudioError('NOT_FOUND', '工作任务已结束或失效，请重新声明。');
+    if (!previous) {
+      const count = [...this.agentTasks.values()].filter(item => item.artifactId === artifactId).reduce((sum, item) => sum + item.tasks.size, 0);
+      if ((group?.tasks.size ?? 0) >= MAX_AGENT_TASKS || count >= MAX_BOARD_TASKS) throw new StudioError('BUSY', '并行工作任务过多，请先结束已有任务。');
+    }
+    const current = group ?? { artifactId, actor: copy(actor), tasks: new Map<string, AgentTask>() };
+    current.actor = copy(actor);
+    current.tasks.set(taskId, { taskId, scope: copy(scope ?? previous!.scope), label: input.label === undefined ? previous?.label : String(input.label).trim() || undefined, expiresAt: Date.now() + AGENT_TASK_LEASE_MS });
+    this.agentTasks.set(key, current); this.publishAgent(artifactId, actor);
+    return { tasks: copy([...current.tasks.values()]) };
+  }
+  private publishAgent(artifactId: string, actor: Actor, lastActivity?: string): void {
+    const key = `${artifactId}:${actor.id}`, entries = [...(this.activities.get(key)?.values() ?? [])], tasks = [...(this.agentTasks.get(key)?.tasks.values() ?? [])];
+    const peers = this.group(artifactId), peerId = `agent-${createHash('sha256').update(actor.id).digest('hex').slice(0, 24)}`;
+    let peer = peers.get(peerId);
+    if (!entries.length && !tasks.length) {
+      if (!peer?.value) return;
+      peer.leaseUntil = Date.now() + AGENT_IDLE_MS;
+      peer.value = { ...peer.value, context: { ...peer.value.context!, editingIds: [], movingIds: [], agentTasks: [], activity: 'idle', lastActivity: lastActivity ?? peer.value.context?.activity }, updatedAt: new Date().toISOString() };
+    } else {
+      if (!peer) { peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: 0, streams: 0, retired: new Set(), tokens: 80, budgetAt: Date.now() }; peers.set(peerId, peer); }
+      peer.leaseUntil = entries.length ? Infinity : Math.max(...tasks.map(task => task.expiresAt));
+      peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: entries[0]?.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap(item => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap(item => item.editingIds ?? []))], agentTasks: copy(tasks), activity: entries.some(item => item.status === 'writing') ? 'writing' : entries.length ? 'reading' : 'working' }, updatedAt: new Date().toISOString() };
+    }
+    this.publishPresence(artifactId);
   }
   room(artifactId: string, input: Record<string, unknown>, actor: Actor) {
     if ((input.peerEpoch === undefined) !== (input.peerSeq === undefined) || input.peerSeq !== undefined && (!Number.isSafeInteger(input.peerSeq) || Number(input.peerSeq) < 0)) throw new StudioError('INVALID_ARGUMENT', '临时协作的页面代次或序号无效。');
@@ -201,29 +269,14 @@ export class StudioCollaboration {
     this.getTimer(artifactId);
     const activityId = randomUUID(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? new Map<string, Activity>();
     group.set(activityId, { actor: copy(actor), ...copy(input) }); this.activities.set(key, group);
-    const peerId = `agent-${createHash('sha256').update(actor.id).digest('hex').slice(0, 24)}`;
-    const publish = () => {
-      if (this.activities.get(key) !== group) return;
-      const entries = [...group.values()], peers = this.group(artifactId); let peer = peers.get(peerId);
-      if (!entries.length) {
-        if (peer?.value) {
-          peer.leaseUntil = Date.now() + AGENT_IDLE_MS;
-          peer.value = { ...peer.value, context: { ...peer.value.context!, editingIds: [], movingIds: [], activity: 'idle', lastActivity: input.status }, updatedAt: new Date().toISOString() };
-        }
-        this.activities.delete(key); this.publishPresence(artifactId); return;
-      }
-      if (!peer) { peer = { actorId: actor.id, sequence: 0, roomSequence: -1, leaseUntil: Number.POSITIVE_INFINITY, streams: 0, retired: new Set(), tokens: 80, budgetAt: Date.now() }; peers.set(peerId, peer); }
-      peer.leaseUntil = Number.POSITIVE_INFINITY;
-      peer.value = { peerId, actor: copy(actor), context: { artifactId, viewId: input.viewId ?? peerId, selectedIds: [...new Set(entries.flatMap(item => item.selectedIds ?? []))], editingIds: [...new Set(entries.flatMap(item => item.editingIds ?? []))], activity: entries.some(item => item.status === 'writing') ? 'writing' : 'reading' }, updatedAt: new Date().toISOString() };
-      this.publishPresence(artifactId);
-    };
-    publish(); let done = false; return () => { if (done) return; done = true; group.delete(activityId); publish(); };
+    this.publishAgent(artifactId, actor); let done = false;
+    return () => { if (done || this.activities.get(key) !== group) return; done = true; group.delete(activityId); if (!group.size) this.activities.delete(key); this.publishAgent(artifactId, actor, input.status); };
   }
   revokeMembers(artifactId: string, memberIds: readonly string[]): void {
     const group = this.peers.get(artifactId), revoked = new Set(memberIds); if (!group) return;
     for (const [peerId, peer] of group) if (revoked.has(peer.actorId)) { if (peer.disconnect) clearTimeout(peer.disconnect); group.delete(peerId); }
     this.publishPresence(artifactId);
   }
-  forget(artifactId: string): void { for (const peer of this.peers.get(artifactId)?.values() ?? []) if (peer.disconnect) clearTimeout(peer.disconnect); this.peers.delete(artifactId); this.timers.forget(artifactId); this.rooms.delete(artifactId); for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key); }
-  close(): void { clearInterval(this.expiry); for (const id of this.peers.keys()) this.forget(id); this.listeners.clear(); this.activities.clear(); this.timers.close(); this.events.clear(); }
+  forget(artifactId: string): void { for (const peer of this.peers.get(artifactId)?.values() ?? []) if (peer.disconnect) clearTimeout(peer.disconnect); this.peers.delete(artifactId); this.timers.forget(artifactId); this.rooms.delete(artifactId); for (const key of this.activities.keys()) if (key.startsWith(`${artifactId}:`)) this.activities.delete(key); for (const key of this.agentTasks.keys()) if (key.startsWith(`${artifactId}:`)) this.agentTasks.delete(key); }
+  close(): void { clearInterval(this.expiry); for (const id of this.peers.keys()) this.forget(id); this.listeners.clear(); this.activities.clear(); this.agentTasks.clear(); this.timers.close(); this.events.clear(); }
 }

@@ -53,6 +53,7 @@
 .studio-share-person>span:nth-child(2){flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .studio-share-person strong{font-size:13px;font-weight:550;overflow-wrap:anywhere}
 .studio-share-person small{color:var(--studio-muted);font-size:11px}
+.studio-share-status{display:inline-flex;align-items:center;gap:5px}.studio-share-person .studio-share-status.is-online{color:#2f8a4c}.studio[data-studio-theme=dark] .studio-share-person .studio-share-status.is-online{color:#79c792}.studio-share-person>.studio-editor-avatar{position:relative}.studio-share-status-dot{position:absolute;right:-1px;bottom:-1px;box-sizing:border-box;width:10px;height:10px;border:2px solid var(--studio-surface);border-radius:50%;background:#2f8a4c;pointer-events:none}.studio[data-studio-theme=dark] .studio-share-status-dot{background:#79c792}.studio-share-forget{width:26px;height:26px;flex-shrink:0;color:var(--studio-muted)}.studio-share-forget:hover{color:var(--studio-danger)}
 .studio-share-person-role{flex-shrink:0;color:var(--studio-muted);font-size:12px}
 .studio-share-member-role,.studio-share-access-button{display:inline-flex;align-items:center;gap:6px;padding:4px 0;background:transparent;text-align:left;font-size:13px}.studio-share-member-role{flex-shrink:0;color:var(--studio-muted)}.studio-share-access-button{font-size:14px;font-weight:550}.studio-editor-submenu button>span{flex:1}.studio-editor-submenu button[aria-checked=true]{background:var(--studio-soft)}
 .studio-share-access{display:flex;align-items:flex-start;gap:11px}
@@ -74,6 +75,7 @@
 .studio-editor-export-option>svg{color:var(--studio-muted)}
 .studio-editor-export-option>span{flex:1;min-width:0;overflow-wrap:anywhere}
 .studio-editor-export-option>small{color:var(--studio-muted);font-size:10px}
+.studio-editor-export-note{display:block;margin-top:4px;color:var(--studio-muted);font-size:11px;line-height:1.6}
 .studio-editor-backup{border-top:1px solid var(--studio-border)!important;border-radius:0;margin-top:12px;padding-top:19px}
 .studio-editor-backup>span{display:flex;flex-direction:column;gap:3px}
 .studio-editor-backup strong{font-size:13px;font-weight:500}.studio-editor-backup>span>small{font-size:11px;color:var(--studio-muted)}

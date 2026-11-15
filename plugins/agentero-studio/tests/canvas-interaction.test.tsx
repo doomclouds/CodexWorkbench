@@ -175,6 +175,95 @@ describe('whiteboard direct interaction', () => {
     expect(query('搜索贴纸')).not.toBeNull();
     expect(host.querySelector('.studio-media-upload')!.textContent).toContain('上传图片或视频');
   });
+  it('hides the selected element chrome during other tools and temporary pan without forgetting selection', async () => {
+    const onSelectionChange = vi.fn(); await editable([element('a')], { onSelectionChange }); await select('a');
+    await click('文字颜色'); expect(host.querySelector('.studio-format-popover')).not.toBeNull();
+    await click('平移'); expect(query('选区格式')).toBeNull();
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['a']);
+    await pointer(500, 400); expect(onSelectionChange).toHaveBeenLastCalledWith(['a']);
+    await key(query('白板画布'), '1'); expect(query('选区格式')).not.toBeNull();
+    expect(host.querySelector('.studio-format-popover')).toBeNull();
+    await key(query('白板画布'), ' ', { code: 'Space' }); expect(query('选区格式')).toBeNull(); expect(host.querySelector('.studio-selection-frame')).toBeNull();
+    await act(async () => query('白板画布').dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ' ', code: 'Space' })));
+    expect(query('选区格式')).not.toBeNull(); expect(onSelectionChange).toHaveBeenLastCalledWith(['a']);
+  });
+  it('closes format popovers on an outside pointer without changing selection or saved content', async () => {
+    const call = await editable([element('a')]); await select('a'); await click('文字颜色');
+    const outside = document.createElement('button'); document.body.append(outside);
+    try { await event(outside, 'pointerdown'); expect(host.querySelector('.studio-format-popover')).toBeNull(); }
+    finally { outside.remove(); }
+    expect(query('选区格式')).not.toBeNull(); expect(call).not.toHaveBeenCalled();
+  });
+  it('switches fixed numeric tools, including the arrow child tool, without opening an insertion menu', async () => {
+    await editable();
+    for (const [digit, expected] of [['1','select'],['2','pan'],['3','text'],['4','container'],['5','note'],['6','stroke'],['7','shape'],['8','sticker'],['9','arrow']]) {
+      await key(query('白板画布'), digit);
+      expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe(expected);
+      expect(host.querySelector('.studio-insert-menu')).toBeNull();
+    }
+    expect(query('箭头模式').getAttribute('title')).toContain('9');
+    expect(query('选择').getAttribute('title')).toBe('选择（1）');
+    await key(query('白板画布'), '2', { code: 'Numpad2' }); expect(query('平移').getAttribute('aria-pressed')).toBe('true');
+    await click('画笔'); await key(query('白板画布'), '9'); expect(query('箭头模式').getAttribute('aria-pressed')).toBe('true');
+    await key(query('白板画布'), 'Escape'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
+    await key(query('白板画布'), '1');
+    for (const value of ['v','h','t','a','s','p','r','e','n','f','l','x','m','o','d']) await key(query('白板画布'), value);
+    await key(query('白板画布'), 'T', { shiftKey: true });
+    expect(query('选择').getAttribute('aria-pressed')).toBe('true');
+  });
+  it('keeps numeric tool keys out of inputs, composition, modifiers, menus and other pages', async () => {
+    await editable([element('a')]);
+    const numeric = async (target: Element, options: KeyboardEventInit = {}) => { await key(target, '3', options); expect(query('选择').getAttribute('aria-pressed')).toBe('true'); };
+    for (const options of [{ isComposing: true }, { keyCode: 229 }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }]) await numeric(query('白板画布'), options);
+    for (const tag of ['input', 'textarea', 'select', 'div']) {
+      const input = document.createElement(tag); if (tag === 'div') input.setAttribute('contenteditable', 'true');
+      query('白板画布').append(input); try { await numeric(input); } finally { input.remove(); }
+    }
+    const outside = document.createElement('button'); document.body.append(outside);
+    try { await numeric(outside); } finally { outside.remove(); }
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    await numeric(query('白板画布')); visibility.mockRestore();
+    await select('a'); await click('文字颜色'); await numeric(query('白板画布'));
+    await key(query('白板画布'), 'Escape'); await click('形状');
+    const before = host.querySelector('.studio-whiteboard')!.getAttribute('data-tool');
+    await key(query('白板画布'), '2'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe(before);
+  });
+  it('leaves HTML interaction before switching from a toolbar button and does not steal its numeric input', async () => {
+    await editable([element('html', { type: 'html', html: '<p>Hello</p>' })]); await select('html'); await click('与 HTML 内容交互');
+    expect(host.querySelector<HTMLIFrameElement>('iframe')!.style.pointerEvents).toBe('auto');
+    await key(query('白板画布'), '2'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
+    await click('平移'); expect(host.querySelector<HTMLIFrameElement>('iframe')!.style.pointerEvents).toBe('none'); expect(query('选区格式')).toBeNull();
+    await key(query('白板画布'), '1'); expect(query('选区格式')).not.toBeNull();
+  });
+  it.each(['Enter', 'F2'])('starts the selected native element editor with %s without consuming typed digits', async editKey => {
+    await editable([element('a', { locked: true })]); await select('a'); await key(query('白板画布'), editKey);
+    expect(query('编辑文字')).not.toBeNull(); await input(query('编辑文字') as HTMLTextAreaElement, '123456789');
+    await key(query('编辑文字'), '2'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
+    expect(query('编辑文字').textContent).toBe('123456789');
+  });
+  it('routes keyboard editing to the existing HTML source and table cell editors', async () => {
+    const onEditHtml = vi.fn(); await editable([element('html', { type: 'html', html: '<p>Hello</p>' }), element('table', { type: 'table', data: { rows: [['header'],['value']] } })], { onEditHtml });
+    await select('html'); await key(query('白板画布'), 'F2'); expect(onEditHtml).toHaveBeenCalledWith(expect.objectContaining({ id: 'html' }));
+    await select('table'); await key(query('白板画布'), 'Enter'); expect(query('表格第1行第1列')).not.toBeNull();
+  });
+  it('preserves a failed inline draft when a toolbar switch cannot save it', async () => {
+    const call = await editable([element('a')]); await select('a'); await key(query('白板画布'), 'Enter');
+    await input(query('编辑文字') as HTMLTextAreaElement, 'Keep this unsaved draft'); call.mockRejectedValueOnce(new Error('Save unavailable'));
+    await click('平移'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
+    expect(query('编辑文字').textContent).toBe('Keep this unsaved draft'); expect(host.querySelector('[role="alert"]')!.textContent).toContain('Save unavailable');
+  });
+  it('redraws only resolved media URLs after background asset notifications and shows loading or errors', async () => {
+    const callbacks = new Set<() => void>(), reference = '/assets/board/photo.png';
+    let status: 'loading' | 'ready' | 'error' = 'loading';
+    const client: StudioClient = { embedded: true, baseUrl: 'http://studio.test', call: vi.fn(), assetUrl: () => status === 'ready' ? 'blob:resolved-photo' : undefined, assetState: () => ({ status, ...(status === 'error' ? { message: 'Media transfer failed' } : {}) }), subscribeAssets: listener => { callbacks.add(listener); return () => callbacks.delete(listener); } };
+    await mount([element('image', { type: 'image', src: reference })], { client });
+    expect(host.textContent).toContain('正在加载媒体'); expect(host.querySelector('img')).toBeNull(); expect(callbacks.size).toBe(1);
+    status = 'ready'; await act(async () => callbacks.forEach(listener => listener()));
+    expect(host.querySelector('img')!.getAttribute('src')).toBe('blob:resolved-photo'); expect(host.textContent).not.toContain('正在加载媒体');
+    status = 'error'; await act(async () => callbacks.forEach(listener => listener()));
+    expect(host.querySelector('[role="alert"]')!.textContent).toBe('Media transfer failed'); expect(host.querySelector('img')).toBeNull();
+    await act(async () => root.unmount()); expect(callbacks.size).toBe(0); root = createRoot(host);
+  });
   it.each(['文字', '便签', '形状', '分区'])('creates %s by a click, enters inline input, saves Escape with the returned version and returns to select', async label => {
     const call = await editable();
     await click(label); await pointer(320, 250);
@@ -233,16 +322,16 @@ describe('whiteboard direct interaction', () => {
     expect(choice('实线').getAttribute('aria-pressed')).toBe('true'); expect(choice('虚线').getAttribute('aria-pressed')).toBe('false');
     expect(section().style.borderStyle).toBe('solid'); expect(section().style.borderWidth).toBe('3px');
   });
-  it('retains continuous pen, arrow and sticker tools after saving', async () => {
+  it('returns to select after each successful pen, arrow and sticker placement', async () => {
     const call = await editable(); await click('画笔'); await pointer(50, 80, { x: 160, y: 180 });
-    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('stroke');
+    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
     await click('画笔'); await click('箭头模式'); await pointer(200, 200, { x: 300, y: 300 });
-    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('arrow');
+    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
     await click('贴纸'); await click('贴纸 想法'); await pointer(500, 300); await pointer(600, 300);
-    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('sticker');
-    expect(call.mock.calls.map(([, args]) => args.operations[0]!.element?.type)).toEqual(['stroke', 'arrow', 'sticker', 'sticker']);
+    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
+    expect(call.mock.calls.map(([, args]) => args.operations[0]!.element?.type)).toEqual(['stroke', 'arrow', 'sticker']);
     expect(call.mock.calls[2]![1].operations[0]!.element).toMatchObject({ text: '想法', data: { stickerIconId: 'bulb' } });
-    expect(host.querySelectorAll('[data-element-id] [data-sticker-icon-id="bulb"]')).toHaveLength(2);
+    expect(host.querySelectorAll('[data-element-id] [data-sticker-icon-id="bulb"]')).toHaveLength(1);
   });
   it('creates an adjacent item with Ctrl Enter and ends a section title with Enter', async () => {
     const call = await editable(); await click('便签'); await pointer(120, 160);
@@ -401,21 +490,20 @@ describe('whiteboard direct interaction', () => {
     expect(query('自定义贴纸')).toBeNull(); expect(host.querySelector('.studio-sticker-custom')).toBeNull();
     await input(query('搜索贴纸') as HTMLInputElement, '合作');
     expect(host.querySelectorAll('.studio-sticker-grid button')).toHaveLength(1);
-    await click('贴纸 握手'); await pointer(300, 200); await pointer(400, 200);
+    await click('贴纸 握手'); await pointer(300, 200); await key(query('白板画布'), '8'); await pointer(400, 200);
     expect(host.querySelectorAll('[data-element-id] [data-sticker-icon-id="handshake"]')).toHaveLength(2);
     await click('贴纸'); expect(query('贴纸 握手').getAttribute('aria-pressed')).toBe('true');
     await input(query('搜索贴纸') as HTMLInputElement, 'nothing-matches-this');
     expect(host.querySelector('.studio-sticker-empty')!.textContent).toContain('没有找到贴纸');
     await click('清除贴纸搜索'); expect(host.querySelectorAll('.studio-sticker-grid button')).toHaveLength(42);
   });
-  it('uses reference tool keys and visible shape and ink palettes without an element sidebar', async () => {
-    await editable(); await key(query('白板画布'),'s'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('note');
-    await key(query('白板画布'),'e'); expect(query('贴纸库')).not.toBeNull();
-    await key(query('白板画布'),'l'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('arrow');
+  it('uses numeric tools and visible shape and ink palettes without an element sidebar', async () => {
+    await editable(); await key(query('白板画布'),'5'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('note');
+    await key(query('白板画布'),'8'); expect(query('贴纸').getAttribute('aria-pressed')).toBe('true');
+    await key(query('白板画布'),'9'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('arrow');
     expect(query('墨色 陶土色')).not.toBeNull();
-    await key(query('白板画布'),'o'); expect(query('形状 椭圆').getAttribute('aria-pressed')).toBe('true');
-    await key(query('白板画布'),'d'); expect(query('形状 菱形').getAttribute('aria-pressed')).toBe('true');
-    await key(query('白板画布'),'T',{shiftKey:true}); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('table');
+    await click('形状'); await click('形状 椭圆'); expect(query('形状 椭圆').getAttribute('aria-pressed')).toBe('true');
+    await click('形状 菱形'); expect(query('形状 菱形').getAttribute('aria-pressed')).toBe('true');
     expect(host.querySelector('.studio-canvas-properties')).toBeNull();
   });
   it.each(['note', 'shape'] as const)('keeps the measured %s toolbar inside desktop and narrow canvas bounds without dropping controls', async type => {
@@ -554,7 +642,7 @@ describe('whiteboard direct interaction', () => {
     expect(tray.querySelector('input,select,.studio-custom-color')).toBeNull();
     await click('墨色 紫色');await pointer(80,100,{x:280,y:180});
     expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({type:'stroke',stroke:'#7C5CBF',strokeWidth:3});
-    expect(query('绘图选项')).not.toBeNull();
+    expect(query('绘图选项')).toBeNull();
     await click('选择');await click('边框与线条');expect(query('线条宽度')).not.toBeNull();expect(query('自定义颜色')).not.toBeNull();
     await input(query('线条宽度') as HTMLInputElement,'6');expect(call.mock.lastCall![1].operations[0]!.changes).toEqual({strokeWidth:6});
     await input(query('自定义颜色') as HTMLInputElement,'#123456');

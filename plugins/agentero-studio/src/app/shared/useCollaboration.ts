@@ -31,7 +31,7 @@ type PresencePatch = Partial<Pick<Presence, 'context' | 'cursor' | 'following' |
 export function createCollaboration(options: Options) {
   const { client, artifactId, peerId } = options;
   const identity = options.identity || { epoch: newClientId('epoch'), presence: 0, room: 0 }, peerEpoch = identity.epoch;
-  let closed = false, connected = false, generation = 0, cursor = '', peerCursor = '', authorityCursor = '';
+  let closed = false, connected = false, generation = 0, cursor = '', receivedCursor = '', peerCursor = '', authorityCursor = '';
   let stream: EventSource | undefined, pollAbort: AbortController | undefined, presenceAbort: AbortController | undefined, roomAbort: AbortController | undefined;
   let reconnect: ReturnType<typeof setTimeout> | undefined, presenceTimer: ReturnType<typeof setTimeout> | undefined, roomTimer: ReturnType<typeof setTimeout> | undefined, idleTimer: ReturnType<typeof setTimeout> | undefined;
   let pending: PresencePatch = {}, published: PresencePatch = {}, presenceBusy = false, roomBusy = false, lastPresence = 0;
@@ -84,6 +84,7 @@ export function createCollaboration(options: Options) {
     }
   }
   async function readFeedback(serial = generation) {
+    if (!alive(serial)) return;
     if (feedbackReading) { feedbackAgain = true; return; }
     feedbackReading = true;
     const ticket = ++feedbackTicket;
@@ -102,22 +103,42 @@ export function createCollaboration(options: Options) {
     void readFeedback(serial).catch(error => { if (alive(serial)) lost(error); });
   }
   async function snapshot(serial = generation) {
+    if (!alive(serial)) return;
     if (snapshotReading) { snapshotAgain = true; return; }
     snapshotReading = true;
-    const ticket = ++snapshotTicket;
+    const ticket = ++snapshotTicket, epoch = position(receivedCursor).epoch;
     try {
       do {
         snapshotAgain = false;
         const next = await readTool<StudioDocument>('artifact_read', { artifactId, mode: 'board' });
-        if (!alive(serial)) return;
+        if (!alive(serial) || epoch !== position(receivedCursor).epoch) return;
         const current = options.getDocument();
         if (!current || next.artifact.revision >= current.artifact.revision) options.onDocument(next);
         requestFeedback(serial);
       } while (snapshotAgain && alive(serial));
     } finally { if (ticket === snapshotTicket) snapshotReading = false; }
   }
+  async function recoverUnits(message: StudioEvent, serial: number) {
+    const current = options.getDocument(), revision = Number(message.revision);
+    const ids = [...new Set(Array.isArray(message.changedIds) ? message.changedIds : message.units?.map(unit => unit.id))];
+    if (!current || revision !== current.artifact.revision + 1 || !ids.length || ids.length > 200 || ids.some(id => typeof id !== 'string')) { await snapshot(serial); return; }
+    try {
+      const result = await readTool<{ artifact: StudioDocument['artifact']; units: NonNullable<StudioEvent['units']> }>('artifact_read', { artifactId, mode: 'units', ids, atRevision: revision });
+      if (!alive(serial) || message.cursor && position(message.cursor).epoch !== position(receivedCursor).epoch) return;
+      const latest = options.getDocument();
+      if (latest && latest.artifact.revision >= revision) return;
+      if (!latest || latest.artifact.revision + 1 !== revision) { await snapshot(serial); return; }
+      if (result.artifact.id !== artifactId || result.artifact.revision !== revision || !Array.isArray(result.units) || result.units.length !== ids.length || new Set(result.units.map(unit => unit.id)).size !== ids.length || result.units.some(unit => !ids.includes(unit.id) || !('after' in unit))) throw new Error('作品单元读取返回了不匹配的版本。');
+      const next = getProduct(latest.artifact.type)?.applyRemoteEvent?.(latest, { ...message, artifact: result.artifact, units: result.units });
+      if (!next) throw new Error('作品单元读取返回了无效的内容。');
+      options.onDocument(next);
+    } catch (error) {
+      if ((error as { code?: string })?.code !== 'VERSION_NOT_FOUND') throw error;
+      await snapshot(serial);
+    }
+  }
   async function event(message: StudioEvent, serial: number) {
-    if (!alive(serial) || message.artifactId && message.artifactId !== artifactId) return;
+    if (!alive(serial) || message.artifactId && message.artifactId !== artifactId || message.cursor && position(message.cursor).epoch !== position(receivedCursor).epoch) return;
     if (!handledControls.has(message)) options.onEvent(message);
     if (message.type === 'access-revoked') { pause(false); return; }
     if (message.type === 'room' && Array.isArray(message.events)) { deliver(message.events as RoomMessage[]); return; }
@@ -127,18 +148,18 @@ export function createCollaboration(options: Options) {
       const current = options.getDocument();
       if (current && Number(message.revision) <= current.artifact.revision) return;
       const next = current && message.revision === current.artifact.revision + 1 && message.units ? getProduct(current.artifact.type)?.applyRemoteEvent?.(current, message) : undefined;
-      if (next) options.onDocument(next); else await snapshot(serial);
+      if (next) options.onDocument(next); else await recoverUnits(message, serial);
     } else if (!['ready', 'share', 'presence', 'room'].includes(message.type)) await snapshot(serial);
   }
   async function batch(result: Partial<SyncBatch> & StudioEvent, serial: number) {
-    if (!alive(serial)) return;
+    if (!alive(serial) || result.cursor && position(result.cursor).epoch !== position(receivedCursor).epoch) return;
     if (result.cursor && cursor && !result.reset && !cursorAfter(result.cursor, cursor)) return;
     if (result.reset) { cursor = result.cursor || ''; await snapshot(serial); }
-    if (!alive(serial)) return;
+    if (!alive(serial) || result.cursor && position(result.cursor).epoch !== position(receivedCursor).epoch) return;
     if (result.type === 'room') await event(result, serial);
     else if (Array.isArray(result.events)) for (const message of result.events) await event(message, serial);
     else if (result.type && result.type !== 'reset') await event(result, serial);
-    if (!alive(serial)) return;
+    if (!alive(serial) || result.cursor && position(result.cursor).epoch !== position(receivedCursor).epoch) return;
     if (result.cursor) cursor = result.cursor;
     connected = true; options.onStatus('saved'); flushPresence(); flushRoom();
   }
@@ -146,6 +167,8 @@ export function createCollaboration(options: Options) {
     if (!alive(serial)) return Promise.resolve();
     const revocation = result.type === 'access-revoked' ? result : result.events?.find(message => message.type === 'access-revoked');
     if (revocation) { options.onEvent(revocation); pause(false); return Promise.resolve(); }
+    if (result.cursor && receivedCursor && !cursorAfter(result.cursor, receivedCursor) && !(result.reset && position(result.cursor).epoch !== position(receivedCursor).epoch)) return Promise.resolve();
+    if (result.cursor) receivedCursor = result.cursor;
     if ((result.actor || result.type === 'ready') && (!result.cursor || !authorityCursor || result.cursor === authorityCursor || cursorAfter(result.cursor, authorityCursor) || result.reset && position(result.cursor).epoch !== position(authorityCursor).epoch)) {
       if (result.cursor) authorityCursor = result.cursor;
       options.onEvent({ type: 'ready', artifactId, actor: result.actor, access: result.access, cursor: result.cursor });
@@ -157,7 +180,8 @@ export function createCollaboration(options: Options) {
     acceptPresence(result, !!result.reset);
     if (result.type === 'room' && Array.isArray(result.events)) deliver(result.events as unknown as RoomMessage[]);
     else for (const message of result.events || []) if (message.type === 'room' && Array.isArray(message.events)) deliver(message.events as RoomMessage[]);
-    const bytes = JSON.stringify(result).length;
+    if (options.getDocument()) { connected = true; flushPresence(); flushRoom(); }
+    const bytes = new TextEncoder().encode(JSON.stringify(result)).length;
     if (queued >= 64 || queuedBytes + bytes > 4 * 1024 * 1024) {
       overflowCursor = result.cursor || overflowCursor || cursor;
       if (!queued && !overflowReading) processing = processing.then(() => drainOverflow(serial)).catch(error => { if (alive(serial)) lost(error); });
@@ -165,30 +189,30 @@ export function createCollaboration(options: Options) {
     }
     queued += 1; queuedBytes += bytes;
     processing = processing.then(async () => {
-      try { await batch(result, serial); }
+      try { if (!result.cursor || position(result.cursor).epoch === position(receivedCursor).epoch) await batch(result, serial); }
       finally { if (generation === serial) { queued -= 1; queuedBytes -= bytes; } }
       await drainOverflow(serial);
     }).catch(error => { if (alive(serial)) lost(error); });
     return processing;
   }
   async function drainOverflow(serial: number) {
-    if (overflowReading) return;
+    if (!alive(serial) || overflowReading) return;
     overflowReading = true;
     try {
       while (!queued && overflowCursor !== undefined && alive(serial)) {
         const barrier = overflowCursor; overflowCursor = undefined;
-        await snapshot(serial); if (alive(serial)) cursor = barrier;
+        await snapshot(serial); if (alive(serial) && position(barrier).epoch === position(receivedCursor).epoch) cursor = barrier;
       }
     } finally { if (generation === serial) overflowReading = false; }
   }
   async function polling(serial: number) {
     while (alive(serial)) {
       pollAbort = new AbortController();
-      const endpoint = url('/api/sync'); endpoint.searchParams.set('wait', '20000'); endpoint.searchParams.set('peerId', peerId); endpoint.searchParams.set('peerEpoch', peerEpoch); if (cursor) endpoint.searchParams.set('after', cursor);
+      const endpoint = url('/api/sync'); endpoint.searchParams.set('wait', '20000'); endpoint.searchParams.set('peerId', peerId); endpoint.searchParams.set('peerEpoch', peerEpoch); if (receivedCursor) endpoint.searchParams.set('after', receivedCursor);
       try {
         const result = await json(await studioRequest(client, endpoint, { headers: headers(), signal: pollAbort.signal }));
         if (!alive(serial)) return;
-        await enqueue(result, serial);
+        void enqueue(result, serial);
         // A synchronous mock or an empty immediate response must not spin the UI thread.
         if (alive(serial)) await new Promise(resolve => setTimeout(resolve, 10));
       } catch (error) { if (alive(serial) && !pollAbort.signal.aborted) lost(error); return; }
@@ -198,7 +222,7 @@ export function createCollaboration(options: Options) {
     if (closed || document.visibilityState === 'hidden') return;
     const serial = ++generation;
     // Re-entry always takes an authoritative snapshot before replaying subsequent events.
-    cursor = ''; peerCursor = ''; authorityCursor = '';
+    cursor = ''; receivedCursor = ''; peerCursor = ''; authorityCursor = '';
     pending = { ...published, ...pending, visible: true };
     connected = false; options.onStatus(options.getDocument() ? 'reconnecting' : 'loading');
     if (!client.baseUrl) { void snapshot(serial).then(() => { if (alive(serial)) options.onStatus('saved'); }, options.onError); return; }

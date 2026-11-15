@@ -85,8 +85,12 @@ export function updateSharing(artifact: ArtifactMetadata, sharing: SharingState,
     for (const role of roles) sharing.tokens[role] = newToken(); sharing.generation++;
     result.revokedRoles = roles; return result;
   }
-  if (action === 'role' || action === 'remove' || action === 'restore') {
+  if (action === 'role' || action === 'remove' || action === 'restore' || action === 'forget') {
     const id = safeId(args.memberId, '成员 ID'), member = sharing.members && Object.hasOwn(sharing.members, id) ? sharing.members[id] : undefined;
+    if (action === 'forget') {
+      if (!member?.removed) throw new StudioError('NOT_FOUND', '已移除成员不存在。');
+      delete sharing.members![id]; sharing.generation++; result.revokedMemberIds = [id]; return result;
+    }
     if (action === 'restore') {
       if (!member?.removed) throw new StudioError('NOT_FOUND', '已移除成员不存在。');
       const role = checkedRole(args.role);

@@ -32,7 +32,7 @@ export function rebaseHtmlState(base: Json, local: Json, accepted: Json): { stat
 }
 
 /** Only the generated rendering copy contains this bridge; region.html stays canonical. */
-function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }, rebase: typeof rebaseHtmlState): void {
+function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; cursorLayer: string }, rebase: typeof rebaseHtmlState): void {
   let enabled = config.annotation;
   let areaStart: { x: number; y: number } | null = null;
   let pointerStart: { x: number; y: number } | null = null;
@@ -89,7 +89,35 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
   const limit = (text: string, length: number) => text.slice(0, length);
   const escape = (value: string) => CSS.escape(value);
   const toElement = (node: EventTarget | Node | null): Element | null => node instanceof Element ? node : node instanceof Node ? node.parentElement : null;
-  const semantic = (element: Element | null): Element | null => element?.closest('[data-studio-id]') ?? element?.closest('text, path, rect, circle, ellipse, polygon, polyline, line, h1, h2, h3, p, li, td, th, figure, section, article') ?? element;
+  const visible = (element: Element): boolean => {
+    const style = getComputedStyle(element);
+    if (style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+    for (let current: Element | null = element; current; current = current.parentElement) {
+      if (getComputedStyle(current).display === 'none') return false;
+      const parent: Element | null = current.parentElement;
+      if (parent?.localName === 'details' && !parent.hasAttribute('open') && current !== [...parent.children].find(child => child.localName === 'summary')) return false;
+    }
+    return true;
+  };
+  const semantic = (element: Element | null): Element | null => {
+    if (!element || element.closest('[data-studio-runtime]')) return null;
+    const closed = element.closest('details:not([open])');
+    const summary = closed && [...closed.children].find(child => child.localName === 'summary');
+    const control = summary ?? element.closest('summary,button,a,input,select,textarea');
+    if (control) return visible(control) ? control : null;
+    if (!visible(element)) return null;
+    // A labelled SVG group is one diagram object; HTML containers remain context only.
+    for (let current: Element | null = element; current?.namespaceURI === 'http://www.w3.org/2000/svg'; current = current.parentElement) if (current.hasAttribute('data-studio-id')) return current;
+    return element.closest('[data-studio-id],text,path,rect,circle,ellipse,polygon,polyline,line,h1,h2,h3,h4,h5,h6,p,li,td,th,figure,section,article,blockquote,ul,ol,table,header,footer,aside,nav,details') ?? element;
+  };
+  const visibleText = (element: Element): string => {
+    if (element instanceof HTMLElement && typeof element.innerText === 'string') return element.innerText.trim();
+    const read = (node: Node): string => {
+      if (node instanceof Element && (node.matches('script,style,[data-studio-runtime]') || !visible(node))) return '';
+      return node.nodeType === Node.TEXT_NODE ? node.textContent ?? '' : [...node.childNodes].map(read).join('');
+    };
+    return read(element).trim();
+  };
   const selector = (element: Element): string => {
     const id = element.getAttribute('data-studio-id');
     if (id) return `[data-studio-id="${escape(id)}"]`;
@@ -105,7 +133,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
     return parts.join(' > ');
   };
   const excerpt = (element: Element): string => {
-    const copy = element.cloneNode(true) as Element;
+    const copy = (element.closest('[data-studio-id]') ?? element).cloneNode(true) as Element;
     copy.querySelectorAll('[data-studio-runtime],script').forEach((child) => child.remove());
     return limit(copy.outerHTML, 15000);
   };
@@ -115,7 +143,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
     if (now - lastSentAt < 120) return;
     lastSentAt = now;
     const selected = elements.filter((element) => !element.closest('[data-studio-runtime]')).slice(0, 80);
-    const targetIds = [...new Set(selected.map((element) => element.getAttribute('data-studio-id')).filter((id): id is string => Boolean(id)))];
+    const targetIds = [...new Set(selected.map((element) => element.closest('[data-studio-id]')?.getAttribute('data-studio-id')).filter((id): id is string => Boolean(id)))];
     const first = selected[0];
     window.parent.postMessage({ type: 'studio-html-selection', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision,
       targetIds, quote: limit(quote, 4000), excerpt: limit(selected.map(excerpt).join('\n'), 15000), selector: first ? selector(first) : undefined, rect, point,
@@ -172,7 +200,6 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
     }
     if (changedRules) syncCursorRules();
   });
-  window.addEventListener('pointerover', () => { if (enabled) syncCursorRules(); }, true);
   window.addEventListener('pagehide', () => cursorObserver.disconnect());
   const restoreCursors = () => {
     cursorObserver.disconnect();
@@ -185,7 +212,9 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
     cursorOverrides.clear();
   };
   const setAnnotation = () => {
-    if (cursorStyle) cursorStyle.textContent = enabled ? `:root, :root * { cursor: ${config.commentCursor} !important; } :root::before, :root::after, :root *::before, :root *::after { cursor: ${config.commentCursor} !important; }` : '';
+    const cursor = `cursor: ${config.commentCursor} !important;`;
+    // The first layer's important rule also beats source CSSOM rules added after activation.
+    if (cursorStyle) cursorStyle.textContent = enabled ? `:root, :root * { ${cursor} } :root::before, :root::after, :root *::before, :root *::after { ${cursor} } @layer ${config.cursorLayer} { :root, :root *, :root::before, :root::after, :root *::before, :root *::after, :root *::marker { ${cursor} } }` : '';
     if (enabled) {
       syncCursorRules();
       cursorDocument.querySelectorAll<HTMLElement | SVGElement>('[style]').forEach(syncInlineCursor);
@@ -258,9 +287,9 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
     if (suppressClick) { suppressClick = false; return; }
     const element = semantic(target);
     if (!element || element.closest('[data-studio-runtime]')) return;
-    const parent = element.parentElement?.closest('[data-studio-id]');
-    const text = `${element.textContent?.trim() ?? ''}${parent && parent !== element ? `\n所属：${parent.getAttribute('data-studio-id') ?? ''}` : ''}`;
-    send([element], text, rectOf(element.getBoundingClientRect()), { x: event.clientX, y: event.clientY });
+    const bounds = element.getBoundingClientRect();
+    if (outline) show(outline, bounds);
+    send([element], visibleText(element), rectOf(bounds), { x: event.clientX, y: event.clientY });
   }, true);
   window.addEventListener('pointermove', (event: PointerEvent) => {
     if (!enabled) return;
@@ -269,7 +298,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
       show(area, { x: Math.min(areaStart.x, event.clientX), y: Math.min(areaStart.y, event.clientY), width: Math.abs(event.clientX - areaStart.x), height: Math.abs(event.clientY - areaStart.y) });
     } else if (!pointerStart && outline) {
       const element = semantic(toElement(event.target));
-      if (element && !element.closest('[data-studio-runtime]')) show(outline, element.getBoundingClientRect());
+      if (element) show(outline, element.getBoundingClientRect()); else outline.style.display = 'none';
     }
   }, true);
   window.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -301,7 +330,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string }
         return rect.width > 0 && rect.height > 0 && rect.left <= box.x + box.w && rect.right >= box.x && rect.top <= box.y + box.h && rect.bottom >= box.y;
       });
       const deepest = targets.filter((element) => !targets.some((other) => other !== element && element.contains(other)));
-      send(deepest, deepest.map((element) => element.textContent?.trim() ?? '').join('\n'), { x: box.x + scrollX, y: box.y + scrollY, w: box.w, h: box.h }, { x: event.clientX, y: event.clientY });
+      send(deepest, deepest.map(visibleText).join('\n'), { x: box.x + scrollX, y: box.y + scrollY, w: box.w, h: box.h }, { x: event.clientX, y: event.clientY });
       return;
     }
     const selection = window.getSelection();
@@ -363,11 +392,15 @@ export function buildHtmlRegionDocument(source: string, options: HtmlRuntimeOpti
   const defaults = doc.createElement('style');
   defaults.setAttribute('data-studio-runtime', 'defaults');
   defaults.textContent = 'html{color-scheme:light;background:#f5f5f5;color:#2d3142}body{margin:0;font-family:Arial,"Microsoft YaHei",sans-serif}*{box-sizing:border-box}svg{max-width:100%}';
+  const cursorLayer = `studio-annotation-${options.channel.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  const layerOrder = doc.createElement('style');
+  layerOrder.setAttribute('data-studio-runtime', 'annotation-layer-order');
+  layerOrder.textContent = `@layer ${cursorLayer};`;
   const bridge = doc.createElement('script');
   bridge.setAttribute('data-studio-runtime', 'bridge');
-  bridge.textContent = `(${selectionRuntime.toString()})(${JSON.stringify({ ...options, commentCursor: COMMENT_CURSOR }).replace(/</g, '\\u003c')}, ${rebaseHtmlState.toString()});`;
+  bridge.textContent = `(${selectionRuntime.toString()})(${JSON.stringify({ ...options, commentCursor: COMMENT_CURSOR, cursorLayer }).replace(/</g, '\\u003c')}, ${rebaseHtmlState.toString()});`;
   // Declare UTF-8 before the bridge exceeds HTML's encoding prescan window.
-  doc.head.prepend(charset, csp, defaults, bridge);
+  doc.head.prepend(charset, csp, layerOrder, defaults, bridge);
   return `<!doctype html>\n${doc.documentElement.outerHTML}`;
 }
 

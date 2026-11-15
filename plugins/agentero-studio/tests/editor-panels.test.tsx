@@ -29,7 +29,7 @@ function historyProps(extra: Partial<HistoryPanelProps> = {}): HistoryPanelProps
   return { history: [], currentRevision: 3, actor: LOCAL_ACTOR, canRestore: true, onRefresh: vi.fn(), onPreview: vi.fn(), onRestore: vi.fn().mockResolvedValue(true), onLoadChanges: vi.fn(async (entry: HistoryBatch) => [...new Set(entry.changedIds)].map(id => ({ id, before: null, after: { text: '新增内容' } }))), ...extra };
 }
 function shareProps(extra: Partial<SharePanelProps> = {}): SharePanelProps {
-  return { title: '测试作品', actor: LOCAL_ACTOR, share: { enabled: false, owner: LOCAL_ACTOR, members: [], roleEnabled: { editor: true, commenter: true, viewer: true } }, exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'json', label: 'JSON 数据' }], canBackup: true, onStart: vi.fn().mockResolvedValue(true), onReset: vi.fn().mockResolvedValue(true), onToggleRole: vi.fn().mockResolvedValue(true), onMemberRole: vi.fn().mockResolvedValue(true), onRemoveMember: vi.fn().mockResolvedValue(true), onRestoreMember: vi.fn().mockResolvedValue(true), onCopy: vi.fn(), onExport: vi.fn(), ...extra };
+  return { title: '测试作品', actor: LOCAL_ACTOR, share: { enabled: false, owner: LOCAL_ACTOR, members: [], roleEnabled: { editor: true, commenter: true, viewer: true } }, exportFormats: [{ format: 'png', label: 'PNG 图片' }, { format: 'json', label: 'JSON 数据' }], canBackup: true, onStart: vi.fn().mockResolvedValue(true), onReset: vi.fn().mockResolvedValue(true), onToggleRole: vi.fn().mockResolvedValue(true), onMemberRole: vi.fn().mockResolvedValue(true), onRemoveMember: vi.fn().mockResolvedValue(true), onRestoreMember: vi.fn().mockResolvedValue(true), onForgetMember: vi.fn().mockResolvedValue(true), onCopy: vi.fn(), onExport: vi.fn(), ...extra };
 }
 
 describe('history popover content', () => {
@@ -101,6 +101,38 @@ describe('history popover content', () => {
 });
 
 describe('share and export popover content', () => {
+  it('distinguishes online status and renders last visits again when the existing panel refreshes', async () => {
+    const now = Date.parse('2026-11-15T12:00:00Z'); vi.spyOn(Date, 'now').mockReturnValue(now);
+    const props = shareProps({ share: { enabled: true, members: [member, { ...member, id: 'offline', name: 'Offline guest', online: false, lastSeenAt: new Date(now - 180_000).toISOString() }, { ...member, id: 'disabled', name: 'Disabled guest', active: false, online: false }] } });
+    await render(<SharePanel {...props} />);
+    const rows = host.querySelectorAll('.studio-share-person');
+    expect(rows[1]!.querySelector('.studio-share-status.is-online')?.textContent).toBe('在线');
+    expect(rows[1]!.querySelector('.studio-editor-avatar > .studio-share-status-dot')).not.toBeNull();
+    expect(rows[1]!.querySelector('.studio-share-status .studio-share-status-dot')).toBeNull();
+    expect(rows[2]!.querySelector('.studio-share-status')?.textContent).toBe('离线 · 3分钟前来过');
+    expect(rows[2]!.querySelector('time')?.getAttribute('datetime')).toBe(new Date(now - 180_000).toISOString());
+    expect(rows[2]!.querySelector('.is-online')).toBeNull();
+    expect(rows[2]!.querySelector('.studio-share-status-dot')).toBeNull();
+    expect(rows[3]!.querySelector('.studio-share-status')?.textContent).toBe('链接已停用'); expect(rows[3]!.querySelector('time')).toBeNull();
+    expect(rows[3]!.querySelector('.studio-share-status-dot')).toBeNull();
+    vi.mocked(Date.now).mockReturnValue(now + 60_000); await render(<SharePanel {...props} />);
+    expect(host.querySelectorAll('.studio-share-person')[2]!.textContent).toContain('4分钟前来过');
+  });
+
+  it('confirms deleting a removed member record using a small icon and keeps the confirmation on failure', async () => {
+    const onForgetMember = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const props = shareProps({ onForgetMember, share: { enabled: true, members: [], removedMembers: [{ ...member, active: false, online: false }], roleEnabled: { editor: false, commenter: false, viewer: false } } });
+    await render(<SharePanel {...props} />);
+    const forget = button(`删除成员记录：${member.name}`); expect(forget.textContent).toBe(''); expect(forget.disabled).toBe(false);
+    await click(`删除成员记录：${member.name}`); expect(onForgetMember).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('释放此白板中的名字'); expect(host.textContent).toContain('历史和评论仍保留');
+    await click('取消'); expect(onForgetMember).not.toHaveBeenCalled();
+    await click(`删除成员记录：${member.name}`); await click('确认删除');
+    expect(onForgetMember).toHaveBeenCalledWith(member.id); expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await click('确认删除'); expect(onForgetMember).toHaveBeenCalledTimes(2);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('offers local invitations without enabling LAN and changes scope explicitly', async () => {
     const props = shareProps(); props.share!.members = [member]; await render(<SharePanel {...props} />);
     expect([...host.querySelectorAll('.studio-share-person strong')].filter(node => node.textContent === person.name)).toHaveLength(1);
@@ -175,6 +207,14 @@ describe('share and export popover content', () => {
     await act(async () => tab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
     expect(document.activeElement?.textContent).toBe('导出');
     await click('完整作品备份包含历史记录与资源ZIP'); expect(props.onExport).toHaveBeenCalledWith('zip');
+  });
+
+  it('explains only the whole-board HTML export scope without changing the selected format', async () => {
+    const props = shareProps({ exportFormats: [{ format: 'html', label: '整板网页（HTML）' }, { format: 'png', label: 'PNG 图片' }] });
+    await render(<SharePanel {...props} initialTab="export" />);
+    const html = button('整板网页（HTML）'); expect(html.textContent).toContain('整块白板的已保存内容'); expect(html.textContent).toContain('导出后的交互状态仅在本页内存保存');
+    expect(button('PNG 图片PNG').querySelector('.studio-editor-export-note')).toBeNull();
+    await click('整板网页（HTML）'); expect(props.onExport).toHaveBeenCalledWith('html');
   });
 });
 

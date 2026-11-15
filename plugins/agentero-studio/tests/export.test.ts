@@ -64,7 +64,9 @@ describe('artifact export preserves one canonical source', () => {
   test('whole HTML contains isolated source-preserving regions and native geometry', () => {
     const html = buildBoardHtml(board([shape, region])); const document = new JSDOM(html).window.document;
     const frame = document.querySelector('iframe')!;
-    expect(frame.getAttribute('srcdoc')).toBe(region.html); expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    const srcdoc = frame.getAttribute('srcdoc')!;
+    expect(srcdoc).toContain('data-studio-export-runtime="state"');
+    expect(srcdoc.replace(/<script data-studio-export-runtime="state">[^]*?<\/script>/, '')).toBe(region.html); expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
     expect(document.querySelector('svg')?.querySelector('[data-studio-id="one"]')?.textContent).toContain(shape.text);
     expect(document.title).toBe('架构 <审阅> / 示例');
   });
@@ -100,7 +102,9 @@ describe('artifact export preserves one canonical source', () => {
     const exported = (value: BoardElement) => new JSDOM(buildBoardHtml(board([value]))).window.document;
     expect(exported(image).querySelector('a')?.getAttribute('href')).toBe(image.href);
     expect(exported({ ...image, href: 'javascript:alert(1)' }).querySelector('a')).toBeNull();
-    expect(exported({ ...image, video: '/assets/board-one/movie' }).querySelector('a')).toBeNull();
+    const movie = exported({ ...image, video: 'data:video/mp4;base64,AAAA' });
+    expect(movie.querySelector('a')).toBeNull(); expect(movie.querySelector('video')?.getAttribute('src')).toBe('data:video/mp4;base64,AAAA');
+    expect(() => exported({ ...image, video: '/assets/board-one/movie' })).toThrow('嵌入视频和封面资源');
   });
   test('region SVG carries CSS, namespaces all identities and preserves valid references', () => {
     const svg = extractRegionSvg(String(region.html), 'copied-region')!; const document = new JSDOM(svg, { contentType: 'image/svg+xml' }).window.document;

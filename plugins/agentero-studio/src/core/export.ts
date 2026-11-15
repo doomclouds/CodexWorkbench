@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import type { Board } from '../contracts/studio.js';
-import { buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg, filenameFor, selectedElements, type ExportOptions } from './serialization.js';
+import { buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg, filenameFor, isHtmlRegionElement, selectedElements, type ExportOptions } from './serialization.js';
 
 export { buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg } from './serialization.js';
 export interface ExportedArtifact { mimeType: string; filename: string; data: string; encoding?: 'base64' | 'utf8' }
@@ -54,7 +54,7 @@ async function png(svg: string, options: ExportOptions): Promise<string> {
 export async function exportArtifact(board: Board, format: string, options: Record<string, unknown> = {}): Promise<ExportedArtifact> {
   const selected = selectedElements(board, options);
   const region = options.regionId ?? options.elementId;
-  const oneRegion = region && selected.length === 1 && selected[0].type === 'html' ? selected[0] : undefined;
+  const oneRegion = region && selected.length === 1 && isHtmlRegionElement(selected[0]) ? selected[0] : undefined;
   const title = oneRegion?.text || board.artifact.title;
   if (format === 'json') return { mimeType: 'application/json', filename: filenameFor(title, 'json'), encoding: 'utf8', data: `${JSON.stringify({ ...board, elements: selected }, null, 2)}\n` };
   if (format === 'html') return { mimeType: 'text/html', filename: filenameFor(title, 'html'), encoding: 'utf8', data: oneRegion ? String(oneRegion.html ?? '') : buildBoardHtml(board, options) };

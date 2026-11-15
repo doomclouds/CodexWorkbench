@@ -1,4 +1,4 @@
-import type { Board, BoardElement } from '../contracts/studio.js';
+import type { Board, BoardElement, Json } from '../contracts/studio.js';
 import { contrastRatio, readableText, semanticColor } from './theme.js';
 import { arrowGeometry, arrowHeads, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
 import { boardStickerMarkup } from './products/whiteboard-stickers.js';
@@ -19,6 +19,30 @@ export function selectedElements(board: Board, options: ExportOptions = {}): Boa
   const selected = board.elements.filter(e => ids.includes(e.id));
   if (selected.length !== new Set(ids).size) throw new ExportError('ELEMENT_NOT_FOUND', '部分导出对象已不存在，请刷新后重试。');
   return selected;
+}
+export const isHtmlRegionElement = (element: BoardElement): boolean => element.type === 'html' || element.type === 'diagram' && typeof element.html === 'string';
+/** Keep the full scene for connector geometry while resolving only resources in the export. */
+export async function inlineExportAssets(board: Board, format: string, options: ExportOptions, resolveSource: (source: string) => Promise<string>): Promise<Board> {
+  const cloned = structuredClone(board), resolved = new Map<string, Promise<string>>();
+  const read = (source: string) => {
+    if (/^(?:data:|#)/i.test(source)) return Promise.resolve(source);
+    if (!resolved.has(source)) resolved.set(source, resolveSource(source));
+    return resolved.get(source)!;
+  };
+  for (const element of selectedElements(cloned, options)) {
+    if (element.type === 'image') {
+      if (typeof element.src === 'string') element.src = await read(element.src);
+      if (format === 'html' && typeof element.video === 'string') element.video = await read(element.video);
+    }
+    if (!isHtmlRegionElement(element) || typeof element.html !== 'string') continue;
+    const attributes = /((?:src|href|poster)\s*=\s*["'])(\/assets\/[^"'<>]+)(["'])/gi;
+    const urls = /url\(\s*["']?(\/assets\/[^)"']+)["']?\s*\)/gi;
+    const references = new Set([...element.html.matchAll(attributes)].map(match => match[2]!).concat([...element.html.matchAll(urls)].map(match => match[1]!)));
+    const values = new Map<string, string>();
+    for (const reference of references) values.set(reference, await read(reference.trim()));
+    element.html = element.html.replace(attributes, (_, prefix, reference, suffix) => `${prefix}${values.get(reference)}${suffix}`).replace(urls, (_, reference) => `url("${values.get(reference)}")`);
+  }
+  return cloned;
 }
 function scalar(value: unknown, fallback: number): number { return typeof value === 'number' && Number.isFinite(value) ? value : fallback; }
 export function boardBounds(elements: BoardElement[], padding = 32, scene: BoardElement[] = elements) {
@@ -123,7 +147,7 @@ function headSvg(kind: string, tip: Point, inside: Point, color: string): string
 export function elementSvg(e: BoardElement, board: Board, options: ExportOptions = {}): string {
   const style = board.style; const ink = semanticColor(e.stroke, style, style.muted);
   let markup = '';
-  if (e.type === 'html') {
+  if (isHtmlRegionElement(e)) {
     const html = String(e.html ?? '');
     if (options.svgRegions === true) {
       const svg = extractRegionSvg(html, e.id);
@@ -187,12 +211,44 @@ export function buildBoardSvg(board: Board, options: ExportOptions = {}): string
   const elements = selectedElements(board, options); const bounds = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
   return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">白板版本 ${board.artifact.revision}，包含 ${elements.length} 个对象。</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map(e => elementSvg(e, board, options)).join('')}</svg>`;
 }
+/** A downloaded page owns only transient state; it never writes back to the Studio host. */
+function offlineEmbedState(initial: Json): void {
+  let state = JSON.parse(JSON.stringify(initial)) as Json;
+  const listeners = new Set<(value: Json) => void>(), copy = () => JSON.parse(JSON.stringify(state)) as Json;
+  const error = (message: string) => window.dispatchEvent(new CustomEvent('studio-embed-error', { detail: { message, localState: copy() } }));
+  Object.defineProperty(window, 'studioEmbed', { configurable: false, writable: false, value: Object.freeze({
+    load: copy,
+    save(value: unknown) {
+      let encoded: string | undefined, next: Json;
+      try { encoded = JSON.stringify(value); }
+      catch { error('嵌入状态必须是可序列化的 JSON 对象。'); return; }
+      if (!value || typeof value !== 'object' || Array.isArray(value) || !encoded || new TextEncoder().encode(encoded).byteLength > 65536) { error('嵌入状态必须是 64 KB 以内的 JSON 对象。'); return; }
+      next = JSON.parse(encoded) as Json;
+      if (!next || typeof next !== 'object' || Array.isArray(next)) { error('嵌入状态必须是可序列化的 JSON 对象。'); return; }
+      if (encoded === JSON.stringify(state)) return;
+      state = next;
+      for (const listener of listeners) { try { listener(copy()); } catch (failure) { console.error('Offline embed state listener failed.', failure); } }
+    },
+    onLoad(listener: (value: Json) => void) { if (typeof listener !== 'function') throw new TypeError('onLoad 需要一个函数。'); listeners.add(listener); return () => listeners.delete(listener); },
+  }) });
+}
+function offlineRegionHtml(element: BoardElement): string {
+  const source = String(element.html ?? ''), seed = JSON.stringify(element.state ?? null).replace(/</g, '\\u003c');
+  const bridge = `<script data-studio-export-runtime="state">(${offlineEmbedState.toString()})(${seed});</script>`;
+  // Insert before source scripts without matching HTML-looking text inside their JavaScript.
+  const prefix = /^(?:\uFEFF|\s|<!--[^]*?-->)*<!doctype[^>]*>/i.exec(source)?.[0] ?? '';
+  return `${prefix}${bridge}${source.slice(prefix.length)}`;
+}
 export function buildBoardHtml(board: Board, options: ExportOptions = {}): string {
   const elements = selectedElements(board, options); const bounds = boardBounds(elements, 32, board.elements);
   const layers = elements.map(e => {
-    if (e.type === 'html') return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(String(e.html ?? ''))}"></iframe>`;
+    if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
+    if (e.type === 'image' && e.video) {
+      if (!/^data:video\//i.test(e.video) || e.src && !/^data:image\//i.test(e.src)) throw new ExportError('ASSET_NOT_EMBEDDED', 'HTML 导出需要先嵌入视频和封面资源。');
+      return `<video data-studio-id="${escapeXml(e.id)}" controls playsinline preload="metadata" src="${escapeXml(e.video)}"${e.src ? ` poster="${escapeXml(e.src)}"` : ''} style="position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;object-fit:contain;transform:rotate(${scalar(e.rotation, 0)}deg)"></video>`;
+    }
     const box = boardBounds([e], 2, board.elements); const markerId = `arrow_${e.id.replace(/[^\w-]/g, '_')}`;
     return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
   }).join('');
-  return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;frame-src 'self' data: blob:;connect-src 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
+  return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
 }

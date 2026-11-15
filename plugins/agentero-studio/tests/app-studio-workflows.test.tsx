@@ -121,6 +121,48 @@ function readerTransport() {
 }
 
 describe('Studio real management workflows', () => {
+  it.each(['history', 'suggestion'] as const)('stops an existing follow before entering %s preview and does not resume it on return', async mode => {
+    const fixture = await createFixture([region()]);
+    const changed = await apply(fixture.board, [{ op: 'update', id: 'region-one', changes: { text: 'Current title' } }]);
+    if (mode === 'suggestion') await service.execute('artifact_feedback', { artifactId: fixture.board.artifact.id, action: 'suggest', text: 'Preview proposal', anchor: { regionId: 'region-one', sourceRevision: 1 }, expectedVersions: { 'region-one': changed.board.elements[0]!.version }, options: [{ id: 'first', label: 'First option', operations: [{ op: 'update', id: 'region-one', changes: { text: 'First title' } }] }, { id: 'second', label: 'Second option', operations: [{ op: 'update', id: 'region-one', changes: { text: 'Second title' } }] }] }, LOCAL_ACTOR);
+    const streams: { onmessage: ((event: { data: string }) => void) | null }[] = [];
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: { data: string }) => void) | null = null; onopen = null; onerror = null;
+      constructor() { streams.push(this); queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'ready', cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null, serverTime: Date.now() }) })); } addEventListener() {} close() {}
+    });
+    vi.stubGlobal('fetch', vi.fn((input, init) => appRequest(input, init)));
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    client = { ...client, embedded: false, baseUrl: 'http://studio.test', token: 'fixture-owner' };
+    await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    const peer = { peerId: 'preview-agent', actor: { ...LOCAL_ACTOR, id: 'preview-agent', name: 'Preview agent', kind: 'agent' }, context: { artifactId: fixture.board.artifact.id, viewId: 'preview-agent', selectedIds: [], agentTasks: [{ taskId: 'working', scope: { rect: { x: 100, y: 200, w: 500, h: 300 } }, expiresAt: Date.now() + 60000 }] }, updatedAt: new Date().toISOString() };
+    await act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'presence', artifactId: fixture.board.artifact.id, peers: [peer] }) }));
+    await click(button('此刻在这里')); await click(container.querySelector<HTMLButtonElement>('.studio-online-row button')!);
+    await waitUntil(() => !!container.querySelector('.studio-follow-banner'));
+    const live = container.querySelector('[aria-label="白板画布"]')!;
+    await waitUntil(() => !!live.getAttribute('data-external-viewport'));
+    if (mode === 'history') {
+      await click(button('版本历史')); await waitUntil(() => container.querySelectorAll('.studio-history-record').length === 2);
+      await click(button('展开版本 0')); await click(button('预览版本'));
+    } else {
+      await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-suggestion-option'));
+      await act(async () => container.querySelector('.studio-suggestion-option')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+    }
+    await waitUntil(() => container.querySelectorAll('[aria-label="白板画布"]').length === 2);
+    expect(container.querySelector('.studio-follow-banner')).toBeNull(); expect(live.getAttribute('data-external-viewport')).toBeNull();
+    await act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'presence', artifactId: fixture.board.artifact.id, peers: [{ ...peer, context: { ...peer.context, agentTasks: [{ ...peer.context.agentTasks[0], scope: { rect: { x: 9000, y: 8000, w: 500, h: 300 } } }] } }] }) }));
+    expect(live.getAttribute('data-external-viewport')).toBeNull();
+    // Keyboard activation does not outside-click-dismiss a hovered suggestion preview.
+    await act(async () => button('此刻在这里').click());
+    const follow = container.querySelector<HTMLButtonElement>('.studio-online-row button')!;
+    expect(follow.disabled).toBe(true); expect(follow.title).toBe('预览期间不能跟随，请先退出预览');
+    await act(async () => button('此刻在这里').click());
+    if (mode === 'history') await click(button('退出预览'));
+    else await act(async () => container.querySelector('.studio-suggestion-option')!.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+    await waitUntil(() => container.querySelectorAll('[aria-label="白板画布"]').length === 1);
+    expect(container.querySelector('.studio-follow-banner')).toBeNull(); expect(live.getAttribute('data-external-viewport')).toBeNull();
+    await click(button('此刻在这里')); expect(container.querySelector<HTMLButtonElement>('.studio-online-row button')!.disabled).toBe(false);
+  });
   it('refreshes live guest permissions without discarding an unsent comment', async () => {
     const fixture = await createFixture([region()]);
     const guest: Actor = { id: 'guest-live', name: '协作者', kind: 'human', role: 'editor' };

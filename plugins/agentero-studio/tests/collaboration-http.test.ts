@@ -127,7 +127,7 @@ describe('HTTP collaboration change transport', () => {
     const initial = await sync(); expect(initial.reset).toBe(true);
     const created = await mutate('first');
     const incremental = await sync(initial.cursor); expect(incremental.reset).toBe(false);
-    expect(incremental.events).toMatchObject([{ type: 'board', revision: created.board.artifact.revision, units: [{ id: 'item', after: { text: 'first', version: 1 } }] }]);
+    expect(incremental.events).toMatchObject([{ type: 'board', revision: created.board.artifact.revision, units: [{ id: 'item', after: { text: 'first', version: 1 } }, { id: '$order', after: { ids: ['item'], version: created.board.orderVersion } }] }]);
     const abort = new AbortController(); cancellations.push(abort);
     const response = await request(`/api/events?artifactId=${artifactId}&after=${encodeURIComponent(initial.cursor)}&peerId=web-a&peerEpoch=epoch-a`, { signal: abort.signal });
     expect(response.headers.get('content-type')).toBe('text/event-stream');
@@ -136,10 +136,16 @@ describe('HTTP collaboration change transport', () => {
     expect(ready.data.events.some((event: any) => event.type === 'board' && event.units?.[0]?.after?.text === 'first')).toBe(true);
     expect(ready.id).toBe(ready.data.cursor);
     await mutate('second', 1); const update = await frame(reader);
-    expect(update.data).toMatchObject({ type: 'board', units: [{ id: 'item', after: { text: 'second', version: 2 } }] }); expect(update.id).toBe(update.data.cursor);
+    expect(update.data).toMatchObject({ type: 'board', units: [{ id: 'item' }] });
+    const changed = update.data.units[0];
+    if (changed.patch) expect(changed.patch).toMatchObject({ baseVersion: 1, version: 2, changes: { text: 'second' }, removedKeys: [] });
+    else expect(changed.after).toMatchObject({ text: 'second', version: 2 });
+    expect(update.id).toBe(update.data.cursor);
     abort.abort();
     const resumed = await request(`/api/events?artifactId=${artifactId}`, { headers: { 'Last-Event-ID': incremental.cursor }, signal: AbortSignal.timeout(3000) });
-    const replay = await frame(resumed.body!.getReader()); expect(replay.data.events.some((event: any) => event.units?.[0]?.after?.text === 'second')).toBe(true); await resumed.body?.cancel().catch(() => {});
+    const replay = await frame(resumed.body!.getReader());
+    expect(replay.data.events.some((event: any) => event.units?.some((unit: any) => unit.id === 'item' && (unit.after?.text === 'second' && unit.after.version === 2 || unit.patch?.baseVersion === 1 && unit.patch.version === 2 && unit.patch.changes.text === 'second')))).toBe(true);
+    await resumed.body?.cancel().catch(() => {});
   });
 
   it('supports cancellable bounded long polls and reconnect reset after a server epoch changes', async () => {
@@ -166,7 +172,7 @@ describe('HTTP collaboration change transport', () => {
     const response = await request(`/api/events?artifactId=${artifactId}&after=${encodeURIComponent(after)}`, { signal: abort.signal });
     const reader = response.body!.getReader(), ready = await frame(reader), change = await frame(reader);
     expect(ready.data).toMatchObject({ type: 'ready', events: [] });
-    expect(change.data).toMatchObject({ type: 'board', units: [{ id: 'item', after: { text: 'during-ready' } }] });
+    expect(change.data).toMatchObject({ type: 'board', units: [{ id: 'item', after: { text: 'during-ready' } }, { id: '$order', after: { ids: ['item'], version: 1 } }] });
     expect(change.id).not.toBe(ready.id); abort.abort();
   });
 

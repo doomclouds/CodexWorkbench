@@ -40,7 +40,9 @@ export interface Feedback {
 export interface HistoryEntry { id: string; revision: number; createdAt: string; actor: Actor; summary: string; changedIds: string[]; restoredFrom?: string }
 /** Display grouping only; every version remains independently addressable. */
 export interface HistoryBatch extends HistoryEntry { firstVersionId: string; firstRevision: number; firstCreatedAt: string; beforeVersionId?: string; versionIds: string[] }
-export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; [key: string]: unknown }
+export interface AgentActivityScope { ids?: string[]; rect?: { x: number; y: number; w: number; h: number } }
+export interface AgentTask { taskId: string; scope: AgentActivityScope; label?: string; expiresAt: number }
+export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; agentTasks?: AgentTask[]; [key: string]: unknown }
 export interface Presence { peerId: string; actor: Actor; peerEpoch?: string; peerSeq?: number; context?: ViewContext; cursor?: { x: number; y: number; surface?: string; t?: number } | null; following?: string; chat?: string; chatExpiresAt?: number; color?: string; visible?: boolean; updatedAt: string }
 export interface RoomMessage { peerId: string; actor: Actor; seq: number; topic: string; data: Json; createdAt: string }
 export interface CollaborationRoom {
@@ -54,19 +56,23 @@ export interface Operation {
   id?: string; element?: Partial<BoardElement>; changes?: Partial<BoardElement>; ids?: string[];
   preset?: string; style?: Partial<StyleProfile>; versionId?: string; data?: Record<string, unknown>;
 }
-export const TOOL_NAMES = ['studio_open', 'artifact_list', 'artifact_manage', 'artifact_read', 'artifact_apply', 'artifact_feedback', 'artifact_share', 'artifact_export'] as const;
+export const TOOL_NAMES = ['studio_open', 'artifact_list', 'artifact_manage', 'artifact_read', 'artifact_apply', 'artifact_feedback', 'artifact_share', 'artifact_export', 'artifact_activity'] as const;
 export type ToolName = typeof TOOL_NAMES[number];
 export interface ToolResponse<T = unknown> { ok: boolean; data?: T; error?: { code: string; message: string; details?: unknown } }
 export interface StudioClient {
   call<T = unknown>(name: ToolName, args?: Record<string, unknown>): Promise<T>;
   request?: (input: string | URL, init?: RequestInit) => Promise<Response>;
   assetUrl?: (reference: string) => string | undefined;
+  subscribeAssets?: (listener: () => void) => () => void;
+  assetState?: (reference: string) => { status: 'loading' | 'ready' | 'error'; message?: string } | undefined;
   openLink?: (url: string) => Promise<void>;
   downloadFile?: (blob: Blob, filename: string) => Promise<void>;
   baseUrl?: string; token?: string; embedded: boolean;
 }
 export interface HtmlSelection { regionId: string; sourceRevision: number; targetIds: string[]; quote: string; excerpt: string; selector?: string; rect?: { x: number; y: number; w: number; h: number }; screenPoint?: { x: number; y: number } }
 export interface Connection { baseUrl: string; token: string; actor: Actor; artifactId?: string; access?: 'local' | 'lan' }
-export interface StudioEvent { type: string; artifactId: string; cursor?: string; revision?: number; artifact?: Artifact; units?: { id: string; after: unknown | null }[]; [key: string]: unknown }
+export interface StudioUnitPatch { baseVersion: number; version: number; changes: Record<string, unknown>; removedKeys: string[] }
+export type StudioUnitEvent = { id: string; after: unknown | null; patch?: never } | { id: string; patch: StudioUnitPatch; after?: never };
+export interface StudioEvent { type: string; artifactId: string; cursor?: string; revision?: number; artifact?: Artifact; units?: StudioUnitEvent[]; [key: string]: unknown }
 export const DEFAULT_STYLE: StyleProfile = { name: 'Diagram', paper: '#f5f5f5', ink: '#2d3142', muted: '#4f5d75', accent: '#eb6c36', link: '#2e5aa8', fontFamily: 'Arial, "Microsoft YaHei", sans-serif', titleFont: 'Georgia, "Songti SC", serif', monoFont: 'Consolas, monospace' };
 export const LOCAL_ACTOR: Actor = { id: 'local', name: '我', kind: 'human', role: 'owner' };

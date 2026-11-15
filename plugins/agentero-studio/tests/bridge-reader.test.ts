@@ -7,24 +7,33 @@ import { downloadBoard } from '../src/app/export';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { APP_MAX_BYTES } from '../src/contracts/transport';
 
-const mocks = vi.hoisted(() => ({ openLink: vi.fn(), downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), capabilities: {} as Record<string, unknown> }));
+const mocks = vi.hoisted(() => ({ openLink: vi.fn(), downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), capabilities: {} as Record<string, unknown> }));
 vi.mock('@modelcontextprotocol/ext-apps', () => ({
   App: class {
     connect = mocks.connect;
     close = mocks.close;
     openLink = mocks.openLink;
     downloadFile = mocks.downloadFile;
-    async callServerTool() { return { _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }; }
+    callServerTool = mocks.callServerTool;
     getHostContext() { return undefined; }
     getHostCapabilities() { return mocks.capabilities; }
   },
   PostMessageTransport: class {}, applyDocumentTheme: vi.fn(), applyHostStyleVariables: vi.fn(),
 }));
 vi.mock('@openai/mcp-extensions/app', () => ({ OpenAIExtensions: class {} }));
-beforeEach(() => { mocks.capabilities = {}; });
+beforeEach(() => { mocks.capabilities = {}; mocks.close.mockResolvedValue(undefined); mocks.callServerTool.mockReset().mockResolvedValue({ _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('reader link host adaptation', () => {
+  it('preserves a backend bootstrap failure instead of replacing it with a missing-connection error', async () => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    mocks.callServerTool.mockResolvedValueOnce({ isError: true, structuredContent: { ok: false, error: { code: 'STUDIO_ERROR', message: 'fetch failed', details: { reason: 'synthetic stale endpoint' } } } });
+    try {
+      await expect(createStudioBridge(() => {})).rejects.toMatchObject({ message: 'fetch failed', code: 'STUDIO_ERROR', details: { reason: 'synthetic stale endpoint' } });
+      expect(mocks.callServerTool).toHaveBeenCalledOnce(); expect(mocks.close).toHaveBeenCalledOnce();
+    } finally { dom.window.close(); }
+  });
   it('preserves HTTP authentication status and reasons without conflating business permission errors', async () => {
     const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000/' });
     vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);

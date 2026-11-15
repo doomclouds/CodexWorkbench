@@ -3,6 +3,8 @@ import type { BoardElement, Presence } from '../../contracts/studio.js';
 import { readableText } from '../../core/theme.js';
 import { participantColor } from '../shared/presence-members.js';
 import { elementBounds } from './canvas-model.js';
+import { activeAgentTasks, agentTaskBounds } from '../shared/agent-activity.js';
+import { AgentWorkingMark } from '../shared/AgentWorkingMark.js';
 
 interface Props {
   peers: Presence[];
@@ -55,8 +57,14 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
     if (!previous || previous.at < at || previous.at === at && previous.peer.updatedAt < peer.updatedAt) cursors.set(peer.actor.id, { peer, at });
   }
   const byId = new Map(elements.map(element => [element.id, element]));
+  const taskAreas = active.flatMap(peer => activeAgentTasks(peer, now).flatMap(task => {
+    schedule(task.expiresAt);
+    const box = agentTaskBounds(task, elements);
+    return box ? [{ peer, task, box }] : [];
+  }));
   const edits = new Map<string, { peer: Presence; element: BoardElement; moving: boolean }>();
   for (const peer of active) {
+    if (activeAgentTasks(peer, now).length) continue;
     const editing = peer.context?.editingIds ?? [], moving = Array.isArray(peer.context?.movingIds) ? peer.context.movingIds as string[] : [];
     for (const id of new Set([...editing, ...moving])) {
       const element = byId.get(id);
@@ -80,6 +88,10 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
   const targetCounts = new Map<string, number>();
   for (const { element } of edits.values()) targetCounts.set(element.id, (targetCounts.get(element.id) ?? 0) + 1);
   return <div ref={root} className="studio-peer-presence-overlay" aria-label="协作者在画布上的位置" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+    {taskAreas.map(({ peer, task, box }) => {
+      const color = participantColor(peer.actor, peer.color), label = task.label || '正在工作';
+      return <div key={`${peer.actor.id}:${task.taskId}`} className="studio-agent-task-area" data-agent-task={task.taskId} data-peer-actor={peer.actor.id} role="status" aria-label={`${peer.actor.name} · ${label}，工作区域提示`} style={{ left: box.x, top: box.y, width: box.w, height: box.h, pointerEvents: 'none', '--agent-work-color': color, '--agent-work-stroke': `${1.5 / zoom}px`, '--agent-work-radius': `${8 / zoom}px`, '--agent-work-gap': `${4 / zoom}px`, '--agent-work-scale': 1 / zoom } as React.CSSProperties}><div className="studio-agent-task-label" style={{ background: color, color: readableText(color) }}><AgentWorkingMark /><span>{peer.actor.name} · {label}</span><i>.</i><i>.</i><i>.</i></div></div>;
+    })}
     {[...edits.entries()].map(([key, { peer, element, moving }]) => {
       const box = elementBounds(element, elements), color = participantColor(peer.actor, peer.color), slot = slots.get(element.id) ?? 0;
       slots.set(element.id, slot + 1);

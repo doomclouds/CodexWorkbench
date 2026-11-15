@@ -282,14 +282,17 @@ describe('shared feedback and invitation permissions through Node HTTP', () => {
 });
 
 describe('feedback and sharing schema through the real MCP SDK', () => {
-  it('extends the existing eight tools and enforces authorship on parsed edit/delete actions', async () => {
+  it('exposes the declared model tools and enforces authorship on parsed edit/delete actions', async () => {
     let actor: Actor = { ...LOCAL_ACTOR };
     const server = createStudioServer({ execute: (name, args) => host.service.execute(name, args, actor), connection: async () => ({ baseUrl: host.origin, token: host.token, actor }) }, '<html></html>');
     const client = new Client({ name: 'studio-sharing-feedback', version: '1.0.0' }), [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport); await client.connect(clientTransport);
     try {
       const listing = await client.listTools();
-      expect(listing.tools.filter(tool => TOOL_NAMES.includes(tool.name as typeof TOOL_NAMES[number]))).toHaveLength(8);
+      const modelTools = listing.tools.filter(tool => { const ui = tool._meta?.ui as { visibility?: string[] } | undefined; return !ui?.visibility || ui.visibility.includes('model'); });
+      expect(modelTools.map(tool => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+      expect(modelTools.map(tool => tool.name)).not.toContain('studio_app_request');
+      expect(listing.tools.find(tool => tool.name === 'studio_app_request')).toMatchObject({ _meta: { ui: { visibility: ['app'] } } });
       const call = async (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: { artifactId, ...args } });
       const created = await call('artifact_feedback', { action: 'create', text: 'SDK message' });
       const feedbackId = (created.structuredContent as any).data.feedback[0].id;
@@ -307,6 +310,9 @@ describe('feedback and sharing schema through the real MCP SDK', () => {
       expect((await call('artifact_share', { action: 'remove', memberId: visitorId })).structuredContent).toMatchObject({ ok: true });
       expect((await call('artifact_share', { action: 'restore', memberId: visitorId, role: 'commenter' })).structuredContent).toMatchObject({ ok: true, data: { removedMembers: [] } });
       expect((await visitor.session()).body.actor).toMatchObject({ id: visitorId, role: 'commenter' });
+      expect((await call('artifact_share', { action: 'remove', memberId: visitorId })).structuredContent).toMatchObject({ ok: true });
+      expect((await call('artifact_share', { action: 'forget', memberId: visitorId })).structuredContent).toMatchObject({ ok: true, data: { removedMembers: [] } });
+      expect((await visitor.session()).body.error.code).toBe('NAME_REQUIRED');
       expect((await call('artifact_feedback', { action: 'delete', feedbackId })).structuredContent).toMatchObject({ ok: true, data: { feedback: [] } });
     } finally { await client.close(); await server.close(); }
   });

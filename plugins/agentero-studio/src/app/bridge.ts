@@ -79,6 +79,8 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
     await app.connect(new PostMessageTransport(window.parent, window.parent), { timeout: 15_000 });
     if (!connection) {
       const opened = await app.callServerTool({ name: 'studio_open', arguments: { view: initialView, ...(initialArtifactId ? { artifactId: initialArtifactId } : {}) } });
+      const payload = opened.structuredContent as ToolResponse | undefined;
+      if (opened.isError || payload?.ok === false) throw Object.assign(new Error(payload?.error?.message || '本机作品服务连接失败。'), { code: payload?.error?.code, details: payload?.error?.details });
       // Bootstrap supplies only the UI connection; its default route must not replace host input.
       connection ??= opened._meta?.connection as Connection | undefined;
     }
@@ -99,7 +101,7 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   });
   bridgeTransportClose = transport.close;
   const client: StudioClient = {
-    request: transport.request, assetUrl: transport.assetUrl,
+    request: transport.request, assetUrl: transport.assetUrl, subscribeAssets: transport.subscribeAssets, assetState: transport.assetState,
     embedded: true, baseUrl: connection.baseUrl, token: connection.token,
     async downloadFile(blob, filename) {
       if (!app.getHostCapabilities()?.downloadFile) throw new Error('当前宿主不支持文件下载，请更新宿主或在浏览器中导出。');
