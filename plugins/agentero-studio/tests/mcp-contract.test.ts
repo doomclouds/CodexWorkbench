@@ -56,6 +56,20 @@ async function applyFailure(args: Record<string, unknown>, code?: string) { retu
 const add = (elements: Record<string, unknown>[]) => apply({ operationId: randomUUID(), operations: elements.map(element => ({ op: 'add', element })) });
 
 describe('model MCP contracts through the real SDK', () => {
+  it('bootstraps an existing App through private metadata without a UI resource or navigation', async () => {
+    const { tools } = await client.listTools();
+    const transport = tools.find(tool => tool.name === APP_TOOL_NAME)!;
+    expect(transport._meta).toMatchObject({ ui: { visibility: ['app'] } });
+    expect((transport._meta?.ui as Record<string, unknown>).resourceUri).toBeUndefined();
+    const result = await client.callTool({ name: APP_TOOL_NAME, arguments: { action: 'connect' } });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([]); expect(result.structuredContent).toEqual({ ok: true });
+    expect(result._meta).toEqual({ connection: { baseUrl: 'http://127.0.0.1:12345', token: 'test-only', actor } });
+    expect(execution?.name).toBe('artifact_manage');
+    expect(JSON.stringify(result.structuredContent)).not.toContain('test-only');
+    expect((await client.callTool({ name: APP_TOOL_NAME, arguments: { action: 'connect', artifactId: 'another-board' } })).isError).toBe(true);
+  });
+
   it('preserves explicit Agent participants and documented MCP client identity through schema parsing', async () => {
     await call('artifact_read', { mode: 'summary', participant: { id: 'review-agent', name: 'Reviewer' } });
     expect(execution).toMatchObject({ name: 'artifact_read', args: { participant: { id: 'review-agent', name: 'Reviewer' } }, context: { clientInfo: { name: 'studio-contract-regression', version: '1.0.0' } } });

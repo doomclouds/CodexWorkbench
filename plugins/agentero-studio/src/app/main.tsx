@@ -2,7 +2,6 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
 import StudioApp from './StudioApp';
 import { createStudioBridge, type StudioBridge } from './bridge';
-import HtmlReader from './HtmlReader';
 import { installEscapeBoundary } from './shared/escape';
 
 installEscapeBoundary(window);
@@ -28,5 +27,4 @@ function Root() {
   if (!bridge) return <main style={{ padding: 36, fontFamily: 'system-ui' }}>正在连接作品库…</main>;
   return <StudioApp client={bridge.client} actor={bridge.actor} initialArtifactId={navigation.artifactId} initialView={navigation.view} navigationRevision={navigation.revision} attachContext={bridge.attachContext} onViewContext={bridge.updateContext} onNavigate={bridge.navigate} />;
 }
-const reader = window.__STUDIO_READER_BOOT__;
-createRoot(document.getElementById('root')!).render(reader ? <HtmlReader {...reader} /> : <Root />);
+createRoot(document.getElementById('root')!).render(<Root />);

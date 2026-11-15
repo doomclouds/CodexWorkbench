@@ -11,6 +11,35 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(
 
 const region: BoardElement = { id: 'region', type: 'html', x: 0, y: 0, w: 500, h: 300, version: 4, sourceRevision: 2, html: '<p data-studio-id="value">A poll</p>', state: { votes: 1 } };
 
+it('forwards only current interactive-frame pointer messages and clears position when interaction ends', async () => {
+  const host = mount(), pointer = vi.fn();
+  const render = (interactive: boolean, element = region) => host.root.render(<HtmlRegion element={element} annotation={false} interactive={interactive} onAnnotate={() => {}} onPointerPosition={pointer} />);
+  await act(async () => render(true));
+  const frame = host.dom.window.document.querySelector('iframe')!, { identity } = await host.messages(frame);
+  const message = { type: 'studio-html-pointer', ...identity, point: { x: .2, y: .75 } };
+  host.send(frame, message);
+  expect(pointer).toHaveBeenLastCalledWith({ x: .2, y: .75 });
+  for (const data of [{ ...message, channel: 'old-frame' }, { ...message, regionId: 'other-region' }, { ...message, sourceRevision: 1 }, { ...message, point: { x: 1.01, y: .75 } }, { ...message, point: { x: Number.NaN, y: 0 } }]) host.send(frame, data);
+  host.send(frame, message, host.dom.window as unknown as MessageEventSource);
+  expect(pointer).toHaveBeenCalledTimes(1);
+  host.send(frame, { ...message, point: null });
+  expect(pointer).toHaveBeenLastCalledWith(null);
+  host.send(frame, message);
+  await act(async () => render(false));
+  expect(pointer).toHaveBeenLastCalledWith(null);
+  const afterDisable = pointer.mock.calls.length;
+  host.send(frame, message);
+  expect(pointer).toHaveBeenCalledTimes(afterDisable);
+  await act(async () => render(true, { ...region, html: '<p>New source</p>', sourceRevision: 3 }));
+  host.send(frame, message);
+  expect(pointer).toHaveBeenCalledTimes(afterDisable);
+  const next = await host.messages(frame);
+  host.send(frame, { type: 'studio-html-pointer', ...next.identity, point: { x: .5, y: .5 } });
+  expect(pointer).toHaveBeenLastCalledWith({ x: .5, y: .5 });
+  await act(async () => host.root.render(null));
+  expect(pointer).toHaveBeenLastCalledWith(null);
+});
+
 it('forwards only current visible annotation-frame numeric shortcuts', async () => {
   const host = mount(), shortcut = vi.fn();
   const render = (annotation: boolean) => host.root.render(<HtmlRegion element={region} annotation={annotation} interactive onAnnotate={() => {}} onToolShortcut={shortcut} />);

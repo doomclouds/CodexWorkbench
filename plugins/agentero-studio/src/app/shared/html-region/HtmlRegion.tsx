@@ -1,17 +1,17 @@
 import './region.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HtmlRegionContent, HtmlSelection, Json } from '../../../contracts/studio.js';
-import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlStateSave } from './runtime.js';
+import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlPointerMessage, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlPointerPosition, type HtmlStateSave } from './runtime.js';
 import { newClientId } from '../client-id.js';
 import { dismissEscapeLayer, isEscapeActive } from '../escape.js';
 
-interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
+interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
 interface SaveQueue {
   active: boolean; processing: boolean; paused: boolean; sequence: number; pending: HtmlStateSave | null;
   accepted: { baseVersion: number; submitted: Json; state: Json; version: number }[];
 }
 
-export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, onAnnotate, onToolShortcut, onStateChange }: Props) {
+export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, onAnnotate, onToolShortcut, onPointerPosition, onStateChange }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const sourceRevision = useMemo(() => typeof element.sourceRevision === 'number' ? element.sourceRevision : element.version, [element.id, element.html, element.sourceRevision]);
   const channel = useMemo(() => newClientId(), [element.id, element.html, sourceRevision]);
@@ -20,6 +20,13 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
   const callback = useRef(onAnnotate);
   callback.current = onAnnotate;
   const toolShortcut = useRef(onToolShortcut); toolShortcut.current = onToolShortcut;
+  const pointerCallback = useRef(onPointerPosition); pointerCallback.current = onPointerPosition;
+  const pointerEnabled = useRef(annotation || interactive); pointerEnabled.current = annotation || interactive;
+  const pointerInside = useRef(false);
+  const reportPointer = (point: HtmlPointerPosition | null) => {
+    pointerCallback.current?.(point);
+    pointerInside.current = Boolean(point);
+  };
   const annotationRef = useRef(annotation); annotationRef.current = annotation;
   const preserveScrollRef = useRef(preserveScroll); preserveScrollRef.current = preserveScroll;
   const scrollPosition = useRef<{ regionId: string; x: number; y: number } | null>(null);
@@ -79,6 +86,8 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
     if (scrollPosition.current?.regionId !== element.id) scrollPosition.current = null;
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || !event.data || event.data.channel !== channel) return;
+      const pointer = validateHtmlPointerMessage(event.data, { channel, regionId: element.id, sourceRevision });
+      if (pointer) { if (pointerEnabled.current) reportPointer(pointer.point); return; }
       if (event.data.type === 'studio-html-tool-shortcut' && event.data.regionId === element.id && event.data.sourceRevision === sourceRevision) {
         if (annotationRef.current && typeof event.data.key === 'string' && /^[1-9]$/.test(event.data.key) && frame.current && isEscapeActive(frame.current)) toolShortcut.current?.(event.data.key);
         return;
@@ -109,8 +118,9 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
       }
     };
     window.addEventListener('message', receive);
-    return () => { queue.active = false; window.removeEventListener('message', receive); };
+    return () => { queue.active = false; if (pointerInside.current) reportPointer(null); window.removeEventListener('message', receive); };
   }, [channel, element.id, sourceRevision, queue]);
+  useEffect(() => { if (!annotation && !interactive && pointerInside.current) reportPointer(null); }, [annotation, interactive]);
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll }, '*');
   }, [annotation, channel, element.id, sourceRevision, ready, Boolean(onStateChange), preserveScroll]);

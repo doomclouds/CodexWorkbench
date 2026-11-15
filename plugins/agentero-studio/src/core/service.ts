@@ -303,9 +303,9 @@ export class StudioService {
       return { document: product.project(snapshot) };
     }
     if (action === 'list' || action === 'get') {
-      let state = await this.store.read(id);
+      let state = await this.store.readProjection(id, current => ({ ...authorizationState(current), feedback: current.feedback }));
       actor = this.authorizedActor(state, actor, authority);
-      if (state.feedback.some(item => proposalExpired(item))) state = await this.store.transaction(id, current => { this.authorizedActor(current, actor, authority); clearExpiredProposals(current); return copy(current); });
+      if (state.feedback.some(item => proposalExpired(item))) state = await this.store.transaction(id, current => { this.authorizedActor(current, actor, authority); clearExpiredProposals(current); return copy({ ...authorizationState(current), feedback: current.feedback }); });
       const feedback = visibleFeedback(state.feedback, actor).filter(item => (args.status === undefined || item.status === args.status) && (args.feedbackId === undefined || item.id === args.feedbackId));
       if (action === 'get' && !feedback.length) throw new StudioError('NOT_FOUND', '反馈不存在。');
       return { feedback };

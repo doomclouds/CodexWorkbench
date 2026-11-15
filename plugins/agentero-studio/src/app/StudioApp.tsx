@@ -16,7 +16,6 @@ import { CommentComposer, CommentPopover } from './shared/comments/CommentPopove
 import { CommentThread, type CommentAction, type CommentActionArguments } from './shared/comments/CommentThread';
 import { CommentsPanel } from './shared/comments/CommentsPanel';
 import { describeCommentTarget, liveCommentPoint, type CommentPoint } from './shared/comments/comment-target';
-import { createRegionReaderLink, watchRegionReaderReturn } from './region-reader';
 import { copyPlainText } from './clipboard';
 import { newClientId } from './shared/client-id';
 import { isAuthenticationFailure, useStudioSession } from './shared/useStudioSession';
@@ -133,8 +132,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   const historyButton = useRef<HTMLButtonElement>(null), shareButton = useRef<HTMLButtonElement>(null), commentsButton = useRef<HTMLButtonElement>(null);
   const [targetViewport, setTargetViewport] = useState<Viewport>();
   const [targetSelection, setTargetSelection] = useState<string[]>();
-  const [readerSession, setReaderSession] = useState<{ artifactId: string; expiresAt: number } | null>(null);
-  const [readerFallback, setReaderFallback] = useState<{ artifactId: string; url: string; expiresAt: number } | null>(null);
+  const [reading, setReading] = useState(false);
   const [replies, setReplies] = useState<Record<string, string>>({});
   const replyAttempts = useRef(new Map<string, { text: string; replyId: string }>());
   const [showResolved, setShowResolved] = useState(false);
@@ -263,7 +261,18 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   stopFollowMotion.current = follow.stop;
   const followedPeer = follow.peer;
   const refreshBoard = useCallback(async (id = activeRef.current) => { if (id === activeRef.current && !accessPending) await collaboration.refresh(); }, [collaboration, accessPending]);
-  const acceptFeedback = useCallback(async (_next: Feedback[]) => { collaboration.feedbackChanged(); await collaboration.refreshFeedback(); }, [collaboration]);
+  const acceptFeedback = useCallback((next: Feedback[], changedId: string) => {
+    collaboration.feedbackChanged();
+    // The write already succeeded. Update its thread without replacing other collaborators' threads.
+    setFeedback(previous => {
+      const changed = next.find(item => item.id === changedId), current = previous.find(item => item.id === changedId);
+      if (!changed) return previous.filter(item => item.id !== changedId);
+      if (!current) return [...previous, changed];
+      if (current.updatedAt > changed.updatedAt) return previous;
+      return previous.map(item => item.id === changedId ? changed : item);
+    });
+    collaboration.refreshFeedback();
+  }, [collaboration]);
   requestPresence.current = () => {
     const state = presenceRef.current, area = canvasArea.current;
     collaboration.presence({ context: { viewId: peerId, artifactId: activeId, selectedIds: state.selectedIds, viewport: state.viewport, surface: { w: area?.clientWidth || window.innerWidth, h: area?.clientHeight || window.innerHeight }, editingIds: state.editingIds, movingIds: state.movingIds, savingIds: state.savingIds, dirty: state.dirty, issues: state.issues }, following: state.following });
@@ -338,7 +347,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
     versionSequence.current += 1; activeRef.current = id; boardRef.current = null;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
     setRoomTimer(null); setTimerBusy(false); setSaveActivity({ dirty: false, saving: false, saveError: '' }); setEditingBusy(false); publishViewContext();
-    resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReaderSession(null); setReaderFallback(null); setShare(null); setHistory([]);
+    resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReading(false); setShare(null); setHistory([]);
     setActiveId(id); setBoard(null); setFeedback([]); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setSelectedIds([]); setAnnotation(null); setError(''); setMenuId(''); setPeers([]); setFollowing('');
     if (ready) acceptBoard(ready);
   }
@@ -347,7 +356,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
     activeRef.current = ''; boardRef.current = null; versionSequence.current += 1;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
     setRoomTimer(null); setTimerBusy(false); setSaveActivity({ dirty: false, saving: false, saveError: '' }); setEditingBusy(false); publishViewContext();
-    resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReaderSession(null); setReaderFallback(null);
+    resetComment(); setAnnotationActive(false); setTargetViewport(undefined); setTargetSelection(undefined); setReading(false);
     setActiveId(''); setBoard(null); setPreview(null); setSuggestionPreview(null); suggestionSequence.current += 1; setPanel(null); setAnnotation(null); setSelectedIds([]); setError(''); setPeers([]); setFollowing('');
   }
   function changeLibraryFilter(value: LibraryFilter) { setFilter(value); setMenuId(''); onNavigate?.(undefined, value === 'trash' ? 'trash' : 'library'); }
@@ -466,40 +475,6 @@ export default function StudioApp({ client: transportClient, actor: initialActor
     setCommentOpen(false); setAnnotationActive(true); setSelectedFeedback({ id: item.id, point: point || locateAnchor(item.anchor) }); setPanel(null);
   }
   function commentPoint(anchor: Anchor, feedbackId?: string, fallback?: CommentPoint) { return liveCommentPoint(canvasArea.current, boardRef.current, anchor, presenceRef.current.viewport, feedbackId, fallback); }
-  async function openHtmlReader(regionId: string) {
-    const id = activeRef.current; if (!id || busy) return;
-    // Reserve the browser tab while the original click still has user activation.
-    const browserTab = client.embedded === false ? window.open('about:blank', '_blank') : null;
-    if (browserTab) browserTab.opener = null;
-    setBusy('reader');
-    try {
-      const link = await createRegionReaderLink(client, { artifactId: id, regionId, viewId: peerId });
-      if (activeRef.current !== id || !mounted.current) { browserTab?.close(); return; }
-      setReaderFallback({ artifactId: id, ...link });
-      try {
-        if (browserTab && !browserTab.closed) browserTab.location.replace(link.url);
-        else if (client.openLink) await client.openLink(link.url);
-        else { const opened = window.open(link.url, '_blank'); if (!opened) throw new Error('浏览器拦截了新标签。'); opened.opener = null; }
-        if (activeRef.current === id) { setReaderSession({ artifactId: id, expiresAt: link.expiresAt }); setReaderFallback(null); }
-      } catch (cause) {
-        browserTab?.close();
-        if (activeRef.current === id) fail(new Error(`${cause instanceof Error ? cause.message : '阅读页未能打开。'} 请点击下方“在新标签打开”。`));
-      }
-    } catch (cause) { browserTab?.close(); if (activeRef.current === id) fail(cause); }
-    finally { if (mounted.current) setBusy(''); }
-  }
-  useEffect(() => {
-    if (accessPending || !readerSession || readerSession.artifactId !== activeId || readerSession.expiresAt <= Date.now()) return;
-    return watchRegionReaderReturn(client, { artifactId: activeId, viewId: peerId }, target => {
-      if (activeRef.current !== target.artifactId || target.viewId !== peerId) return;
-      const point = locateAnchor({ regionId: target.regionId });
-      if (!point) { inform('原区域已移除，请在白板中选择其他区域。'); return; }
-      versionSequence.current += 1; suggestionSequence.current += 1; setPreview(null); setSuggestionPreview(null);
-      setPanel(null); setCommentOpen(false); setSelectedFeedback(null);
-      setAnnotationActive(target.annotate && canComment); inform(target.annotate && canComment ? '已定位原区域，点击图解中的目标添加备注。' : '已定位原区域。');
-    });
-  }, [readerSession, activeId, client, peerId, canComment, accessPending]);
-
   async function createFeedback(event: FormEvent) {
     event.preventDefault(); const current = boardRef.current;
     if (!current || !annotation || !feedbackText.trim() || busy || commentSubmitting.current) return;
@@ -514,14 +489,14 @@ export default function StudioApp({ client: transportClient, actor: initialActor
         const created = result.feedback.find(item => item.id === result.contextId);
         if (!created) throw new Error('备注已提交，但未取得保存结果，请重试。');
         pending.created = created;
-        if (activeRef.current === id) { await acceptFeedback(result.feedback); setSavedComment(created); }
+        if (activeRef.current === id) { acceptFeedback(result.feedback, created.id); setSavedComment(created); }
       }
       if (activeRef.current !== id || !mounted.current) return;
       if (attachComment) {
         if (attachContext) await attachContext(pending.created, current);
         else {
           const result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action: 'send', artifactId: id, feedbackId: pending.created.id, targetViewId: peerId });
-          if (activeRef.current === id) await acceptFeedback(result.feedback);
+          if (activeRef.current === id) acceptFeedback(result.feedback, pending.created.id);
         }
       }
       if (activeRef.current !== id || !mounted.current) return;
@@ -545,7 +520,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
     setBusy(`feedback:${item.id}`); setError('');
     try {
       const result = await client.call<{ feedback: Feedback[] }>('artifact_feedback', { action, artifactId: item.artifactId, feedbackId: item.id, ...args });
-      if (activeRef.current === item.artifactId) { await acceptFeedback(result.feedback); if (action === 'delete' || action === 'resolve') setSelectedFeedback(previous => previous?.id === item.id ? null : previous); }
+      if (activeRef.current === item.artifactId) { acceptFeedback(result.feedback, item.id); if (action === 'delete' || action === 'resolve') setSelectedFeedback(previous => previous?.id === item.id ? null : previous); }
       if (action === 'send') inform('请求已提交，等待房主附加到对话。');
       if (attempt && replyAttempts.current.get(attemptKey) === attempt) replyAttempts.current.delete(attemptKey);
       return result.feedback.find(entry => entry.id === item.id) || null;
@@ -659,13 +634,12 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   const shareContent = <div aria-label="分享面板"><SharePanel title={board?.artifact.title || '作品'} actor={actor} share={share} busy={!!busy} exportFormats={product.exportFormats} canBackup={canManage} onStart={access => changeSharing('start', { access })} onReset={role => changeSharing('reset', { role })} onToggleRole={(role, on) => changeSharing('link', { role, on })} onMemberRole={(memberId, role) => changeSharing('role', { memberId, role })} onRemoveMember={memberId => changeSharing('remove', { memberId })} onRestoreMember={(memberId, role) => changeSharing('restore', { memberId, role })} onForgetMember={memberId => changeSharing('forget', { memberId })} canonicalLink={share?.canonicalPath && client.baseUrl ? new URL(share.canonicalPath, client.baseUrl).href : undefined} onCopy={(link, role) => { if (role) void copyInvitation(link, role); else if (link) void copyLink(link); }} onExport={format => void exportBoard(format)} extraContent={<div className="studio-editor-secondary"><button className="studio-button studio-text-button" aria-label={resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题'} onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}>{resolvedTheme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}切换为{resolvedTheme === 'dark' ? '明亮' : '暗色'}主题</button></div>} /></div>;
   const commentsContent = <CommentsPanel feedback={feedback} actor={actor} busy={!!busy} showResolved={showResolved} onShowResolved={setShowResolved} onOpen={selectFeedback} onAction={feedbackAction} onAttach={attachFeedback} renderSuggestion={item => <SuggestionPanel feedback={item} client={client} artifactId={activeId} onChanged={acceptBoard} onPreview={operations => void previewSuggestion(item, operations)} onRefresh={() => void refreshBoard()} onError={fail} />} />;
 
-  return <div ref={studioRoot} className={`studio ${activeId ? 'studio-editor' : 'studio-library'}${session.status === 'denied' ? ' studio-session-denied' : ''}`} data-session-status={session.status} data-studio-theme={resolvedTheme}>
+  return <div ref={studioRoot} className={`studio ${activeId ? 'studio-editor' : 'studio-library'}${session.status === 'denied' ? ' studio-session-denied' : ''}${reading ? ' studio-reading' : ''}`} data-session-status={session.status} data-studio-theme={resolvedTheme}>
     <SessionNotice status={session.status} reason={session.reason} onRetry={() => void session.check()} />
-    <CursorChat enabled={!!activeId && !accessPending && !preview && !suggestionPreview} live={cursorLive} color={claimParticipantColor(actor, peerId, peers)} onMessage={(text, expiresAt) => collaboration.presence({ chat: text, chatExpiresAt: expiresAt })} />
+    <CursorChat enabled={!!activeId && !reading && !accessPending && !preview && !suggestionPreview} live={cursorLive} color={claimParticipantColor(actor, peerId, peers)} onMessage={(text, expiresAt) => collaboration.presence({ chat: text, chatExpiresAt: expiresAt })} />
     <div className="studio-session-content" hidden={session.status === 'denied'} aria-hidden={session.status === 'denied' ? true : undefined} inert={accessPending}>
     {error && <div className="studio-error" role="alert"><AlertCircle size={17} /><span>{error}</span>{retryRef.current && <button onClick={() => { setError(''); retryRef.current?.(); }}>重试</button>}<button className="studio-icon-button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={15} /></button></div>}
     {notice && <div className="studio-notice" role="status"><Check size={15} />{notice}<button className="studio-icon-button" aria-label="关闭通知" onClick={() => setNotice('')}><X size={14} /></button></div>}
-    {readerFallback?.artifactId === activeId && <div className="studio-reader-fallback" role="status"><span>请点击链接打开 HTML 阅读页。</span><a href={readerFallback.url} target="_blank" rel="noopener noreferrer" onClick={() => { setReaderSession({ artifactId: activeId, expiresAt: readerFallback.expiresAt }); setReaderFallback(null); }}>在新标签打开</a><button className="studio-icon-button" aria-label="关闭阅读页链接" onClick={() => setReaderFallback(null)}><X size={14} /></button></div>}
     {!activeId ? <main className="studio-library-main">
       <header className="studio-library-header"><div className="studio-library-title">{filter !== 'recent' && <button type="button" className="studio-icon-button" aria-label="返回最近作品" title="返回最近作品" disabled={!!busy} onClick={() => { changeLibraryFilter('recent'); setQuery(''); }}><ArrowLeft size={21} /></button>}<h1>{filter === 'trash' ? '回收站' : filter === 'pinned' ? '已固定' : '作品'}</h1></div>{canManage && <LibraryToolbar query={query} filter={filter} layout={layout} resolvedTheme={resolvedTheme} busy={!!busy} creating={busy === 'create'} onQueryChange={setQuery} onFilterChange={changeLibraryFilter} onLayoutChange={value => { setLayout(value); try { localStorage.setItem('agentero-studio-view', value); } catch { /* optional preference */ } }} onThemeChange={setTheme} onCreate={() => void createBoard()} onImport={() => archiveInput.current?.click()} onEmptyTrash={() => void prepareEmptyTrash()} />}</header>
       {canManage ? <>
@@ -695,9 +669,9 @@ export default function StudioApp({ client: transportClient, actor: initialActor
       {preview && <div className="studio-preview-banner"><Clock3 size={16} /><span>正在预览版本 {preview.version.revision}，当前白板未改变。</span><button className="studio-button studio-compact" onClick={closePreview}>退出预览</button>{canEdit && <button className="studio-button studio-primary studio-compact" disabled={!!busy} onClick={() => setPreviewRestoreOpen(true)}><RotateCcw size={14} />恢复此版本</button>}</div>}
       {previewRestoreOpen && preview && <StudioDialog title="恢复此版本？" onClose={() => { if (!busy) setPreviewRestoreOpen(false); }}><p>将整个作品恢复到版本 {preview.version.revision}。恢复会创建新版本，已有历史记录将保留。</p><div className="studio-modal-footer"><button type="button" className="studio-button" disabled={!!busy} onClick={() => setPreviewRestoreOpen(false)}>取消</button><button type="button" className="studio-button studio-primary" disabled={!!busy} onClick={() => { void restoreVersion().then(restored => { if (restored) setPreviewRestoreOpen(false); }); }}>确认恢复</button></div></StudioDialog>}
       {following && <div className="studio-follow-banner"><Users size={14} /><span>正在跟随 {followedPeer?.actor.name || "协作者"} 的视角</span><button className="studio-link-button" onClick={() => setFollowing('')}>停止跟随</button></div>}
-      <div className="studio-workspace"><div ref={canvasArea} className="studio-canvas-area">{board ? <><div className="studio-live-editor" hidden={!!preview || !!suggestionPreview}><ProductEditor key={board.artifact.id} document={board} client={client} actor={actor} clockOffsetMs={clockOffsetMs} onChanged={acceptBoard} onAnnotate={annotate} onError={fail} onNotice={inform} readOnly={!canEdit || !!preview || !!suggestionPreview} annotationActive={annotationActive && !preview && !suggestionPreview} annotationTarget={commentOpen && annotation ? annotation.anchor : activeFeedback?.anchor} onAnnotationModeChange={changeAnnotationMode} onSelectionChange={selectionChanged} onActivityChange={editorActivityChanged} activities={feedback.filter(item => item.status !== 'resolved' || showResolved)} onFeedbackSelect={selectFeedback} onOpenHtml={regionId => void openHtmlReader(regionId)} documentControls={client.baseUrl && <TimerControl timer={roomTimer} clockOffsetMs={clockOffsetMs} canEdit={canEdit && !preview && !suggestionPreview} busy={timerBusy} onAction={(action, duration, delta) => void changeTimer(action, duration, delta)} />} onViewportChange={viewportChanged} onCursorMove={cursorMoved} onViewportInteract={stopFollowing} room={collaboration.room} presence={peers} onReleaseAgentTask={canReleaseAgentTasks ? releaseAgentTask : undefined} selfPeerId={peerId} externalViewport={follow.viewport || targetViewport} externalSelectedIds={targetSelection} /></div>{(preview?.board || suggestionPreview) && <ProductEditor key={`preview-${preview?.version.id || 'suggestion'}`} document={preview?.board || suggestionPreview!} client={client} actor={actor} clockOffsetMs={clockOffsetMs} readOnly preview onChanged={() => {}} onAnnotate={() => {}} onSelectionChange={() => {}} onViewportChange={() => {}} onCursorMove={() => {}} presence={[]} selfPeerId={`preview-${peerId}`} />}</> : <div className="studio-empty"><Loader2 size={28} className="studio-spin" /><p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>{error && <button className="studio-button" onClick={() => void refreshBoard()}><RefreshCw size={16} />重新加载</button>}</div>}</div></div>
-      {commentOpen && annotation && canComment && <CommentPopover point={annotation.screenPoint} locate={() => commentPoint(annotation.anchor, undefined, annotation.screenPoint)} draft pinLabel={actor.name} label={annotation.label} onClose={() => setCommentOpen(false)} onOutside={() => { if (!feedbackText.trim() && !savedComment) setCommentOpen(false); }}><CommentComposer text={feedbackText} attach={attachComment} busy={busy === 'feedback'} saved={!!savedComment} error={commentError} onTextChange={setFeedbackText} onAttachChange={setAttachComment} onSubmit={event => void createFeedback(event)} /></CommentPopover>}
-      {activeFeedback && selectedFeedback && <CommentPopover point={selectedFeedback.point} locate={() => commentPoint(activeFeedback.anchor, activeFeedback.id, selectedFeedback.point)} onClose={() => setSelectedFeedback(null)}><CommentThread feedback={activeFeedback} actor={actor} busy={!!busy} onAction={feedbackAction} onAttach={attachFeedback} onClose={() => setSelectedFeedback(null)} replyText={replies[activeFeedback.id] || ''} onReplyTextChange={value => setReplies(previous => ({ ...previous, [activeFeedback.id]: value }))} /></CommentPopover>}    </>}
+      <div className="studio-workspace"><div ref={canvasArea} className="studio-canvas-area">{board ? <><div className="studio-live-editor" hidden={!!preview || !!suggestionPreview}><ProductEditor key={board.artifact.id} document={board} client={client} actor={actor} clockOffsetMs={clockOffsetMs} onChanged={acceptBoard} onAnnotate={annotate} onError={fail} onNotice={inform} readOnly={!canEdit || !!preview || !!suggestionPreview} annotationActive={annotationActive && !preview && !suggestionPreview} annotationTarget={commentOpen && annotation ? annotation.anchor : activeFeedback?.anchor} onAnnotationModeChange={changeAnnotationMode} onSelectionChange={selectionChanged} onActivityChange={editorActivityChanged} activities={feedback.filter(item => item.status !== 'resolved' || showResolved)} onFeedbackSelect={selectFeedback} onReadingChange={setReading} documentControls={client.baseUrl && <TimerControl timer={roomTimer} clockOffsetMs={clockOffsetMs} canEdit={canEdit && !preview && !suggestionPreview} busy={timerBusy} onAction={(action, duration, delta) => void changeTimer(action, duration, delta)} />} onViewportChange={viewportChanged} onCursorMove={cursorMoved} onViewportInteract={stopFollowing} room={collaboration.room} presence={peers} onReleaseAgentTask={canReleaseAgentTasks ? releaseAgentTask : undefined} selfPeerId={peerId} externalViewport={follow.viewport || targetViewport} externalSelectedIds={targetSelection} /></div>{(preview?.board || suggestionPreview) && <ProductEditor key={`preview-${preview?.version.id || 'suggestion'}`} document={preview?.board || suggestionPreview!} client={client} actor={actor} clockOffsetMs={clockOffsetMs} readOnly preview onReadingChange={setReading} onChanged={() => {}} onAnnotate={() => {}} onSelectionChange={() => {}} onViewportChange={() => {}} onCursorMove={() => {}} presence={[]} selfPeerId={`preview-${peerId}`} />}</> : <div className="studio-empty"><Loader2 size={28} className="studio-spin" /><p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>{error && <button className="studio-button" onClick={() => void refreshBoard()}><RefreshCw size={16} />重新加载</button>}</div>}</div></div>
+      {!reading && commentOpen && annotation && canComment && <CommentPopover point={annotation.screenPoint} locate={() => commentPoint(annotation.anchor, undefined, annotation.screenPoint)} draft pinLabel={actor.name} label={annotation.label} onClose={() => setCommentOpen(false)} onOutside={() => { if (!feedbackText.trim() && !savedComment) setCommentOpen(false); }}><CommentComposer text={feedbackText} attach={attachComment} busy={busy === 'feedback'} saved={!!savedComment} error={commentError} onTextChange={setFeedbackText} onAttachChange={setAttachComment} onSubmit={event => void createFeedback(event)} /></CommentPopover>}
+      {!reading && activeFeedback && selectedFeedback && <CommentPopover point={selectedFeedback.point} locate={() => commentPoint(activeFeedback.anchor, activeFeedback.id, selectedFeedback.point)} onClose={() => setSelectedFeedback(null)}><CommentThread feedback={activeFeedback} actor={actor} busy={!!busy} onAction={feedbackAction} onAttach={attachFeedback} onClose={() => setSelectedFeedback(null)} replyText={replies[activeFeedback.id] || ''} onReplyTextChange={value => setReplies(previous => ({ ...previous, [activeFeedback.id]: value }))} /></CommentPopover>}    </>}
     {purgeConfirmation && <StudioDialog title={purgeConfirmation.all ? '清空回收站' : '永久删除作品'} onClose={() => { if (!purgeRunning.current) setPurgeConfirmation(null); }}><p>将永久删除 {purgeConfirmation.targets.length} 项作品，此操作无法恢复。</p>{purgeConfirmation.targets.length === 1 && <p className="studio-purge-target">{purgeConfirmation.targets[0]!.title}</p>}<div className="studio-modal-footer"><button type="button" className="studio-button" disabled={!!busy} onClick={() => setPurgeConfirmation(null)}>取消</button><button type="button" className="studio-button studio-purge-confirm" disabled={!!busy} onClick={() => void purgeArtifacts()}>{busy === 'purge' ? <Loader2 className="studio-spin" size={15} /> : <Trash2 size={15} />}{busy === 'purge' ? '正在删除…' : purgeConfirmation.all ? '清空回收站' : '永久删除'}</button></div></StudioDialog>}
     {copyFallback && <StudioDialog title="手动复制链接" onClose={() => setCopyFallback('')}><p>浏览器未能自动复制，请复制下面的邀请链接。</p><input className="studio-text-field" aria-label="邀请链接" readOnly value={copyFallback} onFocus={event => event.currentTarget.select()} autoFocus /><div className="studio-modal-footer"><button className="studio-button" onClick={() => setCopyFallback('')}>完成</button></div></StudioDialog>}
     {rename && <StudioDialog title="重命名作品" onClose={() => setRename(null)}><form onSubmit={event => { event.preventDefault(); if (rename.title.trim()) void manageArtifact('rename', rename.artifact, { title: rename.title.trim() }); }}><label className="studio-field-label" htmlFor="studio-rename-title">作品名称</label><input className="studio-text-field" id="studio-rename-title" maxLength={200} value={rename.title} onChange={event => setRename(previous => previous ? { ...previous, title: event.target.value } : null)} /><div className="studio-modal-footer"><button type="button" className="studio-button" onClick={() => setRename(null)}>取消</button><button className="studio-button studio-primary" type="submit" disabled={!rename.title.trim() || !!busy}>保存</button></div></form></StudioDialog>}

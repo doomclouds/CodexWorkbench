@@ -562,10 +562,10 @@ describe('whiteboard direct interaction', () => {
     expect((host.querySelector('[data-feedback-pin="object"]') as HTMLElement).style.left).toBe('500px');
     expect((host.querySelector('[data-feedback-pin="html"]') as HTMLElement).style.left).toBe('620px');
   });
-  it('shares HTML editor and reader entries, activates content on double click and keeps document controls before compact zoom', async () => {
-    const open = vi.fn(), edit = vi.fn();
-    await mount([element('region', { type: 'html', html: '<p>Hello</p>', locked: true })], { onOpenHtml: open, onEditHtml: edit, documentControls: <button aria-label="计时器">Timer</button> });
-    await select('region'); await click('新标签页打开 HTML 图解'); expect(open.mock.lastCall?.[0].id).toBe('region');
+  it('offers direct selection reading instead of an external HTML reader, activates content on double click and keeps document controls before compact zoom', async () => {
+    const edit = vi.fn();
+    await mount([element('region', { type: 'html', html: '<p>Hello</p>', locked: true })], { onEditHtml: edit, documentControls: <button aria-label="计时器">Timer</button> });
+    await select('region'); expect(query('全屏观看选区')).not.toBeNull(); expect(host.querySelector('[aria-label="新标签页打开 HTML 图解"]')).toBeNull();
     await click('编辑 HTML 源码'); expect(edit.mock.lastCall?.[0].id).toBe('region');
     await event(host.querySelector('[data-element-id="region"]')!, 'dblclick'); expect((host.querySelector('iframe') as HTMLIFrameElement).style.pointerEvents).toBe('auto');
     expect([...host.querySelector('.studio-canvas-top-tools')!.children].map(node => node.getAttribute('aria-label'))).toEqual(['计时器', null, '缩放菜单']);

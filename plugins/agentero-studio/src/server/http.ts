@@ -6,7 +6,6 @@ import { StudioError, StudioService, type StudioAuthority } from '../core/servic
 import { safeId, text } from '../core/shared/common.js';
 import { MAX_ARCHIVE_BYTES } from '../core/shared/archive.js';
 import { createGuestSessions } from './guest-session.js';
-import { createRegionReaders } from './region-reader.js';
 import { lanAddresses } from './lan-addresses.js';
 import { createCollaborationRoutes } from './collaboration-routes.js';
 import { SERVICE_PROTOCOL_VERSION } from './service-protocol.js';
@@ -14,7 +13,7 @@ import { PLUGIN_VERSION } from '../contracts/version.js';
 
 interface Auth { actor: Actor; token: string; artifactId?: string; owner: boolean; access: 'local' | 'lan'; viaLan: boolean; authority: StudioAuthority }
 interface Invitation { title: string; role: Exclude<Role, 'owner'> }
-export interface StudioHost { service: StudioService; origin: string; token: string; hasActiveReaders(): boolean; close(): Promise<void> }
+export interface StudioHost { service: StudioService; origin: string; token: string; close(): Promise<void> }
 const MAX_BODY = 21 * 1024 * 1024;
 // A listening socket on one of these ports is still rejected by browser Fetch.
 // https://fetch.spec.whatwg.org/#port-blocking
@@ -96,7 +95,6 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
   if (options.port && BROWSER_BLOCKED_PORTS.has(options.port)) throw new StudioError('INVALID_ARGUMENT', `浏览器禁止访问端口 ${options.port}，请选择其他端口。`);
   const service = new StudioService({ dataRoot: options.dataRoot, ownerName: options.ownerName }), token = randomBytes(32).toString('base64url');
   const guestSession = await createGuestSessions(service.dataRoot);
-  const regionReaders = createRegionReaders(service);
   const servers = new Set<Server>(), sockets = new Set<Socket>();
   let origin = '', lan: Server | undefined, sharingOrigin = '', startingLan: Promise<string> | undefined, stopping = false;
   function server() {
@@ -150,35 +148,6 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
     response.setHeader('Referrer-Policy', 'no-referrer');
     if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
     if (await collaborationRoutes.handle(request, response, url)) return;
-    if (url.pathname === '/api/region-view' && (request.method === 'POST' || request.method === 'GET')) {
-      const input = request.method === 'POST' ? await readJson(request) : {}, artifactId = typeof input.artifactId === 'string' ? input.artifactId : url.searchParams.get('artifactId') ?? '';
-      const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
-      // Use the listener's known address, never a caller-controlled Host header.
-      const readerOrigin = request.socket.localPort === (local.address() as AddressInfo)?.port ? origin : sharingOrigin;
-      const data = request.method === 'POST' ? await regionReaders.create(auth, input, readerOrigin) : await regionReaders.takeReturn(auth, artifactId, url.searchParams.get('viewId') ?? '');
-      json(response, 200, { ok: true, data }); return;
-    }
-    const reader = /^\/api\/region-reader\/([^/]+)\/([^/]+)(\/return)?$/.exec(url.pathname);
-    if (reader && (request.method === 'GET' && !reader[3] || request.method === 'POST' && reader[3])) {
-      const capability = header(request, 'authorization').replace(/^Bearer\s+/i, '');
-      const artifactId = decodeURIComponent(reader[1]!), regionId = decodeURIComponent(reader[2]!);
-      await service.accessMode(artifactId, viaLan(request));
-      if ([...url.searchParams.keys()].some(key => key !== 'metadata') || url.searchParams.has('metadata') && url.searchParams.get('metadata') !== '1') throw new StudioError('INVALID_ARGUMENT', '阅读请求参数无效。');
-      let data;
-      if (reader[3]) {
-        const input = await readJson(request);
-        if (Object.keys(input).some(key => key !== 'annotate') || typeof input.annotate !== 'boolean') throw new StudioError('INVALID_ARGUMENT', '返回白板请求无效。');
-        data = await regionReaders.returnToBoard(capability, artifactId, regionId, input.annotate);
-      } else data = await regionReaders.source(capability, artifactId, regionId, url.searchParams.get('metadata') === '1');
-      json(response, 200, { ok: true, data }); return;
-    }
-    const readerPage = /^\/region\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})\/([A-Za-z0-9][A-Za-z0-9_-]{0,119})$/.exec(url.pathname);
-    if (readerPage && request.method === 'GET') {
-      const boot = JSON.stringify({ artifactId: readerPage[1], regionId: readerPage[2] }).replace(/</g, '\\u003c');
-      const script = `<script>window.__STUDIO_READER_BOOT__=${boot};</script>`, raw = options.html ?? '<!doctype html><html><head><meta charset="utf-8"><title>Agentero Studio</title></head><body><main id="root">Agentero Studio</main></body></html>';
-      const html = /<head\b[^>]*>/i.test(raw) ? raw.replace(/<head\b[^>]*>/i, opening => opening + script) : `${script}${raw}`;
-      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Length': Buffer.byteLength(html) }); response.end(html); return;
-    }
     if (request.method === 'GET' && url.pathname.startsWith('/api/thumbnails/')) {
       const artifactId = decodeURIComponent(url.pathname.slice('/api/thumbnails/'.length));
       const auth = await authorize(request, response, url, artifactId); scope(auth, artifactId);
@@ -267,10 +236,9 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
   }
   try { await service.resetSharingSessions(); const port = await listen(local, options.port ?? 0, '127.0.0.1'); origin = `http://127.0.0.1:${port}`; service.configureLocalOrigin(origin); }
   catch (error) { await service.close(); throw error; }
-  return { service, origin, token, hasActiveReaders: regionReaders.hasActiveReaders, async close() {
+  return { service, origin, token, async close() {
     if (stopping) return; stopping = true;
     collaborationRoutes.close();
-    regionReaders.close();
     await Promise.all([...servers].map(closeServer)); for (const socket of sockets) socket.destroy(); await service.resetSharingSessions(); await service.close();
   } };
 }

@@ -8,7 +8,6 @@ vi.mock('react-dom/client', async original => {
   return { ...actual, createRoot: (...args: Parameters<typeof actual.createRoot>) => { const root = actual.createRoot(...args); harness.roots.push(root); return root; } };
 });
 vi.mock('../src/app/shared/escape', () => ({ installEscapeBoundary: () => () => {} }));
-vi.mock('../src/app/HtmlReader', () => ({ default: () => null }));
 vi.mock('../src/app/bridge', () => ({ createStudioBridge: async (receive: typeof harness.receive) => { harness.receive = receive; return { client: { embedded: false }, actor: { id: 'local', name: 'Owner', kind: 'human', role: 'owner' }, artifactId: 'first', view: 'editor', navigate: harness.navigate, close: async () => {} }; } }));
 vi.mock('../src/app/StudioApp', () => ({ default: ({ initialArtifactId, initialView, onNavigate }: { initialArtifactId?: string; initialView?: string; onNavigate?: (artifactId?: string, view?: string) => void }) => <main><output>{`${initialView}:${initialArtifactId ?? ''}`}</output><button onClick={() => onNavigate?.('created', 'editor')}>Open created</button><button onClick={() => onNavigate?.(undefined, 'trash')}>Trash</button></main> }));
 afterEach(async () => { for (const root of harness.roots.splice(0)) await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals(); });

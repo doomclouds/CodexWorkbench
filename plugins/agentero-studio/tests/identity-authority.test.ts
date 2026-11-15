@@ -137,17 +137,13 @@ describe('host owner and viewer-safe sharing identity', () => {
     expect(projected.role).toBe('viewer'); expect(projected.roles).toEqual(['viewer']); expect(projected.links).toEqual({ viewer: info.links.viewer });
   });
 
-  it('refreshes the same identity across invitation-role changes and revokes its old stream and reader', async () => {
-    await host.service.execute('artifact_apply', { artifactId, operations: [{ op: 'add', element: { id: 'html', type: 'html', html: '<h1>Reader</h1>' } }] });
+  it('refreshes the same identity across invitation-role changes and revokes its old stream', async () => {
     const info = await share({ action: 'start', access: 'local' }), viewer = guest(tokenFor(info)); const actor = await viewer.join('Switching role');
-    const region = await viewer.request('/api/region-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, regionId: 'html', viewId: 'old-editor-view' }) });
-    const cap = new URLSearchParams(new URL((await region.json()).data.url).hash.slice(1)).get('cap');
     const stream = await viewer.request(`/api/events?artifactId=${artifactId}`), reader = stream.body!.getReader();
     await reader.read();
     viewer.use(tokenFor(info, 'viewer')); expect((await viewer.session()).value.actor).toMatchObject({ id: actor.id, role: 'viewer' });
     let text = ''; while (!text.includes('access-revoked')) { const part = await reader.read(); if (part.done) break; text += new TextDecoder().decode(part.value); }
     expect(text).toContain('"reason":"role-changed"'); await reader.cancel();
-    expect((await fetch(`${host.origin}/api/region-reader/${artifactId}/html`, { headers: { Authorization: `Bearer ${cap}` } })).status).toBe(401);
     viewer.use(); expect((await viewer.session()).value.actor.role).toBe('viewer');
   });
 
@@ -166,19 +162,6 @@ describe('host owner and viewer-safe sharing identity', () => {
     expect((await viewer.session()).response.status).toBe(401);
     viewer.use(tokenFor(next)); expect((await viewer.session()).value.actor).toMatchObject({ id: actor.id, name: actor.name }); viewer.use();
     await share({ action: 'remove', memberId: actor.id }); expect((await viewer.session()).value.error.details.reason).toBe('removed');
-  });
-
-  it('binds canonical reader return intents to the signed author rather than the shared empty token or public view ID', async () => {
-    await host.service.execute('artifact_apply', { artifactId, operations: [{ op: 'add', element: { id: 'reader-html', type: 'html', html: '<h1>Reader</h1>' } }] });
-    const info = await share({ action: 'start', access: 'local' }), a = guest(tokenFor(info)), b = guest(tokenFor(info));
-    await a.join('Reader owner'); await b.join('Other reader'); a.use(); b.use();
-    const created = await a.request('/api/region-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, regionId: 'reader-html', viewId: 'public-origin-view' }) });
-    const cap = new URLSearchParams(new URL((await created.json()).data.url).hash.slice(1)).get('cap');
-    expect((await fetch(`${host.origin}/api/region-reader/${artifactId}/reader-html/return`, { method: 'POST', headers: { Authorization: `Bearer ${cap}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ annotate: true }) })).status).toBe(200);
-    const path = `/api/region-view?artifactId=${artifactId}&viewId=public-origin-view`;
-    expect((await (await b.request(path)).json()).data).toEqual({});
-    expect((await (await a.request(path)).json()).data.navigation).toMatchObject({ artifactId, regionId: 'reader-html', viewId: 'public-origin-view', annotate: true });
-    expect((await (await a.request(path)).json()).data).toEqual({});
   });
 });
 

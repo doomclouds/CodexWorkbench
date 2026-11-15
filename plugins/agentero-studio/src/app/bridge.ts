@@ -31,11 +31,6 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
     if (!boot) throw new Error('请从 Codex 插件或有效的作品分享链接打开 Agentero 创作。');
     const client: StudioClient = {
       embedded: false, baseUrl: boot.baseUrl || location.origin, token: boot.token,
-      async openLink(url) {
-        const opened = window.open(url, '_blank');
-        if (!opened) throw new Error('浏览器未打开阅读页，请点击阅读链接。');
-        opened.opener = null;
-      },
       async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
         const response = await fetch(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
         return unwrap(await response.json() as ToolResponse<T>, response.status);
@@ -54,6 +49,7 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   let bridge: StudioBridge | undefined;
   let contextUpdater: ReturnType<typeof createHostContextUpdater> | undefined;
   let tornDown = false;
+  const bootstrapAbort = new AbortController();
   let bridgeTransportClose: (() => void) | undefined;
   const navigate = (args: Record<string, unknown>) => {
     initialArtifactId = typeof args.artifactId === 'string' && args.artifactId ? args.artifactId : undefined;
@@ -75,6 +71,7 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   };
   app.onteardown = async () => {
     tornDown = true;
+    bootstrapAbort.abort(new Error('作品页面已关闭。'));
     contextUpdater?.close();
     bridgeTransportClose?.();
     // Keep the transport open until the SDK sends the teardown acknowledgement.
@@ -82,13 +79,16 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   };
   try {
     await app.connect(new PostMessageTransport(window.parent, window.parent), { timeout: 15_000 });
+    bootstrapAbort.signal.throwIfAborted();
     if (!connection) {
-      const opened = await app.callServerTool({ name: 'studio_open', arguments: { view: initialView, ...(initialArtifactId ? { artifactId: initialArtifactId } : {}) } });
+      // Connecting an existing view must not invoke the tool that opens a new App.
+      const opened = await app.callServerTool({ name: 'studio_app_request', arguments: { action: 'connect' } }, { signal: bootstrapAbort.signal });
       const payload = opened.structuredContent as ToolResponse | undefined;
       if (opened.isError || payload?.ok === false) throw Object.assign(new Error(payload?.error?.message || '本机作品服务连接失败。'), { code: payload?.error?.code, details: payload?.error?.details });
       // Bootstrap supplies only the UI connection; its default route must not replace host input.
       connection ??= opened._meta?.connection as Connection | undefined;
     }
+    bootstrapAbort.signal.throwIfAborted();
     if (!connection?.baseUrl || typeof connection.token !== 'string') throw new Error('本机作品服务没有返回有效连接。');
   } catch (error) {
     if (!tornDown) await app.close().catch(() => {});
@@ -117,10 +117,6 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
       for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
       const result = await app.downloadFile({ contents: [{ type: 'resource', resource: { uri: `file:///${encodeURIComponent(filename)}`, mimeType: blob.type || 'application/octet-stream', blob: btoa(binary) } }] });
       if (result.isError) throw new Error('宿主未完成文件下载，可能已取消或被拒绝；请重试。');
-    },
-    async openLink(url) {
-      const result = await app.openLink({ url });
-      if (result.isError) throw new Error('宿主未打开阅读页，请点击阅读链接。');
     },
     async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
       const result = await transport.request(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) });

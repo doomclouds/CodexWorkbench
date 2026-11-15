@@ -9,13 +9,12 @@ import { AGENT_TASK_LEASE_MS, DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Artif
 import { StudioService } from '../src/core/service';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
-  default: ({ board, onChanged, onAnnotate, onAnnotateNative, onSelectionChange, onEditHtml, onOpenHtml, readOnly, presence, externalViewport }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onAnnotateNative?: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; onOpenHtml?: (element: Board['elements'][number]) => void; readOnly?: boolean; presence?: { peerId: string }[]; externalViewport?: unknown }) => <section data-peers={presence?.map(peer => peer.peerId).join(',')} data-external-viewport={JSON.stringify(externalViewport)} aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
+  default: ({ board, onChanged, onAnnotate, onAnnotateNative, onSelectionChange, onEditHtml, readOnly, presence, externalViewport }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onAnnotateNative?: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; readOnly?: boolean; presence?: { peerId: string }[]; externalViewport?: unknown }) => <section data-peers={presence?.map(peer => peer.peerId).join(',')} data-external-viewport={JSON.stringify(externalViewport)} aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-input'], quote: '输入节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="input"]', rect: { x: 10, y: 20, w: 80, h: 30 } })}>标注 HTML 内部</button>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-output'], quote: '输出节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="output"]', rect: { x: 100, y: 20, w: 80, h: 30 } })}>标注 HTML 输出</button>
     <button onClick={() => { const element = board.elements.find(item => item.id === 'native-table'); if (element) onAnnotateNative?.({ anchor: { coordinateSpace: 'element', elementIds: [element.id], x: 1, y: .5 }, versions: { [element.id]: element.version }, label: '对象 · table', screenPoint: { x: 300, y: 150 } }); }}>标注原生表格</button>
     <button onClick={() => onSelectionChange?.(['region-one'])}>选择 HTML 区域</button>
     <button onClick={() => onEditHtml?.()}>导入 HTML</button>
-    <button onClick={() => { const element = board.elements.find(element => element.id === 'region-one'); if (element) onOpenHtml?.(element); }}>独立阅读 HTML</button>
     <button onClick={() => onChanged({ ...board, artifact: { ...board.artifact, revision: board.artifact.revision + 5 } })}>模拟较新画布版本</button>
   </section>,
 }));
@@ -100,26 +99,6 @@ async function appRequest(input: string | URL, init?: RequestInit, actor: Actor 
   if (url.pathname === '/api/room') return Response.json({ accepted: JSON.parse(String(init?.body || '{}')).events?.length || 0, dropped: 0, cursor: 'fixture:0', serverTime: Date.now() });
   throw new Error(`Unexpected app request: ${url.pathname}`);
 }
-function readerTransport() {
-  vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
-  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-  const request = vi.fn(async (input: string | URL, init?: RequestInit) => {
-    const url = new URL(input);
-    if (url.pathname !== '/api/region-view') return appRequest(input, init);
-    if (url.pathname === '/api/region-view') {
-      if (init?.method === 'POST') {
-        const target = JSON.parse(String(init.body)) as { artifactId: string; regionId: string };
-        return Response.json({ ok: true, data: { url: `http://studio.test/region/${target.artifactId}/${target.regionId}#cap=limited-reader`, expiresAt: Date.now() + 900000 } });
-      }
-      return Response.json({ ok: true, data: {} });
-    }
-    throw new Error(`Unexpected reader request: ${url.pathname}`);
-  });
-  const openLink = vi.fn().mockRejectedValue(new Error('宿主不支持打开新标签'));
-  Object.assign(client, { baseUrl: 'http://studio.test', token: 'owner-secret-kept-in-header', request, openLink });
-  return { request, openLink };
-}
-
 describe('Studio real management workflows', () => {
   it.each(['create', 'import'] as const)('keeps a later navigation when %s completes and retains the saved new work in the library', async action => {
     const destination = await createFixture();
@@ -487,91 +466,93 @@ describe('Studio real management workflows', () => {
     expect(request?.[1].expectedVersions).toEqual({ [addedId]: 0 });
   });
 
-  it('offers a scoped explicit reader link after host open fails and watches the original view without creating another grant', async () => {
-    const fixture = await createFixture([region()]), { request, openLink } = readerTransport();
+  it.each(['create', 'delete'] as const)('finishes a confirmed comment %s without waiting for the background list', async action => {
+    const fixture = await createFixture([region()]);
+    if (action === 'delete') await service.execute('artifact_feedback', { action: 'create', artifactId: fixture.board.artifact.id, text: '等待删除的备注', anchor: { regionId: 'region-one', sourceRevision: 1 } }, LOCAL_ACTOR);
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    await click(button('独立阅读 HTML'));
-    await waitUntil(() => !!container.querySelector('.studio-reader-fallback a'));
-    const fallback = container.querySelector<HTMLAnchorElement>('.studio-reader-fallback a')!, url = new URL(fallback.href);
-    expect(url.pathname).toBe(`/region/${fixture.board.artifact.id}/region-one`);
-    expect(url.hash).toBe('#cap=limited-reader'); expect(url.searchParams.has('token')).toBe(false);
-    expect(fallback.href).not.toContain(client.token);
-    expect(fallback.target).toBe('_blank'); expect(fallback.rel).toBe('noopener noreferrer');
-    expect(openLink).toHaveBeenCalledExactlyOnceWith(fallback.href);
-    const creates = request.mock.calls.filter(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method === 'POST');
-    expect(creates).toHaveLength(1);
-    const target = JSON.parse(String(creates[0]![1]?.body));
-    expect(target).toEqual({ artifactId: fixture.board.artifact.id, regionId: 'region-one', viewId: expect.any(String) });
-    expect(creates[0]![1]?.headers).toMatchObject({ Authorization: `Bearer ${client.token}` });
-    expect(request.mock.calls.some(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method !== 'POST')).toBe(false);
-    // Keep JSDOM in this document while exercising the anchor's real click handler.
-    fallback.addEventListener('click', event => event.preventDefault(), { once: true });
-    await click(fallback);
-    await waitUntil(() => request.mock.calls.some(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method !== 'POST'));
-    const poll = request.mock.calls.find(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method !== 'POST')!;
-    const pollUrl = new URL(poll[0]);
-    expect(pollUrl.searchParams.get('artifactId')).toBe(fixture.board.artifact.id);
-    expect(pollUrl.searchParams.get('viewId')).toBe(target.viewId);
-    expect(pollUrl.href).not.toContain(client.token);
-    expect(request.mock.calls.filter(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method === 'POST')).toHaveLength(1);
-    expect(container.querySelector('.studio-reader-fallback')).toBeNull();
+    await act(async () => { await Promise.all(call.mock.results.map(result => result.value)); });
+    if (action === 'delete') {
+      await click(button('备注列表')); await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!);
+      await click(button('备注操作')); await click(button('删除备注线程'));
+    } else {
+      await click(button('标注 HTML 内部'));
+      await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '立即显示已保存的备注');
+    }
+    const execute = call.getMockImplementation()!;
+    let release!: () => void, listStarted = false;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    call.mockImplementation(async (name, args) => {
+      if (name === 'artifact_feedback' && args.action === 'list') { listStarted = true; await waiting; }
+      return execute(name, args);
+    });
+    try {
+      if (action === 'create') await submit(container.querySelector<HTMLFormElement>('.studio-comment-compose')!);
+      else await click(button('删除'));
+      await waitUntil(() => listStarted);
+      await waitUntil(() => action === 'create' ? !container.querySelector('.studio-comment-compose') && !!container.querySelector('.studio-feedback-message') : !container.querySelector('.studio-comment-popover'));
+      if (action === 'create') {
+        expect(container.querySelector('.studio-feedback-message')?.textContent).toBe('立即显示已保存的备注');
+        expect(button('备注操作').disabled).toBe(false);
+      }
+      expect((await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id })).feedback).toHaveLength(action === 'create' ? 1 : 0);
+    } finally { await act(async () => release()); }
   });
 
-  it('reserves a Web reader tab during the click before awaiting its scoped link', async () => {
-    const fixture = await createFixture([region()]), { request, openLink } = readerTransport();
-    client.embedded = false;
-    const order: string[] = [], originalRequest = request.getMockImplementation()!;
-    request.mockImplementation(async (...args) => { if (new URL(args[0]).pathname === '/api/region-view' && args[1]?.method === 'POST') order.push('grant'); return originalRequest(...args); });
-    const replace = vi.fn(), close = vi.fn();
-    const tab = { opener: window, closed: false, location: { replace }, close };
-    const open = vi.spyOn(window, 'open').mockImplementation(() => { order.push('tab'); return tab as unknown as Window; });
-    await mount({ artifactId: fixture.board.artifact.id });
-    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    await click(button('独立阅读 HTML'));
-    await waitUntil(() => replace.mock.calls.length === 1);
-    expect(order.slice(0, 2)).toEqual(['tab', 'grant']);
-    expect(open).toHaveBeenCalledExactlyOnceWith('about:blank', '_blank');
-    expect(tab.opener).toBeNull(); expect(openLink).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled();
-    const url = new URL(replace.mock.calls[0]![0]);
-    expect(url.pathname).toBe(`/region/${fixture.board.artifact.id}/region-one`);
-    expect(url.hash).toBe('#cap=limited-reader'); expect(url.searchParams.has('token')).toBe(false);
+  it('keeps newer collaborative threads when an older deletion acknowledgement arrives', async () => {
+    const fixture = await createFixture([region()]), artifactId = fixture.board.artifact.id;
+    const first = (await service.execute('artifact_feedback', { action: 'create', artifactId, text: '删除目标' }, LOCAL_ACTOR)).feedback[0] as Feedback;
+    const other = (await service.execute('artifact_feedback', { action: 'create', artifactId, text: '原来的另一条备注' }, LOCAL_ACTOR)).feedback[1] as Feedback;
+    const streams: { onmessage: ((event: { data: string }) => void) | null }[] = [];
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: { data: string }) => void) | null = null; onerror = null;
+      constructor() { streams.push(this); queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'ready', cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null }) })); }
+      addEventListener() {} close() {}
+    });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    vi.stubGlobal('fetch', vi.fn((input, init) => appRequest(input, init)));
+    client = { ...client, embedded: false, baseUrl: 'http://studio.test' };
+    await mount({ artifactId }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('备注列表')); await waitUntil(() => container.querySelectorAll('.studio-comment-list-item').length === 2);
+    await click(container.querySelector<HTMLElement>(`[data-feedback-id="${first.id}"]`)!);
+    await click(button('备注操作')); await click(button('删除备注线程'));
+    const execute = call.getMockImplementation()!;
+    let releaseAck!: () => void, releaseList!: () => void, committed = false, holdLists = false, listStarted = false;
+    const ack = new Promise<void>(resolve => { releaseAck = resolve; }), list = new Promise<void>(resolve => { releaseList = resolve; });
+    call.mockImplementation(async (name, args) => {
+      if (name === 'artifact_feedback' && args.action === 'list' && holdLists) { listStarted = true; await list; }
+      const result = await execute(name, args);
+      if (name === 'artifact_feedback' && args.action === 'delete') { committed = true; await ack; }
+      return result;
+    });
+    try {
+      await click(button('删除')); await waitUntil(() => committed);
+      await service.execute('artifact_feedback', { action: 'edit', artifactId, feedbackId: other.id, text: '另一窗口更新的备注', expectedText: other.text }, LOCAL_ACTOR);
+      await service.execute('artifact_feedback', { action: 'create', artifactId, text: '另一窗口新增的备注' }, LOCAL_ACTOR);
+      await act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'feedback', artifactId, cursor: 'fixture:2' }) }));
+      await waitUntil(() => !container.querySelector('.studio-comment-popover'));
+      await click(button('备注列表'));
+      await waitUntil(() => container.textContent?.includes('另一窗口新增的备注') === true);
+      holdLists = true; await act(async () => releaseAck()); await waitUntil(() => listStarted);
+      expect(container.textContent).toContain('另一窗口更新的备注');
+      expect(container.textContent).toContain('另一窗口新增的备注');
+      expect(container.textContent).not.toContain('原来的另一条备注');
+      expect(container.querySelectorAll('.studio-comment-list-item')).toHaveLength(2);
+    } finally { await act(async () => { releaseAck(); releaseList(); }); }
   });
 
-  it('closes a reserved Web reader tab when its scoped request fails', async () => {
-    const fixture = await createFixture([region()]), { request } = readerTransport();
-    client.embedded = false;
-    const original = request.getMockImplementation()!;
-    request.mockImplementation((input, init) => new URL(String(input)).pathname === '/api/region-view' ? Promise.resolve(Response.json({ ok: false, error: { code: 'FORBIDDEN', message: '无法创建阅读链接' } }, { status: 403 })) : original(input, init));
-    const tab = { opener: window, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
-    vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
-    await mount({ artifactId: fixture.board.artifact.id });
-    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    await click(button('独立阅读 HTML'));
-    await waitUntil(() => tab.close.mock.calls.length === 1);
-    expect(tab.location.replace).not.toHaveBeenCalled(); expect(container.textContent).toContain('无法创建阅读链接');
-  });
-
-  it('clears a blocked reader link when switching artifacts and when returning home', async () => {
-    const first = await createFixture([region()]);
-    const second = await service.execute('artifact_manage', { action: 'create', title: '另一块白板', elements: [region()] }, LOCAL_ACTOR) as { board: Board };
-    const { request } = readerTransport();
-    await mount({ artifactId: first.board.artifact.id });
-    await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-artifact') === first.board.artifact.id);
-    await click(button('独立阅读 HTML'));
-    await waitUntil(() => !!container.querySelector('.studio-reader-fallback a'));
-    expect(container.querySelector<HTMLAnchorElement>('.studio-reader-fallback a')?.href).toContain(`/region/${first.board.artifact.id}/region-one`);
-    await mount({ artifactId: second.board.artifact.id });
-    await waitUntil(() => container.querySelector('[aria-label="白板画布"]')?.getAttribute('data-artifact') === second.board.artifact.id);
-    expect(container.querySelector('.studio-reader-fallback')).toBeNull();
-    await click(button('独立阅读 HTML'));
-    await waitUntil(() => !!container.querySelector('.studio-reader-fallback a'));
-    expect(container.querySelector<HTMLAnchorElement>('.studio-reader-fallback a')?.href).toContain(`/region/${second.board.artifact.id}/region-one`);
-    await click(button('返回作品中心'));
-    await waitUntil(() => !!container.querySelector('.studio-library-main'));
-    expect(container.querySelector('.studio-reader-fallback')).toBeNull();
-    const targets = request.mock.calls.filter(([input, init]) => new URL(input).pathname === '/api/region-view' && init?.method === 'POST').map(([, init]) => JSON.parse(String(init?.body)));
-    expect(targets.map(target => target.artifactId)).toEqual([first.board.artifact.id, second.board.artifact.id]);
+  it('keeps the comment draft and shows a failed write instead of displaying a saved thread', async () => {
+    const fixture = await createFixture([region()]);
+    await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('标注 HTML 内部'));
+    await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '未保存的备注草稿');
+    const execute = call.getMockImplementation()!;
+    call.mockImplementation((name, args) => name === 'artifact_feedback' && args.action === 'create' ? Promise.reject(new Error('保存暂时失败')) : execute(name, args));
+    await submit(container.querySelector<HTMLFormElement>('.studio-comment-compose')!);
+    await waitUntil(() => container.querySelector('.studio-comment-error')?.textContent === '保存暂时失败');
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('未保存的备注草稿');
+    expect(container.querySelector('[data-feedback-id]')).toBeNull();
+    expect((await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id })).feedback).toHaveLength(0);
   });
 
   it('freezes internal HTML selection and original source even when the region changed before commenting', async () => {

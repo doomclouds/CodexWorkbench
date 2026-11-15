@@ -25,6 +25,39 @@ async function runtime(source: string, overrides = {}) {
 }
 
 describe('HTML region rendering copy', () => {
+  it('shares iframe pointer position without consuming interactive HTML events and clears it on exit', async () => {
+    const { dom, sent } = await runtime('<button id="control">Try it</button><script>window.moves=0;document.getElementById("control").addEventListener("pointermove",()=>window.moves++)</script>', { annotation: false });
+    const control = dom.window.document.getElementById('control')!;
+    const pointers = () => sent.filter(message => message.type === 'studio-html-pointer');
+    control.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 256, clientY: 192 }));
+    control.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 512, clientY: 384 }));
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(pointers()).toEqual([{ type: 'studio-html-pointer', channel: options.channel, regionId: options.regionId, sourceRevision: options.sourceRevision, point: { x: .5, y: .5 } }]);
+    expect(dom.window.eval('window.moves')).toBe(2);
+    control.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 640, clientY: 400 }));
+    control.dispatchEvent(new dom.window.MouseEvent('pointerout', { bubbles: true, relatedTarget: null }));
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(pointers().at(-1)?.point).toBeNull();
+    expect(pointers()).toHaveLength(2);
+  });
+
+  it('keeps sharing in annotation mode and cancels pending positions on pointer cancellation or window blur', async () => {
+    const { dom, sent } = await runtime('<p id="text">Text</p>');
+    const text = dom.window.document.getElementById('text')!;
+    const pointers = () => sent.filter(message => message.type === 'studio-html-pointer');
+    text.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 128, clientY: 192 }));
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(pointers().at(-1)?.point).toEqual({ x: .125, y: .25 });
+    text.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 256, clientY: 384 }));
+    text.dispatchEvent(new dom.window.MouseEvent('pointercancel', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(pointers().map(message => message.point)).toEqual([{ x: .125, y: .25 }, null]);
+    text.dispatchEvent(new dom.window.MouseEvent('pointermove', { bubbles: true, clientX: 512, clientY: 384 }));
+    dom.window.dispatchEvent(new dom.window.Event('blur'));
+    await new Promise(resolve => setTimeout(resolve, 25));
+    expect(pointers().map(message => message.point)).toEqual([{ x: .125, y: .25 }, null, null]);
+  });
+
   it('sends annotation-mode numeric tools while preserving inputs, IME, modifiers and interactive HTML', async () => {
     const { dom, sent } = await runtime('<p id="static">Static text</p><input id="input"><div id="edit" contenteditable="true"></div><div role="menu" id="menu"></div><div id="shadow"></div>');
     const tools = () => sent.filter(value => value.type === 'studio-html-tool-shortcut');

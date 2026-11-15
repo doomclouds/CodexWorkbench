@@ -72,10 +72,10 @@ export function anchorBounds(anchor: Anchor, elements: readonly BoardElement[]):
   return boundsOf(elements.filter(element => ids.includes(element.id)).map(element => elementBounds(element, elements)));
 }
 
-export function fitViewport(elements: readonly Rect[], width: number, height: number, padding = 72): Viewport {
+export function fitViewport(elements: readonly Rect[], width: number, height: number, padding = 72, maxZoom = 1): Viewport {
   const bounds = boundsOf(elements);
   if (!bounds) return { x: width / 2 - 400, y: height / 2 - 240, zoom: 1 };
-  const zoom = clamp(Math.min(Math.max(1, width - padding * 2) / Math.max(1, bounds.w), Math.max(1, height - padding * 2) / Math.max(1, bounds.h), 1), MIN_ZOOM, MAX_ZOOM);
+  const zoom = clamp(Math.min(Math.max(1, width - padding * 2) / Math.max(1, bounds.w), Math.max(1, height - padding * 2) / Math.max(1, bounds.h), maxZoom), MIN_ZOOM, MAX_ZOOM);
   return { x: (width - bounds.w * zoom) / 2 - bounds.x * zoom, y: (height - bounds.h * zoom) / 2 - bounds.y * zoom, zoom };
 }
 

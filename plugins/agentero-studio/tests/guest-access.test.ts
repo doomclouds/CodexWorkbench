@@ -47,19 +47,11 @@ async function until(reader: ReadableStreamDefaultReader<Uint8Array>, marker: st
   try { while (!value.includes(marker)) { const next = await reader.read(); if (next.done) break; value += new TextDecoder().decode(next.value); } return value; }
   finally { clearTimeout(timeout); }
 }
-async function region(guest: ReturnType<typeof browser>, baseUrl = host.origin) {
-  const response = await guest.request('/api/region-view', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, regionId: 'html', viewId: 'source-view' }) });
-  expect(response.status).toBe(200); const link = (await response.json()).data.url;
-  const capability = new URLSearchParams(new URL(link).hash.slice(1)).get('cap')!;
-  return { capability, read: () => fetch(`${baseUrl}/api/region-reader/${artifactId}/html`, { headers: { Authorization: `Bearer ${capability}` } }) };
-}
-
 describe('persistent named anonymous guests', () => {
   it('forgets only a removed member on this board, frees its name and requires registration for a fresh grant', async () => {
     const info = await share({ action: 'start', access: 'local' }), guest = browser(tokenFor(info)), other = browser(tokenFor(info));
     const actor = (await guest.name('Released name')).body.actor, cookie = guest.cookie;
     await other.name('Other guest');
-    const source = await region(guest);
     await guest.tool('artifact_apply', { operations: [{ op: 'add', element: { type: 'text', text: 'Original authored content' } }] });
     await guest.tool('artifact_feedback', { action: 'create', text: 'Original author snapshot' });
     const otherId = (await host.service.execute('artifact_manage', { action: 'create' })).artifact.id;
@@ -78,7 +70,6 @@ describe('persistent named anonymous guests', () => {
     expect(after.sharing.members).not.toHaveProperty(actor.id); expect(after.guestNames).not.toHaveProperty(actor.id);
     expect(after.history).toEqual(before.history); expect(after.feedback).toEqual(before.feedback);
     expect(await host.service.store.read(otherId)).toEqual(foreignBefore);
-    expect((await source.read()).status).toBe(401);
     await expect(share({ action: 'forget', memberId: actor.id })).rejects.toMatchObject({ code: 'NOT_FOUND' });
     guest.use(''); expect((await guest.session()).response.status).toBe(401);
     guest.use(tokenFor(reset));
@@ -89,7 +80,6 @@ describe('persistent named anonymous guests', () => {
     const renamed = await guest.name('Registered again');
     expect(renamed.body.actor).toMatchObject({ id: actor.id, name: 'Registered again' });
     expect((await host.service.store.read(artifactId)).sharing.members![actor.id]!.grantId).not.toBe(before.sharing.members![actor.id]!.grantId);
-    expect((await source.read()).status).toBe(401);
     expect((await host.service.store.read(artifactId)).feedback[0]!.author).toMatchObject({ id: actor.id, name: actor.name });
   });
 
@@ -228,28 +218,26 @@ describe('access reasons and local/LAN invitation scope', () => {
     expect((await guest.tool('artifact_apply', { operations: [{ op: 'add', element: { type: 'text' } }] })).response.status).toBe(403);
   });
 
-  it('copies local role invitations without opening a LAN listener and enforces scope on every listener and reader', async () => {
+  it('copies local role invitations without opening a LAN listener and enforces scope on every listener', async () => {
     const listen = vi.spyOn(Server.prototype, 'listen');
     const local = await share({ action: 'start', access: 'local' });
     expect(listen).not.toHaveBeenCalled(); expect(new URL(local.links.editor).origin).toBe(host.origin); expect(local.access).toBe('local'); expect(await host.service.hasShares()).toBe(false);
     listen.mockRestore();
     const localGuest = browser(tokenFor(local)); const actor = (await localGuest.name('Local guest')).body.actor;
-    const localSource = await region(localGuest), localStream = await localGuest.request(`/api/events?artifactId=${artifactId}`), localReader = localStream.body!.getReader(); await until(localReader, 'ready');
+    const localStream = await localGuest.request(`/api/events?artifactId=${artifactId}`), localReader = localStream.body!.getReader(); await until(localReader, 'ready');
     const otherId = (await host.service.execute('artifact_manage', { action: 'create' })).artifact.id;
     const other = await host.service.execute('artifact_share', { artifactId: otherId, action: 'start' }), lanOrigin = new URL(other.links.editor).origin;
     const denied = await fetch(`${lanOrigin}/api/session?artifactId=${artifactId}&share=${tokenFor(local)}`);
     expect(denied.status).toBe(401); expect((await denied.json()).error.details.reason).toBe('local-only');
     expect((await fetch(`${lanOrigin}/api/tools/artifact_read`, { method: 'POST', headers: { Authorization: `Bearer ${host.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId }) })).status).toBe(401);
-    expect((await fetch(`${lanOrigin}/api/region-reader/${artifactId}/html`, { headers: { Authorization: `Bearer ${localSource.capability}` } })).status).toBe(401);
     const lan = await share({ action: 'start', access: 'lan' });
     expect(tokenFor(lan)).toBe(tokenFor(local)); expect((await localGuest.session()).body).toMatchObject({ actor: { id: actor.id }, access: 'lan' });
     const lanGuest = browser(tokenFor(lan), lanOrigin); await lanGuest.name('LAN guest');
-    const lanSource = await region(lanGuest, lanOrigin), lanStream = await lanGuest.request(`/api/events?artifactId=${artifactId}`), lanReader = lanStream.body!.getReader(); await until(lanReader, 'ready');
+    const lanStream = await lanGuest.request(`/api/events?artifactId=${artifactId}`), lanReader = lanStream.body!.getReader(); await until(lanReader, 'ready');
     const again = await share({ action: 'start', access: 'local' });
     expect(tokenFor(again)).toBe(tokenFor(local)); expect(again.members).toHaveLength(2);
     expect(await until(lanReader, 'access-revoked')).toContain('"reason":"local-only"'); await lanReader.cancel();
     expect(await until(localReader, '"type":"share"')).not.toContain('access-revoked'); await localReader.cancel();
-    expect((await localSource.read()).status).toBe(200); expect((await lanSource.read()).status).toBe(401);
     expect((await localGuest.session()).body.access).toBe('local');
     expect((await lanGuest.session()).body.error.details.reason).toBe('local-only');
   });
