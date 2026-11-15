@@ -698,6 +698,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       if (readingRef.current) { if (['Delete', 'Backspace'].includes(event.key)) event.preventDefault(); return; }
       const target = event.target as HTMLElement;
       if (target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),iframe,[role="dialog"],[role="menu"],[role="listbox"],[role="combobox"]')) return;
+      if (target?.closest('button,a[href]') && (event.key === 'Enter' || event.key === ' ' || event.code === 'Space')) return;
       if (event.code === 'Space') { spaceHeld.current = true; setSpacePan(true); event.preventDefault(); return; }
       const command = event.ctrlKey || event.metaKey;
       if (command && event.key.toLowerCase() === 'a') { event.preventDefault(); selectIds(boardRef.current.elements.map((element) => element.id)); }

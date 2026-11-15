@@ -58,6 +58,18 @@ it('views multiple native components and keeps locked contents of a selected con
   await click('退出全屏观看'); expect(host.querySelector('.is-reading')).toBeNull();
 });
 
+it.each([['Enter', 'Enter'], [' ', 'Space']])('lets %s activate the reading button instead of editing or panning', async (key, code) => {
+  await mount([element('one', { type: 'note' })]);
+  const button = query('全屏观看选区'); button.focus();
+  const down = new KeyboardEvent('keydown', { key, code, bubbles: true, cancelable: true });
+  await act(async () => { button.dispatchEvent(down); });
+  expect(down.defaultPrevented).toBe(false);
+  expect(host.querySelector('[contenteditable="true"]')).toBeNull();
+  expect(host.querySelector('.studio-whiteboard')?.getAttribute('data-tool')).toBe('select');
+  // jsdom does not synthesize a button's native keyboard click.
+  await click('全屏观看选区'); expect(host.querySelector('.is-reading')).not.toBeNull();
+});
+
 it.each([false, true])('makes HTML interactive without reloading it, then restores its previous interactive=%s mode through iframe Escape', async previous => {
   await mount([element('html', { type: 'html', html: '<button>Count</button>', sourceRevision: 1 })]);
   const frame = host.querySelector('iframe')!;
