@@ -265,15 +265,6 @@
     ]
   },
   {
-    "name": "elkjs",
-    "version": "0.12.1",
-    "license": "EPL-2.0 OR GPL-3.0-or-later",
-    "files": [
-      "LICENSE.md"
-    ],
-    "source": "https://github.com/kieler/elkjs/tree/624ae90aa37110033a8af59c5ccbb292708b4317"
-  },
-  {
     "name": "emoji-mart",
     "version": "5.6.0",
     "license": "MIT",
