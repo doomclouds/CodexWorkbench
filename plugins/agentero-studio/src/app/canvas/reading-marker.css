@@ -1,0 +1,7 @@
+.studio-reading-marker{position:absolute;inset:0;z-index:65;overflow:hidden;touch-action:none}
+.studio-reading-marker.is-active{cursor:crosshair}
+.studio-reading-marker.is-navigating{cursor:inherit}
+.studio-reading-marker>svg{display:block;overflow:visible;pointer-events:none}
+.studio-reading-marker path{fill:none;stroke:#facc15;stroke-opacity:.52;stroke-linecap:round;stroke-linejoin:round;opacity:1;transition:opacity 450ms linear}
+.studio-reading-marker path.is-fading{opacity:0}
+@media(prefers-reduced-motion:reduce){.studio-reading-marker path{transition:none}}

@@ -209,7 +209,7 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
   return <div ref={root} className="studio-native-table" style={{ position: 'relative', width: current.width, height: '100%' }} onDoubleClick={event => event.stopPropagation()} onPointerDownCapture={event => { if (menu && !(event.target as Element).closest('.studio-table-cell-menu')) setMenu(null); }}>
     <table className="studio-board-table" style={{ width: current.width, ...bodyPaint }}><colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup><tbody>{rows.map((row, r) => <tr key={r}>{row.map((cell, c) => {
       const Cell = r === 0 && head ? 'th' : 'td', editing = active?.row === r && active.col === c;
-      return <Cell key={c} data-cell={`${r}:${c}`} onPointerDown={event => { if (active && !editing && canEdit && !busyRef.current) { event.preventDefault(); event.stopPropagation(); void navigate({ row: r, col: c }); } }} onDoubleClick={event => { event.stopPropagation(); start(r, c); }} onContextMenu={event => {
+      return <Cell key={c} data-cell={`${r}:${c}`} onPointerDown={event => { if (event.button === 0 && active && !editing && canEdit && !busyRef.current) { event.preventDefault(); event.stopPropagation(); void navigate({ row: r, col: c }); } }} onDoubleClick={event => { if (event.button !== 0) return; event.stopPropagation(); start(r, c); }} onContextMenu={event => {
         if (!canEdit) return;
         event.preventDefault(); event.stopPropagation(); start(r, c);
         const rect = root.current!.getBoundingClientRect(), scale = rect.width / current.width || 1;
