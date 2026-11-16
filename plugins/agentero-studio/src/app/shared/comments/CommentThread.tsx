@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Mouse
 import { ArrowUp, Check, MoreHorizontal, Pencil, RotateCcw, Send, Trash2, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import type { Actor, Feedback } from '../../../contracts/studio';
+import { attachmentStatus } from './attachment';
 import { newClientId } from '../client-id';
 
 export type CommentAction = 'reply' | 'edit' | 'delete' | 'resolve' | 'reopen' | 'send';
@@ -42,12 +43,14 @@ function MessageHeader({ author, date, expanded, children }: { author: Actor; da
 interface Props {
   feedback: Feedback; actor: Actor; busy: boolean; compact?: boolean; onOpen?: () => void; onClose?: () => void;
   onAction: RunCommentAction; onAttach: (feedback: Feedback) => Promise<void>;
+  attaching?: boolean;
   replyText?: string; onReplyTextChange?: (value: string) => void;
 }
 
-export function CommentThread({ feedback, actor, busy, compact = false, onOpen, onClose, onAction, onAttach, replyText = '', onReplyTextChange }: Props) {
+export function CommentThread({ feedback, actor, busy, compact = false, onOpen, onClose, onAction, onAttach, attaching = false, replyText = '', onReplyTextChange }: Props) {
   const [editing, setEditing] = useState<string | null>(null), [editText, setEditText] = useState(''), [deleting, setDeleting] = useState(false), [error, setError] = useState(''), [running, setRunning] = useState(false), [attach, setAttach] = useState(false), [pendingReply, setPendingReply] = useState<Feedback | null>(null);
   const [editAttach, setEditAttach] = useState(false), [savedEdit, setSavedEdit] = useState<Feedback | null>(null);
+  const [localAttaching, setLocalAttaching] = useState(false), [attachFailed, setAttachFailed] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null), submitLock = useRef(false);
   const editBase = useRef('');
   const replyAttempt = useRef<{ threadId: string; actorId: string; actorKind: Actor['kind']; text: string; replyId: string } | null>(null);
@@ -57,14 +60,22 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
   const processing = feedback.status === 'processing';
   const otherAgentProcessing = actor.kind === 'agent' && processing && feedback.processingBy && (feedback.processingBy.id !== actor.id || feedback.processingBy.kind !== actor.kind);
   const canResolve = !otherAgentProcessing && (actor.role === 'owner' || actor.role === 'editor' || canComment && own(feedback.author, actor));
-  const disabled = busy || running, resolved = feedback.status === 'resolved';
+  const disabled = busy || running || attaching, resolved = feedback.status === 'resolved';
+  const attachment = attachmentStatus(feedback), attachmentBusy = attaching || localAttaching;
   useEffect(() => { if (editing) input.current?.focus(); }, [editing]);
   async function run(action: CommentAction, args?: CommentActionArguments) {
     if (submitLock.current || !commentPermission.current) return undefined;
-    submitLock.current = true; setRunning(true); setError('');
+    submitLock.current = true; setRunning(true); setError(''); setAttachFailed(false);
     try { return await onAction(action, feedback, args); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return undefined; }
     finally { submitLock.current = false; setRunning(false); }
+  }
+  async function attachToConversation(item: Feedback) {
+    if (submitLock.current || !commentPermission.current) return false;
+    submitLock.current = true; setRunning(true); setLocalAttaching(true); setError(''); setAttachFailed(false);
+    try { await onAttach(item); return true; }
+    catch (cause) { setAttachFailed(true); setError(cause instanceof Error ? cause.message : String(cause)); return false; }
+    finally { submitLock.current = false; setRunning(false); setLocalAttaching(false); }
   }
   function edit(id: string, text: string) { if (!commentPermission.current) return; editBase.current = text; setDeleting(false); setEditText(text); setEditing(id); setEditAttach(false); setSavedEdit(null); setError(''); }
   async function saveEdit(event: FormEvent) {
@@ -72,10 +83,8 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
     const result = savedEdit || await run('edit', { text: editText.trim(), expectedText: editBase.current, ...(editing !== 'main' ? { replyId: editing! } : {}) });
     if (!result) return;
     if (editAttach && commentPermission.current) {
-      setRunning(true);
-      try { await onAttach(result); setSavedEdit(null); }
-      catch (cause) { setSavedEdit(result); setError(cause instanceof Error ? cause.message : String(cause)); return; }
-      finally { setRunning(false); }
+      if (!await attachToConversation(result)) { setSavedEdit(result); return; }
+      setSavedEdit(null);
     }
     setEditing(null);
   }
@@ -92,10 +101,7 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
       if (currentReplyText.current === replyText) onReplyTextChange?.('');
     }
     if (attach && commentPermission.current) {
-      setRunning(true);
-      try { await onAttach(saved); setPendingReply(null); }
-      catch (cause) { setPendingReply(saved); setError(cause instanceof Error ? cause.message : String(cause)); }
-      finally { setRunning(false); }
+      if (await attachToConversation(saved)) setPendingReply(null); else setPendingReply(saved);
     }
   }
   const editor = <form className="studio-comment-edit" onSubmit={event => void saveEdit(event)}><textarea ref={input} aria-label="编辑备注内容" value={editText} rows={3} maxLength={16000} readOnly={!canComment} disabled={disabled || !!savedEdit} onChange={event => setEditText(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(null); } }} /><label className="studio-comment-edit-attach"><input type="checkbox" checked={editAttach} disabled={!canComment || disabled || !!savedEdit} onChange={event => setEditAttach(event.target.checked)} />附加到对话</label><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setEditing(null)}>取消</button><button type="submit" className="studio-button studio-primary" disabled={!canComment || disabled || !editText.trim()}>{savedEdit ? '重试附加' : '保存'}</button></div></form>;
@@ -103,7 +109,7 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
     ...(canComment && own(feedback.author, actor) ? [{ label: '编辑', icon: <Pencil size={14} />, run: () => edit('main', feedback.text) }] : []),
     ...(canResolve && resolved ? [{ label: '重新打开', icon: <RotateCcw size={14} />, run: () => { void run('reopen'); } }] : []),
     ...(processing && actor.kind === 'human' && actor.role === 'owner' ? [{ label: '重新打开备注', title: '仅清除处理标记；已经开始的任务不会因此中断。', icon: <RotateCcw size={14} />, run: () => { void run('reopen'); } }] : []),
-    ...(canComment ? [{ label: '附加到对话', icon: <Send size={14} />, run: () => { setError(''); void onAttach(feedback).catch(cause => setError(cause instanceof Error ? cause.message : String(cause))); } }] : []),
+    ...(canComment ? [{ label: '附加到对话', ...(attachment === 'attached' ? { title: '这条请求已附加；若内容没有变化，不会重复插入附件。' } : {}), icon: <Send size={14} />, run: () => { void attachToConversation(feedback); } }] : []),
     ...(canDelete ? [{ label: '删除备注线程', icon: <Trash2 size={14} />, danger: true, run: () => { setEditing(null); setDeleting(true); } }] : []),
   ];
   return <article className={`studio-comment-thread${compact ? ' studio-comment-list-item' : ' is-expanded'}`} data-feedback-id={feedback.id} data-status={feedback.status} {...compact ? { role: 'button', tabIndex: 0, onClick: (event: MouseEvent) => { if (!(event.target as Element).closest('button,input,textarea,form,[role=menu]')) onOpen?.(); }, onKeyDown: (event: KeyboardEvent) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onOpen?.(); } } } : {}}>
@@ -112,7 +118,8 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
       <CommentMenu label="备注操作" items={mainMenu} disabled={disabled} />
       {!compact && <button type="button" className="studio-icon-button" aria-label="关闭备注" onClick={onClose}><X size={15} /></button>}
     </MessageHeader>
-    {feedback.status !== 'open' && <span className={`studio-feedback-status studio-feedback-status-${feedback.status}`}>{resolved ? '已解决' : feedback.status === 'pending' ? '待房主处理' : feedback.processingBy ? `${feedback.processingBy.name || (feedback.processingBy.kind === 'agent' ? 'Codex' : '协作者')} 正在处理` : '处理中'}</span>}
+    {(attachment || attachmentBusy) && <span className={`studio-feedback-status studio-feedback-attachment-${attachmentBusy ? 'attaching' : attachment}`} role="status">{attachmentBusy ? '附加中…' : attachment === 'attached' ? '已附加到对话' : '待附加到对话'}</span>}
+    {(resolved || processing) && <span className={`studio-feedback-status studio-feedback-status-${feedback.status}`}>{resolved ? '已解决' : feedback.processingBy ? `${feedback.processingBy.name || (feedback.processingBy.kind === 'agent' ? 'Codex' : '协作者')} 正在处理` : '处理中'}</span>}
     {editing === 'main' ? editor : <p className="studio-feedback-message">{feedback.text}</p>}
     {deleting && <div className="studio-comment-delete-confirm" role="group" aria-label="删除备注确认"><p>删除这条备注及其所有回复？</p><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setDeleting(false)}>取消</button><button type="button" className="studio-button is-danger" disabled={!canDelete || disabled} onClick={() => { void run('delete'); }}>删除</button></div></div>}
     {compact ? feedback.replies.length > 0 && <button type="button" className="studio-link-button studio-comment-reply-count" onClick={onOpen}>{feedback.replies.length} 条回复</button> : <>
@@ -123,5 +130,6 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
       {(canComment || replyText.trim() || pendingReply) && !editing && !deleting && <form className="studio-reply-form" onSubmit={event => void submitReply(event)}><textarea aria-label={`回复批注：${feedback.text}`} placeholder={resolved ? '回复以重新打开…' : '回复…'} value={replyText} rows={1} maxLength={16000} readOnly={!canComment} disabled={disabled || !!pendingReply} onChange={event => onReplyTextChange?.(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} /><div className="studio-comment-compose-footer">{canComment ? <><label><input type="checkbox" checked={attach} disabled={disabled || !!pendingReply} onChange={event => setAttach(event.target.checked)} />附加到对话</label><button type="submit" className="studio-comment-submit" aria-label={pendingReply ? '重试附加回复' : '发送回复'} disabled={disabled || !replyText.trim() && !pendingReply}><ArrowUp size={18} /></button></> : <span>当前为只读查看，回复草稿已保留。</span>}</div></form>}
     </>}
     {error && <p className="studio-comment-error" role="alert">{error}</p>}
+    {attachFailed && !editing && !pendingReply && <button type="button" className="studio-link-button studio-comment-attach-retry" disabled={disabled || !canComment} onClick={() => { void attachToConversation(feedback); }}>重试附加</button>}
   </article>;
 }

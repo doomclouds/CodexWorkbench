@@ -24,6 +24,26 @@ async function fixture() {
 }
 
 describe('portable artifact archives', () => {
+  it('retains attachment receipts across export and import and rejects malformed ones before publishing', async () => {
+    const { artifact } = await service.execute('artifact_manage', { action: 'create', title: '附加回执备份' });
+    const created = await service.execute('artifact_feedback', { artifactId: artifact.id, action: 'create', text: '需要保存的讨论' });
+    const requested = await service.execute('artifact_feedback', { artifactId: artifact.id, feedbackId: created.contextId, action: 'send' });
+    const requestId = requested.feedback[0].attachment.requestId;
+    const attached = await service.execute('artifact_feedback', { artifactId: artifact.id, feedbackId: created.contextId, action: 'attached', requestId });
+    const exported = await service.execute('artifact_export', { artifactId: artifact.id, format: 'zip' });
+    const { data } = await service.getExport(exported.exportId);
+    const imported = await service.importArchive(data);
+    expect((await service.store.read(imported.artifact.id)).feedback[0]!.attachment).toEqual(attached.feedback[0].attachment);
+    const originalEntries = unzipSync(data), before = (await service.execute('artifact_list')).artifacts.map((item: { id: string }) => item.id);
+    for (const changed of [{ state: 'broken' }, { contentKey: '<not-a-content-key>' }, { attachedAt: undefined }, { attachedBy: { ...LOCAL_ACTOR, kind: 'agent' } }, { requestedBy: null }]) {
+      const entries = { ...originalEntries }, snapshot = JSON.parse(Buffer.from(entries['artifact.json']!).toString());
+      Object.assign(snapshot.feedback[0].attachment, changed);
+      entries['artifact.json'] = strToU8(JSON.stringify(snapshot));
+      await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
+    }
+    expect((await service.execute('artifact_list')).artifacts.map((item: { id: string }) => item.id)).toEqual(before);
+  });
+
   it('preserves deleted object version clocks through archive and history retention', async () => {
     const { artifact } = await service.execute('artifact_manage', { action: 'create', title: 'Version clocks' });
     await service.execute('artifact_apply', { artifactId: artifact.id, operations: [{ op: 'add', element: { id: 'reused', type: 'note', text: 'Old generation' } }] });

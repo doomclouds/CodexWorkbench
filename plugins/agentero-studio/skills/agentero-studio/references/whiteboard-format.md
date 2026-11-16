@@ -44,6 +44,21 @@
 
 原生文字支持不嵌套的 `**粗体**`、`*斜体*`、反引号代码、`[文字](https://...)`，以及行首 `- ` 或 `1. ` 列表。原始 HTML 作为普通文字显示；需要 HTML 排版时用 HTML Region。链接仅 HTTP(S)。
 
+## 名称与标题
+
+HTML 区域与原生分区（`type: "container"`，用于框住一组内容）的外层名称都写在 **`element.text`**，不是 `title`、`name` 或 `label`。`artifact_manage.title` 只命名整块作品，HTML 内部的 `<title>`／标题也不会自动替外层命名。
+
+新增时根据内容主旨设置简短、可辨识的 `text`。优先采用用户提供的名称；未指定时可取 HTML 的正文标题或 `<title>`，原生分区取所含内容的主题。例如“录制入口与路径设置”“批处理结果与异常”，不要留下空白或“HTML 图解”“HTML 内部选区”“分区”“选区”等通用占位名，也不要只加序号掩盖没有主题。多张同主题图可加实际差别，如“录制流程 · 入口设置”“录制流程 · 导出结果”。
+
+```json
+[
+  { "op": "add", "element": { "id": "recording-options", "type": "html", "x": 80, "y": 80, "w": 1440, "h": 1120, "text": "录制入口与路径设置", "html": "<!doctype html><title>录制入口与路径设置</title><h1>录制入口与路径设置</h1>" } },
+  { "op": "add", "element": { "id": "batch-results", "type": "container", "x": 1600, "y": 80, "w": 600, "h": 360, "text": "批处理结果与异常" } }
+]
+```
+
+上例是 `artifact_apply.operations` 片段；实际提交仍带本次任务绑定、操作标识和必要版本检查。完成后用 `artifact_read mode: "objects", ids: [...]` 读回新增对象，确认 `text` 与预期名称一致；概要中的 `items[].label` 是该字段的摘要。只改源码或已有内容时保留既有名称，不因看到默认名就批量改名；用户明确要求命名或本次创建的对象遗留占位名时，再用目标对象的 `update` 和 `changes.text` 修正。
+
 ## 各类对象
 
 ### 文字、便签和分区
@@ -90,7 +105,7 @@
 
 ### HTML Region
 
-使用 `type: "html", html: "完整HTML"`，给明确区域宽高。`state` 保存独立的 JSON 交互状态，`sourceRevision` 由服务管理。改 HTML 只提交 `changes.html`；不要附带旧几何、旧状态或手动设置源码版本。
+使用 `type: "html", text: "内容主题", html: "完整HTML"`，给明确区域宽高；按[名称与标题](#名称与标题)命名外层。`state` 保存独立的 JSON 交互状态，`sourceRevision` 由服务管理。只改 HTML 源码时只提交 `changes.html`；不要附带旧几何、旧状态或手动设置源码版本。确需同步修改外层名称时，另明确提交本次 `changes.text`。
 
 内部目标提供稳定 `data-studio-id`，反馈读取见 [HTML 区域与反馈](html-feedback.md)。内部没有原生拖拽编辑器，用户通过对象／文字／框选备注让 Codex 修改源。脚本不能直接获得宿主或文件系统能力。
 

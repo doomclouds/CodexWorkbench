@@ -61,7 +61,22 @@ export function updateFeedback<C, O extends ContentOperation, A, S>(state: Artif
       state.feedback = state.feedback.filter(entry => entry.id !== item.id); delete state.sources[item.id];
     }
     else if (action === 'resolve' || action === 'reopen') { if (actor.role === 'commenter' && item.author.id !== actor.id) throw new StudioError('FORBIDDEN', '只能更改自己备注的状态。'); item.status = action === 'resolve' ? 'resolved' : 'open'; delete item.processingBy; }
-    else if (action === 'send') { item.status = 'pending'; delete item.processingBy; if (typeof args.targetViewId === 'string') item.targetViewId = text(args.targetViewId, '', 120); contextId = item.id; }
+    else if (action === 'send') {
+      const contentKey = createHash('sha256').update(JSON.stringify({ text: item.text, replies: item.replies, anchor: item.anchor, versions: item.versions })).digest('hex');
+      if (item.attachment?.contentKey === contentKey) return { feedback: visibleFeedback(state.feedback, actor), contextId: item.id };
+      item.attachment = { requestId: randomUUID(), contentKey, state: 'pending', requestedAt: now, requestedBy: copy(actor) };
+      if (item.status === 'open') item.status = 'pending';
+      if (typeof args.targetViewId === 'string') item.targetViewId = text(args.targetViewId, '', 120);
+      contextId = item.id;
+    }
+    else if (action === 'attached') {
+      requireRole(actor, ['owner']);
+      if (actor.kind !== 'human') throw new StudioError('FORBIDDEN', '只有房主界面可以确认已附加到对话。');
+      const requestId = safeId(args.requestId, '附加请求 ID');
+      if (!item.attachment || item.attachment.requestId !== requestId) throw new StudioError('CONFLICT', '附加请求已更新，请重新查看当前备注。');
+      if (item.attachment.state === 'attached') return { feedback: visibleFeedback(state.feedback, actor) };
+      item.attachment = { ...item.attachment, state: 'attached', attachedAt: now, attachedBy: copy(actor) };
+    }
     else if (action === 'processing') {
       requireRole(actor, ['owner']);
       if (item.status === 'processing' && item.processingBy) {
@@ -73,6 +88,6 @@ export function updateFeedback<C, O extends ContentOperation, A, S>(state: Artif
     else throw new StudioError('INVALID_ARGUMENT', '不支持的备注操作。');
     item.updatedAt = now;
   }
-  makeHistory(state, actor, action === 'create' ? '添加备注' : action === 'delete' ? '删除备注讨论' : action === 'edit' ? '编辑备注消息' : action === 'send' ? '提交 Codex 请求（等待处理）' : '更新备注', [`$feedback:${item.id}`]);
+  makeHistory(state, actor, action === 'create' ? '添加备注' : action === 'delete' ? '删除备注讨论' : action === 'edit' ? '编辑备注消息' : action === 'send' ? '请求附加到对话' : action === 'attached' ? '已附加到对话' : '更新备注', [`$feedback:${item.id}`]);
   return { feedback: visibleFeedback(state.feedback, actor), ...(contextId ? { contextId } : {}) };
 }
