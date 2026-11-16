@@ -1,6 +1,6 @@
 import type { Board, BoardElement, Json } from '../contracts/studio.js';
 import { contrastRatio, readableText, semanticColor } from './theme.js';
-import { arrowGeometry, arrowHeads, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
+import { arrowGeometry, arrowHeads, arrowLabelBox, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
 import { boardStickerMarkup } from './products/whiteboard-stickers.js';
 import { parseRichText, safeHttpLink, type RichTextSegment } from './shared/rich-text.js';
 
@@ -50,9 +50,13 @@ export function boardBounds(elements: BoardElement[], padding = 32, scene: Board
   const boxes = elements.map(e => {
     if (e.type === 'arrow') {
       endpoint(e.from, scene); endpoint(e.to, scene);
-      const points = arrowGeometry(e, scene).points;
+      const route = arrowGeometry(e, scene), points = route.points;
       const xs = points.map(point => point.x), ys = points.map(point => point.y);
-      return { x: Math.min(...xs) - 16, y: Math.min(...ys) - 28, w: Math.max(32, Math.max(...xs) - Math.min(...xs) + 32), h: Math.max(48, Math.max(...ys) - Math.min(...ys) + 48) };
+      const path = { x: Math.min(...xs) - 16, y: Math.min(...ys) - 28, w: Math.max(32, Math.max(...xs) - Math.min(...xs) + 32), h: Math.max(48, Math.max(...ys) - Math.min(...ys) + 48) };
+      const label = arrowLabelBox(e, route.label);
+      if (!label) return path;
+      const x = Math.min(path.x, label.x), y = Math.min(path.y, label.y);
+      return { x, y, w: Math.max(path.x + path.w, label.x + label.w) - x, h: Math.max(path.y + path.h, label.y + label.h) - y };
     }
     if (e.type === 'stroke' && e.points?.length) {
       const xs = e.points.filter((_n, i) => i % 2 === 0); const ys = e.points.filter((_n, i) => i % 2 === 1); const pen = scalar(e.strokeWidth ?? e.width, 3);
@@ -169,7 +173,7 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
     const route = arrowGeometry(e, board.elements), heads = arrowHeads(e);
     const color = semanticColor(e.stroke ?? e.color, style, style.muted);
     markup = `<path d="${route.path}" fill="none" stroke="${escapeXml(color)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}" stroke-linejoin="round" ${e.dash ? 'stroke-dasharray="5 4"' : ''}/>` + headSvg(heads[0], route.points[0], route.points[1] ?? route.points[0], color) + headSvg(heads[1], route.points.at(-1)!, route.points.at(-2) ?? route.points.at(-1)!, color);
-    if (e.label) { const width = Math.max(28, [...e.label].length * 14 + 16); markup += `<rect x="${route.label.x - width / 2}" y="${route.label.y - 22}" width="${width}" height="20" fill="${escapeXml(style.paper)}"/>` + textSvg({ ...e, x: route.label.x - width / 2, y: route.label.y - 22, w: width, h: 20, text: e.label, fontSize: 12, textAlign: 'center' }, board, style.muted, true); }
+    if (e.label) { const box = arrowLabelBox(e, route.label)!; markup += `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="${escapeXml(style.paper)}"/>` + textSvg({ ...e, ...box, text: e.label, fontSize: e.labelSize ? 13 : 12, textAlign: 'center' }, board, style.muted, true); }
   } else if (e.type === 'image') {
     const source = typeof options.assets === 'object' && options.assets ? (options.assets as Record<string, string>)[String(e.src)] ?? e.src : e.src;
     if (source && /^data:image\//i.test(source)) {

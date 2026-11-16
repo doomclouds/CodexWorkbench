@@ -9,6 +9,7 @@ export interface ContentTask {
   failure?: unknown;
   appliedSources?: BoardElement[];
   stream?: string;
+  strictVersions?: Record<string, number>;
 }
 export interface ContentReceipt { board: Board; historyEntry?: { id: string } }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -62,14 +63,15 @@ export class NativeContentQueue {
   source(id: string, version: number) { return this.versions.get(`${id}@${version}`); }
   historyId(revision: number) { return this.histories.get(revision); }
   setEnabled(enabled: boolean) { this.enabled = enabled; if (enabled) this.drain(); }
-  enqueue(before: Board, operations: Operation[], summary: string, sources = before.elements, remember = true, stream?: string, operationId?: string): Promise<ContentReceipt | null> {
+  enqueue(before: Board, operations: Operation[], summary: string, sources = before.elements, remember = true, stream?: string, operationId?: string, strictVersions?: Record<string, number>): Promise<ContentReceipt | null> {
+    // Read dependencies guard CAS; only write targets own drafts and block local edits.
     const keys = [...new Set(operations.flatMap(op => contentTargets(before, op)))];
     if (operations.some(op => ['style', 'layout', 'restore', 'motion'].includes(op.op))) keys.push('$board');
     const previous = this.tasks.findLast(task => task.keys.some(key => keys.includes(key) || key === '$board' || keys.includes('$board')));
     if (previous && equal(previous.operations, operations) && (!operationId || previous.id === operationId)) return this.promises.get(previous.id) ?? Promise.resolve(null);
     let sourceElements = keys.flatMap(id => { const source = sources.find(element => element.id === id) ?? before.elements.find(element => element.id === id); return source ? [source] : []; });
     if (stream) sourceElements = overlayContent(sourceElements, this.tasks.filter(task => task.stream === stream));
-    const task: ContentTask = { id: operationId ?? newClientId('op'), keys, before: structuredClone({ ...before, elements: [] }), sources: structuredClone(sourceElements), operations: structuredClone(operations), summary, remember, stream, state: 'queued' };
+    const task: ContentTask = { id: operationId ?? newClientId('op'), keys, before: structuredClone({ ...before, elements: [] }), sources: structuredClone(sourceElements), operations: structuredClone(operations), summary, remember, stream, state: 'queued', ...(strictVersions ? { strictVersions: { ...strictVersions } } : {}) };
     this.tasks.push(task);
     const completion = new Promise<ContentReceipt | null>(resolve => this.completions.set(task.id, resolve));
     this.promises.set(task.id, completion);
@@ -97,7 +99,7 @@ export class NativeContentQueue {
     task.appliedSources = [];
     for (const key of task.keys.filter(key => key !== '$board')) {
       let base = task.sources.find(element => element.id === key);
-      const ack = this.acknowledged.get(key);
+      const ack = task.strictVersions ? undefined : this.acknowledged.get(key);
       if (base && ack && ack.element.version > base.version) {
         const originalBase = base;
         const operation = task.operations.find(op => op.id === key && op.op === 'update');
@@ -122,7 +124,7 @@ export class NativeContentQueue {
       if (base) task.appliedSources.push(structuredClone(base));
     }
     if (task.operations.some(op => op.op === 'layout' && ['front', 'back', 'forward', 'backward'].includes(op.preset ?? ''))) versions.$order = task.before.orderVersion ?? 0;
-    return { artifactId: task.before.artifact.id, operationId: task.id, merge: 'safe', expectedVersions: versions,
+    return { artifactId: task.before.artifact.id, operationId: task.id, ...(!task.strictVersions ? { merge: 'safe' } : {}), expectedVersions: task.strictVersions ?? versions,
       ...(task.keys.includes('$board') ? { expectedRevision: task.before.artifact.revision } : {}), operations, summary: task.summary };
   }
   private async run(task: ContentTask) {

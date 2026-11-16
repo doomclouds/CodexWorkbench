@@ -1,5 +1,5 @@
 import type { BoardElement, Operation } from '../../contracts/studio.js';
-import { arrowGeometry } from '../../core/products/whiteboard-geometry.js';
+import { arrowGeometry, arrowLabelBox } from '../../core/products/whiteboard-geometry.js';
 import { boundsOf, contains, expandMoveIds, moveOperations, type Point, type Rect } from './canvas-model.js';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -12,9 +12,10 @@ const normalizedAngle = (angle: number) => ((angle + 180) % 360 + 360) % 360 - 1
 
 export function geometryBounds(element: BoardElement, elements: readonly BoardElement[]): Rect {
   if (element.type === 'arrow') {
-    const points = arrowGeometry(element, elements).points;
+    const route = arrowGeometry(element, elements), points = route.points;
     const x = Math.min(...points.map(point => point.x)), y = Math.min(...points.map(point => point.y));
-    return { x, y, w: Math.max(1, Math.max(...points.map(point => point.x)) - x), h: Math.max(1, Math.max(...points.map(point => point.y)) - y) };
+    const path = { x, y, w: Math.max(1, Math.max(...points.map(point => point.x)) - x), h: Math.max(1, Math.max(...points.map(point => point.y)) - y) }, label = arrowLabelBox(element, route.label);
+    return label ? boundsOf([path, label])! : path;
   }
   const angle = (element.rotation ?? 0) * Math.PI / 180;
   if (element.type === 'stroke' && element.points?.length) {
@@ -77,6 +78,8 @@ export function resizeSelection(elements: readonly BoardElement[], ids: readonly
     const w = Math.max(1, element.w * sx), h = Math.max(1, element.h * sy);
     const changes: Partial<BoardElement> = { x: center.x - w / 2, y: center.y - h / 2, w, h, ...scaledStroke(element, sx, sy) };
     if (element.type === 'arrow') {
+      if (element.labelOffset) changes.labelOffset = { x: element.labelOffset.x * sx, y: element.labelOffset.y * sy };
+      if (element.labelSize) changes.labelSize = { ...element.labelSize };
       for (const end of ['from', 'to'] as const) if (Array.isArray(element[end])) { const point = transform({ x: element[end][0], y: element[end][1] }); changes[end] = [point.x, point.y]; }
       if (element.bends?.[0] === 'h' || element.bends?.[0] === 'v') {
         const horizontal = element.bends[0] === 'h';
@@ -99,6 +102,8 @@ export function rotateSelection(elements: readonly BoardElement[], ids: readonly
     const at = transform({ x: element.x + element.w / 2, y: element.y + element.h / 2 });
     const changes: Partial<BoardElement> = { x: at.x - element.w / 2, y: at.y - element.h / 2 };
     if (element.type === 'arrow') {
+      if (element.labelOffset) changes.labelOffset = turn(element.labelOffset, radians);
+      if (element.labelSize) changes.labelSize = { ...element.labelSize };
       for (const end of ['from', 'to'] as const) if (Array.isArray(element[end])) { const point = transform({ x: element[end][0], y: element[end][1] }); changes[end] = [point.x, point.y]; }
       if (element.bends?.length) changes.bends = arrowGeometry(element, elements).points.slice(1, -1).flatMap(point => { const at = transform(point); return [at.x, at.y]; });
     } else changes.rotation = normalizedAngle(Number(element.rotation ?? 0) + angle);

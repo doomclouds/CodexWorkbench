@@ -1,6 +1,12 @@
 import type { BoardElement } from '../../contracts/studio.js';
 
 export interface Point { x: number; y: number }
+/** The label frame is shared by export, fit/selection and Agent workspace geometry. */
+export function arrowLabelBox(element: BoardElement, at: Point): { x: number; y: number; w: number; h: number } | undefined {
+  if (!element.label) return;
+  const w = element.labelSize?.w ?? Math.max(28, [...element.label].length * 14 + 16), h = element.labelSize?.h ?? 20;
+  return { x: at.x - w / 2, y: at.y - (element.labelSize ? h / 2 : 22), w, h };
+}
 /** Midpoint quadratics smooth pen strokes; repeated points keep deliberate corners. */
 export function strokePath(coordinates: readonly number[] = [], offset: Point = { x: 0, y: 0 }): string {
   const points: Point[] = [];
@@ -107,7 +113,7 @@ export function arrowGeometry(arrow: BoardElement, elements: readonly BoardEleme
   }
   points = points.filter((point, index) => index === 0 || point.x !== points![index - 1]!.x || point.y !== points![index - 1]!.y);
   const middle = Math.floor((points.length - 1) / 2), left = points[middle]!, right = points[middle + 1] ?? left;
-  return { path: roundedPolyline(points), points, label: { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 } };
+  return { path: roundedPolyline(points), points, label: { x: (left.x + right.x) / 2 + (arrow.labelOffset?.x ?? 0), y: (left.y + right.y) / 2 + (arrow.labelOffset?.y ?? 0) } };
 }
 
 export function shapePath(element: BoardElement): string {

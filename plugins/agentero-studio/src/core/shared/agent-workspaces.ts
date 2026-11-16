@@ -1,6 +1,6 @@
 import type { AgentActivityScope, AgentTask, AgentTaskBinding, BoardElement } from '../../contracts/studio.js';
 import type { WhiteboardContent } from '../products/whiteboard.js';
-import { arrowGeometry } from '../products/whiteboard-geometry.js';
+import { arrowGeometry, arrowLabelBox } from '../products/whiteboard-geometry.js';
 import { safeId, same, StudioError } from './common.js';
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -30,7 +30,10 @@ function bounds(points: readonly { x: number; y: number }[], padding = 0): Rect 
 
 /** Work reservations use rendered geometry, not caller-provided arrow or stroke boxes. */
 export function workspaceElementBounds(element: BoardElement, elements: readonly BoardElement[]): Rect {
-  if (element.type === 'arrow') return bounds(arrowGeometry(element, elements).points, Number(element.strokeWidth ?? element.width ?? 1.4) / 2);
+  if (element.type === 'arrow') {
+    const route = arrowGeometry(element, elements), path = bounds(route.points, Number(element.strokeWidth ?? element.width ?? 1.4) / 2), label = arrowLabelBox(element, route.label);
+    return label ? bounds([{ x: path.x, y: path.y }, { x: path.x + path.w, y: path.y + path.h }, { x: label.x, y: label.y }, { x: label.x + label.w, y: label.y + label.h }]) : path;
+  }
   const angle = Number(element.rotation ?? 0) * Math.PI / 180, c = Math.cos(angle), s = Math.sin(angle);
   const center = { x: element.x + element.w / 2, y: element.y + element.h / 2 };
   const turn = (x: number, y: number) => ({ x: center.x + x * c - y * s, y: center.y + x * s + y * c });

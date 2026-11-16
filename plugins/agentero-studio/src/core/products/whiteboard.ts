@@ -18,6 +18,11 @@ export function validateWhiteboardAsset(mimeType: string): void {
   if (!/^(image\/(png|jpeg|gif|webp|svg\+xml)|video\/(mp4|webm|quicktime))$/.test(mimeType)) throw new StudioError('INVALID_ARGUMENT', '白板仅接收图片和视频资源。');
 }
 const TYPES = new Set(['shape', 'container', 'text', 'stroke', 'arrow', 'image', 'html', 'table', 'link', 'note', 'sticker', 'diagram', 'chart']);
+function validateLayoutLabel(element: BoardElement): void {
+  const offset = element.labelOffset, size = element.labelSize;
+  if (offset !== undefined && (!object(offset) || !['x', 'y'].every(key => typeof offset[key as 'x' | 'y'] === 'number' && Number.isFinite(offset[key as 'x' | 'y']) && Math.abs(offset[key as 'x' | 'y']) <= 10_000_000))) throw new StudioError('INVALID_ARGUMENT', '连接线标签偏移无效。');
+  if (size !== undefined && (!object(size) || !['w', 'h'].every(key => typeof size[key as 'w' | 'h'] === 'number' && Number.isFinite(size[key as 'w' | 'h']) && size[key as 'w' | 'h'] > 0 && size[key as 'w' | 'h'] <= 10000))) throw new StudioError('INVALID_ARGUMENT', '连接线标签尺寸无效。');
+}
 export function normalizeElement(input: Partial<BoardElement>, id?: string): BoardElement {
   if (!object(input) || !TYPES.has(input.type ?? '')) throw new StudioError('INVALID_ARGUMENT', '白板元素类型无效。');
   const result: BoardElement = { ...copy(input), id: safeId(id ?? input.id ?? randomUUID(), '元素 ID'), type: input.type!, x: finite(input.x, 0), y: finite(input.y, 0), w: finite(input.w, 220), h: finite(input.h, 120), version: 1 };
@@ -33,6 +38,7 @@ export function normalizeElement(input: Partial<BoardElement>, id?: string): Boa
     if (result.head !== undefined && !['end', 'both', 'none'].includes(result.head)) throw new StudioError('INVALID_ARGUMENT', '连接线箭头须为 end、both 或 none。');
     if (result.heads !== undefined && (!Array.isArray(result.heads) || result.heads.length !== 2 || result.heads.some(head => !['none', 'arrow', 'circle'].includes(head)))) throw new StudioError('INVALID_ARGUMENT', '连接线两端须为 none、arrow 或 circle。');
     for (const side of [result.fromSide, result.toSide]) if (side !== undefined && !['top', 'right', 'bottom', 'left'].includes(side)) throw new StudioError('INVALID_ARGUMENT', '连接线吸附方向无效。');
+    validateLayoutLabel(result);
     if (result.bends !== undefined) {
       const bends = result.bends;
       const native = Array.isArray(bends) && ['h', 'v'].includes(String(bends[0])) && bends.length <= 13 && bends.slice(1).every(value => typeof value === 'number' && Number.isFinite(value));
@@ -123,7 +129,7 @@ function deletedIds(content: WhiteboardContent, operation: Operation): string[] 
   if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string')) throw new StudioError('INVALID_ARGUMENT', '元素 ID 列表无效。');
   return content.elements.filter(element => ids.includes(element.id) || element.type === 'arrow' && (typeof element.from === 'string' && ids.includes(element.from) || typeof element.to === 'string' && ids.includes(element.to))).map(element => element.id);
 }
-const LOCKED_GEOMETRY = ['type', 'x', 'y', 'w', 'h', 'rotation', 'parentId', 'groupId', 'from', 'to', 'fromSide', 'toSide', 'points', 'bends', 'crop'] as const;
+const LOCKED_GEOMETRY = ['type', 'x', 'y', 'w', 'h', 'rotation', 'parentId', 'groupId', 'from', 'to', 'fromSide', 'toSide', 'points', 'bends', 'labelOffset', 'labelSize', 'crop'] as const;
 /** Coordinates are absolute; only actual changes to a locked object or bound arrow are blocked. */
 function assertLockedGeometry(before: WhiteboardContent, after: WhiteboardContent, baseline: WhiteboardContent) {
   const protectedIds = new Set([...baseline.elements, ...before.elements].filter(element => element.locked).map(element => element.id));
@@ -146,6 +152,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     if (!object(content) || !Array.isArray(content.elements) || !object(content.style)) throw new StudioError('INVALID_ARGUMENT', '白板内容无效。');
     if (content.orderVersion !== undefined && (!Number.isSafeInteger(content.orderVersion) || content.orderVersion < 0)) throw new StudioError('INVALID_ARGUMENT', '白板层级版本无效。');
     if (content.elements.length > 2000 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError('TOO_LARGE', '白板内容超过当前容量，请分成多个作品。');
+    for (const element of content.elements) if (element.type === 'arrow') validateLayoutLabel(element);
   },
   versionOf: (content, id) => id === '$order' ? content.orderVersion ?? 0 : content.elements.find(item => item.id === id)?.version ?? 0,
   syncVersions: syncElementVersions,
@@ -186,6 +193,10 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (Object.hasOwn(operation.changes, 'locked') && typeof operation.changes.locked !== 'boolean') throw new StudioError('INVALID_ARGUMENT', 'locked 必须是布尔值。');
       if (current.locked && operation.changes.locked === false && Object.keys(operation.changes).length !== 1) throw new StudioError('LOCKED', '请通过单独的锁定操作明确解锁。', { elementId: id });
       const { id: _id, version: _version, ...changes } = copy(operation.changes);
+      if (current.type === 'arrow' && [...['from', 'to', 'fromSide', 'toSide', 'bends'], ...(!current.locked ? ['label'] : [])].some(key => Object.hasOwn(changes, key) && !same(changes[key], current[key]))) {
+        if (!Object.hasOwn(changes, 'labelOffset')) changes.labelOffset = undefined;
+        if (!Object.hasOwn(changes, 'labelSize')) changes.labelSize = undefined;
+      }
       if (current.type === 'table' && object(changes.data) && Object.hasOwn(changes.data, 'rows')) {
         // Legacy full-matrix writes cannot establish which rows survived a structural edit.
         if (!Object.hasOwn(changes.data, 'rowIds')) changes.data.rowIds = (Array.isArray(changes.data.rows) ? changes.data.rows : []).map((_, index) => `${id}:row:v${current.version + 1}:${index}`);

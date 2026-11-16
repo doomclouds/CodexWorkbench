@@ -61,6 +61,16 @@ HTML 区域与原生分区（`type: "container"`，用于框住一组内容）�
 
 ## 各类对象
 
+### 选区整理与流程布局
+
+几何整理和按连接关系排图是两类操作。等距按边界的净间隙计算并保留两端；统一宽高以最大外框为准，保留正文、字号、媒体源与内部内容。整组及分区不要拆散，锁定内容不自动解锁。界面“整理选区”提供这些独立命令。
+
+按流程排布先调用 `artifact_read`：`{artifactId,mode:"layout-preview",requestId,ids,direction:"right"或"down",gap:64}`。它是只读预览，返回 `operations`、`expectedVersions`、受影响对象、跨选区连接与跳过原因；可选 `labelSizes:{连接线ID:{w,h}}` 提供实际标签尺寸。未提供测量时会给估计提示，须检查预览。
+
+按用户已授权范围确认预览后，用原样 `operations` 和全部 `expectedVersions`（包括 `$order`、跨界连接及其外部端点依据）提交一次 `artifact_apply`，仍须携带本次 Agent 的任务绑定与稳定 `operationId`。不使用 `merge:"safe"` 重放过期的计算结果；冲突后重读并重新预览，不扩大选区。取消计算使用 `artifact_read {artifactId,mode:"layout-cancel",requestId}`；取消只停止本次计算，不修改作品。
+
+首版流程布局仅处理同层独立节点；HTML 和未来文档区域按外框处理。含锁定节点／连线、分组、嵌套、旋转或无法完整表达路径的分量会明确保留，不能把跳过说成已整理。连接线的 `labelOffset` 是相对自然中段中心的白板向量，`labelSize` 是测量外框；手动改线、或修改未锁定连接线的标签后会恢复自动放置，锁定连接线仍可改文字并保留标签几何。勿把这些字段当正文。
+
 ### 文字、便签和分区
 
 `type: "text"` 是无框文字；`note` 是便签；`container` 是分区。给段落实际宽高，避免用极小框塞长文。分区标题、内部内容和包含关系需要同时考虑；删除分区不是默认删除其中所有信息的授权。

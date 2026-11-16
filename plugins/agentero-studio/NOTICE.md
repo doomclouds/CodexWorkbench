@@ -13,3 +13,5 @@ Diagram Design 是用户可另行启用的外部插件／Skill。Studio 仅在�
 本插件不隶属于 Anthropic，也不借助 Claude 登录态、claude.ai 私有接口或 DeepSeek Harness 的宿主扩展运行。
 
 PNG 导出使用 `@resvg/resvg-wasm 2.6.2`，其许可为 MPL-2.0；原始许可与来源保存在 [许可来源](assets/licenses/sources/resvg-wasm/2.6.2/LICENSE)。对应源码见 [resvg-js 固定提交](https://github.com/yisibl/resvg-js/tree/9ca058462ac529120c8cc84ddcd6fef644cc5406)。构建生成的 `assets/licenses/manifest.json` 和 `assets/licenses/packages/` 收录实际运行依赖的许可，第三方运行文件不因打包而改用本插件的 MIT 许可。
+
+流程布局使用未修改的 `elkjs 0.12.1`，按 EPL-2.0 分发（上游同时提供 GPL-3.0-or-later 次级许可）。原始版权及许可随 `assets/licenses/packages/elkjs/0.12.1/LICENSE.md` 分发，对应源码见 [ELK.js 固定提交](https://github.com/kieler/elkjs/tree/624ae90aa37110033a8af59c5ccbb292708b4317)。算法在本地独立 Worker 中计算，Studio 的选区、预览与几何适配代码保持本项目许可。
