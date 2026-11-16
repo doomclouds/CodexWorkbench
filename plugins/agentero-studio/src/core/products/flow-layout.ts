@@ -56,17 +56,17 @@ export function prepareFlowLayout(elements: readonly BoardElement[], args: Recor
     }
   }
   const byId = new Map(elements.map(item => [item.id, item]));
+  // Any existing object can become an arrow or acquire a selected endpoint without changing order.
+  const expectedVersions: Record<string, number> = { $order: orderVersion, ...Object.fromEntries(elements.map(item => [item.id, item.version])) };
   for (const id of ids) if (!byId.has(id)) throw new StudioError('NOT_FOUND', '选区对象已不存在，请重新选择。', { elementId: id });
   const nodes = elements.filter(item => ids.has(item.id) && !['arrow', 'stroke'].includes(item.type));
-  if (!nodes.length) return { requestId, direction, gap, elements, components: [], nodes: [], edges: [], expectedVersions: { $order: orderVersion, ...Object.fromEntries([...ids].map(id => [id, byId.get(id)!.version])) }, boundaryIds: [], skipped: [{ ids: [...ids], reason: '连接线和笔迹不单独排布，请选择需要排布的节点。' }], warnings: [] };
+  if (!nodes.length) return { requestId, direction, gap, elements, components: [], nodes: [], edges: [], expectedVersions, boundaryIds: [], skipped: [{ ids: [...ids], reason: '连接线和笔迹不单独排布，请选择需要排布的节点。' }], warnings: [] };
   const selectedNodes = new Set(nodes.map(item => item.id));
   const arrows = elements.filter(item => item.type === 'arrow');
   const internal = arrows.filter(item => typeof item.from === 'string' && typeof item.to === 'string' && selectedNodes.has(item.from) && selectedNodes.has(item.to));
   const boundary = arrows.filter(item => Number(typeof item.from === 'string' && selectedNodes.has(item.from)) + Number(typeof item.to === 'string' && selectedNodes.has(item.to)) === 1);
   if (nodes.length + internal.length > 200) throw new StudioError('TOO_LARGE', '本次流程布局最多涉及 200 个节点与内部连线，请缩小选区。');
-  const dependencyIds = new Set([...ids, ...internal.map(item => item.id), ...boundary.map(item => item.id)]);
-  for (const arrow of boundary) for (const end of [arrow.from, arrow.to]) if (typeof end === 'string') dependencyIds.add(safeId(end, '端点对象 ID'));
-  const expectedVersions = { $order: orderVersion, ...Object.fromEntries([...dependencyIds].map(id => [id, byId.get(id)?.version ?? 0])) };
+  for (const arrow of boundary) for (const end of [arrow.from, arrow.to]) if (typeof end === 'string') expectedVersions[safeId(end, '端点对象 ID')] = byId.get(end)?.version ?? 0;
   const parents = new Map(nodes.map(item => [item.id, item.id]));
   const root = (id: string): string => parents.get(id) === id ? id : root(parents.get(id)!);
   for (const arrow of internal) parents.set(root(arrow.to as string), root(arrow.from as string));

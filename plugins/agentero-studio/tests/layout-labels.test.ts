@@ -2,12 +2,14 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
+import { JSDOM } from 'jsdom';
 import { StudioService } from '../src/core/service.js';
 import { normalizeElement, whiteboardAdapter } from '../src/core/products/whiteboard.js';
 import { arrowGeometry } from '../src/core/products/whiteboard-geometry.js';
 import { moveOperations } from '../src/app/canvas/canvas-model.js';
 import { resizeSelection, rotateSelection } from '../src/app/canvas/native-geometry.js';
-import { buildBoardSvg } from '../src/core/serialization.js';
+import { buildBoardSvg, buildBoardHtml } from '../src/core/serialization.js';
+import { exportArtifact } from '../src/core/export.js';
 import { DEFAULT_STYLE, type Board, type BoardElement, type Operation } from '../src/contracts/studio.js';
 const node = (id: string, x: number): BoardElement => ({ id, type: 'shape', x, y: 0, w: 100, h: 60, version: 1, text: id });
 const arrow: BoardElement = { id: 'arrow', type: 'arrow', x: 0, y: 0, w: 1, h: 1, version: 1, from: 'a', to: 'b', bends: [160, 30, 160, 80, 260, 80, 260, 30], label: '布局标签', labelOffset: { x: 17, y: -23 }, labelSize: { w: 180, h: 48 } };
@@ -49,4 +51,32 @@ it('validates layout label geometry and exports the full measured label frame', 
   const svg = buildBoardSvg(board), at = arrowGeometry(arrow, elements).label;
   expect(svg).toContain(`x="${at.x - 90}" y="${at.y - 24}" width="180" height="48"`);
   expect(svg).toContain('布局标签');
+});
+
+it.each([
+  { offset: { x: 17, y: 300 }, size: { w: 180, h: 48 } },
+  { offset: { x: -480, y: -180 }, size: { w: 320, h: 96 } },
+  { offset: { x: 500, y: 150 }, size: undefined },
+])('keeps the actual offset label box inside SVG, HTML and PNG export surfaces: $offset', async ({ offset, size }) => {
+  const elements = [node('a', 0), node('b', 300), { ...arrow, labelOffset: offset, labelSize: size }];
+  const board: Board = { artifact: { id: 'label-bounds', type: 'whiteboard', title: 'Offset label', revision: 1, createdAt: '', updatedAt: '', pinned: false }, elements, style: DEFAULT_STYLE };
+  const assertLabelInside = (svg: Element) => {
+    const [x, y, width, height] = svg.getAttribute('viewBox')!.split(/\s+/).map(Number);
+    const rect = svg.querySelector('[data-studio-id="arrow"] > rect')!;
+    expect(rect).not.toBeNull();
+    const label = Object.fromEntries(['x', 'y', 'width', 'height'].map(key => [key, Number(rect.getAttribute(key))]));
+    expect(label.x).toBeGreaterThanOrEqual(x); expect(label.y).toBeGreaterThanOrEqual(y);
+    expect(label.x + label.width).toBeLessThanOrEqual(x + width); expect(label.y + label.height).toBeLessThanOrEqual(y + height);
+    return { width, height };
+  };
+  for (const ids of [undefined, ['arrow']]) {
+    const svg = new JSDOM(buildBoardSvg(board, { ids, padding: 0 }), { contentType: 'image/svg+xml' }).window.document.documentElement;
+    const bounds = assertLabelInside(svg);
+    const html = new JSDOM(buildBoardHtml(board, { ids })).window.document;
+    const layer = html.querySelector('svg:has([data-studio-id="arrow"])')!;
+    assertLabelInside(layer);
+    const png = await exportArtifact(board, 'png', { ids, padding: 0 });
+    const image = Buffer.from(png.data, 'base64');
+    expect(image.readUInt32BE(16)).toBe(bounds.width); expect(image.readUInt32BE(20)).toBe(bounds.height);
+  }
 });

@@ -109,7 +109,7 @@ it('shows a layout failure and keeps Apply unavailable instead of presenting it 
   expect(button('应用排布').disabled).toBe(true); expect(host.querySelector('[aria-label="流程排布预览"]')).toBeNull();
 });
 
-it('reads the exact preview basis when the local board lags, including legitimate absent external endpoints', async () => {
+it('does not silently replace an old DOM measurement basis with newer units when the local board lags', async () => {
   const source = makeBoard([node('a'), node('b', 30), { ...node('edge'), type: 'arrow', from: 'b', to: 'missing' }]);
   const result: FlowLayoutPreview = { requestId: 'exact', artifactId: 'board', revision: 2, direction: 'right', gap: 64, operations: [{ op: 'update', id: 'a', changes: { x: 120 } }], expectedVersions: { a: 2, b: 1, edge: 1, missing: 0, $order: 0 }, affectedIds: ['a'], boundaryIds: ['edge'], skipped: [], warnings: [] };
   const call = vi.fn(async (_name, args) => {
@@ -120,7 +120,42 @@ it('reads the exact preview basis when the local board lags, including legitimat
   const transport: StudioClient = { embedded: true, async call<T>(name: ToolName, args: Record<string, unknown> = {}) { return await call(name, args) as T; } };
   await act(async () => root.render(<SelectionLayoutDialog board={source} ids={['a', 'b']} client={transport} initialMode="flow" labelSizes={() => ({})} canEdit onApply={vi.fn()} onDiscardPreview={() => {}} onClose={() => {}} onError={() => {}} />));
   await click('生成预览');
-  expect(host.querySelector('[aria-label="流程排布预览"]')).not.toBeNull(); expect(host.querySelector('[role="alert"]')).toBeNull();
-  expect(call.mock.calls.find(([, args]) => args.mode === 'units')![1]).toMatchObject({ atRevision: 2, ids: ['a', 'b', 'edge', 'missing'] });
+  expect(host.querySelector('[aria-label="流程排布预览"]')).toBeNull();
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('重新预览');
+  expect(call.mock.calls.some(([, args]) => args.mode === 'units')).toBe(false);
+  expect(button('应用排布').disabled).toBe(true);
+});
+
+it.each(['rebind', 'become-arrow'] as const)('disables an existing preview when an outside object changes topology via %s without changing order', async change => {
+  directory = await mkdtemp(join(tmpdir(), 'studio-layout-ui-')); service = new StudioService({ dataRoot: directory });
+  const original = (await service.execute('artifact_manage', { action: 'create', elements: [node('a'), node('b', 30), { ...node('ab'), type: 'arrow', from: 'a', to: 'b' }, node('outside-a', 900), node('outside-b', 1200), { ...node('outside-edge'), type: 'arrow', from: 'outside-a', to: 'outside-b' }, node('outside-shape', 1500)] })).board as Board;
+  const apply = vi.fn(), call = vi.fn((name, args) => service!.execute(name, args));
+  const transport: StudioClient = { embedded: true, call };
+  const render = async (source: Board) => act(async () => root.render(<SelectionLayoutDialog board={source} ids={['a', 'b']} client={transport} initialMode="flow" labelSizes={() => ({})} canEdit onApply={apply} onDiscardPreview={() => {}} onClose={() => {}} onError={() => {}} />));
+  await render(original); await click('生成预览');
+  await waitFor(() => !!host.querySelector('[aria-label="流程排布预览"]'));
+  expect(button('应用排布').disabled).toBe(false);
+  const target = change === 'rebind' ? 'outside-edge' : 'outside-shape';
+  const changed = await service.execute('artifact_apply', { artifactId: original.artifact.id, expectedVersions: { [target]: 1 }, operations: [{ op: 'update', id: target, changes: change === 'rebind' ? { from: 'a' } : { type: 'arrow', from: 'b', to: 'outside-a' } }] });
+  expect(changed.board.orderVersion).toBe(original.orderVersion);
+  await render(changed.board);
   expect(button('应用排布').disabled).toBe(true); expect(host.textContent).toContain('布局依据已更新');
+  await click('应用排布'); expect(apply).not.toHaveBeenCalled();
+});
+
+it('lets a tall flow be inspected at actual text size and scrolled, then returns to overview without writing', async () => {
+  const source = makeBoard([node('a'), { ...node('b'), y: 3000 }]);
+  const original = structuredClone(source);
+  const result: FlowLayoutPreview = { requestId: 'tall', artifactId: source.artifact.id, revision: 1, direction: 'down', gap: 64, operations: [], expectedVersions: { a: 1, b: 1, $order: 0 }, affectedIds: ['a', 'b'], boundaryIds: [], skipped: [], warnings: [] };
+  await act(async () => root.render(<FlowLayoutDrawing source={source} preview={result} />));
+  const content = () => host.querySelector<HTMLElement>('.studio-layout-preview-content')!;
+  const scroller = host.querySelector<HTMLElement>('[aria-label="可滚动流程预览"]')!;
+  expect(Number.parseFloat(content().style.height)).toBeLessThan(1000);
+  await click('100%预览');
+  expect(Number.parseFloat(content().style.height)).toBeGreaterThan(3000);
+  expect(host.querySelector('[aria-label="流程预览比例"]')?.textContent).toContain('100%');
+  scroller.scrollTop = 1800; expect(scroller.scrollTop).toBe(1800);
+  await click('适应预览'); expect(scroller.scrollTop).toBe(0);
+  expect(Number.parseFloat(content().style.height)).toBeLessThan(1000);
+  expect(source).toEqual(original);
 });

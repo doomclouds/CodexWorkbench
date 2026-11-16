@@ -1178,6 +1178,9 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   }
   const comparingTask = queue.tasks.find(task => task.id === comparison) ?? detachedTask;
   const forgetDraft = (task: ContentTask) => {
+    if (task.strictVersions) {
+      queue.discard(task.id); setComparison(null); setDetachedTask(null); setError(''); return;
+    }
     queue.discardFor(task.keys);
     setEditing(value => value && task.keys.includes(value.id) ? null : value);
     setPropertyDrafts(value => Object.fromEntries(Object.entries(value).filter(([id]) => !task.keys.includes(id))));
@@ -1190,6 +1193,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   };
   const overwriteDraft = async (task: ContentTask) => {
     if (!canEditRef.current) return;
+    if (task.strictVersions) { setError('整理结果需要重新核对依据，请重新选择目标并整理；流程排布请先重新预览。'); return; }
     const current = comparisonBoard ?? boardRef.current;
     const operations = task.operations.map(operation => {
       const base = task.sources.find(element => element.id === operation.id);

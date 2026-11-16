@@ -1,6 +1,12 @@
 import type { BoardElement } from '../../contracts/studio.js';
 
 export interface Point { x: number; y: number }
+/** The label frame is shared by export, fit/selection and Agent workspace geometry. */
+export function arrowLabelBox(element: BoardElement, at: Point): { x: number; y: number; w: number; h: number } | undefined {
+  if (!element.label) return;
+  const w = element.labelSize?.w ?? Math.max(28, [...element.label].length * 14 + 16), h = element.labelSize?.h ?? 20;
+  return { x: at.x - w / 2, y: at.y - (element.labelSize ? h / 2 : 22), w, h };
+}
 /** Midpoint quadratics smooth pen strokes; repeated points keep deliberate corners. */
 export function strokePath(coordinates: readonly number[] = [], offset: Point = { x: 0, y: 0 }): string {
   const points: Point[] = [];

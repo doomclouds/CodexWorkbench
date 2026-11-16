@@ -2,7 +2,7 @@
 
 Agentero Studio 是 CodexWorkbench 的本地设计创作插件。通过 Codex 对话旁的 MCP App 进入作品中心，创建白板、组织原生对象和 HTML Region，并围绕具体内容留下备注、附加到对话，让 Codex 修改原始内容。
 
-版本：`0.2.7`。运行要求：Node.js 24 或更高版本。
+版本：`0.2.8`。运行要求：Node.js 24 或更高版本。
 
 ## 使用流程
 

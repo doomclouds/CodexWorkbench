@@ -64,7 +64,8 @@ export class NativeContentQueue {
   historyId(revision: number) { return this.histories.get(revision); }
   setEnabled(enabled: boolean) { this.enabled = enabled; if (enabled) this.drain(); }
   enqueue(before: Board, operations: Operation[], summary: string, sources = before.elements, remember = true, stream?: string, operationId?: string, strictVersions?: Record<string, number>): Promise<ContentReceipt | null> {
-    const keys = [...new Set([...operations.flatMap(op => contentTargets(before, op)), ...Object.keys(strictVersions ?? {})])];
+    // Read dependencies guard CAS; only write targets own drafts and block local edits.
+    const keys = [...new Set(operations.flatMap(op => contentTargets(before, op)))];
     if (operations.some(op => ['style', 'layout', 'restore', 'motion'].includes(op.op))) keys.push('$board');
     const previous = this.tasks.findLast(task => task.keys.some(key => keys.includes(key) || key === '$board' || keys.includes('$board')));
     if (previous && equal(previous.operations, operations) && (!operationId || previous.id === operationId)) return this.promises.get(previous.id) ?? Promise.resolve(null);

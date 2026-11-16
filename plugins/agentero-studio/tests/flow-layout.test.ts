@@ -78,6 +78,19 @@ it('invalidates a preview when a new relationship is added without changing exis
   await expect(service!.execute('artifact_apply', { artifactId: id, expectedVersions: preview.expectedVersions, operations: preview.operations })).rejects.toMatchObject({ code: 'CONFLICT', details: { elementId: '$order' } });
 });
 
+it.each(['rebind', 'become-arrow'] as const)('rejects a stale real worker preview after an existing outside object changes topology via %s', async change => {
+  const board = await fixture([box('a'), box('b', 10, 10), edge('ab', 'a', 'b'), box('outside-a', 900), box('outside-b', 1200), edge('outside-edge', 'outside-a', 'outside-b'), box('outside-shape', 1500)]);
+  const id = board.artifact.id;
+  const preview = await service!.execute('artifact_read', { artifactId: id, mode: 'layout-preview', ids: ['a', 'b'], requestId: `outside-${change}` }) as FlowLayoutPreview;
+  expect(preview.operations.length).toBeGreaterThan(0);
+  const target = change === 'rebind' ? 'outside-edge' : 'outside-shape';
+  const update = await service!.execute('artifact_apply', { artifactId: id, expectedVersions: { [target]: 1 }, operations: [{ op: 'update', id: target, changes: change === 'rebind' ? { from: 'a' } : { type: 'arrow', from: 'b', to: 'outside-a' } }] });
+  const changed = await service!.store.read(id);
+  expect(update.board.orderVersion).toBe(board.orderVersion);
+  await expect(service!.execute('artifact_apply', { artifactId: id, expectedVersions: preview.expectedVersions, operations: preview.operations })).rejects.toMatchObject({ code: 'CONFLICT', details: { elementId: target } });
+  expect(await service!.store.read(id)).toEqual(changed);
+});
+
 it('skips locked components including cross-boundary locked arrows, without moving an independent component', async () => {
   const elements = [box('a'), box('b', 20, 20), box('c', 40, 40), box('d', 60, 60), box('outside', 900), edge('ab', 'a', 'b'), edge('cross', 'a', 'outside', { locked: true }), edge('cd', 'c', 'd')];
   const prepared = prepareFlowLayout(elements, { ids: ['a', 'b', 'c', 'd'], requestId: 'locked-component' });

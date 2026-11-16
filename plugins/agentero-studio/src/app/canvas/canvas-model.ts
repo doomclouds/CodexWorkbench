@@ -1,7 +1,7 @@
 import { DEFAULT_STYLE, type Anchor, type BoardElement, type ElementType, type Operation, type StudioClient, type StyleProfile } from '../../contracts/studio.js';
 import { newClientId } from '../shared/client-id.js';
 import { DARK_THEME, LIGHT_THEME } from '../../core/theme.js';
-import { arrowGeometry } from '../../core/products/whiteboard-geometry.js';
+import { arrowGeometry, arrowLabelBox } from '../../core/products/whiteboard-geometry.js';
 export { arrowGeometry, arrowEnd, arrowHeads } from '../../core/products/whiteboard-geometry.js';
 export { safeHttpLink } from '../../core/shared/rich-text.js';
 
@@ -43,7 +43,9 @@ export function boundsOf(elements: readonly Rect[]): Rect | null {
 }
 
 export function elementBounds(element: BoardElement, elements: readonly BoardElement[]): Rect {
-  return element.type === 'arrow' ? boundsOf(arrowGeometry(element, elements).points.map(point => ({ ...point, w: 0, h: 0 })))! : element;
+  if (element.type !== 'arrow') return element;
+  const route = arrowGeometry(element, elements), path = boundsOf(route.points.map(point => ({ ...point, w: 0, h: 0 })))!, label = arrowLabelBox(element, route.label);
+  return label ? boundsOf([path, label])! : path;
 }
 
 /** Relative anchors stay attached when the object is moved or resized. */
@@ -73,7 +75,8 @@ export function anchorBounds(anchor: Anchor, elements: readonly BoardElement[]):
 }
 
 export function fitViewport(elements: readonly Rect[], width: number, height: number, padding = 72, maxZoom = 1): Viewport {
-  const bounds = boundsOf(elements);
+  const scene = elements as readonly BoardElement[];
+  const bounds = boundsOf(elements.map(element => 'type' in element && element.type === 'arrow' ? elementBounds(element as BoardElement, scene) : element));
   if (!bounds) return { x: width / 2 - 400, y: height / 2 - 240, zoom: 1 };
   const zoom = clamp(Math.min(Math.max(1, width - padding * 2) / Math.max(1, bounds.w), Math.max(1, height - padding * 2) / Math.max(1, bounds.h), maxZoom), MIN_ZOOM, MAX_ZOOM);
   return { x: (width - bounds.w * zoom) / 2 - bounds.x * zoom, y: (height - bounds.h * zoom) / 2 - bounds.y * zoom, zoom };

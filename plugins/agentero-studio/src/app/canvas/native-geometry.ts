@@ -1,5 +1,5 @@
 import type { BoardElement, Operation } from '../../contracts/studio.js';
-import { arrowGeometry } from '../../core/products/whiteboard-geometry.js';
+import { arrowGeometry, arrowLabelBox } from '../../core/products/whiteboard-geometry.js';
 import { boundsOf, contains, expandMoveIds, moveOperations, type Point, type Rect } from './canvas-model.js';
 
 export type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
@@ -12,9 +12,10 @@ const normalizedAngle = (angle: number) => ((angle + 180) % 360 + 360) % 360 - 1
 
 export function geometryBounds(element: BoardElement, elements: readonly BoardElement[]): Rect {
   if (element.type === 'arrow') {
-    const points = arrowGeometry(element, elements).points;
+    const route = arrowGeometry(element, elements), points = route.points;
     const x = Math.min(...points.map(point => point.x)), y = Math.min(...points.map(point => point.y));
-    return { x, y, w: Math.max(1, Math.max(...points.map(point => point.x)) - x), h: Math.max(1, Math.max(...points.map(point => point.y)) - y) };
+    const path = { x, y, w: Math.max(1, Math.max(...points.map(point => point.x)) - x), h: Math.max(1, Math.max(...points.map(point => point.y)) - y) }, label = arrowLabelBox(element, route.label);
+    return label ? boundsOf([path, label])! : path;
   }
   const angle = (element.rotation ?? 0) * Math.PI / 180;
   if (element.type === 'stroke' && element.points?.length) {

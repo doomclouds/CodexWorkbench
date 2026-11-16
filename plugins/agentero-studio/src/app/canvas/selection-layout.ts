@@ -29,7 +29,7 @@ function unitsFor(elements: readonly BoardElement[], selected: readonly string[]
     units.push(ids);
   }
   return units.map(ids => {
-    const members = elements.filter(item => ids.has(item.id) && !['arrow', 'stroke'].includes(item.type));
+    const members = elements.filter(item => ids.has(item.id));
     const bounds = boundsOf(members.map(item => geometryBounds(item, elements)))!;
     return { ids: [...ids], bounds, frame: members.length === 1 ? { x: members[0].x, y: members[0].y, w: members[0].w, h: members[0].h } : bounds };
   });
@@ -45,12 +45,15 @@ export function arrangeSelection(elements: readonly BoardElement[], selected: re
     basis.add(item.id); if (typeof item.from === 'string') basis.add(item.from); if (typeof item.to === 'string') basis.add(item.to);
   }
   const basisIds = [...basis];
+  let lockedUnits = 0, externallyBoundUnits = 0;
   const units = allUnits.filter(unit => {
     const locked = elements.some(item => item.locked && (unit.ids.includes(item.id) || item.type === 'arrow' && (typeof item.from === 'string' && unit.ids.includes(item.from) || typeof item.to === 'string' && unit.ids.includes(item.to))));
-    if (locked) skippedIds.push(...unit.ids);
-    return !locked;
+    const externallyBound = elements.some(item => unit.ids.includes(item.id) && item.type === 'arrow' && [item.from, item.to].some(endpoint => typeof endpoint === 'string' && !unit.ids.includes(endpoint)));
+    if (locked || externallyBound) { skippedIds.push(...unit.ids); if (locked) lockedUnits++; else externallyBoundUnits++; return false; }
+    return true;
   }).sort((a, b) => a.bounds.y - b.bounds.y || a.bounds.x - b.bounds.x);
-  if (skippedIds.length) warnings.push(`已跳过 ${allUnits.length - units.length} 组含锁定对象或连接的内容。`);
+  if (lockedUnits) warnings.push(`已跳过 ${lockedUnits} 组含锁定对象或连接的内容。`);
+  if (externallyBoundUnits) warnings.push(`已跳过 ${externallyBoundUnits} 组含外部绑定连接的内容，无法整体平移；外部对象保持原位。`);
   if (units.length < 2) return { operations: [], basisIds, skippedIds, warnings: [...warnings, '请选择至少两个可整理的独立对象或组。'] };
   const operations: Operation[] = [];
   if (arrangement.startsWith('distribute-')) {
