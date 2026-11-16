@@ -99,7 +99,9 @@ export class NativeContentQueue {
     task.appliedSources = [];
     for (const key of task.keys.filter(key => key !== '$board')) {
       let base = task.sources.find(element => element.id === key);
-      const ack = task.strictVersions ? undefined : this.acknowledged.get(key);
+      // A geometry ACK may include someone else's paragraphs; block operations retain their original CAS.
+      const documentEdit = task.operations.some(operation => operation.op === 'document' && operation.id === key);
+      const ack = task.strictVersions || documentEdit ? undefined : this.acknowledged.get(key);
       if (base && ack && ack.element.version > base.version) {
         const originalBase = base;
         const operation = task.operations.find(op => op.id === key && op.op === 'update');

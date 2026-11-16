@@ -1,6 +1,6 @@
 ---
 name: agentero-studio
-description: "在 Agentero Studio 中创建、查找和管理白板，根据选区或批注修改内容与 HTML 图解，并处理局域网共享、历史版本和导出。可组合使用当前可用的 Diagram Design。"
+description: "在 Agentero Studio 中创建、查找和管理白板，根据选区或批注修改内容、HTML 图解和文档段落，并处理局域网共享、历史版本和导出。可组合使用当前可用的 Diagram Design。"
 license: MIT
 ---
 
@@ -23,6 +23,7 @@ license: MIT
 - 绘制实物、场景、示意插图或重新绘制图片时，读取 [图片与素描](references/pictures.md)。用户询问“你会怎么改”“给几个方案”时，读取 [建议方案与预览](references/ideas.md)，区分建议与已经授权的实施。
 - 便签、文本、形状、分区、笔迹、箭头、表格和图片，直接操作白板对象。先读受影响对象，保留人工位置、分组和用户措辞，除非任务本身要求改变它们。
 - 专业图解可以放在 HTML Region 中。区域整体由白板管理；内部节点由 Codex 根据备注修改 HTML，不要求把内部节点转换成原生白板对象。
+- 长文说明使用独立文档区域，按[文档区域与段落修改](references/document-regions.md)读取块 JSON、冻结段落备注并局部修改。正文以带稳定块 ID 的 JSON 为唯一编辑源，不能用渲染 HTML 或旧全文覆盖新内容。
 - 创建 HTML 区域或原生分区时，主动按内容设置能区分主题的外层名称，不沿用“HTML 图解”“分区”“选区”等占位名。沿用用户已给的名称；字段与读回检查见[白板对象格式](references/whiteboard-format.md#名称与标题)。
 - 用户提供现有 HTML 时，保留其内容与结构，在指定区域导入或更新。网页的实际 DOM 可能已被脚本或浏览器改变，不能拿 `outerHTML` 覆盖保存的原始源码。
 - 需要较完整图解规则时，检查本次可用技能中是否存在 **Diagram Design**。存在则读取该技能及当前图种需要的参考，由同一个 Codex 按其规范生成 HTML/SVG，再通过 Studio 工具写入目标区域。它是可选的外部能力，不是 Studio 后端可以直接调用的模型服务。

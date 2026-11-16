@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import type { Board } from '../contracts/studio.js';
 import { buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg, filenameFor, isHtmlRegionElement, selectedElements, type ExportOptions } from './serialization.js';
+import { documentHtml } from './products/document-serialization.js';
 
 export { buildBoardHtml, buildBoardSvg, ExportError, extractRegionSvg } from './serialization.js';
 export interface ExportedArtifact { mimeType: string; filename: string; data: string; encoding?: 'base64' | 'utf8' }
@@ -55,9 +56,11 @@ export async function exportArtifact(board: Board, format: string, options: Reco
   const selected = selectedElements(board, options);
   const region = options.regionId ?? options.elementId;
   const oneRegion = region && selected.length === 1 && isHtmlRegionElement(selected[0]) ? selected[0] : undefined;
-  const title = oneRegion?.text || board.artifact.title;
+  const oneDocument = selected.length === 1 && selected[0]?.type === 'document' && (region || Array.isArray(options.ids) && options.ids.length === 1) ? selected[0] : undefined;
+  const title = oneRegion?.text || oneDocument?.text || board.artifact.title;
   if (format === 'json') return { mimeType: 'application/json', filename: filenameFor(title, 'json'), encoding: 'utf8', data: `${JSON.stringify({ ...board, elements: selected }, null, 2)}\n` };
-  if (format === 'html') return { mimeType: 'text/html', filename: filenameFor(title, 'html'), encoding: 'utf8', data: oneRegion ? String(oneRegion.html ?? '') : buildBoardHtml(board, options) };
+  if (format === 'html') return { mimeType: 'text/html', filename: filenameFor(title, 'html'), encoding: 'utf8', data: oneDocument?.document ? documentHtml(oneDocument.document, title) : oneRegion ? String(oneRegion.html ?? '') : buildBoardHtml(board, options) };
+  if (oneDocument && (format === 'svg' || format === 'png')) throw new ExportError('UNSUPPORTED_DOCUMENT_EXPORT', '文档全文请导出 HTML 或 JSON；白板图片只表示区域内的可见摘要。');
   if (format === 'svg' || format === 'png') {
     let svg = oneRegion ? extractRegionSvg(String(oneRegion.html ?? ''), oneRegion.id) : buildBoardSvg(board, options);
     if (!svg) {

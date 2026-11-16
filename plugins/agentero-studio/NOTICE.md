@@ -15,3 +15,5 @@ Diagram Design 是用户可另行启用的外部插件／Skill。Studio 仅在�
 PNG 导出使用 `@resvg/resvg-wasm 2.6.2`，其许可为 MPL-2.0；原始许可与来源保存在 [许可来源](assets/licenses/sources/resvg-wasm/2.6.2/LICENSE)。对应源码见 [resvg-js 固定提交](https://github.com/yisibl/resvg-js/tree/9ca058462ac529120c8cc84ddcd6fef644cc5406)。构建生成的 `assets/licenses/manifest.json` 和 `assets/licenses/packages/` 收录实际运行依赖的许可，第三方运行文件不因打包而改用本插件的 MIT 许可。
 
 流程布局使用未修改的 `elkjs 0.12.1`，按 EPL-2.0 分发（上游同时提供 GPL-3.0-or-later 次级许可）。原始版权及许可随 `assets/licenses/packages/elkjs/0.12.1/LICENSE.md` 分发，对应源码见 [ELK.js 固定提交](https://github.com/kieler/elkjs/tree/624ae90aa37110033a8af59c5ccbb292708b4317)。算法在本地独立 Worker 中计算，Studio 的选区、预览与几何适配代码保持本项目许可。
+
+文档区域按需启用 `@blocknote/core`、`@blocknote/react` 与 `@blocknote/ariakit` 0.54.0，三个包均采用 MPL-2.0，保持上游代码未修改。对应源代码可从 [BlockNote 固定提交](https://github.com/TypeCellOS/BlockNote/tree/37614ab348dcc7faa830a9a88437b37197a2162d) 获取；实际分发包的许可文本由构建收录到上述许可清单和目录。Ariakit 组件依赖保留其 MIT 许可。仅接入块编辑与格式 UI，没有接入 BlockNote 的协作 provider、内建评论存储或商业导出扩展。

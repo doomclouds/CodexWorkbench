@@ -38,6 +38,11 @@ it('draws real world-coordinate paths, follows pan/zoom, then fades and removes 
   await act(async () => vi.advanceTimersByTime(1)); expect(mark.classList.contains('is-fading')).toBe(true);
   await act(async () => vi.advanceTimersByTime(450)); expect(surface().querySelector('path')).toBeNull();
 });
+it('clips focused document ink without moving the drawing origin or truncating its stored coordinates', async () => {
+  await render({ clip: { x: 180, y: 90, w: 820, h: 500 } }); await stroke();
+  expect(surface().style.clipPath).toBe('polygon(180px 90px, 1000px 90px, 1000px 590px, 180px 590px)');
+  expect(surface().querySelector('path')?.getAttribute('d')).toBe('M20 25 L40 45 L50 55');
+});
 
 it('clears all marks and timers immediately on clear, scope change and unmount', async () => {
   await render(); await stroke(); await render({ clearRevision: 1 }); expect(surface().querySelector('path')).toBeNull(); expect(vi.getTimerCount()).toBe(0);

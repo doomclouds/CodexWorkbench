@@ -2,6 +2,8 @@
 
 只在处理 HTML Region、内部标注或源码修改时读取本文件。
 
+文档区域的 JSON、稳定段落 ID 和文字备注另见[文档区域与段落修改](document-regions.md)，不要套用 HTML sourceRevision 或 DOM 源码流程。
+
 ## 三种内容的关系
 
 - **保存的原始 HTML** 是区域内容的事实来源，包含样式、标记和必要脚本。修改基于 `artifact_read` 返回的源与版本。

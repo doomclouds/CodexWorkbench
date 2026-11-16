@@ -17,10 +17,12 @@ const taskBinding = {
   generation: z.string().min(1).max(120).optional().describe('artifact_activity 返回的原样任务代次；与 taskId 成对，不能用旧代续写、换号盲重试或绕过人工结束。'),
 };
 const anchor = z.object({
-  coordinateSpace: z.enum(['board', 'element', 'html']).optional().describe('board: x/y/w/h 为白板世界坐标；element: x/y 为 elementIds[0] 内的 0..1 相对坐标；html: x/y/w/h 为 regionId 内部 CSS 像素。省略时沿用旧锚点含义。'),
+  coordinateSpace: z.enum(['board', 'element', 'html', 'document']).optional().describe('board 为白板世界坐标；element 为首个对象内的相对坐标；html 为区域 CSS 像素；document 以 elementIds[0]、blockIds 与 sourceVersion 冻结文档选中文字。'),
   elementIds: z.array(id).optional().describe('已存在对象的稳定 ID；element 坐标以首个对象为基准。'),
   regionId: id.optional().describe('HTML 区域 ID；html 坐标空间必填。'),
   targetIds: z.array(z.string().max(160)).max(100).optional(),
+  blockIds: z.array(id).min(1).max(100).optional().describe('document 备注选中的实际稳定段落 ID。'),
+  sourceVersion: z.number().int().positive().optional().describe('文档选区来源的 element.version；写入仍使用当前 expectedVersions。'),
   sourceRevision: z.number().int().positive().optional().describe('HTML 原始选区的源码版本，需要 regionId；不能用作对象 CAS 版本。'),
   quote: z.string().max(4000).optional(), excerpt: z.string().max(16000).optional(), selector: z.string().max(1200).optional(),
   x: coordinate.optional(), y: coordinate.optional(), w: coordinate.min(0).optional(), h: coordinate.min(0).optional(),
@@ -48,8 +50,8 @@ const descriptions: Record<ToolName, string> = {
   studio_open: '打开 Agentero 创作作品中心或指定白板。仅导航，不隐式创建。',
   artifact_list: '按名称、固定或回收状态查找作品；分页返回摘要。',
   artifact_manage: '创建、重命名、固定、回收、恢复或复制作品。purge 由房主永久删除已在回收站的作品，artifactId 或 1..100 个 artifactIds 二选一；先校验全部参数，再逐项返回 deletedIds/failures，不删除活跃作品。import 导入用户指定的本机 ZIP；asset-import 导入用户明确指定或当前任务生成的本机媒体绝对路径，返回稳定资源引用；asset-delete 仅移除未被内容、历史或反馈引用的资源并保留内部回收副本。',
-  artifact_read: '读取作品概要、对象、HTML 原始源码、冻结反馈、资产元数据或历史。默认 summary；layout-preview 根据 ids、direction、gap 只读计算流程预览，返回 operations 与全部依据 expectedVersions，应用时仍需 artifact_apply 的权限、任务范围与版本检查；layout-cancel 以 requestId 真正中止本身份的计算线程。context+feedbackId/contextId 返回冻结原生 element 与版本、HTML 来源引用；source+feedbackId+elementId/regionId 读取对应冻结对象/源码。HTML 按 offset/limit 分段，有 nextOffset 时继续；当前对象 CAS 版本从 objects 读取。首次发现可不带任务只读且不续期；taskId/generation成对携带，成功读取确实命中本任务范围才续活动，不制造写入进度。assets 仅房主查询。不要把 DOM 摘录当原始源码。',
-  artifact_apply: '以稳定对象 ID 批量局部修改白板。Agent真实内容写入必须携带有效taskId/generation并在声明范围内；人类界面不需要Agent任务。更改 HTML 使用 update.changes.html 并提供 expectedVersions；冲突后重读，不覆盖。locked 仅锁定几何，允许文字、样式、HTML 和 state 更新；移动、裁剪、删除及改变关联锁线前须独立明确解锁，同批解锁绕过会拒绝。layout preset=front/back/forward/backward 按 ids 调整对象层级。restore 指定 versionId 并形成新版本；附 id 或 ids 时只恢复所选内容单元，保留未选择的内容、样式与当前标题；仍须核对当前 revision 或全部目标版本，恢复不能绕过锁。data.mode=undo 安全撤回所选事务。',
+  artifact_read: '读取作品概要、对象、HTML 原始源码、冻结反馈、资产元数据或历史。默认 summary；layout-preview 根据 ids、direction、gap 只读计算流程预览，返回 operations 与全部依据 expectedVersions，应用时仍需 artifact_apply 的权限、任务范围与版本检查；layout-cancel 以 requestId 真正中止本身份的计算线程。context+feedbackId/contextId 返回冻结原生 element 与版本、HTML 来源引用；source+feedbackId+elementId/regionId 读取对应冻结对象/源码。HTML 按 offset/limit 分段，有 nextOffset 时继续；当前对象 CAS 版本从 objects 读取。首次发现可不带任务只读且不续期；taskId/generation成对携带，成功读取确实命中本任务范围才续活动，不制造写入进度。assets 仅房主查询。文档用 blocks+elementId 读取稳定块（可附 feedbackId 读冻结块），source 返回可分页 JSON。不要把 DOM 摘录当原始源码。',
+  artifact_apply: '以稳定对象 ID 批量局部修改白板。Agent真实内容写入必须携带有效taskId/generation并在声明范围内；人类界面不需要Agent任务。文档区域用 document 操作：id 指定区域，data.operations 为 insert/update/delete/move 块操作（insert 含 block，update 含 id/changes，move 含 id/parentId/afterId）；沿用区域 expectedVersions。更改 HTML 使用 update.changes.html 并提供 expectedVersions；冲突后重读，不覆盖。locked 仅锁定几何，允许文字、样式、HTML 和 state 更新；移动、裁剪、删除及改变关联锁线前须独立明确解锁，同批解锁绕过会拒绝。layout preset=front/back/forward/backward 按 ids 调整对象层级。restore 指定 versionId 并形成新版本；附 id 或 ids 时只恢复所选内容单元，保留未选择的内容、样式与当前标题；仍须核对当前 revision 或全部目标版本，恢复不能绕过锁。data.mode=undo 安全撤回所选事务。',
   artifact_feedback: '创建或读取带原生对象、白板区域或 HTML 内部锚点的备注，支持回复、编辑自己的消息、删除整讨论、解决及私人建议。回复已解决讨论会重新打开；删除同时移除冻结来源，历史版本保留。create 用 versions 冻结选取时的原始对象/HTML，稳定 operationId 保证重试不重复；contextId 用于读取冻结来源。Agent选择或撤回已应用方案产生内容变化时也需有效taskId/generation。send 请求房主附加到对话；同一内容重试返回原 attachment.requestId，内容变化后生成新请求。attached 仅房主界面在宿主成功后按该请求回写；与备注解决和 Agent 处理状态独立。普通备注不自动授权修改。',
   artifact_share: '查询或管理分享及角色链接。start 默认局域网，access:local 只启用本机邀请；切换范围保留成员，stop 撤销全部授权；link 开关角色邀请，reset 使旧链接和对应授权失效；role/remove 管理成员并撤销原连接。restore 按已启用角色恢复原浏览器。forget 仅删除已移除成员和该板姓名登记，旧评论历史不变；之后需有效邀请重新输名，新授权不复活移除前排队请求。仅所有者可管理。',
   artifact_export: '按范围导出 JSON、HTML、SVG 或 PNG，或由房主导出包含资源、历史和反馈的 ZIP 备份；返回下载资源引用。富 HTML PNG 可能需要在白板界面导出。',
@@ -58,9 +60,9 @@ const descriptions: Record<ToolName, string> = {
 function record(value: unknown): Record<string, unknown> | undefined { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
 function modelSource(value: unknown): Record<string, unknown> {
   const source = record(value) || {}, { html, element, ...metadata } = source, frozen = record(element);
-  const { html: nestedHtml, ...elementMetadata } = frozen || {};
+  const { html: nestedHtml, document, ...elementMetadata } = frozen || {};
   const sourceHtml = typeof html === 'string' ? html : typeof nestedHtml === 'string' ? nestedHtml : undefined;
-  return { ...metadata, ...(frozen ? { element: elementMetadata } : {}), ...(sourceHtml !== undefined ? { htmlLength: sourceHtml.length, readWith: 'artifact_read source + feedbackId + regionId' } : {}) };
+  return { ...metadata, ...(frozen ? { element: elementMetadata } : {}), ...(document ? { documentSchemaVersion: 1, readWith: 'artifact_read blocks + feedbackId + elementId，或 source 分页读取 JSON' } : {}), ...(sourceHtml !== undefined ? { htmlLength: sourceHtml.length, readWith: 'artifact_read source + feedbackId + regionId' } : {}) };
 }
 /** UI keeps full documents on its private transport; model results carry bounded references. */
 function modelResult(name: ToolName, args: Record<string, unknown>, value: unknown): unknown {
@@ -72,6 +74,15 @@ function modelResult(name: ToolName, args: Record<string, unknown>, value: unkno
     if (artifact) return { artifact, ...(result.historyEntry ? { historyEntry: result.historyEntry } : {}) };
   }
   if (name === 'artifact_read') {
+    if (args.mode === 'source' && record(result.document)) {
+      const json = JSON.stringify(result.document);
+      let offset = Math.max(0, Math.min(json.length, Math.floor(Number(args.offset) || 0)));
+      if (offset > 0 && /[\uDC00-\uDFFF]/.test(json[offset] ?? '') && /[\uD800-\uDBFF]/.test(json[offset - 1])) offset--;
+      let end = Math.min(json.length, offset + Math.min(200000, Math.max(1, Math.floor(Number(args.limit) || 64000))));
+      if (end < json.length && /[\uD800-\uDBFF]/.test(json[end - 1]) && /[\uDC00-\uDFFF]/.test(json[end])) end += end - offset === 1 ? 1 : -1;
+      const { document: _document, text: _text, sources: _sources, ...metadata } = result;
+      return { ...modelSource(metadata), json: json.slice(offset, end), offset, totalLength: json.length, ...(end < json.length ? { nextOffset: end } : {}), complete: end === json.length };
+    }
     if (args.mode === 'source' && typeof result.html === 'string') {
       let offset = Math.max(0, Math.min(result.html.length, Math.floor(Number(args.offset) || 0)));
       // Keep UTF-16 pagination on character boundaries, including a one-unit limit.

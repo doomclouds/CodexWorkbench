@@ -26,6 +26,7 @@ export function describeElement(element: BoardElement, elements: readonly BoardE
   switch (element.type) {
     case 'note': return withText('便签', element.text);
     case 'text': return withText('文字', element.text);
+    case 'document': return withText('文档', element.text);
     case 'shape': return withText(shapes[element.kind || 'rounded'] || '形状', element.text);
     case 'container': {
       const count = elements.filter(item => item.id !== element.id && item.x >= element.x && item.y >= element.y && item.x + item.w <= element.x + element.w && item.y + item.h <= element.y + element.h).length;
@@ -64,6 +65,14 @@ export function describeCommentTarget(document: StudioDocument, anchor: Anchor, 
 }
 
 export function liveCommentPoint(canvas: HTMLElement | null, document: StudioDocument | null, anchor: Anchor, viewport?: Viewport, feedbackId?: string, fallback?: CommentPoint): CommentPoint | undefined {
+  if (canvas && anchor.coordinateSpace === 'document' && anchor.elementIds?.[0]) {
+    const roots = [...canvas.querySelectorAll<HTMLElement>(`[data-document-id="${CSS.escape(anchor.elementIds[0])}"]`)];
+    for (const root of roots.sort((a, b) => Number(b.classList.contains('studio-document-focus')) - Number(a.classList.contains('studio-document-focus')))) {
+      const blockId = anchor.blockIds?.[0];
+      const block = blockId ? root.querySelector<HTMLElement>(`[data-document-block-id="${CSS.escape(blockId)}"],[data-id="${CSS.escape(blockId)}"]`) : root;
+      if (block?.getClientRects().length) { const rect = block.getBoundingClientRect(); return { x: rect.right, y: rect.top + 12, width: 12, height: 24 }; }
+    }
+  }
   const pin = feedbackId ? [...canvas?.querySelectorAll<HTMLElement>('[data-feedback-pin]') || []].find(node => node.dataset.feedbackPin === feedbackId) : undefined;
   if (pin) { const rect = pin.getBoundingClientRect(); return { x: rect.left, y: rect.top, width: rect.width, height: rect.height }; }
   if (!canvas || !document || !('elements' in document) || !viewport) return fallback;

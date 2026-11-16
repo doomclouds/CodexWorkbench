@@ -14,6 +14,14 @@ const feedback: Feedback = {
 };
 
 describe('Studio feedback attachments', () => {
+  it('attaches stable paragraph identities and directs document changes through frozen and current block reads', () => {
+    const draft = feedbackDraft({ ...feedback, anchor: { coordinateSpace: 'document', elementIds: ['document-one'], blockIds: ['paragraph-one'], sourceVersion: 7, quote: '原段落' }, versions: { 'document-one': 7 } }, document);
+    const source = JSON.parse(draft.content[0]!.text.split('\n')[1]!);
+    expect(source).toMatchObject({ elementIds: ['document-one'], blockIds: ['paragraph-one'], sourceVersion: 7, sourceVersions: { 'document-one': 7 }, selectedText: '原段落' });
+    expect(draft.content[0].text).toContain('blocks 模式');
+    expect(draft.content[0].text).toContain('op:document');
+    expect(draft._meta['openai/message']).toEqual({ target: 'active', send: false });
+  });
   it('attaches one removable context item without inserting task text into the user draft', () => {
     const draft = feedbackDraft(feedback, document);
     expect(OpenAIMessageParamsSchema.parse(draft)).toEqual(draft);

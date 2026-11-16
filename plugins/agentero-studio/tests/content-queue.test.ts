@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { NativeContentQueue, type ContentReceipt } from '../src/app/canvas/content-queue.js';
 import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type BoardElement, type Operation } from '../src/contracts/studio.js';
@@ -13,6 +13,32 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: Erro
 const create = (send: (args: Record<string, unknown>) => Promise<ContentReceipt>) => new NativeContentQueue({ send, changed() {}, accepted() {} });
 
 describe('native content queue', () => {
+  it('keeps document operations on their original CAS after a geometry ACK includes someone else\'s paragraph', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'studio-document-ack-')), service = new StudioService({ dataRoot: folder });
+    try {
+      const created = await service.execute('artifact_manage', { action: 'create', title: 'Document ACK', elements: [element('one', { type: 'document', document: { schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: 'base' }] } })] }, LOCAL_ACTOR) as { board: Board };
+      const base = created.board, remote = { ...LOCAL_ACTOR, id: 'remote', name: '协作者', role: 'editor' as const };
+      await service.execute('artifact_apply', { artifactId: base.artifact.id, operationId: 'remote-paragraph', expectedVersions: { one: 1 }, operations: [{ op: 'document', id: 'one', data: { operations: [{ op: 'update', id: 'paragraph', changes: { content: 'remote' } }] } }] }, remote);
+      const received = deferred<ContentReceipt>(), release = deferred<void>();
+      const send = vi.fn(async (args: Record<string, unknown>) => {
+        const result = await service.execute('artifact_apply', args, LOCAL_ACTOR) as ContentReceipt;
+        if (args.summary === 'geometry') { received.resolve(result); await release.promise; }
+        return result;
+      });
+      const queue = create(send), geometry = queue.enqueue(base, operation('one', { x: 40 }), 'geometry');
+      const serverAck = await received.promise;
+      expect(serverAck.board.elements[0]).toMatchObject({ version: 3, x: 40, document: { blocks: [{ id: 'paragraph', content: 'remote' }] } });
+      const blockOps: Operation[] = [{ op: 'document', id: 'one', data: { operations: [{ op: 'update', id: 'paragraph', changes: { content: 'local' } }] } }];
+      const pending = queue.enqueue(base, blockOps, 'old document draft', base.elements);
+      release.resolve(); await geometry;
+      expect(await pending).toBeNull();
+      expect(send.mock.calls[1]![0]).toMatchObject({ expectedVersions: { one: 1 }, operations: blockOps });
+      expect(queue.tasks[0]).toMatchObject({ state: 'failed', sources: [{ version: 1 }], operations: blockOps });
+      expect(queue.tasks[0]!.strictVersions).toBeUndefined();
+      const saved = await service.execute('artifact_read', { artifactId: base.artifact.id, mode: 'objects', ids: ['one'] }, LOCAL_ACTOR) as { elements: BoardElement[] };
+      expect(saved.elements[0]).toMatchObject({ version: 3, x: 40, document: { blocks: [{ content: 'remote' }] } });
+    } finally { await service.close(); const target = resolve(folder); if (!target.startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test folder'); await rm(target, { recursive: true, force: true }); }
+  });
   it('carries explicit gesture operation ids and keeps distinct equal gestures as distinct commits', async () => {
     const first = deferred<ContentReceipt>(), send = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue({ board: board([element('one', { version: 2, x: 10 })], 2) });
     const queue = create(send), base = board(), operations = operation('one', { x: 10 });
