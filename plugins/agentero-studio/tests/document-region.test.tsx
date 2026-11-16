@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { BoardElement } from '../src/contracts/studio.js';
-import { documentPlainText, type DocumentContent } from '../src/contracts/document.js';
+import { documentPlainText, normalizeDocument, type DocumentContent } from '../src/contracts/document.js';
+import { documentHtml } from '../src/core/products/document-serialization.js';
 
 const imageRequests = vi.hoisted(() => ({ values: [] as Promise<string>[] }));
 vi.mock('../src/app/canvas/DocumentEditor.js', () => ({ default: ({ value, editable, onChange, resolveFileUrl }: { value: DocumentContent; editable: boolean; onChange: (value: DocumentContent) => void; resolveFileUrl: (source: string) => Promise<string> }) => <><textarea aria-label="测试块编辑器" readOnly={!editable} value={documentPlainText(value)} onChange={event => onChange({ schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: event.target.value, children: [] }] })} /><button type="button" aria-label="测试读取图片" onClick={() => { const request = resolveFileUrl('/assets/artifact-one/picture'); imageRequests.values.push(request); void request.catch(() => undefined); }}>读取图片</button></> }));
@@ -30,6 +32,77 @@ async function edit() { await click('编辑文档'); for (let i = 0; i < 25 && !
 async function change(value: string, label = '测试块编辑器') { await act(async () => { const input = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(`[aria-label="${label}"]`)!; const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function tick(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 const storedDraft = () => localStorage.getItem('studio-document-draft:owner:artifact-one:document-one');
+
+it('does not promote an ACK containing foreign paragraphs underneath new local typing', async () => {
+  let acknowledge!: (element: BoardElement) => void;
+  props.onSave = vi.fn(() => new Promise<BoardElement>(resolve => { acknowledge = resolve; }));
+  await render(); await edit(); vi.useFakeTimers();
+  await change('本机标题', '文档标题'); await tick(650);
+  await change('保存标题期间的新输入');
+  const merged = { ...elementValue('协作者的新正文', 3), text: '本机标题' };
+  props = { ...props, element: merged }; await render();
+  await act(async () => acknowledge(structuredClone(merged))); await tick(1500);
+  expect(props.onSave).toHaveBeenCalledTimes(1);
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!.value).toBe('保存标题期间的新输入');
+  expect(host.textContent).toContain('比较');
+  expect(JSON.parse(storedDraft()!).base.version).toBe(1);
+});
+
+it('applies only the compared local block intent and keeps remote additions and an untouched remote title', async () => {
+  let calls = 0;
+  props.onSave = vi.fn(async (document, title, base) => { if (!calls++) throw new Error('CONFLICT'); return { ...base, version: base.version + 1, document: structuredClone(document), text: title }; });
+  await render(); await edit(); vi.useFakeTimers(); await change('本机要修改的段落'); await tick(650);
+  const canonical = { ...elementValue('协作者修改的段落', 3), text: '协作者新标题' };
+  canonical.document!.blocks[0]!.props.backgroundColor = 'red';
+  canonical.document!.blocks.push({ id: 'remote-added', type: 'paragraph', props: {}, content: '协作者新增的未涉及段落', children: [] });
+  props = { ...props, element: canonical }; await render(); await click('比较最新内容'); await click('保存已比较的草稿');
+  expect(props.onSave).toHaveBeenCalledTimes(2);
+  const saved = vi.mocked(props.onSave).mock.calls[1]!;
+  expect(saved[0].blocks.map(block => block.id)).toEqual(['paragraph', 'remote-added']);
+  expect(saved[0].blocks[0]!.props.backgroundColor).toBe('red');
+  expect(documentPlainText(saved[0])).toContain('本机要修改的段落'); expect(documentPlainText(saved[0])).toContain('协作者新增的未涉及段落');
+  expect(saved[1]).toBe('协作者新标题'); expect(saved[2].version).toBe(3); expect(saved[3]).toBe(true);
+});
+
+it('renders legal string table cells consistently with canonical text and full HTML export', () => {
+  const value = normalizeDocument({ schemaVersion: 1, blocks: [{ id: 'table', type: 'table', props: {}, content: { type: 'tableContent', rows: [{ cells: ['字符串 A', [{ type: 'text', text: '片段 B', styles: { bold: true } }], { type: 'tableCell', props: {}, content: '对象 C' }] }] } }] });
+  const read = renderToStaticMarkup(<DocumentReadView document={value} client={props.client} />), exported = documentHtml(value, '表格');
+  for (const text of ['字符串 A', '片段 B', '对象 C']) { expect(documentPlainText(value)).toContain(text); expect(read).toContain(text); expect(exported).toContain(text); }
+});
+
+it('focuses inline reading and isolates document copy, paste and destructive keys without blocking canvas navigation', async () => {
+  await render(); const scroll = host.querySelector<HTMLElement>('.studio-document-scroll')!;
+  expect(document.activeElement).toBe(scroll);
+  const keys = vi.fn(), copy = vi.fn(), cut = vi.fn(), paste = vi.fn();
+  window.addEventListener('keydown', keys); window.addEventListener('copy', copy); window.addEventListener('cut', cut); window.addEventListener('paste', paste);
+  try {
+    for (const key of ['Delete', 'Backspace', '7', 'ArrowDown']) await act(async () => scroll.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
+    expect(keys).not.toHaveBeenCalled();
+    const copied = new Event('copy', { bubbles: true, cancelable: true }), removed = new Event('cut', { bubbles: true, cancelable: true }), pasted = new Event('paste', { bubbles: true, cancelable: true });
+    await act(async () => { scroll.dispatchEvent(copied); scroll.dispatchEvent(removed); scroll.dispatchEvent(pasted); });
+    expect(copy).not.toHaveBeenCalled(); expect(cut).not.toHaveBeenCalled(); expect(paste).not.toHaveBeenCalled(); expect(copied.defaultPrevented).toBe(false); expect(removed.defaultPrevented).toBe(false); expect(pasted.defaultPrevented).toBe(false);
+    await act(async () => scroll.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })));
+    expect(keys).toHaveBeenCalledTimes(1);
+  } finally { window.removeEventListener('keydown', keys); window.removeEventListener('copy', copy); window.removeEventListener('cut', cut); window.removeEventListener('paste', paste); }
+});
+
+it('exits editing before a vendor editor can swallow an otherwise unclaimed Escape', async () => {
+  await render(); await edit(); const input = host.querySelector<HTMLElement>('[aria-label="测试块编辑器"]')!;
+  const swallowed = vi.fn((event: Event) => { event.preventDefault(); event.stopPropagation(); });
+  input.addEventListener('keydown', swallowed);
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(host.querySelector('[aria-label="测试块编辑器"]')).toBeNull();
+  expect(swallowed).not.toHaveBeenCalled();
+  expect(props.onInteract).toHaveBeenCalledWith(false);
+});
+
+it('lets the vendor dismiss its open menu before leaving editing', async () => {
+  await render(); await edit(); const input = host.querySelector<HTMLElement>('[aria-label="测试块编辑器"]')!;
+  const menu = window.document.createElement('div'); menu.setAttribute('role', 'listbox'); menu.textContent = '编辑器菜单'; host.querySelector('.studio-document-region')!.append(menu);
+  const dismiss = vi.fn((event: Event) => { event.preventDefault(); event.stopPropagation(); menu.remove(); }); input.addEventListener('keydown', dismiss);
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(dismiss).toHaveBeenCalledTimes(1); expect(host.querySelector('[aria-label="测试块编辑器"]')).not.toBeNull();
+});
 
 it('keeps attempting the server save when the local draft cache is full', async () => {
   await render(); await edit(); vi.useFakeTimers();
@@ -69,6 +142,42 @@ it('keeps a new edit made during an in-flight save and submits it against the re
   expect(document.querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!.value).toBe('等待期间继续输入');
   await tick(650); expect(props.onSave).toHaveBeenCalledTimes(2);
   expect(props.onSave).toHaveBeenLastCalledWith(documentValue('等待期间继续输入'), '方案说明', expect.objectContaining({ version: 2 }), false);
+});
+
+it('shows newer canonical props after a delayed older save acknowledgement when no newer local edit exists', async () => {
+  let acknowledge!: (element: BoardElement) => void;
+  props.onSave = vi.fn(() => new Promise<BoardElement>(resolve => { acknowledge = resolve; }));
+  await render(); await edit(); vi.useFakeTimers();
+  await change('本机已提交的版本二'); await tick(650);
+  expect(props.onSave).toHaveBeenCalledTimes(1);
+  const delayedAck = { ...props.element, version: 2, document: documentValue('本机已提交的版本二') };
+  props = { ...props, element: { ...elementValue('协作者已经保存的版本三', 3), text: '远端新标题' } };
+  await render();
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!.value).toBe('本机已提交的版本二');
+  expect(props.onActivity).toHaveBeenLastCalledWith(expect.objectContaining({ dirty: true, saving: true }));
+  await act(async () => acknowledge(structuredClone(delayedAck)));
+  await tick(1000); await click('阅读文档');
+  expect(props.onSave).toHaveBeenCalledTimes(1);
+  expect({ title: document.querySelector<HTMLInputElement>('[aria-label="文档标题"]')!.value, text: host.querySelector('.studio-doc-prose')!.textContent, saved: host.textContent?.includes('已保存') }).toEqual({ title: '远端新标题', text: '协作者已经保存的版本三', saved: true });
+});
+
+it('retains typing after newer canonical props arrive and keeps its confirmed base for the later conflict', async () => {
+  let acknowledge!: (element: BoardElement) => void;
+  props.onSave = vi.fn().mockImplementationOnce(() => new Promise<BoardElement>(resolve => { acknowledge = resolve; })).mockRejectedValueOnce(new Error('版本冲突，请比较最新内容'));
+  await render(); await edit(); vi.useFakeTimers();
+  await change('已经发出的版本二'); await tick(650);
+  const delayedAck = { ...props.element, version: 2, document: documentValue('已经发出的版本二') };
+  props = { ...props, element: elementValue('协作者的版本三', 3) }; await render();
+  await change('回执之前继续输入的本机草稿');
+  await act(async () => acknowledge(structuredClone(delayedAck)));
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!.value).toBe('回执之前继续输入的本机草稿');
+  await tick(650);
+  expect(props.onSave).toHaveBeenCalledTimes(2);
+  expect(props.onSave).toHaveBeenLastCalledWith(documentValue('回执之前继续输入的本机草稿'), '方案说明', expect.objectContaining({ version: 2, document: documentValue('已经发出的版本二') }), false);
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('版本冲突');
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!.value).toBe('回执之前继续输入的本机草稿');
+  await click('比较最新内容'); const comparison = host.querySelector('[aria-label="比较文档草稿"]')!;
+  expect(comparison.textContent).toContain('协作者的版本三'); expect(comparison.textContent).toContain('回执之前继续输入的本机草稿');
 });
 
 it('preserves failed text without an automatic retry loop and retries only when requested', async () => {

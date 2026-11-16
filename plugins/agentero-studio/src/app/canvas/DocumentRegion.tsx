@@ -2,9 +2,9 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { createPortal } from 'react-dom';
 import { ArrowLeft, BookOpen, Check, Download, FileText, Loader2, Maximize, MessageSquare, Pencil, Search, X } from 'lucide-react';
 import type { Actor, Anchor, BoardElement, StudioClient } from '../../contracts/studio.js';
-import { defaultDocument, documentAnchorState, documentBlockText, documentPlainText, flattenDocumentBlocks, normalizeDocument, type DocumentContent } from '../../contracts/document.js';
+import { applyDocumentOperations, defaultDocument, documentAnchorState, documentBlockText, documentOperations, documentPlainText, flattenDocumentBlocks, normalizeDocument, type DocumentContent } from '../../contracts/document.js';
 import { assetDisplayUrl } from './canvas-model.js';
-import { registerEscapeLayer } from '../shared/escape.js';
+import { isEscapeActive, registerEscapeLayer } from '../shared/escape.js';
 import { studioRequest, downloadStudioBlob, downloadStudioFile } from '../transport.js';
 import { copyPlainText } from '../clipboard.js';
 import DocumentReadView from './DocumentReadView.js';
@@ -59,23 +59,33 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     catch { setDraftWarning('无法保存本机草稿，仍会尝试保存到白板；未确认前请复制文档草稿。'); }
   }, [document, title, dirty, draftKey, recovered]);
   useEffect(() => {
-    if (!dirty && !saving) { baseline.current = element; setDocument(element.document ?? defaultDocument()); setTitle(element.text || '文档'); }
-  }, [element.version]);
+    if (!dirty && !saving && element.version >= baseline.current.version) { baseline.current = element; setDocument(element.document ?? defaultDocument()); setTitle(element.text || '文档'); }
+  }, [element.version, dirty, saving]);
   const save = useCallback(async (overwrite = false): Promise<boolean> => {
     if (inFlight.current) return inFlight.current;
     if (!canEdit) { setError('当前为只读，文档草稿已保留。'); return false; }
-    const submitted = draft.current, source = overwrite ? current.current : baseline.current;
+    const submitted = draft.current, origin = baseline.current, source = overwrite ? current.current : origin;
     if (!submitted.title.trim()) { setError('请填写文档标题后保存。'); return false; }
-    if (JSON.stringify(submitted.document) === JSON.stringify(source.document) && submitted.title === source.text) return true;
+    if (!overwrite && JSON.stringify(submitted.document) === JSON.stringify(source.document) && submitted.title === source.text) return true;
     setSaving(true); setError('');
     const work = (async () => {
       try {
-        const result = await callbacks.current.onSave(submitted.document, submitted.title, source, overwrite);
+        const intent = overwrite ? documentOperations(origin.document ?? defaultDocument(), submitted.document) : [];
+        const documentToSave = overwrite ? intent.length ? applyDocumentOperations(source.document ?? defaultDocument(), intent) : source.document ?? defaultDocument() : submitted.document;
+        const titleToSave = overwrite && submitted.title === (origin.text || '文档') ? source.text ?? '文档' : submitted.title;
+        const result = await callbacks.current.onSave(documentToSave, titleToSave, source, overwrite);
         if (!result) throw new Error('文档尚未保存，请比较最新内容或重试。');
+        const newerDraft = JSON.stringify(draft.current) !== JSON.stringify(submitted);
+        const foreignBody = JSON.stringify(normalizeDocument(result.document ?? defaultDocument())) !== JSON.stringify(normalizeDocument(submitted.document));
+        if (newerDraft && foreignBody) {
+          baseline.current = origin;
+          if (mounted.current) setError('保存回执含有新的正文，新输入已保留，请比较最新内容后保存。');
+          return false;
+        }
         baseline.current = result;
         recoveryPresent.current = false;
         if (mounted.current) {
-          if (draft.current.document === submitted.document && draft.current.title === submitted.title) { setDocument(result.document ?? submitted.document); setTitle(result.text || submitted.title); }
+          if (!newerDraft) { setDocument(result.document ?? submitted.document); setTitle(result.text || submitted.title); }
           setComparing(false); setRecovered(null);
         }
         return true;
@@ -89,6 +99,8 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   useEffect(() => { callbacks.current.onActivity({ editing: editing && interactive, dirty, saving, error: error || (dirty ? draftWarning : '') }); }, [editing, interactive, dirty, saving, error, draftWarning]);
   useEffect(() => () => callbacks.current.onActivity({ editing: false, dirty: false, saving: false, error: '' }), []);
   useEffect(() => { if (editRequest && canEdit) { setEditing(true); onInteract(true); } }, [editRequest, canEdit]);
+  useEffect(() => { if (!interactive) setEditing(false); }, [interactive]);
+  useEffect(() => { if (interactive && !expanded && !editing) scroll.current?.focus({ preventScroll: true }); }, [interactive, expanded, editing]);
   useEffect(() => {
     const root = expanded ? focusShell.current : shell.current;
     if (!root) return;
@@ -96,7 +108,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
       if (target instanceof Node && !root.contains(target)) return false;
       if (exportMenu) { setExportMenu(false); return; }
       if (comparing) { setComparing(false); return; }
-      if (editing) { setEditing(false); return; }
+      if (editing) { setEditing(false); if (!expanded) callbacks.current.onInteract(false); return; }
       if (interactive && !expanded) { callbacks.current.onInteract(false); return; }
       return false;
     }, 30);
@@ -189,13 +201,31 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     {draftWarning && <div className="studio-document-message has-error" role="alert"><span>{draftWarning}</span><button type="button" onClick={() => void copyDraft()}>复制本机草稿</button></div>}
     <div className="studio-document-body">
       {expanded && <nav className="studio-document-toc" aria-label="文档目录"><strong>目录</strong>{headings.length ? headings.map(block => <button type="button" key={block.id} onClick={() => jump(block.id)} style={{ paddingLeft: 10 + (Number(block.props.level) || 1) * 8 }}>{documentBlockText(block) || '未命名标题'}</button>) : <small>添加标题后显示目录</small>}</nav>}
-      <div ref={scroll} className="studio-document-scroll" onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={editing ? undefined : selectText}>
+      <div ref={scroll} className="studio-document-scroll" tabIndex={interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={editing ? undefined : selectText}>
         <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{editing && canEdit && interactive ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={canEdit} theme={theme} onChange={setDocument} onSelection={setSelection} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} highlightedIds={targetIds} find={find} />}</div>
       </div>
     </div>
     {error && <div className="studio-document-message has-error" role="alert"><span>{error}</span><button type="button" onClick={() => void save()} disabled={saving || !canEdit}>重试保存</button><button type="button" onClick={() => setComparing(true)}>比较最新内容</button><button type="button" onClick={() => void copyPlainText(JSON.stringify(draft.current)).catch(cause => setError(String(cause)))}>复制草稿</button></div>}
-    {comparing && <div className="studio-document-comparison" role="dialog" aria-label="比较文档草稿"><h3>比较最新内容后再保存</h3><div><section><strong>当前已保存内容</strong><pre>{documentPlainText(current.current.document ?? defaultDocument())}</pre></section><section><strong>你的文档草稿</strong><pre>{documentPlainText(document)}</pre></section></div><footer><button type="button" onClick={() => setComparing(false)}>保留草稿</button><button type="button" onClick={() => { baseline.current = current.current; setDocument(current.current.document ?? defaultDocument()); setTitle(current.current.text || '文档'); setError(''); setComparing(false); }}>采用当前内容</button><button type="button" disabled={saving || !canEdit} onClick={() => void save(true)}>保存已比较的草稿</button></footer></div>}
+    {comparing && <div className="studio-document-comparison" role="dialog" aria-label="比较文档草稿"><h3>比较最新内容后再保存</h3><div><section><strong>当前已保存内容 · {current.current.text || '文档'}</strong><pre>{documentPlainText(current.current.document ?? defaultDocument())}</pre></section><section><strong>你的文档草稿 · {title}</strong><pre>{documentPlainText(document)}</pre></section></div><footer><button type="button" onClick={() => setComparing(false)}>保留草稿</button><button type="button" onClick={() => { baseline.current = current.current; setDocument(current.current.document ?? defaultDocument()); setTitle(current.current.text || '文档'); setError(''); setComparing(false); }}>采用当前内容</button><button type="button" disabled={saving || !canEdit} onClick={() => void save(true)}>保存已比较的草稿</button></footer></div>}
   </>;
-  const interactiveEvents = { onPointerDown: (event: React.PointerEvent) => { if (event.button === 0 && (interactive || (event.target as HTMLElement).closest('button,input'))) event.stopPropagation(); }, onDoubleClick: (event: React.MouseEvent) => { if ((event.target as HTMLElement).closest('button,input')) return; event.stopPropagation(); onInteract(true); if (canEdit) setEditing(true); }, onKeyDown: (event: React.KeyboardEvent) => { if (expanded && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); focusShell.current?.querySelector<HTMLInputElement>('[aria-label="文档内查找"]')?.focus(); } } };
+  const captureEscape = (event: React.KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.repeat || event.nativeEvent.isComposing || event.keyCode === 229 || !editing || comparing || exportMenu) return;
+    const root = expanded ? focusShell.current : shell.current;
+    if (!root || [...root.querySelectorAll<HTMLElement>('.bn-suggestion-menu,[role="menu"],[role="listbox"],[role="dialog"]')].some(isEscapeActive)) return;
+    event.preventDefault(); event.stopPropagation(); setEditing(false);
+    if (!expanded) callbacks.current.onInteract(false);
+  };
+  const documentPointerDown = (event: React.PointerEvent) => {
+    const target = event.target as HTMLElement;
+    if (event.button !== 0 || !interactive && !target.closest('button,input')) return;
+    if (interactive && target.closest('.studio-document-scroll') && !target.closest('button,a[href],input:not([disabled]),textarea,select,[contenteditable="true"]')) scroll.current?.focus({ preventScroll: true });
+    event.stopPropagation();
+  };
+  const documentKeyDown = (event: React.KeyboardEvent) => {
+    if (expanded && !event.nativeEvent.isComposing && event.keyCode !== 229 && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); focusShell.current?.querySelector<HTMLInputElement>('[aria-label="文档内查找"]')?.focus(); return; }
+    const navigation = event.code === 'Space' || event.key === 'Escape' || (event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key) || event.shiftKey && ['Digit0', 'Digit1', 'Digit2'].includes(event.code);
+    if (interactive && !(editing && canEdit) && (event.target as HTMLElement).closest('.studio-document-scroll') && !navigation) event.stopPropagation();
+  };
+  const interactiveEvents = { onKeyDownCapture: captureEscape, onPointerDown: documentPointerDown, onDoubleClick: (event: React.MouseEvent) => { if ((event.target as HTMLElement).closest('button,input')) return; event.stopPropagation(); onInteract(true); if (canEdit) setEditing(true); }, onKeyDown: documentKeyDown };
   return <><div ref={shell} className={`studio-document-region${interactive ? ' is-interactive' : ''}`} data-document-id={element.id} data-native-interactive={interactive ? 'true' : undefined} {...interactiveEvents}>{expanded ? <div className="studio-document-expanded-placeholder">正在展开文档</div> : body}</div>{expanded && focusHost && createPortal(<section ref={focusShell} className="studio-document-focus" data-document-id={element.id} aria-label={`文档：${title}`} data-native-interactive="true" {...interactiveEvents}>{body}</section>, focusHost)}</>;
 }

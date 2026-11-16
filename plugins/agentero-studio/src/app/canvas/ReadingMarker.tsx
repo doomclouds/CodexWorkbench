@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
-import type { Point, Viewport } from './canvas-model.js';
+import type { Point, Rect, Viewport } from './canvas-model.js';
 import { registerEscapeLayer } from '../shared/escape.js';
 import './reading-marker.css';
 
@@ -11,6 +11,7 @@ export interface ReadingMarkerProps {
   scopeKey: string;
   clearRevision?: number;
   navigationActive?: boolean;
+  clip?: Rect;
   onDrawingChange?: (drawing: boolean) => void;
 }
 const HOLD_MS = 3000, FADE_MS = 450;
@@ -19,7 +20,7 @@ const path = (points: Point[]) => points.length === 1
   : points.map((point, index) => `${index ? 'L' : 'M'}${point.x} ${point.y}`).join(' ');
 
 /** Session-only marks: coordinates follow the board, but nothing enters its content or history. */
-export default function ReadingMarker({ viewport, active, scopeKey, clearRevision = 0, navigationActive = false, onDrawingChange }: ReadingMarkerProps) {
+export default function ReadingMarker({ viewport, active, scopeKey, clearRevision = 0, navigationActive = false, clip, onDrawingChange }: ReadingMarkerProps) {
   const root = useRef<HTMLDivElement>(null), currentViewport = useRef(viewport); currentViewport.current = viewport;
   const reportDrawing = useRef(onDrawingChange); reportDrawing.current = onDrawingChange;
   const drawing = useRef<Draft | null>(null), frame = useRef<number | undefined>(undefined), nextId = useRef(0);
@@ -88,7 +89,7 @@ export default function ReadingMarker({ viewport, active, scopeKey, clearRevisio
     timers.current.set(id, { fade, remove });
   }
   function cancel(event: PointerEvent<HTMLDivElement>) { if (event.pointerId === drawing.current?.pointerId) cancelDraft(); }
-  return <div ref={root} className={`studio-reading-marker${active ? ' is-active' : ''}${navigationActive ? ' is-navigating' : ''}`} style={{ pointerEvents: active ? 'auto' : 'none' }} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel} onLostPointerCapture={cancel}>
+  return <div ref={root} className={`studio-reading-marker${active ? ' is-active' : ''}${navigationActive ? ' is-navigating' : ''}`} style={{ pointerEvents: active ? 'auto' : 'none', clipPath: clip ? `polygon(${clip.x}px ${clip.y}px, ${clip.x + clip.w}px ${clip.y}px, ${clip.x + clip.w}px ${clip.y + clip.h}px, ${clip.x}px ${clip.y + clip.h}px)` : undefined }} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel} onLostPointerCapture={cancel}>
     <svg width="100%" height="100%" aria-hidden="true"><g transform={`translate(${viewport.x} ${viewport.y}) scale(${viewport.zoom})`}>
       {strokes.map(stroke => <path key={stroke.id} className={stroke.fading ? 'is-fading' : ''} d={path(stroke.points)} strokeWidth={stroke.width} />)}
       {draft && <path className="is-drawing" d={path(draft.points)} strokeWidth={draft.width} />}

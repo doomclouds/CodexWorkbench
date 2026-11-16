@@ -118,7 +118,8 @@ export function documentOperations(before: DocumentContent, after: DocumentConte
       let found = locate(working.blocks, block.id);
       if (!found) { put({ op: 'insert', block: { ...structuredClone(block), children: [] }, parentId, afterId: previous }); found = locate(working.blocks, block.id)!; }
       const own = { type: block.type, props: block.props, content: block.content }, current = { type: found.block.type, props: found.block.props, content: found.block.content };
-      if (JSON.stringify(current) !== JSON.stringify(own)) put({ op: 'update', id: block.id, changes: own });
+      const changes = Object.fromEntries(Object.entries(own).filter(([key, value]) => JSON.stringify(current[key as keyof typeof current]) !== JSON.stringify(value)));
+      if (Object.keys(changes).length) put({ op: 'update', id: block.id, changes });
       found = locate(working.blocks, block.id)!;
       if (found.parentId !== parentId || (found.list[found.index - 1]?.id ?? null) !== previous) put({ op: 'move', id: block.id, parentId, afterId: previous });
       order(block.children ?? [], block.id); previous = block.id;

@@ -41,7 +41,7 @@ export default function DocumentReadView({ document, client, highlightedIds = []
       case 'image': { const source = assetDisplayUrl(String(block.props.url || ''), client); node = source ? <figure><img src={source} alt={String(block.props.caption || block.props.name || '')} loading="lazy" style={{ width: typeof block.props.previewWidth === 'number' && block.props.previewWidth > 0 ? block.props.previewWidth : undefined }} />{block.props.caption && <figcaption>{String(block.props.caption)}</figcaption>}</figure> : <p className="studio-doc-unavailable">图片尚未加载或已不可用</p>; break; }
       case 'table': {
         const table = record(block.content) ? block.content : {}, rows = Array.isArray(table.rows) ? table.rows : [];
-        node = <div className="studio-doc-table-wrap"><table><tbody>{rows.map((row, index) => <tr key={index}>{(record(row) && Array.isArray(row.cells) ? row.cells : []).map((cell, column) => <td key={column}>{inline(Array.isArray(cell) ? cell : record(cell) ? cell.content : [])}</td>)}</tr>)}</tbody></table></div>;
+        node = <div className="studio-doc-table-wrap"><table><tbody>{rows.map((row, index) => <tr key={index}>{(record(row) && Array.isArray(row.cells) ? row.cells : []).map((cell, column) => <td key={column}>{inline(typeof cell === 'string' || Array.isArray(cell) ? cell : record(cell) ? cell.content : [])}</td>)}</tr>)}</tbody></table></div>;
         break;
       }
       default: node = <p>{content || <br />}</p>;
