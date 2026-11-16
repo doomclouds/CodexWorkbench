@@ -7,6 +7,9 @@
   "engines": { "node": ">=24" },
   "scripts": { "build": "node ../../tooling/build-agentero-studio.mjs", "typecheck": "tsc --noEmit", "test": "vitest run" },
   "dependencies": {
+    "@blocknote/ariakit": "0.54.0",
+    "@blocknote/core": "0.54.0",
+    "@blocknote/react": "0.54.0",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@openai/mcp-extensions": "0.2.1",
@@ -20,13 +23,13 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "jsdom": "29.0.1",
     "@types/jsdom": "27.0.0",
     "@types/node": "24.12.1",
     "@types/proper-lockfile": "4.1.4",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "esbuild": "0.28.2",
+    "jsdom": "29.0.1",
     "typescript": "7.0.2",
     "vite": "8.3.6",
     "vite-plugin-singlefile": "2.3.4",

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/p
 import { basename, join } from 'node:path';
 import { Unzip, UnzipInflate, unzipSync, zipSync, type UnzipFileInfo, type Zippable } from 'fflate';
 import type { Actor } from '../../contracts/studio.js';
+import { normalizeDocument } from '../../contracts/document.js';
 import { copy, object, requireRole, safeId, StudioError, text } from './common.js';
 import type { ExportBytes } from './files.js';
 import type { ArtifactMetadata, ArtifactState } from './model.js';
@@ -140,7 +141,10 @@ function validateState(value: unknown, products: ProductRegistry): ArtifactState
       for (const receipt of proposal.receipts) { if (!object(receipt) || typeof receipt.fingerprint !== 'string') throw invalid(); safeId(receipt.id, '操作 ID'); if (receipt.historyId !== undefined) safeId(receipt.historyId, '历史 ID'); }
     }
   }
-  for (const [feedbackId, sources] of Object.entries(state.sources)) if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid('备份来源记录无效。');
+  for (const [feedbackId, sources] of Object.entries(state.sources)) {
+    if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid('备份来源记录无效。');
+    for (const source of sources) if (object(source) && object(source.element) && source.element.type === 'document') normalizeDocument(source.element.document);
+  }
   for (const [assetId, asset] of Object.entries(state.assets)) {
     safeId(assetId, '资源 ID');
     if (!object(asset) || asset.id !== assetId || typeof asset.filename !== 'string' || typeof asset.mimeType !== 'string' || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES) throw invalid('备份资源信息无效。');

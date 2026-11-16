@@ -90,7 +90,9 @@ describe('model MCP contracts through the real SDK', () => {
     expect(fields.operationId.description).toContain('重试');
     expect(fields.action.enum).toContain('attached');
     expect(fields.requestId.description).toContain('宿主确认附加成功');
-    expect(fields.anchor.properties.coordinateSpace.enum).toEqual(['board', 'element', 'html']);
+    expect(fields.anchor.properties.coordinateSpace.enum).toEqual(['board', 'element', 'html', 'document']);
+    expect(fields.anchor.properties.blockIds.maxItems).toBe(100);
+    expect(fields.anchor.properties.sourceVersion.description).toContain('element.version');
     expect(fields.anchor.properties.coordinateSpace.description).toContain('CSS 像素');
     const apply = tools.find(tool => tool.name === 'artifact_apply')!, applyFields = apply.inputSchema.properties as Record<string, any>;
     expect(applyFields.operations.items.properties.changes.properties.locked).toMatchObject({ type: 'boolean', description: expect.stringContaining('仍可更新') });

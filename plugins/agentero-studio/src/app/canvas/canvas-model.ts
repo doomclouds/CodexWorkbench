@@ -2,6 +2,7 @@ import { DEFAULT_STYLE, type Anchor, type BoardElement, type ElementType, type O
 import { newClientId } from '../shared/client-id.js';
 import { DARK_THEME, LIGHT_THEME } from '../../core/theme.js';
 import { arrowGeometry, arrowLabelBox } from '../../core/products/whiteboard-geometry.js';
+import { defaultDocument } from '../../contracts/document.js';
 export { arrowGeometry, arrowEnd, arrowHeads } from '../../core/products/whiteboard-geometry.js';
 export { safeHttpLink } from '../../core/shared/rich-text.js';
 
@@ -126,6 +127,7 @@ export function makeElement(type: ElementType, point: Point, overrides: Partial<
     stroke: { w: 1, h: 1, points: [0, 0, 1, 1], stroke: 'muted', strokeWidth: 3 },
     arrow: { w: 180, h: 1, from: [point.x, point.y], to: [point.x + 180, point.y], color: 'muted', head: 'end' },
     html: { w: 1440, h: 1120, text: 'HTML 图解', html: '' },
+    document: { w: 680, h: 560, text: '文档', document: defaultDocument() },
     image: { w: 360, h: 240 },
     table: { w: 480, h: 180, data: { rows: [['名称', '说明', '状态'], ['项目 A', '双击编辑表格', '进行中'], ['项目 B', '待补充', '待处理']] }, fill: '#ffffff', color: '#2d3142' },
     link: { w: 320, h: 94, text: '链接', href: 'https://example.com', fill: '#ffffff' },

@@ -3,6 +3,8 @@ import { contrastRatio, readableText, semanticColor } from './theme.js';
 import { arrowGeometry, arrowHeads, arrowLabelBox, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
 import { boardStickerMarkup } from './products/whiteboard-stickers.js';
 import { parseRichText, safeHttpLink, type RichTextSegment } from './shared/rich-text.js';
+import { documentPlainText, flattenDocumentBlocks } from '../contracts/document.js';
+import { blocksHtml, DOCUMENT_EXPORT_CSS } from './products/document-serialization.js';
 
 export interface ExportOptions { regionId?: string; elementId?: string; ids?: string[]; padding?: number; scale?: number; [key: string]: unknown }
 export class ExportError extends Error { constructor(public code: string, message: string) { super(message); this.name = 'ExportError'; } }
@@ -30,6 +32,11 @@ export async function inlineExportAssets(board: Board, format: string, options: 
     return resolved.get(source)!;
   };
   for (const element of selectedElements(cloned, options)) {
+    if (element.type === 'document' && element.document) for (const block of flattenDocumentBlocks(element.document.blocks)) {
+      if (block.type !== 'image' || typeof block.props.url !== 'string' || !block.props.url) continue;
+      block.props.url = await read(block.props.url);
+      if (!/^data:image\//i.test(block.props.url)) throw new ExportError('ASSET_NOT_EMBEDDED', '文档图片尚未嵌入，请先导入 Studio 图片资源后导出。');
+    }
     if (element.type === 'image') {
       if (typeof element.src === 'string') element.src = await read(element.src);
       if (format === 'html' && typeof element.video === 'string') element.video = await read(element.video);
@@ -151,7 +158,10 @@ function headSvg(kind: string, tip: Point, inside: Point, color: string): string
 export function elementSvg(e: BoardElement, board: Board, options: ExportOptions = {}): string {
   const style = board.style; const ink = semanticColor(e.stroke, style, style.muted);
   let markup = '';
-  if (isHtmlRegionElement(e)) {
+  if (e.type === 'document' && e.document) {
+    const preview = { ...e, text: `${e.text || '文档'}\n${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
+    markup = `<rect x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="#fff" stroke="#ccd4de" rx="7"/>${textSvg(preview, board, '#24303e')}`;
+  } else if (isHtmlRegionElement(e)) {
     const html = String(e.html ?? '');
     if (options.svgRegions === true) {
       const svg = extractRegionSvg(html, e.id);
@@ -246,6 +256,7 @@ function offlineRegionHtml(element: BoardElement): string {
 export function buildBoardHtml(board: Board, options: ExportOptions = {}): string {
   const elements = selectedElements(board, options); const bounds = boardBounds(elements, 32, board.elements);
   const layers = elements.map(e => {
+    if (e.type === 'document' && e.document) return `<section data-studio-id="${escapeXml(e.id)}" class="studio-document" aria-label="${escapeXml(e.text || '文档')}" style="position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;overflow:auto;transform:rotate(${scalar(e.rotation, 0)}deg)"><h1>${escapeXml(e.text || '文档')}</h1>${blocksHtml(e.document.blocks)}</section>`;
     if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
     if (e.type === 'image' && e.video) {
       if (!/^data:video\//i.test(e.video) || e.src && !/^data:image\//i.test(e.src)) throw new ExportError('ASSET_NOT_EMBEDDED', 'HTML 导出需要先嵌入视频和封面资源。');
@@ -254,5 +265,5 @@ export function buildBoardHtml(board: Board, options: ExportOptions = {}): strin
     const box = boardBounds([e], 2, board.elements); const markerId = `arrow_${e.id.replace(/[^\w-]/g, '_')}`;
     return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
   }).join('');
-  return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
+  return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
 }

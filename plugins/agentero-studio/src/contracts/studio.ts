@@ -1,4 +1,5 @@
 import type { Proposal } from './proposals.js';
+import type { DocumentContent } from './document.js';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Role = 'owner' | 'editor' | 'commenter' | 'viewer';
 export interface Actor { id: string; name: string; kind: 'human' | 'agent'; role: Role }
@@ -12,7 +13,7 @@ export interface StyleProfile {
   name: string; paper: string; ink: string; muted: string; accent: string; link: string;
   fontFamily: string; titleFont: string; monoFont: string; [key: string]: string;
 }
-export type ElementType = 'shape' | 'container' | 'text' | 'stroke' | 'arrow' | 'image' | 'html' | 'table' | 'link' | 'note' | 'sticker' | 'diagram' | 'chart';
+export type ElementType = 'shape' | 'container' | 'text' | 'stroke' | 'arrow' | 'image' | 'html' | 'document' | 'table' | 'link' | 'note' | 'sticker' | 'diagram' | 'chart';
 export interface BoardElement {
   id: string; type: ElementType; x: number; y: number; w: number; h: number; version: number;
   text?: string; kind?: string; color?: string; stroke?: string; fill?: string; fontSize?: number;
@@ -25,12 +26,13 @@ export interface BoardElement {
   /** Optional layout label centre offset from the route's natural middle segment, in board units. */
   labelOffset?: { x: number; y: number }; labelSize?: { w: number; h: number };
   src?: string; video?: string; html?: string; sourceRevision?: number; state?: Json; href?: string;
+  document?: DocumentContent;
   data?: Record<string, unknown>; [key: string]: unknown;
 }
 export interface ArtifactView { artifact: Artifact }
 export interface HtmlRegionContent { id: string; version: number; html?: string; sourceRevision?: number; text?: string; state?: Json }
 export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown>; orderVersion?: number }
-export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
+export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html' | 'document'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; blockIds?: string[]; sourceVersion?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
 export interface FeedbackAttachment {
   requestId: string; contentKey: string; state: 'pending' | 'attached'; requestedAt: string; requestedBy: Actor;
   attachedAt?: string; attachedBy?: Actor;
@@ -76,7 +78,7 @@ export interface CollaborationRoom {
 export interface SyncBatch { cursor: string; reset: boolean; events: StudioEvent[]; peers: Presence[]; timer: RoomTimer | null; serverTime: number; actor?: Actor; access?: 'local' | 'lan' }
 export interface RoomTimer { durationMs: number; deadline: number | null; remainingMs: number; paused: boolean; source: Actor }
 export interface Operation {
-  op: 'add' | 'update' | 'delete' | 'layout' | 'style' | 'restore' | 'motion';
+  op: 'add' | 'update' | 'delete' | 'layout' | 'style' | 'restore' | 'motion' | 'document';
   id?: string; element?: Partial<BoardElement>; changes?: Partial<BoardElement>; ids?: string[];
   preset?: string; style?: Partial<StyleProfile>; versionId?: string; data?: Record<string, unknown>;
 }

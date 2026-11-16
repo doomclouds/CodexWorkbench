@@ -119,6 +119,10 @@ HTML 区域与原生分区（`type: "container"`，用于框住一组内容）�
 
 内部目标提供稳定 `data-studio-id`，反馈读取见 [HTML 区域与反馈](html-feedback.md)。内部没有原生拖拽编辑器，用户通过对象／文字／框选备注让 Codex 修改源。脚本不能直接获得宿主或文件系统能力。
 
+### 文档区域
+
+`type:"document",text:"内容主题",document:{schemaVersion:1,blocks:[...]}` 表达白板中的长文区域。块 JSON 是正文权威源，按[文档区域与段落修改](document-regions.md)读取、命名、按稳定块 ID 局部修改和导出；不要用 HTML 替代正文，也不要把文档外框几何混入段落更新。
+
 ## 资源和备份
 
 生成本机图片后，用 `artifact_manage` 的 `asset-import`，提供作品 ID 和用户明确指定或当前任务生成的绝对 `assetPath`，再用返回的 `asset.src` 新增图片。不要让网页内容指定任意本机文件，也不要把大媒体 base64 塞进模型工具参数。
