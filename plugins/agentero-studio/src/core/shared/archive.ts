@@ -87,7 +87,7 @@ function validateMetadata(value: unknown, expectedId?: string, expectedType?: st
   safeId(value.id); safeId(value.type, '作品类型');
   if (expectedId !== undefined && value.id !== expectedId || expectedType !== undefined && value.type !== expectedType || typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200 || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !validDate(value.createdAt) || !validDate(value.updatedAt) || typeof value.pinned !== 'boolean') throw invalid('备份作品信息无效。');
 }
-function validateActor(value: unknown): void {
+function validateActor(value: unknown): asserts value is Actor {
   if (!object(value) || typeof value.id !== 'string' || typeof value.name !== 'string' || !['human', 'agent'].includes(String(value.kind)) || !['owner', 'editor', 'commenter', 'viewer'].includes(String(value.role))) throw invalid('备份作者信息无效。');
 }
 function validateState(value: unknown, products: ProductRegistry): ArtifactState<unknown> {
@@ -116,6 +116,16 @@ function validateState(value: unknown, products: ProductRegistry): ArtifactState
     if (feedbackIds.has(feedback.id) || feedback.artifactId !== id || !['comment', 'request'].includes(feedback.type) || !['open', 'pending', 'processing', 'resolved'].includes(feedback.status) || typeof feedback.text !== 'string' || !object(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid('备份反馈信息无效。');
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) { if (!object(reply) || typeof reply.text !== 'string' || !validDate(reply.createdAt)) throw invalid(); safeId(reply.id, '回复 ID'); validateActor(reply.author); }
+    if (feedback.attachment !== undefined) {
+      const attachment = feedback.attachment;
+      if (!object(attachment) || typeof attachment.requestId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(attachment.requestId) || typeof attachment.contentKey !== 'string' || !/^[a-f0-9]{64}$/.test(attachment.contentKey) || !['pending', 'attached'].includes(String(attachment.state)) || !validDate(attachment.requestedAt)) throw invalid('备份备注附加记录无效。');
+      validateActor(attachment.requestedBy);
+      if (attachment.state === 'attached') {
+        if (!validDate(attachment.attachedAt)) throw invalid('备份缺少备注附加成功时间。');
+        validateActor(attachment.attachedBy);
+        if (attachment.attachedBy.kind !== 'human' || attachment.attachedBy.role !== 'owner') throw invalid('备份备注附加回执的身份无效。');
+      }
+    }
     if (feedback.proposal) {
       const proposal = feedback.proposal;
       if (!object(proposal) || proposal.audience !== 'owner' || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== 'string' || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid('备份建议记录无效。');

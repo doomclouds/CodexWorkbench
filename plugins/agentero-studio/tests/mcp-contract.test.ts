@@ -88,6 +88,8 @@ describe('model MCP contracts through the real SDK', () => {
     const feedback = tools.find(tool => tool.name === 'artifact_feedback')!, fields = feedback.inputSchema.properties as Record<string, any>;
     expect(fields.versions).toMatchObject({ type: 'object', description: expect.stringContaining('选取时') });
     expect(fields.operationId.description).toContain('重试');
+    expect(fields.action.enum).toContain('attached');
+    expect(fields.requestId.description).toContain('宿主确认附加成功');
     expect(fields.anchor.properties.coordinateSpace.enum).toEqual(['board', 'element', 'html']);
     expect(fields.anchor.properties.coordinateSpace.description).toContain('CSS 像素');
     const apply = tools.find(tool => tool.name === 'artifact_apply')!, applyFields = apply.inputSchema.properties as Record<string, any>;

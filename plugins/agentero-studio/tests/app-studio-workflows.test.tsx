@@ -9,7 +9,7 @@ import { AGENT_TASK_LEASE_MS, DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Artif
 import { StudioService } from '../src/core/service';
 
 vi.mock('../src/app/canvas/WhiteboardCanvas', () => ({
-  default: ({ board, onChanged, onAnnotate, onAnnotateNative, onSelectionChange, onEditHtml, readOnly, presence, externalViewport }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onAnnotateNative?: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; readOnly?: boolean; presence?: { peerId: string }[]; externalViewport?: unknown }) => <section data-peers={presence?.map(peer => peer.peerId).join(',')} data-external-viewport={JSON.stringify(externalViewport)} aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)}>
+  default: ({ board, onChanged, onAnnotate, onAnnotateNative, onSelectionChange, onEditHtml, readOnly, presence, externalViewport }: { board: Board; onChanged: (board: Board) => void; onAnnotate: (selection: unknown) => void; onAnnotateNative?: (selection: unknown) => void; onSelectionChange?: (ids: string[]) => void; onEditHtml?: (element?: Board['elements'][number]) => void; readOnly?: boolean; presence?: { peerId: string }[]; externalViewport?: unknown }) => <section data-peers={presence?.map(peer => peer.peerId).join(',')} data-external-viewport={JSON.stringify(externalViewport)} aria-label="白板画布" data-artifact={board.artifact.id} data-revision={board.artifact.revision} data-read-only={String(!!readOnly)} data-element-text={board.elements.map(element => element.text).join('|')}>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-input'], quote: '输入节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="input"]', rect: { x: 10, y: 20, w: 80, h: 30 } })}>标注 HTML 内部</button>
     <button onClick={() => onAnnotate({ regionId: 'region-one', sourceRevision: 1, targetIds: ['node-output'], quote: '输出节点', excerpt: '输入节点 → 输出节点', selector: '[data-node="output"]', rect: { x: 100, y: 20, w: 80, h: 30 } })}>标注 HTML 输出</button>
     <button onClick={() => { const element = board.elements.find(item => item.id === 'native-table'); if (element) onAnnotateNative?.({ anchor: { coordinateSpace: 'element', elementIds: [element.id], x: 1, y: .5 }, versions: { [element.id]: element.version }, label: '对象 · table', screenPoint: { x: 300, y: 150 } }); }}>标注原生表格</button>
@@ -739,15 +739,16 @@ describe('Studio real management workflows', () => {
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('把输入节点改成强调色');
     let saved = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
     expect(saved.feedback).toHaveLength(1);
-    expect(saved.feedback[0]).toMatchObject({ type: 'comment', status: 'open' });
+    expect(saved.feedback[0]).toMatchObject({ type: 'comment', status: 'pending', attachment: { state: 'pending' } });
     expect(attach.mock.calls[0]?.[0]).toMatchObject({ id: saved.feedback[0].id });
     await submit(container.querySelector<HTMLFormElement>('.studio-comment-compose')!);
     await waitUntil(() => attach.mock.calls.length === 2 && !container.querySelector('.studio-comment-popover'));
     saved = await service.execute('artifact_feedback', { action: 'list', artifactId: fixture.board.artifact.id });
     expect(saved.feedback).toHaveLength(1);
+    expect(saved.feedback[0].attachment).toMatchObject({ state: 'attached' });
     expect(attach.mock.calls[1]?.[0]).toMatchObject({ id: saved.feedback[0].id });
     expect(call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'create')).toHaveLength(1);
-    expect(call.mock.calls.some(([name, args]) => name === 'artifact_feedback' && args.action === 'send')).toBe(false);
+    expect(call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'attached')).toHaveLength(1);
   });
 
   it('opens one header popover at a time and exports through the active product without enabling sharing', async () => {
@@ -887,6 +888,154 @@ describe('Studio real management workflows', () => {
     expect(call).toHaveBeenCalledWith('artifact_share', { artifactId, action: 'restore', memberId: actor.id, role: 'viewer' });
     expect(container.querySelector(`[aria-label="恢复访问：${actor.name}"]`)).toBeNull();
     expect((await service.guestSession(artifactId, undefined, actor.id)).actor).toMatchObject({ id: actor.id, name: actor.name, role: 'viewer' });
+  });
+});
+
+describe('Studio feedback attachment requests', () => {
+  const collaborator: Actor = { id: 'attachment-author', name: '附加请求协作者', kind: 'human', role: 'commenter' };
+  async function pendingComment(artifactId: string, text: string): Promise<Feedback> {
+    const created = await service.execute('artifact_feedback', { artifactId, action: 'create', text }, collaborator);
+    return (await service.execute('artifact_feedback', { artifactId, feedbackId: created.contextId, action: 'send' }, collaborator)).feedback.find((item: Feedback) => item.id === created.contextId)!;
+  }
+  function liveOwner() {
+    const streams: { onmessage: ((event: { data: string }) => void) | null }[] = [];
+    vi.stubGlobal('EventSource', class {
+      onmessage: ((event: { data: string }) => void) | null = null; onerror = null;
+      constructor() { streams.push(this); queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ type: 'ready', cursor: 'fixture:1', reset: true, events: [], peers: [], timer: null }) })); }
+      addEventListener() {} close() {}
+    });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    vi.stubGlobal('fetch', vi.fn((input, init) => appRequest(input, init)));
+    client = { ...client, embedded: false, baseUrl: 'http://studio.test' };
+    let cursor = 1;
+    return async (artifactId: string) => act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'feedback', artifactId, cursor: `fixture:${++cursor}` }) }));
+  }
+
+  it('keeps pending attachment counts visible after opening the list and locates a newly requested comment', async () => {
+    const fixture = await createFixture(), artifactId = fixture.board.artifact.id;
+    const emit = liveOwner();
+    await mount({ artifactId, attach: vi.fn().mockResolvedValue(undefined) });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    expect(container.querySelector('[aria-label$="条备注待附加"]')).toBeNull();
+    const first = await pendingComment(artifactId, '请附加第一条录制说明');
+    await emit(artifactId);
+    await waitUntil(() => !!container.querySelector('[aria-label="1 条备注待附加"]'));
+    expect(container.querySelector('[aria-label="备注列表面板"]')).toBeNull();
+    await click(button('查看待附加备注'));
+    await waitUntil(() => !!container.querySelector(`.studio-comment-popover [data-feedback-id="${first.id}"]`));
+    expect(container.querySelector('[aria-label="1 条备注待附加"]')).not.toBeNull();
+    await click(button('关闭备注'));
+    await pendingComment(artifactId, '请附加第二条路径说明');
+    await emit(artifactId);
+    await waitUntil(() => !!container.querySelector('[aria-label="2 条备注待附加"]'));
+    await click(button('备注列表'));
+    await waitUntil(() => container.querySelectorAll('.studio-comment-list-item').length === 2);
+    expect(container.querySelector('[aria-label="2 条备注待附加"]')).not.toBeNull();
+    await click(button('备注列表'));
+    expect(container.querySelector('[aria-label="备注列表面板"]')).toBeNull();
+    expect(container.querySelector('[aria-label="2 条备注待附加"]')).not.toBeNull();
+  });
+
+  it('returns from a historical preview to the current board when viewing an incoming attachment request', async () => {
+    const fixture = await createFixture(), artifactId = fixture.board.artifact.id;
+    const changed = await apply(fixture.board, [{ op: 'add', element: { id: 'current-note', type: 'note', x: 20, y: 20, w: 200, h: 160, text: '当前版本的录制说明' } }]);
+    const emit = liveOwner();
+    await mount({ artifactId, attach: vi.fn().mockResolvedValue(undefined) });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('版本历史')); await waitUntil(() => container.querySelectorAll('.studio-history-record').length === 2);
+    await click(button('展开版本 0')); await click(button('预览版本'));
+    await waitUntil(() => !!container.querySelector('.studio-preview-banner'));
+    const canvases = () => [...container.querySelectorAll<HTMLElement>('[aria-label="白板画布"]')];
+    expect(canvases()).toHaveLength(2);
+    expect(canvases().find(canvas => canvas.getAttribute('data-revision') !== String(changed.board.artifact.revision))?.getAttribute('data-element-text')).toBe('');
+    const created = await service.execute('artifact_feedback', { artifactId, action: 'create', text: '请查看当前版本的录制说明', anchor: { coordinateSpace: 'element', elementIds: ['current-note'], x: .5, y: .5 } }, collaborator);
+    await service.execute('artifact_feedback', { artifactId, feedbackId: created.contextId, action: 'send' }, collaborator);
+    await emit(artifactId);
+    await waitUntil(() => !!container.querySelector('[aria-label="查看待附加备注"]'));
+    await click(button('查看待附加备注'));
+    await waitUntil(() => !container.querySelector('.studio-preview-banner') && !!container.querySelector(`.studio-comment-popover [data-feedback-id="${created.contextId}"]`));
+    expect(canvases()).toHaveLength(1);
+    expect(canvases()[0]!.getAttribute('data-element-text')).toBe(changed.board.elements[0]!.text);
+    expect(canvases()[0]!.getAttribute('data-read-only')).toBe('false');
+    expect(container.querySelector('.studio-feedback-message')?.textContent).toBe('请查看当前版本的录制说明');
+    expect(container.querySelector('[aria-label="1 条备注待附加"]')).not.toBeNull();
+  });
+
+  it('persists a successful attachment and reads it back after remount without inserting the same request again', async () => {
+    const fixture = await createFixture(), artifactId = fixture.board.artifact.id;
+    const requested = await pendingComment(artifactId, '交接后仍可讨论的备注');
+    const attach = vi.fn().mockResolvedValue(undefined);
+    await mount({ artifactId, attach });
+    await waitUntil(() => !!container.querySelector('[aria-label="1 条备注待附加"]'));
+    await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+    await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!);
+    await click(button('备注操作')); await click(button('附加到对话'));
+    await waitUntil(() => container.querySelector('.studio-comment-thread [role="status"]')?.textContent === '已附加到对话');
+    const stored = (await service.execute('artifact_feedback', { artifactId, feedbackId: requested.id, action: 'get' })).feedback[0] as Feedback;
+    expect(stored.attachment).toMatchObject({ requestId: requested.attachment!.requestId, state: 'attached', attachedBy: LOCAL_ACTOR });
+    expect(stored.status).not.toBe('resolved');
+    expect(container.querySelector('[aria-label="1 条备注待附加"]')).toBeNull();
+    expect(container.querySelector('.studio-reply-form')).not.toBeNull();
+    await act(async () => root.unmount()); root = createRoot(container);
+    await mount({ artifactId, attach });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+    expect(container.querySelector('[aria-label$="条备注待附加"]')).toBeNull();
+    expect(container.querySelector('.studio-comment-list-item [role="status"]')?.textContent).toBe('已附加到对话');
+    await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!);
+    await click(button('备注操作')); await click(button('附加到对话'));
+    await waitUntil(() => !button('备注操作').disabled);
+    expect(attach).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries only the receipt after the host accepted an attachment and saving its status failed', async () => {
+    const fixture = await createFixture(), artifactId = fixture.board.artifact.id;
+    const requested = await pendingComment(artifactId, '仅补记状态的请求');
+    const attach = vi.fn().mockResolvedValue(undefined), execute = call.getMockImplementation()!;
+    let receiptCalls = 0;
+    call.mockImplementation(async (name, args) => {
+      if (name === 'artifact_feedback' && args.action === 'attached' && ++receiptCalls === 1) throw new Error('暂时无法保存回执');
+      return execute(name, args);
+    });
+    await mount({ artifactId, attach }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+    await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!);
+    await click(button('备注操作')); await click(button('附加到对话'));
+    await waitUntil(() => container.querySelector('.studio-comment-error')?.textContent?.includes('状态尚未保存') === true);
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect((await service.execute('artifact_feedback', { artifactId, feedbackId: requested.id, action: 'get' })).feedback[0].attachment.state).toBe('pending');
+    expect(container.querySelector('[aria-label="1 条备注待附加"]')).not.toBeNull();
+    await click(button('重试附加'));
+    await waitUntil(() => container.querySelector('.studio-comment-thread [role="status"]')?.textContent === '已附加到对话');
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(receiptCalls).toBe(2);
+    const receipts = call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'attached');
+    expect(receipts.map(([, args]) => args.requestId)).toEqual([requested.attachment!.requestId, requested.attachment!.requestId]);
+    expect((await service.execute('artifact_feedback', { artifactId, feedbackId: requested.id, action: 'get' })).feedback[0].attachment.state).toBe('attached');
+    expect(container.querySelector('.studio-comment-error')).toBeNull();
+  });
+
+  it('guards a repeated menu activation while the host is attaching the same request', async () => {
+    const fixture = await createFixture(), artifactId = fixture.board.artifact.id;
+    const requested = await pendingComment(artifactId, '快速重复点击的请求');
+    let accept!: () => void;
+    const accepted = new Promise<void>(resolve => { accept = resolve; }), attach = vi.fn(() => accepted);
+    try {
+      await mount({ artifactId, attach }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+      await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+      await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!);
+      await click(button('备注操作'));
+      const action = button('附加到对话');
+      await act(async () => { action.click(); action.click(); });
+      await waitUntil(() => attach.mock.calls.length === 1);
+      expect(container.querySelector('.studio-comment-thread [role="status"]')?.textContent).toBe('附加中…');
+      expect(button('备注操作').disabled).toBe(true);
+      expect((await service.execute('artifact_feedback', { artifactId, feedbackId: requested.id, action: 'get' })).feedback[0].attachment.state).toBe('pending');
+      await act(async () => accept());
+      await waitUntil(() => container.querySelector('.studio-comment-thread [role="status"]')?.textContent === '已附加到对话');
+      expect(attach).toHaveBeenCalledTimes(1);
+      expect(call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'attached')).toHaveLength(1);
+    } finally { await act(async () => accept()); }
   });
 });
 

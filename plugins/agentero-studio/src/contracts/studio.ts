@@ -29,6 +29,10 @@ export interface ArtifactView { artifact: Artifact }
 export interface HtmlRegionContent { id: string; version: number; html?: string; sourceRevision?: number; text?: string; state?: Json }
 export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown>; orderVersion?: number }
 export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
+export interface FeedbackAttachment {
+  requestId: string; contentKey: string; state: 'pending' | 'attached'; requestedAt: string; requestedBy: Actor;
+  attachedAt?: string; attachedBy?: Actor;
+}
 export interface Feedback {
   id: string; artifactId: string; type: 'comment' | 'request'; anchor: Anchor; author: Actor;
   text: string; status: 'open' | 'pending' | 'processing' | 'resolved'; createdAt: string; updatedAt: string;
@@ -36,6 +40,7 @@ export interface Feedback {
   versions?: Record<string, number>;
   proposal?: Proposal;
   processingBy?: Actor;
+  attachment?: FeedbackAttachment;
 }
 export interface HistoryEntry { id: string; revision: number; createdAt: string; actor: Actor; summary: string; changedIds: string[]; restoredFrom?: string }
 /** Display grouping only; every version remains independently addressable. */

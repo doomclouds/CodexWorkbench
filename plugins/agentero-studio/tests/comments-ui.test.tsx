@@ -7,6 +7,7 @@ import { CommentThread, type RunCommentAction } from '../src/app/shared/comments
 import { CommentsPanel } from '../src/app/shared/comments/CommentsPanel';
 import { describeCommentTarget, liveCommentPoint } from '../src/app/shared/comments/comment-target';
 import { DEFAULT_STYLE, LOCAL_ACTOR, type Actor, type Board, type Feedback } from '../src/contracts/studio';
+import { attachmentStatus, isAttachmentPending } from '../src/app/shared/comments/attachment';
 
 let host: HTMLDivElement, root: Root;
 const colleague: Actor = { id: 'colleague', name: '同事', kind: 'human', role: 'commenter' };
@@ -124,4 +125,49 @@ it('describes actual table content and resolves saved pin coordinates before sta
   expect(first.x).toBeCloseTo(237); expect(first.y).toBeCloseTo(128);
   const panned = liveCommentPoint(host, board, anchor, { x: 150, y: 80, zoom: .5 })!;
   expect(panned.x - first.x).toBe(50); expect(panned.y - first.y).toBe(30);
+});
+
+it('shows pending, attaching and successful handoff without conflating them with resolution', async () => {
+  const pending: Feedback = { ...feedback, status: 'pending', attachment: { requestId: 'request-1', contentKey: 'key', state: 'pending', requestedAt: feedback.createdAt, requestedBy: colleague } };
+  const props = { actor: LOCAL_ACTOR, busy: false, onAction: action(), onAttach: async () => {} };
+  await render(<CommentThread {...props} feedback={pending} />);
+  expect(host.querySelector('[role=status]')?.textContent).toBe('待附加到对话');
+  expect(host.textContent).not.toContain('待房主处理');
+  await render(<CommentThread {...props} feedback={pending} attaching />);
+  expect(host.querySelector('[role=status]')?.textContent).toBe('附加中…');
+  expect(button('备注操作').disabled).toBe(true);
+  const attached: Feedback = { ...pending, status: 'resolved', attachment: { ...pending.attachment!, state: 'attached', attachedAt: feedback.updatedAt, attachedBy: LOCAL_ACTOR } };
+  await render(<CommentThread {...props} feedback={attached} />);
+  expect(host.querySelector('[role=status]')?.textContent).toBe('已附加到对话');
+  expect(host.textContent).toContain('已解决');
+  expect(host.querySelector('textarea')?.getAttribute('placeholder')).toBe('回复以重新打开…');
+});
+
+it('locks a menu attachment immediately and exposes an explicit retry after host failure', async () => {
+  let fail!: () => void;
+  const attached = vi.fn<() => Promise<void>>();
+  // Keep the first actual host call pending, so a second synchronous click hits the ref lock.
+  attached.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { fail = () => reject(new Error('当前对话暂不可用')); })).mockResolvedValue(undefined);
+  await render(<CommentThread feedback={{ ...feedback, status: 'pending' }} actor={LOCAL_ACTOR} busy={false} onAction={action()} onAttach={attached} />);
+  await click(button('备注操作'));
+  const attachButton = button('附加到对话');
+  await act(async () => { attachButton.click(); attachButton.click(); });
+  expect(attached).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[role=status]')?.textContent).toBe('附加中…');
+  await act(async () => fail());
+  expect(host.querySelector('[role=alert]')?.textContent).toBe('当前对话暂不可用');
+  expect(host.querySelector('[role=status]')?.textContent).toBe('待附加到对话');
+  await click(button('重试附加'));
+  expect(attached).toHaveBeenCalledTimes(2);
+  expect(host.querySelector('[role=alert]')).toBeNull();
+});
+
+it('keeps unresolved attachment requests visible and puts them first even when their discussion was resolved', async () => {
+  const normal = { ...feedback, id: 'newer', createdAt: '2026-11-15T01:00:00Z' };
+  const pending: Feedback = { ...feedback, id: 'pending', status: 'resolved', attachment: { requestId: 'request-1', contentKey: 'key', state: 'pending', requestedAt: feedback.createdAt, requestedBy: colleague } };
+  await render(<CommentsPanel feedback={[normal, pending]} actor={LOCAL_ACTOR} busy={false} showResolved={false} onShowResolved={() => {}} onOpen={() => {}} onAction={action()} onAttach={async () => {}} renderSuggestion={() => null} />);
+  expect([...host.querySelectorAll('[data-feedback-id]')].map(node => node.getAttribute('data-feedback-id'))).toEqual(['pending', 'newer']);
+  expect(isAttachmentPending(pending)).toBe(true);
+  expect(attachmentStatus({ ...feedback, status: 'pending' })).toBe('pending');
+  expect(isAttachmentPending({ ...pending, attachment: { ...pending.attachment!, state: 'attached' } })).toBe(false);
 });
