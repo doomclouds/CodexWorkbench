@@ -1,17 +1,17 @@
 import './region.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { HtmlRegionContent, HtmlSelection, Json } from '../../../contracts/studio.js';
-import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlPointerMessage, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlPointerPosition, type HtmlStateSave } from './runtime.js';
+import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlNavigationMessage, validateHtmlPointerMessage, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlNavigationEvent, type HtmlPointerPosition, type HtmlStateSave } from './runtime.js';
 import { newClientId } from '../client-id.js';
 import { dismissEscapeLayer, isEscapeActive } from '../escape.js';
 
-interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
+interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; panMode?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onNavigation?: (event: HtmlNavigationEvent) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
 interface SaveQueue {
   active: boolean; processing: boolean; paused: boolean; sequence: number; pending: HtmlStateSave | null;
   accepted: { baseVersion: number; submitted: Json; state: Json; version: number }[];
 }
 
-export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, onAnnotate, onToolShortcut, onPointerPosition, onStateChange }: Props) {
+export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, panMode = false, onAnnotate, onToolShortcut, onPointerPosition, onNavigation, onStateChange }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const sourceRevision = useMemo(() => typeof element.sourceRevision === 'number' ? element.sourceRevision : element.version, [element.id, element.html, element.sourceRevision]);
   const channel = useMemo(() => newClientId(), [element.id, element.html, sourceRevision]);
@@ -21,6 +21,14 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
   callback.current = onAnnotate;
   const toolShortcut = useRef(onToolShortcut); toolShortcut.current = onToolShortcut;
   const pointerCallback = useRef(onPointerPosition); pointerCallback.current = onPointerPosition;
+  const navigationCallback = useRef(onNavigation); navigationCallback.current = onNavigation;
+  const navigationPan = useRef<Extract<HtmlNavigationEvent, { kind: 'pan' }> | null>(null);
+  const navigationSpace = useRef(false);
+  const clearNavigation = () => {
+    if (navigationPan.current) navigationCallback.current?.({ ...navigationPan.current, phase: 'cancel' });
+    if (navigationSpace.current) navigationCallback.current?.({ kind: 'space', held: false });
+    navigationPan.current = null; navigationSpace.current = false;
+  };
   const pointerEnabled = useRef(annotation || interactive); pointerEnabled.current = annotation || interactive;
   const pointerInside = useRef(false);
   const reportPointer = (point: HtmlPointerPosition | null) => {
@@ -86,6 +94,13 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
     if (scrollPosition.current?.regionId !== element.id) scrollPosition.current = null;
     const receive = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow || !event.data || event.data.channel !== channel) return;
+      const navigation = validateHtmlNavigationMessage(event.data, { channel, regionId: element.id, sourceRevision });
+      if (navigation) {
+        if (!pointerEnabled.current || !frame.current || !isEscapeActive(frame.current)) return;
+        if (navigation.kind === 'pan') navigationPan.current = ['end', 'cancel'].includes(navigation.phase) ? null : navigation;
+        if (navigation.kind === 'space') navigationSpace.current = navigation.held;
+        navigationCallback.current?.(navigation); return;
+      }
       const pointer = validateHtmlPointerMessage(event.data, { channel, regionId: element.id, sourceRevision });
       if (pointer) { if (pointerEnabled.current) reportPointer(pointer.point); return; }
       if (event.data.type === 'studio-html-tool-shortcut' && event.data.regionId === element.id && event.data.sourceRevision === sourceRevision) {
@@ -118,17 +133,17 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
       }
     };
     window.addEventListener('message', receive);
-    return () => { queue.active = false; if (pointerInside.current) reportPointer(null); window.removeEventListener('message', receive); };
+    return () => { queue.active = false; clearNavigation(); if (pointerInside.current) reportPointer(null); window.removeEventListener('message', receive); };
   }, [channel, element.id, sourceRevision, queue]);
-  useEffect(() => { if (!annotation && !interactive && pointerInside.current) reportPointer(null); }, [annotation, interactive]);
+  useEffect(() => { if (!annotation && !interactive) { clearNavigation(); if (pointerInside.current) reportPointer(null); } }, [annotation, interactive]);
   useEffect(() => {
-    frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll }, '*');
-  }, [annotation, channel, element.id, sourceRevision, ready, Boolean(onStateChange), preserveScroll]);
+    frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*');
+  }, [annotation, channel, element.id, sourceRevision, ready, Boolean(onStateChange), preserveScroll, panMode]);
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ type: 'studio-html-state-update', channel, regionId: element.id, state: element.state ?? null, version: element.version }, '*');
   }, [element.state, element.version, element.id, channel, ready]);
   return <div className={`studio-html-region${annotation ? ' is-annotating' : ''}`}>
-    <iframe ref={frame} title={element.text || 'HTML 图解'} srcDoc={source} sandbox="allow-scripts" referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll }, '*')} style={{ pointerEvents: annotation || interactive ? 'auto' : 'none' }} />
+    <iframe ref={frame} title={element.text || 'HTML 图解'} srcDoc={source} sandbox="allow-scripts" referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*')} style={{ pointerEvents: annotation || interactive ? 'auto' : 'none' }} />
     {saveError?.channel === channel && <div className="studio-html-state-error" data-native-interactive="true" role="alert">
       <span>{saveError.message} 本地交互修改已保留。</span>
       <button type="button" disabled={!onStateChange || processingChannel === channel} onClick={() => { queue.paused = false; setSaveError(null); void saveProcessor.current(); }}>重试保存</button>

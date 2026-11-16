@@ -1,0 +1,16 @@
+.studio-reading-controls{position:absolute;z-index:76;bottom:18px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:5px;border:1px solid var(--canvas-ui-border);border-radius:11px;background:var(--canvas-ui);color:var(--canvas-ui-text);box-shadow:0 4px 20px #00000017;max-width:calc(100% - 24px);font-size:12px}
+.studio-reading-controls>button{display:flex;align-items:center;justify-content:center;width:30px;height:32px;padding:0;border:0;border-radius:6px;background:transparent}
+.studio-reading-controls>button:hover{background:var(--canvas-ui-soft)}
+.studio-reading-controls>button[aria-pressed=true]{background:color-mix(in srgb,var(--canvas-accent) 15%,var(--canvas-ui));color:var(--canvas-accent)}
+.studio-reading-controls-divider{height:20px;width:1px;background:var(--canvas-ui-border);margin:0 3px}
+.studio-reading-percent{display:flex;align-items:center;height:30px;border:1px solid transparent;border-radius:5px;padding-right:4px;color:var(--canvas-ui-text)}
+.studio-reading-percent:focus-within{border-color:var(--canvas-accent)}
+.studio-reading-percent.has-error{border-color:var(--studio-danger,#bf493f)}
+.studio-reading-percent input{width:44px;min-width:0;border:0;background:transparent;color:inherit;text-align:right;font-variant-numeric:tabular-nums;padding:4px 2px;outline:none!important}
+.studio-reading-controls>.studio-reading-preset-toggle{width:18px}
+.studio-reading-presets{position:absolute;bottom:calc(100% + 8px);right:35px;min-width:135px;display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:6px;border:1px solid var(--canvas-ui-border);border-radius:8px;background:var(--canvas-ui);box-shadow:0 5px 20px #0002}
+.studio-reading-presets button{padding:8px;border:0;border-radius:5px;background:transparent;color:inherit;font-size:12px}
+.studio-reading-presets button:hover,.studio-reading-presets button[aria-checked=true]{background:var(--canvas-ui-soft)}
+.studio-reading-controls-message{position:absolute;bottom:calc(100% + 9px);left:50%;transform:translateX(-50%);white-space:nowrap;border:1px solid var(--canvas-ui-border);border-radius:7px;padding:7px 10px;background:var(--canvas-ui);color:var(--canvas-ui-text);font-size:11px;box-shadow:0 3px 14px #0001;pointer-events:none}
+.studio-reading-controls-message[role=alert]{color:var(--studio-danger,#bf493f)}
+@container studio-canvas (max-width:360px){.studio-reading-controls{gap:0;padding:4px}.studio-reading-controls>button{width:27px}.studio-reading-controls>.studio-reading-preset-toggle{width:15px}.studio-reading-controls-divider{margin:0 2px}}

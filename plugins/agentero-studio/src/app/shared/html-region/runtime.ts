@@ -10,6 +10,7 @@ export interface HtmlRuntimeOptions {
   state?: Json;
   elementVersion?: number;
   writable?: boolean;
+  panMode?: boolean;
 }
 
 /** Replays newer intent and reports overlaps with remote values included in an own ACK. */
@@ -40,6 +41,9 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
   let outline: HTMLDivElement | null = null;
   let area: HTMLDivElement | null = null;
   let cursorStyle: HTMLStyleElement | null = null;
+  let navigationSpace = false, externalPanMode = config.panMode === true;
+  let navigationPan: { pointerId: number; screenX: number; screenY: number } | null = null;
+  let navigationClick = false, forcedCursor = '';
   let lastSentAt = 0;
   let embedState: Json = config.state ?? null;
   let authoritativeState: Json = config.state ?? null;
@@ -161,10 +165,10 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
   const cursorOverrides = new Map<CSSStyleDeclaration, { value: string; priority: string; element?: HTMLElement | SVGElement; sourceStyle?: string | null; appliedStyle?: string | null }>();
   const overrideCursor = (style: CSSStyleDeclaration, element?: HTMLElement | SVGElement) => {
     const value = style.getPropertyValue('cursor'), priority = style.getPropertyPriority('cursor');
-    if (!value || value === config.commentCursor && priority === 'important') return;
+    if (!value || value === forcedCursor && priority === 'important') return;
     const previous = { value, priority, ...(element ? { element, sourceStyle: element.getAttribute('style'), appliedStyle: null as string | null } : {}) };
     cursorOverrides.set(style, previous);
-    style.setProperty('cursor', config.commentCursor, 'important');
+    style.setProperty('cursor', forcedCursor, 'important');
     if (element) previous.appliedStyle = element.getAttribute('style');
   };
   const syncCursorRules = () => {
@@ -183,7 +187,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     if (element.style?.getPropertyPriority('cursor') === 'important') overrideCursor(element.style, element);
   };
   const cursorObserver = new MutationObserver(records => {
-    if (!enabled) return;
+    if (!forcedCursor) return;
     let changedRules = false;
     for (const record of records) {
       const target = record.target instanceof Element ? record.target : record.target.parentElement;
@@ -204,22 +208,27 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
   const restoreCursors = () => {
     cursorObserver.disconnect();
     for (const [style, original] of cursorOverrides) {
-      if (style.getPropertyValue('cursor') !== config.commentCursor || style.getPropertyPriority('cursor') !== 'important') continue;
+      if (style.getPropertyValue('cursor') !== forcedCursor || style.getPropertyPriority('cursor') !== 'important') continue;
       if (original.element && original.element.getAttribute('style') === original.appliedStyle) {
         if (original.sourceStyle === null) original.element.removeAttribute('style'); else original.element.setAttribute('style', original.sourceStyle!);
       } else style.setProperty('cursor', original.value, original.priority);
     }
     cursorOverrides.clear();
   };
-  const setAnnotation = () => {
-    const cursor = `cursor: ${config.commentCursor} !important;`;
+  const updateCursor = () => {
+    restoreCursors();
+    forcedCursor = navigationPan ? 'grabbing' : navigationSpace || externalPanMode ? 'grab' : enabled ? config.commentCursor : '';
+    const cursor = `cursor: ${forcedCursor} !important;`;
     // The first layer's important rule also beats source CSSOM rules added after activation.
-    if (cursorStyle) cursorStyle.textContent = enabled ? `:root, :root * { ${cursor} } :root::before, :root::after, :root *::before, :root *::after { ${cursor} } @layer ${config.cursorLayer} { :root, :root *, :root::before, :root::after, :root *::before, :root *::after, :root *::marker { ${cursor} } }` : '';
-    if (enabled) {
+    if (cursorStyle) cursorStyle.textContent = forcedCursor ? `:root, :root * { ${cursor} } :root::before, :root::after, :root *::before, :root *::after { ${cursor} } @layer ${config.cursorLayer} { :root, :root *, :root::before, :root::after, :root *::before, :root *::after, :root *::marker { ${cursor} } }` : '';
+    if (forcedCursor) {
       syncCursorRules();
       cursorDocument.querySelectorAll<HTMLElement | SVGElement>('[style]').forEach(syncInlineCursor);
       cursorObserver.observe(cursorDocument.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
-    } else restoreCursors();
+    }
+  };
+  const setAnnotation = () => {
+    updateCursor();
     if (outline) outline.style.display = 'none';
     if (area) area.style.display = 'none';
     areaStart = null;
@@ -227,6 +236,59 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     suppressClick = false;
   };
   const sendEscape = () => window.parent.postMessage({ type: 'studio-html-escape', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision }, '*');
+  const sendNavigation = (value: HtmlNavigationEvent) => window.parent.postMessage({ type: 'studio-html-navigation', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, ...value }, '*');
+  const cancelNavigation = () => {
+    if (navigationPan) sendNavigation({ kind: 'pan', phase: 'cancel', ...navigationPan });
+    navigationPan = null;
+    if (navigationSpace) sendNavigation({ kind: 'space', held: false });
+    navigationSpace = false; navigationClick = false; updateCursor();
+  };
+  const navigationInput = (event: KeyboardEvent) => event.composedPath().some(node => node instanceof Element && node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"],button,a[href],[role="menu"],[role="dialog"],[role="listbox"],[role="combobox"]'));
+  // These handlers run before annotation and source handlers: navigation must never edit content.
+  window.addEventListener('keydown', event => {
+    if (event.code !== 'Space' || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey || navigationInput(event)) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    if (!navigationSpace) { navigationSpace = true; updateCursor(); sendNavigation({ kind: 'space', held: true }); }
+  }, true);
+  window.addEventListener('keyup', event => {
+    if (event.code !== 'Space' || !navigationSpace) return;
+    event.preventDefault(); event.stopImmediatePropagation(); navigationSpace = false; updateCursor(); sendNavigation({ kind: 'space', held: false });
+  }, true);
+  window.addEventListener('pointerdown', (event: PointerEvent) => {
+    navigationClick = false;
+    if (event.button !== 1 && !(event.button === 0 && (navigationSpace || externalPanMode))) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    navigationPan = { pointerId: event.pointerId, screenX: event.screenX, screenY: event.screenY }; navigationClick = true;
+    setAnnotation();
+    document.documentElement.setPointerCapture?.(event.pointerId);
+    sendNavigation({ kind: 'pan', phase: 'start', ...navigationPan });
+  }, true);
+  window.addEventListener('pointermove', (event: PointerEvent) => {
+    if (!navigationPan || navigationPan.pointerId !== event.pointerId) return;
+    reportPointer(event);
+    event.preventDefault(); event.stopImmediatePropagation();
+    navigationPan = { pointerId: event.pointerId, screenX: event.screenX, screenY: event.screenY };
+    sendNavigation({ kind: 'pan', phase: 'move', ...navigationPan });
+  }, true);
+  window.addEventListener('pointerup', (event: PointerEvent) => {
+    if (!navigationPan || navigationPan.pointerId !== event.pointerId) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const last = { pointerId: event.pointerId, screenX: event.screenX, screenY: event.screenY };
+    navigationPan = null; updateCursor(); sendNavigation({ kind: 'pan', phase: 'end', ...last });
+    if (document.documentElement.hasPointerCapture?.(event.pointerId)) document.documentElement.releasePointerCapture(event.pointerId);
+  }, true);
+  window.addEventListener('pointercancel', cancelNavigation, true);
+  window.addEventListener('lostpointercapture', () => { if (navigationPan) cancelNavigation(); }, true);
+  window.addEventListener('blur', event => { if (event.target === window) cancelNavigation(); }, true);
+  window.addEventListener('pagehide', cancelNavigation);
+  window.addEventListener('mousedown', event => { if (event.button === 1 || navigationPan) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+  window.addEventListener('auxclick', event => { if (event.button === 1) { event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+  window.addEventListener('click', event => { if (navigationClick) { navigationClick = false; event.preventDefault(); event.stopImmediatePropagation(); } }, true);
+  window.addEventListener('wheel', event => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    sendNavigation({ kind: 'zoom', x: Math.max(0, Math.min(1, event.clientX / innerWidth)), y: Math.max(0, Math.min(1, event.clientY / innerHeight)), deltaY: event.deltaY, deltaMode: event.deltaMode });
+  }, { capture: true, passive: false });
   let pointerTimer: number | undefined, pointerActive = false;
   let pointerPosition = { x: 0, y: 0 };
   const sendPointer = (point: HtmlPointerPosition | null) => window.parent.postMessage({ type: 'studio-html-pointer', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, point }, '*');
@@ -298,6 +360,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     enabled = event.data.enabled === true;
     config.writable = event.data.writable === true;
     config.preserveScroll = event.data.preserveScroll === true;
+    externalPanMode = event.data.panMode === true;
     setAnnotation();
   });
   // Register at window capture before source scripts can attach their handlers.
@@ -430,6 +493,21 @@ export function buildHtmlRegionDocument(source: string, options: HtmlRuntimeOpti
 }
 
 interface HtmlFramePoint { x: number; y: number }
+export type HtmlNavigationEvent =
+  | { kind: 'space'; held: boolean }
+  | { kind: 'pan'; phase: 'start' | 'move' | 'end' | 'cancel'; pointerId: number; screenX: number; screenY: number }
+  | { kind: 'zoom'; x: number; y: number; deltaY: number; deltaMode: number };
+
+export function validateHtmlNavigationMessage(value: unknown, expected: Pick<HtmlRuntimeOptions, 'channel' | 'regionId' | 'sourceRevision'>): HtmlNavigationEvent | null {
+  if (!value || typeof value !== 'object') return null;
+  const input = value as Record<string, unknown>;
+  if (input.type !== 'studio-html-navigation' || input.channel !== expected.channel || input.regionId !== expected.regionId || input.sourceRevision !== expected.sourceRevision) return null;
+  if (input.kind === 'space') return typeof input.held === 'boolean' ? { kind: 'space', held: input.held } : null;
+  const finite = (key: string, maximum: number) => typeof input[key] === 'number' && Number.isFinite(input[key]) && Math.abs(input[key] as number) <= maximum;
+  if (input.kind === 'pan' && ['start', 'move', 'end', 'cancel'].includes(String(input.phase)) && Number.isSafeInteger(input.pointerId) && (input.pointerId as number) >= 0 && finite('screenX', 1e7) && finite('screenY', 1e7)) return { kind: 'pan', phase: input.phase as 'start' | 'move' | 'end' | 'cancel', pointerId: input.pointerId as number, screenX: input.screenX as number, screenY: input.screenY as number };
+  if (input.kind === 'zoom' && finite('x', 1) && finite('y', 1) && (input.x as number) >= 0 && (input.y as number) >= 0 && finite('deltaY', 1e7) && [0, 1, 2].includes(input.deltaMode as number)) return { kind: 'zoom', x: input.x as number, y: input.y as number, deltaY: input.deltaY as number, deltaMode: input.deltaMode as number };
+  return null;
+}
 export type HtmlFrameSelection = HtmlSelection & { point?: HtmlFramePoint };
 
 export function validateHtmlSelectionMessage(value: unknown, expected: Pick<HtmlRuntimeOptions, 'channel' | 'regionId' | 'sourceRevision'>): HtmlFrameSelection | null {

@@ -84,6 +84,12 @@ export function zoomAt(viewport: Viewport, point: Point, zoom: number): Viewport
   return { x: point.x - (point.x - viewport.x) / viewport.zoom * nextZoom, y: point.y - (point.y - viewport.y) / viewport.zoom * nextZoom, zoom: nextZoom };
 }
 
+/** Normalize line/page wheels and cap one event so a coarse mouse tick cannot jump past a readable scale. */
+export function wheelZoomFactor(deltaY: number, deltaMode = 0): number {
+  const pixels = deltaY * (deltaMode === 1 ? 16 : deltaMode === 2 ? 800 : 1);
+  return Math.exp(-clamp(pixels, -120, 120) * .0015);
+}
+
 /** Groups and containers move together; attached arrows derive their endpoints at render time. */
 export function expandMoveIds(elements: readonly BoardElement[], selected: readonly string[]): string[] {
   const ids = new Set(selected);
