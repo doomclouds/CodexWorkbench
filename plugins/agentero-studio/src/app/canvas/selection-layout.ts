@@ -40,7 +40,7 @@ export function arrangeSelection(elements: readonly BoardElement[], selected: re
   if (!Number.isFinite(gap) || gap < 0 || gap > 1000) throw new Error('间距须为 0 到 1000 像素。');
   const allUnits = unitsFor(elements, selected), skippedIds: string[] = [], warnings: string[] = [];
   if (new Set(allUnits.flatMap(unit => unit.ids)).size > 200) throw new Error('一次最多整理 200 个对象（含组内内容），请缩小选区。');
-  const members = new Set(allUnits.flatMap(unit => unit.ids)), basis = new Set(members);
+  const members = new Set(allUnits.flatMap(unit => unit.ids)), basis = new Set(elements.map(element => element.id));
   for (const item of elements) if (item.type === 'arrow' && (typeof item.from === 'string' && members.has(item.from) || typeof item.to === 'string' && members.has(item.to))) {
     basis.add(item.id); if (typeof item.from === 'string') basis.add(item.from); if (typeof item.to === 'string') basis.add(item.to);
   }

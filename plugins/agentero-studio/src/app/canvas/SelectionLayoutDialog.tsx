@@ -113,7 +113,8 @@ export default function SelectionLayoutDialog({ board, ids, client, initialMode,
     try {
       const result = arrangeSelection(board.elements, ids, kind, gap);
       if (result.operations.length) {
-        const versions = { ...Object.fromEntries(board.elements.filter(element => result.basisIds.includes(element.id)).map(element => [element.id, element.version])), $order: board.orderVersion ?? 0 };
+        const byId = new Map(board.elements.map(element => [element.id, element.version]));
+        const versions = { ...Object.fromEntries(result.basisIds.map(id => [id, byId.get(id) ?? 0])), $order: board.orderVersion ?? 0 };
         await onApply(result.operations, label, board, versions, newClientId('arrange'));
         if (alive.current) setNotice([`${label}已应用。`, ...result.warnings].join(' '));
       } else setNotice(result.warnings.join(' ') || '选区已满足这个排列，无需调整。');

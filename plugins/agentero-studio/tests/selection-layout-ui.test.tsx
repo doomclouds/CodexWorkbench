@@ -159,3 +159,16 @@ it('lets a tall flow be inspected at actual text size and scrolled, then returns
   expect(Number.parseFloat(content().style.height)).toBeLessThan(1000);
   expect(source).toEqual(original);
 });
+
+it('rejects geometric group layout if an existing outside object joins that group before saving', async () => {
+  directory = await mkdtemp(join(tmpdir(), 'studio-layout-ui-')); service = new StudioService({ dataRoot: directory });
+  const source = (await service.execute('artifact_manage', { action: 'create', elements: [{ ...node('a'), groupId: 'group' }, { ...node('b', 200), groupId: 'group' }, node('outside', 900), { ...node('wide', 1500), w: 600 }] })).board as Board;
+  const apply = vi.fn().mockResolvedValue(undefined);
+  await act(async () => root.render(<SelectionLayoutDialog board={source} ids={['a', 'wide']} client={{ embedded: true, call: vi.fn() }} initialMode="geometry" labelSizes={() => ({})} canEdit onApply={apply} onDiscardPreview={() => {}} onClose={() => {}} onError={() => {}} />));
+  await click('同宽');
+  const [operations, , , versions] = apply.mock.calls[0];
+  const joined = await service.execute('artifact_apply', { artifactId: source.artifact.id, expectedVersions: { outside: 1 }, operations: [{ op: 'update', id: 'outside', changes: { groupId: 'group' } }] });
+  expect(joined.board.orderVersion).toBe(source.orderVersion);
+  await expect(service.execute('artifact_apply', { artifactId: source.artifact.id, expectedVersions: versions, operations })).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect((await service.execute('artifact_read', { artifactId: source.artifact.id, mode: 'board' })).elements).toEqual(joined.board.elements);
+});
