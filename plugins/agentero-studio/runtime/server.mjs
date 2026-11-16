@@ -139,7 +139,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.8";
+    PLUGIN_VERSION = "0.2.9";
   }
 });
 
@@ -5220,8 +5220,8 @@ var require_multipleOf = __commonJS({
         const { gen, data, schemaCode, it } = cxt;
         const prec = it.opts.multipleOfPrecision;
         const res = gen.let("res");
-        const invalid2 = prec ? (0, codegen_1._)`Math.abs(Math.round(${res}) - ${res}) > 1e-${prec}` : (0, codegen_1._)`${res} !== parseInt(${res})`;
-        cxt.fail$data((0, codegen_1._)`(${schemaCode} === 0 || (${res} = ${data}/${schemaCode}, ${invalid2}))`);
+        const invalid3 = prec ? (0, codegen_1._)`Math.abs(Math.round(${res}) - ${res}) > 1e-${prec}` : (0, codegen_1._)`${res} !== parseInt(${res})`;
+        cxt.fail$data((0, codegen_1._)`(${schemaCode} === 0 || (${res} = ${data}/${schemaCode}, ${invalid3}))`);
       }
     };
     exports.default = def;
@@ -7935,6 +7935,205 @@ var init_rich_text = __esm({
   }
 });
 
+// src/contracts/document.ts
+function defaultDocument(id2 = "paragraph") {
+  return { schemaVersion: 1, blocks: [{ id: id2, type: "paragraph", props: {}, content: [], children: [] }] };
+}
+function flattenDocumentBlocks(blocks) {
+  return blocks.flatMap((block) => [block, ...flattenDocumentBlocks(block.children ?? [])]);
+}
+function documentBlockText(block) {
+  const walk2 = (value) => typeof value === "string" ? value : Array.isArray(value) ? value.map(walk2).join("") : record3(value) ? typeof value.text === "string" ? value.text : Object.entries(value).filter(([key]) => !["props", "styles", "url", "href", "type"].includes(key)).map(([, child]) => walk2(child)).join(" ") : "";
+  if (block.type === "image") return String(block.props.caption || block.props.name || "");
+  if (block.type === "codeBlock") return walk2(block.content);
+  if (block.type === "table" && record3(block.content) && Array.isArray(block.content.rows)) return block.content.rows.map((row) => record3(row) && Array.isArray(row.cells) ? row.cells.map(walk2).join("	") : "").join("\n");
+  return walk2(block.content).trim();
+}
+function documentPlainText(document) {
+  return flattenDocumentBlocks(document.blocks).map(documentBlockText).filter(Boolean).join("\n");
+}
+function safeUrl(value, image = false) {
+  if (!value) return true;
+  if (/^\/assets\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+$/.test(value)) return true;
+  if (image && /^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]+$/.test(value)) return true;
+  try {
+    const url2 = new URL(value);
+    return ["http:", "https:", ...image ? [] : ["mailto:"]].includes(url2.protocol);
+  } catch {
+    return false;
+  }
+}
+function normalizeDocument(value) {
+  if (!record3(value) || value.schemaVersion !== 1 || !Array.isArray(value.blocks)) throw invalid("\u6587\u6863\u987B\u4F7F\u7528 schemaVersion:1 \u4E0E blocks JSON\u3002");
+  const encoded = JSON.stringify(value);
+  if (new TextEncoder().encode(encoded).byteLength > 2 * 1024 * 1024) throw invalid("\u5355\u4E2A\u6587\u6863\u4E0D\u80FD\u8D85\u8FC7 2 MB\u3002");
+  const ids = /* @__PURE__ */ new Set();
+  let count = 0;
+  function json3(input2, depth) {
+    if (depth > 24) throw invalid("\u6587\u6863\u5185\u5BB9\u5D4C\u5957\u8FC7\u6DF1\u3002");
+    if (input2 === null || typeof input2 === "boolean" || typeof input2 === "string") return input2;
+    if (typeof input2 === "number" && Number.isFinite(input2)) return input2;
+    if (Array.isArray(input2)) return input2.map((item) => item === void 0 ? null : json3(item, depth + 1));
+    if (!record3(input2)) throw invalid("\u6587\u6863\u53EA\u5141\u8BB8 JSON \u5185\u5BB9\u3002");
+    const result = {};
+    for (const [key, child] of Object.entries(input2)) {
+      if (["__proto__", "constructor", "prototype", "html", "innerHTML"].includes(key)) throw invalid("\u6587\u6863\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u5185\u5BB9\u5B57\u6BB5\u3002");
+      if (child === void 0) continue;
+      if (key === "href" && (typeof child !== "string" || !safeUrl(child)) || key === "url" && (typeof child !== "string" || !safeUrl(child, true))) throw invalid("\u6587\u6863\u94FE\u63A5\u6216\u56FE\u7247\u5730\u5740\u4E0D\u53D7\u652F\u6301\u3002");
+      result[key] = json3(child, depth + 1);
+    }
+    return result;
+  }
+  function block(input2, depth) {
+    if (depth > 12 || ++count > 2e3) throw invalid("\u6587\u6863\u5C42\u7EA7\u6216\u6BB5\u843D\u6570\u91CF\u8D85\u8FC7\u5F53\u524D\u8303\u56F4\u3002");
+    if (!record3(input2) || !validId(input2.id) || ids.has(input2.id) || !DOCUMENT_BLOCK_TYPES.includes(input2.type)) throw invalid("\u6587\u6863\u5757 ID \u5FC5\u987B\u552F\u4E00\u4E14\u7C7B\u578B\u53D7\u652F\u6301\u3002");
+    ids.add(input2.id);
+    if (input2.props !== void 0 && !record3(input2.props) || input2.children !== void 0 && !Array.isArray(input2.children)) throw invalid("\u6587\u6863\u5757\u5C5E\u6027\u6216\u5B50\u5757\u683C\u5F0F\u65E0\u6548\u3002");
+    const props = json3(input2.props ?? {}, 0);
+    if (props.textAlignment !== void 0 && !["left", "center", "right", "justify"].includes(String(props.textAlignment))) throw invalid("\u6587\u6863\u5BF9\u9F50\u65B9\u5F0F\u65E0\u6548\u3002");
+    if (input2.type === "heading" && props.level !== void 0 && (typeof props.level !== "number" || ![1, 2, 3, 4, 5, 6].includes(props.level))) throw invalid("\u6587\u6863\u6807\u9898\u7EA7\u522B\u65E0\u6548\u3002");
+    if (input2.type === "checkListItem" && props.checked !== void 0 && typeof props.checked !== "boolean") throw invalid("\u4EFB\u52A1\u9879\u72B6\u6001\u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
+    const inline2 = (value2) => typeof value2 === "string" || Array.isArray(value2) && value2.every((item) => record3(item) && (item.type === "text" && typeof item.text === "string" || item.type === "link" && typeof item.href === "string" && inline2(item.content)));
+    if (input2.type === "table") {
+      if (!record3(input2.content) || input2.content.type !== "tableContent" || !Array.isArray(input2.content.rows) || input2.content.rows.some((row) => !record3(row) || !Array.isArray(row.cells) || row.cells.some((cell) => !(record3(cell) && cell.type === "tableCell" ? inline2(cell.content) : inline2(cell))))) throw invalid("\u6587\u6863\u8868\u683C\u9700\u8981\u6709\u6548\u7684 tableContent \u884C\u4E0E\u5355\u5143\u683C\u3002");
+    } else if (!["image", "divider"].includes(String(input2.type)) && input2.content !== void 0 && !inline2(input2.content)) throw invalid("\u6587\u6863\u6587\u5B57\u5185\u5BB9\u987B\u4F7F\u7528\u6587\u672C\u6216\u94FE\u63A5\u7247\u6BB5\u3002");
+    return { id: input2.id, type: input2.type, props, ...input2.content !== void 0 ? { content: json3(input2.content, 0) } : {}, children: (input2.children ?? []).map((child) => block(child, depth + 1)) };
+  }
+  return { schemaVersion: 1, blocks: value.blocks.map((item) => block(item, 0)) };
+}
+function locate(blocks, id2) {
+  for (const [index, block] of blocks.entries()) {
+    if (block.id === id2) return { list: blocks, index, block, parentId: null };
+    const nested = locate(block.children ?? [], id2);
+    if (nested) return { ...nested, parentId: nested.parentId ?? block.id };
+  }
+}
+function applyDocumentOperation(next, operation2) {
+  if (!record3(operation2)) throw invalid("\u6587\u6863\u5757\u64CD\u4F5C\u65E0\u6548\u3002");
+  if (operation2.op === "update") {
+    const target = locate(next.blocks, operation2.id);
+    if (!target) throw conflict("\u8981\u7F16\u8F91\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    if (!record3(operation2.changes) || Object.keys(operation2.changes).some((key) => !["type", "props", "content"].includes(key))) throw invalid("\u5757\u66F4\u65B0\u53EA\u5141\u8BB8 type\u3001props \u4E0E content\u3002");
+    target.list[target.index] = { ...target.block, ...structuredClone(operation2.changes), id: target.block.id, children: target.block.children };
+  } else if (operation2.op === "delete") {
+    const target = locate(next.blocks, operation2.id);
+    if (!target) throw conflict("\u8981\u5220\u9664\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    target.list.splice(target.index, 1);
+  } else if (operation2.op === "insert" || operation2.op === "move") {
+    if (operation2.parentId !== void 0 && operation2.parentId !== null && !validId(operation2.parentId) || operation2.afterId !== void 0 && operation2.afterId !== null && !validId(operation2.afterId)) throw invalid("\u6BB5\u843D\u4F4D\u7F6E\u9700\u8981\u6709\u6548\u7684 parentId/afterId \u6216 null\u3002");
+    const target = operation2.op === "move" ? locate(next.blocks, operation2.id) : void 0;
+    if (operation2.op === "move" && !target) throw conflict("\u8981\u79FB\u52A8\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    const moving = target ? target.block : normalizeDocument({ schemaVersion: 1, blocks: operation2.op === "insert" ? [operation2.block] : [] }).blocks[0];
+    if (!target && flattenDocumentBlocks([moving]).some((block) => locate(next.blocks, block.id))) throw conflict("\u65B0\u589E\u6587\u6863\u5757 ID \u5DF2\u5B58\u5728\u3002");
+    if (operation2.parentId && flattenDocumentBlocks([moving]).some((block) => block.id === operation2.parentId)) throw invalid("\u4E0D\u80FD\u628A\u6BB5\u843D\u79FB\u52A8\u5230\u81EA\u8EAB\u5185\u90E8\u3002");
+    const parent = operation2.parentId ? locate(next.blocks, operation2.parentId) : void 0;
+    if (operation2.parentId && !parent) throw conflict("\u76EE\u6807\u7236\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    const list = parent ? parent.block.children ?? (parent.block.children = []) : next.blocks;
+    if (target) target.list.splice(target.index, 1);
+    const after = operation2.afterId === void 0 ? list.length - 1 : operation2.afterId === null ? -1 : list.findIndex((block) => block.id === operation2.afterId);
+    if (operation2.afterId !== void 0 && operation2.afterId !== null && after < 0) throw conflict("\u63D2\u5165\u4F4D\u7F6E\u7684\u76F8\u90BB\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    list.splice(after + 1, 0, moving);
+  } else throw invalid("\u4E0D\u652F\u6301\u7684\u6587\u6863\u5757\u64CD\u4F5C\u3002");
+}
+function applyDocumentOperations(document, operations) {
+  const next = normalizeDocument(document);
+  if (!Array.isArray(operations) || !operations.length || operations.length > 6e3) throw invalid("\u6587\u6863\u63D0\u4EA4\u9700\u8981 1 \u81F3 6000 \u4E2A\u5757\u64CD\u4F5C\u3002");
+  for (const operation2 of operations) applyDocumentOperation(next, operation2);
+  return normalizeDocument(next);
+}
+var DOCUMENT_BLOCK_TYPES, invalid, conflict, record3, validId;
+var init_document = __esm({
+  "src/contracts/document.ts"() {
+    "use strict";
+    DOCUMENT_BLOCK_TYPES = ["paragraph", "heading", "bulletListItem", "numberedListItem", "checkListItem", "quote", "codeBlock", "table", "image", "divider"];
+    invalid = (message) => Object.assign(new Error(message), { code: "INVALID_ARGUMENT" });
+    conflict = (message) => Object.assign(new Error(message), { code: "CONFLICT" });
+    record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    validId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value);
+  }
+});
+
+// src/core/products/document-serialization.ts
+function link(value) {
+  if (typeof value !== "string") return;
+  try {
+    const url2 = new URL(value);
+    if (["http:", "https:", "mailto:"].includes(url2.protocol)) return url2.href;
+  } catch {
+  }
+}
+function inline(value) {
+  if (typeof value === "string") return esc2(value);
+  if (Array.isArray(value)) return value.map(inline).join("");
+  if (!record4(value)) return "";
+  if (value.type === "link") {
+    const href = link(value.href), content = inline(value.content);
+    return href ? `<a href="${esc2(href)}">${content}</a>` : content;
+  }
+  if (typeof value.text !== "string") return inline(value.content);
+  let text2 = esc2(value.text).replaceAll("\n", "<br>");
+  const styles = record4(value.styles) ? value.styles : {};
+  for (const [property, tag] of [["bold", "strong"], ["italic", "em"], ["underline", "u"], ["strike", "s"], ["code", "code"]]) if (styles[property]) text2 = `<${tag}>${text2}</${tag}>`;
+  const paint = (color2) => typeof color2 === "string" && color2 !== "default" && /^(?:#[\da-f]{3,8}|[a-z]+)$/i.test(color2) ? color2 : void 0;
+  const color = paint(styles.textColor), background = paint(styles.backgroundColor);
+  return color || background ? `<span style="${color ? `color:${color};` : ""}${background ? `background-color:${background};` : ""}">${text2}</span>` : text2;
+}
+function table(content) {
+  const rows = record4(content) && Array.isArray(content.rows) ? content.rows : [];
+  const headers = record4(content) && typeof content.headerRows === "number" ? content.headerRows : 0;
+  return `<table><tbody>${rows.map((row, index) => `<tr>${(record4(row) && Array.isArray(row.cells) ? row.cells : []).map((cell) => {
+    const tag = index < headers ? "th" : "td", props = record4(cell) && record4(cell.props) ? cell.props : {};
+    const span = (name2) => Number.isInteger(props[name2]) && Number(props[name2]) > 1 && Number(props[name2]) <= 100 ? ` ${name2}="${props[name2]}"` : "";
+    return `<${tag}${span("colspan")}${span("rowspan")}>${inline(cell)}</${tag}>`;
+  }).join("")}</tr>`).join("")}</tbody></table>`;
+}
+function blockBody(block) {
+  const content = inline(block.content), children = blocksHtml(block.children ?? []), id2 = ` data-block-id="${esc2(block.id)}"`;
+  const align = ["left", "center", "right", "justify"].includes(String(block.props.textAlignment)) ? ` style="text-align:${block.props.textAlignment}"` : "";
+  if (block.type === "heading") {
+    const level = Math.max(1, Math.min(6, Number(block.props.level) || 1));
+    return `<h${level}${id2}${align}>${content}</h${level}>${children}`;
+  }
+  if (block.type === "codeBlock") return `<pre${id2}><code>${esc2(documentBlockText(block))}</code></pre>${children}`;
+  if (block.type === "quote") return `<blockquote${id2}>${content}${children}</blockquote>`;
+  if (block.type === "divider") return `<hr${id2}>${children}`;
+  if (block.type === "table") return `<div${id2} class="document-table">${table(block.content)}</div>${children}`;
+  if (block.type === "image") {
+    const url2 = typeof block.props.url === "string" ? block.props.url : "";
+    const width = typeof block.props.previewWidth === "number" && block.props.previewWidth > 0 ? ` style="width:${Math.min(1e4, block.props.previewWidth)}px"` : "";
+    return `<figure${id2}>${url2 ? `<img src="${esc2(url2)}" alt="${esc2(block.props.caption || block.props.name || "")}"${width}>` : ""}${block.props.caption ? `<figcaption>${esc2(block.props.caption)}</figcaption>` : ""}</figure>${children}`;
+  }
+  return `<p${id2}${align}>${content || "<br>"}</p>${children}`;
+}
+function blocksHtml(blocks) {
+  let html2 = "";
+  for (let index = 0; index < blocks.length; index++) {
+    const block = blocks[index];
+    if (!["bulletListItem", "numberedListItem", "checkListItem"].includes(block.type)) {
+      html2 += blockBody(block);
+      continue;
+    }
+    const tag = block.type === "numberedListItem" ? "ol" : "ul", list = [block];
+    while (blocks[index + 1]?.type === block.type) list.push(blocks[++index]);
+    const start = (item) => item.type === "numberedListItem" && typeof item.props.start === "number" && Number.isInteger(item.props.start) ? item.props.start : void 0;
+    html2 += `<${tag}${block.type === "checkListItem" ? ' class="document-tasks"' : start(block) !== void 0 ? ` start="${start(block)}"` : ""}>${list.map((item, at) => `<li data-block-id="${esc2(item.id)}"${at && start(item) !== void 0 ? ` value="${start(item)}"` : ""}>${item.type === "checkListItem" ? `<input type="checkbox" disabled${item.props.checked ? " checked" : ""}> ` : ""}${inline(item.content)}${blocksHtml(item.children ?? [])}</li>`).join("")}</${tag}>`;
+  }
+  return html2;
+}
+function documentHtml(document, title) {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src 'unsafe-inline';img-src data:;object-src 'none';base-uri 'none';form-action 'none'"><title>${esc2(title)}</title><style>body{margin:0;background:#f3f5f7}main{max-width:900px;margin:auto;min-height:100vh}${DOCUMENT_EXPORT_CSS}</style></head><body><main class="studio-document"><h1>${esc2(title)}</h1>${blocksHtml(document.blocks)}</main></body></html>`;
+}
+var esc2, record4, DOCUMENT_EXPORT_CSS;
+var init_document_serialization = __esm({
+  "src/core/products/document-serialization.ts"() {
+    "use strict";
+    init_document();
+    esc2 = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+    record4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    DOCUMENT_EXPORT_CSS = `.studio-document{box-sizing:border-box;line-height:1.8;color:#24303e;background:#fff;font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;padding:28px;overflow-wrap:anywhere}.studio-document h1,.studio-document h2,.studio-document h3{line-height:1.4;margin:1.25em 0 .5em}.studio-document p{margin:.65em 0}.studio-document img{max-width:100%;height:auto}.studio-document figure{margin:1em 0}.studio-document figcaption{font-size:13px;color:#65717e}.studio-document pre{padding:14px;background:#f2f4f7;border-radius:6px;overflow:auto;white-space:pre-wrap}.studio-document code{font-family:Consolas,monospace}.studio-document blockquote{border-left:3px solid #abb9c8;padding-left:16px;margin:1em 0;color:#526172}.studio-document table{border-collapse:collapse;width:100%}.studio-document th,.studio-document td{border:1px solid #ccd4de;padding:6px 10px;min-width:60px}.studio-document .document-table{overflow:auto}.studio-document .document-tasks{list-style:none;padding-left:1em}.studio-document a{color:#325fc1}.studio-document hr{border:0;border-top:1px solid #ccd4de;margin:20px 0}`;
+  }
+});
+
 // src/core/serialization.ts
 function escapeXml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -7960,6 +8159,11 @@ async function inlineExportAssets(board, format, options, resolveSource) {
     return resolved.get(source);
   };
   for (const element of selectedElements(cloned, options)) {
+    if (element.type === "document" && element.document) for (const block of flattenDocumentBlocks(element.document.blocks)) {
+      if (block.type !== "image" || typeof block.props.url !== "string" || !block.props.url) continue;
+      block.props.url = await read(block.props.url);
+      if (!/^data:image\//i.test(block.props.url)) throw new ExportError("ASSET_NOT_EMBEDDED", "\u6587\u6863\u56FE\u7247\u5C1A\u672A\u5D4C\u5165\uFF0C\u8BF7\u5148\u5BFC\u5165 Studio \u56FE\u7247\u8D44\u6E90\u540E\u5BFC\u51FA\u3002");
+    }
     if (element.type === "image") {
       if (typeof element.src === "string") element.src = await read(element.src);
       if (format === "html" && typeof element.video === "string") element.video = await read(element.video);
@@ -8106,7 +8310,11 @@ function elementSvg(e, board, options = {}) {
   const style = board.style;
   const ink = semanticColor(e.stroke, style, style.muted);
   let markup = "";
-  if (isHtmlRegionElement(e)) {
+  if (e.type === "document" && e.document) {
+    const preview = { ...e, text: `${e.text || "\u6587\u6863"}
+${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
+    markup = `<rect x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="#fff" stroke="#ccd4de" rx="7"/>${textSvg(preview, board, "#24303e")}`;
+  } else if (isHtmlRegionElement(e)) {
     const html2 = String(e.html ?? "");
     if (options.svgRegions === true) {
       const svg = extractRegionSvg(html2, e.id);
@@ -8220,6 +8428,7 @@ function buildBoardHtml(board, options = {}) {
   const elements = selectedElements(board, options);
   const bounds3 = boardBounds(elements, 32, board.elements);
   const layers = elements.map((e) => {
+    if (e.type === "document" && e.document) return `<section data-studio-id="${escapeXml(e.id)}" class="studio-document" aria-label="${escapeXml(e.text || "\u6587\u6863")}" style="position:absolute;left:${e.x - bounds3.x}px;top:${e.y - bounds3.y}px;width:${e.w}px;height:${e.h}px;overflow:auto;transform:rotate(${scalar(e.rotation, 0)}deg)"><h1>${escapeXml(e.text || "\u6587\u6863")}</h1>${blocksHtml(e.document.blocks)}</section>`;
     if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds3.x}px;top:${e.y - bounds3.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
     if (e.type === "image" && e.video) {
       if (!/^data:video\//i.test(e.video) || e.src && !/^data:image\//i.test(e.src)) throw new ExportError("ASSET_NOT_EMBEDDED", "HTML \u5BFC\u51FA\u9700\u8981\u5148\u5D4C\u5165\u89C6\u9891\u548C\u5C01\u9762\u8D44\u6E90\u3002");
@@ -8230,7 +8439,7 @@ function buildBoardHtml(board, options = {}) {
     return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds3.x}px;top:${box.y - bounds3.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
   }).join("");
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds3.width}px;height:${bounds3.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds3.width}px;height:${bounds3.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
 `;
 }
 var ExportError, isHtmlRegionElement;
@@ -8241,6 +8450,8 @@ var init_serialization = __esm({
     init_whiteboard_geometry();
     init_whiteboard_stickers();
     init_rich_text();
+    init_document();
+    init_document_serialization();
     ExportError = class extends Error {
       constructor(code, message) {
         super(message);
@@ -8912,10 +9123,12 @@ async function exportArtifact(board, format, options = {}) {
   const selected = selectedElements(board, options);
   const region = options.regionId ?? options.elementId;
   const oneRegion = region && selected.length === 1 && isHtmlRegionElement(selected[0]) ? selected[0] : void 0;
-  const title = oneRegion?.text || board.artifact.title;
+  const oneDocument = selected.length === 1 && selected[0]?.type === "document" && (region || Array.isArray(options.ids) && options.ids.length === 1) ? selected[0] : void 0;
+  const title = oneRegion?.text || oneDocument?.text || board.artifact.title;
   if (format === "json") return { mimeType: "application/json", filename: filenameFor(title, "json"), encoding: "utf8", data: `${JSON.stringify({ ...board, elements: selected }, null, 2)}
 ` };
-  if (format === "html") return { mimeType: "text/html", filename: filenameFor(title, "html"), encoding: "utf8", data: oneRegion ? String(oneRegion.html ?? "") : buildBoardHtml(board, options) };
+  if (format === "html") return { mimeType: "text/html", filename: filenameFor(title, "html"), encoding: "utf8", data: oneDocument?.document ? documentHtml(oneDocument.document, title) : oneRegion ? String(oneRegion.html ?? "") : buildBoardHtml(board, options) };
+  if (oneDocument && (format === "svg" || format === "png")) throw new ExportError("UNSUPPORTED_DOCUMENT_EXPORT", "\u6587\u6863\u5168\u6587\u8BF7\u5BFC\u51FA HTML \u6216 JSON\uFF1B\u767D\u677F\u56FE\u7247\u53EA\u8868\u793A\u533A\u57DF\u5185\u7684\u53EF\u89C1\u6458\u8981\u3002");
   if (format === "svg" || format === "png") {
     let svg = oneRegion ? extractRegionSvg(String(oneRegion.html ?? ""), oneRegion.id) : buildBoardSvg(board, options);
     if (!svg) {
@@ -8934,6 +9147,7 @@ var init_export = __esm({
     "use strict";
     init_resvg_wasm();
     init_serialization();
+    init_document_serialization();
     init_serialization();
   }
 });
@@ -8979,6 +9193,10 @@ function normalizeElement(input2, id2) {
     if (!object2(crop) || typeof crop.zoom !== "number" || !Number.isFinite(crop.zoom) || crop.zoom < 1 || ["x", "y"].some((key) => typeof crop[key] !== "number" || !Number.isFinite(crop[key]) || crop[key] < 0 || crop[key] > 1)) throw new StudioError("INVALID_ARGUMENT", "\u56FE\u7247\u88C1\u526A\u7F29\u653E\u987B\u81F3\u5C11\u4E3A 1\uFF0C\u4F4D\u7F6E x/y \u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
   }
   if (result.type === "table") result.data = tableIdentity(result.id, result.data);
+  if (result.type === "document") {
+    result.document = normalizeDocument(input2.document ?? defaultDocument());
+    if (result.html !== void 0) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u4F7F\u7528\u5757 JSON \u4FDD\u5B58\uFF0C\u4E0D\u80FD\u540C\u65F6\u5305\u542B HTML \u6E90\u3002");
+  }
   return result;
 }
 function tableIdentity(id2, value) {
@@ -9098,7 +9316,8 @@ var init_whiteboard = __esm({
     init_safe_merge();
     init_whiteboard_geometry();
     init_serialization();
-    TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "table", "link", "note", "sticker", "diagram", "chart"]);
+    init_document();
+    TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "document", "table", "link", "note", "sticker", "diagram", "chart"]);
     LOCKED_GEOMETRY = ["type", "x", "y", "w", "h", "rotation", "parentId", "groupId", "from", "to", "fromSide", "toSide", "points", "bends", "labelOffset", "labelSize", "crop"];
     whiteboardAdapter = {
       type: "whiteboard",
@@ -9107,6 +9326,10 @@ var init_whiteboard = __esm({
         if (content.orderVersion !== void 0 && (!Number.isSafeInteger(content.orderVersion) || content.orderVersion < 0)) throw new StudioError("INVALID_ARGUMENT", "\u767D\u677F\u5C42\u7EA7\u7248\u672C\u65E0\u6548\u3002");
         if (content.elements.length > 2e3 || Buffer.byteLength(JSON.stringify(content)) > 8 * 1024 * 1024) throw new StudioError("TOO_LARGE", "\u767D\u677F\u5185\u5BB9\u8D85\u8FC7\u5F53\u524D\u5BB9\u91CF\uFF0C\u8BF7\u5206\u6210\u591A\u4E2A\u4F5C\u54C1\u3002");
         for (const element of content.elements) if (element.type === "arrow") validateLayoutLabel(element);
+        for (const element of content.elements) if (element.type === "document") {
+          normalizeDocument(element.document);
+          if (element.html !== void 0) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u4E0D\u80FD\u540C\u65F6\u4FDD\u5B58 HTML \u6E90\u3002");
+        }
       },
       versionOf: (content, id2) => id2 === "$order" ? content.orderVersion ?? 0 : content.elements.find((item) => item.id === id2)?.version ?? 0,
       syncVersions: syncElementVersions,
@@ -9133,7 +9356,7 @@ var init_whiteboard = __esm({
           return ["front", "back", "forward", "backward"].includes(operation2.preset ?? "") ? [...ids, "$order"] : ids;
         }
         if (operation2.op === "delete") return [.../* @__PURE__ */ new Set([...operation2.ids ?? [safeId(operation2.id, "\u5143\u7D20 ID")], ...deletedIds(content, operation2)])];
-        if (operation2.op === "update") return [safeId(operation2.id, "\u5143\u7D20 ID")];
+        if (operation2.op === "update" || operation2.op === "document") return [safeId(operation2.id, "\u5143\u7D20 ID")];
         return [];
       },
       apply(content, operation2, baseline = content) {
@@ -9166,6 +9389,15 @@ var init_whiteboard = __esm({
           if (next.type === "html") next.sourceRevision = current.html === next.html ? current.sourceRevision ?? 1 : Number(current.sourceRevision ?? 0) + 1;
           assertLockedGeometry(content, { ...content, elements: content.elements.map((element) => element.id === id2 ? next : element) }, baseline);
           content.elements[index] = next;
+          return [id2];
+        }
+        if (operation2.op === "document") {
+          const id2 = safeId(operation2.id, "\u6587\u6863 ID"), current = content.elements.find((element) => element.id === id2);
+          if (!current || current.type !== "document" || !current.document) throw new StudioError("NOT_FOUND", "\u6587\u6863\u533A\u57DF\u4E0D\u5B58\u5728\u3002");
+          const document = applyDocumentOperations(current.document, operation2.data?.operations);
+          if (same(document, current.document)) return [];
+          current.document = document;
+          current.version++;
           return [id2];
         }
         if (operation2.op === "delete") {
@@ -9307,11 +9539,17 @@ var init_whiteboard = __esm({
       snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
         const anchor3 = object2(value) ? copy(value) : {};
         if (anchor3.elementIds !== void 0 && (!Array.isArray(anchor3.elementIds) || anchor3.elementIds.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5143\u7D20\u5B9A\u4F4D\u65E0\u6548\u3002");
-        if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
+        if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html", "document"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
         for (const key of ["x", "y", "w", "h"]) if (anchor3[key] !== void 0) finite(anchor3[key], 0);
         if ((anchor3.w ?? 0) < 0 || (anchor3.h ?? 0) < 0) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u8303\u56F4\u5C3A\u5BF8\u4E0D\u80FD\u4E3A\u8D1F\u6570\u3002");
         if (anchor3.coordinateSpace === "element" && (!anchor3.elementIds?.length || [anchor3.x, anchor3.y].some((value2) => value2 !== void 0 && (value2 < 0 || value2 > 1)))) throw new StudioError("INVALID_ARGUMENT", "\u5BF9\u8C61\u5907\u6CE8\u9700\u8981\u5B9A\u4F4D\u5BF9\u8C61\uFF0C\u4E14\u76F8\u5BF9\u5750\u6807\u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
         if (anchor3.coordinateSpace === "html" && !anchor3.regionId) throw new StudioError("INVALID_ARGUMENT", "HTML \u5907\u6CE8\u9700\u8981\u533A\u57DF ID\u3002");
+        if (anchor3.coordinateSpace === "document") {
+          if (anchor3.elementIds?.length !== 1 || !Array.isArray(anchor3.blockIds) || !anchor3.blockIds.length || anchor3.blockIds.length > 100 || anchor3.blockIds.some((id2) => typeof id2 !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id2))) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u5907\u6CE8\u9700\u8981\u4E00\u4E2A\u6587\u6863\u53CA\u5B9E\u9645\u6BB5\u843D ID\u3002");
+          if (anchor3.sourceVersion !== void 0 && (!Number.isSafeInteger(anchor3.sourceVersion) || anchor3.sourceVersion < 1)) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u6765\u6E90\u7248\u672C\u65E0\u6548\u3002");
+          if (!versions && anchor3.sourceVersion !== void 0) versions = { [anchor3.elementIds[0]]: anchor3.sourceVersion };
+          if (versions && anchor3.sourceVersion !== void 0 && versions[anchor3.elementIds[0]] !== anchor3.sourceVersion) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u6765\u6E90\u7248\u672C\u4E0E\u9009\u533A\u7248\u672C\u4E0D\u4E00\u81F4\u3002");
+        }
         if (anchor3.sourceRevision !== void 0 && (!Number.isInteger(anchor3.sourceRevision) || anchor3.sourceRevision < 1 || !anchor3.regionId)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6E90\u7801\u7248\u672C\u65E0\u6548\u3002");
         if (anchor3.targetIds !== void 0 && (!Array.isArray(anchor3.targetIds) || anchor3.targetIds.length > 100 || anchor3.targetIds.some((id2) => typeof id2 !== "string" || id2.length > 160 || /[\u0000-\u001f]/.test(id2)))) throw new StudioError("INVALID_ARGUMENT", "HTML \u5907\u6CE8\u76EE\u6807\u65E0\u6548\u3002");
         for (const [key, limit] of [["quote", 4e3], ["excerpt", 16e3], ["selector", 1200]]) if (anchor3[key] !== void 0 && (typeof anchor3[key] !== "string" || anchor3[key].length > limit)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6765\u6E90\u6587\u5B57\u65E0\u6548\u6216\u8FC7\u957F\u3002");
@@ -9333,7 +9571,16 @@ var init_whiteboard = __esm({
           if (!selected || ambiguous) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: id2, version: versions[id2] });
           return selected;
         });
-        if (anchor3.coordinateSpace === "element") {
+        if (anchor3.coordinateSpace === "document") {
+          const element = elements[0];
+          if (element.type !== "document" || !element.document) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u76EE\u6807\u4E0D\u662F\u6587\u6863\u533A\u57DF\u3002");
+          const blocks = flattenDocumentBlocks(element.document.blocks), selected = anchor3.blockIds.map((id2) => blocks.find((block) => block.id === id2));
+          if (selected.some((block) => !block)) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u7684\u6BB5\u843D\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002");
+          const normalize = (value2) => value2.replace(/\s+/g, " ").trim();
+          if (anchor3.quote && !normalize(selected.map((block) => documentBlockText(block)).join("\n")).includes(normalize(anchor3.quote))) throw new StudioError("CONFLICT", "\u9009\u4E2D\u6587\u5B57\u4E0D\u5C5E\u4E8E\u6240\u63D0\u4F9B\u7684\u6587\u6863\u6BB5\u843D\u7248\u672C\u3002");
+          anchor3.sourceVersion = element.version;
+        }
+        if (anchor3.coordinateSpace === "element" || anchor3.coordinateSpace === "document") {
           for (const element of elements) if (element.version < (clocks?.[element.id]?.incarnationStart ?? 1)) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u5C5E\u4E8E\u5DF2\u5220\u9664\u7684\u5BF9\u8C61\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: element.id, version: element.version });
         }
         const sources = elements.map((element) => typeof element.html === "string" ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) } : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });
@@ -9361,12 +9608,35 @@ var init_whiteboard = __esm({
           const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : void 0;
           return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, elements: state.content.elements.filter((item) => !ids || ids.includes(item.id)), ...ids?.includes("$order") ? { units: [{ id: "$order", value: orderUnit(state.content) }] } : {} };
         }
+        if (mode === "blocks") {
+          const elementId = safeId(args.elementId ?? args.regionId, "\u6587\u6863 ID");
+          const element = args.feedbackId ? state.sources[safeId(args.feedbackId, "\u53CD\u9988 ID")]?.find((source) => source.element?.id === elementId)?.element : state.content.elements.find((item) => item.id === elementId && item.type === "document");
+          if (!element?.document) throw new StudioError("NOT_FOUND", "\u6587\u6863\u533A\u57DF\u4E0D\u5B58\u5728\u3002");
+          const all = [];
+          const visit2 = (blocks, parentId) => {
+            let afterId = null;
+            for (const block of blocks) {
+              all.push({ block, parentId, afterId });
+              visit2(block.children ?? [], block.id);
+              afterId = block.id;
+            }
+          };
+          visit2(element.document.blocks, null);
+          const ids = args.blockIds;
+          if (ids !== void 0 && (!Array.isArray(ids) || ids.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u6BB5\u843D ID \u5217\u8868\u65E0\u6548\u3002");
+          const selected = ids ? all.filter(({ block }) => ids.includes(block.id)) : all;
+          const offset = Math.max(0, Math.floor(Number(args.offset) || 0)), limit = Math.min(200, Math.max(1, Math.floor(Number(args.limit) || 100)));
+          return { artifactId: state.artifact.id, elementId, version: element.version, schemaVersion: 1, flat: true, blocks: selected.slice(offset, offset + limit).map(({ block, parentId, afterId }) => ({ ...copy(block), children: [], parentId, afterId })), totalCount: selected.length, ...offset + limit < selected.length ? { nextOffset: offset + limit } : {} };
+        }
         if (mode === "source") {
           if (args.feedbackId) {
             const snapshots = state.sources[safeId(args.feedbackId, "\u53CD\u9988 ID")], snapshot = snapshots?.find((item) => (args.regionId === void 0 || item.regionId === args.regionId) && (args.elementId === void 0 || item.element?.id === args.elementId));
             if (!snapshot) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u6CA1\u6709\u5BF9\u5E94\u7684\u51BB\u7ED3\u6E90\u7801\u3002");
+            if (snapshot.element?.type === "document") return { ...copy(snapshot), document: copy(snapshot.element.document), sourceVersion: snapshot.element.version };
             return { ...copy(snapshot), sources: copy(snapshots) };
           }
+          const document = state.content.elements.find((item) => item.id === (args.elementId ?? args.regionId) && item.type === "document");
+          if (document?.document) return { artifactId: state.artifact.id, elementId: document.id, version: document.version, document: copy(document.document), text: documentPlainText(document.document) };
           const regionId = safeId(args.regionId ?? args.elementId, "\u533A\u57DF ID"), { region } = htmlSource([state, ...state.history.slice().reverse()], regionId, args.sourceRevision);
           return { html: region.html, regionId, sourceRevision: region.sourceRevision ?? 1, version: region.sourceRevision ?? 1, artifactId: state.artifact.id };
         }
@@ -9377,6 +9647,9 @@ var init_whiteboard = __esm({
       },
       rewriteAssetReferences(content, from, to) {
         for (const element of content.elements) for (const key of ["src", "video"]) if (typeof element[key] === "string") element[key] = element[key].replace(`/assets/${from}/`, `/assets/${to}/`);
+        for (const element of content.elements) if (element.document) {
+          for (const block of flattenDocumentBlocks(element.document.blocks)) if (block.type === "image" && typeof block.props.url === "string") block.props.url = block.props.url.replace(`/assets/${from}/`, `/assets/${to}/`);
+        }
       },
       validateAsset: validateWhiteboardAsset,
       async thumbnail(snapshot, resources) {
@@ -12908,16 +13181,16 @@ function exportResources(store, artifactId) {
 }
 async function saveExport(root2, artifactId, result) {
   const exportId = randomUUID11(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
-  const record3 = { exportId, artifactId, filename: basename(result.filename), mimeType: result.mimeType, size: data.length, downloadPath: `/api/exports/${exportId}?artifactId=${encodeURIComponent(artifactId)}` };
+  const record5 = { exportId, artifactId, filename: basename(result.filename), mimeType: result.mimeType, size: data.length, downloadPath: `/api/exports/${exportId}?artifactId=${encodeURIComponent(artifactId)}` };
   await atomicWrite(join6(root2, "exports", exportId), data);
-  await atomicWrite(join6(root2, "exports", `${exportId}.json`), JSON.stringify(record3));
-  return record3;
+  await atomicWrite(join6(root2, "exports", `${exportId}.json`), JSON.stringify(record5));
+  return record5;
 }
 async function getExport(root2, exportId) {
   safeId(exportId, "\u5BFC\u51FA ID");
   try {
-    const record3 = JSON.parse(await readFile4(join6(root2, "exports", `${exportId}.json`), "utf8"));
-    return { ...record3, data: await readFile4(join6(root2, "exports", exportId)) };
+    const record5 = JSON.parse(await readFile4(join6(root2, "exports", `${exportId}.json`), "utf8"));
+    return { ...record5, data: await readFile4(join6(root2, "exports", exportId)) };
   } catch (error62) {
     if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u5BFC\u51FA\u6587\u4EF6\u4E0D\u5B58\u5728\u3002");
     throw error62;
@@ -12939,17 +13212,17 @@ async function purgeExports(root2, artifactId) {
     const match = /^([A-Za-z0-9][A-Za-z0-9_-]{0,119})\.json$/.exec(name2);
     if (!match) continue;
     const metadata = join6(directory, name2);
-    let record3;
+    let record5;
     try {
       await regularFile(metadata);
-      record3 = JSON.parse(await readFile4(metadata, "utf8"));
+      record5 = JSON.parse(await readFile4(metadata, "utf8"));
     } catch (error62) {
       if (error62.code === "ENOENT") continue;
       if (error62 instanceof SyntaxError) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
       throw error62;
     }
-    if (!record3 || typeof record3 !== "object" || !("artifactId" in record3) || record3.artifactId !== artifactId) continue;
-    if (!("exportId" in record3) || record3.exportId !== match[1]) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u4E0E\u6587\u4EF6\u540D\u4E0D\u7B26\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
+    if (!record5 || typeof record5 !== "object" || !("artifactId" in record5) || record5.artifactId !== artifactId) continue;
+    if (!("exportId" in record5) || record5.exportId !== match[1]) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u4E0E\u6587\u4EF6\u540D\u4E0D\u7B26\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
     const data = join6(directory, match[1]);
     try {
       await regularFile(data);
@@ -14196,7 +14469,7 @@ async function readArchiveInput(args) {
     const encoded = args.archiveBase64;
     if (typeof encoded !== "string" || !encoded.length || encoded.length > Math.ceil(MAX_ARCHIVE_BYTES / 3) * 4) throw tooLarge();
     const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
-    if (encoded.length % 4 || /[^A-Za-z0-9+/]/.test(encoded.slice(0, encoded.length - padding))) throw invalid("\u5907\u4EFD\u5185\u5BB9\u4E0D\u662F\u6709\u6548\u7684 Base64\u3002");
+    if (encoded.length % 4 || /[^A-Za-z0-9+/]/.test(encoded.slice(0, encoded.length - padding))) throw invalid2("\u5907\u4EFD\u5185\u5BB9\u4E0D\u662F\u6709\u6548\u7684 Base64\u3002");
     const data = Buffer.from(encoded, "base64");
     if (data.length > MAX_ARCHIVE_BYTES) throw tooLarge();
     return data;
@@ -14206,7 +14479,7 @@ async function readArchiveInput(args) {
   const file2 = await open3(path2, "r");
   try {
     const info = await file2.stat();
-    if (!info.isFile()) throw invalid("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
+    if (!info.isFile()) throw invalid2("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
     if (info.size > MAX_ARCHIVE_BYTES) throw tooLarge();
     const chunks = [];
     let size = 0;
@@ -14226,17 +14499,17 @@ function entryLimit(name2) {
   if (name2 === "artifact.json") return MAX_SNAPSHOT_BYTES;
   if (name2 === "assets/") return 0;
   if (/^assets\/[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name2.slice(7))) return MAX_ASSET_BYTES2;
-  throw invalid("\u5907\u4EFD\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u6587\u4EF6\u8DEF\u5F84\u3002");
+  throw invalid2("\u5907\u4EFD\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u6587\u4EF6\u8DEF\u5F84\u3002");
 }
 function extract(data) {
-  if (!data.length) throw invalid();
+  if (!data.length) throw invalid2();
   if (data.length > MAX_ARCHIVE_BYTES) throw tooLarge();
   const declared = /* @__PURE__ */ new Map(), names = /* @__PURE__ */ new Set(), files = /* @__PURE__ */ new Map();
   let declaredSize = 0, actualSize = 0;
   try {
     unzipSync(data, { filter(info) {
       const limit = entryLimit(info.name);
-      if (names.has(info.name.toLowerCase())) throw invalid("\u5907\u4EFD\u5305\u542B\u91CD\u590D\u6587\u4EF6\u3002");
+      if (names.has(info.name.toLowerCase())) throw invalid2("\u5907\u4EFD\u5305\u542B\u91CD\u590D\u6587\u4EF6\u3002");
       if (declared.size >= MAX_ENTRIES || info.originalSize > limit || info.size > MAX_ARCHIVE_BYTES || ![0, 8].includes(info.compression)) throw tooLarge();
       declaredSize += info.originalSize;
       if (declaredSize > MAX_EXPANDED_BYTES) throw tooLarge();
@@ -14244,12 +14517,12 @@ function extract(data) {
       names.add(info.name.toLowerCase());
       return false;
     } });
-    if (!declared.has("artifact.json")) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u4F5C\u54C1\u5FEB\u7167\u3002");
+    if (!declared.has("artifact.json")) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u4F5C\u54C1\u5FEB\u7167\u3002");
     const seen = /* @__PURE__ */ new Set(), completed = /* @__PURE__ */ new Set();
     const unzipper = new Unzip((file2) => {
       const limit = entryLimit(file2.name), info = declared.get(file2.name);
-      if (!info || seen.has(file2.name)) throw invalid("\u5907\u4EFD\u6587\u4EF6\u76EE\u5F55\u4E0D\u4E00\u81F4\u6216\u5B58\u5728\u91CD\u590D\u6587\u4EF6\u3002");
-      if (file2.compression !== info.compression || file2.originalSize !== void 0 && file2.originalSize !== info.originalSize || file2.size !== void 0 && file2.size !== info.size) throw invalid();
+      if (!info || seen.has(file2.name)) throw invalid2("\u5907\u4EFD\u6587\u4EF6\u76EE\u5F55\u4E0D\u4E00\u81F4\u6216\u5B58\u5728\u91CD\u590D\u6587\u4EF6\u3002");
+      if (file2.compression !== info.compression || file2.originalSize !== void 0 && file2.originalSize !== info.originalSize || file2.size !== void 0 && file2.size !== info.size) throw invalid2();
       seen.add(file2.name);
       const chunks = [];
       let size = 0;
@@ -14263,7 +14536,7 @@ function extract(data) {
         }
         chunks.push(chunk);
         if (final) {
-          if (size !== info.originalSize) throw invalid();
+          if (size !== info.originalSize) throw invalid2();
           files.set(file2.name, Buffer.concat(chunks, size));
           completed.add(file2.name);
         }
@@ -14272,99 +14545,102 @@ function extract(data) {
     });
     unzipper.register(UnzipInflate);
     for (let offset = 0; offset < data.length; offset += 1024) unzipper.push(data.subarray(offset, offset + 1024), offset + 1024 >= data.length);
-    if (completed.size !== declared.size) throw invalid();
+    if (completed.size !== declared.size) throw invalid2();
     return files;
   } catch (error62) {
     if (error62 instanceof StudioError) throw error62;
-    throw invalid();
+    throw invalid2();
   }
 }
 function validDate(value) {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 function validateMetadata(value, expectedId, expectedType) {
-  if (!object2(value)) throw invalid();
+  if (!object2(value)) throw invalid2();
   safeId(value.id);
   safeId(value.type, "\u4F5C\u54C1\u7C7B\u578B");
-  if (expectedId !== void 0 && value.id !== expectedId || expectedType !== void 0 && value.type !== expectedType || typeof value.title !== "string" || !value.title.trim() || value.title.length > 200 || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !validDate(value.createdAt) || !validDate(value.updatedAt) || typeof value.pinned !== "boolean") throw invalid("\u5907\u4EFD\u4F5C\u54C1\u4FE1\u606F\u65E0\u6548\u3002");
+  if (expectedId !== void 0 && value.id !== expectedId || expectedType !== void 0 && value.type !== expectedType || typeof value.title !== "string" || !value.title.trim() || value.title.length > 200 || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !validDate(value.createdAt) || !validDate(value.updatedAt) || typeof value.pinned !== "boolean") throw invalid2("\u5907\u4EFD\u4F5C\u54C1\u4FE1\u606F\u65E0\u6548\u3002");
 }
 function validateActor(value) {
-  if (!object2(value) || typeof value.id !== "string" || typeof value.name !== "string" || !["human", "agent"].includes(String(value.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(value.role))) throw invalid("\u5907\u4EFD\u4F5C\u8005\u4FE1\u606F\u65E0\u6548\u3002");
+  if (!object2(value) || typeof value.id !== "string" || typeof value.name !== "string" || !["human", "agent"].includes(String(value.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(value.role))) throw invalid2("\u5907\u4EFD\u4F5C\u8005\u4FE1\u606F\u65E0\u6548\u3002");
 }
 function validateState(value, products) {
   const state = products.decode(value);
-  if (!object2(state) || state.schemaVersion !== 2 || !("content" in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object2(state.sources) || !object2(state.assets)) throw invalid();
+  if (!object2(state) || state.schemaVersion !== 2 || !("content" in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object2(state.sources) || !object2(state.assets)) throw invalid2();
   validateMetadata(state.artifact);
   const { id: id2, type, revision } = state.artifact, product = products.get(type);
   product.adapter.validate(state.content);
   if (state.unitClocks !== void 0) {
-    if (!object2(state.unitClocks)) throw invalid("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+    if (!object2(state.unitClocks)) throw invalid2("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
     for (const [unitId, clock] of Object.entries(state.unitClocks)) {
       safeId(unitId.startsWith("$") ? unitId.slice(1) : unitId, "\u5185\u5BB9\u5355\u5143 ID");
-      if (!object2(clock) || !Number.isSafeInteger(clock.version) || Number(clock.version) < 1 || !Number.isSafeInteger(clock.incarnationStart) || Number(clock.incarnationStart) < 1 || Number(clock.incarnationStart) > Number(clock.version) || clock.sourceRevision !== void 0 && (!Number.isSafeInteger(clock.sourceRevision) || Number(clock.sourceRevision) < 1)) throw invalid("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+      if (!object2(clock) || !Number.isSafeInteger(clock.version) || Number(clock.version) < 1 || !Number.isSafeInteger(clock.incarnationStart) || Number(clock.incarnationStart) < 1 || Number(clock.incarnationStart) > Number(clock.version) || clock.sourceRevision !== void 0 && (!Number.isSafeInteger(clock.sourceRevision) || Number(clock.sourceRevision) < 1)) throw invalid2("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
     }
   }
   const historyIds = /* @__PURE__ */ new Set(), revisions = /* @__PURE__ */ new Set();
   for (const saved of state.history) {
-    if (!object2(saved) || !object2(saved.entry)) throw invalid("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
+    if (!object2(saved) || !object2(saved.entry)) throw invalid2("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
     validateMetadata(saved.artifact, id2, type);
     product.adapter.validate(saved.content);
     const entry = saved.entry;
     safeId(entry.id, "\u5386\u53F2 ID");
     validateActor(entry.actor);
-    if (historyIds.has(entry.id) || revisions.has(entry.revision) || entry.revision !== saved.artifact.revision || entry.revision > revision || !validDate(entry.createdAt) || typeof entry.summary !== "string" || !Array.isArray(entry.changedIds) || entry.changedIds.some((changed) => typeof changed !== "string")) throw invalid("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
+    if (historyIds.has(entry.id) || revisions.has(entry.revision) || entry.revision !== saved.artifact.revision || entry.revision > revision || !validDate(entry.createdAt) || typeof entry.summary !== "string" || !Array.isArray(entry.changedIds) || entry.changedIds.some((changed) => typeof changed !== "string")) throw invalid2("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
     historyIds.add(entry.id);
     revisions.add(entry.revision);
   }
   const feedbackIds = /* @__PURE__ */ new Set();
   for (const feedback of state.feedback) {
-    if (!object2(feedback)) throw invalid();
+    if (!object2(feedback)) throw invalid2();
     safeId(feedback.id, "\u53CD\u9988 ID");
     validateActor(feedback.author);
-    if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object2(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
+    if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object2(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid2("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) {
-      if (!object2(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid();
+      if (!object2(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid2();
       safeId(reply.id, "\u56DE\u590D ID");
       validateActor(reply.author);
     }
     if (feedback.attachment !== void 0) {
       const attachment = feedback.attachment;
-      if (!object2(attachment) || typeof attachment.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(attachment.requestId) || typeof attachment.contentKey !== "string" || !/^[a-f0-9]{64}$/.test(attachment.contentKey) || !["pending", "attached"].includes(String(attachment.state)) || !validDate(attachment.requestedAt)) throw invalid("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u8BB0\u5F55\u65E0\u6548\u3002");
+      if (!object2(attachment) || typeof attachment.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(attachment.requestId) || typeof attachment.contentKey !== "string" || !/^[a-f0-9]{64}$/.test(attachment.contentKey) || !["pending", "attached"].includes(String(attachment.state)) || !validDate(attachment.requestedAt)) throw invalid2("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u8BB0\u5F55\u65E0\u6548\u3002");
       validateActor(attachment.requestedBy);
       if (attachment.state === "attached") {
-        if (!validDate(attachment.attachedAt)) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u5907\u6CE8\u9644\u52A0\u6210\u529F\u65F6\u95F4\u3002");
+        if (!validDate(attachment.attachedAt)) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u5907\u6CE8\u9644\u52A0\u6210\u529F\u65F6\u95F4\u3002");
         validateActor(attachment.attachedBy);
-        if (attachment.attachedBy.kind !== "human" || attachment.attachedBy.role !== "owner") throw invalid("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u56DE\u6267\u7684\u8EAB\u4EFD\u65E0\u6548\u3002");
+        if (attachment.attachedBy.kind !== "human" || attachment.attachedBy.role !== "owner") throw invalid2("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u56DE\u6267\u7684\u8EAB\u4EFD\u65E0\u6548\u3002");
       }
     }
     if (feedback.proposal) {
       const proposal = feedback.proposal;
-      if (!object2(proposal) || proposal.audience !== "owner" || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== "string" || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid("\u5907\u4EFD\u5EFA\u8BAE\u8BB0\u5F55\u65E0\u6548\u3002");
+      if (!object2(proposal) || proposal.audience !== "owner" || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== "string" || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid2("\u5907\u4EFD\u5EFA\u8BAE\u8BB0\u5F55\u65E0\u6548\u3002");
       const optionIds = /* @__PURE__ */ new Set();
       for (const option2 of proposal.options) {
-        if (!object2(option2)) throw invalid();
+        if (!object2(option2)) throw invalid2();
         safeId(option2.id, "\u65B9\u6848 ID");
-        if (optionIds.has(option2.id) || typeof option2.label !== "string" || !Array.isArray(option2.operations) || option2.operations.some((op) => !object2(op) || typeof op.op !== "string") || !Number.isSafeInteger(option2.baselineRevision) || option2.baselineRevision < 0 || !object2(option2.baseline) || !object2(option2.versions) || Object.values(option2.versions).some((value2) => !Number.isSafeInteger(value2) || value2 < 0) || !Array.isArray(option2.targetIds) || option2.targetIds.some((value2) => typeof value2 !== "string") || typeof option2.wholeContent !== "boolean" || typeof option2.active !== "boolean") throw invalid("\u5907\u4EFD\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
+        if (optionIds.has(option2.id) || typeof option2.label !== "string" || !Array.isArray(option2.operations) || option2.operations.some((op) => !object2(op) || typeof op.op !== "string") || !Number.isSafeInteger(option2.baselineRevision) || option2.baselineRevision < 0 || !object2(option2.baseline) || !object2(option2.versions) || Object.values(option2.versions).some((value2) => !Number.isSafeInteger(value2) || value2 < 0) || !Array.isArray(option2.targetIds) || option2.targetIds.some((value2) => typeof value2 !== "string") || typeof option2.wholeContent !== "boolean" || typeof option2.active !== "boolean") throw invalid2("\u5907\u4EFD\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
         optionIds.add(option2.id);
-        if (option2.active && !option2.application) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u5DF2\u5E94\u7528\u65B9\u6848\u7684\u53D8\u66F4\u8BB0\u5F55\u3002");
+        if (option2.active && !option2.application) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u5DF2\u5E94\u7528\u65B9\u6848\u7684\u53D8\u66F4\u8BB0\u5F55\u3002");
         if (option2.application) {
           const application = option2.application;
-          if (!object2(application) || !Number.isSafeInteger(application.revision) || application.revision < 0 || !Array.isArray(application.changes) || application.changes.some((change) => !object2(change) || typeof change.id !== "string")) throw invalid();
+          if (!object2(application) || !Number.isSafeInteger(application.revision) || application.revision < 0 || !Array.isArray(application.changes) || application.changes.some((change) => !object2(change) || typeof change.id !== "string")) throw invalid2();
           safeId(application.historyId, "\u5386\u53F2 ID");
         }
       }
       for (const receipt of proposal.receipts) {
-        if (!object2(receipt) || typeof receipt.fingerprint !== "string") throw invalid();
+        if (!object2(receipt) || typeof receipt.fingerprint !== "string") throw invalid2();
         safeId(receipt.id, "\u64CD\u4F5C ID");
         if (receipt.historyId !== void 0) safeId(receipt.historyId, "\u5386\u53F2 ID");
       }
     }
   }
-  for (const [feedbackId, sources] of Object.entries(state.sources)) if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid("\u5907\u4EFD\u6765\u6E90\u8BB0\u5F55\u65E0\u6548\u3002");
+  for (const [feedbackId, sources] of Object.entries(state.sources)) {
+    if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid2("\u5907\u4EFD\u6765\u6E90\u8BB0\u5F55\u65E0\u6548\u3002");
+    for (const source of sources) if (object2(source) && object2(source.element) && source.element.type === "document") normalizeDocument(source.element.document);
+  }
   for (const [assetId, asset] of Object.entries(state.assets)) {
     safeId(assetId, "\u8D44\u6E90 ID");
-    if (!object2(asset) || asset.id !== assetId || typeof asset.filename !== "string" || typeof asset.mimeType !== "string" || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES2) throw invalid("\u5907\u4EFD\u8D44\u6E90\u4FE1\u606F\u65E0\u6548\u3002");
+    if (!object2(asset) || asset.id !== assetId || typeof asset.filename !== "string" || typeof asset.mimeType !== "string" || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES2) throw invalid2("\u5907\u4EFD\u8D44\u6E90\u4FE1\u606F\u65E0\u6548\u3002");
     product.validateAsset(asset.mimeType);
   }
   return state;
@@ -14373,7 +14649,7 @@ function walk(value, visit2) {
   const queue = [{ value, depth: 0 }];
   while (queue.length) {
     const next = queue.pop();
-    if (next.depth > 64) throw invalid("\u5907\u4EFD\u6570\u636E\u5D4C\u5957\u8FC7\u6DF1\u3002");
+    if (next.depth > 64) throw invalid2("\u5907\u4EFD\u6570\u636E\u5D4C\u5957\u8FC7\u6DF1\u3002");
     if (!next.value || typeof next.value !== "object") continue;
     for (const [key, child] of Object.entries(next.value)) {
       visit2?.(next.value, key, child);
@@ -14400,7 +14676,7 @@ async function exportArchive(store, state, actor) {
   for (const [id2, asset] of Object.entries(snapshot.assets)) {
     safeId(id2, "\u8D44\u6E90 ID");
     const bytes2 = await readFile5(join7(store.folder(state.artifact.id), "assets", id2));
-    if (bytes2.length !== asset.size) throw invalid("\u4F5C\u54C1\u8D44\u6E90\u4E0D\u5B8C\u6574\uFF0C\u672A\u751F\u6210\u5907\u4EFD\u3002");
+    if (bytes2.length !== asset.size) throw invalid2("\u4F5C\u54C1\u8D44\u6E90\u4E0D\u5B8C\u6574\uFF0C\u672A\u751F\u6210\u5907\u4EFD\u3002");
     size += bytes2.length;
     if (bytes2.length > MAX_ASSET_BYTES2 || size > MAX_EXPANDED_BYTES) throw tooLarge();
     entries[`assets/${id2}`] = [bytes2, { level: 0 }];
@@ -14417,7 +14693,7 @@ async function importArchive(store, products, data, actor, title) {
   try {
     raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(files.get("artifact.json")));
   } catch {
-    throw invalid("\u4F5C\u54C1\u5FEB\u7167\u4E0D\u662F\u6709\u6548\u7684 JSON\u3002");
+    throw invalid2("\u4F5C\u54C1\u5FEB\u7167\u4E0D\u662F\u6709\u6548\u7684 JSON\u3002");
   }
   walk(raw);
   let original;
@@ -14425,17 +14701,17 @@ async function importArchive(store, products, data, actor, title) {
     original = validateState(raw, products);
   } catch (error62) {
     if (error62 instanceof StudioError) throw error62;
-    throw invalid();
+    throw invalid2();
   }
   const state = portable(original);
   for (const [id3, asset] of Object.entries(state.assets)) {
     const bytes = files.get(`assets/${id3}`);
-    if (!bytes || bytes.length !== asset.size) throw invalid("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
+    if (!bytes || bytes.length !== asset.size) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
   }
-  if ([...files.keys()].some((name2) => name2 !== "artifact.json" && name2 !== "assets/" && !Object.hasOwn(state.assets, name2.slice(7)))) throw invalid("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
+  if ([...files.keys()].some((name2) => name2 !== "artifact.json" && name2 !== "assets/" && !Object.hasOwn(state.assets, name2.slice(7)))) throw invalid2("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
   const previous = copy(state.artifact), id2 = randomUUID12(), now = (/* @__PURE__ */ new Date()).toISOString();
-  walk(state, (record3, key, value) => {
-    if (typeof value === "string") record3[key] = key === "artifactId" && value === previous.id ? id2 : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id2}/`);
+  walk(state, (record5, key, value) => {
+    if (typeof value === "string") record5[key] = key === "artifactId" && value === previous.id ? id2 : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id2}/`);
   });
   state.artifact.id = id2;
   state.artifact.updatedAt = now;
@@ -14463,18 +14739,19 @@ async function importArchive(store, products, data, actor, title) {
   }
   return state;
 }
-var MAX_ARCHIVE_BYTES, MAX_EXPANDED_BYTES, MAX_SNAPSHOT_BYTES, MAX_ASSET_BYTES2, MAX_ENTRIES, invalid, tooLarge;
+var MAX_ARCHIVE_BYTES, MAX_EXPANDED_BYTES, MAX_SNAPSHOT_BYTES, MAX_ASSET_BYTES2, MAX_ENTRIES, invalid2, tooLarge;
 var init_archive = __esm({
   "src/core/shared/archive.ts"() {
     "use strict";
     init_esm();
+    init_document();
     init_common();
     MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
     MAX_EXPANDED_BYTES = 256 * 1024 * 1024;
     MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
     MAX_ASSET_BYTES2 = 20 * 1024 * 1024;
     MAX_ENTRIES = 5e3;
-    invalid = (message = "\u5907\u4EFD\u6587\u4EF6\u65E0\u6548\u6216\u4E0D\u5B8C\u6574\u3002") => new StudioError("INVALID_ARCHIVE", message);
+    invalid2 = (message = "\u5907\u4EFD\u6587\u4EF6\u65E0\u6548\u6216\u4E0D\u5B8C\u6574\u3002") => new StudioError("INVALID_ARCHIVE", message);
     tooLarge = () => new StudioError("TOO_LARGE", "\u5907\u4EFD\u8D85\u8FC7\u5BB9\u91CF\u9650\u5236\uFF1AZIP 128 MB\uFF0C\u5C55\u5F00\u540E 256 MB\uFF0C\u5355\u4E2A\u8D44\u6E90 20 MB\u3002");
   }
 });
@@ -14696,15 +14973,15 @@ function finishFlowLayout(prepared, graph) {
       operations.push({ op: "update", id: arrow.id, changes });
     }
   }
-  const invalid2 = /* @__PURE__ */ new Set();
+  const invalid3 = /* @__PURE__ */ new Set();
   for (const component of valid) {
     const keys = /* @__PURE__ */ new Set([...component.ids, ...component.edges.map((item) => item.id)]);
     if (operations.some((operation2) => keys.has(operation2.id) && [operation2.changes?.x, operation2.changes?.y, ...operation2.changes?.bends ?? [], ...Object.values(operation2.changes?.labelOffset ?? {})].some((value) => typeof value === "number" && (!Number.isFinite(value) || Math.abs(value) > 1e7)))) {
-      keys.forEach((id2) => invalid2.add(id2));
+      keys.forEach((id2) => invalid3.add(id2));
       skipped.push({ ids: [...keys], reason: "\u5E03\u5C40\u7ED3\u679C\u8D85\u8FC7\u767D\u677F\u5750\u6807\u8303\u56F4\uFF0C\u672A\u5E94\u7528\u8BE5\u8FDE\u901A\u5206\u91CF\u3002" });
     }
   }
-  const accepted = operations.filter((item) => !invalid2.has(item.id) && Object.entries(item.changes ?? {}).some(([field, value]) => JSON.stringify(prepared.elements.find((element) => element.id === item.id)?.[field]) !== JSON.stringify(value)));
+  const accepted = operations.filter((item) => !invalid3.has(item.id) && Object.entries(item.changes ?? {}).some(([field, value]) => JSON.stringify(prepared.elements.find((element) => element.id === item.id)?.[field]) !== JSON.stringify(value)));
   return { requestId: prepared.requestId, direction: prepared.direction, gap: prepared.gap, operations: accepted, expectedVersions: prepared.expectedVersions, affectedIds: accepted.map((item) => item.id), boundaryIds: prepared.boundaryIds, skipped, warnings };
 }
 var sides, elkSide, nodeId, edgeId, point, name;
@@ -17390,9 +17667,9 @@ var Class = class {
   constructor(..._args) {
   }
 };
-function members(proto, table) {
-  for (const key in table) {
-    const desc = Object.getOwnPropertyDescriptor(table, key);
+function members(proto, table2) {
+  for (const key in table2) {
+    const desc = Object.getOwnPropertyDescriptor(table2, key);
     if (desc.get)
       Object.defineProperty(proto, key, { ...desc, enumerable: false });
     else
@@ -17407,10 +17684,10 @@ function hide(inst, key, value) {
   return own(inst, key, value, false);
 }
 // @__NO_SIDE_EFFECTS__
-function derived(computes, table) {
+function derived(computes, table2) {
   for (const key in computes) {
     const compute = computes[key];
-    Object.defineProperty(table, key, {
+    Object.defineProperty(table2, key, {
       configurable: true,
       enumerable: true,
       get() {
@@ -17421,7 +17698,7 @@ function derived(computes, table) {
       }
     });
   }
-  return table;
+  return table2;
 }
 function defineBound(proto, key, fn) {
   Object.defineProperty(proto, key, {
@@ -32721,8 +32998,8 @@ function rewriteKeyNames(ctx) {
       bySchema.set(entry.schema, entry);
   }
   const rewrites = /* @__PURE__ */ new Map();
-  for (const record3 of pendingRecords.get(ctx) ?? []) {
-    const seen = ctx.seen.get(record3);
+  for (const record5 of pendingRecords.get(ctx) ?? []) {
+    const seen = ctx.seen.get(record5);
     const names = (seen?.def ?? seen?.schema)?.propertyNames;
     if (!names || names === true || rewrites.has(names))
       continue;
@@ -37675,44 +37952,44 @@ async function readRecord(root2) {
   }
 }
 async function probe(root2) {
-  const record3 = await readRecord(root2);
-  if (!record3) return;
+  const record5 = await readRecord(root2);
+  if (!record5) return;
   try {
-    const url2 = new URL(record3.origin);
+    const url2 = new URL(record5.origin);
     if (url2.hostname !== "127.0.0.1" || url2.protocol !== "http:") return;
-    const response = await fetch(`${record3.origin}/api/session`, { headers: { Authorization: `Bearer ${record3.token}` }, signal: AbortSignal.timeout(1500) });
+    const response = await fetch(`${record5.origin}/api/session`, { headers: { Authorization: `Bearer ${record5.token}` }, signal: AbortSignal.timeout(1500) });
     if (response.ok) {
       const session = await response.json();
       if (session.owner !== true || session.serviceProtocol !== SERVICE_PROTOCOL_VERSION || session.pluginVersion !== PLUGIN_VERSION) throw new StudioError("SERVICE_PROTOCOL_MISMATCH", `\u6B63\u5728\u8FD0\u884C\u7684 Studio \u670D\u52A1\u7248\u672C\u4E0E\u5F53\u524D\u63D2\u4EF6 ${PLUGIN_VERSION} \u4E0D\u517C\u5BB9\u3002\u8BF7\u5173\u95ED\u65E7\u7248\u672C\u767D\u677F\u7A97\u53E3\u3001\u91CD\u542F\u63D2\u4EF6\u540E\u518D\u6253\u5F00\uFF1B\u672A\u542F\u52A8\u7B2C\u4E8C\u4E2A\u6570\u636E\u670D\u52A1\u3002`, { expected: SERVICE_PROTOCOL_VERSION, actual: session.serviceProtocol ?? null, expectedVersion: PLUGIN_VERSION, actualVersion: session.pluginVersion ?? null });
-      return record3;
+      return record5;
     }
   } catch (error62) {
     if (error62 instanceof StudioError && error62.code === "SERVICE_PROTOCOL_MISMATCH") throw error62;
   }
 }
-async function writeRecord(root2, record3) {
+async function writeRecord(root2, record5) {
   await mkdir2(root2, { recursive: true });
   const target = join2(root2, "service.json");
   const temp = `${target}.${process.pid}.tmp`;
-  await writeFile2(temp, `${JSON.stringify(record3)}
+  await writeFile2(temp, `${JSON.stringify(record5)}
 `, { mode: 384 });
   await rename2(temp, target);
 }
 var delay2 = (ms) => new Promise((resolve4) => setTimeout(resolve4, ms));
 async function discoverService(root2, entry) {
   await mkdir2(root2, { recursive: true });
-  let record3 = await probe(root2);
-  if (!record3) {
+  let record5 = await probe(root2);
+  if (!record5) {
     const existing = await readRecord(root2);
     if (existing && isAlive(existing.pid)) {
-      for (let attempt = 0; attempt < 6 && !record3; attempt++) {
+      for (let attempt = 0; attempt < 6 && !record5; attempt++) {
         await delay2(300);
-        record3 = await probe(root2);
+        record5 = await probe(root2);
       }
-      if (!record3) throw new Error("Studio \u670D\u52A1\u8FDB\u7A0B\u4ECD\u5728\u8FD0\u884C\uFF0C\u4F46\u6682\u65F6\u6CA1\u6709\u54CD\u5E94\uFF1B\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u672A\u53E6\u8D77\u7B2C\u4E8C\u4E2A\u6570\u636E\u670D\u52A1\u3002");
+      if (!record5) throw new Error("Studio \u670D\u52A1\u8FDB\u7A0B\u4ECD\u5728\u8FD0\u884C\uFF0C\u4F46\u6682\u65F6\u6CA1\u6709\u54CD\u5E94\uFF1B\u8BF7\u7A0D\u540E\u91CD\u8BD5\uFF0C\u672A\u53E6\u8D77\u7B2C\u4E8C\u4E2A\u6570\u636E\u670D\u52A1\u3002");
     }
   }
-  if (!record3) {
+  if (!record5) {
     const lock3 = join2(root2, "startup.lock");
     let acquired = false;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -37722,8 +37999,8 @@ async function discoverService(root2, entry) {
         acquired = true;
         break;
       } catch {
-        record3 = await probe(root2);
-        if (record3) break;
+        record5 = await probe(root2);
+        if (record5) break;
         try {
           const pid = Number(await readFile(join2(lock3, "owner"), "utf8"));
           if (pid && !isAlive(pid)) {
@@ -37738,17 +38015,17 @@ async function discoverService(root2, entry) {
     }
     if (acquired) {
       try {
-        record3 = await probe(root2);
-        if (!record3) {
+        record5 = await probe(root2);
+        if (!record5) {
           const existing = await readRecord(root2);
           if (existing && isAlive(existing.pid)) throw new Error("\u73B0\u6709 Studio \u670D\u52A1\u672A\u786E\u8BA4\u9000\u51FA\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
           const child = spawn(process.execPath, [entry, "--serve", "--managed", "--data-root", root2], { detached: true, windowsHide: true, stdio: "ignore", env: { ...process.env } });
           child.on("error", () => {
           });
           child.unref();
-          for (let attempt = 0; attempt < 100 && !record3; attempt++) {
+          for (let attempt = 0; attempt < 100 && !record5; attempt++) {
             await delay2(150);
-            record3 = await probe(root2);
+            record5 = await probe(root2);
           }
         }
       } finally {
@@ -37759,9 +38036,9 @@ async function discoverService(root2, entry) {
         });
       }
     }
-    if (!record3) throw new Error("Studio \u672C\u673A\u670D\u52A1\u672A\u80FD\u542F\u52A8\uFF1B\u8BF7\u68C0\u67E5 Node.js \u7248\u672C\u548C\u6570\u636E\u76EE\u5F55\u6743\u9650\u3002");
+    if (!record5) throw new Error("Studio \u672C\u673A\u670D\u52A1\u672A\u80FD\u542F\u52A8\uFF1B\u8BF7\u68C0\u67E5 Node.js \u7248\u672C\u548C\u6570\u636E\u76EE\u5F55\u6743\u9650\u3002");
   }
-  return record3;
+  return record5;
 }
 var sameService = (left, right) => left.origin === right.origin && left.token === right.token && left.pid === right.pid && left.instanceId === right.instanceId;
 async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(import.meta.url)) {
@@ -45952,10 +46229,12 @@ var taskBinding = {
   generation: external_exports.string().min(1).max(120).optional().describe("artifact_activity \u8FD4\u56DE\u7684\u539F\u6837\u4EFB\u52A1\u4EE3\u6B21\uFF1B\u4E0E taskId \u6210\u5BF9\uFF0C\u4E0D\u80FD\u7528\u65E7\u4EE3\u7EED\u5199\u3001\u6362\u53F7\u76F2\u91CD\u8BD5\u6216\u7ED5\u8FC7\u4EBA\u5DE5\u7ED3\u675F\u3002")
 };
 var anchor2 = external_exports.object({
-  coordinateSpace: external_exports.enum(["board", "element", "html"]).optional().describe("board: x/y/w/h \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement: x/y \u4E3A elementIds[0] \u5185\u7684 0..1 \u76F8\u5BF9\u5750\u6807\uFF1Bhtml: x/y/w/h \u4E3A regionId \u5185\u90E8 CSS \u50CF\u7D20\u3002\u7701\u7565\u65F6\u6CBF\u7528\u65E7\u951A\u70B9\u542B\u4E49\u3002"),
+  coordinateSpace: external_exports.enum(["board", "element", "html", "document"]).optional().describe("board \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement \u4E3A\u9996\u4E2A\u5BF9\u8C61\u5185\u7684\u76F8\u5BF9\u5750\u6807\uFF1Bhtml \u4E3A\u533A\u57DF CSS \u50CF\u7D20\uFF1Bdocument \u4EE5 elementIds[0]\u3001blockIds \u4E0E sourceVersion \u51BB\u7ED3\u6587\u6863\u9009\u4E2D\u6587\u5B57\u3002"),
   elementIds: external_exports.array(id).optional().describe("\u5DF2\u5B58\u5728\u5BF9\u8C61\u7684\u7A33\u5B9A ID\uFF1Belement \u5750\u6807\u4EE5\u9996\u4E2A\u5BF9\u8C61\u4E3A\u57FA\u51C6\u3002"),
   regionId: id.optional().describe("HTML \u533A\u57DF ID\uFF1Bhtml \u5750\u6807\u7A7A\u95F4\u5FC5\u586B\u3002"),
   targetIds: external_exports.array(external_exports.string().max(160)).max(100).optional(),
+  blockIds: external_exports.array(id).min(1).max(100).optional().describe("document \u5907\u6CE8\u9009\u4E2D\u7684\u5B9E\u9645\u7A33\u5B9A\u6BB5\u843D ID\u3002"),
+  sourceVersion: external_exports.number().int().positive().optional().describe("\u6587\u6863\u9009\u533A\u6765\u6E90\u7684 element.version\uFF1B\u5199\u5165\u4ECD\u4F7F\u7528\u5F53\u524D expectedVersions\u3002"),
   sourceRevision: external_exports.number().int().positive().optional().describe("HTML \u539F\u59CB\u9009\u533A\u7684\u6E90\u7801\u7248\u672C\uFF0C\u9700\u8981 regionId\uFF1B\u4E0D\u80FD\u7528\u4F5C\u5BF9\u8C61 CAS \u7248\u672C\u3002"),
   quote: external_exports.string().max(4e3).optional(),
   excerpt: external_exports.string().max(16e3).optional(),
@@ -45991,8 +46270,8 @@ var descriptions = {
   studio_open: "\u6253\u5F00 Agentero \u521B\u4F5C\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
   artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
   artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
-  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Blayout-preview \u6839\u636E ids\u3001direction\u3001gap \u53EA\u8BFB\u8BA1\u7B97\u6D41\u7A0B\u9884\u89C8\uFF0C\u8FD4\u56DE operations \u4E0E\u5168\u90E8\u4F9D\u636E expectedVersions\uFF0C\u5E94\u7528\u65F6\u4ECD\u9700 artifact_apply \u7684\u6743\u9650\u3001\u4EFB\u52A1\u8303\u56F4\u4E0E\u7248\u672C\u68C0\u67E5\uFF1Blayout-cancel \u4EE5 requestId \u771F\u6B63\u4E2D\u6B62\u672C\u8EAB\u4EFD\u7684\u8BA1\u7B97\u7EBF\u7A0B\u3002context+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
-  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
+  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Blayout-preview \u6839\u636E ids\u3001direction\u3001gap \u53EA\u8BFB\u8BA1\u7B97\u6D41\u7A0B\u9884\u89C8\uFF0C\u8FD4\u56DE operations \u4E0E\u5168\u90E8\u4F9D\u636E expectedVersions\uFF0C\u5E94\u7528\u65F6\u4ECD\u9700 artifact_apply \u7684\u6743\u9650\u3001\u4EFB\u52A1\u8303\u56F4\u4E0E\u7248\u672C\u68C0\u67E5\uFF1Blayout-cancel \u4EE5 requestId \u771F\u6B63\u4E2D\u6B62\u672C\u8EAB\u4EFD\u7684\u8BA1\u7B97\u7EBF\u7A0B\u3002context+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u6587\u6863\u7528 blocks+elementId \u8BFB\u53D6\u7A33\u5B9A\u5757\uFF08\u53EF\u9644 feedbackId \u8BFB\u51BB\u7ED3\u5757\uFF09\uFF0Csource \u8FD4\u56DE\u53EF\u5206\u9875 JSON\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
+  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u6587\u6863\u533A\u57DF\u7528 document \u64CD\u4F5C\uFF1Aid \u6307\u5B9A\u533A\u57DF\uFF0Cdata.operations \u4E3A insert/update/delete/move \u5757\u64CD\u4F5C\uFF08insert \u542B block\uFF0Cupdate \u542B id/changes\uFF0Cmove \u542B id/parentId/afterId\uFF09\uFF1B\u6CBF\u7528\u533A\u57DF expectedVersions\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
   artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002Agent\u9009\u62E9\u6216\u64A4\u56DE\u5DF2\u5E94\u7528\u65B9\u6848\u4EA7\u751F\u5185\u5BB9\u53D8\u5316\u65F6\u4E5F\u9700\u6709\u6548taskId/generation\u3002send \u8BF7\u6C42\u623F\u4E3B\u9644\u52A0\u5230\u5BF9\u8BDD\uFF1B\u540C\u4E00\u5185\u5BB9\u91CD\u8BD5\u8FD4\u56DE\u539F attachment.requestId\uFF0C\u5185\u5BB9\u53D8\u5316\u540E\u751F\u6210\u65B0\u8BF7\u6C42\u3002attached \u4EC5\u623F\u4E3B\u754C\u9762\u5728\u5BBF\u4E3B\u6210\u529F\u540E\u6309\u8BE5\u8BF7\u6C42\u56DE\u5199\uFF1B\u4E0E\u5907\u6CE8\u89E3\u51B3\u548C Agent \u5904\u7406\u72B6\u6001\u72EC\u7ACB\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
   artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5C40\u57DF\u7F51\uFF0Caccess:local \u53EA\u542F\u7528\u672C\u673A\u9080\u8BF7\uFF1B\u5207\u6362\u8303\u56F4\u4FDD\u7559\u6210\u5458\uFF0Cstop \u64A4\u9500\u5168\u90E8\u6388\u6743\uFF1Blink \u5F00\u5173\u89D2\u8272\u9080\u8BF7\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u548C\u5BF9\u5E94\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u6210\u5458\u5E76\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u3002forget \u4EC5\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u548C\u8BE5\u677F\u59D3\u540D\u767B\u8BB0\uFF0C\u65E7\u8BC4\u8BBA\u5386\u53F2\u4E0D\u53D8\uFF1B\u4E4B\u540E\u9700\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u590D\u6D3B\u79FB\u9664\u524D\u6392\u961F\u8BF7\u6C42\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
   artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002",
@@ -46003,9 +46282,9 @@ function record2(value) {
 }
 function modelSource(value) {
   const source = record2(value) || {}, { html: html2, element, ...metadata } = source, frozen = record2(element);
-  const { html: nestedHtml, ...elementMetadata } = frozen || {};
+  const { html: nestedHtml, document, ...elementMetadata } = frozen || {};
   const sourceHtml = typeof html2 === "string" ? html2 : typeof nestedHtml === "string" ? nestedHtml : void 0;
-  return { ...metadata, ...frozen ? { element: elementMetadata } : {}, ...sourceHtml !== void 0 ? { htmlLength: sourceHtml.length, readWith: "artifact_read source + feedbackId + regionId" } : {} };
+  return { ...metadata, ...frozen ? { element: elementMetadata } : {}, ...document ? { documentSchemaVersion: 1, readWith: "artifact_read blocks + feedbackId + elementId\uFF0C\u6216 source \u5206\u9875\u8BFB\u53D6 JSON" } : {}, ...sourceHtml !== void 0 ? { htmlLength: sourceHtml.length, readWith: "artifact_read source + feedbackId + regionId" } : {} };
 }
 function modelResult(name2, args, value) {
   const result = record2(value);
@@ -46020,6 +46299,15 @@ function modelResult(name2, args, value) {
     if (artifact) return { artifact, ...result.historyEntry ? { historyEntry: result.historyEntry } : {} };
   }
   if (name2 === "artifact_read") {
+    if (args.mode === "source" && record2(result.document)) {
+      const json3 = JSON.stringify(result.document);
+      let offset = Math.max(0, Math.min(json3.length, Math.floor(Number(args.offset) || 0)));
+      if (offset > 0 && /[\uDC00-\uDFFF]/.test(json3[offset] ?? "") && /[\uD800-\uDBFF]/.test(json3[offset - 1])) offset--;
+      let end = Math.min(json3.length, offset + Math.min(2e5, Math.max(1, Math.floor(Number(args.limit) || 64e3))));
+      if (end < json3.length && /[\uD800-\uDBFF]/.test(json3[end - 1]) && /[\uDC00-\uDFFF]/.test(json3[end])) end += end - offset === 1 ? 1 : -1;
+      const { document: _document, text: _text, sources: _sources, ...metadata } = result;
+      return { ...modelSource(metadata), json: json3.slice(offset, end), offset, totalLength: json3.length, ...end < json3.length ? { nextOffset: end } : {}, complete: end === json3.length };
+    }
     if (args.mode === "source" && typeof result.html === "string") {
       let offset = Math.max(0, Math.min(result.html.length, Math.floor(Number(args.offset) || 0)));
       if (offset > 0 && /[\uDC00-\uDFFF]/.test(result.html[offset] ?? "") && /[\uD800-\uDBFF]/.test(result.html[offset - 1])) offset--;

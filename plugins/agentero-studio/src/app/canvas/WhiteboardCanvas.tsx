@@ -1172,13 +1172,22 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       return { state: next.state ?? null, version: next.version };
     } : undefined} />;
     else if (element.type === 'document') content = <DocumentRegion element={element} artifactId={board.artifact.id} actor={actor} client={client} canEdit={canEdit && !preview} canAnnotate={canAnnotate && !preview} interactive={reading ? reading.ids.includes(element.id) : interactiveId === element.id} expanded={!!reading && reading.ids.length === 1 && reading.ids[0] === element.id} focusHost={viewportElement.current} theme={viewTheme} readingZoom={viewport.zoom} editRequest={documentEditRequest?.id === element.id ? documentEditRequest.sequence : undefined} target={annotationTarget} onInteract={active => { setInteractiveId(active ? element.id : null); if (active) setTool('select'); }} onExpand={() => { selectIds([element.id]); void readSelection(); }} onExit={exitReading} onFocusSurface={surface => { if (surface || documentFocusSurface.current?.id === element.id) { documentFocusSurface.current = surface; setFocusedDocumentSurface(surface); } }} onActivity={state => setDocumentActivities(previous => { if (JSON.stringify(previous[element.id]) === JSON.stringify(state)) return previous; return { ...previous, [element.id]: state }; })} onSave={async (document, title, base, overwrite) => {
-      if (overwrite) queue.discardFor([element.id]);
       const operations: Operation[] = [];
       const blocks = documentOperations(base.document ?? defaultDocument(), document);
       if (blocks.length) operations.push({ op: 'document', id: element.id, data: { operations: blocks } });
       if (title !== base.text) operations.push({ op: 'update', id: element.id, changes: { text: title } });
+      let failed = queue.tasks.find(task => task.state === 'failed'
+        && (task.stream === '编辑文档' || task.summary === '编辑文档')
+        && task.sources.some(source => source.id === element.id && source.type === 'document')
+        && task.operations.length > 0 && task.operations.every(operation => operation.id === element.id
+          && (operation.op === 'document' || operation.op === 'update' && operation.changes
+            && Object.keys(operation.changes).length === 1 && Object.hasOwn(operation.changes, 'text'))));
+      if (overwrite && failed) {
+        // Replacing this save must leave later movement/style intentions in the queue.
+        queue.discard(failed.id); failed = undefined;
+      }
+      if (queue.tasks.some(task => (task.keys.includes(element.id) || task.keys.includes('$board')) && task.id !== failed?.id)) throw new Error('此文档还有未确认的白板操作，请先返回画板处理，再比较最新内容后保存正文。');
       if (!operations.length) return base;
-      const failed = queue.tasks.find(task => task.state === 'failed' && task.keys.includes(element.id));
       if (failed && JSON.stringify(failed.operations) !== JSON.stringify(operations)) throw new Error('前次文档草稿尚未保存，请先比较最新内容后保存。');
       const saved = failed ? (await queue.retry(failed.id))?.board : await apply(operations, '编辑文档', [base]);
       return saved?.elements.find(item => item.id === element.id) ?? false;
