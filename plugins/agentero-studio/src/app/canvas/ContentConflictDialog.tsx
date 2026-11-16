@@ -8,8 +8,8 @@ export default function ContentConflictDialog({ task, current, onKeep, onRemote,
   task: ContentTask; current: Board; onKeep: () => void; onRemote: () => void; onOverwrite: () => void; onCopy: () => void; disabled: boolean; portalRoot?: HTMLElement | null;
 }) {
   const removed = task.keys.some(id => id !== '$board' && task.sources.some(element => element.id === id) && !current.elements.some(element => element.id === id));
-  return <StudioDialog title={task.strictVersions ? '整理结果需要重新核对' : removed ? '对象已被删除，草稿仍可恢复' : '比较未保存的修改'} onClose={onKeep} wide portalRoot={portalRoot}>
-    <p>{task.strictVersions ? '整理结果依赖生成时的对象、位置与连接。采用当前已保存内容后，请重新选择目标并整理；按流程排布需要重新预览。原操作尚未确认时，也可保留草稿后重试原操作。' : removed ? '其他人已删除此对象。可以复制草稿，或将它另存为新对象。' : '同一处内容有了新修改。请比较双方内容，再决定采用哪一份；保留草稿不会覆盖对方。'}</p>
+  return <StudioDialog title={task.strictVersions ? '旧排布草稿尚未确认' : removed ? '对象已被删除，草稿仍可恢复' : '比较未保存的修改'} onClose={onKeep} wide portalRoot={portalRoot}>
+    <p>{task.strictVersions ? '自动布局功能已移除。这份旧草稿仍保留原操作与版本依据；可以复制或保留草稿，也可明确重试原操作。采用当前已保存内容只放弃这项旧操作，不影响其他草稿。' : removed ? '其他人已删除此对象。可以复制草稿，或将它另存为新对象。' : '同一处内容有了新修改。请比较双方内容，再决定采用哪一份；保留草稿不会覆盖对方。'}</p>
     {task.operations.map((operation, index) => {
       const base = task.sources.find(element => element.id === operation.id), remote = current.elements.find(element => element.id === operation.id);
       const fields = operation.changes ? Object.keys(operation.changes).filter(field => JSON.stringify(base?.[field]) !== JSON.stringify(operation.changes?.[field])) : [];
