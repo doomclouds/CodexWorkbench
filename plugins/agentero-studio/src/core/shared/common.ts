@@ -30,19 +30,22 @@ export function requireRole(actor: Actor, roles: readonly Role[]): void {
 export function assertAlive(artifact: { trashedAt?: string }): void {
   if (artifact.trashedAt) throw new StudioError('TRASHED', '作品已在回收站，请先恢复。');
 }
+export async function renameWithRetry(source: string, target: string): Promise<void> {
+  for (let retry = 0; ; retry++) {
+    try { await rename(source, target); return; }
+    catch (error) {
+      // Windows read handles may briefly block an atomic rename; retry only this step.
+      if (process.platform !== 'win32' || retry === 5 || !['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
+      await delay(50 * (retry + 1));
+    }
+  }
+}
 export async function atomicWrite(file: string, content: string | Uint8Array): Promise<void> {
   await mkdir(dirname(file), { recursive: true });
   const temporary = join(dirname(file), `.${randomUUID()}.tmp`);
   try {
     await writeFile(temporary, content, { flag: 'wx' });
-    for (let retry = 0; ; retry++) {
-      try { await rename(temporary, file); break; }
-      catch (error) {
-        // An open Windows read handle can briefly prevent replacement; retry only that atomic step.
-        if (process.platform !== 'win32' || retry === 5 || !['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
-        await delay(50 * (retry + 1));
-      }
-    }
+    await renameWithRetry(temporary, file);
   }
   finally { await rm(temporary, { force: true }); }
 }

@@ -73,20 +73,23 @@ function requireRole(actor, roles) {
 function assertAlive(artifact) {
   if (artifact.trashedAt) throw new StudioError("TRASHED", "\u4F5C\u54C1\u5DF2\u5728\u56DE\u6536\u7AD9\uFF0C\u8BF7\u5148\u6062\u590D\u3002");
 }
+async function renameWithRetry(source, target) {
+  for (let retry = 0; ; retry++) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error62) {
+      if (process.platform !== "win32" || retry === 5 || !["EPERM", "EBUSY", "EACCES"].includes(error62.code ?? "")) throw error62;
+      await delay(50 * (retry + 1));
+    }
+  }
+}
 async function atomicWrite(file2, content) {
   await mkdir(dirname(file2), { recursive: true });
   const temporary = join(dirname(file2), `.${randomUUID()}.tmp`);
   try {
     await writeFile(temporary, content, { flag: "wx" });
-    for (let retry = 0; ; retry++) {
-      try {
-        await rename(temporary, file2);
-        break;
-      } catch (error62) {
-        if (process.platform !== "win32" || retry === 5 || !["EPERM", "EBUSY", "EACCES"].includes(error62.code ?? "")) throw error62;
-        await delay(50 * (retry + 1));
-      }
-    }
+    await renameWithRetry(temporary, file2);
   } finally {
     await rm(temporary, { force: true });
   }
@@ -9749,7 +9752,7 @@ var require_polyfills = __commonJS({
       }
       if (platform === "win32") {
         fs.rename = typeof fs.rename !== "function" ? fs.rename : (function(fs$rename) {
-          function rename5(from, to, cb) {
+          function rename4(from, to, cb) {
             var start = Date.now();
             var backoff = 0;
             fs$rename(from, to, function CB(er) {
@@ -9769,8 +9772,8 @@ var require_polyfills = __commonJS({
               if (cb) cb(er);
             });
           }
-          if (Object.setPrototypeOf) Object.setPrototypeOf(rename5, fs$rename);
-          return rename5;
+          if (Object.setPrototypeOf) Object.setPrototypeOf(rename4, fs$rename);
+          return rename4;
         })(fs.rename);
       }
       fs.read = typeof fs.read !== "function" ? fs.read : (function(fs$read) {
@@ -14461,7 +14464,7 @@ var init_esm = __esm({
 
 // src/core/shared/archive.ts
 import { randomUUID as randomUUID12 } from "node:crypto";
-import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rename as rename4, rm as rm4, writeFile as writeFile3 } from "node:fs/promises";
+import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rm as rm4, writeFile as writeFile3 } from "node:fs/promises";
 import { basename as basename2, join as join7 } from "node:path";
 async function readArchiveInput(args) {
   if (args.archivePath !== void 0 === (args.archiveBase64 !== void 0)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u4E00\u4E2A\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u6216\u5907\u4EFD\u5185\u5BB9\u3002");
@@ -14732,7 +14735,7 @@ async function importArchive(store, products, data, actor, title) {
     for (const assetId of Object.keys(state.assets)) await writeFile3(join7(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
     await writeFile3(join7(staging, "artifact.json"), JSON.stringify(state), { flag: "wx" });
     await mkdir5(join7(store.root, "artifacts"), { recursive: true });
-    await rename4(staging, store.folder(id2));
+    await renameWithRetry(staging, store.folder(id2));
   } catch (error62) {
     await rm4(staging, { recursive: true, force: true });
     throw error62;

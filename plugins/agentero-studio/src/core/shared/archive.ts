@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Unzip, UnzipInflate, unzipSync, zipSync, type UnzipFileInfo, type Zippable } from 'fflate';
 import type { Actor } from '../../contracts/studio.js';
 import { normalizeDocument } from '../../contracts/document.js';
-import { copy, object, requireRole, safeId, StudioError, text } from './common.js';
+import { copy, object, renameWithRetry, requireRole, safeId, StudioError, text } from './common.js';
 import type { ExportBytes } from './files.js';
 import type { ArtifactMetadata, ArtifactState } from './model.js';
 import type { ProductRegistry } from './products.js';
@@ -215,7 +215,7 @@ export async function importArchive(store: ArtifactStore<unknown>, products: Pro
     for (const assetId of Object.keys(state.assets)) await writeFile(join(staging, 'assets', assetId), files.get(`assets/${assetId}`)!, { flag: 'wx' });
     await writeFile(join(staging, 'artifact.json'), JSON.stringify(state), { flag: 'wx' });
     await mkdir(join(store.root, 'artifacts'), { recursive: true });
-    await rename(staging, store.folder(id));
+    await renameWithRetry(staging, store.folder(id));
   } catch (error) { await rm(staging, { recursive: true, force: true }); throw error; }
   return state;
 }

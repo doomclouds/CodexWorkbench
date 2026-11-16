@@ -18,6 +18,7 @@ export interface DocumentActivity { editing: boolean; dirty: boolean; saving: bo
 interface Props {
   element: BoardElement; artifactId: string; actor: Actor; client: StudioClient; canEdit: boolean; canAnnotate: boolean;
   interactive: boolean; expanded: boolean; focusHost: HTMLElement | null; theme: 'light' | 'dark'; readingZoom?: number; editRequest?: number; target?: Anchor;
+  annotationActive?: boolean;
   onInteract(active: boolean): void; onExpand(): void; onExit(): void;
   onSave(document: DocumentContent, title: string, base: BoardElement, overwrite: boolean): Promise<BoardElement | false>;
   onActivity(activity: DocumentActivity): void;
@@ -25,7 +26,7 @@ interface Props {
   onAnnotate(anchor: Anchor, version: number, point?: { x: number; y: number }): void;
 }
 interface SavedDraft { base: BoardElement; document: DocumentContent; title: string }
-export default function DocumentRegion({ element, artifactId, actor, client, canEdit, canAnnotate, interactive, expanded, focusHost, theme, readingZoom = 1, editRequest, target, onInteract, onExpand, onExit, onSave, onActivity, onAnnotate, onFocusSurface }: Props) {
+export default function DocumentRegion({ element, artifactId, actor, client, canEdit, canAnnotate, interactive, expanded, focusHost, theme, readingZoom = 1, editRequest, target, annotationActive = false, onInteract, onExpand, onExit, onSave, onActivity, onAnnotate, onFocusSurface }: Props) {
   const [document, setDocument] = useState<DocumentContent>(() => element.document ?? defaultDocument());
   const [title, setTitle] = useState(element.text || '文档');
   const [editing, setEditing] = useState(false), [saving, setSaving] = useState(false), [error, setError] = useState(''), [comparing, setComparing] = useState(false);
@@ -185,7 +186,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   function jump(id: string) { const block = scroll.current?.querySelector<HTMLElement>(`[data-document-block-id="${CSS.escape(id)}"]`); if (block && scroll.current) scroll.current.scrollTop += block.getBoundingClientRect().top - scroll.current.getBoundingClientRect().top - 24; }
   function nextMatch(delta: number) { if (!matches.length) return; const index = (findIndex + delta + matches.length) % matches.length; setFindIndex(index); jump(matches[index].id); }
   const body = <>
-    <header className="studio-document-heading">
+    <header className="studio-document-heading" data-document-controls="true">
       {expanded && <button type="button" className="studio-button" onClick={onExit}><ArrowLeft size={16} />返回画板</button>}
       <FileText size={18} /><input aria-label="文档标题" value={title} readOnly={!canEdit || !editing} onChange={event => setTitle(event.target.value)} maxLength={200} />
       <span className={`studio-document-save${error ? ' has-error' : ''}`} role="status">{saving ? <><Loader2 size={13} className="studio-spin" />保存中</> : error ? '未保存' : dirty ? '待保存' : <><Check size={13} />已保存</>}</span>
@@ -226,6 +227,6 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     const navigation = event.code === 'Space' || event.key === 'Escape' || (event.ctrlKey || event.metaKey) && ['+', '=', '-', '0'].includes(event.key) || event.shiftKey && ['Digit0', 'Digit1', 'Digit2'].includes(event.code);
     if (interactive && !(editing && canEdit) && (event.target as HTMLElement).closest('.studio-document-scroll') && !navigation) event.stopPropagation();
   };
-  const interactiveEvents = { onKeyDownCapture: captureEscape, onPointerDown: documentPointerDown, onDoubleClick: (event: React.MouseEvent) => { if ((event.target as HTMLElement).closest('button,input')) return; event.stopPropagation(); onInteract(true); if (canEdit) setEditing(true); }, onKeyDown: documentKeyDown };
+  const interactiveEvents = { onKeyDownCapture: captureEscape, onPointerDown: documentPointerDown, onDoubleClick: (event: React.MouseEvent) => { if (annotationActive || (event.target as HTMLElement).closest('button,input')) return; event.stopPropagation(); onInteract(true); if (canEdit) setEditing(true); }, onKeyDown: documentKeyDown };
   return <><div ref={shell} className={`studio-document-region${interactive ? ' is-interactive' : ''}`} data-document-id={element.id} data-native-interactive={interactive ? 'true' : undefined} {...interactiveEvents}>{expanded ? <div className="studio-document-expanded-placeholder">正在展开文档</div> : body}</div>{expanded && focusHost && createPortal(<section ref={focusShell} className="studio-document-focus" data-document-id={element.id} aria-label={`文档：${title}`} data-native-interactive="true" {...interactiveEvents}>{body}</section>, focusHost)}</>;
 }

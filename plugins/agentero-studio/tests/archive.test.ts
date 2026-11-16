@@ -1,15 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { basename, join, resolve, sep } from 'node:path';
 import { Zip, ZipPassThrough, strToU8, unzipSync, zipSync } from 'fflate';
 import { LOCAL_ACTOR, type Actor } from '../src/contracts/studio.js';
 import { StudioService } from '../src/core/service.js';
 import { startStudioHost, type StudioHost } from '../src/server/http.js';
 
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  return { ...actual, rename: vi.fn(actual.rename) };
+});
+const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+
 let directory: string, service: StudioService; const hosts: StudioHost[] = [];
 const viewer: Actor = { id: 'guest', name: '访客', role: 'viewer', kind: 'human' };
-beforeEach(async () => { directory = await mkdtemp(join(tmpdir(), 'studio-archive-')); service = new StudioService({ dataRoot: directory }); });
+beforeEach(async () => { vi.mocked(rename).mockReset().mockImplementation(actualFs.rename); directory = await mkdtemp(join(tmpdir(), 'studio-archive-')); service = new StudioService({ dataRoot: directory }); });
 afterEach(async () => { await Promise.all(hosts.splice(0).map(host => host.close())); await service.close(); if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test directory'); await rm(directory, { recursive: true, force: true }); });
 async function fixture() {
   const { artifact } = await service.execute('artifact_manage', { action: 'create', title: '完整作品' });
@@ -24,6 +30,55 @@ async function fixture() {
 }
 
 describe('portable artifact archives', () => {
+  it.runIf(process.platform === 'win32')('retries only a temporarily blocked Windows import publication and retains complete assets', async () => {
+    const source = await fixture(), original = await readFile(service.store.file(source.artifact.id), 'utf8');
+    const accepted = await service.importArchive(source.data), acceptedContent = await readFile(service.store.file(accepted.artifact.id), 'utf8');
+    const before = (await readdir(join(directory, 'artifacts'))).sort(), attempts: { from: string; to: string }[] = [];
+    vi.mocked(rename).mockImplementation(async (from, to) => {
+      if (basename(String(from)).startsWith('import-')) {
+        attempts.push({ from: String(from), to: String(to) });
+        expect((await readdir(join(directory, 'artifacts'))).sort()).toEqual(before);
+        if (attempts.length <= 3) throw Object.assign(new Error('Synthetic Windows publish sharing violation'), { code: ['EPERM', 'EBUSY', 'EACCES'][attempts.length - 1] });
+      }
+      return actualFs.rename(from, to);
+    });
+    const imported = await service.importArchive(source.data), id = imported.artifact.id;
+    expect(attempts).toHaveLength(4); expect(new Set(attempts.map(value => value.from)).size).toBe(1); expect(new Set(attempts.map(value => value.to)).size).toBe(1);
+    expect(id).not.toBe(source.artifact.id);
+    expect((await service.execute('artifact_read', { artifactId: id })).elements[1].src).toBe(`/assets/${id}/${source.asset.id}`);
+    expect(Buffer.from((await service.getAsset(id, source.asset.id)).data)).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
+    expect(await readFile(service.store.file(source.artifact.id), 'utf8')).toBe(original);
+    expect(await readFile(service.store.file(accepted.artifact.id), 'utf8')).toBe(acceptedContent);
+    expect(await readdir(join(directory, 'staging'))).toEqual([]);
+  });
+
+  it.runIf(process.platform === 'win32')('reports a persistent Windows publish failure and removes staging without changing existing work', async () => {
+    const source = await fixture(), original = await readFile(service.store.file(source.artifact.id), 'utf8');
+    const accepted = await service.importArchive(source.data), acceptedContent = await readFile(service.store.file(accepted.artifact.id), 'utf8');
+    const before = (await readdir(join(directory, 'artifacts'))).sort(), error = Object.assign(new Error('Persistent Windows publication lock'), { code: 'EPERM' });
+    let attempts = 0;
+    vi.mocked(rename).mockImplementation(async (from, to) => { if (basename(String(from)).startsWith('import-')) { attempts++; throw error; } return actualFs.rename(from, to); });
+    await expect(service.importArchive(source.data)).rejects.toBe(error);
+    expect(attempts).toBe(6);
+    expect((await readdir(join(directory, 'artifacts'))).sort()).toEqual(before);
+    expect(await readdir(join(directory, 'staging'))).toEqual([]);
+    expect(await readFile(service.store.file(source.artifact.id), 'utf8')).toBe(original);
+    expect(await readFile(service.store.file(accepted.artifact.id), 'utf8')).toBe(acceptedContent);
+    expect(Buffer.from((await service.getAsset(source.artifact.id, source.asset.id)).data)).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
+  });
+
+  it('does not retry import publication on another platform', async () => {
+    const source = await fixture(), error = Object.assign(new Error('Non-Windows publication denied'), { code: 'EACCES' });
+    let attempts = 0;
+    vi.mocked(rename).mockImplementation(async (from, to) => { if (basename(String(from)).startsWith('import-')) { attempts++; throw error; } return actualFs.rename(from, to); });
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    try {
+      Object.defineProperty(process, 'platform', { value: 'linux' });
+      await expect(service.importArchive(source.data)).rejects.toBe(error);
+    } finally { Object.defineProperty(process, 'platform', platform); }
+    expect(attempts).toBe(1); expect(await readdir(join(directory, 'staging'))).toEqual([]);
+  });
+
   it('retains attachment receipts across export and import and rejects malformed ones before publishing', async () => {
     const { artifact } = await service.execute('artifact_manage', { action: 'create', title: '附加回执备份' });
     const created = await service.execute('artifact_feedback', { artifactId: artifact.id, action: 'create', text: '需要保存的讨论' });
