@@ -161,6 +161,8 @@ export function moveOperations(elements: readonly BoardElement[], ids: readonly 
   return elements.filter((e) => selected.has(e.id) && !e.locked).map((e) => {
     const changes: Partial<BoardElement> = { x: e.x + delta.x, y: e.y + delta.y };
     if (e.type === 'arrow') {
+      if (e.labelOffset) changes.labelOffset = { ...e.labelOffset };
+      if (e.labelSize) changes.labelSize = { ...e.labelSize };
       if (Array.isArray(e.from)) changes.from = [e.from[0] + delta.x, e.from[1] + delta.y];
       if (Array.isArray(e.to)) changes.to = [e.to[0] + delta.x, e.to[1] + delta.y];
       if (e.bends && typeof e.bends[0] === 'number') changes.bends = e.bends.map((value, index) => Number(value) + (index % 2 ? delta.y : delta.x));

@@ -77,6 +77,8 @@ export function resizeSelection(elements: readonly BoardElement[], ids: readonly
     const w = Math.max(1, element.w * sx), h = Math.max(1, element.h * sy);
     const changes: Partial<BoardElement> = { x: center.x - w / 2, y: center.y - h / 2, w, h, ...scaledStroke(element, sx, sy) };
     if (element.type === 'arrow') {
+      if (element.labelOffset) changes.labelOffset = { x: element.labelOffset.x * sx, y: element.labelOffset.y * sy };
+      if (element.labelSize) changes.labelSize = { ...element.labelSize };
       for (const end of ['from', 'to'] as const) if (Array.isArray(element[end])) { const point = transform({ x: element[end][0], y: element[end][1] }); changes[end] = [point.x, point.y]; }
       if (element.bends?.[0] === 'h' || element.bends?.[0] === 'v') {
         const horizontal = element.bends[0] === 'h';
@@ -99,6 +101,8 @@ export function rotateSelection(elements: readonly BoardElement[], ids: readonly
     const at = transform({ x: element.x + element.w / 2, y: element.y + element.h / 2 });
     const changes: Partial<BoardElement> = { x: at.x - element.w / 2, y: at.y - element.h / 2 };
     if (element.type === 'arrow') {
+      if (element.labelOffset) changes.labelOffset = turn(element.labelOffset, radians);
+      if (element.labelSize) changes.labelSize = { ...element.labelSize };
       for (const end of ['from', 'to'] as const) if (Array.isArray(element[end])) { const point = transform({ x: element[end][0], y: element[end][1] }); changes[end] = [point.x, point.y]; }
       if (element.bends?.length) changes.bends = arrowGeometry(element, elements).points.slice(1, -1).flatMap(point => { const at = transform(point); return [at.x, at.y]; });
     } else changes.rotation = normalizedAngle(Number(element.rotation ?? 0) + angle);

@@ -25,7 +25,7 @@ import { adjacentElement, canShowConnectionPorts, connectionAtPoint, connectionP
 import InlineTextEditor, { type InlineTextEditorHandle, type InlineTextFormatState } from './InlineTextEditor.js';
 import { newClientId } from '../shared/client-id.js';
 import { nativePaint, PEN_CURSOR } from './native-palette.js';
-import { alignSelection, tidySelection, geometryBounds, selectionBounds as nativeSelectionBounds, resizeBox, resizeElement, resizeSelection, rotateSelection, snapMove, type ResizeHandle, type AlignmentGuide } from './native-geometry.js';
+import { alignSelection, geometryBounds, selectionBounds as nativeSelectionBounds, resizeBox, resizeElement, resizeSelection, rotateSelection, snapMove, type ResizeHandle, type AlignmentGuide } from './native-geometry.js';
 import { visibleCommentCorner } from '../shared/comments/comment-target.js';
 import { copyPlainText } from '../clipboard.js';
 import { studioRequest } from '../transport.js';
@@ -35,6 +35,7 @@ import { NativeContentQueue, overlayContent, type ContentTask, type ContentRecei
 import { downloadStudioBlob } from '../transport.js';
 import type { NativeTableDraft } from './NativeTable.js';
 import ContentConflictDialog from './ContentConflictDialog.js';
+import SelectionLayoutDialog from './SelectionLayoutDialog.js';
 import { encodeGestureFrame, useNativeGestureSync, type NativeGesture } from '../shared/useNativeGestureSync.js';
 import { mergeJson } from '../../core/shared/safe-merge.js';
 import './canvas.css';
@@ -163,6 +164,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const newTextIds = useRef(new Set<string>());
   const emptyTextDelete = useRef<{ elementId: string; operationId: string } | undefined>(undefined);
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [layoutMode, setLayoutMode] = useState<'geometry' | 'flow' | null>(null);
   const [cropDialog, setCropDialog] = useState<BoardElement | null>(null);
   const [dialogDirty, setDialogDirty] = useState(false);
   const [propertyDrafts, setPropertyDrafts] = useState<Record<string, { base: BoardElement; changes: Partial<BoardElement> }>>({});
@@ -372,7 +374,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   }, [board]);
   useEffect(() => {
     if (readingRef.current) exitReading();
-    selectIds([]); setTool('select'); setEditing(null); setDialog(null); setCropDialog(null); setDialogDirty(false); setPropertyDrafts({}); setTableDrafts({}); setPropertyEditingIds([]); setUndo([]); setRedo([]);
+    selectIds([]); setTool('select'); setEditing(null); setDialog(null); setLayoutMode(null); setCropDialog(null); setDialogDirty(false); setPropertyDrafts({}); setTableDrafts({}); setPropertyEditingIds([]); setUndo([]); setRedo([]);
     setDraftOwner(`${board.artifact.id}:${actor.id}`);
     const frame = requestAnimationFrame(() => {
       const host = viewportElement.current;
@@ -612,7 +614,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if(action==='group'){void group();return;}
     if(action==='ungroup'){void updateSelected({groupId:''},'取消组合');return;}
     if(action==='lock'){void updateSelected({locked:!elements.filter(element=>ids.includes(element.id)).every(element=>element.locked)},'锁定位置与尺寸');return;}
-    if(action==='tidy'){void apply(tidySelection(elements,ids),'整理元素',elements);return;}
+    if(action==='tidy'||action==='flow-layout'){void openSelectionLayout(action==='tidy'?'geometry':'flow');return;}
     if(['front','back','forward','backward'].includes(action))void apply([{op:'layout',preset:action,ids}],'调整层级',elements);
   };
   const openMenu = async (point: Point) => {if(editing&&!await commitEditing())return;if(selectionRef.current.some(id=>draftsRef.current[id])&&!await savePropertyDrafts())return;const rect=viewportElement.current?.getBoundingClientRect();setMenu({x:point.x-(rect?.left??0),y:point.y-(rect?.top??0)});};
@@ -633,6 +635,25 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const openHtmlEditor = async (element?: BoardElement) => {
     if (!await chooseTool('select')) return;
     if (onEditHtml) onEditHtml(element); else setDialog({ type: 'html', element });
+  };
+  const openSelectionLayout = async (mode: 'geometry' | 'flow') => {
+    if (!canEditRef.current || readingRef.current || selectionRef.current.length < 2) return;
+    if (!await chooseTool('select')) return;
+    if (queue.tasks.length) { setError('请先完成当前保存或处理未保存的草稿，再整理选区。'); return; }
+    setLayoutMode(mode);
+  };
+  const measureLayoutLabels = () => Object.fromEntries([...viewportElement.current!.querySelectorAll<HTMLElement>('[data-element-id] .studio-arrow-label')].flatMap(node => {
+    const id = node.closest('[data-element-id]')!.getAttribute('data-element-id')!, rect = node.getBoundingClientRect();
+    const edge = boardRef.current.elements.find(element => element.id === id);
+    const internal = edge && typeof edge.from === 'string' && typeof edge.to === 'string' && selectionRef.current.includes(edge.from) && selectionRef.current.includes(edge.to);
+    return internal && rect.width > 0 && rect.height > 0 ? [[id, { w: rect.width / viewportRef.current.zoom, h: rect.height / viewportRef.current.zoom }]] : [];
+  }));
+  const applyCalculatedLayout = async (operations: Operation[], summary: string, source: Board, versions: Record<string, number>, operationId: string) => {
+    if (!canEditRef.current || preview || source.artifact.id !== boardRef.current.artifact.id) throw new Error('当前视图无法应用排布。');
+    const failed = queue.tasks.find(task => task.id === operationId && task.state === 'failed');
+    if (!failed && Object.entries(versions).some(([id, version]) => (id === '$order' ? boardRef.current.orderVersion ?? 0 : boardRef.current.elements.find(item => item.id === id)?.version ?? 0) !== version)) throw new Error('布局依据已更新，请重新预览后再应用。');
+    const receipt = failed ? await queue.retry(operationId) : await queue.enqueue(source, operations, summary, source.elements, true, undefined, operationId, versions);
+    if (!receipt) throw new Error(queue.tasks.find(task => task.id === operationId)?.error || '排布尚未确认保存，请重试或核对最新内容。');
   };
   const editSelected = () => {
     const selected = selectionRef.current.length === 1 && boardRef.current.elements.find(element => element.id === selectionRef.current[0]);
@@ -990,7 +1011,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if (localIntentIds.has(element.id)) continue;
     const index = remoteElements.findIndex(item => item.id === element.id);
     if (index < 0) { if (peer.kind !== 'upload') remoteElements.push(element); }
-    else { const geometry = Object.fromEntries(['x', 'y', 'w', 'h', 'rotation', 'points', 'from', 'to', 'bends', 'fromSide', 'toSide'].filter(key => element[key] !== undefined).map(key => [key, element[key]])); remoteElements[index] = { ...remoteElements[index]!, ...geometry }; }
+    else { const geometry = Object.fromEntries(['x', 'y', 'w', 'h', 'rotation', 'points', 'from', 'to', 'bends', 'fromSide', 'toSide', 'labelOffset', 'labelSize'].filter(key => element[key] !== undefined).map(key => [key, element[key]])); remoteElements[index] = { ...remoteElements[index]!, ...geometry }; }
   }
   const renderedElements = useMemo(() => {
     if (!gesture) return remoteElements;
@@ -1101,7 +1122,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         <defs>{renderMarker(startMarker, fromHead)}{renderMarker(marker, toHead)}</defs>
         <path d={geometry.path} fill="none" stroke="transparent" strokeWidth={16 / viewport.zoom} pointerEvents="stroke" onPointerDown={(event) => begin(event as unknown as ReactPointerEvent<HTMLDivElement>, element)} onDoubleClick={event => { event.stopPropagation(); if (canEdit && !annotating) beginEditing(element); }} />
         <path d={geometry.path} fill="none" stroke={markerColor} strokeWidth={Number(element.strokeWidth ?? element.width ?? 1.8)} strokeDasharray={element.dash ? '6 5' : undefined} markerStart={fromHead !== 'none' ? `url(#${startMarker})` : undefined} markerEnd={toHead !== 'none' ? `url(#${marker})` : undefined} pointerEvents="none" />
-        {(element.label || editing?.id === element.id) && <foreignObject x={geometry.label.x - 100} y={geometry.label.y - 28} width={200} height={54} overflow="visible"><div className="studio-arrow-label">{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.label} />}</div></foreignObject>}
+        {(element.label || editing?.id === element.id) && <foreignObject x={geometry.label.x - (element.labelSize?.w ?? 200) / 2} y={geometry.label.y - (element.labelSize ? element.labelSize.h / 2 : 28)} width={element.labelSize?.w ?? 200} height={element.labelSize?.h ?? 54} overflow="visible"><div className="studio-arrow-label" style={element.labelSize ? { maxWidth: element.labelSize.w } : undefined}>{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.label} />}</div></foreignObject>}
       </svg>;
     }
     const fill = element.hollow ? 'transparent' : semanticColor(nativePaint(element.fill,viewTheme), viewStyle, element.type === 'note' ? '#fff0b5' : element.type === 'shape' || element.type === 'table' ? viewStyle['paper-2'] ?? viewStyle.paper : 'transparent');
@@ -1294,7 +1315,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     {toolMenu === 'shape' && canEdit && <div className="studio-shape-options studio-insert-menu" data-native-interactive="true"><div className="studio-shape-grid">{SHAPES.map(([kind,label])=><button type="button" key={kind} aria-label={`形状 ${label}`} title={label} aria-pressed={shapeKind===kind && tool==='shape'} onClick={()=>{setShapeKind(kind);void chooseTool('shape','shape');}}><Shape element={makeElement('shape',{x:0,y:0},{w:64,h:48,kind,fill:'transparent',stroke:viewStyle.ink})}/></button>)}</div><button type="button" onClick={()=>{void chooseTool('table');}}><Table2 size={17}/>表格</button><button type="button" onClick={()=>{setDialog({type:'link'});setToolMenu(null);}}><Link size={17}/>链接</button><button type="button" onClick={()=>{void openHtmlEditor();setToolMenu(null);}}><Braces size={17}/>HTML 图解</button></div>}
     {!annotating && (tool==='stroke'||tool==='arrow') && canEdit && <div className="studio-shape-options studio-pen-menu" role="toolbar" aria-label="绘图选项" data-native-interactive="true"><div className="studio-pen-choices"><button type="button" aria-label="画笔模式" title="画笔（6）" aria-pressed={tool==='stroke'} onClick={()=>{void chooseTool('stroke');}}><PenLine size={18}/></button><button type="button" aria-label="箭头模式" title="箭头" aria-pressed={tool==='arrow'} onClick={()=>{void chooseTool('arrow');}}><ArrowUpRight size={18}/></button></div><span className="studio-tool-divider"/><ColorPalette presetOnly theme={viewTheme} value={penColor} onChange={setPenColor}/></div>}
     {toolMenu === 'sticker' && canEdit && <StickerPalette selectedId={sticker} onSelect={choice => { setSticker(choice.id); void chooseTool('sticker'); }} onUpload={() => { fileInput.current?.click(); setToolMenu(null); }} />}
-    {!reading && selectedElements.length > 0 && selectionBounds && !annotating && tool==='select' && !spacePan && gesture?.kind!=='pan' && <CanvasFormatToolbar key={selection.join(',')} elements={selectedElements} style={{ left: viewport.x + (selectionBounds.x + selectionBounds.w / 2) * viewport.zoom, top: clamp(viewport.y + selectionBounds.y * viewport.zoom - (selected?.type === 'html' ? 82 : 58), 12, Math.max(12, (viewportElement.current?.clientHeight || 600) - 145)) }} formatState={editing||selected?.type==='table'&&propertyEditingIds.includes(selected.id)?formatState:undefined} requestLink={linkRequest} customColors={customColors} onCustomColorsChange={saveCustomColors} theme={viewTheme} canEdit={canEdit} canAnnotate={canAnnotate} saving={queue.tasks.some(task=>task.state!=='failed'&&task.keys.some(id=>selection.includes(id)))} interactive={interactiveId === selected?.id} onChange={changes => { void updateSelected(changes); }} onEditText={() => { if (selected) beginEditing(selected); }} onTextFormat={formatText} onAnnotate={annotateSelected} onToggleInteractive={() => { if (selected) { setTool('select'); setInteractiveId(value => value === selected.id ? null : selected.id); } }} onReadSelection={() => { void readSelection(); }} onEditHtml={selected ? ()=>{void openHtmlEditor(selected);}:undefined} onCrop={selected?.type==='image'&&selected.src&&!selected.video?()=>setCropDialog(selected):undefined} onAlign={edge=>{void apply(alignSelection(boardRef.current.elements,selectionRef.current,edge),'对齐元素');}} onMore={openMenu} />}
+    {!reading && selectedElements.length > 0 && selectionBounds && !annotating && tool==='select' && !spacePan && gesture?.kind!=='pan' && <CanvasFormatToolbar key={selection.join(',')} elements={selectedElements} style={{ left: viewport.x + (selectionBounds.x + selectionBounds.w / 2) * viewport.zoom, top: clamp(viewport.y + selectionBounds.y * viewport.zoom - (selected?.type === 'html' ? 82 : 58), 12, Math.max(12, (viewportElement.current?.clientHeight || 600) - 145)) }} formatState={editing||selected?.type==='table'&&propertyEditingIds.includes(selected.id)?formatState:undefined} requestLink={linkRequest} customColors={customColors} onCustomColorsChange={saveCustomColors} theme={viewTheme} canEdit={canEdit} canAnnotate={canAnnotate} saving={queue.tasks.some(task=>task.state!=='failed'&&task.keys.some(id=>selection.includes(id)))} interactive={interactiveId === selected?.id} onChange={changes => { void updateSelected(changes); }} onEditText={() => { if (selected) beginEditing(selected); }} onTextFormat={formatText} onAnnotate={annotateSelected} onToggleInteractive={() => { if (selected) { setTool('select'); setInteractiveId(value => value === selected.id ? null : selected.id); } }} onReadSelection={() => { void readSelection(); }} onEditHtml={selected ? ()=>{void openHtmlEditor(selected);}:undefined} onCrop={selected?.type==='image'&&selected.src&&!selected.video?()=>setCropDialog(selected):undefined} onAlign={edge=>{void apply(alignSelection(boardRef.current.elements,selectionRef.current,edge),'对齐元素');}} onArrange={() => { void openSelectionLayout('geometry'); }} onMore={openMenu} />}
     {menu && <CanvasActionsMenu point={menu} canEdit={canEdit} selected={selection.length} locked={selectedElements.some(element=>element.locked)} hasClipboard={Boolean(navigator.clipboard?.readText)} onCommand={command} onClose={()=>setMenu(null)}/>}
     <div aria-label="草稿与保存提示" style={{position:'absolute',bottom:87,left:18,maxWidth:'min(620px, calc(100% - 36px))',maxHeight:'45%',overflowY:'auto',display:'flex',flexDirection:'column',gap:8,zIndex:60}}>
     {(toolNotice || previewStatus) && <div role="status" style={{padding:'8px 12px',border:'1px solid var(--canvas-ui-border)',borderRadius:7,background:'var(--canvas-ui)',color:'var(--canvas-ui-text)'}}>{toolNotice || previewStatus}</div>}
@@ -1305,6 +1326,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     {!preview && Object.entries(tableDrafts).filter(([id]) => !board.elements.some(element => element.id === id && element.type === 'table')).map(([id, draft]) => <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert" key={id}><span>正在编辑的表格已被删除，草稿仍可恢复。</span><button type="button" onClick={() => inspectDetached(draft.base, draft.changes)}>查看并恢复表格草稿</button></div>)}
     </div>
     {comparingTask && <ContentConflictDialog task={comparingTask} current={comparisonBoard ?? board} disabled={!canEdit} onKeep={() => { setComparison(null); setDetachedTask(null); }} onRemote={() => forgetDraft(comparingTask)} onOverwrite={() => void overwriteDraft(comparingTask)} onCopy={() => void copyPlainText(JSON.stringify(comparingTask.operations, null, 2)).catch(failure => setError(errorText(failure)))} />}
+    {layoutMode && <SelectionLayoutDialog key={board.artifact.id} board={boardRef.current} ids={selection} client={client} initialMode={layoutMode} labelSizes={measureLayoutLabels} canEdit={canEdit} onApply={applyCalculatedLayout} onViewLayout={result => { const host = viewportElement.current, bounds = nativeSelectionBounds(boardRef.current.elements, [...result.affectedIds, ...selectionRef.current]); if (host && bounds) { viewportInteract.current?.(); setViewport(fitViewport([bounds], host.clientWidth, host.clientHeight, 72)); } }} onDiscardPreview={requestId => { const task = queue.tasks.find(item => item.id === requestId && item.state === 'failed'); if ((task?.failure as { code?: string } | undefined)?.code === 'CONFLICT') queue.discard(requestId); }} onError={message => { if (boardRef.current.artifact.id === board.artifact.id) setError(message); }} onClose={() => setLayoutMode(null)} />}
     <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime" multiple hidden onChange={(event) => { void uploadMedia(event.target.files); event.currentTarget.value = ''; }} />
     <input ref={htmlInput} type="file" accept=".html,.htm,text/html" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void file.text().then((html) => addElements([makeElement('html', centerPoint(), { html, text: file.name.replace(/\.html?$/i, '') })], '导入 HTML 图解')); event.currentTarget.value = ''; }} />
     {cropDialog && <ImageCropDialog element={cropDialog} src={assetDisplayUrl(cropDialog.src, client)!} onDirtyChange={setDialogDirty} onClose={() => { setCropDialog(null); setDialogDirty(false); }} onSave={async changes => {

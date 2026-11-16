@@ -17,6 +17,8 @@ import { ThumbnailCache } from './shared/thumbnails.js';
 import { exportArchive, importArchive as importArtifactArchive, readArchiveInput } from './shared/archive.js';
 import { userInfo } from 'node:os';
 import { jsonEqual } from './shared/safe-merge.js';
+import { FlowLayoutJobs } from './products/flow-layout-jobs.js';
+import { prepareFlowLayout, finishFlowLayout } from './products/flow-layout.js';
 
 export { StudioError } from './store.js';
 export type { ExportRecord } from './shared/files.js';
@@ -30,6 +32,7 @@ function ownerActor(name?: string): Actor {
 
 export class StudioService {
   private readonly thumbnails = new ThumbnailCache();
+  private readonly layouts = new FlowLayoutJobs();
   readonly store: StudioStore;
   readonly owner: Actor;
   private readonly products: ProductRegistry;
@@ -208,6 +211,21 @@ export class StudioService {
   }
   private async read(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     const mode = text(args.mode, 'document');
+    if (mode === 'layout-preview' || mode === 'layout-cancel') {
+      const requestId = safeId(args.requestId, '布局请求 ID');
+      const snapshot = await this.store.readProjection(id, state => {
+        const currentActor = this.authorizedActor(state, actor, authority);
+        requireRole(currentActor, ['owner', 'editor']); assertAlive(state.artifact);
+        if (state.artifact.type !== 'whiteboard') throw new StudioError('INVALID_ARGUMENT', '此作品不支持流程布局。');
+        const elements = mode === 'layout-preview' ? (state.content as WhiteboardContent).elements.map(item => ({ id: item.id, type: item.type, x: item.x, y: item.y, w: item.w, h: item.h, version: item.version, rotation: item.rotation, parentId: item.parentId, groupId: item.groupId, locked: item.locked, from: item.from, to: item.to, fromSide: item.fromSide, toSide: item.toSide, label: item.label, text: item.text?.slice(0, 30) })) : [];
+        return { artifact: state.artifact, actor: currentActor, elements, orderVersion: (state.content as WhiteboardContent).orderVersion ?? 0 };
+      });
+      if (mode === 'layout-cancel') return { cancelled: await this.layouts.cancel(id, snapshot.actor.id, requestId) };
+      const prepared = prepareFlowLayout(snapshot.elements, { ...args, requestId }, snapshot.orderVersion);
+      const result = prepared.graph ? await this.layouts.run(id, snapshot.actor.id, requestId, prepared.graph) : undefined;
+      await this.store.readProjection(id, state => { requireRole(this.authorizedActor(state, actor, authority), ['owner', 'editor']); assertAlive(state.artifact); });
+      return { artifactId: id, revision: snapshot.artifact.revision, ...finishFlowLayout(prepared, result?.graph) };
+    }
     if (mode === 'units') return this.store.readProjection(id, current => {
       this.authorizedActor(current, actor, authority);
       if (!Array.isArray(args.ids) || !args.ids.length || args.ids.length > 200 || args.ids.some(value => typeof value !== 'string')) throw new StudioError('INVALID_ARGUMENT', '请提供 1 到 200 个内容单元 ID。');
@@ -479,5 +497,5 @@ export class StudioService {
     return this.store.transaction(id, current => { this.authorizedActor(current, actor, authority); assertAlive(current.artifact); return saveExport(this.dataRoot, id, result); });
   }
   async getExport(exportId: string) { return getExport(this.dataRoot, exportId); }
-  async close() { this.closing = true; await Promise.allSettled([...this.tasks]); this.collaboration.close(); this.thumbnails.clear(); }
+  async close() { this.closing = true; await this.layouts.close(); await Promise.allSettled([...this.tasks]); this.collaboration.close(); this.thumbnails.clear(); }
 }

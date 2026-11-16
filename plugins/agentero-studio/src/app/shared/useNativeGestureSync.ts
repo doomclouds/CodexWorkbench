@@ -16,7 +16,7 @@ export interface NativeGesture {
 export interface GestureReceipt { id: string; operationId: string; revision: number; versions: Record<string, number> }
 export interface PeerGesture extends NativeGesture { peerId: string; actor: Actor; seq: number; expiresAt: number; ended?: boolean }
 const KINDS = ['move', 'resize', 'turn', 'ink', 'shape', 'arrow', 'upload'];
-const FIELDS = ['id', 'type', 'version', 'x', 'y', 'w', 'h', 'rotation', 'kind', 'fill', 'stroke', 'strokeWidth', 'color', 'text', 'fontSize', 'from', 'to', 'fromSide', 'toSide', 'heads', 'dash', 'head', 'bends'];
+const FIELDS = ['id', 'type', 'version', 'x', 'y', 'w', 'h', 'rotation', 'kind', 'fill', 'stroke', 'strokeWidth', 'color', 'text', 'fontSize', 'from', 'to', 'fromSide', 'toSide', 'heads', 'dash', 'head', 'bends', 'labelOffset', 'labelSize'];
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= 1e9;
 const identifier = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 160;

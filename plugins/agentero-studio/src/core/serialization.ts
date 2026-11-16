@@ -169,7 +169,7 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
     const route = arrowGeometry(e, board.elements), heads = arrowHeads(e);
     const color = semanticColor(e.stroke ?? e.color, style, style.muted);
     markup = `<path d="${route.path}" fill="none" stroke="${escapeXml(color)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}" stroke-linejoin="round" ${e.dash ? 'stroke-dasharray="5 4"' : ''}/>` + headSvg(heads[0], route.points[0], route.points[1] ?? route.points[0], color) + headSvg(heads[1], route.points.at(-1)!, route.points.at(-2) ?? route.points.at(-1)!, color);
-    if (e.label) { const width = Math.max(28, [...e.label].length * 14 + 16); markup += `<rect x="${route.label.x - width / 2}" y="${route.label.y - 22}" width="${width}" height="20" fill="${escapeXml(style.paper)}"/>` + textSvg({ ...e, x: route.label.x - width / 2, y: route.label.y - 22, w: width, h: 20, text: e.label, fontSize: 12, textAlign: 'center' }, board, style.muted, true); }
+    if (e.label) { const width = e.labelSize?.w ?? Math.max(28, [...e.label].length * 14 + 16), height = e.labelSize?.h ?? 20, y = route.label.y - (e.labelSize ? height / 2 : 22); markup += `<rect x="${route.label.x - width / 2}" y="${y}" width="${width}" height="${height}" fill="${escapeXml(style.paper)}"/>` + textSvg({ ...e, x: route.label.x - width / 2, y, w: width, h: height, text: e.label, fontSize: e.labelSize ? 13 : 12, textAlign: 'center' }, board, style.muted, true); }
   } else if (e.type === 'image') {
     const source = typeof options.assets === 'object' && options.assets ? (options.assets as Record<string, string>)[String(e.src)] ?? e.src : e.src;
     if (source && /^data:image\//i.test(source)) {

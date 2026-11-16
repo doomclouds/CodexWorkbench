@@ -22,6 +22,8 @@ export interface BoardElement {
   crop?: { zoom: number; x: number; y: number };
   from?: string | [number, number]; to?: string | [number, number]; fromSide?: string; toSide?: string;
   label?: string; dash?: boolean; head?: string; points?: number[]; bends?: (number | 'h' | 'v')[];
+  /** Optional layout label centre offset from the route's natural middle segment, in board units. */
+  labelOffset?: { x: number; y: number }; labelSize?: { w: number; h: number };
   src?: string; video?: string; html?: string; sourceRevision?: number; state?: Json; href?: string;
   data?: Record<string, unknown>; [key: string]: unknown;
 }
