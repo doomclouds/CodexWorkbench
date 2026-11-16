@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { registerEscapeLayer } from '../shared/escape';
 
-export function StudioDialog({ title, children, onClose, wide = false }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
+export function StudioDialog({ title, children, onClose, wide = false, portalRoot }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean; portalRoot?: HTMLElement | null }) {
   const titleId = useId();
   const ref = useRef<HTMLDivElement>(null);
   const close = useRef(onClose); close.current = onClose;
@@ -12,8 +13,8 @@ export function StudioDialog({ title, children, onClose, wide = false }: { title
     const unregister = registerEscapeLayer(ref.current!, () => close.current(), 20);
     return () => { unregister(); previous?.focus(); };
   }, []);
-  return <div className="studio-modal-backdrop" onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <div className={`studio-modal${wide ? ' studio-modal-wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref} onKeyDown={event => {
+  const dialog = <div className="studio-modal-backdrop" onPointerDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className={`studio-modal${wide ? ' studio-modal-wide' : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onKeyDown={event => {
       if (event.key !== 'Tab') return;
       const controls = [...(ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, textarea, select, [tabindex="0"]') || [])];
       if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
@@ -23,4 +24,5 @@ export function StudioDialog({ title, children, onClose, wide = false }: { title
       {children}
     </div>
   </div>;
+  return portalRoot ? createPortal(dialog, portalRoot) : dialog;
 }

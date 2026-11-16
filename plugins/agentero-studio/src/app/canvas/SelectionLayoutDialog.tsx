@@ -10,6 +10,7 @@ import { arrangeSelection, type SelectionArrangement } from './selection-layout.
 import './selection-layout.css';
 
 interface Props {
+  portalRoot?: HTMLElement | null;
   board: Board; ids: string[]; client: StudioClient; initialMode: 'geometry' | 'flow';
   labelSizes: () => Record<string, FlowLabelSize>; canEdit: boolean;
   onApply: (operations: Operation[], summary: string, source: Board, versions: Record<string, number>, operationId: string) => Promise<void>;
@@ -79,7 +80,7 @@ export function FlowLayoutDrawing({ source, preview, contextIds = [] }: { source
   </svg></FlowPreviewViewport>;
 }
 
-export default function SelectionLayoutDialog({ board, ids, client, initialMode, labelSizes, canEdit, onApply, onViewLayout, onDiscardPreview, onClose, onError }: Props) {
+export default function SelectionLayoutDialog({ board, ids, client, initialMode, labelSizes, canEdit, onApply, onViewLayout, onDiscardPreview, onClose, onError, portalRoot }: Props) {
   const [mode, setMode] = useState(initialMode), [gap, setGap] = useState(24), [flowGap, setFlowGap] = useState(64);
   const [direction, setDirection] = useState<FlowDirection>('right');
   const [running, setRunning] = useState(false), [applying, setApplying] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -132,7 +133,7 @@ export default function SelectionLayoutDialog({ board, ids, client, initialMode,
     finally { if (alive.current) setApplying(false); }
   }
   const stale = preview && layoutPreviewStale(board, preview.result);
-  return <StudioDialog title="整理选区" wide onClose={close}>
+  return <StudioDialog title="整理选区" wide onClose={close} portalRoot={portalRoot}>
     <div className="studio-layout-tabs" role="tablist" aria-label="整理方式"><button type="button" role="tab" aria-selected={mode === 'geometry'} disabled={applying} onClick={() => { reset(); setMode('geometry'); }}>几何整理</button><button type="button" role="tab" aria-selected={mode === 'flow'} disabled={applying} onClick={() => { reset(); setMode('flow'); }}>按流程排布</button></div>
     {mode === 'geometry' ? <div className="studio-layout-geometry"><p>等距固定最外侧对象；同尺寸以最大外框为准，不改正文或字号。组合与分区按整体处理。</p><label className="studio-layout-gap">排列间距 <input aria-label="排列间距" type="number" min="0" max="1000" value={gap} disabled={applying} onChange={event => setGap(Number(event.target.value))} /> px</label><div className="studio-layout-commands">{geometricCommands.map(([kind, label]) => <button type="button" className="studio-button" key={kind} disabled={!canEdit || applying} onClick={() => void applyGeometry(kind, label)}>{label}</button>)}</div></div> : <>
       <p className="studio-layout-description">按选中节点与内部连接安排流程。预览不保存；实线标出调整内容，橙色虚线是跨选区连接，灰色虚线内容保持原位。回路会参考对象顺序安排，应用前可在预览中核对。预览期间白板对象发生变化时，请重新预览。</p>
