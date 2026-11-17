@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { arrowGeometry, assetDisplayUrl, canvasStyle, duplicateElements, expandMoveIds, fitViewport, makeElement, moveOperations, zoomAt } from '../src/app/canvas/canvas-model.js';
+import { arrowGeometry, assetDisplayUrl, canvasStyle, duplicateElements, expandMoveIds, fitViewport, makeElement, moveOperations, placeFormatToolbar, zoomAt } from '../src/app/canvas/canvas-model.js';
 import { DEFAULT_STYLE, type BoardElement, type StudioClient } from '../src/contracts/studio.js';
 import { contrastRatio } from '../src/core/theme.js';
 
 const shape = (id: string, x = 0, y = 0, extra: Partial<BoardElement> = {}): BoardElement => ({ id, type: 'shape', x, y, w: 100, h: 80, version: 3, text: id, ...extra });
 
 describe('whiteboard geometry', () => {
+  it('keeps offscreen selection actions beside the view controls with a usable gap', () => {
+    const size = { w: 264, h: 42 }, viewport = { w: 800, h: 600 }, hud = { x: 660, y: 12, w: 126, h: 38 };
+    const position = placeFormatToolbar({ x: 1600, y: -200 }, size, viewport, hud);
+    expect(position.x + size.w / 2).toBeLessThanOrEqual(hud.x - 8);
+    expect(position.x - size.w / 2).toBeGreaterThanOrEqual(12); expect(position.y).toBe(12);
+  });
+  it('moves selection actions below the view controls when a narrow canvas cannot fit them beside it', () => {
+    const size = { w: 264, h: 42 }, viewport = { w: 300, h: 400 }, hud = { x: 160, y: 12, w: 126, h: 38 };
+    const position = placeFormatToolbar({ x: 1600, y: 12 }, size, viewport, hud);
+    expect(position.y).toBeGreaterThanOrEqual(hud.y + hud.h + 8);
+    expect(position.x - size.w / 2).toBeGreaterThanOrEqual(12); expect(position.x + size.w / 2).toBeLessThanOrEqual(viewport.w - 12);
+  });
+  it('keeps nonconflicting selection actions at their original position', () => {
+    const anchor = { x: 240, y: 150 }, size = { w: 264, h: 42 }, viewport = { w: 800, h: 600 };
+    expect(placeFormatToolbar(anchor, size, viewport, { x: 660, y: 12, w: 126, h: 38 })).toEqual(anchor);
+    expect(placeFormatToolbar({ x: 1600, y: -200 }, size, viewport)).toEqual({ x: 656, y: 12 });
+  });
   it('projects an uncustomized theme with matching paper and ink without mutating shared content', () => {
     const original = structuredClone(DEFAULT_STYLE);
     const dark = canvasStyle(original, 'dark');

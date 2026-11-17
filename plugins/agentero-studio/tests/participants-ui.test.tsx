@@ -4,7 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LOCAL_ACTOR, DEFAULT_STYLE, type AgentTask, type Board, type CollaborationRoom, type Presence } from '../src/contracts/studio';
 import { OnlineParticipants } from '../src/app/shared/OnlineParticipants';
-import { CursorChat } from '../src/app/shared/CursorChat';
 import { useNativeGestureSync, type NativeGesture } from '../src/app/shared/useNativeGestureSync';
 import { claimParticipantColor, participantColor } from '../src/app/shared/presence-members';
 import { useViewportFollow } from '../src/app/shared/useViewportFollow';
@@ -68,7 +67,6 @@ it('keeps an Agent ID target on current board geometry and exits when that targe
 let root: Root, container: HTMLDivElement;
 beforeEach(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; container = document.createElement('div'); container.className = 'studio'; document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
-async function type(input: HTMLInputElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); }); }
 
 it('ignores human read/write activity labels when readonly peers have no real editing or saving targets', async () => {
   const peers = (['viewer', 'commenter'] as const).map((role, index): Presence => ({ peerId: `${role}-page`, actor: { ...LOCAL_ACTOR, id: role, name: role, kind: 'human', role }, context: { artifactId: 'board', viewId: `${role}-page`, selectedIds: ['one'], editingIds: [], movingIds: [], savingIds: [], activity: index ? 'reading' : 'writing' }, updatedAt: new Date().toISOString() }));
@@ -143,17 +141,6 @@ it('shows distinct live agents, their read/write status, and only other people i
   expect([...container.querySelectorAll('.studio-online-row')].find(row => row.textContent?.includes('协作者'))?.textContent).toContain('所有者');
   await act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={peers.map(page => page.peerId === 'agent-one' ? { ...page, context: { ...page.context!, activity: 'idle', editingIds: [] } } : page)} following="" onFollow={() => {}} />));
   expect(agentRow.textContent).toContain('刚刚活动'); expect(agentRow.querySelector('.is-busy')).toBeNull();
-});
-
-it('opens cursor chat at the pointer, caps code points, and expires it without creating a comment', async () => {
-  vi.useFakeTimers(); const onMessage = vi.fn();
-  await act(async () => root.render(<CursorChat enabled live color="#785ee8" onMessage={onMessage} />));
-  await act(async () => { window.dispatchEvent(new MouseEvent('pointermove', { clientX: 120, clientY: 150 })); window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })); });
-  const input = container.querySelector<HTMLInputElement>('[aria-label="光标聊天"]')!;
-  expect(input).not.toBeNull(); expect(container.querySelector<HTMLElement>('form')!.style.left).toBe('132px');
-  await type(input, '字'.repeat(60)); expect(input.value).toHaveLength(50); expect(onMessage.mock.calls.at(-1)?.[0]).toHaveLength(50);
-  await act(async () => { await vi.advanceTimersByTimeAsync(5000); }); expect(container.querySelector('form')?.classList.contains('is-fading')).toBe(true);
-  await act(async () => { await vi.advanceTimersByTimeAsync(600); }); expect(container.querySelector('form')).toBeNull(); expect(onMessage.mock.calls.at(-1)).toEqual(['', 0]);
 });
 
 it('sends geometry during continuous pointer movement rather than debouncing until it stops', async () => {

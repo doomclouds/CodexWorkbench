@@ -141,6 +141,8 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
       ? { structuredContent: { ...snapshot } }
       : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] }));
     bridge.updateContext = contextUpdater.update;
+    // The library is an open App too, even before a work or selection exists.
+    contextUpdater.update(null);
   }
   return bridge;
 }

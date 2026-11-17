@@ -63,7 +63,7 @@ export interface AgentTask extends AgentTaskBinding {
   endedAt?: number; outcome?: AgentTaskOutcome;
 }
 export interface ViewContext { viewId: string; artifactId: string; selectedIds: string[]; viewport?: { x: number; y: number; zoom: number }; editingIds?: string[]; savingIds?: string[]; agentTasks?: AgentTask[]; [key: string]: unknown }
-export interface Presence { peerId: string; actor: Actor; peerEpoch?: string; peerSeq?: number; context?: ViewContext; cursor?: { x: number; y: number; surface?: string; t?: number } | null; following?: string; chat?: string; chatExpiresAt?: number; color?: string; visible?: boolean; updatedAt: string }
+export interface Presence { peerId: string; actor: Actor; peerEpoch?: string; peerSeq?: number; context?: ViewContext; cursor?: { x: number; y: number; surface?: string; t?: number } | null; following?: string; color?: string; visible?: boolean; updatedAt: string }
 export interface RoomMessage { peerId: string; actor: Actor; seq: number; topic: string; data: Json; createdAt: string }
 /** Local notifications from the authenticated transport, never accepted through room.send. */
 export type CollaborationStateEvent =

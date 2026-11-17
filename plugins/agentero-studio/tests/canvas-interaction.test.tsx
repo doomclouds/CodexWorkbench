@@ -773,13 +773,15 @@ describe('whiteboard direct interaction', () => {
     expect(call.mock.calls.at(-2)![1].operations[0]!.changes).toEqual({stroke:'#123456'});
     expect(call.mock.lastCall![1].operations[0]).toMatchObject({op:'style',style:{nativeInks:'123456'}});
   });
-  it('formats only the chosen native text range before saving and keeps HTML captions in world scale', async () => {
+  it('formats only the chosen native text range before saving and keeps HTML caption controls in screen scale', async () => {
     const call=await editable([element('one',{text:'alpha beta'})]);await select('one');await event(host.querySelector('[data-element-id="one"]')!,'dblclick');
     const editor=query('编辑文字');const text=editor.firstChild!.firstChild as Text;
     const range=document.createRange();range.setStart(text,6);range.setEnd(text,10);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range);document.dispatchEvent(new Event('selectionchange'));
     await click('加粗');await key(editor,'Escape');expect(call.mock.calls[0]![1].operations[0]!.changes?.text).toBe('alpha **beta**');
     await act(async()=>root.render(null));await mount([element('region',{type:'html',html:'<p>Hi</p>'})],{externalViewport:{x:0,y:0,zoom:.5}});
-    expect((host.querySelector('.studio-html-caption') as HTMLElement).style.transform).toBe('');
+    const caption = host.querySelector<HTMLElement>('.studio-html-caption')!;
+    expect(caption.style.transform).toBe('scale(2)');
+    expect((query('移动 HTML 区域') as HTMLElement).style.width).toBe('28px');
     expect((host.querySelector('.studio-canvas-world') as HTMLElement).style.transform).toContain('scale(0.5)');
   });
   it('saves real layer commands and restores their persisted order through undo and redo', async () => {

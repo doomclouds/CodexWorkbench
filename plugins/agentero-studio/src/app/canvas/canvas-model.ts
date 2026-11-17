@@ -198,11 +198,16 @@ export function tableRows(element: BoardElement): string[][] {
   return [['']];
 }
 
-/** The toolbar is centered on the selection, then kept inside the canvas in screen pixels. */
-export function placeFormatToolbar(anchor: Point, size: { w: number; h: number }, viewport: { w: number; h: number }): Point {
+/** Keep selection actions inside the canvas without covering its persistent view controls. */
+export function placeFormatToolbar(anchor: Point, size: { w: number; h: number }, viewport: { w: number; h: number }, topTools?: Rect): Point {
   const margin = 12;
-  return {
+  const position = {
     x: clamp(anchor.x, margin + size.w / 2, Math.max(margin + size.w / 2, viewport.w - margin - size.w / 2)),
     y: clamp(anchor.y, margin, Math.max(margin, viewport.h - margin - size.h)),
   };
+  const gap = 8;
+  if (!topTools || position.x + size.w / 2 <= topTools.x - gap || position.x - size.w / 2 >= topTools.x + topTools.w + gap || position.y + size.h <= topTools.y - gap || position.y >= topTools.y + topTools.h + gap) return position;
+  const left = topTools.x - gap - size.w / 2;
+  if (left >= margin + size.w / 2) return { x: left, y: position.y };
+  return { x: position.x, y: clamp(topTools.y + topTools.h + gap, margin, Math.max(margin, viewport.h - margin - size.h)) };
 }

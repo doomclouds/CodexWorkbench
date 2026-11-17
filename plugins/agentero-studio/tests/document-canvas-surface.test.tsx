@@ -37,11 +37,11 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it('fits a focused document to standard reading scale and restores the original board viewport on exit', async () => {
-  expect((query('全屏缩放比例') as HTMLInputElement).value).toBe('100');
-  await click('全屏放大'); expect((query('全屏缩放比例') as HTMLInputElement).value).toBe('120');
-  await click('适应全屏内容'); expect((query('全屏缩放比例') as HTMLInputElement).value).toBe('100');
-  await click('退出全屏观看'); expect(world()).toBe('translate(17px,39px) scale(0.5)'); expect(props.onChanged).not.toHaveBeenCalled();
+it('opens documents at standard reading scale without a second fullscreen toolbar and restores the board on Escape', async () => {
+  expect(world()).toBe('translate(0px,0px) scale(1)');
+  expect(query('全屏缩放比例')).toBeNull(); expect(query('全屏放大')).toBeNull(); expect(query('退出全屏观看')).toBeNull();
+  await act(async () => query('白板画布').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(world()).toBe('translate(17px,39px) scale(0.5)'); expect(props.onChanged).not.toHaveBeenCalled();
 });
 it('routes middle and Space drag into actual document scrolling instead of moving the hidden board', async () => {
   const before = world(), target = query('文档内容按钮');
@@ -52,12 +52,14 @@ it('routes middle and Space drag into actual document scrolling instead of movin
   expect(controller.scrollBy).toHaveBeenCalledWith({ x: 10, y: 30 }); expect(controller.click).not.toHaveBeenCalled(); expect(world()).toBe(before);
   await act(async () => query('白板画布').dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true })));
 });
-it('preserves native plain wheels and sends explicit zoom anchors to the document surface', async () => {
+it('preserves native plain wheels and keeps document writing scale stable on pinch or modified wheel', async () => {
   const before = world(), target = query('文档内容按钮');
   const ordinary = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 50 });
   await act(async () => target.dispatchEvent(ordinary)); expect(ordinary.defaultPrevented).toBe(false); expect(world()).toBe(before);
-  await act(async () => target.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, ctrlKey: true, clientX: 330, clientY: 240 })));
-  expect(controller.setZoomAnchor).toHaveBeenCalledWith({ x: 330, y: 240 }); expect(Number((query('全屏缩放比例') as HTMLInputElement).value)).toBeGreaterThan(100);
+  controller.setZoomAnchor.mockClear();
+  const modified = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: -100, ctrlKey: true, clientX: 330, clientY: 240 });
+  await act(async () => target.dispatchEvent(modified));
+  expect(modified.defaultPrevented).toBe(true); expect(controller.setZoomAnchor).not.toHaveBeenCalled(); expect(world()).toBe(before);
 });
 it('keeps the document native context menu while suppressing the board menu in blank reading space', async () => {
   const native = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
@@ -68,19 +70,16 @@ it('keeps the document native context menu while suppressing the board menu in b
   expect(blank.defaultPrevented).toBe(true);
   expect(host.querySelector('.studio-canvas-context-menu')).toBeNull();
 });
-it('keeps document find reachable after viewing controls return keyboard focus to the viewport', async () => {
-  query('白板画布').focus();
+it('keeps document find reachable from its own controls without making the canvas focusable', async () => {
+  expect(query('白板画布').hasAttribute('tabindex')).toBe(false); query('文档内容按钮').focus();
   const down = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true });
-  await act(async () => query('白板画布').dispatchEvent(down));
+  await act(async () => query('文档内容按钮').dispatchEvent(down));
   expect(down.defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(query('文档内查找'));
 });
-it('uses content origin, scale and clipping for ink while keeping the board coordinate cursor inside the original frame', async () => {
-  await click('临时荧光笔');
-  const marker = host.querySelector<HTMLElement>('.studio-reading-marker')!;
-  expect(marker.style.clipPath).toBe('polygon(180px 90px, 1000px 90px, 1000px 590px, 180px 590px)');
-  expect(marker.querySelector('g')!.getAttribute('transform')).toBe('translate(220 120) scale(1)');
-  const before = world(); await act(async () => marker.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 70 }))); expect(controller.scrollBy).toHaveBeenCalledWith({ x: 0, y: 70 }); expect(world()).toBe(before);
+it('omits the generic ink layer and maps document presence back inside its original board frame', async () => {
+  expect(query('临时荧光笔')).toBeNull(); expect(host.querySelector('.studio-reading-marker')).toBeNull();
+  const before = world();
   await pointer(query('文档内容按钮'), 'pointermove', 0, 590, 340); expect(props.onCursorMove).toHaveBeenLastCalledWith({ x: 400, y: 320 });
   expect(props.onChanged).not.toHaveBeenCalled();
 });

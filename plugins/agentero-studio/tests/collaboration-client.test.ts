@@ -34,6 +34,14 @@ function reads(next: () => Board) { return vi.fn(async (input: string | URL, ini
 const ready = (cursor = 'epoch:1') => ({ type: 'ready', cursor, reset: true, events: [], peers: [], timer: null, serverTime: Date.now(), actor: LOCAL_ACTOR });
 
 describe('collaboration client transport', () => {
+  it('rejects removed cursor chat before sending any room traffic', async () => {
+    const request = reads(() => board(1)), view = fixture(request); await view.emit(ready());
+    request.mockClear();
+    expect(await view.controller.room.send('chat', { text: 'removed chat' })).toBe(false);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(request.mock.calls.filter(([input]) => new URL(String(input)).pathname === '/api/room')).toHaveLength(0);
+  });
+
   it('publishes trusted document state only after the canonical commit is locally applied', async () => {
     const slow = deferred<Response>(), request = reads(() => board(1)); request.mockImplementationOnce(() => slow.promise);
     const view = fixture(request), states: any[] = [];

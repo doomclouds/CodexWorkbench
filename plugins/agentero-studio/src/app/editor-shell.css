@@ -18,3 +18,6 @@
 .studio-editor-actions .studio-editor-popover{font-size:13px;text-align:left}
 .studio-editor-actions .studio-editor-popover button{font-size:inherit}
 @media(max-width:690px){.studio-editor-header{height:55px;padding:7px 9px}.studio-editor-actions{gap:3px}.studio-editor-title>input{width:clamp(90px,25vw,170px)}.studio-editor-actions>.studio-editor-popover-anchor>.studio-icon-button,.studio-comment-mode-control>.studio-icon-button{width:32px;height:32px}.studio-comment-dropdown{width:22px!important}.studio-comment-dropdown.has-requests{width:auto!important;min-width:38px}.studio-editor-actions .studio-editor-popover .studio-text-button>span{display:inline}}
+/* The document return action saves its draft; global navigation must not bypass it. */
+.studio-document-reading .studio-editor-header{height:44px;padding:5px 12px;justify-content:flex-end}
+.studio-document-reading .studio-editor-title,.studio-document-reading .studio-editor-actions>:not(.studio-comment-mode-control){display:none}

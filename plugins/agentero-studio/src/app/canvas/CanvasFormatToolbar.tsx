@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Bold, Braces, Crop, Maximize, Italic, Link, List, Lock, MessageSquare, MoreHorizontal, MousePointer2, Unlock, Pencil } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, Braces, Crop, Maximize, Italic, Link, List, Lock, MessageSquare, MoreHorizontal, MousePointer2, Unlock } from 'lucide-react';
 import type { BoardElement } from '../../contracts/studio.js';
 import { getBoardSticker } from '../../core/products/whiteboard-stickers.js';
 import { arrowHeads, placeFormatToolbar } from './canvas-model.js';
@@ -11,12 +11,12 @@ interface Props {
   elements: BoardElement[]; style: CSSProperties; canEdit: boolean; canAnnotate: boolean; saving: boolean; interactive: boolean; theme: 'light' | 'dark';
   onChange: (changes: Partial<BoardElement>) => void; onEditText: () => void;
   onTextFormat: (format: 'bold' | 'italic' | 'list' | 'link' | 'numbered', value?: string) => void;
-  onAnnotate: () => void; onFocusAnnotate?: () => void; onToggleInteractive: () => void; onReadSelection?: () => void; onEditHtml?: () => void; onEditDocument?: () => void; onCrop?: () => void;
+  onAnnotate: () => void; onToggleInteractive: () => void; onReadSelection?: () => void; onEditHtml?: () => void; onCrop?: () => void;
   requestLink?:{key:string;value:string}; formatState?:InlineTextFormatState;
   customColors?: string[]; onCustomColorsChange?: (colors: string[]) => void;
   onMore: (point: { x: number; y: number }) => void; onAlign: (edge: 'left'|'hcenter'|'right'|'top'|'vcenter'|'bottom') => void;
 }
-export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnotate, saving, interactive, theme, onChange, onEditText, onTextFormat, onAnnotate, onFocusAnnotate, onToggleInteractive, onReadSelection, onEditHtml, onEditDocument, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
+export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnotate, saving, interactive, theme, onChange, onEditText, onTextFormat, onAnnotate, onToggleInteractive, onReadSelection, onEditHtml, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
   const [popover, setPopover] = useState<string | null>(null), [link, setLink] = useState('');
   const toolbar = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -31,10 +31,13 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
   useLayoutEffect(() => {
     const node = toolbar.current, host = node?.parentElement;
     if (!node || !host) return;
+    const topTools = host.querySelector<HTMLElement>('.studio-canvas-top-tools');
     const place = () => {
       const bounds = node.getBoundingClientRect(), canvas = host.getBoundingClientRect();
       if (!canvas.width || !canvas.height || !bounds.width) return;
-      const next = placeFormatToolbar({ x: Number(style.left), y: Number(style.top) }, { w: bounds.width, h: bounds.height }, { w: canvas.width, h: canvas.height });
+      const controls = topTools?.getBoundingClientRect();
+      const reserved = controls?.width && controls.height ? { x: controls.left - canvas.left, y: controls.top - canvas.top, w: controls.width, h: controls.height } : undefined;
+      const next = placeFormatToolbar({ x: Number(style.left), y: Number(style.top) }, { w: bounds.width, h: bounds.height }, { w: canvas.width, h: canvas.height }, reserved);
       setPosition(current => current?.left === next.x && current.top === next.y ? current : { left: next.x, top: next.y });
       const dialog = node.querySelector<HTMLElement>('.studio-format-popover');
       if (dialog) {
@@ -46,7 +49,7 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
     };
     place();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : undefined;
-    observer?.observe(node); observer?.observe(host);
+    observer?.observe(node); observer?.observe(host); if (topTools) observer?.observe(topTools);
     window.addEventListener('resize', place);
     return () => { observer?.disconnect(); window.removeEventListener('resize', place); };
   }, [style.left, style.top, elements.length, popover]);
@@ -63,7 +66,7 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
   const toggle = (name: string) => { if (popover !== name) returnFocus.current = document.activeElement as HTMLElement; setPopover(value => value === name ? null : name); };
   return <div ref={toolbar} className="studio-selection-toolbar" role="toolbar" aria-label="选区格式" data-native-interactive="true" style={{ ...style, ...position }} onPointerDown={event => { if ((event.target as HTMLElement).closest('button')) event.preventDefault(); }}><div className="studio-selection-toolbar-scroll">
     {onReadSelection && <button type="button" aria-label="全屏观看选区" title="全屏观看" onClick={onReadSelection}><Maximize size={18}/></button>}
-    {documentRegion ? <><span className="studio-selection-label">文档</span><button type="button" aria-label="与文档内容交互" title="阅读与选择文字" aria-pressed={interactive} onClick={onToggleInteractive}><MousePointer2 size={18}/></button>{canEdit && onEditDocument && <button type="button" aria-label="编辑文档" title="编辑文档" onClick={onEditDocument}><Pencil size={18}/></button>}</> : html ? <><span className="studio-selection-label">HTML 图解</span><button type="button" aria-label="与 HTML 内容交互" title="与内容交互" aria-pressed={interactive} onClick={onToggleInteractive}><MousePointer2 size={18}/></button>{canEdit && onEditHtml && <button type="button" aria-label="编辑 HTML 源码" title="编辑 HTML 源码" onClick={onEditHtml}><Braces size={18}/></button>}</> : canEdit && <>
+    {documentRegion ? <span className="studio-selection-label">文档</span> : html ? <><span className="studio-selection-label">HTML 图解</span><button type="button" aria-label="与 HTML 内容交互" title="与内容交互" aria-pressed={interactive} onClick={onToggleInteractive}><MousePointer2 size={18}/></button>{canEdit && onEditHtml && <button type="button" aria-label="编辑 HTML 源码" title="编辑 HTML 源码" onClick={onEditHtml}><Braces size={18}/></button>}</> : canEdit && <>
       {text && <>{elements.every(element=>['shape','text'].includes(element.type)) && <select aria-label="形状类型" disabled={allLocked} value={selected?.type==='text'?'text':selected?.kind??'rounded'} onChange={event=>onChange(event.target.value==='text'?{type:'text',fill:'transparent'}:{type:'shape',kind:event.target.value,fill:selected?.fill==='transparent'?'#EFEFEF':selected?.fill})}>{[['text','文字'],['rounded','圆角矩形'],['rect','矩形'],['ellipse','椭圆'],['diamond','菱形'],['pill','胶囊'],['hexagon','六边形'],['parallelogram','平行四边形'],['database','数据库'],['queue','队列'],['document','文档'],['cloud','云'],['person','人物']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>}<select aria-label="文字大小" value={elements.every(element => element.fontSize === elements[0].fontSize) ? selected?.fontSize ?? elements[0].fontSize ?? 16 : ''} disabled={saving} onChange={event => onChange({fontSize:Number(event.target.value)})}><option value="" disabled>混合</option>{[[14,'小'],[16,'正文'],[28,'大'],[48,'标题'],[96,'超大'],...selected?.fontSize && ![14,16,28,48,96].includes(selected.fontSize) ? [[selected.fontSize,String(selected.fontSize)]] : []].map(([size,label]) => <option key={size} value={size}>{label} · {size}px</option>)}</select><button type="button" aria-label="加粗" title="加粗（Ctrl/⌘ B）" aria-pressed={formatState?.bold ?? elements.every(element => element.bold)} onClick={() => onTextFormat('bold')} disabled={saving}><Bold size={17}/></button><button type="button" aria-label="斜体" title="斜体（Ctrl/⌘ I）" aria-pressed={formatState?.italic ?? elements.every(element => element.italic)} onClick={() => onTextFormat('italic')} disabled={saving}><Italic size={17}/></button>{selected && <><button type="button" aria-label="文字链接" title="文字链接" onClick={() => toggle('文字链接')}><Link size={17}/></button><button type="button" aria-label="切换列表" title="无序列表" onClick={() => onTextFormat('list')}><List size={17}/></button></>}<button type="button" aria-label="文字对齐" title="文字对齐" onClick={() => toggle('文字对齐')}><Align size={17}/></button><button type="button" aria-label="文字颜色" title="文字颜色" onClick={() => toggle('文字颜色')}>A</button></>}
       {line && <button type="button" aria-label="边框与线条" title="边框与线条" onClick={() => toggle('边框与线条')}>☰</button>}
       {selected?.type === 'arrow' && <><select className="studio-arrow-endpoint-select" aria-label="连接线起点" value={arrowHeads(selected)[0]} onChange={event => onChange({heads:[event.target.value as 'none'|'arrow'|'circle',arrowHeads(selected)[1]]})}>{['none','arrow','circle'].map(value => <option key={value} value={value}>{value==='none'?'无':value==='arrow'?'箭头':'圆点'}</option>)}</select><select className="studio-arrow-endpoint-select" aria-label="连接线终点" value={arrowHeads(selected)[1]} onChange={event => onChange({heads:[arrowHeads(selected)[0],event.target.value as 'none'|'arrow'|'circle']})}>{['none','arrow','circle'].map(value => <option key={value} value={value}>{value==='none'?'无':value==='arrow'?'箭头':'圆点'}</option>)}</select></>}
@@ -71,7 +74,6 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
       {elements.length > 1 && <button type="button" aria-label="对齐对象" title="对齐对象" disabled={allLocked} onClick={() => toggle('对齐对象')}><AlignCenter size={17}/></button>}
     </>}
     {canEdit && fill && <button type="button" aria-label="填充颜色" title="填充颜色" className="studio-color-chip" style={{background:selected?.fill || '#EFEFEF'}} onClick={() => toggle('填充颜色')}/>}
-    {documentRegion && onFocusAnnotate && <button type="button" className="studio-format-text-action" aria-label="聚焦备注" title="在画布内聚焦正文并备注" disabled={!canAnnotate} onClick={onFocusAnnotate}><MessageSquare size={17}/><span>聚焦备注</span></button>}
     <span className="studio-tool-divider"/>{canAnnotate && <button type="button" aria-label="备注所选元素" title="备注" onClick={onAnnotate}><MessageSquare size={18}/></button>}{canEdit && <button type="button" className="studio-lock-toggle" aria-label={allLocked?'解锁元素':'锁定元素'} title={allLocked?'解锁位置与尺寸':'锁定位置与尺寸（仍可编辑内容）'} aria-pressed={allLocked} disabled={saving} onClick={() => onChange({locked:!allLocked})}>{allLocked?<Unlock size={18}/>:<Lock size={18}/>}</button>}<button type="button" aria-label="更多操作" title="更多操作" onClick={event => {const rect=event.currentTarget.getBoundingClientRect();onMore({x:rect.left,y:rect.bottom+6});}}><MoreHorizontal size={19}/></button>
     </div>{panel('文字颜色',<ColorPalette theme={theme} value={selected?.color} onChange={color => onChange({color})} custom={customColors} onCustomChange={onCustomColorsChange}/>)}
     {panel('填充颜色',<ColorPalette theme={theme} kind="fill" value={selected?.fill} onChange={fill => onChange(documentRegion ? {fill} : {fill,hollow:false})} none={elements.every(element => element.type === 'shape') ? () => onChange({hollow:true}) : undefined}/>)}

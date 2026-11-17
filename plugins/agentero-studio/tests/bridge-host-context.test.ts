@@ -17,14 +17,14 @@ describe('Studio host background context', () => {
     await vi.advanceTimersByTimeAsync(149);
     expect(send).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(send).toHaveBeenCalledExactlyOnceWith({ artifactId: 'artifact-one', viewId: 'diagram', selectedIds: ['new'], selectedCount: 1, viewport: { x: 10, y: 20, zoom: 1.5 } });
+    expect(send).toHaveBeenCalledExactlyOnceWith({ appId: 'agentero-studio', panelOpen: true, artifactId: 'artifact-one', viewId: 'diagram', selectedIds: ['new'], selectedCount: 1, viewport: { x: 10, y: 20, zoom: 1.5 } });
     updater.update(context(['new']));
     await vi.advanceTimersByTimeAsync(150);
     expect(send).toHaveBeenCalledTimes(1);
     updater.close();
   });
 
-  it('replaces the current background state when the editor closes', async () => {
+  it('keeps the open panel visible while replacing the work context on return to the library', async () => {
     vi.useFakeTimers();
     const send = vi.fn(async () => {});
     const updater = createHostContextUpdater(send);
@@ -32,7 +32,7 @@ describe('Studio host background context', () => {
     await vi.advanceTimersByTimeAsync(150);
     updater.update(null);
     await vi.advanceTimersByTimeAsync(150);
-    expect(send).toHaveBeenLastCalledWith({ artifactId: null, viewId: null, selectedIds: [], selectedCount: 0 });
+    expect(send).toHaveBeenLastCalledWith({ appId: 'agentero-studio', panelOpen: true, artifactId: null, viewId: null, selectedIds: [], selectedCount: 0 });
     updater.close();
   });
 
