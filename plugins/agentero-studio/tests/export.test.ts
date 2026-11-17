@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 import { describe, expect, test } from 'vitest';
 import { exportArtifact } from '../src/core/export';
 import { boardBounds, buildBoardHtml, buildBoardSvg, extractRegionSvg, filenameFor } from '../src/core/serialization';
-import { DARK_THEME, LIGHT_THEME } from '../src/core/theme';
+import { contrastRatio, DARK_THEME, LIGHT_THEME } from '../src/core/theme';
 import type { Board, BoardElement } from '../src/contracts/studio';
 import { BOARD_STICKERS, boardStickerMarkup } from '../src/core/products/whiteboard-stickers';
 
@@ -12,6 +12,28 @@ const shape: BoardElement = { id: 'one', type: 'shape', kind: 'rounded', x: -30,
 const region: BoardElement = { id: 'region', type: 'html', x: 140, y: 0, w: 320, h: 180, version: 4, html: '<!doctype html><html><head><style>.node{fill:#ff0000}.edge{stroke:#111111;marker-end:url(#arrow)}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" width="32" height="18" viewBox="0 0 32 18" role="img" aria-labelledby="title"><title id="title">图解</title><defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0 0L8 3L0 6"/></marker></defs><rect class="node" width="32" height="18"/><path class="edge" d="M2 2H8"/></svg></body></html>' };
 
 describe('artifact export preserves one canonical source', () => {
+  test.each((['light', 'dark'] as const).flatMap(theme => (['text', 'shape', 'note', 'container', 'table'] as const).map(type => ({ theme, type }))))('preserves explicit low-contrast $type ink in $theme SVG and HTML exports', ({ theme, type }) => {
+    const style = theme === 'dark' ? DARK_THEME : LIGHT_THEME;
+    const color = theme === 'dark' ? '#303645' : '#F4F4F4';
+    const value: BoardElement = { ...shape, type, fill: style.paper, color, ...(type === 'table' ? { data: { rows: [['Header'], ['Body']] } } : {}) };
+    const original = board([value]); original.style = { ...style };
+    const snapshot = structuredClone(original);
+    for (const markup of [buildBoardSvg(original), buildBoardHtml(original)]) {
+      const document = new JSDOM(markup).window.document;
+      const texts = [...document.querySelectorAll('[data-studio-id="one"] text')];
+      expect(texts.length).toBeGreaterThan(0);
+      expect(texts.map(node => node.getAttribute('fill'))).toEqual(Array(texts.length).fill(color));
+    }
+    expect(original).toEqual(snapshot);
+  });
+  test.each(['shape', 'note', 'container'] as const)('keeps semantic %s ink readable when a theme color matches its surface', type => {
+    const value = { ...shape, type, fill: DARK_THEME.paper, color: 'ink' };
+    const original = board([value]); original.style = { ...DARK_THEME, ink: DARK_THEME.paper };
+    const document = new JSDOM(buildBoardSvg(original)).window.document;
+    const color = document.querySelector('text')!.getAttribute('fill')!;
+    expect(contrastRatio(color, DARK_THEME.paper)).toBeGreaterThanOrEqual(4.5);
+    expect(value.color).toBe('ink');
+  });
   test('exports legacy TSV table cells with structured data taking precedence when present', async () => {
     const legacy = { ...shape, type: 'table' as const, x: 0, y: 0, w: 900, h: 300, text: '名称\t说明\t状态\n项目 A\t双击单元格编辑\t进行中\n项目 B\t后续安排\t待处理', data: undefined };
     const document = new JSDOM(buildBoardSvg(board([legacy])), { contentType: 'image/svg+xml' }).window.document;

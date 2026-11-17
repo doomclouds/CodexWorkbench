@@ -155,7 +155,10 @@ export function createRpcTransport(baseUrl: string, send: Send) {
       }
       checkSignal(signal);
       return new Response([204, 205, 304].includes(result.status) ? null : content, { status: result.status, headers: result.headers });
-    } finally { await Promise.all([...owned].map(release)); }
+    } finally {
+      // The complete response is already usable. Cleanup has its own timeout and must not delay it.
+      for (const transferId of owned) void release(transferId);
+    }
   }
   async function cacheAsset(key: string, signal: AbortSignal) {
     const cached = assets.get(key);

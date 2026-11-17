@@ -61,7 +61,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const callbacks = useRef({ onSave, onActivity, onAnnotate, onInteract, onAnnotationModeChange, onExit }); callbacks.current = { onSave, onActivity, onAnnotate, onInteract, onAnnotationModeChange, onExit };
   const dirty = JSON.stringify(document) !== JSON.stringify(baseline.current.document ?? defaultDocument()) || title !== (baseline.current.text || '文档');
   const surface = documentSurface(element, styleProfile);
-  const surfaceStyle = { '--document-backdrop': surface.backdrop, '--document-paper': surface.paper, '--document-ink': surface.ink, '--document-muted': surface.muted, '--document-rule': surface.rule, '--document-code': surface.code, '--document-link': surface.link, '--document-danger': surface.scheme === 'dark' ? '#FFADB5' : '#9E303B', '--document-ui-scale': expanded ? 1 : 1 / readingZoom, colorScheme: surface.scheme } as CSSProperties;
+  const surfaceStyle = { '--document-backdrop': surface.backdrop, '--document-paper': surface.paper, '--document-ink': surface.ink, '--document-muted': surface.muted, '--document-rule': surface.rule, '--document-code': surface.code, '--document-link': surface.link, '--document-danger': surface.scheme === 'dark' ? '#FFADB5' : '#9E303B', '--document-ui-scale': expanded ? 1 : Math.min(1 / readingZoom, 1.5), colorScheme: surface.scheme } as CSSProperties;
   const draftKey = `studio-document-draft:${actor.id}:${artifactId}:${element.id}`;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => () => { for (const cancel of pendingAssets.current) cancel(); }, []);
@@ -254,7 +254,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     <header className="studio-document-heading" data-document-controls="true">
       {expanded && <button type="button" className="studio-button" disabled={composing || leaving} onClick={() => void requestExit()}><ArrowLeft size={16} />返回画板</button>}
       {!expanded && onMoveStart && <button type="button" className="studio-document-move" aria-label="移动文档" title={element.locked ? '文档位置已锁定' : '拖动把手移动文档'} disabled={!canEdit || element.locked} data-document-move-handle="true" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); if (event.button === 0 && canEdit && !element.locked) onMoveStart(event); }} onClick={event => event.stopPropagation()}><GripVertical size={16} /></button>}
-      <FileText className="studio-document-kind" size={18} /><input aria-label="文档标题" value={title} readOnly={!canEdit || !editing || !interactive || annotationActive || leaving} onChange={event => setTitle(event.target.value)} maxLength={200} />
+      <FileText className="studio-document-kind" size={18} />{expanded ? <input aria-label="文档标题" value={title} readOnly={!canEdit || !editing || !interactive || annotationActive || leaving} onChange={event => setTitle(event.target.value)} maxLength={200} /> : <span className="studio-document-title" aria-label="文档标题" title={title}>{title}</span>}
       <span className={`studio-document-save${error ? ' has-error' : ''}`} role="status">{saving ? <><Loader2 size={13} className="studio-spin" />保存中</> : error ? '未保存' : dirty ? '待保存' : <><Check size={13} />已保存</>}</span>
       <button type="button" className="studio-icon-button studio-document-edit" aria-label={editing ? '阅读文档' : canEdit ? '编辑文档' : '阅读文档'} title={editing ? '阅读文档' : canEdit ? '编辑文档' : '阅读文档'} disabled={composing || leaving} onClick={() => { if (editing) setEditing(false); else if (canEdit) requestEdit(); else onExpand(); }}>{editing ? <BookOpen size={17} /> : <Pencil size={17} />}</button>
       {!expanded && <button type="button" className="studio-icon-button" aria-label="展开文档" title="展开阅读与编辑" onClick={onExpand}><Maximize size={17} /></button>}
@@ -284,6 +284,22 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   };
   const documentPointerDown = (event: React.PointerEvent) => {
     const target = event.target as HTMLElement;
+    const heading = target.closest('.studio-document-heading') && !target.closest('button,a[href],input,textarea,select,[role="menu"]');
+    const blank = target.matches('.studio-document-body,.studio-document-scroll,.studio-document-content,.studio-doc-prose');
+    const movable = !expanded && !editing && !annotationActive && canEdit && !element.locked;
+    const plainMouse = event.button === 0 && (!event.pointerType || event.pointerType === 'mouse') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+    if (movable && plainMouse && (heading || blank) && onMoveStart) {
+      const reader = scroll.current;
+      if (blank && target === reader) {
+        // Scrollbar gutters are outside the native client box, including under CSS zoom.
+        const rect = reader.getBoundingClientRect(), scaleX = rect.width / reader.offsetWidth, scaleY = rect.height / reader.offsetHeight;
+        const left = rect.left + reader.clientLeft * scaleX, top = rect.top + reader.clientTop * scaleY;
+        if (event.clientX < left || event.clientX >= left + reader.clientWidth * scaleX || event.clientY < top || event.clientY >= top + reader.clientHeight * scaleY) return;
+      }
+      event.preventDefault(); event.stopPropagation(); onMoveStart(event);
+      if (blank && interactive) reader?.focus({ preventScroll: true });
+      return;
+    }
     if (event.button !== 0 || !interactive && !target.closest('button,input')) return;
     if (!editing && interactive && target.closest('.studio-document-scroll') && !target.closest('button,a[href],input:not([disabled]),textarea,select,[contenteditable="true"]')) scroll.current?.focus({ preventScroll: true });
     event.stopPropagation();

@@ -138,20 +138,21 @@ it('scopes reading Select All to this document body and leaves native input and 
     expect(scroll.contains(window.getSelection()!.anchorNode)).toBe(true);
     expect(scroll.contains(window.getSelection()!.focusNode)).toBe(true);
   }
-  for (const label of ['文档外输入框', '文档标题']) {
-    const input = host.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
-    const selectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
-    await act(async () => input.dispatchEvent(selectAll));
-    expect(selectAll.defaultPrevented).toBe(false);
-  }
+  const externalSelectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+  await act(async () => host.querySelector('[aria-label="文档外输入框"]')!.dispatchEvent(externalSelectAll));
+  expect(externalSelectAll.defaultPrevented).toBe(false);
   const editable = window.document.createElement('div'); editable.setAttribute('contenteditable', 'true'); editable.textContent = '原生可编辑内容'; scroll.append(editable);
   const nativeSelectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
   await act(async () => editable.dispatchEvent(nativeSelectAll));
   expect(nativeSelectAll.defaultPrevented).toBe(false); editable.remove();
   await render(); await edit();
-  const editorSelectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
-  await act(async () => portal.querySelector('[aria-label="测试块编辑器"]')!.dispatchEvent(editorSelectAll));
-  expect(editorSelectAll.defaultPrevented).toBe(false);
+  for (const label of ['测试块编辑器', '文档标题']) {
+    const input = portal.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!;
+    expect(input.matches('input,textarea')).toBe(true);
+    const editorSelectAll = new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => input.dispatchEvent(editorSelectAll));
+    expect(editorSelectAll.defaultPrevented).toBe(false);
+  }
 });
 
 it('keeps keyboard Select All as a scoped document note source and creates no source for an empty document', async () => {
@@ -567,7 +568,7 @@ it('keeps a recovered draft across reopening until the user chooses recovery or 
   await act(async () => root.unmount()); root = createRoot(host);
   await render(); expect(surface().textContent).toContain('有上次未保存');
   await click('恢复草稿');
-  expect(document.querySelector<HTMLInputElement>('[aria-label="文档标题"]')!.value).toBe('草稿标题');
+  expect(surface().querySelector('[aria-label="文档标题"]')!.textContent).toBe('草稿标题');
   expect(storedDraft()).toContain('不能丢失的旧草稿');
 });
 
@@ -635,4 +636,25 @@ it('uses Escape to dismiss a local export menu before leaving document editing',
   expect(document.querySelector('[aria-label="文档导出格式"]')).toBeNull(); expect(document.querySelector('[aria-label="测试块编辑器"]')).toBeTruthy();
   await act(async () => button('阅读文档').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(document.querySelector('[aria-label="测试块编辑器"]')).toBeNull(); expect(props.onExit).not.toHaveBeenCalled();
+});
+
+it.each([
+  { zoom: .05, compensation: 1.5, header: 3.45 },
+  { zoom: .25, compensation: 1.5, header: 17.25 },
+  { zoom: .5, compensation: 1.5, header: 34.5 },
+  { zoom: 1, compensation: 1, header: 46 },
+  { zoom: 2, compensation: .5, header: 46 },
+])('lets the whole inline document header shrink in distant views at $zoom', async ({ zoom, compensation, header }) => {
+  props = { ...props, readingZoom: zoom, canEdit: false };
+  await render();
+  const region = host.querySelector<HTMLElement>('.studio-document-region')!;
+  const scale = Number(region.style.getPropertyValue('--document-ui-scale'));
+  expect(scale).toBe(compensation);
+  expect(46 * scale * zoom).toBeCloseTo(header);
+  expect(region.classList.contains('is-thumbnail')).toBe(props.element.w * zoom < 220);
+  expect(region.querySelector('[aria-label="展开文档"]')).not.toBeNull();
+  expect(region.querySelector('[aria-label="测试块编辑器"]')).toBeNull();
+  props = { ...props, expanded: true };
+  await render();
+  expect(portal.querySelector<HTMLElement>('.studio-document-focus')!.style.getPropertyValue('--document-ui-scale')).toBe('1');
 });

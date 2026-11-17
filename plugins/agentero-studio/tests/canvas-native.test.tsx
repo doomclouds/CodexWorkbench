@@ -39,9 +39,9 @@ async function select(id: string) { const node = host.querySelector(`[data-eleme
 describe('native canvas parity', () => {
   it.each((['light', 'dark'] as const).flatMap(theme => [
     { theme, paint: 'default', values: {} },
-    { theme, paint: 'existing white fill', values: { fill: '#ffffff', color: '#2d3142' } },
+    { theme, paint: 'existing white fill', values: { fill: '#ffffff', color: 'ink' } },
     { theme, paint: 'custom paint', values: { fill: '#1d4266', color: '#eacb67' } },
-    { theme, paint: 'projected palette fill', values: { fill: '#F9E56F', color: '#f5f5f5' } },
+    { theme, paint: 'projected palette fill', values: { fill: '#F9E56F', color: 'ink' } },
   ]))('keeps table header and body readable in $theme with $paint', async ({ theme, paint, values }) => {
     host.dataset.studioTheme = theme;
     const value = element('table', { type: 'table', data: { rows: [['Header', 'Value'], ['Body', 'Cell']] }, ...values });
@@ -51,12 +51,28 @@ describe('native canvas parity', () => {
     const bodyStyle = getComputedStyle(rendered), headerStyle = getComputedStyle(header), cellStyle = getComputedStyle(body);
     const paper = (theme === 'dark' ? DARK_THEME : LIGHT_THEME).paper;
     expect(contrastRatio(bodyStyle.backgroundColor, paper)).toBe(1);
-    expect(contrastRatio(cellStyle.color, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(headerStyle.color, headerStyle.backgroundColor, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-    if (paint === 'custom paint') expect(contrastRatio(headerStyle.color, '#eacb67')).toBe(1);
+    if (paint === 'custom paint') {
+      expect(contrastRatio(headerStyle.color, '#eacb67')).toBe(1);
+      expect(contrastRatio(cellStyle.color, '#eacb67')).toBe(1);
+    } else {
+      expect(contrastRatio(cellStyle.color, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(headerStyle.color, headerStyle.backgroundColor, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    }
     if (paint === 'default') expect(contrastRatio(headerStyle.backgroundColor, (theme === 'dark' ? DARK_THEME : LIGHT_THEME)['paper-2']!)).toBe(1);
     if (paint === 'projected palette fill') expect(contrastRatio(headerStyle.backgroundColor, theme === 'dark' ? '#F5D515' : '#F9E56F')).toBe(1);
     expect(value).toEqual(original);
+  });
+  it.each(['text', 'shape', 'note', 'container', 'table'] as const)('respects literal low-contrast ink on %s in a dark workspace', async type => {
+    host.dataset.studioTheme = 'dark';
+    const value = element('custom', { type, color: '#303645', ...(type === 'table' ? { data: { rows: [['Header'], ['Body']] } } : {}) });
+    await mount(board([value]));
+    const node = host.querySelector<HTMLElement>('[data-element-id="custom"]')!;
+    expect(getComputedStyle(node).color).toBe('rgb(48, 54, 69)');
+    if (type === 'table') {
+      expect(getComputedStyle(node.querySelector('th')!).color).toBe('rgb(48, 54, 69)');
+      expect(getComputedStyle(node.querySelector('td')!).color).toBe('rgb(48, 54, 69)');
+    }
+    expect(value.color).toBe('#303645');
   });
   it('renders the supported inline text and list format safely while keeping editable source markers', async () => {
     const text = '**重点**与*说明* `safe()` [资料](https://example.com)\n- 第一点\n2. 第二点\n<img src=x onerror=alert(1)> [危险](javascript:alert)';
