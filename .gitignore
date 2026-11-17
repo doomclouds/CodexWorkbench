@@ -9,6 +9,7 @@ artifacts/
 *.tsbuildinfo
 
 # Local state, configuration and credentials
+/.codex/skills/
 .codegraph/
 .cache/
 .local/

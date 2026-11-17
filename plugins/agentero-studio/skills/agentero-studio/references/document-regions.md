@@ -2,6 +2,8 @@
 
 文档是当前白板的独立 `type:"document"` 对象，外框几何和标题 `text` 由白板管理；正文权威内容是 `document:{schemaVersion:1,blocks:[...]}`。不要把渲染 DOM、HTML 或 Markdown 与块 JSON 同时作为可编辑源。新增时给内容主题名称，保留用户已有标题和块 ID。
 
+纸张颜色属于区域外框的 `fill`，默认与分区相同；不要把区域背景塞进段落 props 或任意 HTML。保留已有自定义填充和显式文字颜色。区域默认字色按纸张明暗选择，不因界面切换明暗而重写正文或区域颜色。
+
 块字段为 `id/type/props/content/children`，支持 paragraph、heading、bulletListItem、numberedListItem、checkListItem、quote、codeBlock、table、image、divider。文字可用纯字符串或文本／链接片段，格式写在片段 styles；代码字符串保留换行和缩进。表格使用 BlockNote `tableContent` 行与单元格 JSON。不要生成任意 HTML 块或脚本字段。
 
 ## 读取并局部修改
@@ -27,6 +29,8 @@
 本期沿用文档对象的版本检查，不是逐字实时协作。其他人修改同一文档后，旧提交会冲突；重读、保留草稿并比较，只提交仍需要的块操作，不能换一个新 operationId 盲写旧全文。
 
 ## 依据段落备注工作
+
+界面的“聚焦备注”在画布内定位正文，不等于展开全文。普通对象备注仍表示整个区域，不能把它冒充精确段落／文字选区。聚焦备注退出后用户若已选择另一对象，应以新选择为准，不恢复旧目标覆盖新的操作。
 
 文档选区锚点使用 `coordinateSpace:"document"`、`elementIds:[文档ID]`、实际 `blockIds`、`sourceVersion` 和 `quote`，并以 `versions` 冻结选取时的文档元素版本。来源版本只用于读冻结内容，写入必须核对当前元素 version。
 

@@ -604,7 +604,7 @@ describe('Studio real management workflows', () => {
     expect(frozen.element).toMatchObject({ id: table.id, version: 1, data: table.data });
   });
 
-  it('retains an unsent comment while changing targets and clicking outside its composer', async () => {
+  it('keeps an unsent comment bound to its original target when another target is requested', async () => {
     const fixture = await createFixture([region()]);
     await mount({ artifactId: fixture.board.artifact.id });
     await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
@@ -614,8 +614,22 @@ describe('Studio real management workflows', () => {
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('保留当前输入');
     await click(button('标注 HTML 输出'));
     expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('保留当前输入');
-    expect(container.querySelector('.studio-comment-target')?.textContent).toContain('输出节点');
+    expect(container.querySelector('.studio-comment-target')?.textContent).toContain('输入节点');
+    expect(container.querySelector('.studio-notice')?.textContent).toContain('已有未发送的备注草稿');
     expect(call.mock.calls.filter(([name, args]) => name === 'artifact_feedback' && args.action === 'create')).toHaveLength(0);
+    await submit(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!.closest('form')!);
+    await waitUntil(() => call.mock.calls.some(([name, args]) => name === 'artifact_feedback' && args.action === 'create'));
+    expect(call.mock.calls.find(([name, args]) => name === 'artifact_feedback' && args.action === 'create')?.[1].anchor).toMatchObject({ targetIds: ['node-input'], quote: '输入节点' });
+  });
+
+  it('allows selecting another comment target only after the old draft is cleared', async () => {
+    const fixture = await createFixture([region()]); await mount({ artifactId: fixture.board.artifact.id });
+    await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
+    await click(button('标注 HTML 内部')); await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, '旧草稿');
+    await click(button('标注 HTML 输出'));
+    await change(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')!, ''); await click(button('标注 HTML 输出'));
+    expect(container.querySelector('.studio-comment-target')?.textContent).toContain('输出节点');
+    expect(container.querySelector<HTMLTextAreaElement>('[aria-label="批注内容"]')?.value).toBe('');
   });
 
   it('edits and deletes an own comment thread through the actual feedback service', async () => {
