@@ -35,6 +35,27 @@ export default function DocumentEditor({ value, editable, theme, initialFocusBlo
     if (blockId && editor.getBlock(blockId)) editor.setTextCursorPosition(blockId, 'end');
     editor.focus();
   }, [editor, editable]);
+  useEffect(() => {
+    if (!editable) return;
+    const scroll = container.current?.closest<HTMLElement>('.studio-document-scroll');
+    if (!scroll) return;
+    const focusBlank = (event: PointerEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.pointerType && event.pointerType !== 'mouse' || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || composing.current) return;
+      const target = event.target;
+      if (!(target instanceof Element) || target.closest('button,a[href],input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="button"],[role="menu"],[role="listbox"],[role="dialog"]')) return;
+      // Native scrollbar gutters are outside the client box, even under CSS zoom.
+      const rect = scroll.getBoundingClientRect(), scaleX = rect.width / scroll.offsetWidth, scaleY = rect.height / scroll.offsetHeight;
+      const left = rect.left + scroll.clientLeft * scaleX, top = rect.top + scroll.clientTop * scaleY;
+      if (event.clientX < left || event.clientX >= left + scroll.clientWidth * scaleX || event.clientY < top || event.clientY >= top + scroll.clientHeight * scaleY) return;
+      const last = flattenDocumentBlocks(editor.document as unknown as DocumentBlock[]).at(-1);
+      if (!last) return;
+      event.preventDefault(); event.stopPropagation();
+      const block = last.type === 'image' || last.type === 'divider' ? editor.insertBlocks([{ type: 'paragraph' }], last.id, 'after')[0] : last;
+      editor.setTextCursorPosition(block.id, 'end'); editor.focus();
+    };
+    scroll.addEventListener('pointerdown', focusBlank);
+    return () => scroll.removeEventListener('pointerdown', focusBlank);
+  }, [editor, editable]);
   useEffect(() => () => { if (compositionFrame.current !== null) cancelAnimationFrame(compositionFrame.current); }, []);
   useEffect(() => {
     if (composing.current || value === appliedValue.current) return;

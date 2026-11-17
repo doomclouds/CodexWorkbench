@@ -268,7 +268,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     {draftWarning && <div className="studio-document-message has-error" role="alert"><span>{draftWarning}</span><button type="button" onClick={() => void copyDraft()}>复制本机草稿</button></div>}
     <div className="studio-document-body">
       {expanded && tocOpen && headings.length > 0 && <nav className="studio-document-toc" aria-label="文档目录"><strong>目录</strong>{headings.map(block => <button type="button" key={block.id} onClick={() => jump(block.id)} style={{ paddingLeft: 10 + (Number(block.props.level) || 1) * 8 }}>{documentBlockText(block) || '未命名标题'}</button>)}</nav>}
-      <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={editing ? undefined : selectText}>
+      <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={editing ? undefined : interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={editing ? undefined : selectText}>
         <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{expanded && editing && (canEdit && interactive && !annotationActive || composing) ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={!leaving && canEdit && (interactive && !annotationActive || composing)} theme={surface.scheme} initialFocusBlockId={editFocusBlockId} highlightedIds={targetIds} find={find} onChange={setDocument} onSelection={selectSelection} onCompositionChange={setComposing} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} scheme={surface.scheme} highlightedIds={annotationActive && selection ? selection.blockIds : targetIds} find={find} />}</div>
       </div>
     </div>
@@ -285,7 +285,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const documentPointerDown = (event: React.PointerEvent) => {
     const target = event.target as HTMLElement;
     if (event.button !== 0 || !interactive && !target.closest('button,input')) return;
-    if (interactive && target.closest('.studio-document-scroll') && !target.closest('button,a[href],input:not([disabled]),textarea,select,[contenteditable="true"]')) scroll.current?.focus({ preventScroll: true });
+    if (!editing && interactive && target.closest('.studio-document-scroll') && !target.closest('button,a[href],input:not([disabled]),textarea,select,[contenteditable="true"]')) scroll.current?.focus({ preventScroll: true });
     event.stopPropagation();
   };
   const documentKeyDown = (event: React.KeyboardEvent) => {

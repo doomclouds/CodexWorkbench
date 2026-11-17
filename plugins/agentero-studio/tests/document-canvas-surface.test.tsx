@@ -70,10 +70,10 @@ it('keeps the document native context menu while suppressing the board menu in b
   expect(blank.defaultPrevented).toBe(true);
   expect(host.querySelector('.studio-canvas-context-menu')).toBeNull();
 });
-it('keeps document find reachable after viewing controls return keyboard focus to the viewport', async () => {
-  query('白板画布').focus();
+it('keeps document find reachable from its own controls without making the canvas focusable', async () => {
+  expect(query('白板画布').hasAttribute('tabindex')).toBe(false); query('文档内容按钮').focus();
   const down = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true });
-  await act(async () => query('白板画布').dispatchEvent(down));
+  await act(async () => query('文档内容按钮').dispatchEvent(down));
   expect(down.defaultPrevented).toBe(true);
   expect(document.activeElement).toBe(query('文档内查找'));
 });

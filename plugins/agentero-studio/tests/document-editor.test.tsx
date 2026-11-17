@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DocumentBlock, DocumentContent } from '../src/contracts/document.js';
 
-const state = vi.hoisted(() => ({ viewChange: undefined as (() => void) | undefined, editor: { document: [] as DocumentBlock[], replaceBlocks: vi.fn(), focus: vi.fn(), getBlock: vi.fn(), setTextCursorPosition: vi.fn(), getSelectedText: () => '', getSelection: () => null, getTextCursorPosition: () => ({ block: { id: 'p' } }) } }));
+const state = vi.hoisted(() => ({ viewChange: undefined as (() => void) | undefined, editor: { document: [] as DocumentBlock[], replaceBlocks: vi.fn(), focus: vi.fn(), getBlock: vi.fn(), insertBlocks: vi.fn(), setTextCursorPosition: vi.fn(), getSelectedText: () => '', getSelection: () => null, getTextCursorPosition: () => ({ block: { id: 'p' } }) } }));
 vi.mock('@blocknote/core', () => ({ BlockNoteSchema: { create: () => ({ blockSchema: {}, inlineContentSchema: {}, styleSchema: {} }) }, createHeadingBlockSpec: () => ({}), defaultBlockSpecs: {} }));
 vi.mock('@blocknote/core/locales', () => ({ zh: {} }));
 vi.mock('@blocknote/react', () => ({ useCreateBlockNote: () => state.editor }));
@@ -19,12 +19,22 @@ beforeEach(() => {
   vi.stubGlobal('cancelAnimationFrame', vi.fn(() => { frame = null; }));
   state.editor.document = documentValue('原文').blocks; state.editor.focus.mockReset(); state.editor.replaceBlocks.mockReset().mockImplementation((_before, after) => { state.editor.document = after; });
   state.editor.getBlock.mockReset().mockImplementation(id => state.editor.document.find(block => block.id === id)); state.editor.setTextCursorPosition.mockReset();
+  state.editor.insertBlocks.mockReset().mockReturnValue([{ id: 'new-paragraph', type: 'paragraph', props: {}, content: [], children: [] }]);
   props = { value: documentValue('原文'), editable: true, theme: 'light', onChange: vi.fn(), onSelection: vi.fn(), onCompositionChange: vi.fn(), uploadFile: vi.fn(), resolveFileUrl: vi.fn() };
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const render = () => act(async () => root.render(<DocumentEditor {...props} />));
 const composition = (type: string) => act(async () => host.querySelector('[contenteditable]')!.dispatchEvent(new CompositionEvent(type, { bubbles: true })));
+function preparePaper() {
+  host.className = 'studio-document-scroll';
+  Object.defineProperties(host, { offsetWidth: { configurable: true, value: 400 }, offsetHeight: { configurable: true, value: 400 }, clientWidth: { configurable: true, value: 380 }, clientHeight: { configurable: true, value: 380 } });
+  vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({ left: 100, top: 50, right: 900, bottom: 850, width: 800, height: 800 } as DOMRect);
+}
+async function paperPointer(target: Element = host, init: MouseEventInit = {}) {
+  const event = new MouseEvent('pointerdown', { button: 0, clientX: 500, clientY: 650, bubbles: true, cancelable: true, ...init });
+  await act(async () => target.dispatchEvent(event)); return event;
+}
 
 it('focuses the ready editor on entry without stealing focus again for normal value updates', async () => {
   await render(); expect(state.editor.focus).toHaveBeenCalledTimes(1);
@@ -47,6 +57,34 @@ it('places a double-click entry at the requested block end before focusing and c
 it('does not ask BlockNote to position a cursor in a block that disappeared before the editor mounted', async () => {
   props = { ...props, initialFocusBlockId: 'removed-block' }; await render();
   expect(state.editor.setTextCursorPosition).not.toHaveBeenCalled(); expect(state.editor.focus).toHaveBeenCalledTimes(1);
+});
+
+it('focuses editable paper whitespace at the last text block without owning read-only paper', async () => {
+  preparePaper();
+  props = { ...props, value: { schemaVersion: 1, blocks: [{ ...documentValue('上文').blocks[0]!, children: [{ id: 'nested-tail', type: 'paragraph', props: {}, content: '文末', children: [] }] }] } };
+  state.editor.document = props.value.blocks; await render(); state.editor.focus.mockClear(); state.editor.setTextCursorPosition.mockClear();
+  expect((await paperPointer()).defaultPrevented).toBe(true);
+  expect(state.editor.setTextCursorPosition).toHaveBeenCalledExactlyOnceWith('nested-tail', 'end'); expect(state.editor.focus).toHaveBeenCalledTimes(1);
+  state.editor.document = [{ id: 'last-image', type: 'image', props: { url: 'https://example.com/image.png' }, children: [] }];
+  await paperPointer();
+  expect(state.editor.insertBlocks).toHaveBeenCalledWith([{ type: 'paragraph' }], 'last-image', 'after');
+  expect(state.editor.setTextCursorPosition).toHaveBeenLastCalledWith('new-paragraph', 'end');
+  props = { ...props, editable: false }; await render(); state.editor.focus.mockClear(); state.editor.setTextCursorPosition.mockClear();
+  expect((await paperPointer()).defaultPrevented).toBe(false);
+  expect(state.editor.focus).not.toHaveBeenCalled(); expect(state.editor.setTextCursorPosition).not.toHaveBeenCalled();
+});
+
+it('leaves scrollbar gutters, native controls, mouse navigation and active composition out of blank-paper focus', async () => {
+  preparePaper(); await render(); state.editor.focus.mockClear(); state.editor.setTextCursorPosition.mockClear();
+  for (const init of [{ clientX: 890 }, { clientY: 840 }, { button: 1 }, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }]) expect((await paperPointer(host, init)).defaultPrevented).toBe(false);
+  const controls = window.document.createElement('div'); controls.innerHTML = '<button>工具</button><a href="https://example.com">链接</a><input><textarea></textarea><select><option>选择</option></select><div role="menu"><span>菜单</span></div><div contenteditable="true"><span contenteditable="false">原生编辑器区域</span></div>'; host.append(controls);
+  for (const target of controls.querySelectorAll('button,a,input,textarea,select,[role=menu] span,[contenteditable=false]')) expect((await paperPointer(target)).defaultPrevented).toBe(false);
+  const touch = new MouseEvent('pointerdown', { button: 0, clientX: 500, clientY: 650, bubbles: true, cancelable: true }); Object.defineProperty(touch, 'pointerType', { value: 'touch' }); await act(async () => host.dispatchEvent(touch)); expect(touch.defaultPrevented).toBe(false);
+  const cancelled = new MouseEvent('pointerdown', { button: 0, clientX: 500, clientY: 650, bubbles: true, cancelable: true }); cancelled.preventDefault(); await act(async () => host.dispatchEvent(cancelled));
+  await composition('compositionstart'); expect((await paperPointer()).defaultPrevented).toBe(false);
+  expect(state.editor.focus).not.toHaveBeenCalled(); expect(state.editor.setTextCursorPosition).not.toHaveBeenCalled();
+  await composition('compositionend'); await act(async () => frame!(0));
+  expect((await paperPointer()).defaultPrevented).toBe(true); expect(state.editor.focus).toHaveBeenCalledTimes(1);
 });
 
 it('preserves the entry block when real BlockNote normalizes raw initial content and only replaces genuine external updates', async () => {

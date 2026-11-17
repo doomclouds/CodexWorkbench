@@ -31,10 +31,12 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 it('opens a native component from its first-level toolbar, enlarges only that component, and restores view and focus on Escape', async () => {
   const reading = vi.fn(), changed = vi.fn();
   await mount([element('one'), element('other', { x: 1400 })], { onReadingChange: reading, onChanged: changed });
+  expect(query('白板画布').getAttribute('tabindex')).toBe('0');
   const before = world().style.transform;
   expect(query('全屏观看选区').closest('[role="toolbar"]')?.getAttribute('aria-label')).toBe('选区格式');
   expect(host.querySelector('[role="menu"]')).toBeNull();
   await click('全屏观看选区');
+  expect(query('白板画布').getAttribute('tabindex')).toBe('0');
   expect(host.querySelector('.studio-whiteboard')?.classList.contains('is-reading')).toBe(true);
   expect(world().style.transform).toContain('scale(4.52)');
   expect((host.querySelector('[data-element-id="other"]') as HTMLElement).style.display).toBe('none');
@@ -44,6 +46,7 @@ it('opens a native component from its first-level toolbar, enlarges only that co
   await key('Delete'); await key('3'); await event(host.querySelector('[data-element-id="one"]')!, 'dblclick');
   expect(changed).not.toHaveBeenCalled(); expect(host.querySelector('[contenteditable="true"]')).toBeNull();
   await key('Escape');
+  expect(query('白板画布').getAttribute('tabindex')).toBe('0');
   expect(world().style.transform).toBe(before); expect(query('白板工具').hidden).toBe(false);
   expect((host.querySelector('[data-element-id="other"]') as HTMLElement).style.display).toBe('');
   expect(reading.mock.calls).toEqual([[true], [false]]);
@@ -79,8 +82,10 @@ it.each([false, true])('makes HTML interactive without reloading it, then restor
   const mode = post.mock.calls.find(([value]) => value.type === 'studio-html-mode')![0];
   await click('全屏观看选区');
   expect(host.querySelector('iframe')).toBe(frame); expect(frame.srcdoc).toBe(source); expect(frame.style.pointerEvents).toBe('auto');
+  expect(query('白板画布').getAttribute('tabindex')).toBe('0');
   await act(async () => { window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: 'studio-html-escape', channel: mode.channel, regionId: 'html', sourceRevision: 1 } })); });
   expect(host.querySelector('.is-reading')).toBeNull(); expect(frame.style.pointerEvents).toBe(previous ? 'auto' : 'none');
+  expect(query('白板画布').getAttribute('tabindex')).toBe('0');
   expect(host.querySelector('iframe')).toBe(frame);
 });
 

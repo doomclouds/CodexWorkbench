@@ -421,6 +421,24 @@ it('focuses inline reading and isolates document copy, paste and destructive key
   } finally { window.removeEventListener('keydown', keys); window.removeEventListener('copy', copy); window.removeEventListener('cut', cut); window.removeEventListener('paste', paste); }
 });
 
+it('gives tab and pointer focus to the scroll surface only while reading', async () => {
+  await render(); const reading = surface().querySelector<HTMLElement>('.studio-document-scroll')!;
+  expect(reading.tabIndex).toBe(0);
+  const readFocus = vi.spyOn(reading, 'focus');
+  const readPointer = new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }); await act(async () => reading.dispatchEvent(readPointer));
+  expect(readFocus).toHaveBeenCalledTimes(1); expect(readPointer.defaultPrevented).toBe(false);
+  await edit(); const writing = portal.querySelector<HTMLElement>('.studio-document-scroll')!;
+  expect(writing.tabIndex).toBe(-1); expect(writing.hasAttribute('tabindex')).toBe(false);
+  const writeFocus = vi.spyOn(writing, 'focus');
+  await act(async () => writing.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })));
+  expect(writeFocus).not.toHaveBeenCalled();
+  await click('阅读文档'); expect(writing.tabIndex).toBe(0); expect(writeFocus).toHaveBeenCalledTimes(1); writeFocus.mockClear();
+  await act(async () => writing.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })));
+  expect(writeFocus).toHaveBeenCalledTimes(1);
+  props = { ...props, interactive: false, expanded: false }; await render();
+  expect(host.querySelector('.studio-document-scroll')!.getAttribute('tabindex')).toBe('-1');
+});
+
 it('exits editing before a vendor editor can swallow an otherwise unclaimed Escape', async () => {
   await render(); await edit(); const input = surface().querySelector<HTMLElement>('[aria-label="测试块编辑器"]')!;
   const swallowed = vi.fn((event: Event) => { event.preventDefault(); event.stopPropagation(); });

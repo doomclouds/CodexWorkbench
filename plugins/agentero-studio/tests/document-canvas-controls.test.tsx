@@ -63,6 +63,21 @@ it('explicitly leaves annotation mode before expanded editing so body editor con
   await clickControl('编辑器内部操作'); expect(editorAction).toHaveBeenCalledTimes(1); expect(annotated).not.toHaveBeenCalled();
 });
 
+it('removes the canvas focus target during expanded document reading and writing and restores it on return', async () => {
+  const viewport = query('白板画布'); expect(viewport.getAttribute('tabindex')).toBe('0');
+  await clickControl('编辑文档'); await vi.waitFor(() => expect(query('控件回归富文本编辑器')).not.toBeNull());
+  expect(viewport.hasAttribute('tabindex')).toBe(false);
+  const editor = query('控件回归富文本编辑器'); editor.focus(); viewport.focus();
+  expect(document.activeElement).toBe(editor);
+  await clickControl('阅读文档');
+  expect(viewport.hasAttribute('tabindex')).toBe(false);
+  const reader = query('文档正文：文档控件'); reader.focus(); viewport.focus();
+  expect(document.activeElement).toBe(reader);
+  const back = [...host.querySelectorAll('button')].find(button => button.textContent?.includes('返回画板'))!;
+  await pointer(back, 'click'); expect(viewport.getAttribute('tabindex')).toBe('0');
+  viewport.focus(); expect(document.activeElement).toBe(viewport);
+});
+
 it('allows the actual document export menu and JSON action while annotation mode remains active', async () => {
   await clickControl('导出文档');
   const item = host.querySelector<HTMLElement>('[role="menuitem"]:last-child'); expect(item?.textContent).toBe('块 JSON');
