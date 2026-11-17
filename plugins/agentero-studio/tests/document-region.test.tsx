@@ -6,9 +6,18 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { BoardElement } from '../src/contracts/studio.js';
 import { documentPlainText, normalizeDocument, type DocumentContent } from '../src/contracts/document.js';
 import { documentHtml } from '../src/core/products/document-serialization.js';
+import { registerEscapeLayer } from '../src/app/shared/escape.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+import { NativeContentQueue } from '../src/app/canvas/content-queue.js';
+import { StudioService } from '../src/core/service.js';
+import { documentOperations } from '../src/contracts/document.js';
+import type { Board, Operation } from '../src/contracts/studio.js';
+import { LIGHT_THEME } from '../src/core/theme.js';
 
 const imageRequests = vi.hoisted(() => ({ values: [] as Promise<string>[] }));
-vi.mock('../src/app/canvas/DocumentEditor.js', () => ({ default: ({ value, editable, onChange, resolveFileUrl }: { value: DocumentContent; editable: boolean; onChange: (value: DocumentContent) => void; resolveFileUrl: (source: string) => Promise<string> }) => <><textarea aria-label="测试块编辑器" readOnly={!editable} value={documentPlainText(value)} onChange={event => onChange({ schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: event.target.value, children: [] }] })} /><button type="button" aria-label="测试读取图片" onClick={() => { const request = resolveFileUrl('/assets/artifact-one/picture'); imageRequests.values.push(request); void request.catch(() => undefined); }}>读取图片</button></> }));
+vi.mock('../src/app/canvas/DocumentEditor.js', () => ({ default: ({ value, editable, theme, onChange, onCompositionChange, resolveFileUrl }: { value: DocumentContent; editable: boolean; theme: string; onChange: (value: DocumentContent) => void; onCompositionChange?: (active: boolean) => void; resolveFileUrl: (source: string) => Promise<string> }) => <><textarea aria-label="测试块编辑器" data-editor-theme={theme} readOnly={!editable} value={documentPlainText(value)} onCompositionStart={() => onCompositionChange?.(true)} onCompositionEnd={() => onCompositionChange?.(false)} onChange={event => onChange({ schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: event.target.value, children: [] }] })} /><button type="button" aria-label="测试读取图片" onClick={() => { const request = resolveFileUrl('/assets/artifact-one/picture'); imageRequests.values.push(request); void request.catch(() => undefined); }}>读取图片</button></> }));
 import DocumentRegion from '../src/app/canvas/DocumentRegion.js';
 import DocumentReadView from '../src/app/canvas/DocumentReadView.js';
 
@@ -32,6 +41,166 @@ async function edit() { await click('编辑文档'); for (let i = 0; i < 25 && !
 async function change(value: string, label = '测试块编辑器') { await act(async () => { const input = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(`[aria-label="${label}"]`)!; const prototype = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function tick(ms: number) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 const storedDraft = () => localStorage.getItem('studio-document-draft:owner:artifact-one:document-one');
+
+it('keeps document paper independent from UI theme in reading, editing and expansion', async () => {
+  props = { ...props, theme: 'dark' }; await render();
+  const shell = host.querySelector<HTMLElement>('.studio-document-region')!;
+  expect(shell.style.getPropertyValue('--document-paper')).toBe('#EFEFEF');
+  await edit(); expect(host.querySelector('[data-editor-theme]')!.getAttribute('data-editor-theme')).toBe('light');
+  props = { ...props, expanded: true, element: { ...props.element, fill: '#182232', color: '#E0B070' } }; await render();
+  expect(portal.querySelector<HTMLElement>('.studio-document-focus')!.style.getPropertyValue('--document-paper')).toBe('#182232');
+  expect(portal.querySelector('[data-editor-theme]')!.getAttribute('data-editor-theme')).toBe('dark');
+  expect(props.onSave).not.toHaveBeenCalled();
+});
+
+it('uses the same opaque backdrop beneath transparent paper in inline and expanded document surfaces', async () => {
+  props = { ...props, element: { ...props.element, fill: 'none' }, styleProfile: { ...LIGHT_THEME, paper: '#101010' }, theme: 'light' };
+  await render(); const shell = host.querySelector<HTMLElement>('.studio-document-region')!;
+  expect(shell.style.getPropertyValue('--document-backdrop')).toBe('#101010'); expect(shell.style.getPropertyValue('--document-paper')).toBe('rgba(0,0,0,0)');
+  props = { ...props, expanded: true, theme: 'dark' }; await render();
+  expect(portal.querySelector<HTMLElement>('.studio-document-focus')!.style.getPropertyValue('--document-backdrop')).toBe('#101010');
+  expect(props.element.fill).toBe('none'); expect(props.onSave).not.toHaveBeenCalled();
+});
+
+it('provides a title drag handle without assigning body text the move action', async () => {
+  const move = vi.fn(); props = { ...props, onMoveStart: move }; await render();
+  const handle = button('移动文档');
+  await act(async () => handle.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })));
+  expect(move).toHaveBeenCalledTimes(1);
+  props = { ...props, annotationMode: true }; await render(); expect(button('移动文档').disabled).toBe(false);
+  await act(async () => button('移动文档').dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })));
+  expect(move).toHaveBeenCalledTimes(2); expect(props.onAnnotate).not.toHaveBeenCalled();
+  await act(async () => host.querySelector('[data-document-block-id]')!.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true })));
+  expect(move).toHaveBeenCalledTimes(2);
+  props = { ...props, element: { ...props.element, locked: true } }; await render(); expect(button('移动文档').disabled).toBe(true);
+  props = { ...props, expanded: true }; await render(); expect(portal.querySelector('[aria-label="移动文档"]')).toBeNull();
+});
+
+it('opens a precise paragraph note directly in focused annotation mode and blocks link navigation', async () => {
+  props = { ...props, annotationMode: true, annotationActive: true, element: { ...props.element, document: { schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: [{ type: 'link', href: 'https://example.com', content: [{ type: 'text', text: '需要备注的段落', styles: {} }] }], children: [] }] } } }; await render();
+  window.getSelection()?.removeAllRanges(); const paragraph = host.querySelector<HTMLElement>('[data-document-block-id="paragraph"]')!;
+  await act(async () => paragraph.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true })));
+  expect(props.onAnnotate).toHaveBeenCalledWith(expect.objectContaining({ coordinateSpace: 'document', elementIds: ['document-one'], blockIds: ['paragraph'], quote: '需要备注的段落', sourceVersion: 1 }), 1, expect.any(Object));
+  expect(paragraph.classList.contains('is-anchored')).toBe(true);
+  const follow = new MouseEvent('click', { bubbles: true, cancelable: true }); await act(async () => paragraph.querySelector('a')!.dispatchEvent(follow)); expect(follow.defaultPrevented).toBe(true);
+  expect(host.textContent).toContain('选择段落或文字'); expect(props.onInteract).not.toHaveBeenCalled(); expect(props.onExpand).not.toHaveBeenCalled();
+});
+
+it('keeps the composing editor mounted when interaction stops and saves the final input against its original base', async () => {
+  await render(); await edit(); vi.useFakeTimers();
+  const editor = host.querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!;
+  await act(async () => editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '中' })));
+  props = { ...props, interactive: false, element: elementValue('他人更新', 2) }; await render();
+  expect(host.querySelector('[aria-label="测试块编辑器"]')).toBe(editor);
+  expect(host.querySelector('[data-native-interactive="true"]')).toBeNull();
+  await change('输入法尚在组合'); await tick(1000); expect(props.onSave).not.toHaveBeenCalled();
+  await change('输入法最终文字');
+  await act(async () => editor.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '文字' })));
+  expect(host.querySelector('[aria-label="测试块编辑器"]')).toBeNull();
+  expect(storedDraft()).toContain('输入法最终文字');
+  await tick(650);
+  expect(props.onSave).toHaveBeenLastCalledWith(documentValue('输入法最终文字'), '方案说明', expect.objectContaining({ version: 1 }), false);
+});
+
+it('keeps an in-flight save and its draft when pointer interaction ends, then accepts its acknowledgement once', async () => {
+  let acknowledge!: (element: BoardElement) => void;
+  props.onSave = vi.fn(() => new Promise<BoardElement>(resolve => { acknowledge = resolve; }));
+  await render(); await edit(); vi.useFakeTimers(); await change('切换对象前的正文'); await tick(650);
+  props = { ...props, interactive: false }; await render();
+  expect(host.querySelector('[aria-label="测试块编辑器"]')).toBeNull();
+  expect(storedDraft()).toContain('切换对象前的正文');
+  expect(props.onActivity).toHaveBeenLastCalledWith(expect.objectContaining({ editing: false, dirty: true, saving: true }));
+  await act(async () => acknowledge(elementValue('切换对象前的正文', 2))); await tick(1500);
+  expect(props.onSave).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[data-document-block-id="paragraph"]')!.textContent).toBe('切换对象前的正文');
+  expect(props.onActivity).toHaveBeenLastCalledWith(expect.objectContaining({ dirty: false, saving: false }));
+});
+
+it('saves dirty text after its own geometry ACK when the confirmed body and title still match its source', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'studio-document-move-')), service = new StudioService({ dataRoot: directory });
+  let latest: Board;
+  const queue = new NativeContentQueue({ send: args => service.execute('artifact_apply', args), changed: () => {}, accepted: (_task, receipt) => { latest = receipt.board; } });
+  try {
+    const created = await service.execute('artifact_manage', { action: 'create', elements: [props.element] }); latest = created.board;
+    props = { ...props, artifactId: created.artifact.id, element: latest.elements[0]!, onSave: vi.fn(async (document, title, base) => {
+      const operations: Operation[] = [{ op: 'document', id: base.id, data: { operations: documentOperations(base.document!, document) } }];
+      if (title !== base.text) operations.push({ op: 'update', id: base.id, changes: { text: title } });
+      return (await queue.enqueue(latest, operations, '编辑文档', [base]))?.board.elements[0] ?? false;
+    }) };
+    await render(); await edit(); await change('移动前还未发送的正文');
+    await act(async () => { await queue.enqueue(latest, [{ op: 'update', id: props.element.id, changes: { x: 250 } }], '移动元素', [props.element]); });
+    props = { ...props, element: latest!.elements[0]! }; await render();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 720)); });
+    expect(props.onSave).toHaveBeenCalledTimes(1); expect(vi.mocked(props.onSave).mock.calls[0]![2].version).toBe(2);
+    expect(queue.tasks).toEqual([]);
+    const saved = await service.execute('artifact_read', { artifactId: created.artifact.id, mode: 'objects', ids: [props.element.id] });
+    expect(saved.elements[0]).toMatchObject({ x: 250, version: 3 }); expect(documentPlainText(saved.elements[0].document)).toBe('移动前还未发送的正文');
+  } finally {
+    queue.setEnabled(false); await service.close();
+    if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected document move fixture');
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('keeps the original text base when a newer canonical version changed only the title', async () => {
+  props.onSave = vi.fn().mockRejectedValue(new Error('版本冲突'));
+  await render(); await edit(); vi.useFakeTimers(); await change('本机尚未保存的段落');
+  props = { ...props, element: { ...elementValue('已保存正文', 2), text: '协作者的新标题' } }; await render(); await tick(650);
+  expect(props.onSave).toHaveBeenLastCalledWith(documentValue('本机尚未保存的段落'), '方案说明', expect.objectContaining({ version: 1 }), false);
+  await click('比较最新内容'); expect(host.querySelector('[aria-label="比较文档草稿"]')!.textContent).toContain('协作者的新标题');
+});
+
+it.each([false, true])('does not open a late focused note after saving when interaction remains %s and focus-note mode ended', async interactive => {
+  let acknowledge!: (element: BoardElement) => void;
+  props.onSave = vi.fn(() => new Promise<BoardElement>(resolve => { acknowledge = resolve; }));
+  await render(); await edit(); await change('备注前需要保存的正文');
+  props = { ...props, annotationMode: true }; await render();
+  window.getSelection()?.removeAllRanges();
+  await act(async () => host.querySelector('[data-document-block-id="paragraph"]')!.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true })));
+  expect(props.onSave).toHaveBeenCalledTimes(1);
+  props = { ...props, interactive, annotationMode: false }; await render();
+  await act(async () => acknowledge({ ...elementValue('备注前需要保存的正文', 2) }));
+  expect(props.onAnnotate).not.toHaveBeenCalled();
+  expect(host.querySelector('[data-document-block-id="paragraph"]')!.textContent).toBe('备注前需要保存的正文');
+});
+
+it('keeps only the latest focused text range when a prior note is waiting for a save', async () => {
+  let acknowledge!: (element: BoardElement) => void;
+  props.onSave = vi.fn(() => new Promise<BoardElement>(resolve => { acknowledge = resolve; }));
+  await render(); await edit(); await change('先前选文，最新选文'); props = { ...props, annotationMode: true }; await render();
+  const text = host.querySelector('[data-document-block-id="paragraph"] p')!.firstChild!;
+  for (const [start, end] of [[0, 4], [5, 9]]) {
+    const range = document.createRange(); range.setStart(text, start); range.setEnd(text, end); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+    await act(async () => text.parentElement!.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true })));
+  }
+  await act(async () => acknowledge(elementValue('先前选文，最新选文', 2)));
+  expect(props.onAnnotate).toHaveBeenCalledTimes(1);
+  expect(props.onAnnotate).toHaveBeenCalledWith(expect.objectContaining({ quote: '最新选文', sourceVersion: 2, blockIds: ['paragraph'] }), 2, expect.any(Object));
+});
+
+it('lets the canvas end focused annotation after local menus are closed', async () => {
+  props = { ...props, annotationMode: true }; await render(); const exitFocus = vi.fn();
+  const remove = registerEscapeLayer(host, exitFocus, 10);
+  try {
+    await click('导出文档');
+    await act(async () => button('导出文档').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(exitFocus).not.toHaveBeenCalled();
+    await act(async () => button('导出文档').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(exitFocus).toHaveBeenCalledTimes(1); expect(props.onInteract).not.toHaveBeenCalled();
+  } finally { remove(); }
+});
+
+it.each(['#EFEFEF', '#182232'])('preserves explicit inline colors and rejects unsafe paints on paper %s', async fill => {
+  props = { ...props, element: { ...props.element, fill, document: { schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: [
+    { type: 'text', text: '显式颜色', styles: { textColor: '#E0B070', backgroundColor: 'rgb(12,24,36)', bold: true } },
+    { type: 'text', text: '预设颜色', styles: { textColor: 'red' } },
+    { type: 'text', text: '<script>unsafe</script>', styles: { textColor: 'red; background:url(javascript:x)', backgroundColor: 'url(javascript:x)' } },
+  ], children: [] }] } } }; await render();
+  const block = host.querySelector('[data-document-block-id="paragraph"]')!, spans = block.querySelectorAll<HTMLSpanElement>('span[style]');
+  expect(spans[0]!.style.color).toBe('rgb(224, 176, 112)'); expect(spans[0]!.style.backgroundColor).toBe('rgb(12, 24, 36)'); expect(spans[0]!.querySelector('strong')!.textContent).toBe('显式颜色');
+  expect(spans[1]!.style.color).toBe(fill === '#EFEFEF' ? 'rgb(224, 62, 62)' : 'rgb(236, 64, 64)');
+  expect(block.querySelector('script')).toBeNull(); expect(block.innerHTML).not.toContain('javascript:'); expect(block.textContent).toContain('<script>unsafe</script>');
+});
 
 it('does not promote an ACK containing foreign paragraphs underneath new local typing', async () => {
   let acknowledge!: (element: BoardElement) => void;

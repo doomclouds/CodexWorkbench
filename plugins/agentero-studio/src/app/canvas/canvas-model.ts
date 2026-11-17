@@ -1,5 +1,6 @@
 import { DEFAULT_STYLE, type Anchor, type BoardElement, type ElementType, type Operation, type StudioClient, type StyleProfile } from '../../contracts/studio.js';
 import { newClientId } from '../shared/client-id.js';
+import { DEFAULT_REGION_FILL } from '../../core/products/document-surface.js';
 import { DARK_THEME, LIGHT_THEME } from '../../core/theme.js';
 import { arrowGeometry, arrowLabelBox } from '../../core/products/whiteboard-geometry.js';
 import { defaultDocument } from '../../contracts/document.js';
@@ -123,11 +124,11 @@ export function makeElement(type: ElementType, point: Point, overrides: Partial<
     shape: { w: 208, h: 112, kind: 'rounded', text: '', fill: '#EFEFEF', stroke: 'transparent', fontSize: 16 },
     note: { w: 208, h: 184, text: '', fill: '#F9E56F', color: '#0B0B0B', fontSize: 15 },
     text: { w: 300, h: 70, text: '', fontSize: 16, fill: 'transparent' },
-    container: { w: 600, h: 360, text: '分区', fill: '#EFEFEF', stroke: '#9ca3af', fontSize: 18 },
+    container: { w: 600, h: 360, text: '分区', fill: DEFAULT_REGION_FILL, stroke: '#9ca3af', fontSize: 18 },
     stroke: { w: 1, h: 1, points: [0, 0, 1, 1], stroke: 'muted', strokeWidth: 3 },
     arrow: { w: 180, h: 1, from: [point.x, point.y], to: [point.x + 180, point.y], color: 'muted', head: 'end' },
     html: { w: 1440, h: 1120, text: 'HTML 图解', html: '' },
-    document: { w: 680, h: 560, text: '文档', document: defaultDocument() },
+    document: { w: 680, h: 560, text: '文档', fill: DEFAULT_REGION_FILL, document: defaultDocument() },
     image: { w: 360, h: 240 },
     table: { w: 480, h: 180, data: { rows: [['名称', '说明', '状态'], ['项目 A', '双击编辑表格', '进行中'], ['项目 B', '待补充', '待处理']] }, fill: '#ffffff', color: '#2d3142' },
     link: { w: 320, h: 94, text: '链接', href: 'https://example.com', fill: '#ffffff' },

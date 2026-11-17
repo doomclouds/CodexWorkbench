@@ -482,6 +482,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
     if (!canComment || preview || suggestionPreview) return;
     setPanel(null); setSelectedFeedback(null);
     if (savedComment) { setCommentOpen(true); inform('当前备注已保存，请先完成附加。'); return; }
+    if (annotation && feedbackText.trim()) { setCommentOpen(true); inform('已有未发送的备注草稿，请先完成或清空当前备注，再选择新目标。'); return; }
     const current = boardRef.current;
     setAnnotation({ ...selection, label: current ? describeCommentTarget(current, selection.anchor, selection.label) : selection.label }); setCommentOpen(true); setCommentError(''); commentPending.current = null;
   }

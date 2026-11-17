@@ -142,7 +142,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.10";
+    PLUGIN_VERSION = "0.2.11";
   }
 });
 
@@ -8056,6 +8056,57 @@ var init_document = __esm({
   }
 });
 
+// src/core/products/document-surface.ts
+function documentInlineColor(value, kind, scheme = "light") {
+  if (typeof value !== "string" || value === "default") return void 0;
+  const preset = inlinePalette[value];
+  if (preset) return preset[(scheme === "dark" ? 2 : 0) + (kind === "background" ? 1 : 0)];
+  try {
+    parseColor(value);
+    return paint(value, LIGHT_THEME, "") || void 0;
+  } catch {
+    return void 0;
+  }
+}
+function paint(value, style, fallback) {
+  try {
+    const color = semanticColor(value, style, fallback), [r, g, b, a] = parseColor(color === "none" ? "transparent" : color);
+    if (![r, g, b, a].every(Number.isFinite)) return fallback;
+    return a === 1 ? "#" + [r, g, b].map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("").toUpperCase() : `rgba(${r},${g},${b},${a})`;
+  } catch {
+    return fallback;
+  }
+}
+function documentSurface(element, style = LIGHT_THEME) {
+  const [r, g, b, alpha] = parseColor(paint(style.paper, LIGHT_THEME, DEFAULT_REGION_FILL));
+  const fallback = parseColor(DEFAULT_REGION_FILL);
+  const backdrop = "#" + [r, g, b].map((channel, index) => Math.round(channel * alpha + fallback[index] * (1 - alpha)).toString(16).padStart(2, "0")).join("").toUpperCase();
+  const paper = paint(element.fill, style, DEFAULT_REGION_FILL), automaticInk = readableText(paper, backdrop);
+  const scheme = automaticInk === "#111111" ? "light" : "dark";
+  const ink = element.color === "ink" ? automaticInk : paint(element.color, style, automaticInk);
+  const readable = (color) => contrastRatio(color, paper, backdrop) >= 4.5 ? color : automaticInk;
+  return { backdrop, paper, ink, scheme, muted: readable(scheme === "light" ? "#4F5D75" : "#C3CAD6"), rule: scheme === "light" ? "#A8B0BD" : "#667285", code: scheme === "light" ? "#E1E3E7" : "#242B38", link: readable(scheme === "light" ? "#245AA9" : "#A8C8FF") };
+}
+var DEFAULT_REGION_FILL, inlinePalette;
+var init_document_surface = __esm({
+  "src/core/products/document-surface.ts"() {
+    "use strict";
+    init_theme();
+    DEFAULT_REGION_FILL = "#EFEFEF";
+    inlinePalette = {
+      gray: ["#9b9a97", "#ebeced", "#bebdb8", "#9b9a97"],
+      brown: ["#64473a", "#e9e5e3", "#8e6552", "#64473a"],
+      red: ["#e03e3e", "#fbe4e4", "#ec4040", "#be3434"],
+      orange: ["#d9730d", "#f6e9d9", "#e3790d", "#b7600a"],
+      yellow: ["#dfab01", "#fbf3db", "#dfab01", "#b58b00"],
+      green: ["#4d6461", "#ddedea", "#6b8b87", "#4d6461"],
+      blue: ["#0b6e99", "#ddebf1", "#0e87bc", "#0b6e99"],
+      purple: ["#6940a5", "#eae4f2", "#8552d7", "#6940a5"],
+      pink: ["#ad1a72", "#f4dfeb", "#da208f", "#ad1a72"]
+    };
+  }
+});
+
 // src/core/products/document-serialization.ts
 function link(value) {
   if (typeof value !== "string") return;
@@ -8065,33 +8116,32 @@ function link(value) {
   } catch {
   }
 }
-function inline(value) {
+function inline(value, scheme) {
   if (typeof value === "string") return esc2(value);
-  if (Array.isArray(value)) return value.map(inline).join("");
+  if (Array.isArray(value)) return value.map((item) => inline(item, scheme)).join("");
   if (!record4(value)) return "";
   if (value.type === "link") {
-    const href = link(value.href), content = inline(value.content);
+    const href = link(value.href), content = inline(value.content, scheme);
     return href ? `<a href="${esc2(href)}">${content}</a>` : content;
   }
-  if (typeof value.text !== "string") return inline(value.content);
+  if (typeof value.text !== "string") return inline(value.content, scheme);
   let text2 = esc2(value.text).replaceAll("\n", "<br>");
   const styles = record4(value.styles) ? value.styles : {};
   for (const [property, tag] of [["bold", "strong"], ["italic", "em"], ["underline", "u"], ["strike", "s"], ["code", "code"]]) if (styles[property]) text2 = `<${tag}>${text2}</${tag}>`;
-  const paint = (color2) => typeof color2 === "string" && color2 !== "default" && /^(?:#[\da-f]{3,8}|[a-z]+)$/i.test(color2) ? color2 : void 0;
-  const color = paint(styles.textColor), background = paint(styles.backgroundColor);
+  const color = documentInlineColor(styles.textColor, "text", scheme), background = documentInlineColor(styles.backgroundColor, "background", scheme);
   return color || background ? `<span style="${color ? `color:${color};` : ""}${background ? `background-color:${background};` : ""}">${text2}</span>` : text2;
 }
-function table(content) {
+function table(content, scheme) {
   const rows = record4(content) && Array.isArray(content.rows) ? content.rows : [];
   const headers = record4(content) && typeof content.headerRows === "number" ? content.headerRows : 0;
   return `<table><tbody>${rows.map((row, index) => `<tr>${(record4(row) && Array.isArray(row.cells) ? row.cells : []).map((cell) => {
     const tag = index < headers ? "th" : "td", props = record4(cell) && record4(cell.props) ? cell.props : {};
     const span = (name) => Number.isInteger(props[name]) && Number(props[name]) > 1 && Number(props[name]) <= 100 ? ` ${name}="${props[name]}"` : "";
-    return `<${tag}${span("colspan")}${span("rowspan")}>${inline(cell)}</${tag}>`;
+    return `<${tag}${span("colspan")}${span("rowspan")}>${inline(cell, scheme)}</${tag}>`;
   }).join("")}</tr>`).join("")}</tbody></table>`;
 }
-function blockBody(block) {
-  const content = inline(block.content), children = blocksHtml(block.children ?? []), id2 = ` data-block-id="${esc2(block.id)}"`;
+function blockBody(block, scheme) {
+  const content = inline(block.content, scheme), children = blocksHtml(block.children ?? [], scheme), id2 = ` data-block-id="${esc2(block.id)}"`;
   const align = ["left", "center", "right", "justify"].includes(String(block.props.textAlignment)) ? ` style="text-align:${block.props.textAlignment}"` : "";
   if (block.type === "heading") {
     const level = Math.max(1, Math.min(6, Number(block.props.level) || 1));
@@ -8100,7 +8150,7 @@ function blockBody(block) {
   if (block.type === "codeBlock") return `<pre${id2}><code>${esc2(documentBlockText(block))}</code></pre>${children}`;
   if (block.type === "quote") return `<blockquote${id2}>${content}${children}</blockquote>`;
   if (block.type === "divider") return `<hr${id2}>${children}`;
-  if (block.type === "table") return `<div${id2} class="document-table">${table(block.content)}</div>${children}`;
+  if (block.type === "table") return `<div${id2} class="document-table">${table(block.content, scheme)}</div>${children}`;
   if (block.type === "image") {
     const url2 = typeof block.props.url === "string" ? block.props.url : "";
     const width = typeof block.props.previewWidth === "number" && block.props.previewWidth > 0 ? ` style="width:${Math.min(1e4, block.props.previewWidth)}px"` : "";
@@ -8108,32 +8158,37 @@ function blockBody(block) {
   }
   return `<p${id2}${align}>${content || "<br>"}</p>${children}`;
 }
-function blocksHtml(blocks) {
+function blocksHtml(blocks, scheme = "light") {
   let html2 = "";
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index];
     if (!["bulletListItem", "numberedListItem", "checkListItem"].includes(block.type)) {
-      html2 += blockBody(block);
+      html2 += blockBody(block, scheme);
       continue;
     }
     const tag = block.type === "numberedListItem" ? "ol" : "ul", list = [block];
     while (blocks[index + 1]?.type === block.type) list.push(blocks[++index]);
     const start = (item) => item.type === "numberedListItem" && typeof item.props.start === "number" && Number.isInteger(item.props.start) ? item.props.start : void 0;
-    html2 += `<${tag}${block.type === "checkListItem" ? ' class="document-tasks"' : start(block) !== void 0 ? ` start="${start(block)}"` : ""}>${list.map((item, at) => `<li data-block-id="${esc2(item.id)}"${at && start(item) !== void 0 ? ` value="${start(item)}"` : ""}>${item.type === "checkListItem" ? `<input type="checkbox" disabled${item.props.checked ? " checked" : ""}> ` : ""}${inline(item.content)}${blocksHtml(item.children ?? [])}</li>`).join("")}</${tag}>`;
+    html2 += `<${tag}${block.type === "checkListItem" ? ' class="document-tasks"' : start(block) !== void 0 ? ` start="${start(block)}"` : ""}>${list.map((item, at) => `<li data-block-id="${esc2(item.id)}"${at && start(item) !== void 0 ? ` value="${start(item)}"` : ""}>${item.type === "checkListItem" ? `<input type="checkbox" disabled${item.props.checked ? " checked" : ""}> ` : ""}${inline(item.content, scheme)}${blocksHtml(item.children ?? [], scheme)}</li>`).join("")}</${tag}>`;
   }
   return html2;
 }
-function documentHtml(document, title) {
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src 'unsafe-inline';img-src data:;object-src 'none';base-uri 'none';form-action 'none'"><title>${esc2(title)}</title><style>body{margin:0;background:#f3f5f7}main{max-width:900px;margin:auto;min-height:100vh}${DOCUMENT_EXPORT_CSS}</style></head><body><main class="studio-document"><h1>${esc2(title)}</h1>${blocksHtml(document.blocks)}</main></body></html>`;
+function documentSurfaceCss(surface) {
+  return `${["paper", "backdrop", "ink", "muted", "rule", "code", "link"].map((key) => `--document-${key}:${surface[key]}`).join(";")};background-color:${surface.backdrop};background-image:linear-gradient(${surface.paper},${surface.paper});color:${surface.ink};color-scheme:${surface.scheme};`;
 }
-var esc2, record4, DOCUMENT_EXPORT_CSS;
+function documentHtml(document, title, surface = defaultSurface) {
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';style-src 'unsafe-inline';img-src data:;object-src 'none';base-uri 'none';form-action 'none'"><title>${esc2(title)}</title><style>body{margin:0;background:${surface.backdrop};color-scheme:${surface.scheme}}main{max-width:900px;margin:auto;min-height:100vh}${DOCUMENT_EXPORT_CSS}</style></head><body><main class="studio-document" style="${esc2(documentSurfaceCss(surface))}"><h1>${esc2(title)}</h1>${blocksHtml(document.blocks, surface.scheme)}</main></body></html>`;
+}
+var esc2, record4, defaultSurface, DOCUMENT_EXPORT_CSS;
 var init_document_serialization = __esm({
   "src/core/products/document-serialization.ts"() {
     "use strict";
     init_document();
+    init_document_surface();
     esc2 = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
     record4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-    DOCUMENT_EXPORT_CSS = `.studio-document{box-sizing:border-box;line-height:1.8;color:#24303e;background:#fff;font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;padding:28px;overflow-wrap:anywhere}.studio-document h1,.studio-document h2,.studio-document h3{line-height:1.4;margin:1.25em 0 .5em}.studio-document p{margin:.65em 0}.studio-document img{max-width:100%;height:auto}.studio-document figure{margin:1em 0}.studio-document figcaption{font-size:13px;color:#65717e}.studio-document pre{padding:14px;background:#f2f4f7;border-radius:6px;overflow:auto;white-space:pre-wrap}.studio-document code{font-family:Consolas,monospace}.studio-document blockquote{border-left:3px solid #abb9c8;padding-left:16px;margin:1em 0;color:#526172}.studio-document table{border-collapse:collapse;width:100%}.studio-document th,.studio-document td{border:1px solid #ccd4de;padding:6px 10px;min-width:60px}.studio-document .document-table{overflow:auto}.studio-document .document-tasks{list-style:none;padding-left:1em}.studio-document a{color:#325fc1}.studio-document hr{border:0;border-top:1px solid #ccd4de;margin:20px 0}`;
+    defaultSurface = documentSurface({});
+    DOCUMENT_EXPORT_CSS = `.studio-document{box-sizing:border-box;line-height:1.8;color:var(--document-ink,${defaultSurface.ink});background-color:var(--document-backdrop,${defaultSurface.backdrop});background-image:linear-gradient(var(--document-paper,${defaultSurface.paper}),var(--document-paper,${defaultSurface.paper}));font:16px/1.8 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;padding:28px;overflow-wrap:anywhere}.studio-document h1,.studio-document h2,.studio-document h3{line-height:1.4;margin:1.25em 0 .5em}.studio-document p{margin:.65em 0}.studio-document img{max-width:100%;height:auto}.studio-document figure{margin:1em 0}.studio-document figcaption{font-size:13px;color:var(--document-muted,${defaultSurface.muted})}.studio-document pre{padding:14px;background:var(--document-code,${defaultSurface.code});border-radius:6px;overflow:auto;white-space:pre-wrap}.studio-document code{font-family:Consolas,monospace}.studio-document blockquote{border-left:3px solid var(--document-rule,${defaultSurface.rule});padding-left:16px;margin:1em 0;color:var(--document-muted,${defaultSurface.muted})}.studio-document table{border-collapse:collapse;width:100%}.studio-document th,.studio-document td{border:1px solid var(--document-rule,${defaultSurface.rule});padding:6px 10px;min-width:60px}.studio-document .document-table{overflow:auto}.studio-document .document-tasks{list-style:none;padding-left:1em}.studio-document a{color:var(--document-link,${defaultSurface.link})}.studio-document hr{border:0;border-top:1px solid var(--document-rule,${defaultSurface.rule});margin:20px 0}`;
   }
 });
 
@@ -8314,9 +8369,10 @@ function elementSvg(e, board, options = {}) {
   const ink = semanticColor(e.stroke, style, style.muted);
   let markup = "";
   if (e.type === "document" && e.document) {
+    const surface = documentSurface(e, style);
     const preview = { ...e, text: `${e.text || "\u6587\u6863"}
 ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
-    markup = `<rect x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="#fff" stroke="#ccd4de" rx="7"/>${textSvg(preview, board, "#24303e")}`;
+    markup = `<rect data-document-backdrop="true" x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="${escapeXml(surface.backdrop)}" rx="7"/><rect data-document-paper="true" x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="${escapeXml(surface.paper)}" stroke="${escapeXml(surface.rule)}" rx="7"/>${textSvg(preview, board, surface.ink)}`;
   } else if (isHtmlRegionElement(e)) {
     const html2 = String(e.html ?? "");
     if (options.svgRegions === true) {
@@ -8431,7 +8487,10 @@ function buildBoardHtml(board, options = {}) {
   const elements = selectedElements(board, options);
   const bounds2 = boardBounds(elements, 32, board.elements);
   const layers = elements.map((e) => {
-    if (e.type === "document" && e.document) return `<section data-studio-id="${escapeXml(e.id)}" class="studio-document" aria-label="${escapeXml(e.text || "\u6587\u6863")}" style="position:absolute;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;overflow:auto;transform:rotate(${scalar(e.rotation, 0)}deg)"><h1>${escapeXml(e.text || "\u6587\u6863")}</h1>${blocksHtml(e.document.blocks)}</section>`;
+    if (e.type === "document" && e.document) {
+      const surface = documentSurface(e, board.style);
+      return `<section data-studio-id="${escapeXml(e.id)}" class="studio-document" aria-label="${escapeXml(e.text || "\u6587\u6863")}" style="${escapeXml(documentSurfaceCss(surface))}position:absolute;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;overflow:auto;transform:rotate(${scalar(e.rotation, 0)}deg)"><h1>${escapeXml(e.text || "\u6587\u6863")}</h1>${blocksHtml(e.document.blocks, surface.scheme)}</section>`;
+    }
     if (isHtmlRegionElement(e)) return `<iframe title="${escapeXml(e.text || e.id)}" sandbox="allow-scripts" style="position:absolute;border:0;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)" srcdoc="${escapeXml(offlineRegionHtml(e))}"></iframe>`;
     if (e.type === "image" && e.video) {
       if (!/^data:video\//i.test(e.video) || e.src && !/^data:image\//i.test(e.src)) throw new ExportError("ASSET_NOT_EMBEDDED", "HTML \u5BFC\u51FA\u9700\u8981\u5148\u5D4C\u5165\u89C6\u9891\u548C\u5C01\u9762\u8D44\u6E90\u3002");
@@ -8442,7 +8501,7 @@ function buildBoardHtml(board, options = {}) {
     return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds2.x}px;top:${box.y - bounds2.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
   }).join("");
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}main{position:relative;width:${bounds2.width}px;height:${bounds2.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds2.width}px;height:${bounds2.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
 `;
 }
 var ExportError, isHtmlRegionElement;
@@ -8455,6 +8514,7 @@ var init_serialization = __esm({
     init_rich_text();
     init_document();
     init_document_serialization();
+    init_document_surface();
     ExportError = class extends Error {
       constructor(code, message) {
         super(message);
@@ -9130,7 +9190,7 @@ async function exportArtifact(board, format, options = {}) {
   const title = oneRegion?.text || oneDocument?.text || board.artifact.title;
   if (format === "json") return { mimeType: "application/json", filename: filenameFor(title, "json"), encoding: "utf8", data: `${JSON.stringify({ ...board, elements: selected }, null, 2)}
 ` };
-  if (format === "html") return { mimeType: "text/html", filename: filenameFor(title, "html"), encoding: "utf8", data: oneDocument?.document ? documentHtml(oneDocument.document, title) : oneRegion ? String(oneRegion.html ?? "") : buildBoardHtml(board, options) };
+  if (format === "html") return { mimeType: "text/html", filename: filenameFor(title, "html"), encoding: "utf8", data: oneDocument?.document ? documentHtml(oneDocument.document, title, documentSurface(oneDocument, board.style)) : oneRegion ? String(oneRegion.html ?? "") : buildBoardHtml(board, options) };
   if (oneDocument && (format === "svg" || format === "png")) throw new ExportError("UNSUPPORTED_DOCUMENT_EXPORT", "\u6587\u6863\u5168\u6587\u8BF7\u5BFC\u51FA HTML \u6216 JSON\uFF1B\u767D\u677F\u56FE\u7247\u53EA\u8868\u793A\u533A\u57DF\u5185\u7684\u53EF\u89C1\u6458\u8981\u3002");
   if (format === "svg" || format === "png") {
     let svg = oneRegion ? extractRegionSvg(String(oneRegion.html ?? ""), oneRegion.id) : buildBoardSvg(board, options);
@@ -9151,6 +9211,7 @@ var init_export = __esm({
     init_resvg_wasm();
     init_serialization();
     init_document_serialization();
+    init_document_surface();
     init_serialization();
   }
 });
