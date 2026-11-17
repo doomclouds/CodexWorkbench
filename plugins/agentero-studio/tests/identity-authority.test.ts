@@ -169,17 +169,17 @@ describe('fresh authority at the artifact transaction', () => {
   it('throttles ordinary Cookie-only authentication and Presence writes without skipping fresh access checks', async () => {
     const info = await share({ action: 'start', access: 'local' }), viewer = guest(tokenFor(info));
     const actor = await viewer.join('Cookie-only touch'); viewer.use();
-    const write = vi.spyOn(host.service.store, 'write'), transaction = vi.spyOn(host.service.store, 'transaction');
+    const transaction = vi.spyOn(host.service.store, 'transaction');
     expect((await viewer.session()).response.status).toBe(200);
     expect((await viewer.call('artifact_read', { mode: 'summary' })).response.status).toBe(200);
     expect((await viewer.request('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, peerId: 'touch-peer', visible: true }) })).status).toBe(200);
-    expect(transaction).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
     await host.service.store.transaction(artifactId, state => { state.sharing.members![actor.id]!.lastSeenAt = new Date(Date.now() - 61_000).toISOString(); });
-    write.mockClear(); transaction.mockClear();
-    expect((await viewer.session()).response.status).toBe(200); expect(write).toHaveBeenCalledTimes(1);
-    expect((await viewer.session()).response.status).toBe(200); expect(write).toHaveBeenCalledTimes(1);
-    await share({ action: 'remove', memberId: actor.id }); write.mockClear(); transaction.mockClear();
-    expect((await viewer.session()).response.status).toBe(401); expect(write).not.toHaveBeenCalled();
+    transaction.mockClear();
+    expect((await viewer.session()).response.status).toBe(200); expect(transaction).toHaveBeenCalledTimes(1);
+    expect((await viewer.session()).response.status).toBe(200); expect(transaction).toHaveBeenCalledTimes(1);
+    await share({ action: 'remove', memberId: actor.id }); transaction.mockClear();
+    expect((await viewer.session()).response.status).toBe(401); expect(transaction).not.toHaveBeenCalled();
   });
 
   it('keeps hot authorization/context projections fresh when another service changes the grant', async () => {
@@ -286,12 +286,12 @@ describe('fresh authority at the artifact transaction', () => {
     expect((await pending).status).toBe(401); expect((await host.service.store.read(artifactId)).assets).toEqual({});
   });
 
-  it('commits a room timer under fresh artifact authorization without rewriting unchanged artifact JSON', async () => {
-    const before = await readFile(host.service.store.file(artifactId), 'utf8');
-    const write = vi.spyOn(host.service.store, 'write').mockRejectedValue(Object.assign(new Error('Unrelated artifact write must not run'), { code: 'EIO' }));
+  it('commits a room timer under fresh artifact authorization without rewriting the artifact database', async () => {
+    const before = await readFile(host.service.store.file(artifactId));
+    const write = vi.spyOn(host.service.store, 'transaction').mockRejectedValue(Object.assign(new Error('Unrelated artifact transaction must not run'), { code: 'EIO' }));
     const result = await host.service.updatePresence(artifactId, { peerId: 'timer-owner', timer: { action: 'start', durationSeconds: 60 } }, host.service.owner);
     expect(write).not.toHaveBeenCalled(); expect(result.timer?.deadline).toBeGreaterThan(Date.now()); expect(host.service.getTimer(artifactId)?.deadline).toBe(result.timer?.deadline);
-    expect(await readFile(host.service.store.file(artifactId), 'utf8')).toBe(before);
+    expect(await readFile(host.service.store.file(artifactId))).toEqual(before);
   });
 });
 

@@ -97,17 +97,17 @@ it('does not retry an unrelated filesystem error or replace the old target', asy
   expect((await readdir(folder)).filter(name => name.endsWith('.tmp'))).toEqual([]);
 });
 
-it.runIf(process.platform === 'win32')('keeps the transaction lock and CAS while retrying a blocked Windows replacement', async () => {
+it('commits only one of two concurrent updates to the same SQLite object version', async () => {
   const service = new StudioService({ dataRoot: folder }), other = new StudioService({ dataRoot: folder }); services.push(service, other);
   const created = await service.execute('artifact_manage', { action: 'create', elements: [{ id: 'a', type: 'text', text: 'old' }] });
-  const id = created.artifact.id, file = service.store.file(id), release = await holdReplacement(file), firstFailure = watchFirstFailure(file);
+  const id = created.artifact.id;
   const attempt = (instance: StudioService, text: string) => instance.execute('artifact_apply', { artifactId: id, operationId: randomUUID(), expectedVersions: { a: 1 }, operations: [{ op: 'update', id: 'a', changes: { text } }] });
-  const first = attempt(service, 'committed once').then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
-  await firstFailure; expect(JSON.parse(await readFile(file, 'utf8')).content.elements[0]).toMatchObject({ text: 'old', version: 1 });
-  const second = attempt(other, 'stale overwrite').then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error }));
-  await release(); const results = await Promise.all([first, second]);
-  expect(results[0].ok).toBe(true); expect(results[1]).toMatchObject({ ok: false, error: { code: 'CONFLICT' } });
+  const updates = ['first update', 'second update'];
+  const results = await Promise.allSettled([attempt(service, updates[0]!), attempt(other, updates[1]!)]);
+  expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { code: 'CONFLICT' } });
+  const committed = updates[results.findIndex(result => result.status === 'fulfilled')];
   const board = await service.execute('artifact_read', { artifactId: id, mode: 'board' });
-  expect(board.elements[0]).toMatchObject({ text: 'committed once', version: 2 }); expect(board.artifact.revision).toBe(1);
+  expect(board.elements[0]).toMatchObject({ text: committed, version: 2 }); expect(board.artifact.revision).toBe(1);
   expect((await service.store.read(id)).operations).toHaveLength(1);
 }, 15000);

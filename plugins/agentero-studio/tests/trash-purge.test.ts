@@ -83,9 +83,10 @@ describe('shared artifact permanent deletion', () => {
   it('rejects redirected artifact folders or nested assets without touching the external namespace', async () => {
     const id = await create(), other = await create(); await trash(id);
     const folder = service.store.folder(id), original = `${folder}-original`;
+    const database = await readFile(service.store.file(id));
     await rename(folder, original); await symlink(original, folder, 'junction');
     expect(await purge(id)).toMatchObject({ failures: [{ code: 'RESOURCE_SCOPE' }] });
-    expect(await readFile(join(original, 'artifact.json'), 'utf8')).toContain(id);
+    expect(await readFile(join(original, 'artifact.sqlite'))).toEqual(database);
     await rm(folder); await rename(original, folder);
     await symlink(service.store.folder(other), join(folder, 'assets'), 'junction');
     expect(await purge(id)).toMatchObject({ failures: [{ code: 'RESOURCE_SCOPE' }] });

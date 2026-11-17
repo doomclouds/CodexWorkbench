@@ -3,7 +3,8 @@ import { mkdir, mkdtemp, readFile, rename, rm, symlink, truncate, writeFile } fr
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { LOCAL_ACTOR, type Actor, type AgentTaskBinding, type Board, type Operation } from '../src/contracts/studio.js';
-import { StudioService } from '../src/core/service.js';
+import { StudioError, StudioService } from '../src/core/service.js';
+import { SqliteArtifactRepository } from '../src/core/shared/sqlite-artifact.js';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=', 'base64');
 const agent: Actor = { id: 'codex', name: 'Codex', kind: 'agent', role: 'owner' };
@@ -131,7 +132,7 @@ describe('model-side local asset lifecycle', () => {
   });
 
   it('recovers from metadata write failures and deletion interrupted after the file move', async () => {
-    const asset = await upload(), write = vi.spyOn(service.store, 'write').mockRejectedValueOnce(new Error('disk unavailable'));
+    const asset = await upload(), write = vi.spyOn(SqliteArtifactRepository.prototype, 'writeState').mockImplementationOnce(() => { throw new StudioError('IO_ERROR', 'disk unavailable'); });
     await expect(remove(asset.id)).rejects.toThrow('disk unavailable'); write.mockRestore();
     expect((await service.execute('artifact_read', { artifactId, mode: 'assets' })).assets[0].id).toBe(asset.id);
     expect(Buffer.from((await service.getAsset(artifactId, asset.id)).data)).toEqual(png);

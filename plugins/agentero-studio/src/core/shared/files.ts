@@ -127,7 +127,7 @@ export async function putAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactI
   return { id, url: `/assets/${artifactId}/${id}`, src: `/assets/${artifactId}/${id}`, filename, mimeType, size: data.byteLength };
 }
 export async function getAsset<C, A, S>(store: ArtifactStore<C, A, S>, artifactId: string, assetId: string): Promise<AssetRecord & { data: Uint8Array }> {
-  safeId(assetId, '资源 ID'); const state = await store.read(artifactId), asset = Object.hasOwn(state.assets, assetId) ? state.assets[assetId] : undefined;
+  safeId(assetId, '资源 ID'); const asset = await store.readProjection(artifactId, state => Object.hasOwn(state.assets, assetId) ? state.assets[assetId] : undefined);
   if (!asset) throw new StudioError('NOT_FOUND', '资源不存在。');
   let data: Uint8Array;
   try { data = await readBoundedAsset(join(await assetDirectory(store, artifactId, 'assets'), assetId)); }

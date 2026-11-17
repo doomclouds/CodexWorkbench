@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { unzipSync, zipSync, strToU8 } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import { JSDOM } from 'jsdom';
 import { StudioService } from '../src/core/service.js';
 import { createStudioServer } from '../src/server/protocol.js';
@@ -12,6 +12,7 @@ import { LOCAL_ACTOR, type Actor, type Board, type Operation } from '../src/cont
 import { applyDocumentOperations, defaultDocument, documentAnchorState, documentBlockText, documentOperations, documentPlainText, normalizeDocument, type DocumentBlock, type DocumentBlockOperation, type DocumentContent } from '../src/contracts/document.js';
 import { buildBoardHtml } from '../src/core/serialization.js';
 import { documentHtml } from '../src/core/products/document-serialization.js';
+import { archiveState, replaceArchiveState } from './helpers/archive-state.js';
 
 const paragraph = (id: string, text: string): DocumentBlock => ({ id, type: 'paragraph', props: {}, content: [{ type: 'text', text, styles: {} }], children: [] });
 const content = (...blocks: DocumentBlock[]): DocumentContent => ({ schemaVersion: 1, blocks });
@@ -157,9 +158,9 @@ describe('document service contracts', () => {
   });
   it('rejects malformed imported document JSON before publishing and refuses incomplete offline image exports', async () => {
     const exported = await service.execute('artifact_export', { artifactId, format: 'zip' });
-    const entries = unzipSync((await service.getExport(exported.exportId)).data), snapshot = JSON.parse(new TextDecoder().decode(entries['artifact.json']!));
-    snapshot.content.elements[0].document.blocks[1].id = 'one';
-    entries['artifact.json'] = strToU8(JSON.stringify(snapshot));
+    const entries = unzipSync((await service.getExport(exported.exportId)).data), snapshot = await archiveState(entries, directory);
+    (snapshot.content as Board).elements[0]!.document!.blocks[1]!.id = 'one';
+    await replaceArchiveState(entries, snapshot, directory);
     await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
     expect((await service.execute('artifact_list', {})).artifacts).toHaveLength(1);
     await patch([{ op: 'insert', block: { id: 'external', type: 'image', props: { url: 'https://example.com/not-bundled.png' } } }]);

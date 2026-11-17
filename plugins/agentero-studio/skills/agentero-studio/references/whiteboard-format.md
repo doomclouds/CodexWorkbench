@@ -119,4 +119,4 @@ HTML 区域与原生分区（`type: "container"`，用于框住一组内容）�
 
 `artifact_read mode: "assets"` 只向房主分页返回资源元数据；有 `nextOffset` 时继续。`asset-delete` 使用 `assetId`，拒绝删除当前内容、保留历史、冻结反馈或私人建议仍引用的资源；移除后保留内部回收副本，不等于立即释放所有磁盘空间。
 
-整作品备份是 `artifact_export format: "zip"`，包含内容、资源、历史和反馈。`artifact_manage action: "import", archivePath: "用户指定的绝对ZIP路径"` 导入为新 ID；界面用文件选择器和受控上传走同一业务逻辑。普通 JSON/HTML 是数据或画面导出，不能冒充完整可恢复备份。
+整作品备份是 `artifact_export format: "zip"`，包含数据库、资源、历史和反馈。当前数据库 ZIP 使用 `agentero-studio-archive` 的版本 2 格式；`artifact_manage action: "import", archivePath: "用户指定的绝对ZIP路径"` 导入为新 ID，界面用文件选择器和受控上传走同一业务逻辑。旧 JSON ZIP 返回 `UNSUPPORTED_STORAGE`；AI 从副本迁移的方式见[旧数据与迁移](legacy-data-migration.md)。普通 JSON/HTML 是数据或画面导出，不能冒充完整可恢复备份。

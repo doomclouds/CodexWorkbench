@@ -26,9 +26,9 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); Object.defineProperty(window, 'innerWidth', { configurable: true, value: dimensions.width }); Object.defineProperty(window, 'innerHeight', { configurable: true, value: dimensions.height }); });
-function Example({ theme, layout, actions }: { theme: 'light' | 'dark'; layout: 'list' | 'grid'; actions: (() => void)[] }) {
+function Example({ theme, layout, actions, item = artifact }: { theme: 'light' | 'dark'; layout: 'list' | 'grid'; actions: (() => void)[]; item?: Artifact }) {
   const [open, setOpen] = useState(false);
-  return <div className="studio studio-library" data-studio-theme={theme}><main className="studio-library-main" style={{ overflow: 'auto' }}><div className={`studio-artifacts-${layout}`}><article className="studio-artifact"><LibraryArtifactMenu artifact={artifact} open={open} busy={false} onOpenChange={setOpen} onPin={actions[0]!} onRename={actions[1]!} onCopyLink={actions[2]!} onDuplicate={actions[3]!} onTrash={actions[4]!} /></article></div></main></div>;
+  return <div className="studio studio-library" data-studio-theme={theme}><main className="studio-library-main" style={{ overflow: 'auto' }}><div className={`studio-artifacts-${layout}`}><article className="studio-artifact"><LibraryArtifactMenu artifact={item} open={open} busy={false} onOpenChange={setOpen} onPin={actions[0]!} onRename={actions[1]!} onCopyLink={actions[2]!} onDuplicate={actions[3]!} onTrash={actions[4]!} /></article></div></main></div>;
 }
 async function click(node: HTMLElement) { await act(async () => node.click()); }
 
@@ -92,4 +92,14 @@ it('repositions with a visible scrolled anchor, closes once it leaves the pane a
   expect(document.activeElement?.textContent).toBe('移入回收站');
   await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(container.querySelector('[role="menu"]')).toBeNull(); expect(document.activeElement).toBe(trigger);
+});
+
+it('offers only moving to trash for an unsupported artifact', async () => {
+  const trash = vi.fn(), other = vi.fn();
+  await act(async () => root.render(<Example theme="light" layout="grid" item={{ ...artifact, storageStatus: 'unsupported' }} actions={[other, other, other, other, trash]} />));
+  await click(container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!);
+  const items = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+  expect(items.map(item => item.textContent)).toEqual(['移入回收站']);
+  await click(items[0]!);
+  expect(trash).toHaveBeenCalledOnce(); expect(other).not.toHaveBeenCalled();
 });
