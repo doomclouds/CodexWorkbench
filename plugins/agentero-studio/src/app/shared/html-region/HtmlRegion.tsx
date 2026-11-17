@@ -5,13 +5,13 @@ import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlNavigationMessage
 import { newClientId } from '../client-id.js';
 import { dismissEscapeLayer, isEscapeActive } from '../escape.js';
 
-interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; preserveScroll?: boolean; panMode?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onNavigation?: (event: HtmlNavigationEvent) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
+interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; zoom?: number; preserveScroll?: boolean; panMode?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onNavigation?: (event: HtmlNavigationEvent) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
 interface SaveQueue {
   active: boolean; processing: boolean; paused: boolean; sequence: number; pending: HtmlStateSave | null;
   accepted: { baseVersion: number; submitted: Json; state: Json; version: number }[];
 }
 
-export default function HtmlRegion({ element, annotation, interactive, preserveScroll = false, panMode = false, onAnnotate, onToolShortcut, onPointerPosition, onNavigation, onStateChange }: Props) {
+export default function HtmlRegion({ element, annotation, interactive, zoom = 1, preserveScroll = false, panMode = false, onAnnotate, onToolShortcut, onPointerPosition, onNavigation, onStateChange }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const sourceRevision = useMemo(() => typeof element.sourceRevision === 'number' ? element.sourceRevision : element.version, [element.id, element.html, element.sourceRevision]);
   const channel = useMemo(() => newClientId(), [element.id, element.html, sourceRevision]);
@@ -142,8 +142,10 @@ export default function HtmlRegion({ element, annotation, interactive, preserveS
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ type: 'studio-html-state-update', channel, regionId: element.id, state: element.state ?? null, version: element.version }, '*');
   }, [element.state, element.version, element.id, channel, ready]);
+  // Let the embedded document rasterize at the display zoom, then cancel the world's
+  // transform on its surface. Percentage sizes need compensation to keep its viewport.
   return <div className={`studio-html-region${annotation ? ' is-annotating' : ''}`}>
-    <iframe ref={frame} title={element.text || 'HTML 图解'} srcDoc={source} sandbox="allow-scripts" referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*')} style={{ pointerEvents: annotation || interactive ? 'auto' : 'none' }} />
+    <iframe ref={frame} title={element.text || 'HTML 图解'} srcDoc={source} sandbox="allow-scripts" referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*')} style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%`, zoom, transform: `scale(${1 / zoom})`, transformOrigin: '0 0', pointerEvents: annotation || interactive ? 'auto' : 'none' }} />
     {saveError?.channel === channel && <div className="studio-html-state-error" data-native-interactive="true" role="alert">
       <span>{saveError.message} 本地交互修改已保留。</span>
       <button type="button" disabled={!onStateChange || processingChannel === channel} onClick={() => { queue.paused = false; setSaveError(null); void saveProcessor.current(); }}>重试保存</button>

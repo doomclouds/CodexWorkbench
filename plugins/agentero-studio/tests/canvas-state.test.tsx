@@ -99,6 +99,78 @@ async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameE
   return { identity, post, load: () => runtime.window.eval('studioEmbed.load()') as Json, save: (state: Json) => runtime.window.eval(`studioEmbed.save(${JSON.stringify(state)})`) };
 }
 
+it('changes raster zoom without replacing the live frame, its channel or a pending state acknowledgement', async () => {
+  const host = mount(), waiting: ((result: { state: Json; version: number }) => void)[] = [];
+  const change = vi.fn((_state: Json, _version: number) => new Promise<{ state: Json; version: number }>(resolve => waiting.push(resolve)));
+  const element = { ...region, state: { votes: 0, label: 'A' } };
+  const render = (zoom: number) => host.root.render(<HtmlRegion element={element} zoom={zoom} annotation={false} interactive onAnnotate={() => {}} onStateChange={change} />);
+  await act(async () => render(.867));
+  const frame = host.dom.window.document.querySelector('iframe')!, originalWindow = frame.contentWindow, originalSource = frame.srcdoc;
+  const input = frame.contentDocument!.createElement('input'); input.value = '未提交的输入'; frame.contentDocument!.body.append(input);
+  const runtime = await connectRuntime(host, frame);
+  await act(async () => { runtime.save({ votes: 1, label: 'A' }); runtime.save({ votes: 2, label: 'A' }); });
+  expect(change).toHaveBeenCalledExactlyOnceWith({ votes: 1, label: 'A' }, 4);
+  for (const zoom of [.867, 1.5, .55]) {
+    await act(async () => render(zoom));
+    expect(host.dom.window.document.querySelector('iframe')).toBe(frame); expect(frame.contentWindow).toBe(originalWindow); expect(frame.srcdoc).toBe(originalSource);
+    expect(input.ownerDocument).toBe(frame.contentDocument); expect(input.value).toBe('未提交的输入'); expect(frame.style.pointerEvents).toBe('auto');
+    expect(runtime.load()).toEqual({ votes: 2, label: 'A' }); expect(change).toHaveBeenCalledTimes(1);
+    expect(runtime.post.mock.calls.filter(([message]) => message.type === 'studio-html-mode').every(([message]) => message.channel === runtime.identity.channel)).toBe(true);
+    // This only checks that the density request reaches the iframe; raster clarity requires a real browser.
+    expect(frame.style.zoom).toBe(String(zoom));
+  }
+  await act(async () => waiting.shift()!({ state: { votes: 1, label: 'Remote' }, version: 5 }));
+  expect(runtime.load()).toEqual({ votes: 2, label: 'Remote' }); expect(change).toHaveBeenNthCalledWith(2, { votes: 2, label: 'Remote' }, 5);
+  await act(async () => waiting.shift()!({ state: { votes: 2, label: 'Remote' }, version: 6 }));
+  expect(runtime.load()).toEqual({ votes: 2, label: 'Remote' }); expect(frame.srcdoc).toBe(originalSource);
+});
+
+it('keeps normalized pointer/navigation and logical annotation coordinates across raster zoom changes', async () => {
+  const host = mount(), pointer = vi.fn(), navigate = vi.fn(), annotate = vi.fn();
+  let zoom = .867;
+  const render = () => host.root.render(<HtmlRegion element={region} zoom={zoom} annotation interactive onAnnotate={annotate} onPointerPosition={pointer} onNavigation={navigate} />);
+  await act(async () => render());
+  const frame = host.dom.window.document.querySelector('iframe')!;
+  Object.defineProperties(frame, { clientWidth: { value: 500 }, clientHeight: { value: 300 }, getBoundingClientRect: { value: () => ({ left: 100, top: 200, width: 500 * zoom, height: 300 * zoom }) } });
+  const { identity } = await host.messages(frame);
+  for (zoom of [.867, 1.5, .55]) {
+    await act(async () => render());
+    await act(async () => {
+      host.send(frame, { type: 'studio-html-pointer', ...identity, point: { x: .2, y: .75 } });
+      host.send(frame, { type: 'studio-html-navigation', ...identity, kind: 'zoom', x: .25, y: .75, deltaY: -3, deltaMode: 1 });
+      host.send(frame, { type: 'studio-html-selection', ...identity, targetIds: ['value'], quote: 'A poll', excerpt: '<p>A poll</p>', rect: { x: 30, y: 400, w: 20, h: 15 }, point: { x: 40, y: 50 } });
+    });
+    expect(pointer).toHaveBeenLastCalledWith({ x: .2, y: .75 });
+    expect(navigate).toHaveBeenLastCalledWith({ kind: 'zoom', x: .25, y: .75, deltaY: -3, deltaMode: 1 });
+    const selection = annotate.mock.lastCall![0];
+    expect(selection.rect).toEqual({ x: 30, y: 400, w: 20, h: 15 }); expect(selection.sourceRevision).toBe(2);
+    expect(selection.screenPoint.x).toBeCloseTo(100 + 40 * zoom); expect(selection.screenPoint.y).toBeCloseTo(200 + 50 * zoom);
+    expect(selection).not.toHaveProperty('point');
+  }
+  expect(pointer).toHaveBeenCalledTimes(3); expect(navigate).toHaveBeenCalledTimes(3); expect(annotate).toHaveBeenCalledTimes(3);
+});
+
+it('retains authenticated logical scroll through zoom changes before a later source replacement', async () => {
+  const host = mount();
+  const render = (zoom: number, element = region) => host.root.render(<HtmlRegion element={element} zoom={zoom} annotation={false} interactive preserveScroll onAnnotate={() => {}} />);
+  await act(async () => render(.867));
+  const frame = host.dom.window.document.querySelector('iframe')!, first = await host.messages(frame), originalSource = frame.srcdoc;
+  await act(async () => { host.send(frame, { type: 'studio-html-ready', ...first.identity }); });
+  for (const zoom of [.867, 1.5, .55]) {
+    await act(async () => render(zoom));
+    await act(async () => {
+      host.send(frame, { type: 'studio-html-scroll', ...first.identity, x: 30, y: 480, maxX: 100, maxY: 900 });
+      host.send(frame, { type: 'studio-html-scroll', ...first.identity, x: 90, y: 800, maxX: 100, maxY: 900 }, null);
+    });
+    expect(frame.srcdoc).toBe(originalSource);
+  }
+  await act(async () => render(.55, { ...region, html: '<p>Replacement source</p>', sourceRevision: 3, version: 5 }));
+  const next = await host.messages(frame);
+  expect(next.identity.channel).not.toBe(first.identity.channel);
+  await act(async () => { host.send(frame, { type: 'studio-html-ready', ...next.identity }); });
+  expect(next.post).toHaveBeenCalledWith({ type: 'studio-html-scroll-restore', ...next.identity, x: 30, y: 480 }, '*');
+});
+
 it('broadcasts state-only changes without replacing an iframe rendering document', async () => {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost/?token=owner-secret' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);

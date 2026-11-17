@@ -142,7 +142,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.11";
+    PLUGIN_VERSION = "0.2.12";
   }
 });
 
