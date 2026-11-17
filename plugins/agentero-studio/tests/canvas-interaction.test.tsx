@@ -35,6 +35,7 @@ async function editable(elements: BoardElement[] = [], props: Partial<Whiteboard
     for (const operation of args.operations) {
       if (operation.op === 'add') current = { ...current, elements: [...current.elements, { ...operation.element, version: 1 } as BoardElement] };
       else if (operation.op === 'delete') current = { ...current, elements: current.elements.filter(item => item.id !== operation.id) };
+      else if (operation.op === 'style') current = { ...current, style: { ...current.style, ...operation.style } as Board['style'] };
       else current = { ...current, elements: current.elements.map(item => item.id === operation.id ? { ...item, ...operation.changes, version: item.version + 1 } : item) };
     }
     current = { ...current, artifact: { ...current.artifact, revision: current.artifact.revision + 1 } };
@@ -767,22 +768,111 @@ describe('whiteboard direct interaction', () => {
     await click('墨色 紫色');await pointer(80,100,{x:280,y:180});
     expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({type:'stroke',stroke:'#7C5CBF',strokeWidth:3});
     expect(query('绘图选项')).toBeNull();
-    await click('选择');await click('边框与线条');expect(query('线条宽度')).not.toBeNull();expect(query('自定义颜色')).not.toBeNull();
+    await click('选择');await click('边框与线条');expect(query('线条宽度')).not.toBeNull();expect(query('添加自定义颜色')).not.toBeNull();
     await input(query('线条宽度') as HTMLInputElement,'6');expect(call.mock.lastCall![1].operations[0]!.changes).toEqual({strokeWidth:6});
-    await input(query('自定义颜色') as HTMLInputElement,'#123456');
-    expect(call.mock.calls.at(-2)![1].operations[0]!.changes).toEqual({stroke:'#123456'});
-    expect(call.mock.lastCall![1].operations[0]).toMatchObject({op:'style',style:{nativeInks:'123456'}});
+    const beforePicker = call.mock.calls.length;
+    await click('添加自定义颜色'); await input(query('颜色值') as HTMLInputElement,'#123456');
+    expect(call).toHaveBeenCalledTimes(beforePicker);
+    await event(host.querySelector('button[type="submit"]')!, 'click');
+    expect(call).toHaveBeenCalledTimes(beforePicker + 1);
+    expect(call.mock.lastCall![1].operations).toEqual([{ op: 'update', id: call.mock.calls[0]![1].operations[0]!.element!.id, changes: { stroke: '#123456' } }, { op: 'style', style: { nativeInks: '123456' } }]);
   });
-  it('formats only the chosen native text range before saving and keeps HTML caption controls in screen scale', async () => {
+  it('applies and reselects custom text ink on a position-locked object without changing its lock or geometry', async () => {
+    host.dataset.studioTheme = 'dark';
+    const locked = element('locked', { type: 'text', text: 'Custom ink', locked: true, color: '#D97757' });
+    const call = await editable([locked]); await select('locked'); await click('文字颜色');
+    await click('添加自定义颜色'); await input(query('颜色值') as HTMLInputElement, '#303645');
+    expect(call).not.toHaveBeenCalled(); await event(host.querySelector('button[type="submit"]')!, 'click');
+    expect(call.mock.calls[0]![1].operations).toEqual([{ op: 'update', id: 'locked', changes: { color: '#303645' } }, { op: 'style', style: { nativeInks: '303645' } }]);
+    const text = host.querySelector<HTMLElement>('[data-element-id="locked"]')!;
+    expect(text.classList.contains('is-locked')).toBe(true); expect(text.style.left).toBe(`${locked.x}px`); expect(text.style.top).toBe(`${locked.y}px`);
+    expect(getComputedStyle(text).color).toBe('rgb(48, 54, 69)');
+    await click('墨色 紫色'); await click('自定义颜色 #303645');
+    expect(call.mock.lastCall![1].operations[0]!.changes).toEqual({ color: '#303645' });
+    expect(getComputedStyle(text).color).toBe('rgb(48, 54, 69)');
+  });
+  it.each([false, true])('saves a confirmed custom color and its palette in one real history entry, with single-step undo and redo (multi=%s)', async multi => {
+    const folder = await mkdtemp(join(tmpdir(), 'studio-canvas-color-history-'));
+    const service = new StudioService({ dataRoot: folder });
+    try {
+      const values = [element('locked', { type: 'text', locked: true, color: '#D97757' }), element('other', { type: 'text', x: 400, color: '#2F7CC4' })];
+      const fixture = await service.execute('artifact_manage', { action: 'create', title: 'Atomic custom color', elements: values }, LOCAL_ACTOR) as { board: Board };
+      let current = fixture.board;
+      const selectedIds = multi ? ['locked', 'other'] : ['locked'];
+      const writes: Record<string, unknown>[] = [];
+      const live: StudioClient = { embedded: true, async call<T>(name: ToolName, args: Record<string, unknown> = {}) { if (name === 'artifact_apply') writes.push(args); return await service.execute(name, args, LOCAL_ACTOR) as T; } };
+      function Harness() { const [value, setValue] = useState(fixture.board); return <WhiteboardCanvas board={value} client={live} actor={LOCAL_ACTOR} onChanged={next => { current = next; setValue(next); }} onAnnotate={() => {}} externalSelectedIds={selectedIds} externalViewport={initialViewport} />; }
+      const historyBefore = await service.execute('artifact_read', { artifactId: current.artifact.id, mode: 'history' }, LOCAL_ACTOR);
+      const until = (check: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); }); check(); });
+      await act(async () => root.render(<Harness />));
+      await click('文字颜色'); await click('添加自定义颜色'); await input(query('颜色值') as HTMLInputElement, '#112233');
+      await event(host.querySelector('.studio-custom-color-actions button[type="button"]')!, 'click');
+      expect(writes).toHaveLength(0);
+      await click('添加自定义颜色'); await input(query('颜色值') as HTMLInputElement, '#303645');
+      await event(host.querySelector('button[type="submit"]')!, 'click');
+      await until(() => expect(current.style.nativeInks).toBe('303645'));
+      expect(writes).toHaveLength(1);
+      expect(writes[0].operations).toEqual([...selectedIds.map(id => ({ op: 'update', id, changes: { color: '#303645' } })), { op: 'style', style: { nativeInks: '303645' } }]);
+      const historyAfter = await service.execute('artifact_read', { artifactId: current.artifact.id, mode: 'history' }, LOCAL_ACTOR);
+      expect(historyAfter.history).toHaveLength(historyBefore.history.length + 1);
+      expect(current.artifact.revision).toBe(fixture.board.artifact.revision + 1);
+      for (const original of fixture.board.elements) {
+        const next = current.elements.find(value => value.id === original.id)!;
+        expect(next).toMatchObject({ x: original.x, y: original.y, w: original.w, h: original.h });
+        expect(next.locked).toBe(original.locked);
+        expect(next.color).toBe(selectedIds.includes(next.id) ? '#303645' : original.color);
+      }
+      await click('文字颜色');
+      await act(async () => (query('白板画布') as HTMLElement).focus());
+      await key(query('白板画布'), 'z', { ctrlKey: true });
+      await until(() => expect(current.elements.map(value => value.color)).toEqual(fixture.board.elements.map(value => value.color)));
+      expect(current.style.nativeInks ?? '').toBe(''); expect(writes).toHaveLength(2);
+      expect((writes[1].operations as Operation[])[0]).toMatchObject({ op: 'restore', data: { mode: 'undo' } });
+      await key(query('白板画布'), 'z', { ctrlKey: true, shiftKey: true });
+      await until(() => expect(current.style.nativeInks).toBe('303645'));
+      expect(writes).toHaveLength(3);
+      expect(current.elements.filter(value => selectedIds.includes(value.id)).every(value => value.color === '#303645')).toBe(true);
+      await click('文字颜色'); await click('墨色 紫色');
+      await until(() => expect(current.elements.find(value => value.id === 'locked')?.color).toBe('#7C5CBF'));
+      await click('自定义颜色 #303645');
+      await until(() => expect(current.elements.find(value => value.id === 'locked')?.color).toBe('#303645'));
+      expect(writes).toHaveLength(5);
+      expect((writes[4].operations as Operation[]).every(operation => operation.op === 'update')).toBe(true);
+      await event(query('自定义颜色 #303645'), 'contextmenu');
+      await until(() => expect(current.style.nativeInks).toBe(''));
+      expect(writes).toHaveLength(6); expect(writes[5].operations).toEqual([{ op: 'style', style: { nativeInks: '' } }]);
+      expect(current.elements.find(value => value.id === 'locked')?.color).toBe('#303645');
+    } finally {
+      await act(async () => root.render(null)); await service.close(); await rm(folder, { recursive: true, force: true });
+    }
+  });
+  it('formats only the chosen native text range before saving and bounds HTML caption zoom compensation', async () => {
     const call=await editable([element('one',{text:'alpha beta'})]);await select('one');await event(host.querySelector('[data-element-id="one"]')!,'dblclick');
     const editor=query('编辑文字');const text=editor.firstChild!.firstChild as Text;
     const range=document.createRange();range.setStart(text,6);range.setEnd(text,10);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range);document.dispatchEvent(new Event('selectionchange'));
     await click('加粗');await key(editor,'Escape');expect(call.mock.calls[0]![1].operations[0]!.changes?.text).toBe('alpha **beta**');
     await act(async()=>root.render(null));await mount([element('region',{type:'html',html:'<p>Hi</p>'})],{externalViewport:{x:0,y:0,zoom:.5}});
     const caption = host.querySelector<HTMLElement>('.studio-html-caption')!;
-    expect(caption.style.transform).toBe('scale(2)');
+    expect(caption.style.transform).toBe('scale(1.5)');
     expect((query('移动 HTML 区域') as HTMLElement).style.width).toBe('28px');
     expect((host.querySelector('.studio-canvas-world') as HTMLElement).style.transform).toContain('scale(0.5)');
+  });
+  it.each([
+    { zoom: .05, compensation: 1.5, badge: false },
+    { zoom: .25, compensation: 1.5, badge: false },
+    { zoom: .5, compensation: 1.5, badge: true },
+    { zoom: 1, compensation: 1, badge: true },
+    { zoom: 2, compensation: .5, badge: true },
+  ])('shrinks HTML caption, move button and gap with its region in a distant view at $zoom', async ({ zoom, compensation, badge }) => {
+    await mount([element('region', { type: 'html', w: 800, html: '<p>Hi</p>' })], { externalViewport: { x: 0, y: 0, zoom } });
+    const caption = host.querySelector<HTMLElement>('.studio-html-caption')!;
+    expect(caption.style.transform).toBe(`scale(${compensation})`);
+    expect(parseFloat(caption.style.width) * compensation * zoom).toBeCloseTo(800 * zoom);
+    expect(caption.style.bottom).toBe(`calc(100% + ${10 * compensation}px)`);
+    expect(caption.querySelector('span') !== null).toBe(badge);
+    const move = query('移动 HTML 区域') as HTMLButtonElement;
+    expect(parseFloat(move.style.width) * compensation * zoom).toBeLessThanOrEqual(28);
+    expect(move.disabled).toBe(false);
   });
   it('saves real layer commands and restores their persisted order through undo and redo', async () => {
     const folder=await mkdtemp(join(tmpdir(),'studio-canvas-layers-')),service=new StudioService({dataRoot:folder});

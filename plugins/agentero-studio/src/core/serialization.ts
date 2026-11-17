@@ -218,7 +218,8 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
   } else {
     const fill = e.hollow ? 'none' : semanticColor(e.fill, style, e.type === 'container' ? 'none' : e.type === 'note' ? '#fff0b5' : style['paper-2'] ?? style.paper);
     let textColor = semanticColor(e.color, style, style.ink);
-    if (contrastRatio(textColor, fill === 'none' ? 'transparent' : fill, style.paper) < 4.5) textColor = readableText(fill === 'none' ? 'transparent' : fill, style.paper);
+    const explicitInk = typeof e.color === 'string' && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(e.color);
+    if (!explicitInk && contrastRatio(textColor, fill === 'none' ? 'transparent' : fill, style.paper) < 4.5) textColor = readableText(fill === 'none' ? 'transparent' : fill, style.paper);
     markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
   }
   return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ''}>${markup}</g>`;

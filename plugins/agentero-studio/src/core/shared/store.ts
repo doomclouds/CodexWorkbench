@@ -52,6 +52,17 @@ export class ArtifactStore<Content, Anchor = unknown, Source = unknown> {
     const cached = this.parsed.get(id);
     if (cached) { this.parsedBytes -= cached.bytes; this.parsed.delete(id); }
   }
+  private normalize(value: unknown, id: string): ArtifactState<Content, Anchor, Source> {
+    const state = this.decode ? this.decode(value) : value as ArtifactState<Content, Anchor, Source>;
+    if (!object(state) || state.schemaVersion !== 2 || state.artifact?.id !== id || typeof state.artifact.type !== 'string' || !('content' in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object(state.sharing) || !object(state.sources) || !object(state.assets)) throw new Error('invalid artifact');
+    this.validateState?.(state);
+    return state;
+  }
+  private remember(id: string, key: string, bytes: number, state: ArtifactState<Content, Anchor, Source>): void {
+    freezeState(state);
+    this.evict(id); this.parsed.set(id, { signature: key, bytes, state }); this.parsedBytes += bytes;
+    while (this.parsed.size > CACHE_ENTRIES || this.parsedBytes > CACHE_BYTES) this.evict(this.parsed.keys().next().value!);
+  }
   private async normalizedState(id: string): Promise<ArtifactState<Content, Anchor, Source>> {
     try {
       const file = this.file(id), before = await stat(file, { bigint: true }), key = signature(before), cached = this.parsed.get(id);
@@ -60,17 +71,12 @@ export class ArtifactStore<Content, Anchor = unknown, Source = unknown> {
       const raw = await readFile(file, 'utf8');
       let state: ArtifactState<Content, Anchor, Source>;
       try {
-        const parsed: unknown = JSON.parse(raw); state = this.decode ? this.decode(parsed) : parsed as ArtifactState<Content, Anchor, Source>;
-        if (!object(state) || state.schemaVersion !== 2 || state.artifact?.id !== id || typeof state.artifact.type !== 'string' || !('content' in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object(state.sharing) || !object(state.sources) || !object(state.assets)) throw new Error('invalid artifact');
         // Migration/validation may normalize data; finish it before publishing frozen cache state.
-        this.validateState?.(state);
+        state = this.normalize(JSON.parse(raw), id);
       } catch { throw new StudioError('CORRUPT_ARTIFACT', '作品文件无法读取，请保留原文件并从备份恢复。'); }
       const after = await stat(file, { bigint: true }), bytes = Buffer.byteLength(raw);
-      freezeState(state);
-      if (key === signature(after) && bytes <= CACHE_BYTES) {
-        this.evict(id); this.parsed.set(id, { signature: key, bytes, state }); this.parsedBytes += bytes;
-        while (this.parsed.size > CACHE_ENTRIES || this.parsedBytes > CACHE_BYTES) this.evict(this.parsed.keys().next().value!);
-      }
+      if (key === signature(after) && bytes <= CACHE_BYTES) this.remember(id, key, bytes, state);
+      else freezeState(state);
       return state;
     } catch (error) {
       this.evict(id);
@@ -89,9 +95,15 @@ export class ArtifactStore<Content, Anchor = unknown, Source = unknown> {
     }
     return values;
   }
-  async write(state: ArtifactState<Content, Anchor, Source>): Promise<void> {
-    try { await atomicWrite(this.file(state.artifact.id), JSON.stringify(state)); }
-    finally { this.evict(state.artifact.id); }
+  async write(state: ArtifactState<Content, Anchor, Source>, cacheCommitted = false): Promise<void> {
+    const id = state.artifact.id;
+    try {
+      const serialized = JSON.stringify(state), bytes = Buffer.byteLength(serialized);
+      const cached = cacheCommitted && bytes <= CACHE_BYTES ? this.normalize(structuredClone(state), id) : undefined;
+      const written = await atomicWrite(this.file(id), serialized);
+      this.evict(id);
+      if (cached) this.remember(id, signature(written), bytes, cached);
+    } catch (error) { this.evict(id); throw error; }
   }
   async transaction<T>(id: string, run: (state: ArtifactState<Content, Anchor, Source>) => Promise<T> | T): Promise<T> {
     const folder = this.folder(id);
@@ -99,7 +111,7 @@ export class ArtifactStore<Content, Anchor = unknown, Source = unknown> {
     catch (error) { this.evict(id); throw error; }
     return this.withLock(id, folder, async assertLocked => {
       const state = await this.read(id), result = await run(state);
-      assertLocked(); await this.write(state); return result;
+      assertLocked(); await this.write(state, true); return result;
     });
   }
   /** Serialize an external room commit with artifact permissions without rewriting unchanged content. */

@@ -202,7 +202,6 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const [menu, setMenu] = useState<{x:number;y:number} | null>(null);
   const [singleKeys, setSingleKeys] = useState(true);
   const [customColors, setCustomColors] = useState<string[]>([]);
-  const pendingCustomColors = useRef<string[] | null>(null);
   const [guides, setGuides] = useState<AlignmentGuide[]>([]);
   const [pointer,setPointer]=useState<Point|null>(null);
   const [localAnnotationTarget,setLocalAnnotationTarget]=useState<Anchor|null>(null);
@@ -423,8 +422,10 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   }, [queue, preview]);
 
   useEffect(()=>{const stored=board.style.nativeInks??'';const colors=stored?stored.split(',').map(value=>`#${value}`):[];if(colors.some(value=>!/^#[0-9a-f]{6}$/i.test(value))){setError('自定义色板数据无效，请重新选择颜色。');return;}setCustomColors(colors);},[board.style.nativeInks]);
-  const saveCustomColors = (colors:string[]) => {const next=colors.slice(-64);pendingCustomColors.current=next;setCustomColors(next);};
-  useEffect(()=>{if(queueSaving||!pendingCustomColors.current)return;const colors=pendingCustomColors.current;pendingCustomColors.current=null;void apply([{op:'style',style:{nativeInks:colors.map(color=>color.slice(1)).join(',')}}],'修改自定义墨色');},[queueSaving,customColors,apply]);
+  const saveCustomColors = (colors: string[]) => {
+    const nativeInks = colors.slice(-64).map(color => color.slice(1)).join(',');
+    if (nativeInks !== (boardRef.current.style.nativeInks ?? '')) void apply([{ op: 'style', style: { nativeInks } }], '修改自定义墨色');
+  };
   const stageSelected = (changes: Partial<BoardElement>) => {
     const next = { ...draftsRef.current };
     for (const element of boardRef.current.elements.filter(element => selectionRef.current.includes(element.id))) {
@@ -436,10 +437,13 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     draftsRef.current = next; setPropertyDrafts(next);
     return next;
   };
-  const savePropertyDrafts = async (ids = selectionRef.current, summary = '调整元素') => {
+  const savePropertyDrafts = async (ids = selectionRef.current, summary = '调整元素', colors?: string[]) => {
     const drafts = ids.flatMap(id => draftsRef.current[id] ? [{ id, ...draftsRef.current[id] }] : []);
-    if (!drafts.length) return;
-    const saved = await apply(drafts.map(draft => ({ op: 'update', id: draft.id, changes: draft.changes })), summary, drafts.map(draft => draft.base));
+    const operations: Operation[] = drafts.map(draft => ({ op: 'update', id: draft.id, changes: draft.changes }));
+    const nativeInks = colors?.slice(-64).map(color => color.slice(1)).join(',');
+    if (nativeInks !== undefined && nativeInks !== (boardRef.current.style.nativeInks ?? '')) operations.push({ op: 'style', style: { nativeInks } });
+    if (!operations.length) return;
+    const saved = await apply(operations, summary, drafts.length ? drafts.map(draft => draft.base) : undefined);
     const next = { ...draftsRef.current };
     for (const draft of drafts) {
       if (!next[draft.id]) continue;
@@ -448,9 +452,9 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     draftsRef.current = next; setPropertyDrafts(next);
     return saved;
   };
-  const updateSelected = async (changes: Partial<BoardElement>, summary = '调整元素') => {
+  const updateSelected = async (changes: Partial<BoardElement>, summary = '调整元素', colors?: string[]) => {
     stageSelected(changes);
-    await savePropertyDrafts(selectionRef.current, summary);
+    await savePropertyDrafts(selectionRef.current, summary, colors);
   };
   const commitEditing = async (adjacent = false, close = true) => {
     if (!canEdit || !editing) return;
@@ -1191,6 +1195,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const renderElement = (element: BoardElement) => {
     const picked = !reading && selection.includes(element.id);
     const hidden = Boolean(reading && !reading.ids.includes(element.id));
+    const captionScale = Math.min(1 / viewport.zoom, 1.5);
     const lineColor = semanticColor(nativePaint(element.stroke ?? element.color,viewTheme), viewStyle, viewStyle.muted);
     if (element.type === 'arrow') {
       const geometry = arrowGeometry(element, renderedElements);
@@ -1209,9 +1214,11 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     const fill = element.hollow ? 'transparent' : semanticColor(nativePaint(element.fill,viewTheme), viewStyle, element.type === 'note' ? '#fff0b5' : element.type === 'shape' || element.type === 'table' ? viewStyle['paper-2'] ?? viewStyle.paper : 'transparent');
     const textFill = element.type === 'table' ? viewStyle.paper : element.type === 'container' ? 'transparent' : fill;
     const preferredInk = semanticColor(nativePaint(element.color,viewTheme), viewStyle, viewStyle.ink);
+    const explicitInk = typeof element.color === 'string' && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(element.color);
     let ink = preferredInk, headerInk = preferredInk;
-    try { if (element.type !== 'sticker' && contrastRatio(ink, textFill, viewStyle.paper) < 4.5) ink = readableText(textFill, viewStyle.paper); } catch { /* Unknown user paint is left for the renderer rather than rewritten. */ }
-    try { if (element.type === 'table' && contrastRatio(headerInk, fill, viewStyle.paper) < 4.5) headerInk = readableText(fill, viewStyle.paper); } catch { /* Keep the same handling for unsupported header paint. */ }
+    // Literal paints are user choices; theme-derived ink still adapts to the surface.
+    try { if (!explicitInk && element.type !== 'sticker' && contrastRatio(ink, textFill, viewStyle.paper) < 4.5) ink = readableText(textFill, viewStyle.paper); } catch { /* Unknown user paint is left for the renderer rather than rewritten. */ }
+    try { if (!explicitInk && element.type === 'table' && contrastRatio(headerInk, fill, viewStyle.paper) < 4.5) headerInk = readableText(fill, viewStyle.paper); } catch { /* Keep the same handling for unsupported header paint. */ }
     const style: CSSProperties = { display: hidden ? 'none' : undefined, left: element.x, top: element.y, width: element.w, height: element.h, color: ink, fontSize: element.fontSize ?? 17, fontFamily: element.fontFamily || viewStyle.fontFamily, fontWeight: element.bold ? 600 : 400, fontStyle: element.italic ? 'italic' : 'normal', textAlign: element.textAlign ?? (element.type === 'shape' ? 'center' : 'left'), transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined, ...(element.type === 'container' ? { borderColor: lineColor, borderStyle: element.dash ? 'dashed' : 'solid', borderWidth: element.strokeWidth ?? 1, background: fill !== 'transparent' ? fill : undefined } : {}) };
     let content;
     if (element.type === 'html' || element.type === 'diagram' && typeof element.html === 'string') content = <HtmlRegion element={element} zoom={viewport.zoom} annotation={annotating} interactive={reading ? reading.ids.includes(element.id) : interactiveId === element.id && selection.length === 1 && selection[0] === element.id} preserveScroll panMode={spacePan || tool === 'pan' && !annotating} onNavigation={input => htmlNavigation(element, input)} onPointerPosition={point => { const position = point && anchorBounds({ coordinateSpace: 'element', elementIds: [element.id], x: point.x, y: point.y }, [element]); onCursorMove?.(position ? { x: position.x, y: position.y } : null); }} onAnnotate={selection=>{selectIds([element.id]);onAnnotate(selection);}} onToolShortcut={key=>{numericTool.current(key);}} onStateChange={canEdit ? async (state: Json, expectedVersion: number) => {
@@ -1272,7 +1279,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       else if (!['html', 'document', 'image', 'stroke', 'diagram', 'chart'].includes(element.type) && !(element.type === 'sticker' && getBoardSticker(element.data?.stickerIconId))) beginEditing(element);
     }}>
       {content}
-      {element.type === 'html' && <div className="studio-html-caption" style={{ bottom: `calc(100% + ${10 / viewport.zoom}px)`, width: element.w * viewport.zoom, transform: `scale(${1 / viewport.zoom})` }}><button type="button" data-native-interactive="true" aria-label="移动 HTML 区域" disabled={!canEdit || element.locked} title={element.locked ? 'HTML 区域位置已锁定' : !canEdit ? '当前为只读' : '拖动移动 HTML 区域'} style={{ width: 28, height: 28, padding: 4, border: '1px solid var(--canvas-ui-border)', borderRadius: 5, background: 'var(--canvas-ui)', color: 'var(--canvas-ui-text)', cursor: !canEdit || element.locked ? 'default' : 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} onPointerDown={event => moveRegion(event, element)} onClick={event => { event.preventDefault(); event.stopPropagation(); if (event.detail === 0) { setAnnotation(false); selectIds([element.id]); viewportElement.current?.focus({ preventScroll: true }); } }}><Hand size={16}/></button><strong>{element.text || 'HTML 图解'}</strong><span>图解</span></div>}
+      {element.type === 'html' && <div className="studio-html-caption" style={{ bottom: `calc(100% + ${10 * captionScale}px)`, width: element.w / captionScale, transform: `scale(${captionScale})` }}><button type="button" data-native-interactive="true" aria-label="移动 HTML 区域" disabled={!canEdit || element.locked} title={element.locked ? 'HTML 区域位置已锁定' : !canEdit ? '当前为只读' : '拖动移动 HTML 区域'} style={{ width: 28, height: 28, padding: 4, border: '1px solid var(--canvas-ui-border)', borderRadius: 5, background: 'var(--canvas-ui)', color: 'var(--canvas-ui-text)', cursor: !canEdit || element.locked ? 'default' : 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }} onPointerDown={event => moveRegion(event, element)} onClick={event => { event.preventDefault(); event.stopPropagation(); if (event.detail === 0) { setAnnotation(false); selectIds([element.id]); viewportElement.current?.focus({ preventScroll: true }); } }}><Hand size={16}/></button><strong>{element.text || 'HTML 图解'}</strong>{element.w * viewport.zoom >= 220 && <span>图解</span>}</div>}
     </div>;
   };
 
@@ -1423,7 +1430,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     {toolMenu === 'shape' && canEdit && <div className="studio-shape-options studio-insert-menu" data-native-interactive="true"><div className="studio-shape-grid">{SHAPES.map(([kind,label])=><button type="button" key={kind} aria-label={`形状 ${label}`} title={label} aria-pressed={shapeKind===kind && tool==='shape'} onClick={()=>{setShapeKind(kind);void chooseTool('shape','shape');}}><Shape element={makeElement('shape',{x:0,y:0},{w:64,h:48,kind,fill:'transparent',stroke:viewStyle.ink})}/></button>)}</div><button type="button" onClick={()=>{void chooseTool('table');}}><Table2 size={17}/>表格</button><button type="button" onClick={()=>{setDialog({type:'link'});setToolMenu(null);}}><Link size={17}/>链接</button><button type="button" onClick={()=>{void openHtmlEditor();setToolMenu(null);}}><Braces size={17}/>HTML 图解</button><button type="button" aria-label="添加文档区域" onClick={() => { void addDocument(); }}><FileText size={17}/>文档区域</button></div>}
     {!annotating && (tool==='stroke'||tool==='arrow') && canEdit && <div className="studio-shape-options studio-pen-menu" role="toolbar" aria-label="绘图选项" data-native-interactive="true"><div className="studio-pen-choices"><button type="button" aria-label="画笔模式" title="画笔（6）" aria-pressed={tool==='stroke'} onClick={()=>{void chooseTool('stroke');}}><PenLine size={18}/></button><button type="button" aria-label="箭头模式" title="箭头" aria-pressed={tool==='arrow'} onClick={()=>{void chooseTool('arrow');}}><ArrowUpRight size={18}/></button></div><span className="studio-tool-divider"/><ColorPalette presetOnly theme={viewTheme} value={penColor} onChange={setPenColor}/></div>}
     {toolMenu === 'sticker' && canEdit && <StickerPalette selectedId={sticker} onSelect={choice => { setSticker(choice.id); void chooseTool('sticker'); }} onUpload={() => { fileInput.current?.click(); setToolMenu(null); }} />}
-    {!reading && !zoomMenu && selectedElements.length > 0 && selectionBounds && !annotating && tool==='select' && !spacePan && gesture?.kind!=='pan' && <CanvasFormatToolbar key={selection.join(',')} elements={selectedElements} style={{ left: viewport.x + (selectionBounds.x + selectionBounds.w / 2) * viewport.zoom, top: clamp(viewport.y + selectionBounds.y * viewport.zoom - (selected?.type === 'html' ? 82 : 58), 12, Math.max(12, (viewportElement.current?.clientHeight || 600) - 145)) }} formatState={editing||selected?.type==='table'&&propertyEditingIds.includes(selected.id)?formatState:undefined} requestLink={linkRequest} customColors={customColors} onCustomColorsChange={saveCustomColors} theme={viewTheme} canEdit={canEdit} canAnnotate={canAnnotate} saving={queue.tasks.some(task=>task.state!=='failed'&&task.keys.some(id=>selection.includes(id)))} interactive={interactiveId === selected?.id} onChange={changes => { void updateSelected(changes); }} onEditText={() => { if (selected) beginEditing(selected); }} onTextFormat={formatText} onAnnotate={annotateSelected} onToggleInteractive={() => { if (selected) { if (interactiveRef.current === selected.id) { setInteractiveId(null); } else enterContent(selected.id); setTool('select'); } }} onReadSelection={() => { void readSelection(); }} onEditHtml={selected ? ()=>{void openHtmlEditor(selected);}:undefined} onCrop={selected?.type==='image'&&selected.src&&!selected.video?()=>setCropDialog(selected):undefined} onAlign={edge=>{void apply(alignSelection(boardRef.current.elements,selectionRef.current,edge),'对齐元素');}} onMore={openMenu} />}
+    {!reading && !zoomMenu && selectedElements.length > 0 && selectionBounds && !annotating && tool==='select' && !spacePan && gesture?.kind!=='pan' && <CanvasFormatToolbar key={selection.join(',')} elements={selectedElements} style={{ left: viewport.x + (selectionBounds.x + selectionBounds.w / 2) * viewport.zoom, top: clamp(viewport.y + selectionBounds.y * viewport.zoom - (selected?.type === 'html' ? 82 : 58), 12, Math.max(12, (viewportElement.current?.clientHeight || 600) - 145)) }} formatState={editing||selected?.type==='table'&&propertyEditingIds.includes(selected.id)?formatState:undefined} requestLink={linkRequest} customColors={customColors} onCustomColorsChange={saveCustomColors} theme={viewTheme} canEdit={canEdit} canAnnotate={canAnnotate} saving={queue.tasks.some(task=>task.state!=='failed'&&task.keys.some(id=>selection.includes(id)))} interactive={interactiveId === selected?.id} onChange={(changes, colors) => { void updateSelected(changes, '调整元素', colors); }} onEditText={() => { if (selected) beginEditing(selected); }} onTextFormat={formatText} onAnnotate={annotateSelected} onToggleInteractive={() => { if (selected) { if (interactiveRef.current === selected.id) { setInteractiveId(null); } else enterContent(selected.id); setTool('select'); } }} onReadSelection={() => { void readSelection(); }} onEditHtml={selected ? ()=>{void openHtmlEditor(selected);}:undefined} onCrop={selected?.type==='image'&&selected.src&&!selected.video?()=>setCropDialog(selected):undefined} onAlign={edge=>{void apply(alignSelection(boardRef.current.elements,selectionRef.current,edge),'对齐元素');}} onMore={openMenu} />}
     {menu && <CanvasActionsMenu point={menu} canEdit={canEdit} selected={selection.length} locked={selectedElements.some(element=>element.locked)} hasClipboard={Boolean(navigator.clipboard?.readText)} onCommand={command} onClose={()=>setMenu(null)}/>}
     <div aria-label="草稿与保存提示" style={{position:'absolute',bottom:87,left:18,maxWidth:'min(620px, calc(100% - 36px))',maxHeight:'45%',overflowY:'auto',display:'flex',flexDirection:'column',gap:8,zIndex:60}}>
     {interactiveId && selection.length === 1 && selection[0] === interactiveId && !reading && <div className="studio-content-mode-notice" role="status" data-native-interactive="true"><MousePointer2 size={15}/><span>内容交互 · Esc 返回选中</span><button type="button" className="studio-link-button" aria-label="退出内容交互" onClick={() => { setInteractiveId(null); viewportElement.current?.focus({ preventScroll: true }); }}>退出</button></div>}

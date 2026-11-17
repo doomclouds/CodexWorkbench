@@ -74,6 +74,26 @@ describe('MCP App RPC transport', () => {
     expect(offsets).toEqual([0, CHUNK, CHUNK * 2]); expect(released.sort()).toEqual(['download-zip', 'upload-zip']);
   });
 
+  it.each([200, 409])('returns a complete %s response while transfer cleanup is still pending', async status => {
+    const value = { ok: status === 200, data: 'saved body'.repeat(CHUNK / 5) };
+    const bytes = Buffer.from(JSON.stringify(value));
+    let release!: () => void, cleanupStarted = false, completed = false;
+    const cleanup = new Promise<void>(resolve => { release = resolve; });
+    const client = transport(async args => {
+      if (args.action === 'release') { cleanupStarted = true; await cleanup; return {}; }
+      if (args.action === 'request') return { status, headers: { 'content-type': 'application/json' }, downloadId: 'saved-response', size: bytes.length };
+      const part = bytes.subarray(args.offset, args.offset + CHUNK), nextOffset = args.offset + part.length;
+      return { data: part.toString('base64'), nextOffset, done: nextOffset === bytes.length };
+    });
+    const pending = client.request('/api/tools/artifact_apply', { method: 'POST' }).then(response => { completed = true; return response; });
+    try {
+      await vi.waitFor(() => expect(cleanupStarted).toBe(true));
+      await vi.waitFor(() => expect(completed).toBe(true), { timeout: 100, interval: 5 });
+      const response = await pending;
+      expect(response.status).toBe(status); expect(await response.json()).toEqual(value);
+    } finally { release(); await pending; }
+  });
+
   it('reads Blob bytes and rejects oversized bodies and invalid response sizes before allocating them', async () => {
     const send = vi.fn(async (_args: Args) => binary(new Uint8Array([0, 255]))), client = transport(send);
     await client.request('/api/assets?artifactId=a', { method: 'POST', body: new Blob([new Uint8Array([0, 255])], { type: 'image/png' }) });

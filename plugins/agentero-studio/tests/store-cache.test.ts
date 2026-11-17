@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
@@ -11,7 +11,7 @@ import { StudioService } from '../src/core/service.js';
 
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>();
-  return { ...actual, readFile: vi.fn(actual.readFile), rename: vi.fn(actual.rename) };
+  return { ...actual, open: vi.fn(actual.open), readFile: vi.fn(actual.readFile), rename: vi.fn(actual.rename) };
 });
 const actualFs = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
 type Content = { value: string; nested: { count: number }; normalized?: boolean };
@@ -20,6 +20,7 @@ const services: StudioService[] = [];
 beforeEach(async () => {
   folder = await mkdtemp(join(tmpdir(), 'studio-store-cache-'));
   vi.mocked(readFile).mockReset().mockImplementation(actualFs.readFile);
+  vi.mocked(open).mockReset().mockImplementation(actualFs.open);
   vi.mocked(rename).mockReset().mockImplementation(actualFs.rename);
 });
 afterEach(async () => {
@@ -38,6 +39,40 @@ function stores() {
 }
 
 describe('bounded parsed artifact cache', () => {
+  it('publishes successful transactions as isolated frozen snapshots without rereading their history', async () => {
+    const state = fixture(), { first, validated } = stores(); await first.write(state);
+    const returned = await first.transaction(state.artifact.id, current => { current.content.value = 'BBB'; return current.content; });
+    const reads = vi.mocked(readFile).mock.calls.length;
+    returned.nested.count = 99;
+    expect(await first.readProjection(state.artifact.id, current => {
+      expect(Object.isFrozen(current.content.nested)).toBe(true);
+      return current.content;
+    })).toMatchObject({ value: 'BBB', nested: { count: 1 }, normalized: true });
+    expect(vi.mocked(readFile).mock.calls).toHaveLength(reads);
+    expect(validated).toHaveBeenCalledTimes(2);
+  });
+  it('invalidates a warm committed snapshot when another instance replaces its bytes', async () => {
+    const state = fixture(), { first, second } = stores(); await first.write(state);
+    await first.transaction(state.artifact.id, current => { current.content.value = 'BBB'; });
+    const next = await second.read(state.artifact.id); next.content.value = 'CCC'; await second.write(next);
+    expect(await first.readProjection(state.artifact.id, current => current.content.value)).toBe('CCC');
+  });
+  it('never labels its committed cache with an external replacement signature', async () => {
+    const state = fixture(), { first } = stores(); await first.write(state);
+    const replacement = structuredClone(state); replacement.content.value = 'CCC';
+    vi.mocked(open).mockImplementationOnce(async (...args) => {
+      const handle = await actualFs.open(...args), close = handle.close.bind(handle);
+      handle.close = async () => {
+        await close();
+        const external = join(folder, 'external-replacement.json');
+        await actualFs.writeFile(external, JSON.stringify(replacement));
+        await actualFs.rename(external, first.file(state.artifact.id));
+      };
+      return handle;
+    });
+    await first.transaction(state.artifact.id, current => { current.content.value = 'BBB'; });
+    expect(await first.readProjection(state.artifact.id, current => current.content.value)).toBe('CCC');
+  });
   it('normalizes once, freezes every nested private value, and returns mutable isolated copies', async () => {
     const state = fixture(), { first, validated } = stores(); await first.write(state);
     const one = await first.read(state.artifact.id);

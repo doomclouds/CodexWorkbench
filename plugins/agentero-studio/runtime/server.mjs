@@ -50,7 +50,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/core/shared/common.ts
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open as open2, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 function safeId(value, label = "\u4F5C\u54C1 ID") {
@@ -87,10 +87,13 @@ async function renameWithRetry(source, target) {
 async function atomicWrite(file2, content) {
   await mkdir(dirname(file2), { recursive: true });
   const temporary = join(dirname(file2), `.${randomUUID()}.tmp`);
+  const handle = await open2(temporary, "wx");
   try {
-    await writeFile(temporary, content, { flag: "wx" });
+    await handle.writeFile(content);
     await renameWithRetry(temporary, file2);
+    return await handle.stat({ bigint: true });
   } finally {
+    await handle.close();
     await rm(temporary, { force: true });
   }
 }
@@ -142,7 +145,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.13";
+    PLUGIN_VERSION = "0.2.14";
   }
 });
 
@@ -7455,20 +7458,20 @@ function hunks(base, side, local) {
     y--;
   }
   const result = [];
-  let open4, i2 = 0, j = 0;
+  let open5, i2 = 0, j = 0;
   for (const op of ops.reverse()) {
     if (op === "=") {
-      open4 = void 0;
+      open5 = void 0;
       i2++;
       j++;
       continue;
     }
-    if (!open4) {
-      open4 = { start: i2, end: i2, lines: [], local };
-      result.push(open4);
+    if (!open5) {
+      open5 = { start: i2, end: i2, lines: [], local };
+      result.push(open5);
     }
-    if (op === "-") open4.end = ++i2;
-    else open4.lines.push(side[j++]);
+    if (op === "-") open5.end = ++i2;
+    else open5.lines.push(side[j++]);
   }
   return result.flatMap((hunk) => hunk.end - hunk.start > 1 && hunk.lines.length === hunk.end - hunk.start ? hunk.lines.flatMap((line, index) => line === base[hunk.start + index] ? [] : [{ ...hunk, start: hunk.start + index, end: hunk.start + index + 1, lines: [line] }]) : [hunk]);
 }
@@ -8427,7 +8430,8 @@ ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
   } else {
     const fill = e.hollow ? "none" : semanticColor(e.fill, style, e.type === "container" ? "none" : e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
     let textColor = semanticColor(e.color, style, style.ink);
-    if (contrastRatio(textColor, fill === "none" ? "transparent" : fill, style.paper) < 4.5) textColor = readableText(fill === "none" ? "transparent" : fill, style.paper);
+    const explicitInk = typeof e.color === "string" && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(e.color);
+    if (!explicitInk && contrastRatio(textColor, fill === "none" ? "transparent" : fill, style.paper) < 4.5) textColor = readableText(fill === "none" ? "transparent" : fill, style.paper);
     markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
   }
   return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ""}>${markup}</g>`;
@@ -10255,8 +10259,8 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$writeFile = fs2.writeFile;
-      fs2.writeFile = writeFile4;
-      function writeFile4(path2, data, options, cb) {
+      fs2.writeFile = writeFile3;
+      function writeFile3(path2, data, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$writeFile(path2, data, options, cb);
@@ -10415,7 +10419,7 @@ var require_graceful_fs = __commonJS({
       }
       function ReadStream$open() {
         var that = this;
-        open4(that.path, that.flags, that.mode, function(err2, fd2) {
+        open5(that.path, that.flags, that.mode, function(err2, fd2) {
           if (err2) {
             if (that.autoClose)
               that.destroy();
@@ -10435,7 +10439,7 @@ var require_graceful_fs = __commonJS({
       }
       function WriteStream$open() {
         var that = this;
-        open4(that.path, that.flags, that.mode, function(err2, fd2) {
+        open5(that.path, that.flags, that.mode, function(err2, fd2) {
           if (err2) {
             that.destroy();
             that.emit("error", err2);
@@ -10452,8 +10456,8 @@ var require_graceful_fs = __commonJS({
         return new fs2.WriteStream(path2, options);
       }
       var fs$open = fs2.open;
-      fs2.open = open4;
-      function open4(path2, flags, mode, cb) {
+      fs2.open = open5;
+      function open5(path2, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
         return go$open(path2, flags, mode, cb);
@@ -11391,6 +11395,19 @@ var init_store = __esm({
           this.parsed.delete(id2);
         }
       }
+      normalize(value, id2) {
+        const state = this.decode ? this.decode(value) : value;
+        if (!object2(state) || state.schemaVersion !== 2 || state.artifact?.id !== id2 || typeof state.artifact.type !== "string" || !("content" in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object2(state.sharing) || !object2(state.sources) || !object2(state.assets)) throw new Error("invalid artifact");
+        this.validateState?.(state);
+        return state;
+      }
+      remember(id2, key, bytes, state) {
+        freezeState(state);
+        this.evict(id2);
+        this.parsed.set(id2, { signature: key, bytes, state });
+        this.parsedBytes += bytes;
+        while (this.parsed.size > CACHE_ENTRIES || this.parsedBytes > CACHE_BYTES) this.evict(this.parsed.keys().next().value);
+      }
       async normalizedState(id2) {
         try {
           const file2 = this.file(id2), before = await stat(file2, { bigint: true }), key = signature(before), cached2 = this.parsed.get(id2);
@@ -11403,21 +11420,13 @@ var init_store = __esm({
           const raw = await readFile3(file2, "utf8");
           let state;
           try {
-            const parsed = JSON.parse(raw);
-            state = this.decode ? this.decode(parsed) : parsed;
-            if (!object2(state) || state.schemaVersion !== 2 || state.artifact?.id !== id2 || typeof state.artifact.type !== "string" || !("content" in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object2(state.sharing) || !object2(state.sources) || !object2(state.assets)) throw new Error("invalid artifact");
-            this.validateState?.(state);
+            state = this.normalize(JSON.parse(raw), id2);
           } catch {
             throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6587\u4EF6\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\u5E76\u4ECE\u5907\u4EFD\u6062\u590D\u3002");
           }
           const after = await stat(file2, { bigint: true }), bytes = Buffer.byteLength(raw);
-          freezeState(state);
-          if (key === signature(after) && bytes <= CACHE_BYTES) {
-            this.evict(id2);
-            this.parsed.set(id2, { signature: key, bytes, state });
-            this.parsedBytes += bytes;
-            while (this.parsed.size > CACHE_ENTRIES || this.parsedBytes > CACHE_BYTES) this.evict(this.parsed.keys().next().value);
-          }
+          if (key === signature(after) && bytes <= CACHE_BYTES) this.remember(id2, key, bytes, state);
+          else freezeState(state);
           return state;
         } catch (error62) {
           this.evict(id2);
@@ -11443,11 +11452,17 @@ var init_store = __esm({
         }
         return values;
       }
-      async write(state) {
+      async write(state, cacheCommitted = false) {
+        const id2 = state.artifact.id;
         try {
-          await atomicWrite(this.file(state.artifact.id), JSON.stringify(state));
-        } finally {
-          this.evict(state.artifact.id);
+          const serialized = JSON.stringify(state), bytes = Buffer.byteLength(serialized);
+          const cached2 = cacheCommitted && bytes <= CACHE_BYTES ? this.normalize(structuredClone(state), id2) : void 0;
+          const written = await atomicWrite(this.file(id2), serialized);
+          this.evict(id2);
+          if (cached2) this.remember(id2, signature(written), bytes, cached2);
+        } catch (error62) {
+          this.evict(id2);
+          throw error62;
         }
       }
       async transaction(id2, run) {
@@ -11461,7 +11476,7 @@ var init_store = __esm({
         return this.withLock(id2, folder, async (assertLocked) => {
           const state = await this.read(id2), result = await run(state);
           assertLocked();
-          await this.write(state);
+          await this.write(state, true);
           return result;
         });
       }
@@ -13079,7 +13094,7 @@ var init_collaboration = __esm({
 
 // src/core/shared/files.ts
 import { randomUUID as randomUUID11 } from "node:crypto";
-import { cp, lstat as lstat2, mkdir as mkdir4, open as open2, readFile as readFile4, readdir as readdir3, realpath as realpath2, rename as rename3, rm as rm3 } from "node:fs/promises";
+import { cp, lstat as lstat2, mkdir as mkdir4, open as open3, readFile as readFile4, readdir as readdir3, realpath as realpath2, rename as rename3, rm as rm3 } from "node:fs/promises";
 import { basename, extname, isAbsolute, join as join6, resolve as resolve3 } from "node:path";
 async function assetDirectory(store, artifactId, directory, create = false) {
   const root2 = await realpath2(store.root), folder = await realpath2(store.folder(artifactId));
@@ -13095,7 +13110,7 @@ async function regularFile(path2) {
   return info;
 }
 async function readBoundedAsset(path2) {
-  const before = await regularFile(path2), file2 = await open2(path2, "r");
+  const before = await regularFile(path2), file2 = await open3(path2, "r");
   try {
     const info = await file2.stat();
     if (!info.isFile() || info.dev !== before.dev || info.ino !== before.ino) throw resourceScope2();
@@ -14520,7 +14535,7 @@ var init_esm = __esm({
 
 // src/core/shared/archive.ts
 import { randomUUID as randomUUID12 } from "node:crypto";
-import { mkdir as mkdir5, mkdtemp, open as open3, readFile as readFile5, rm as rm4, writeFile as writeFile3 } from "node:fs/promises";
+import { mkdir as mkdir5, mkdtemp, open as open4, readFile as readFile5, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
 import { basename as basename2, join as join7 } from "node:path";
 async function readArchiveInput(args) {
   if (args.archivePath !== void 0 === (args.archiveBase64 !== void 0)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u4E00\u4E2A\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u6216\u5907\u4EFD\u5185\u5BB9\u3002");
@@ -14535,7 +14550,7 @@ async function readArchiveInput(args) {
   }
   const path2 = text(args.archivePath, "", 4096);
   if (!path2.trim()) throw new StudioError("INVALID_ARGUMENT", "\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-  const file2 = await open3(path2, "r");
+  const file2 = await open4(path2, "r");
   try {
     const info = await file2.stat();
     if (!info.isFile()) throw invalid2("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
@@ -14788,8 +14803,8 @@ async function importArchive(store, products, data, actor, title) {
   const staging = await mkdtemp(join7(store.root, "staging", "import-"));
   try {
     await mkdir5(join7(staging, "assets"));
-    for (const assetId of Object.keys(state.assets)) await writeFile3(join7(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
-    await writeFile3(join7(staging, "artifact.json"), JSON.stringify(state), { flag: "wx" });
+    for (const assetId of Object.keys(state.assets)) await writeFile2(join7(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
+    await writeFile2(join7(staging, "artifact.json"), JSON.stringify(state), { flag: "wx" });
     await mkdir5(join7(store.root, "artifacts"), { recursive: true });
     await renameWithRetry(staging, store.folder(id2));
   } catch (error62) {
@@ -37495,7 +37510,7 @@ var StdioServerTransport = class {
 init_common();
 import { spawn } from "node:child_process";
 import { createHash, randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir2, readFile, writeFile as writeFile2, rename as rename2, unlink, readdir } from "node:fs/promises";
+import { mkdir as mkdir2, readFile, writeFile, rename as rename2, unlink, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join as join2, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37765,7 +37780,7 @@ async function writeRecord(root2, record5) {
   await mkdir2(root2, { recursive: true });
   const target = join2(root2, "service.json");
   const temp = `${target}.${process.pid}.tmp`;
-  await writeFile2(temp, `${JSON.stringify(record5)}
+  await writeFile(temp, `${JSON.stringify(record5)}
 `, { mode: 384 });
   await rename2(temp, target);
 }
@@ -37789,7 +37804,7 @@ async function discoverService(root2, entry) {
     for (let attempt = 0; attempt < 100; attempt++) {
       try {
         await mkdir2(lock3);
-        await writeFile2(join2(lock3, "owner"), String(process.pid));
+        await writeFile(join2(lock3, "owner"), String(process.pid));
         acquired = true;
         break;
       } catch {
@@ -37858,7 +37873,7 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
   const leaseDirectory = join2(root2, "leases");
   await mkdir2(leaseDirectory, { recursive: true });
   const lease = join2(leaseDirectory, `${process.pid}-${randomUUID3()}.json`);
-  const heartbeat = () => writeFile2(lease, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 35e3 })).catch(() => {
+  const heartbeat = () => writeFile(lease, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 35e3 })).catch(() => {
   });
   await heartbeat();
   const timer = setInterval(() => {

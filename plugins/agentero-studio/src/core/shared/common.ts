@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, rename, rm } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Actor, Role } from '../../contracts/studio.js';
@@ -40,12 +41,15 @@ export async function renameWithRetry(source: string, target: string): Promise<v
     }
   }
 }
-export async function atomicWrite(file: string, content: string | Uint8Array): Promise<void> {
+export async function atomicWrite(file: string, content: string | Uint8Array): Promise<BigIntStats> {
   await mkdir(dirname(file), { recursive: true });
   const temporary = join(dirname(file), `.${randomUUID()}.tmp`);
+  const handle = await open(temporary, 'wx');
   try {
-    await writeFile(temporary, content, { flag: 'wx' });
+    await handle.writeFile(content);
     await renameWithRetry(temporary, file);
+    // The handle still identifies our bytes if another process replaces the path.
+    return await handle.stat({ bigint: true });
   }
-  finally { await rm(temporary, { force: true }); }
+  finally { await handle.close(); await rm(temporary, { force: true }); }
 }
