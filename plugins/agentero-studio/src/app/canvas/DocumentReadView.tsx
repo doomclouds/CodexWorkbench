@@ -23,7 +23,7 @@ function inline(value: unknown, scheme: 'light' | 'dark'): ReactNode {
     return <Fragment key={index}>{text}</Fragment>;
   });
 }
-export default function DocumentReadView({ document, client, highlightedIds = [], find = '', scheme = 'light' }: { document: DocumentContent; client: StudioClient; highlightedIds?: string[]; find?: string; scheme?: 'light' | 'dark' }) {
+export default function DocumentReadView({ document, client, highlightedIds = [], find = '', scheme = 'light', annotating = false, interactive = false }: { document: DocumentContent; client: StudioClient; highlightedIds?: string[]; find?: string; scheme?: 'light' | 'dark'; annotating?: boolean; interactive?: boolean }) {
   const [, refresh] = useState(0);
   useEffect(() => client.subscribeAssets?.(() => refresh(value => value + 1)), [client]);
   function blockViews(blocks: DocumentBlock[]): ReactNode {
@@ -50,7 +50,7 @@ export default function DocumentReadView({ document, client, highlightedIds = []
       default: node = <p>{content || <br />}</p>;
     }
     const matched = Boolean(find.trim() && text.toLocaleLowerCase().includes(find.trim().toLocaleLowerCase()));
-    return <Fragment key={block.id}><div data-document-block-id={block.id} className={`studio-doc-block${highlightedIds.includes(block.id) ? ' is-anchored' : ''}${matched ? ' is-find-match' : ''}`} style={{ textAlign: ['left', 'right', 'center', 'justify'].includes(String(block.props.textAlignment)) ? block.props.textAlignment as 'left' : undefined }}>{node}</div>{!!block.children?.length && <div className="studio-doc-children">{blockViews(block.children)}</div>}</Fragment>;
+    return <Fragment key={block.id}><div data-document-block-id={block.id} data-document-annotation-target={annotating ? '' : undefined} tabIndex={annotating && interactive ? 0 : undefined} className={`studio-doc-block${highlightedIds.includes(block.id) ? ' is-anchored' : ''}${matched ? ' is-find-match' : ''}`} style={{ textAlign: ['left', 'right', 'center', 'justify'].includes(String(block.props.textAlignment)) ? block.props.textAlignment as 'left' : undefined }}>{node}</div>{!!block.children?.length && <div className="studio-doc-children">{blockViews(block.children)}</div>}</Fragment>;
   }
   return <article className="studio-doc-prose">{blockViews(document.blocks)}</article>;
 }

@@ -43,6 +43,42 @@ it('chooses the nearest control or paragraph without replacing it with a tagged 
   expect(text.selections()[0].excerpt).not.toContain('<script');
 });
 
+it('previews the nearest labelled SVG group and leaves SVG line geometry exact in the annotation', async () => {
+  const source = '<svg><g data-studio-id="container"><g id="node" data-studio-id="node"><rect fill="transparent" id="hit" width="80" height="30"/><text>Step</text></g></g><line id="arrow" x1="10" x2="90" y1="90" y2="90" stroke="black"/></svg>';
+  const group = await render(source), line = await render(source);
+  const node = group.dom.window.document.getElementById('node')!, hit = group.dom.window.document.getElementById('hit')!;
+  node.getBoundingClientRect = () => ({ x: 20, y: 30, width: 80, height: 30 } as DOMRect);
+  const groupOutline = group.dom.window.document.querySelector<HTMLElement>('[data-studio-runtime="outline"]')!;
+  group.fire(hit, 'pointermove'); expect(groupOutline.style.width).toBe('80px');
+  group.fire(hit, 'click'); expect(group.selections()[0]).toMatchObject({ targetIds: ['node'], quote: 'Step' });
+  const arrow = line.dom.window.document.getElementById('arrow')!;
+  arrow.getBoundingClientRect = () => ({ x: 10, y: 90, width: 80, height: 0 } as DOMRect);
+  const outline = line.dom.window.document.querySelector<HTMLElement>('[data-studio-runtime="outline"]')!;
+  line.fire(arrow, 'pointermove'); expect(outline.style.height).toBe('6px'); expect(outline.style.top).toBe('87px');
+  line.fire(arrow, 'click'); expect(line.selections()[0]).toMatchObject({ selector: '#arrow', rect: { x: 10, y: 90, w: 80, h: 0 } });
+});
+
+it('clears an iframe preview on exit, blur, scrolling, navigation and mode disable', async () => {
+  const { dom, fire, mode, selections } = await render('<p id="paragraph">Text</p>');
+  const paragraph = dom.window.document.getElementById('paragraph')!;
+  paragraph.getBoundingClientRect = () => ({ x: 20, y: 30, width: 112, height: 24 } as DOMRect);
+  const outline = dom.window.document.querySelector<HTMLElement>('[data-studio-runtime="outline"]')!;
+  for (const leave of [
+    () => fire(paragraph, 'pointerout'),
+    () => dom.window.dispatchEvent(new dom.window.Event('blur')),
+    () => paragraph.dispatchEvent(new dom.window.Event('scroll')),
+    () => dom.window.dispatchEvent(new dom.window.Event('pagehide')),
+    () => mode(false),
+  ]) {
+    fire(paragraph, 'pointermove'); expect(outline.style.display).toBe('block');
+    leave(); expect(outline.style.display).toBe('none');
+  }
+  mode(true); fire(paragraph, 'pointermove');
+  paragraph.dispatchEvent(new dom.window.KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+  fire(paragraph, 'pointermove'); expect(outline.style.display).toBe('none');
+  expect(selections()).toHaveLength(0);
+});
+
 it('keeps a natural text range exact while retaining the nearest stable context', async () => {
   const { dom, fire, selections } = await render('<section data-studio-id="panel"><p id="paragraph">Hello selected text</p><p>Other paragraph</p></section>');
   const paragraph = dom.window.document.getElementById('paragraph')!;

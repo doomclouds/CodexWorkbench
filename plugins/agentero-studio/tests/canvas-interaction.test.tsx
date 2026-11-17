@@ -183,6 +183,42 @@ describe('whiteboard direct interaction', () => {
     await mount([target], { ...props, annotationActive: false }); expect(hit()).toBeNull();
   });
 
+  it('previews the actual annotation object on native text, hollow shapes, notes, table cells and arrows', async () => {
+    const annotate = vi.fn();
+    const values = [element('text', { type: 'text' }), element('shape', { kind: 'ellipse', hollow: true }), element('note', { type: 'note' }), element('table', { type: 'table', data: { rows: [['标题'], ['值']] } }), element('arrow', { type: 'arrow', from: [100, 120], to: [300, 120], label: '说明' })];
+    await mount(values, { annotationActive: true, onAnnotateNative: annotate });
+    const hit = () => host.querySelector('[data-annotation-hover]');
+    for (const [id, child] of [['text', '.studio-element-text'], ['shape', '.studio-element-text'], ['note', '.studio-note-fill'], ['table', 'td'], ['arrow', '.studio-arrow-label'], ['arrow', 'path[pointer-events="stroke"]']] as const) {
+      const target = host.querySelector(`[data-element-id="${id}"] ${child}`)!;
+      await event(target, 'pointermove', 150, 145);
+      expect(hit()?.getAttribute('data-annotation-hover')).toBe(id);
+      if (id === 'arrow') expect(hit()?.localName).toBe('path');
+      await event(target, 'pointerdown', 150, 145);
+      await event(query('白板画布'), 'pointerup', 150, 145);
+      expect(annotate.mock.lastCall?.[0].anchor).toMatchObject({ coordinateSpace: 'element', elementIds: [id] });
+    }
+    await event(query('白板画布'), 'pointermove', 500, 400);
+    expect(hit()).toBeNull();
+  });
+
+  it('hands hover to the HTML iframe and document body without leaving a native object preview', async () => {
+    const annotate = vi.fn();
+    const values = [element('shape'), element('html', { type: 'html', html: '<p>A</p>' }), element('doc', { type: 'document' })];
+    await mount(values, { annotationActive: true, onAnnotateNative: annotate });
+    const shape = host.querySelector('[data-element-id="shape"]')!, iframe = host.querySelector('iframe')!;
+    const hit = () => host.querySelector('[data-annotation-hover]');
+    await event(shape, 'pointermove'); expect(hit()).not.toBeNull();
+    await act(async () => shape.dispatchEvent(new MouseEvent('pointerout', { bubbles: true, relatedTarget: iframe })));
+    expect(hit()).toBeNull();
+    for (const selector of ['[data-document-content]', '[data-document-controls]']) {
+      const target = host.querySelector(selector)!;
+      await event(shape, 'pointermove'); expect(hit()).not.toBeNull();
+      await event(target, 'pointermove'); expect(hit()).toBeNull();
+      await event(target, 'pointerdown'); await event(query('白板画布'), 'pointerup');
+      expect(annotate).not.toHaveBeenCalled();
+    }
+  });
+
   it('pins a quick comment inside the visible top-right corner of a huge element at the current zoom', async () => {
     const annotate = vi.fn();
     const target = element('huge', { x: -300, y: -200, w: 2000, h: 1500 });
