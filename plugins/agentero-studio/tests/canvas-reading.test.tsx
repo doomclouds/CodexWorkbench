@@ -84,6 +84,27 @@ it.each([false, true])('makes HTML interactive without reloading it, then restor
   expect(host.querySelector('iframe')).toBe(frame);
 });
 
+it('passes ordinary and reading zoom through the real Canvas call site without replacing the HTML frame', async () => {
+  const ordinaryView = { ...originalViewport, zoom: .867 };
+  await mount([element('html', { type: 'html', w: 500, h: 300, html: '<input value="Keep the current document"/>', sourceRevision: 1 })], { externalViewport: ordinaryView });
+  const frame = host.querySelector('iframe')!, source = frame.srcdoc, contentWindow = frame.contentWindow, before = world().style.transform;
+  const expectCurrentFrame = (zoom: number) => {
+    expect(host.querySelector('iframe')).toBe(frame); expect(frame.contentWindow).toBe(contentWindow); expect(frame.srcdoc).toBe(source);
+    // This is the parent/child zoom contract, not a jsdom claim about raster clarity or physical layout.
+    expect(Number(frame.style.zoom)).toBeCloseTo(zoom, 12);
+  };
+  expectCurrentFrame(.867);
+  await click('全屏观看选区');
+  const fittedZoom = Number(/scale\(([^)]+)\)/.exec(world().style.transform)![1]);
+  expect(fittedZoom).not.toBe(.867); expectCurrentFrame(fittedZoom); expect(frame.style.pointerEvents).toBe('auto');
+  const input = query('全屏缩放比例') as HTMLInputElement;
+  await act(async () => { input.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '137.5'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+  expectCurrentFrame(1.375);
+  await click('退出全屏观看');
+  expectCurrentFrame(.867); expect(world().style.transform).toBe(before); expect(frame.style.pointerEvents).toBe('none');
+});
+
 it('exits safely if the viewed component is deleted remotely', async () => {
   const reading = vi.fn(); await mount([element('one')], { onReadingChange: reading }); await click('全屏观看选区');
   await act(async () => { root.render(<WhiteboardCanvas board={board([])} client={{ embedded: true, call: vi.fn() }} actor={LOCAL_ACTOR} onChanged={() => {}} onAnnotate={() => {}} onReadingChange={reading} />); });
