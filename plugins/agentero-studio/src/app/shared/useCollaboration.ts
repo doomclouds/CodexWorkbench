@@ -25,7 +25,7 @@ export function cursorAfter(next: string, previous: string): boolean {
   const a = position(next), b = position(previous);
   return a.epoch === b.epoch && Number.isSafeInteger(a.seq) && a.seq > b.seq;
 }
-type PresencePatch = Partial<Pick<Presence, 'context' | 'cursor' | 'following' | 'chat' | 'chatExpiresAt' | 'color' | 'visible'>>;
+type PresencePatch = Partial<Pick<Presence, 'context' | 'cursor' | 'following' | 'color' | 'visible'>>;
 
 /** Owns one visible page's transport, watermarks and bounded ephemeral outboxes. Content writes stay in the product queue. */
 export function createCollaboration(options: Options) {
@@ -258,7 +258,7 @@ export function createCollaboration(options: Options) {
     processing = Promise.resolve(); queued = queuedBytes = 0; overflowCursor = undefined; overflowReading = false;
     for (const outgoing of roomOutbox.splice(0)) outgoing.resolve(false);
     for (const outgoing of timerOutbox.splice(0)) outgoing.reject(new Error('连接已暂停，计时操作未提交。'));
-    pending = { ...pending, cursor: null, chat: '', visible: false }; presenceBusy = roomBusy = false;
+    pending = { ...pending, cursor: null, visible: false }; presenceBusy = roomBusy = false;
     peers = []; options.onPresence(peers, timer); localState({ type: 'reset', reason });
     if (leave) options.onCursorClear?.();
     if (leave && client.baseUrl) void studioRequest(client, url('/api/presence'), { method: 'POST', headers: headers(), body: JSON.stringify({ artifactId, peerId, peerEpoch, peerSeq: ++identity.presence, leave: true }), keepalive: !options.polling }).catch(() => {});
@@ -300,7 +300,7 @@ export function createCollaboration(options: Options) {
   }
   const room: CollaborationRoom = {
     send(topic, data) {
-      if (closed || !connected || document.visibilityState === 'hidden' || !['gesture', 'upload', 'chat', 'follow'].includes(topic) || new TextEncoder().encode(JSON.stringify(data)).length > 4096) return Promise.resolve(false);
+      if (closed || !connected || document.visibilityState === 'hidden' || !['gesture', 'upload', 'follow'].includes(topic) || new TextEncoder().encode(JSON.stringify(data)).length > 4096) return Promise.resolve(false);
       if (roomOutbox.length >= 80 && data && typeof data === 'object' && !Array.isArray(data) && data.phase === 'end') {
         const index = roomOutbox.findIndex(item => item.data && typeof item.data === 'object' && !Array.isArray(item.data) && item.data.phase !== 'end');
         if (index >= 0) roomOutbox.splice(index, 1)[0]!.resolve(false);
@@ -312,7 +312,7 @@ export function createCollaboration(options: Options) {
     subscribeState(listener) { stateListeners.add(listener); return () => { stateListeners.delete(listener); }; },
   };
   function refresh() { const serial = generation; processing = processing.then(() => snapshot(serial)).catch(error => { if (alive(serial)) lost(error); }); return processing; }
-  const clearCursor = () => { options.onCursorClear?.(); presence({ cursor: null, chat: '' }); };
+  const clearCursor = () => { options.onCursorClear?.(); presence({ cursor: null }); };
   const visibility = () => { if (document.visibilityState === 'hidden') pause(true); else { pending = { ...pending, visible: true }; connect(); } };
   const pagehide = () => pause(true);
   const heartbeat = setInterval(() => { if (connected) { pending.visible = true; void flushPresence(); } }, 15000);
@@ -343,7 +343,7 @@ export function useCollaboration(options: Options & { enabled: boolean }) {
     if (!options.enabled || !options.artifactId) return;
     const active = createCollaboration({ ...options, identity: identity.current, getDocument: () => callbacks.current.getDocument(), onDocument: value => callbacks.current.onDocument(value), onFeedback: value => callbacks.current.onFeedback(value), onPresence: (peers, timer) => callbacks.current.onPresence(peers, timer), onEvent: event => callbacks.current.onEvent(event), onStatus: status => callbacks.current.onStatus(status), onError: error => callbacks.current.onError(error), onClock: offset => callbacks.current.onClock?.(offset), onCursorClear: () => callbacks.current.onCursorClear?.(), onReset: () => resetRoom(value => value + 1) });
     controller.current = active;
-    const unsubscribes = ['gesture', 'upload', 'chat', 'follow'].map(topic => active.room.subscribe(topic, message => { for (const listener of subscriptions.current.get(topic) || []) listener(message); }));
+    const unsubscribes = ['gesture', 'upload', 'follow'].map(topic => active.room.subscribe(topic, message => { for (const listener of subscriptions.current.get(topic) || []) listener(message); }));
     unsubscribes.push(active.room.subscribeState!(event => { for (const listener of stateSubscriptions.current) listener(event); }));
     return () => { controller.current = undefined; active.close(); unsubscribes.forEach(unsubscribe => unsubscribe()); };
   }, [options.client, options.polling, options.artifactId, options.peerId, options.enabled]);

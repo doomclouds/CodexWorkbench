@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type StudioClient } from '../src/contracts/studio.js';
 
 const editorAction = vi.hoisted(() => vi.fn());
-vi.mock('../src/app/canvas/DocumentEditor.js', () => ({ default: () => <div><textarea aria-label="控件回归编辑器" /><button type="button" aria-label="编辑器内部操作" onClick={editorAction}>正文编辑器操作</button></div> }));
+vi.mock('../src/app/canvas/DocumentEditor.js', () => ({ default: () => <div><textarea aria-label="控件回归编辑器" /><div contentEditable suppressContentEditableWarning aria-label="控件回归富文本编辑器">正文</div><button type="button" aria-label="编辑器内部操作" onClick={editorAction}>正文编辑器操作</button></div> }));
 import WhiteboardCanvas from '../src/app/canvas/WhiteboardCanvas.js';
 
 let host: HTMLDivElement, root: Root;
@@ -23,7 +23,7 @@ const query = (label: string) => host.querySelector<HTMLElement>(`[aria-label="$
 const doc = () => host.querySelector<HTMLElement>('[data-element-id="doc"]')!;
 async function pointer(target: Element, type: string, x = 160, y = 180) {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, detail: type === 'click' ? 1 : 0, clientX: x, clientY: y });
-  await act(async () => target.dispatchEvent(event)); return event;
+  await act(async () => { target.dispatchEvent(event); if (type === 'pointerup') target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y })); }); return event;
 }
 async function clickControl(label: string) {
   const button = query(label), target = button.querySelector('svg') || button;
@@ -50,16 +50,13 @@ it('lets the actual inline document Expand control run in annotation mode and re
   const event = await clickControl('展开文档');
   expect(event.defaultPrevented).toBe(false); expect(host.querySelector('.studio-document-focus')).not.toBeNull();
   expect(modeChanged).not.toHaveBeenCalledWith(false); expect(annotated).not.toHaveBeenCalled();
-  await clickControl('编辑文档');
-  await vi.waitFor(() => expect(query('控件回归编辑器')).not.toBeNull());
-  expect(modeChanged).not.toHaveBeenCalledWith(false);
   const back = [...host.querySelectorAll('button')].find(button => button.textContent?.includes('返回画板'))!;
   await pointer(back, 'pointerdown'); await pointer(back, 'pointerup'); await pointer(back, 'click');
   expect(host.querySelector('.studio-document-focus')).toBeNull();
   expect(host.querySelector('.studio-whiteboard')?.getAttribute('data-tool')).toBe('annotate');
 });
 
-it('explicitly leaves annotation mode before inline editing so body editor controls are not swallowed', async () => {
+it('explicitly leaves annotation mode before expanded editing so body editor controls are not swallowed', async () => {
   await clickControl('编辑文档');
   await vi.waitFor(() => expect(query('控件回归编辑器')).not.toBeNull());
   expect(modeChanged).toHaveBeenCalledWith(false); expect(host.querySelector('.studio-whiteboard')?.getAttribute('data-tool')).toBe('select');
@@ -74,10 +71,10 @@ it('allows the actual document export menu and JSON action while annotation mode
   expect(modeChanged).not.toHaveBeenCalledWith(false); expect(annotated).not.toHaveBeenCalled();
 });
 
-it('keeps ordinary document body and other object clicks as annotation targets', async () => {
+it('routes unselected document paragraphs to semantic comments and keeps other objects as whole-object targets', async () => {
   const body = doc().querySelector('[data-document-block-id="paragraph"]')!;
   await pointer(body, 'pointerdown'); await pointer(body, 'pointerup'); await pointer(body, 'click');
-  expect(annotated).toHaveBeenLastCalledWith(expect.objectContaining({ anchor: expect.objectContaining({ elementIds: ['doc'] }) }));
+  expect(annotated).toHaveBeenLastCalledWith(expect.objectContaining({ anchor: expect.objectContaining({ coordinateSpace: 'document', elementIds: ['doc'], blockIds: ['paragraph'] }) }));
   const shape = host.querySelector('[data-element-id="shape"]')!;
   await pointer(shape, 'pointerdown', 840, 100); await pointer(shape, 'pointerup', 840, 100); await pointer(shape, 'click', 840, 100);
   expect(annotated).toHaveBeenCalledTimes(2); expect(annotated).toHaveBeenLastCalledWith(expect.objectContaining({ anchor: expect.objectContaining({ elementIds: ['shape'] }) }));
@@ -89,4 +86,41 @@ it('does not turn a plain body double-click into editing while annotation mode i
   await pointer(body, 'dblclick');
   expect(modeChanged).not.toHaveBeenCalledWith(false); expect(query('控件回归编辑器')).toBeNull();
   expect(doc().querySelector('.studio-document-region')?.classList.contains('is-interactive')).toBe(false);
+});
+
+it('routes actual document reading zoom keys to canvas inline and consumes them after expansion', async () => {
+  await act(async () => root.render(<WhiteboardCanvas board={board} actor={LOCAL_ACTOR} client={client} onChanged={changed} onAnnotate={() => {}} externalViewport={{ x: 0, y: 0, zoom: .5 }} externalSelectedIds={['doc']} />));
+  const pressZoom = async () => {
+    const event = new KeyboardEvent('keydown', { key: '=', ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => query('文档正文：文档控件').dispatchEvent(event)); return event;
+  };
+  expect((await pressZoom()).defaultPrevented).toBe(true);
+  expect(host.querySelector<HTMLElement>('.studio-canvas-world')!.style.transform).toContain('scale(0.6)');
+  await clickControl('展开文档');
+  const before = host.querySelector<HTMLElement>('.studio-canvas-world')!.style.transform;
+  expect((await pressZoom()).defaultPrevented).toBe(true);
+  expect(host.querySelector<HTMLElement>('.studio-canvas-world')!.style.transform).toBe(before);
+});
+
+it.each([{ ctrlKey: true }, { metaKey: true }])('keeps expanded editor, title and find fields at the document scale without stealing their printable or edit keys: %j', async command => {
+  await clickControl('编辑文档'); await vi.waitFor(() => expect(query('控件回归富文本编辑器')).not.toBeNull());
+  const before = host.querySelector<HTMLElement>('.studio-canvas-world')!.style.transform;
+  const press = async (target: Element, key: string, extra: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra });
+    await act(async () => target.dispatchEvent(event)); return event;
+  };
+  for (const target of [query('控件回归富文本编辑器'), query('文档标题'), query('文档内查找')]) {
+    target.focus();
+    for (const key of ['+', '=', '-', '0']) expect((await press(target, key, command)).defaultPrevented).toBe(true);
+    expect((await press(target, '@', { shiftKey: true, code: 'Digit2' })).defaultPrevented).toBe(false);
+    expect((await press(target, 'b', command)).defaultPrevented).toBe(false);
+    expect((await press(target, '=', { ...command, isComposing: true })).defaultPrevented).toBe(false);
+  }
+  await clickControl('导出文档'); expect(query('文档导出格式')).not.toBeNull();
+  expect((await press(query('文档标题'), '=', command)).defaultPrevented).toBe(true);
+  const otherField = document.createElement('input'); query('白板画布').append(otherField);
+  const externalField = document.createElement('input'); document.body.append(externalField);
+  expect((await press(otherField, '=', command)).defaultPrevented).toBe(false);
+  expect((await press(externalField, '=', command)).defaultPrevented).toBe(false); externalField.remove();
+  expect(host.querySelector<HTMLElement>('.studio-canvas-world')!.style.transform).toBe(before); expect(changed).not.toHaveBeenCalled();
 });

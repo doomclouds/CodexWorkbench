@@ -7,20 +7,25 @@ export interface DocumentFocusSurface {
   scrollBy(delta: Point): void;
   /** Canvas-local point to preserve through the next readingZoom change. */
   setZoomAnchor(point: Point | null): void;
+  /** Flushes document edits before a canvas-owned exit request. */
+  prepareExit?(): Promise<boolean>;
 }
 interface Props {
   expanded: boolean; id: string; version: number; zoom: number; host: HTMLElement | null;
   scroll: RefObject<HTMLDivElement | null>; content: RefObject<HTMLDivElement | null>;
+  prepareExit(): Promise<boolean>;
   onChange?: (surface: DocumentFocusSurface | null) => void;
 }
 interface Metrics { origin: Point; zoom: number; clip: Rect; scopeKey: string }
-export default function useDocumentFocusSurface({ expanded, id, version, zoom, host, scroll, content, onChange }: Props): number | undefined {
+export default function useDocumentFocusSurface({ expanded, id, version, zoom, host, scroll, content, prepareExit, onChange }: Props): number | undefined {
   const [baseWidth, setBaseWidth] = useState<number>();
   const notify = useRef(onChange); notify.current = onChange;
+  const beforeExit = useRef(prepareExit); beforeExit.current = prepareExit;
   const active = useRef(false), metric = useRef<Metrics | null>(null), anchor = useRef<Point | null>(null), refresh = useRef<() => void>(() => {});
   const controls = useMemo(() => ({
     scrollBy(delta: Point) { const node = scroll.current; if (node) { node.scrollLeft += delta.x; node.scrollTop += delta.y; refresh.current(); } },
     setZoomAnchor(point: Point | null) { anchor.current = point; },
+    prepareExit() { return beforeExit.current(); },
   }), [scroll]);
   useLayoutEffect(() => {
     const node = scroll.current, body = content.current;

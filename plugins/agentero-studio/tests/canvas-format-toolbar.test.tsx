@@ -15,11 +15,11 @@ async function click(label: string) { await act(async () => query<HTMLButtonElem
 async function choose(label: string, value: string) {
   await act(async () => { const select = query<HTMLSelectElement>(label); select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
 }
-async function mount(elements: BoardElement[], props: Partial<Props> = {}) {
+async function mount(elements: BoardElement[], props: Partial<Props> = {}, withViewControls = false) {
   const changed = vi.fn();
   function Harness() {
     const [values, setValues] = useState(elements);
-    return <CanvasFormatToolbar elements={values} style={{ left: 200, top: 12 }} canEdit canAnnotate saving={false} interactive={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onToggleInteractive={() => {}} onMore={() => {}} onAlign={() => {}} onChange={changes => { changed(changes); setValues(previous => previous.map(value => ({ ...value, ...changes }))); }} {...props} />;
+    return <>{withViewControls && <div className="studio-canvas-top-tools" />}<CanvasFormatToolbar elements={values} style={{ left: 200, top: 12 }} canEdit canAnnotate saving={false} interactive={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onToggleInteractive={() => {}} onMore={() => {}} onAlign={() => {}} onChange={changes => { changed(changes); setValues(previous => previous.map(value => ({ ...value, ...changes }))); }} {...props} /></>;
   }
   await act(async () => root.render(<Harness />));
   return changed;
@@ -29,7 +29,21 @@ beforeEach(() => {
   sheet = document.createElement('style'); sheet.textContent = readFileSync(resolve('src/app/canvas/canvas.css'), 'utf8'); document.head.append(sheet);
   host = document.createElement('div'); host.className = 'studio-whiteboard'; host.style.width = '400px'; document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); sheet.remove(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); sheet.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it.each([800, 300])('measures the real view controls and keeps selection actions clear in a %spx canvas', async width => {
+  const rect = (x: number, y: number, w: number, h: number) => ({ x, y, left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, toJSON() {} });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return rect(100, 50, width, 600);
+    if (this.classList.contains('studio-canvas-top-tools')) return rect(100 + width - 140, 62, 126, 38);
+    if (this.classList.contains('studio-selection-toolbar')) return rect(0, 0, 264, 42);
+    return rect(0, 0, 0, 0);
+  });
+  await mount([element('document')], { style: { left: 1600, top: 12 } }, true);
+  const toolbar = query('选区格式'), left = parseFloat(toolbar.style.left) - 132, top = parseFloat(toolbar.style.top);
+  expect(left + 264 <= width - 148 || top >= 58).toBe(true);
+  expect(left).toBeGreaterThanOrEqual(12); expect(left + 264).toBeLessThanOrEqual(width - 12);
+});
 
 it('changes a document frame fill through the same palette without offering global text formatting', async () => {
   const changed = await mount([element('document', { fill: '#EFEFEF' })]);
@@ -42,30 +56,26 @@ it('changes a document frame fill through the same palette without offering glob
   expect(query('填充颜色').style.background).toBe('rgb(174, 226, 171)');
 });
 
-it('offers document focus annotation directly while preserving the whole-object annotation action', async () => {
-  const focus = vi.fn(), annotate = vi.fn(), edit = vi.fn();
-  await mount([element('document')], { onFocusAnnotate: focus, onAnnotate: annotate, onEditDocument: edit });
-  const action = query<HTMLButtonElement>('聚焦备注');
-  expect(action.textContent).toContain('聚焦备注'); expect(action.closest('[role="dialog"]')).toBeNull();
-  await click('聚焦备注'); expect(focus).toHaveBeenCalledOnce(); expect(annotate).not.toHaveBeenCalled(); expect(edit).not.toHaveBeenCalled();
-  await click('备注所选元素'); expect(annotate).toHaveBeenCalledOnce(); expect(focus).toHaveBeenCalledOnce();
-  const style = getComputedStyle(action);
-  expect(style.width).toBe('auto'); expect(style.whiteSpace).toBe('nowrap'); expect(style.flexShrink).toBe('0');
-});
-
-it('respects edit and annotation permissions for document actions', async () => {
-  const focus = vi.fn();
-  await mount([element('document')], { canEdit: false, canAnnotate: false, onFocusAnnotate: focus });
-  expect(query('填充颜色')).toBeNull(); expect(query('编辑文档')).toBeNull();
-  expect(query<HTMLButtonElement>('聚焦备注').disabled).toBe(true);
-  await click('聚焦备注'); expect(focus).not.toHaveBeenCalled();
-});
-
-it('keeps the existing annotation action for ordinary objects without adding document focus', async () => {
-  const annotate = vi.fn(), focus = vi.fn();
-  await mount([element('container')], { onAnnotate: annotate, onFocusAnnotate: focus });
+it('keeps document operations in its header instead of duplicating interaction, edit and focus-note actions', async () => {
+  const annotate = vi.fn();
+  await mount([element('document')], { onAnnotate: annotate });
+  expect(query('与文档内容交互')).toBeNull();
+  expect(query('编辑文档')).toBeNull();
   expect(query('聚焦备注')).toBeNull();
-  await click('备注所选元素'); expect(annotate).toHaveBeenCalledOnce(); expect(focus).not.toHaveBeenCalled();
+  await click('备注所选元素'); expect(annotate).toHaveBeenCalledOnce();
+});
+
+it('respects edit and annotation permissions for document object actions', async () => {
+  await mount([element('document')], { canEdit: false, canAnnotate: false });
+  expect(query('填充颜色')).toBeNull(); expect(query('编辑文档')).toBeNull();
+  expect(query('聚焦备注')).toBeNull(); expect(query('备注所选元素')).toBeNull();
+});
+
+it('keeps the existing annotation action for ordinary objects', async () => {
+  const annotate = vi.fn();
+  await mount([element('container')], { onAnnotate: annotate });
+  expect(query('聚焦备注')).toBeNull();
+  await click('备注所选元素'); expect(annotate).toHaveBeenCalledOnce();
 });
 
 it('lets a mixed document and container selection share a frame fill', async () => {

@@ -177,24 +177,22 @@ it('matches the actual header avatar claim for the pointer and editing badge', a
   expect(host.querySelector('.studio-remote-cursor path')!.getAttribute('fill')).toBe('#fbb315');
 });
 
-it('automatically fades chat, marks a 60-second cursor idle and expires it at 15 minutes without new peer events', async () => {
+it('marks a 60-second cursor idle and expires it at 15 minutes without new peer events', async () => {
   let parentRenders = 0;
-  const peers = [peer('alice', { context: context(['one']), cursor: { x: 10, y: 20, t: START }, chat: 'hello', chatExpiresAt: START + 5000 })];
+  const peers = [peer('alice', { context: context(['one']), cursor: { x: 10, y: 20, t: START } })];
   function Parent() { parentRenders++; return <PeerPresenceOverlay peers={peers} elements={elements} artifactId="board" selfActorId="self" zoom={1} />; }
   await act(async () => root.render(<Parent />));
-  await advance(4999); expect(host.querySelector('p')!.style.opacity).toBe('1');
-  await advance(1); expect(host.querySelector('p')!.style.opacity).toBe('0'); expect(host.querySelector('p')!.style.transition).toBe('opacity 600ms linear');
-  await advance(600); expect(host.querySelector('p')).toBeNull();
-  await advance(54_400); expect(host.querySelector('.studio-remote-cursor')!.classList.contains('is-idle')).toBe(true); expect((host.querySelector('.studio-remote-cursor') as HTMLElement).style.opacity).toBe('0.35');
+  await advance(59_999); expect(host.querySelector('.studio-remote-cursor')!.classList.contains('is-idle')).toBe(false);
+  await advance(1); expect(host.querySelector('.studio-remote-cursor')!.classList.contains('is-idle')).toBe(true); expect((host.querySelector('.studio-remote-cursor') as HTMLElement).style.opacity).toBe('0.35');
   await advance(840_000); expect(host.querySelector('.studio-remote-cursor')).toBeNull(); expect(host.querySelector('[data-peer-target]')).toBeNull(); expect(vi.getTimerCount()).toBe(0);
   expect(parentRenders).toBe(1);
 });
 
-it.each([-7_200_000, 7_200_000])('uses the server clock offset %s for cursor and chat deadlines', async offset => {
+it.each([-7_200_000, 7_200_000])('uses the server clock offset %s for cursor deadlines', async offset => {
   vi.setSystemTime(START - offset);
-  await mount([peer('alice', { cursor: { x: 10, y: 20, t: START }, chat: 'server clock', chatExpiresAt: START + 5000 })], { clockOffsetMs: offset });
-  await advance(5600); expect(host.querySelector('p')).toBeNull(); expect(host.querySelector('.is-idle')).toBeNull();
-  await advance(54_400); expect(host.querySelector('.is-idle')).not.toBeNull();
+  await mount([peer('alice', { cursor: { x: 10, y: 20, t: START } })], { clockOffsetMs: offset });
+  await advance(59_999); expect(host.querySelector('.is-idle')).toBeNull();
+  await advance(1); expect(host.querySelector('.is-idle')).not.toBeNull();
   await advance(840_000); expect(host.querySelector('.studio-remote-cursor')).toBeNull();
 });
 
@@ -214,12 +212,6 @@ it('reacts to document visibility, explicit cursor null and peer departure witho
   await advance(61_000); await act(async () => { visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange')); }); expect(host.querySelector('.is-idle')).not.toBeNull();
   await mount([{ ...page, cursor: null }]); expect(host.querySelector('.studio-remote-cursor')).toBeNull(); expect(vi.getTimerCount()).toBe(0);
   await mount([page]); expect(host.querySelector('.studio-remote-cursor')).not.toBeNull(); await mount([]); expect(host.querySelector('.studio-remote-cursor')).toBeNull();
-});
-
-it('removes chat without an animation when reduced motion is enabled', async () => {
-  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
-  await mount([peer('alice', { cursor: { x: 10, y: 20, t: START }, chat: 'quiet', chatExpiresAt: START + 5000 })]);
-  expect(host.querySelector('p')!.style.transition).toBe('none'); await advance(5000); expect(host.querySelector('p')).toBeNull();
 });
 
 it.each([-7_200_000, 7_200_000])('keeps a workspace after a minute and marks stale progress on server time %s without peer updates', async offset => {

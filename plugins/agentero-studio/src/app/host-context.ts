@@ -1,6 +1,8 @@
 import type { ViewContext } from '../contracts/studio';
 
 export interface HostViewContext {
+  appId: 'agentero-studio';
+  panelOpen: true;
   artifactId: string | null;
   viewId: string | null;
   selectedIds: string[];
@@ -9,9 +11,11 @@ export interface HostViewContext {
 }
 
 function summarize(context: ViewContext | null): HostViewContext {
-  if (!context) return { artifactId: null, viewId: null, selectedIds: [], selectedCount: 0 };
+  if (!context) return { appId: 'agentero-studio', panelOpen: true, artifactId: null, viewId: null, selectedIds: [], selectedCount: 0 };
   const selectedIds = [...new Set(context.selectedIds)];
   const snapshot: HostViewContext = {
+    appId: 'agentero-studio',
+    panelOpen: true,
     artifactId: context.artifactId,
     viewId: context.viewId,
     selectedIds: selectedIds.slice(0, 200),

@@ -29,7 +29,7 @@ export class ParticipantActivity {
     const present = new Set(peers.map(peer => peer.peerId));
     for (const key of this.pages.keys()) if (!present.has(key)) this.pages.delete(key);
     for (const peer of peers) {
-      const signature = JSON.stringify([peer.context, peer.cursor, peer.chat, peer.following, peer.visible, peer.color]);
+      const signature = JSON.stringify([peer.context, peer.cursor, peer.following, peer.visible, peer.color]);
       const previous = this.pages.get(peer.peerId);
       if (!previous || previous.signature !== signature) this.pages.set(peer.peerId, { signature, at: previous ? now : Math.min(now, Date.parse(peer.updatedAt) || now) });
     }

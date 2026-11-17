@@ -7,23 +7,48 @@ import { downloadBoard } from '../src/app/export';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { APP_MAX_BYTES } from '../src/contracts/transport';
 
-const mocks = vi.hoisted(() => ({ downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), capabilities: {} as Record<string, unknown> }));
+const mocks = vi.hoisted(() => ({ downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), updateModelContext: vi.fn(), capabilities: {} as Record<string, unknown> }));
 vi.mock('@modelcontextprotocol/ext-apps', () => ({
   App: class {
     connect = mocks.connect;
     close = mocks.close;
     downloadFile = mocks.downloadFile;
     callServerTool = mocks.callServerTool;
+    updateModelContext = mocks.updateModelContext;
     getHostContext() { return undefined; }
     getHostCapabilities() { return mocks.capabilities; }
   },
   PostMessageTransport: class {}, applyDocumentTheme: vi.fn(), applyHostStyleVariables: vi.fn(),
 }));
 vi.mock('@openai/mcp-extensions/app', () => ({ OpenAIExtensions: class {} }));
-beforeEach(() => { mocks.capabilities = {}; mocks.close.mockResolvedValue(undefined); mocks.callServerTool.mockReset().mockResolvedValue({ _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }); });
+beforeEach(() => { mocks.capabilities = {}; mocks.close.mockResolvedValue(undefined); mocks.updateModelContext.mockResolvedValue(undefined); mocks.callServerTool.mockReset().mockResolvedValue({ _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('host connection adaptation', () => {
+  it.each(['structuredContent', 'text'] as const)('announces an existing panel with no selected work through %s context', async format => {
+    vi.useFakeTimers();
+    mocks.capabilities = { updateModelContext: { [format]: true } };
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    try {
+      const bridge = await createStudioBridge(() => {});
+      await vi.advanceTimersByTimeAsync(150);
+      const empty = { appId: 'agentero-studio', panelOpen: true, artifactId: null, viewId: null, selectedIds: [], selectedCount: 0 };
+      expect(mocks.updateModelContext).toHaveBeenCalledExactlyOnceWith(format === 'structuredContent'
+        ? { structuredContent: empty }
+        : { content: [{ type: 'text', text: JSON.stringify(empty) }] });
+      expect(mocks.callServerTool.mock.calls.map(call => call[0].name)).not.toContain('studio_open');
+
+      bridge.updateContext?.({ artifactId: 'selected-board', viewId: 'current-view', selectedIds: ['paragraph-one'] });
+      await vi.advanceTimersByTimeAsync(150);
+      const selected = { ...empty, artifactId: 'selected-board', viewId: 'current-view', selectedIds: ['paragraph-one'], selectedCount: 1 };
+      expect(mocks.updateModelContext).toHaveBeenLastCalledWith(format === 'structuredContent'
+        ? { structuredContent: selected }
+        : { content: [{ type: 'text', text: JSON.stringify(selected) }] });
+      await bridge.close();
+    } finally { dom.window.close(); }
+  });
+
   it('bootstraps through the app-only transport without invoking the tool that opens the UI', async () => {
     const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
     vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);

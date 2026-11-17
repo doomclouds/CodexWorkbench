@@ -142,7 +142,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.12";
+    PLUGIN_VERSION = "0.2.13";
   }
 });
 
@@ -12388,7 +12388,7 @@ var init_collaboration_room = __esm({
   "src/core/shared/collaboration-room.ts"() {
     "use strict";
     init_common();
-    ROOM_TTL = { gesture: 1e4, upload: 9e4, chat: 5e3, follow: 8e3 };
+    ROOM_TTL = { gesture: 1e4, upload: 9e4, follow: 8e3 };
     CollaborationRoom = class {
       budgets = /* @__PURE__ */ new Map();
       sequences = /* @__PURE__ */ new Map();
@@ -12725,7 +12725,7 @@ var init_collaboration = __esm({
       }
       async updateNow(artifactId, input2, actor) {
         if (Buffer.byteLength(JSON.stringify(input2)) > 16 * 1024) throw new StudioError("TOO_LARGE", "\u5728\u7EBF\u72B6\u6001\u8FC7\u5927\u3002");
-        if (input2.context !== void 0 && input2.context !== null && !object2(input2.context) || input2.cursor !== void 0 && input2.cursor !== null && !object2(input2.cursor) || input2.following !== void 0 && input2.following !== null && typeof input2.following !== "string" || input2.chat !== void 0 && input2.chat !== null && typeof input2.chat !== "string") throw new StudioError("INVALID_ARGUMENT", "\u5728\u7EBF\u72B6\u6001\u5B57\u6BB5\u65E0\u6548\u3002");
+        if (input2.context !== void 0 && input2.context !== null && !object2(input2.context) || input2.cursor !== void 0 && input2.cursor !== null && !object2(input2.cursor) || input2.following !== void 0 && input2.following !== null && typeof input2.following !== "string") throw new StudioError("INVALID_ARGUMENT", "\u5728\u7EBF\u72B6\u6001\u5B57\u6BB5\u65E0\u6548\u3002");
         if (input2.peerEpoch === void 0 !== (input2.peerSeq === void 0)) throw new StudioError("INVALID_ARGUMENT", "\u9875\u9762\u4EE3\u6B21\u548C\u72B6\u6001\u5E8F\u53F7\u5FC5\u987B\u4E00\u8D77\u63D0\u4F9B\u3002");
         if (input2.peerSeq !== void 0 && (!Number.isSafeInteger(input2.peerSeq) || Number(input2.peerSeq) < 0)) throw new StudioError("INVALID_ARGUMENT", "\u5728\u7EBF\u72B6\u6001\u5E8F\u53F7\u65E0\u6548\u3002");
         const peerId = safeId(input2.peerId ?? actor.id, "\u53C2\u4E0E\u8005 ID"), previous = this.peers.get(artifactId)?.get(peerId)?.value;
@@ -12745,7 +12745,6 @@ var init_collaboration = __esm({
         }
         const cursor = input2.cursor === null ? null : object2(input2.cursor) ? { x: finite(input2.cursor.x, 0), y: finite(input2.cursor.y, 0), ...typeof input2.cursor.surface === "string" ? { surface: input2.cursor.surface.slice(0, 120) } : {}, t: Date.now() } : previous?.cursor;
         const following = input2.following === null ? void 0 : typeof input2.following === "string" ? input2.following.slice(0, 120) : previous?.following;
-        const chat = input2.chat === null ? void 0 : typeof input2.chat === "string" ? [...input2.chat].slice(0, 50).join("") : previous?.chat;
         if (input2.color !== void 0 && (typeof input2.color !== "string" || !/^#[0-9a-f]{6}$/i.test(input2.color))) throw new StudioError("INVALID_ARGUMENT", "\u534F\u4F5C\u989C\u8272\u65E0\u6548\u3002");
         if (input2.visible !== void 0 && typeof input2.visible !== "boolean") throw new StudioError("INVALID_ARGUMENT", "\u9875\u9762\u53EF\u89C1\u72B6\u6001\u65E0\u6548\u3002");
         let nextTimer;
@@ -12763,7 +12762,7 @@ var init_collaboration = __esm({
         peer.budgetAt = now;
         if (input2.leave !== true && input2.timer === void 0 && peer.tokens < 1) return result(false);
         if (input2.leave !== true && input2.timer === void 0) peer.tokens--;
-        const next = input2.leave === true ? void 0 : { peerId, actor: copy(actor), ...peer.epoch ? { peerEpoch: peer.epoch, peerSeq: sequence2 } : {}, ...context ? { context } : {}, ...cursor !== void 0 ? { cursor } : {}, ...following !== void 0 ? { following } : {}, ...chat !== void 0 ? { chat, chatExpiresAt: input2.chat === void 0 ? previous?.chatExpiresAt : Date.now() + 5e3 } : {}, ...input2.color !== void 0 || previous?.color ? { color: input2.color ?? previous?.color } : {}, ...input2.visible !== void 0 || previous?.visible !== void 0 ? { visible: input2.visible ?? previous?.visible } : {}, updatedAt: new Date(now).toISOString() };
+        const next = input2.leave === true ? void 0 : { peerId, actor: copy(actor), ...peer.epoch ? { peerEpoch: peer.epoch, peerSeq: sequence2 } : {}, ...context ? { context } : {}, ...cursor !== void 0 ? { cursor } : {}, ...following !== void 0 ? { following } : {}, ...input2.color !== void 0 || previous?.color ? { color: input2.color ?? previous?.color } : {}, ...input2.visible !== void 0 || previous?.visible !== void 0 ? { visible: input2.visible ?? previous?.visible } : {}, updatedAt: new Date(now).toISOString() };
         if (nextTimer) await this.timers.set(artifactId, nextTimer);
         peer.value = next;
         peer.sequence = sequence2;
@@ -12816,10 +12815,6 @@ var init_collaboration = __esm({
         return copy([...group.values()].flatMap((peer) => {
           if (!peer.value || !peer.streams && peer.leaseUntil <= now) return [];
           const value = copy(peer.value);
-          if (value.chatExpiresAt !== void 0 && value.chatExpiresAt <= now) {
-            delete value.chat;
-            delete value.chatExpiresAt;
-          }
           if (value.context?.agentTasks) value.context.agentTasks = value.context.agentTasks.filter((task) => task.outcome ? task.endedAt + AGENT_TASK_FADE_MS > now : task.expiresAt > now);
           return [value];
         }));
@@ -46066,7 +46061,7 @@ var schemas = {
   artifact_activity: external_exports.object({ artifactId: id, action: external_exports.enum(["begin", "update", "end", "status", "release"]), ...taskBinding, taskId: id.optional().describe("begin \u6307\u5B9A\u903B\u8F91\u4EFB\u52A1\uFF1Bstatus \u53EF\u7701\u7565\u4EE5\u5217\u51FA\u81EA\u5DF1\u7684\u4EFB\u52A1\uFF0C\u6216\u53EA\u7ED9 taskId \u67E5\u8BE2\u672C\u4EFB\u52A1\uFF1Bupdate/end/release \u540C\u65F6\u9700\u8981 generation\u3002"), phase: external_exports.enum(["preparing", "writing", "verifying"]).optional(), outcome: external_exports.enum(["completed", "failed", "cancelled"]).optional(), targetActorId: id.optional().describe("\u623F\u4E3B\u754C\u9762 release \u7684\u76EE\u6807 Agent actor.id\uFF0C\u4E0D\u662F participant.id\uFF1B\u4E0D\u80FD\u4EE5\u76EE\u6807\u8EAB\u4EFD\u5192\u5145\u8C03\u7528\u8005\u3002"), scope: external_exports.object({ ids: external_exports.array(id).min(1).max(200).optional(), rect: external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) }).optional() }).optional(), label: external_exports.string().trim().min(1).max(80).optional() })
 };
 var descriptions = {
-  studio_open: "\u6253\u5F00 Agentero \u521B\u4F5C\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
+  studio_open: "\u4EC5\u5728\u5F53\u524D\u4F1A\u8BDD\u6CA1\u6709\u5DF2\u6253\u5F00\u7684 Agentero \u521B\u4F5C\u9762\u677F\u4E14\u672C\u6B65\u786E\u9700\u754C\u9762\u65F6\u8C03\u7528\u4E00\u6B21\uFF0C\u6253\u5F00\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\uFF1B\u8C03\u7528\u524D\u5148\u67E5\u5F53\u524D\u5BBF\u4E3B App \u4E0A\u4E0B\u6587\u6216\u9762\u677F\u6E05\u5355\u3002appId=agentero-studio\u3001panelOpen=true \u8868\u793A\u5DF2\u6709\u9762\u677F\uFF0C\u5373\u4F7F artifactId/viewId \u4E3A\u7A7A\u4E5F\u5E94\u590D\u7528\uFF1B\u540E\u7EED\u8BFB\u53D6\u3001\u4FEE\u6539\u548C\u9A8C\u8BC1\u76F4\u63A5\u4F7F\u7528\u4F5C\u54C1\u5DE5\u5177\uFF0C\u4E0D\u91CD\u590D\u8C03\u7528\u672C\u5DE5\u5177\u5237\u65B0\u3001\u8865\u8FDE\u63A5\u6216\u786E\u8BA4\u4FDD\u5B58\u3002\u6253\u5F00\u8BF7\u6C42\u8FDB\u884C\u4E2D\u5148\u7B49\u5F85\uFF1B\u53E5\u67C4\u5931\u6548\u5148\u91CD\u65B0\u67E5\u8BE2\uFF0C\u786E\u8BA4\u5173\u95ED\u540E\u624D\u53EF\u518D\u6B21\u6253\u5F00\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
   artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
   artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
   artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u6587\u6863\u7528 blocks+elementId \u8BFB\u53D6\u7A33\u5B9A\u5757\uFF08\u53EF\u9644 feedbackId \u8BFB\u51BB\u7ED3\u5757\uFF09\uFF0Csource \u8FD4\u56DE\u53EF\u5206\u9875 JSON\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",

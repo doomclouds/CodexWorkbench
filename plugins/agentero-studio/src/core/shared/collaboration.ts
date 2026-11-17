@@ -102,7 +102,7 @@ export class StudioCollaboration {
   }
   private async updateNow(artifactId: string, input: Record<string, unknown>, actor: Actor) {
     if (Buffer.byteLength(JSON.stringify(input)) > 16 * 1024) throw new StudioError('TOO_LARGE', '在线状态过大。');
-    if (input.context !== undefined && input.context !== null && !object(input.context) || input.cursor !== undefined && input.cursor !== null && !object(input.cursor) || input.following !== undefined && input.following !== null && typeof input.following !== 'string' || input.chat !== undefined && input.chat !== null && typeof input.chat !== 'string') throw new StudioError('INVALID_ARGUMENT', '在线状态字段无效。');
+    if (input.context !== undefined && input.context !== null && !object(input.context) || input.cursor !== undefined && input.cursor !== null && !object(input.cursor) || input.following !== undefined && input.following !== null && typeof input.following !== 'string') throw new StudioError('INVALID_ARGUMENT', '在线状态字段无效。');
     if ((input.peerEpoch === undefined) !== (input.peerSeq === undefined)) throw new StudioError('INVALID_ARGUMENT', '页面代次和状态序号必须一起提供。');
     if (input.peerSeq !== undefined && (!Number.isSafeInteger(input.peerSeq) || Number(input.peerSeq) < 0)) throw new StudioError('INVALID_ARGUMENT', '在线状态序号无效。');
     const peerId = safeId(input.peerId ?? actor.id, '参与者 ID'), previous = this.peers.get(artifactId)?.get(peerId)?.value;
@@ -121,7 +121,6 @@ export class StudioCollaboration {
     if (context && !['owner', 'editor'].includes(actor.role)) for (const field of ['editingIds', 'movingIds', 'savingIds']) if (context[field] !== undefined) context[field] = [];
     const cursor = input.cursor === null ? null : object(input.cursor) ? { x: finite(input.cursor.x, 0), y: finite(input.cursor.y, 0), ...(typeof input.cursor.surface === 'string' ? { surface: input.cursor.surface.slice(0, 120) } : {}), t: Date.now() } : previous?.cursor;
     const following = input.following === null ? undefined : typeof input.following === 'string' ? input.following.slice(0, 120) : previous?.following;
-    const chat = input.chat === null ? undefined : typeof input.chat === 'string' ? [...input.chat].slice(0, 50).join('') : previous?.chat;
     if (input.color !== undefined && (typeof input.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(input.color))) throw new StudioError('INVALID_ARGUMENT', '协作颜色无效。');
     if (input.visible !== undefined && typeof input.visible !== 'boolean') throw new StudioError('INVALID_ARGUMENT', '页面可见状态无效。');
     let nextTimer: RoomTimer | undefined;
@@ -134,7 +133,7 @@ export class StudioCollaboration {
     const now = Date.now(); peer.tokens = Math.min(80, peer.tokens + (now - peer.budgetAt) * 40 / 1000); peer.budgetAt = now;
     if (input.leave !== true && input.timer === undefined && peer.tokens < 1) return result(false);
     if (input.leave !== true && input.timer === undefined) peer.tokens--;
-    const next: Presence | undefined = input.leave === true ? undefined : { peerId, actor: copy(actor), ...(peer.epoch ? { peerEpoch: peer.epoch, peerSeq: sequence } : {}), ...(context ? { context: context as Presence['context'] } : {}), ...(cursor !== undefined ? { cursor } : {}), ...(following !== undefined ? { following } : {}), ...(chat !== undefined ? { chat, chatExpiresAt: input.chat === undefined ? previous?.chatExpiresAt : Date.now() + 5000 } : {}), ...(input.color !== undefined || previous?.color ? { color: input.color as string | undefined ?? previous?.color } : {}), ...(input.visible !== undefined || previous?.visible !== undefined ? { visible: input.visible as boolean | undefined ?? previous?.visible } : {}), updatedAt: new Date(now).toISOString() };
+    const next: Presence | undefined = input.leave === true ? undefined : { peerId, actor: copy(actor), ...(peer.epoch ? { peerEpoch: peer.epoch, peerSeq: sequence } : {}), ...(context ? { context: context as Presence['context'] } : {}), ...(cursor !== undefined ? { cursor } : {}), ...(following !== undefined ? { following } : {}), ...(input.color !== undefined || previous?.color ? { color: input.color as string | undefined ?? previous?.color } : {}), ...(input.visible !== undefined || previous?.visible !== undefined ? { visible: input.visible as boolean | undefined ?? previous?.visible } : {}), updatedAt: new Date(now).toISOString() };
     if (nextTimer) await this.timers.set(artifactId, nextTimer);
     peer.value = next; peer.sequence = sequence; peer.departed = input.leave === true; this.publishPresence(artifactId); return result(true);
   }
@@ -178,7 +177,7 @@ export class StudioCollaboration {
     const now = Date.now();
     return copy([...group.values()].flatMap(peer => {
       if (!peer.value || !peer.streams && peer.leaseUntil <= now) return [];
-      const value = copy(peer.value); if (value.chatExpiresAt !== undefined && value.chatExpiresAt <= now) { delete value.chat; delete value.chatExpiresAt; }
+      const value = copy(peer.value);
       if (value.context?.agentTasks) value.context.agentTasks = value.context.agentTasks.filter(task => task.outcome ? task.endedAt! + AGENT_TASK_FADE_MS > now : task.expiresAt > now);
       return [value];
     }));

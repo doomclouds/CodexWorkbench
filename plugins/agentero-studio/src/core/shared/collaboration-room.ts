@@ -4,7 +4,7 @@ import { copy, object, requireRole, StudioError } from './common.js';
 interface Bucket { tokens: number; ends: number; updatedAt: number }
 interface GestureOrder { sequence: number; ended: boolean; expiresAt: number }
 interface RoomInput { topic: string; data: Record<string, Json> }
-export const ROOM_TTL: Record<string, number> = { gesture: 10_000, upload: 90_000, chat: 5000, follow: 8000 };
+export const ROOM_TTL: Record<string, number> = { gesture: 10_000, upload: 90_000, follow: 8000 };
 
 /** Loss-tolerant room previews have their own budget and never enter content history. */
 export class CollaborationRoom {

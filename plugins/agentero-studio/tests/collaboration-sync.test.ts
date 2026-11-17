@@ -113,17 +113,17 @@ describe('bounded collaboration replay and peer ordering', () => {
   it.each(['viewer', 'commenter', 'editor', 'owner'] as const)('normalizes advertised edit activity using the server %s role while retaining ordinary presence', async role => {
     const collaboration = create(), actor: Actor = { id: `role-${role}`, name: role, kind: 'human', role };
     const context = { artifactId: 'board-a', viewId: 'role-page', selectedIds: ['shape'], editingIds: ['shape'], movingIds: ['shape'], savingIds: ['shape'], dirty: true, viewport: { x: 1, y: 2, zoom: 1 } };
-    const result = await collaboration.update('board-a', { peerId: 'role-page', context, cursor: { x: 20, y: 30 }, chat: 'hello', actor: { ...actor, role: 'owner' } }, actor);
+    const result = await collaboration.update('board-a', { peerId: 'role-page', context, cursor: { x: 20, y: 30 }, actor: { ...actor, role: 'owner' } }, actor);
     const allowed = ['editor', 'owner'].includes(role), ids = allowed ? ['shape'] : [];
-    expect(result.peers[0]).toMatchObject({ actor, context: { ...context, editingIds: ids, movingIds: ids, savingIds: ids }, cursor: { x: 20, y: 30 }, chat: 'hello' });
+    expect(result.peers[0]).toMatchObject({ actor, context: { ...context, editingIds: ids, movingIds: ids, savingIds: ids }, cursor: { x: 20, y: 30 } });
     expect(context.editingIds).toEqual(['shape']);
   });
 
   it.each(['viewer', 'commenter'] as const)('drops inherited editor activity after fresh %s authorization even on a cursor-only update', async role => {
     const collaboration = create(), actor: Actor = { ...editor, id: 'downgraded-member' };
-    await collaboration.update('board-a', { peerId: 'retained-page', context: { artifactId: 'board-a', viewId: 'retained-page', selectedIds: ['shape'], editingIds: ['shape'], movingIds: ['shape'], savingIds: ['shape'] }, chat: 'retained' }, actor);
+    await collaboration.update('board-a', { peerId: 'retained-page', context: { artifactId: 'board-a', viewId: 'retained-page', selectedIds: ['shape'], editingIds: ['shape'], movingIds: ['shape'], savingIds: ['shape'] } }, actor);
     const result = await collaboration.update('board-a', { peerId: 'retained-page', cursor: { x: 40, y: 50 } }, actor, async () => ({ ...actor, role }));
-    expect(result.peers[0]).toMatchObject({ actor: { id: actor.id, role }, context: { selectedIds: ['shape'], editingIds: [], movingIds: [], savingIds: [] }, cursor: { x: 40, y: 50 }, chat: 'retained' });
+    expect(result.peers[0]).toMatchObject({ actor: { id: actor.id, role }, context: { selectedIds: ['shape'], editingIds: [], movingIds: [], savingIds: [] }, cursor: { x: 40, y: 50 } });
   });
 
   it('validates read-only edit activity fields before normalizing them', async () => {
@@ -157,7 +157,7 @@ describe('bounded collaboration replay and peer ordering', () => {
     expect(collaboration.room('board-a', { ...base, peerSeq: 1, events: [frame(3, 'step')] }, editor).accepted).toBe(0);
     expect(collaboration.room('board-a', { ...base, peerSeq: 0, events: [frame(100, 'end')] }, editor).accepted).toBe(0);
     expect(() => collaboration.room('board-a', { peerId: 'view', events: [frame(1)] }, viewer)).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }));
-    expect(collaboration.room('board-a', { peerId: 'view', events: [{ topic: 'chat', data: { text: 'hello' } }] }, viewer).accepted).toBe(1);
+    expect(collaboration.room('board-a', { peerId: 'view', events: [{ topic: 'follow', data: { of: 'tab-a' } }] }, viewer).accepted).toBe(1);
     const many = Array.from({ length: 80 }, (_, index) => ({ topic: 'gesture', data: { id: 'drag-b', seq: index, phase: 'step' } }));
     const overloaded = collaboration.room('board-a', { ...base, peerSeq: 2, events: many }, editor); expect(overloaded.dropped).toBeGreaterThan(0);
     expect(collaboration.room('board-a', { ...base, peerSeq: 3, events: [{ topic: 'gesture', data: { id: 'drag-b', seq: 100, phase: 'end' } }] }, editor).accepted).toBe(1);

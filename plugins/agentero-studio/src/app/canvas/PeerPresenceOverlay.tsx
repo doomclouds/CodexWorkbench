@@ -17,12 +17,11 @@ interface Props {
   geometryTargets?: readonly { peerId: string; elementIds: readonly string[] }[];
   onReleaseAgentTask?: (target: AgentTaskReleaseTarget) => Promise<void>;
 }
-const IDLE_AFTER = 60_000, EXPIRE_AFTER = 15 * 60_000, CHAT_FADE = 600;
+const IDLE_AFTER = 60_000, EXPIRE_AFTER = 15 * 60_000;
 
 export default function PeerPresenceOverlay({ peers, elements, artifactId, selfActorId, zoom, clockOffsetMs = 0, preview = false, geometryTargets = [], onReleaseAgentTask }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden');
-  const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false);
   const [, tick] = useState(0);
   const lastTaskBoxes = useRef(new Map<string, ActivityBounds>()), pending = useRef(new Set<string>());
   const [releasing, setReleasing] = useState(new Set<string>()), [releaseError, setReleaseError] = useState<{ key: string; message: string }>();
@@ -34,14 +33,6 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
     document.addEventListener('visibilitychange', update);
     return () => { observer.disconnect(); document.removeEventListener('visibilitychange', update); };
   }, []);
-  useEffect(() => {
-    const media = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-    if (!media) return;
-    const update = () => setReducedMotion(media.matches);
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, []);
-
   const now = Date.now() + clockOffsetMs;
   let deadline = Infinity;
   const schedule = (at: number) => { if (at > now) deadline = Math.min(deadline, at); };
@@ -91,7 +82,6 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
   }
   for (const { peer, at } of cursors.values()) {
     schedule(at + IDLE_AFTER); schedule(at + EXPIRE_AFTER); schedule(Date.parse(peer.updatedAt) + EXPIRE_AFTER);
-    if (peer.chat) { const expiry = peer.chatExpiresAt ?? at + 5000; schedule(expiry); if (!reducedMotion) schedule(expiry + CHAT_FADE); }
   }
   useEffect(() => {
     if (!visible || preview || !Number.isFinite(deadline)) return;
@@ -135,8 +125,7 @@ export default function PeerPresenceOverlay({ peers, elements, artifactId, selfA
     })}
     {[...cursors.values()].map(({ peer, at }) => {
       const color = participantColor(peer.actor, peer.color), idle = now >= at + IDLE_AFTER;
-      const chatExpiry = peer.chatExpiresAt ?? at + 5000, showChat = peer.chat && now < chatExpiry + (reducedMotion ? 0 : CHAT_FADE);
-      return <div key={peer.actor.id} className={`studio-remote-cursor${idle ? ' is-idle' : ''}`} data-peer-actor={peer.actor.id} data-peer-id={peer.peerId} style={{ left: peer.cursor!.x, top: peer.cursor!.y, opacity: idle ? .35 : 1, transform: `scale(${1 / zoom})`, pointerEvents: 'none' }}><svg width="18" height="23" viewBox="0 0 18 23" aria-hidden="true"><path d="M2 1 16 14 10 15 7 21 2 1Z" fill={color} stroke="#fff" strokeWidth="1.4" /></svg><span style={{ background: color, color: readableText(color) }}>{peer.actor.name}</span>{showChat && <p style={{ opacity: now >= chatExpiry ? 0 : 1, transition: reducedMotion ? 'none' : 'opacity 600ms linear' }}>{peer.chat}</p>}</div>;
+      return <div key={peer.actor.id} className={`studio-remote-cursor${idle ? ' is-idle' : ''}`} data-peer-actor={peer.actor.id} data-peer-id={peer.peerId} style={{ left: peer.cursor!.x, top: peer.cursor!.y, opacity: idle ? .35 : 1, transform: `scale(${1 / zoom})`, pointerEvents: 'none' }}><svg width="18" height="23" viewBox="0 0 18 23" aria-hidden="true"><path d="M2 1 16 14 10 15 7 21 2 1Z" fill={color} stroke="#fff" strokeWidth="1.4" /></svg><span style={{ background: color, color: readableText(color) }}>{peer.actor.name}</span></div>;
     })}
   </div>;
 }

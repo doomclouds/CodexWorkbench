@@ -223,10 +223,22 @@ describe('HTTP collaboration change transport', () => {
     const denied = await request('/api/presence', { method: 'POST', body: JSON.stringify({ ...base, peerSeq: 100 }) }); expect(denied.status).toBe(403);
   });
 
+  it('keeps ordinary presence and following while removed cursor chat is neither published nor accepted as a room topic', async () => {
+    const person = await guest('viewer'), base = { artifactId, peerId: 'viewer-chat-removal', peerEpoch: 'epoch-chat-removal' };
+    const response = await person.request('/api/presence', { method: 'POST', body: JSON.stringify({ ...base, peerSeq: 0, cursor: { x: 12, y: 34 }, following: 'editor-page', color: '#785ee8', visible: true, chat: 'removed chat', chatExpiresAt: Date.now() + 60_000 }) });
+    expect(response.status).toBe(200);
+    const value = (await response.json()).peers.find((peer: { peerId: string }) => peer.peerId === base.peerId);
+    expect(value).toMatchObject({ actor: person.actor, cursor: { x: 12, y: 34 }, following: 'editor-page', color: '#785ee8', visible: true });
+    expect(value).not.toHaveProperty('chat'); expect(value).not.toHaveProperty('chatExpiresAt');
+    const post = (topic: string) => person.request('/api/room', { method: 'POST', body: JSON.stringify({ ...base, peerSeq: 1, events: [{ topic, data: { of: 'editor-page' } }] }) });
+    const rejected = await post('chat'); expect(rejected.status).toBe(400); expect((await rejected.json()).error.code).toBe('INVALID_ARGUMENT');
+    const followed = await post('follow'); expect(followed.status).toBe(200); expect((await followed.json()).accepted).toBe(1);
+  });
+
   it('checks room roles and wakes/rejects a revoked guest long poll before it can receive later content', async () => {
     const person = await guest('viewer'), payload = { artifactId, peerId: 'viewer-a', peerEpoch: 'epoch-a', peerSeq: 0, events: [{ topic: 'gesture', data: { id: 'drag-a', seq: 1, phase: 'start' } }] };
     expect((await person.request('/api/room', { method: 'POST', body: JSON.stringify(payload) })).status).toBe(403);
-    expect((await person.request('/api/room', { method: 'POST', body: JSON.stringify({ ...payload, peerSeq: 1, events: [{ topic: 'chat', data: { text: 'hello' } }] }) })).status).toBe(200);
+    expect((await person.request('/api/room', { method: 'POST', body: JSON.stringify({ ...payload, peerSeq: 1, events: [{ topic: 'follow', data: { of: 'editor-a' } }] }) })).status).toBe(200);
     const cursor = (await (await person.request(`/api/sync?artifactId=${artifactId}`)).json()).cursor;
     const waiting = person.request(`/api/sync?artifactId=${artifactId}&after=${encodeURIComponent(cursor)}&wait=20000`);
     await host.service.execute('artifact_share', { artifactId, action: 'remove', memberId: person.actor.id });
