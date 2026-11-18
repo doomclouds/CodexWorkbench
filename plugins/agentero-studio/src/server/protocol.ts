@@ -26,6 +26,10 @@ const anchor = z.object({
   sourceRevision: z.number().int().positive().optional().describe('HTML 原始选区的源码版本，需要 regionId；不能用作对象 CAS 版本。'),
   quote: z.string().max(4000).optional(), excerpt: z.string().max(16000).optional(), selector: z.string().max(1200).optional(),
   x: coordinate.optional(), y: coordinate.optional(), w: coordinate.min(0).optional(), h: coordinate.min(0).optional(),
+  pin: z.discriminatedUnion('coordinateSpace', [
+    z.object({ coordinateSpace: z.literal('board'), x: coordinate, y: coordinate }),
+    z.object({ coordinateSpace: z.literal('document'), x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
+  ]).optional().describe('备注气泡尖头的独立显示位置。board 使用白板世界坐标；document 使用首个 blockIds 对应段落的归一化相对点，只能用于 document 备注。原 anchor 的范围和来源字段继续定位反馈内容。'),
 }).passthrough();
 const elementPatch = z.object({
   locked: z.boolean().optional().describe('仅锁定位置、尺寸、旋转、连接几何和裁剪。锁后文字、样式、HTML 和 state 仍可更新。解锁须单独提交 changes:{locked:false}，且不能在同一事务内继续移动或删除。'),

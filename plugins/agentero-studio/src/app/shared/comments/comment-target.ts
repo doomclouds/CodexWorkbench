@@ -2,7 +2,10 @@ import type { Anchor, Board, BoardElement } from '../../../contracts/studio';
 import type { StudioDocument, Viewport } from '../../products';
 import { anchorBounds, tableRows, type Point, type Rect } from '../../canvas/canvas-model';
 
-export interface CommentPoint { x: number; y: number; width?: number; height?: number }
+/** A comment point is the lower-left tip of the pin, in screen coordinates. */
+export type CommentPoint = Point;
+
+export const COMMENT_PIN_SIZE = 28;
 
 /** The original editor pins quick comments 16 screen pixels inside the visible corner. */
 export function visibleCommentCorner(bounds: Rect, viewport: Viewport, host: { width: number; height: number }): Point {
@@ -64,19 +67,45 @@ export function describeCommentTarget(document: StudioDocument, anchor: Anchor, 
   return document.artifact.title;
 }
 
+export function commentBoardTip(anchor: Anchor, elements: readonly BoardElement[]): Point | null {
+  if (anchor.pin?.coordinateSpace === 'board') return { x: anchor.pin.x, y: anchor.pin.y };
+  if (anchor.pin?.coordinateSpace === 'document') return null;
+  const bounds = anchorBounds(anchor, elements);
+  if (!bounds) return null;
+  const carriesPoint = Number.isFinite(anchor.x) && Number.isFinite(anchor.y);
+  return { x: bounds.x + (carriesPoint ? 0 : bounds.w), y: bounds.y };
+}
+
+export function documentCommentTip(root: HTMLElement, anchor: Anchor): CommentPoint | undefined {
+  if (anchor.coordinateSpace !== 'document' || anchor.pin?.coordinateSpace === 'board') return;
+  const id = anchor.blockIds?.[0];
+  const block = id ? root.querySelector<HTMLElement>(`[data-document-block-id="${CSS.escape(id)}"],.bn-block-outer[data-id="${CSS.escape(id)}"]`) : root;
+  if (!block?.getClientRects().length) return;
+  const rect = block.getBoundingClientRect();
+  if (anchor.pin?.coordinateSpace === 'document') return { x: rect.left + rect.width * anchor.pin.x, y: rect.top + rect.height * anchor.pin.y };
+  return { x: rect.right, y: rect.top + 12 };
+}
+
 export function liveCommentPoint(canvas: HTMLElement | null, document: StudioDocument | null, anchor: Anchor, viewport?: Viewport, feedbackId?: string, fallback?: CommentPoint): CommentPoint | undefined {
-  if (canvas && anchor.coordinateSpace === 'document' && anchor.elementIds?.[0]) {
-    const roots = [...canvas.querySelectorAll<HTMLElement>(`[data-document-id="${CSS.escape(anchor.elementIds[0])}"]`)];
-    for (const root of roots.sort((a, b) => Number(b.classList.contains('studio-document-focus')) - Number(a.classList.contains('studio-document-focus')))) {
-      const blockId = anchor.blockIds?.[0];
-      const block = blockId ? root.querySelector<HTMLElement>(`[data-document-block-id="${CSS.escape(blockId)}"],[data-id="${CSS.escape(blockId)}"]`) : root;
-      if (block?.getClientRects().length) { const rect = block.getBoundingClientRect(); return { x: rect.right, y: rect.top + 12, width: 12, height: 24 }; }
+  if (!canvas) return fallback;
+  if (feedbackId) {
+    const pins = canvas.querySelectorAll<HTMLElement>('[data-feedback-pin]');
+    for (const pin of pins) {
+      if (pin.dataset.feedbackPin !== feedbackId) continue;
+      const rect = pin.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) return { x: rect.left, y: rect.bottom };
     }
   }
-  const pin = feedbackId ? [...canvas?.querySelectorAll<HTMLElement>('[data-feedback-pin]') || []].find(node => node.dataset.feedbackPin === feedbackId) : undefined;
-  if (pin) { const rect = pin.getBoundingClientRect(); return { x: rect.left, y: rect.top, width: rect.width, height: rect.height }; }
-  if (!canvas || !document || !('elements' in document) || !viewport) return fallback;
-  const bounds = anchorBounds(anchor, (document as Board).elements), host = canvas.querySelector('.studio-canvas-viewport')?.getBoundingClientRect();
-  if (!bounds || !host) return fallback;
-  return { x: host.left + viewport.x + (bounds.x + (anchor.x === undefined ? bounds.w : 0)) * viewport.zoom, y: host.top + viewport.y + bounds.y * viewport.zoom + (anchor.y === undefined ? 4 : 0), width: 36, height: 36 };
+  if (anchor.coordinateSpace === 'document' && anchor.pin?.coordinateSpace !== 'board' && anchor.elementIds?.[0]) {
+    const roots = [...canvas.querySelectorAll<HTMLElement>(`[data-document-id="${CSS.escape(anchor.elementIds[0])}"]`)];
+    for (const root of roots.sort((a, b) => Number(b.classList.contains('studio-document-focus')) - Number(a.classList.contains('studio-document-focus')))) {
+      const point = documentCommentTip(root, anchor);
+      if (point) return point;
+    }
+  }
+  if (!document || !('elements' in document) || !viewport) return fallback;
+  const tip = commentBoardTip(anchor, (document as Board).elements);
+  const host = canvas.querySelector('.studio-canvas-viewport')?.getBoundingClientRect();
+  if (!tip || !host) return fallback;
+  return { x: host.left + viewport.x + tip.x * viewport.zoom, y: host.top + viewport.y + tip.y * viewport.zoom };
 }

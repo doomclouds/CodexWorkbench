@@ -113,13 +113,22 @@ it('uses the same expanded editing request for the document header and supports 
   await click('返回画板 doc'); expect(documents.get('doc')!.expanded).toBe(false);
 });
 
-it('creates a document from the empty board entry and opens its expanded editor', async () => {
+it('places a document from the empty board entry and edits only after an explicit request', async () => {
   const call = await mount([]); const entry = [...host.querySelectorAll('button')].find(button => button.textContent === '添加文档')!;
   await pointer(entry, 'click');
+  expect(call).not.toHaveBeenCalled(); expect(documents.size).toBe(0);
+  await pointer(query('白板画布'), 'pointermove', 120, 140);
+  expect(host.querySelector('[data-document-placement]')).not.toBeNull();
+  await pointer(query('白板画布'), 'pointerdown', 120, 140);
+  expect(documents.size).toBe(0); expect(call).not.toHaveBeenCalled();
+  await pointer(query('白板画布'), 'pointerup', 120, 140);
   const document = [...documents.values()][0];
-  expect(call).toHaveBeenCalledOnce(); expect(document).toMatchObject({ expanded: true, interactive: true, editRequest: 1 });
-  expect(query('编辑文字')).toBeNull(); await click(`返回画板 ${document.element.id}`);
+  expect(call).toHaveBeenCalledOnce(); expect(document).toMatchObject({ expanded: false, interactive: true, editRequest: undefined });
+  expect(document.element).toMatchObject({ x: 212, y: 224, w: 680, h: 560 });
+  expect(query('编辑文字')).toBeNull(); expect(host.querySelector('.studio-document-focus')).toBeNull();
   expect(selected()).toEqual([document.element.id]);
+  await click(`编辑正文 ${document.element.id}`);
+  expect(documents.get(document.element.id)).toMatchObject({ expanded: true, editRequest: 1 });
 });
 
 it('exits unified comments before leaving the expanded document', async () => {

@@ -32,6 +32,17 @@ async function fixture() {
 }
 
 describe('portable artifact archives', () => {
+  it.each([
+    { coordinateSpace: 'board', x: 10_000_001, y: 4 },
+    { coordinateSpace: 'document', x: .2, y: .3 },
+  ])('rejects an invalid imported feedback pin before publishing (%j)', async pin => {
+    const source = await fixture(), entries = unzipSync(source.data), state = await archiveState(entries, directory);
+    (state.feedback[0]!.anchor as Record<string, unknown>).pin = pin;
+    await replaceArchiveState(entries, state, directory);
+    await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
+    expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
+    expect(await readdir(join(directory, 'staging'))).toEqual([]);
+  });
   it('rejects legacy JSON backups without publishing or modifying any artifact', async () => {
     const source = await fixture(), previous = await readFile(service.store.file(source.artifact.id));
     const legacy = zipSync({ 'artifact.json': strToU8(JSON.stringify(await service.store.read(source.artifact.id))) });

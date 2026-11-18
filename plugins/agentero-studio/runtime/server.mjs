@@ -118,6 +118,12 @@ var init_common = __esm({
 });
 
 // src/contracts/studio.ts
+function isCommentPin(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const pin = value;
+  if (pin.coordinateSpace !== "board" && pin.coordinateSpace !== "document") return false;
+  return [pin.x, pin.y].every((coordinate2) => typeof coordinate2 === "number" && Number.isFinite(coordinate2) && (pin.coordinateSpace === "board" ? Math.abs(coordinate2) <= 1e7 : coordinate2 >= 0 && coordinate2 <= 1));
+}
 var AGENT_TASK_LEASE_MS, AGENT_TASK_STALE_MS, AGENT_TASK_FADE_MS, TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
 var init_studio = __esm({
   "src/contracts/studio.ts"() {
@@ -145,7 +151,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.16";
+    PLUGIN_VERSION = "0.2.17";
   }
 });
 
@@ -9690,6 +9696,7 @@ var init_whiteboard = __esm({
       },
       snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
         const anchor3 = object2(value) ? copy(value) : {};
+        if (anchor3.pin !== void 0 && (!isCommentPin(anchor3.pin) || anchor3.pin.coordinateSpace === "document" && anchor3.coordinateSpace !== "document")) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6C14\u6CE1\u4F4D\u7F6E\u65E0\u6548\u3002");
         if (anchor3.elementIds !== void 0 && (!Array.isArray(anchor3.elementIds) || anchor3.elementIds.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5143\u7D20\u5B9A\u4F4D\u65E0\u6548\u3002");
         if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html", "document"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
         for (const key of ["x", "y", "w", "h"]) if (anchor3[key] !== void 0) finite(anchor3[key], 0);
@@ -15227,6 +15234,11 @@ function validateState(value, products) {
     safeId(feedback.id, "\u53CD\u9988 ID");
     validateActor(feedback.author);
     if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object2(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid2("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
+    if (feedback.anchor.pin !== void 0) {
+      const pin = feedback.anchor.pin;
+      if (!isCommentPin(pin)) throw invalid2("\u5907\u4EFD\u5907\u6CE8\u6C14\u6CE1\u4F4D\u7F6E\u65E0\u6548\u3002");
+      if (pin.coordinateSpace === "document" && (feedback.anchor.coordinateSpace !== "document" || !Array.isArray(feedback.anchor.elementIds) || feedback.anchor.elementIds.length !== 1 || typeof feedback.anchor.elementIds[0] !== "string" || !Array.isArray(feedback.anchor.blockIds) || !feedback.anchor.blockIds.length || feedback.anchor.blockIds.length > 100 || feedback.anchor.blockIds.some((id3) => typeof id3 !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id3)))) throw invalid2("\u5907\u4EFD\u6587\u6863\u6C14\u6CE1\u7F3A\u5C11\u6709\u6548\u6BB5\u843D\u5B9A\u4F4D\u3002");
+    }
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) {
       if (!object2(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid2();
@@ -15428,6 +15440,7 @@ var init_archive = __esm({
   "src/core/shared/archive.ts"() {
     "use strict";
     init_esm();
+    init_studio();
     init_document();
     init_common();
     init_sqlite_artifact();
@@ -46704,7 +46717,11 @@ var anchor2 = external_exports.object({
   x: coordinate.optional(),
   y: coordinate.optional(),
   w: coordinate.min(0).optional(),
-  h: coordinate.min(0).optional()
+  h: coordinate.min(0).optional(),
+  pin: external_exports.discriminatedUnion("coordinateSpace", [
+    external_exports.object({ coordinateSpace: external_exports.literal("board"), x: coordinate, y: coordinate }),
+    external_exports.object({ coordinateSpace: external_exports.literal("document"), x: external_exports.number().min(0).max(1), y: external_exports.number().min(0).max(1) })
+  ]).optional().describe("\u5907\u6CE8\u6C14\u6CE1\u5C16\u5934\u7684\u72EC\u7ACB\u663E\u793A\u4F4D\u7F6E\u3002board \u4F7F\u7528\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Bdocument \u4F7F\u7528\u9996\u4E2A blockIds \u5BF9\u5E94\u6BB5\u843D\u7684\u5F52\u4E00\u5316\u76F8\u5BF9\u70B9\uFF0C\u53EA\u80FD\u7528\u4E8E document \u5907\u6CE8\u3002\u539F anchor \u7684\u8303\u56F4\u548C\u6765\u6E90\u5B57\u6BB5\u7EE7\u7EED\u5B9A\u4F4D\u53CD\u9988\u5185\u5BB9\u3002")
 }).passthrough();
 var elementPatch = external_exports.object({
   locked: external_exports.boolean().optional().describe("\u4EC5\u9501\u5B9A\u4F4D\u7F6E\u3001\u5C3A\u5BF8\u3001\u65CB\u8F6C\u3001\u8FDE\u63A5\u51E0\u4F55\u548C\u88C1\u526A\u3002\u9501\u540E\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u4ECD\u53EF\u66F4\u65B0\u3002\u89E3\u9501\u987B\u5355\u72EC\u63D0\u4EA4 changes:{locked:false}\uFF0C\u4E14\u4E0D\u80FD\u5728\u540C\u4E00\u4E8B\u52A1\u5185\u7EE7\u7EED\u79FB\u52A8\u6216\u5220\u9664\u3002")

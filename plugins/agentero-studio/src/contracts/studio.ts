@@ -33,7 +33,15 @@ export interface BoardElement {
 export interface ArtifactView { artifact: Artifact }
 export interface HtmlRegionContent { id: string; version: number; html?: string; sourceRevision?: number; text?: string; state?: Json }
 export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown>; orderVersion?: number }
-export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html' | 'document'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; blockIds?: string[]; sourceVersion?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number }
+/** Board pins use world units; document pins use the first selected block's normalized bounds. */
+export interface CommentPin { coordinateSpace: 'board' | 'document'; x: number; y: number }
+export function isCommentPin(value: unknown): value is CommentPin {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const pin = value as Record<string, unknown>;
+  if (pin.coordinateSpace !== 'board' && pin.coordinateSpace !== 'document') return false;
+  return [pin.x, pin.y].every(coordinate => typeof coordinate === 'number' && Number.isFinite(coordinate) && (pin.coordinateSpace === 'board' ? Math.abs(coordinate) <= 10_000_000 : coordinate >= 0 && coordinate <= 1));
+}
+export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html' | 'document'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; blockIds?: string[]; sourceVersion?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number; pin?: CommentPin }
 export interface FeedbackAttachment {
   requestId: string; contentKey: string; state: 'pending' | 'attached'; requestedAt: string; requestedBy: Actor;
   attachedAt?: string; attachedBy?: Actor;

@@ -1,14 +1,15 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, BookOpen, Check, Download, FileText, GripVertical, List, Loader2, Maximize, Pencil, Search, X } from 'lucide-react';
-import type { Actor, Anchor, BoardElement, StudioClient, StyleProfile } from '../../contracts/studio.js';
+import type { Actor, Anchor, BoardElement, CommentPin as CommentPlacement, Feedback, StudioClient, StyleProfile } from '../../contracts/studio.js';
 import { documentSurface } from '../../core/products/document-surface.js';
 import { applyDocumentOperations, defaultDocument, documentAnchorState, documentBlockText, documentOperations, documentPlainText, flattenDocumentBlocks, normalizeDocument, type DocumentContent } from '../../contracts/document.js';
-import { assetDisplayUrl } from './canvas-model.js';
+import { assetDisplayUrl, clamp, type Point } from './canvas-model.js';
 import { isEscapeActive, registerEscapeLayer } from '../shared/escape.js';
 import { studioRequest, downloadStudioBlob, downloadStudioFile } from '../transport.js';
 import { copyPlainText } from '../clipboard.js';
 import DocumentReadView from './DocumentReadView.js';
+import { CommentPin } from '../shared/comments/CommentPin.js';
 import type { DocumentTextSelection } from './DocumentEditor.js';
 import useDocumentFocusSurface, { type DocumentFocusSurface } from './useDocumentFocusSurface.js';
 export type { DocumentFocusSurface } from './useDocumentFocusSurface.js';
@@ -25,10 +26,13 @@ interface Props {
   onSave(document: DocumentContent, title: string, base: BoardElement, overwrite: boolean): Promise<BoardElement | false>;
   onActivity(activity: DocumentActivity): void;
   onFocusSurface?(surface: DocumentFocusSurface | null): void;
+  boardPoint?(clientX: number, clientY: number): Point;
+  activities?: readonly Feedback[];
+  onFeedbackSelect?(feedback: Feedback, point: Point): void;
   onAnnotate(anchor: Anchor, version: number, point?: { x: number; y: number }): void;
 }
 interface SavedDraft { base: BoardElement; document: DocumentContent; title: string }
-export default function DocumentRegion({ element, artifactId, actor, client, canEdit, canAnnotate, interactive, expanded, focusHost, readingZoom = 1, editRequest, target, annotationActive = false, onAnnotationModeChange, styleProfile, onMoveStart, onInteract, onEdit, onExpand, onExit, onSave, onActivity, onAnnotate, onFocusSurface }: Props) {
+export default function DocumentRegion({ element, artifactId, actor, client, canEdit, canAnnotate, interactive, expanded, focusHost, readingZoom = 1, editRequest, target, annotationActive = false, onAnnotationModeChange, styleProfile, onMoveStart, onInteract, onEdit, onExpand, onExit, onSave, onActivity, onAnnotate, onFocusSurface, boardPoint, activities, onFeedbackSelect }: Props) {
   const [document, setDocument] = useState<DocumentContent>(() => element.document ?? defaultDocument());
   const [title, setTitle] = useState(element.text || '文档');
   const [editing, setEditing] = useState(false), [saving, setSaving] = useState(false), [leaving, setLeaving] = useState(false), [error, setError] = useState(''), [comparing, setComparing] = useState(false);
@@ -168,9 +172,15 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const targetIds = target?.coordinateSpace === 'document' && target.elementIds?.includes(element.id) ? target.blockIds ?? [] : [];
   const anchorState = targetIds.length ? documentAnchorState(target!, element) : null;
   useEffect(() => {
-    if (!targetIds.length) return;
-    jump(targetIds[0]);
-  }, [targetIds.join(','), element.version, editing]);
+    const id = targetIds[0];
+    if (!id) return;
+    if (target?.pin && scroll.current) {
+      const block = scroll.current.querySelector(`[data-document-block-id="${CSS.escape(id)}"]`)?.getBoundingClientRect();
+      const viewport = scroll.current.getBoundingClientRect();
+      if (block && block.bottom > viewport.top && block.top < viewport.bottom) return;
+    }
+    jump(id);
+  }, [targetIds.join(','), element.version, editing, target?.pin]);
   const readingSelection = () => {
     const selected = window.getSelection();
     return selected?.rangeCount && !selected.isCollapsed && scroll.current?.contains(selected.anchorNode) && scroll.current.contains(selected.focusNode) ? selected : null;
@@ -213,20 +223,33 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   };
   const selectText = (event: React.MouseEvent) => {
     if ((!interactive && !expanded && !annotatingRead) || event.button !== 0) return;
+    if (event.target instanceof Element && event.target.closest('[data-feedback-pin]')) return;
     const selected = readingSelection();
     const picked = selected ? readTextSelection(selected) : annotatingRead ? pickAnnotationBlock(event.target) : null;
     selectSelection(picked, false);
-    if (picked && annotatingRead) void annotate(picked);
+    if (picked && annotatingRead) void annotate(picked, { x: event.clientX, y: event.clientY });
   };
-  const annotate = async (selected: DocumentTextSelection) => {
+  const annotate = async (selected: DocumentTextSelection, point?: Point) => {
     if (!canAnnotate || composing) return;
+    let pin: CommentPlacement | undefined;
+    if (expanded && selected.blockIds[0]) {
+      const block = scroll.current?.querySelector(`[data-document-block-id="${CSS.escape(selected.blockIds[0])}"]`);
+      const bounds = block?.getBoundingClientRect();
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        const position = point ?? { x: bounds.right, y: bounds.top + Math.min(12, bounds.height) };
+        pin = { coordinateSpace: 'document', x: clamp((position.x - bounds.left) / bounds.width, 0, 1), y: clamp((position.y - bounds.top) / bounds.height, 0, 1) };
+        point = { x: bounds.left + pin.x * bounds.width, y: bounds.top + pin.y * bounds.height };
+      }
+    } else if (point && boardPoint) {
+      pin = { coordinateSpace: 'board', ...boardPoint(point.x, point.y) };
+    }
     const request = ++annotationRequest.current;
     const expected = JSON.stringify(draft.current);
     if (dirty && !await save()) return;
     if (!mounted.current || request !== annotationRequest.current) return;
     if (expected !== JSON.stringify(draft.current)) { setError('选中文字已变化，请重新选择后添加备注。'); return; }
     const source = baseline.current, rect = scroll.current?.getBoundingClientRect();
-    callbacks.current.onAnnotate({ coordinateSpace: 'document', elementIds: [element.id], blockIds: selected.blockIds, sourceVersion: source.version, quote: selected.quote }, source.version, rect ? { x: rect.right - 12, y: rect.top + 70 } : undefined);
+    callbacks.current.onAnnotate({ coordinateSpace: 'document', elementIds: [element.id], blockIds: selected.blockIds, sourceVersion: source.version, quote: selected.quote, ...(pin ? { pin } : {}) }, source.version, point ?? (rect ? { x: rect.right - 12, y: rect.top + 70 } : undefined));
     selectedText.current = null; if (!annotationActive) setSelection(null);
   };
   useEffect(() => {
@@ -282,6 +305,15 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   }
   useEffect(() => { setFindIndex(0); if (find.trim() && matches.length) jump(matches[0].id); }, [find]);
   function nextMatch(delta: number) { if (!matches.length) return; const index = (findIndex + delta + matches.length) % matches.length; setFindIndex(index); jump(matches[index].id); }
+  const commentPins = activities?.length ? new Map<string, ReactNode[]>() : undefined;
+  if (commentPins) activities?.forEach((feedback, index) => {
+    const { pin, blockIds, elementIds } = feedback.anchor;
+    const blockId = blockIds?.[0];
+    if (pin?.coordinateSpace !== 'document' || elementIds?.[0] !== element.id || !blockId) return;
+    const pins = commentPins.get(blockId) ?? [];
+    pins.push(<CommentPin key={feedback.id} feedback={feedback} index={index} left={`${pin.x * 100}%`} top={`${pin.y * 100}%`} zoom={readingZoom} onSelect={onFeedbackSelect} />);
+    commentPins.set(blockId, pins);
+  });
   const body = <>
     <header className="studio-document-heading" data-document-controls="true">
       {expanded && <button type="button" className="studio-button" disabled={composing || leaving} onClick={() => void requestExit()}><ArrowLeft size={16} />返回画板</button>}
@@ -302,7 +334,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
       {expanded && tocOpen && headings.length > 0 && <nav className="studio-document-toc" aria-label="文档目录"><strong>目录</strong>{headings.map(block => <button type="button" key={block.id} onClick={() => jump(block.id)} style={{ paddingLeft: 10 + (Number(block.props.level) || 1) * 8 }}>{documentBlockText(block) || '未命名标题'}</button>)}</nav>}
       <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={showEditor ? undefined : interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={showEditor ? undefined : selectText}
         onPointerOver={annotatingRead ? moveAnnotation : undefined} onPointerMove={annotatingRead ? moveAnnotation : undefined} onPointerLeave={annotatingRead ? () => previewAnnotation(null) : undefined} onPointerCancel={annotatingRead ? () => previewAnnotation(null) : undefined} onScrollCapture={annotatingRead ? scrollAnnotation : undefined}>
-        <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{showEditor ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={!leaving && canEdit && (interactive && !annotationActive || composing)} theme={surface.scheme} initialFocusBlockId={editFocusBlockId} highlightedIds={targetIds} find={find} onChange={setDocument} onSelection={selectSelection} onCompositionChange={setComposing} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} scheme={surface.scheme} highlightedIds={annotationActive && selection ? selection.blockIds : targetIds} find={find} annotating={annotatingRead} interactive={interactive || expanded} />}</div>
+        <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{showEditor ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={!leaving && canEdit && (interactive && !annotationActive || composing)} theme={surface.scheme} initialFocusBlockId={editFocusBlockId} highlightedIds={targetIds} find={find} onChange={setDocument} onSelection={selectSelection} onCompositionChange={setComposing} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} scheme={surface.scheme} highlightedIds={annotationActive && selection ? selection.blockIds : targetIds} find={find} annotating={annotatingRead} interactive={interactive || expanded} renderCommentPins={commentPins ? blockId => commentPins.get(blockId) : undefined} />}</div>
       </div>
     </div>
     {error && <div className="studio-document-message has-error" role="alert"><span>{error}</span><button type="button" onClick={() => void save()} disabled={saving || !canEdit}>重试保存</button><button type="button" onClick={() => setComparing(true)}>比较最新内容</button><button type="button" onClick={() => void copyPlainText(JSON.stringify(draft.current)).catch(cause => setError(String(cause)))}>复制草稿</button></div>}

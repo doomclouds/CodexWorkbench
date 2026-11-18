@@ -1,21 +1,33 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2, X } from 'lucide-react';
-import type { CommentPoint } from './comment-target';
+import { COMMENT_PIN_SIZE, type CommentPoint } from './comment-target';
 import './comments.css';
 import { registerEscapeLayer } from '../escape';
 
-interface Props { point?: CommentPoint; locate?: () => CommentPoint | undefined; label?: string; draft?: boolean; pinLabel?: string; onClose: () => void; onOutside?: () => void; children: ReactNode }
+interface Props { point?: CommentPoint; locate?: () => CommentPoint | undefined; label?: string; draft?: boolean; showDraftPin?: boolean; pinLabel?: string; onClose: () => void; onOutside?: () => void; children: ReactNode }
 
 export function placeCommentPopover(point: CommentPoint, size: { width: number; height: number }, viewport: { width: number; height: number }) {
-  const gutter = 8, pinWidth = point.width ?? 36, pinHeight = point.height ?? 36;
-  let left = point.x + pinWidth + 6;
-  if (left + size.width > viewport.width - gutter) left = point.x - size.width - 6;
-  const above = viewport.height - point.y < 320 && point.y > viewport.height - point.y;
-  return { left: Math.max(gutter, Math.min(left, viewport.width - size.width - gutter)), top: Math.max(gutter, Math.min(above ? point.y + pinHeight - size.height : point.y - 2, viewport.height - size.height - gutter)), maxHeight: Math.max(48, Math.min(Math.max(320, viewport.height * .6), viewport.height - gutter * 2)) };
+  const gutter = 8, gap = 6, pinTop = point.y - COMMENT_PIN_SIZE;
+  const right = point.x + COMMENT_PIN_SIZE + gap, left = point.x - size.width - gap;
+  const fitsRight = right + size.width + gutter <= viewport.width;
+  const fitsLeft = left >= gutter;
+  const maxHeight = Math.max(48, Math.min(Math.max(320, viewport.height * .6), viewport.height - gutter * 2));
+  if (fitsRight || fitsLeft) {
+    const above = viewport.height - pinTop < 320 && pinTop > viewport.height - pinTop;
+    const top = above ? point.y - size.height : pinTop - 2;
+    return { left: fitsRight ? Math.max(gutter, right) : Math.min(left, viewport.width - size.width - gutter), top: Math.max(gutter, Math.min(top, viewport.height - size.height - gutter)), maxHeight };
+  }
+  // In a narrow view, put the card above or below the pin before constraining it.
+  const roomAbove = pinTop - gap - gutter, roomBelow = viewport.height - point.y - gap - gutter;
+  const above = roomBelow < size.height && roomAbove > roomBelow;
+  const heightLimit = Math.max(48, Math.min(maxHeight, above ? roomAbove : roomBelow));
+  const height = Math.min(size.height, heightLimit);
+  const top = above ? pinTop - gap - height : point.y + gap;
+  return { left: Math.max(gutter, Math.min(point.x, viewport.width - size.width - gutter)), top: Math.max(gutter, Math.min(top, viewport.height - height - gutter)), maxHeight: heightLimit };
 }
 
 /** Positions a comment beside its target without changing the canvas layout. */
-export function CommentPopover({ point, locate, label, draft, pinLabel, onClose, onOutside, children }: Props) {
+export function CommentPopover({ point, locate, label, draft, showDraftPin = true, pinLabel, onClose, onOutside, children }: Props) {
   const root = useRef<HTMLElement>(null);
   const close = useRef(onClose); close.current = onClose;
   const outsideClose = useRef(onOutside || onClose); outsideClose.current = onOutside || onClose;
@@ -45,7 +57,7 @@ export function CommentPopover({ point, locate, label, draft, pinLabel, onClose,
     document.addEventListener('pointerdown', outside, true);
     return () => { document.removeEventListener('pointerdown', outside, true); unregister(); };
   }, []);
-  return <>{draft && pin && <span className="studio-comment-draft-pin" aria-hidden="true" style={{ left: pin.x, top: pin.y }}>{(pinLabel || '我').slice(0, 1)}</span>}<section ref={root} className={`studio-comment-popover${draft ? ' is-draft' : ''}`} role="dialog" aria-label={draft ? '新建备注' : '备注线程'} style={position} onPointerDown={event => event.stopPropagation()}>
+  return <>{draft && showDraftPin && pin && <span className="studio-comment-pin studio-comment-draft-pin" aria-hidden="true" style={{ left: pin.x, top: pin.y }}>{(pinLabel || '我').slice(0, 1)}</span>}<section ref={root} className={`studio-comment-popover${draft ? ' is-draft' : ''}`} role="dialog" aria-label={draft ? '新建备注' : '备注线程'} style={position} onPointerDown={event => event.stopPropagation()}>
     {label && <div className="studio-comment-target"><span title={label}>{label}</span><button type="button" className="studio-icon-button" aria-label="关闭备注" onClick={onClose}><X size={15} /></button></div>}
     {children}
   </section></>;

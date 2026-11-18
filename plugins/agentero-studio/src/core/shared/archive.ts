@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { Unzip, UnzipInflate, unzipSync, zipSync, type UnzipFileInfo, type Zippable } from 'fflate';
-import type { Actor } from '../../contracts/studio.js';
+import { isCommentPin, type Actor } from '../../contracts/studio.js';
 import { normalizeDocument } from '../../contracts/document.js';
 import { copy, object, renameWithRetry, requireRole, safeId, StudioError, text } from './common.js';
 import type { ExportBytes } from './files.js';
@@ -121,6 +121,11 @@ function validateState(value: unknown, products: ProductRegistry): ArtifactState
   for (const feedback of state.feedback) {
     if (!object(feedback)) throw invalid(); safeId(feedback.id, '反馈 ID'); validateActor(feedback.author);
     if (feedbackIds.has(feedback.id) || feedback.artifactId !== id || !['comment', 'request'].includes(feedback.type) || !['open', 'pending', 'processing', 'resolved'].includes(feedback.status) || typeof feedback.text !== 'string' || !object(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid('备份反馈信息无效。');
+    if (feedback.anchor.pin !== undefined) {
+      const pin = feedback.anchor.pin;
+      if (!isCommentPin(pin)) throw invalid('备份备注气泡位置无效。');
+      if (pin.coordinateSpace === 'document' && (feedback.anchor.coordinateSpace !== 'document' || !Array.isArray(feedback.anchor.elementIds) || feedback.anchor.elementIds.length !== 1 || typeof feedback.anchor.elementIds[0] !== 'string' || !Array.isArray(feedback.anchor.blockIds) || !feedback.anchor.blockIds.length || feedback.anchor.blockIds.length > 100 || feedback.anchor.blockIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)))) throw invalid('备份文档气泡缺少有效段落定位。');
+    }
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) { if (!object(reply) || typeof reply.text !== 'string' || !validDate(reply.createdAt)) throw invalid(); safeId(reply.id, '回复 ID'); validateActor(reply.author); }
     if (feedback.attachment !== undefined) {

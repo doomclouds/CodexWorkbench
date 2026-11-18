@@ -56,9 +56,10 @@ async function streamUntil(reader: ReadableStreamDefaultReader<Uint8Array>, matc
 describe('shared feedback and invitation permissions through Node HTTP', () => {
   it('edits only own messages, reopens a resolved reply and deletes the thread with its frozen source', async () => {
     const info = await share({ action: 'start' }), author = browser(tokenFor(info, 'commenter'), 'Author'), other = browser(tokenFor(info, 'editor'), 'Other');
-    const creation = { action: 'create', operationId: 'deleted-feedback-retry', text: 'Original', anchor: { regionId: 'html' }, versions: { html: 1 } };
+    const creation = { action: 'create', operationId: 'deleted-feedback-retry', text: 'Original', anchor: { regionId: 'html', pin: { coordinateSpace: 'board', x: 234.5, y: 107.25 } }, versions: { html: 1 } };
     const created = await author.call('artifact_feedback', creation);
     const item = created.body.data.feedback[0], feedbackId = item.id;
+    expect(item.anchor).toEqual(creation.anchor);
     expect((await other.call('artifact_feedback', { action: 'edit', feedbackId, text: 'Forged' })).response.status).toBe(403);
     expect((await other.call('artifact_feedback', { action: 'delete', feedbackId })).response.status).toBe(403);
     expect((await author.call('artifact_feedback', { action: 'edit', feedbackId, text: 'Edited first' })).body.data.feedback[0].text).toBe('Edited first');
@@ -278,8 +279,12 @@ describe('feedback and sharing schema through the real MCP SDK', () => {
       expect(modelTools.map(tool => tool.name)).not.toContain('studio_app_request');
       expect(listing.tools.find(tool => tool.name === 'studio_app_request')).toMatchObject({ _meta: { ui: { visibility: ['app'] } } });
       const call = async (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: { artifactId, ...args } });
-      const created = await call('artifact_feedback', { action: 'create', text: 'SDK message' });
+      const anchor = { coordinateSpace: 'html', regionId: 'html', sourceRevision: 1, x: 5, y: 8, w: 140, h: 25, pin: { coordinateSpace: 'board', x: 327.25, y: -118.5 } };
+      const created = await call('artifact_feedback', { action: 'create', text: 'SDK message', anchor, versions: { html: 1 } });
       const feedbackId = (created.structuredContent as any).data.feedback[0].id;
+      expect((created.structuredContent as any).data.feedback[0].anchor).toEqual(anchor);
+      const source = await call('artifact_read', { mode: 'source', feedbackId, regionId: 'html' });
+      expect((source.structuredContent as any).data.html).toBe('<h1>Frozen source</h1>');
       const reply = await call('artifact_feedback', { action: 'reply', feedbackId, text: 'SDK reply' });
       const replyId = (reply.structuredContent as any).data.feedback[0].replies[0].id;
       const edited = await call('artifact_feedback', { action: 'edit', feedbackId, replyId, text: 'SDK edited reply' });
