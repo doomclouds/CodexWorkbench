@@ -119,12 +119,16 @@ export async function connectStudio(root = dataDirectory(), entry = fileURLToPat
       if (participant !== undefined && !object(participant)) throw new StudioError('INVALID_ARGUMENT', 'Agent participant 必须提供 id 和 name。');
       const participantId = object(participant) ? text(participant.id, '', 120).trim() : undefined;
       if (participantId === '') throw new StudioError('INVALID_ARGUMENT', 'Agent participant ID 不能为空。');
+      const appearanceKey = object(participant) ? participant.appearanceKey : undefined;
+      if (appearanceKey !== undefined && (typeof appearanceKey !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(appearanceKey))) throw new StudioError('INVALID_ARGUMENT', 'Agent appearanceKey 必须是随机 UUIDv4。');
       const displayName = (object(participant) ? text(participant.name, '', 60) : context?.clientInfo?.title || context?.clientInfo?.name || 'Codex').trim();
       if (!displayName) throw new StudioError('INVALID_ARGUMENT', 'Agent participant 名称不能为空。');
-      const agentId = `agent-${createHash('sha256').update(JSON.stringify({ connection: agentConnectionId, participant: participantId ?? null })).digest('hex').slice(0, 32)}`;
-      const agentName = `${Array.from(displayName).slice(0, 24).join('')} · ${agentId.slice(-8)}`;
+      const participantKey = participantId ?? 'main';
+      const presentationId = typeof appearanceKey === 'string' ? `agent-display-${createHash('sha256').update(JSON.stringify({ appearance: appearanceKey.toLowerCase(), participant: participantKey })).digest('hex').slice(0, 32)}` : undefined;
+      const agentId = `agent-${createHash('sha256').update(JSON.stringify({ connection: agentConnectionId, participant: participantKey, ...(presentationId ? { presentation: presentationId } : {}) })).digest('hex').slice(0, 32)}`;
+      const agentName = `${Array.from(displayName).slice(0, 24).join('')} · ${(presentationId ?? agentId).slice(-8)}`;
       const target = await freshRecord();
-      const response = await fetch(`${target.origin}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${target.token}`, 'Content-Type': 'application/json', 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': agentId, 'X-Studio-Agent-Name': encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(90_000) });
+      const response = await fetch(`${target.origin}/api/tools/${name}`, { method: 'POST', headers: { Authorization: `Bearer ${target.token}`, 'Content-Type': 'application/json', 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': agentId, 'X-Studio-Agent-Name': encodeURIComponent(agentName), ...(presentationId ? { 'X-Studio-Agent-Presentation-Id': presentationId } : {}) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(90_000) });
       const result = await response.json() as ToolResponse;
       if (!result.ok) throw Object.assign(new Error(result.error?.message || 'Studio 操作失败'), { code: result.error?.code, details: result.error?.details });
       if (!closing && name === 'artifact_activity' && typeof operationArgs.artifactId === 'string' && ['begin', 'update', 'status', 'end'].includes(String(operationArgs.action))) {

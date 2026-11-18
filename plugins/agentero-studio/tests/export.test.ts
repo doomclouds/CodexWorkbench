@@ -12,10 +12,96 @@ const shape: BoardElement = { id: 'one', type: 'shape', kind: 'rounded', x: -30,
 const region: BoardElement = { id: 'region', type: 'html', x: 140, y: 0, w: 320, h: 180, version: 4, html: '<!doctype html><html><head><style>.node{fill:#ff0000}.edge{stroke:#111111;marker-end:url(#arrow)}</style></head><body><svg xmlns="http://www.w3.org/2000/svg" width="32" height="18" viewBox="0 0 32 18" role="img" aria-labelledby="title"><title id="title">图解</title><defs><marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0 0L8 3L0 6"/></marker></defs><rect class="node" width="32" height="18"/><path class="edge" d="M2 2H8"/></svg></body></html>' };
 
 describe('artifact export preserves one canonical source', () => {
-  test.each((['light', 'dark'] as const).flatMap(theme => (['text', 'shape', 'note', 'container', 'table'] as const).map(type => ({ theme, type }))))('preserves explicit low-contrast $type ink in $theme SVG and HTML exports', ({ theme, type }) => {
+  test.each((['light', 'dark'] as const).flatMap(theme => [undefined, 'ink', 'muted'].map(color => ({ theme, color }))))('exports automatic text against its visible native backdrop in $theme with $color ink', ({ theme, color }) => {
+    const style = theme === 'dark' ? DARK_THEME : LIGHT_THEME;
+    const fill = theme === 'dark' ? '#EFEFEF' : '#222638';
+    const surface: BoardElement = { ...shape, id: 'surface', type: 'container', x: 0, y: 0, w: 400, h: 260, fill, text: '' };
+    const text: BoardElement = { ...shape, id: 'text', type: 'text', x: 40, y: 60, w: 220, h: 60, color };
+    const source = board([surface, text]); source.style = { ...style };
+    const original = structuredClone(source);
+    for (const markup of [buildBoardSvg(source), buildBoardHtml(source)]) {
+      const document = new JSDOM(markup).window.document;
+      const ink = document.querySelector('[data-studio-id="text"] text')!.getAttribute('fill')!;
+      expect(contrastRatio(ink, fill)).toBeGreaterThanOrEqual(4.5);
+    }
+    const isolated = new JSDOM(buildBoardSvg(source, { ids: ['text'] })).window.document;
+    expect(contrastRatio(isolated.querySelector('text')!.getAttribute('fill')!, style.paper)).toBeGreaterThanOrEqual(4.5);
+    expect(source).toEqual(original);
+  });
+  test.each([
+    { type: 'container', x: 160, y: 0, w: 400, h: 260, fill: '#EFEFEF' },
+    { type: 'container', x: 0, y: 0, w: 400, h: 260, fill: '#EFEFEF', rotation: 30 },
+    { type: 'container', x: 0, y: 0, w: 400, h: 260, fill: 'rgba(255,255,255,.5)' },
+    { type: 'shape', kind: 'ellipse', x: 0, y: 0, w: 400, h: 260, fill: '#EFEFEF' },
+    { type: 'html', x: 0, y: 0, w: 400, h: 260, html: '<p>Opaque content</p>' },
+  ] as const)('keeps the canvas default when an overlapping $type surface is uncertain', extra => {
+    const base: BoardElement = { ...shape, id: 'base', type: 'container', x: 0, y: 0, w: 500, h: 300, fill: '#EFEFEF' };
+    const cover: BoardElement = { ...shape, id: 'cover', ...extra };
+    const text: BoardElement = { ...shape, id: 'text', type: 'text', x: 40, y: 60, w: 220, h: 60 };
+    const source = board([base, cover, text]); source.style = { ...DARK_THEME };
+    const exported = new JSDOM(buildBoardSvg(source)).window.document;
+    expect(exported.querySelector('[data-studio-id="text"] text')!.getAttribute('fill')).toBe(DARK_THEME.ink);
+  });
+  test('exports automatic table body and header ink against their separate surfaces', () => {
+    const value: BoardElement = { ...shape, type: 'table', fill: '#EFEFEF', color: 'ink', data: { rows: [['Header'], ['Body']] } };
+    const source = board([value]); source.style = { ...DARK_THEME };
+    const document = new JSDOM(buildBoardSvg(source)).window.document;
+    const texts = [...document.querySelectorAll('[data-studio-id="one"] text')];
+    expect(contrastRatio(texts[0]!.getAttribute('fill')!, '#EFEFEF')).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(texts[1]!.getAttribute('fill')!, DARK_THEME.paper)).toBeGreaterThanOrEqual(4.5);
+    expect(value.color).toBe('ink');
+  });
+  test('prepares backdrop layers once when exporting a thousand text objects or their selection', () => {
+    const background: BoardElement = { ...shape, id: 'surface', type: 'container', x: 0, y: 0, w: 1200, h: 2400, fill: '#EFEFEF', text: '' };
+    const texts: BoardElement[] = Array.from({ length: 1000 }, (_, index) => ({ ...shape, id: `text-${index}`, type: 'text', x: 20 + index % 10 * 110, y: 20 + Math.floor(index / 10) * 22, w: 90, h: 20 }));
+    const elements = [background, ...texts], ids = elements.map(element => element.id);
+    let reads = 0;
+    const source = board(elements.map(element => new Proxy(element, { get(value, key, receiver) { if (key === 'id') reads++; return Reflect.get(value, key, receiver); } })));
+    source.style = { ...DARK_THEME };
+    for (const options of [{}, { ids }]) {
+      reads = 0;
+      const markup = buildBoardSvg(source, options);
+      expect(markup).toContain('data-studio-id="text-999"');
+      expect(reads).toBeLessThan(elements.length * 8);
+    }
+  });
+  test.each((['light', 'dark'] as const).flatMap(theme => [
+    { theme, color: '#2d3142', fill: '#ffffff' },
+    { theme, color: '#eacb67', fill: '#1d4266' },
+  ]))('exports populated table cells with readable per-surface ink in $theme with $color', ({ theme, color, fill }) => {
+    const rows = [['名称', '说明', '状态'], ['项目 A', '第一行内容', '进行中'], ['项目 B', '第二行内容', '待处理']];
+    const value: BoardElement = { ...shape, type: 'table', color, fill, data: { rows } };
+    const source = board([value]); source.style = { ...(theme === 'dark' ? DARK_THEME : LIGHT_THEME) };
+    const original = structuredClone(source);
+    for (const markup of [buildBoardSvg(source), buildBoardHtml(source)]) {
+      const document = new JSDOM(markup).window.document;
+      const texts = [...document.querySelectorAll('[data-studio-id="one"] text')];
+      expect(texts.map(text => text.textContent)).toEqual(rows.flat());
+      for (const text of texts.slice(0, 3)) expect(contrastRatio(text.getAttribute('fill')!, color)).toBe(1);
+      for (const text of texts.slice(3)) expect(contrastRatio(text.getAttribute('fill')!, source.style.paper)).toBeGreaterThanOrEqual(4.5);
+      if (theme === 'light' && color === '#2d3142' || theme === 'dark' && color === '#eacb67') {
+        for (const text of texts.slice(3)) expect(contrastRatio(text.getAttribute('fill')!, color)).toBe(1);
+      }
+    }
+    expect(source).toEqual(original);
+  });
+  test('renders visible PNG body text when the stored table ink matches the dark workspace', async () => {
+    const rows = [['名称', '说明', '状态'], ['项目 A', '第一行内容', '进行中'], ['项目 B', '第二行内容', '待处理']];
+    const value: BoardElement = { ...shape, type: 'table', x: 0, y: 0, w: 600, h: 180, color: '#2d3142', fill: '#ffffff', data: { rows } };
+    const source = board([value]); source.style = { ...DARK_THEME };
+    const blank = structuredClone(source);
+    blank.elements[0]!.data!.rows = [rows[0], ['', '', ''], ['', '', '']];
+    const visible = await exportArtifact(source, 'png', { padding: 0 });
+    const empty = await exportArtifact(blank, 'png', { padding: 0 });
+    expect(visible.data).not.toBe(empty.data);
+    expect(Buffer.from(visible.data, 'base64').readUInt32BE(16)).toBe(600);
+    expect(value.color).toBe('#2d3142');
+    expect(value.data!.rows).toEqual(rows);
+  });
+  test.each((['light', 'dark'] as const).flatMap(theme => (['text', 'shape', 'note', 'container'] as const).map(type => ({ theme, type }))))('preserves explicit low-contrast $type ink in $theme SVG and HTML exports', ({ theme, type }) => {
     const style = theme === 'dark' ? DARK_THEME : LIGHT_THEME;
     const color = theme === 'dark' ? '#303645' : '#F4F4F4';
-    const value: BoardElement = { ...shape, type, fill: style.paper, color, ...(type === 'table' ? { data: { rows: [['Header'], ['Body']] } } : {}) };
+    const value: BoardElement = { ...shape, type, fill: style.paper, color };
     const original = board([value]); original.style = { ...style };
     const snapshot = structuredClone(original);
     for (const markup of [buildBoardSvg(original), buildBoardHtml(original)]) {

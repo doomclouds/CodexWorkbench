@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import StudioApp from '../src/app/StudioApp';
 import { StudioService } from '../src/core/service';
+import { DARK_THEME } from '../src/core/theme';
 import { LOCAL_ACTOR, type Actor, type Board, type StudioClient, type ToolName } from '../src/contracts/studio';
 
 let host: HTMLDivElement, root: Root, service: StudioService, folder: string;
@@ -30,6 +31,29 @@ const canvas = () => host.querySelector<HTMLElement>('[aria-label="白板画布"
 const header = () => host.querySelector<HTMLButtonElement>('[aria-label="备注"]')!;
 const tool = () => host.querySelector('.studio-whiteboard')!.getAttribute('data-tool');
 async function key(value: string, target: Element = canvas(), extra: KeyboardEventInit = {}) { await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...extra }))); }
+
+it('commits dark canvas paper on the first render when opening a work', async () => {
+  localStorage.setItem('agentero-studio-theme', 'dark');
+  const papers: (string | null)[] = [];
+  const setProperty = CSSStyleDeclaration.prototype.setProperty;
+  vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty').mockImplementation(function (this: CSSStyleDeclaration, name, value, priority) {
+    if (name === '--canvas-paper') papers.push(value);
+    setProperty.call(this, name, value, priority);
+  });
+
+  await mount();
+  expect(papers.length).toBeGreaterThan(0);
+  expect(new Set(papers)).toEqual(new Set([DARK_THEME.paper]));
+
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="返回作品中心"]')!.click());
+  const openWork = () => host.querySelector<HTMLButtonElement>('[aria-label^="打开白板："]');
+  await vi.waitFor(async () => { await act(async () => {}); expect(openWork()).not.toBeNull(); });
+  papers.length = 0;
+  await act(async () => openWork()!.click());
+  await vi.waitFor(async () => { await act(async () => {}); expect(canvas()).not.toBeNull(); });
+  expect(papers.length).toBeGreaterThan(0);
+  expect(new Set(papers)).toEqual(new Set([DARK_THEME.paper]));
+});
 
 describe('one global annotation tool', () => {
   it('keeps header and native tool state identical across every numeric tool transition', async () => {

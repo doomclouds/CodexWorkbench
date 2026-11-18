@@ -24,7 +24,8 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 async function mount(value: Board, props: Partial<WhiteboardCanvasProps> = {}) {
-  await act(async () => root.render(<WhiteboardCanvas board={value} client={client()} actor={LOCAL_ACTOR} onChanged={() => {}} onAnnotate={() => {}} {...props} />));
+  const viewTheme = host.dataset.studioTheme === 'dark' ? 'dark' : 'light';
+  await act(async () => root.render(<WhiteboardCanvas board={value} client={client()} actor={LOCAL_ACTOR} viewTheme={viewTheme} onChanged={() => {}} onAnnotate={() => {}} {...props} />));
 }
 async function event(node: Element, name: string) { await act(async () => { node.dispatchEvent(new MouseEvent(name, { bubbles: true, button: 0 })); }); }
 async function input(node: HTMLInputElement | HTMLTextAreaElement, value: string) {
@@ -37,6 +38,56 @@ async function input(node: HTMLInputElement | HTMLTextAreaElement, value: string
 async function select(id: string) { const node = host.querySelector(`[data-element-id="${id}"]`)!; await event(node, 'pointerdown'); await event(node, 'pointerup'); }
 
 describe('native canvas parity', () => {
+  it.each((['light', 'dark'] as const).flatMap(theme => [undefined, 'ink', 'muted'].map(color => ({ theme, color }))))('reads automatic text against its covering surface in $theme with $color ink', async ({ theme, color }) => {
+    host.dataset.studioTheme = theme;
+    const fill = theme === 'dark' ? '#EFEFEF' : '#222638';
+    const surface = element('surface', { type: 'container', x: 0, y: 0, w: 400, h: 260, fill });
+    const text = element('body', { type: 'text', x: 40, y: 60, w: 220, h: 60, color });
+    const outside = element('outside', { type: 'text', x: 460, y: 60, w: 220, h: 60, color });
+    const value = board([surface, text, outside]), original = structuredClone(value);
+    await mount(value);
+    const body = host.querySelector<HTMLElement>('[data-element-id="body"]')!;
+    const outer = host.querySelector<HTMLElement>('[data-element-id="outside"]')!;
+    const title = host.querySelector<HTMLElement>('[data-element-id="surface"]')!;
+    const paper = (theme === 'dark' ? DARK_THEME : LIGHT_THEME).paper;
+    expect(contrastRatio(getComputedStyle(body).color, fill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(getComputedStyle(outer).color, paper)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(getComputedStyle(title).color, paper)).toBeGreaterThanOrEqual(4.5);
+    expect(value).toEqual(original);
+  });
+  it('updates automatic text when a covering surface changes or moves without changing stored ink', async () => {
+    host.dataset.studioTheme = 'dark';
+    const surface = element('surface', { type: 'shape', kind: 'rect', x: 0, y: 0, w: 400, h: 260, fill: '#EFEFEF' });
+    const text = element('body', { type: 'text', x: 40, y: 60, w: 220, h: 60, color: 'ink' });
+    await mount(board([surface, text]));
+    const color = () => getComputedStyle(host.querySelector('[data-element-id="body"]')!).color;
+    expect(contrastRatio(color(), '#EFEFEF')).toBeGreaterThanOrEqual(4.5);
+    await mount(board([{ ...surface, fill: '#222638' }, text], 2));
+    expect(contrastRatio(color(), '#222638')).toBeGreaterThanOrEqual(4.5);
+    await mount(board([{ ...surface, x: 500 }, text], 3));
+    expect(contrastRatio(color(), DARK_THEME.paper)).toBeGreaterThanOrEqual(4.5);
+    expect(text.color).toBe('ink');
+  });
+  it('keeps explicit text ink fixed over a covering surface and follows layer order for automatic ink', async () => {
+    host.dataset.studioTheme = 'dark';
+    const surface = element('surface', { type: 'container', x: 0, y: 0, w: 400, h: 260, fill: '#EFEFEF' });
+    const automatic = element('automatic', { type: 'text', x: 40, y: 60, w: 220, h: 40 });
+    const explicit = element('explicit', { type: 'text', x: 40, y: 120, w: 220, h: 40, color: '#303645' });
+    await mount(board([surface, automatic, explicit]));
+    expect(getComputedStyle(host.querySelector('[data-element-id="explicit"]')!).color).toBe('rgb(48, 54, 69)');
+    await mount(board([automatic, surface, explicit], 2));
+    expect(contrastRatio(getComputedStyle(host.querySelector('[data-element-id="automatic"]')!).color, DARK_THEME.paper)).toBeGreaterThanOrEqual(4.5);
+    expect(explicit.color).toBe('#303645');
+  });
+  it.each(['#EFEFEF', '#222638'])('keeps link title and address readable on its own %s surface', async fill => {
+    host.dataset.studioTheme = 'dark';
+    const value = element('link', { type: 'link', fill, href: 'https://example.com' });
+    await mount(board([value]));
+    const node = host.querySelector('[data-element-id="link"]')!;
+    expect(contrastRatio(getComputedStyle(node).color, fill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(getComputedStyle(node.querySelector('.studio-link-card span')!).color, fill)).toBeGreaterThanOrEqual(4.5);
+    expect(value.color).toBeUndefined();
+  });
   it.each((['light', 'dark'] as const).flatMap(theme => [
     { theme, paint: 'default', values: {} },
     { theme, paint: 'existing white fill', values: { fill: '#ffffff', color: 'ink' } },
@@ -53,25 +104,38 @@ describe('native canvas parity', () => {
     expect(contrastRatio(bodyStyle.backgroundColor, paper)).toBe(1);
     if (paint === 'custom paint') {
       expect(contrastRatio(headerStyle.color, '#eacb67')).toBe(1);
-      expect(contrastRatio(cellStyle.color, '#eacb67')).toBe(1);
-    } else {
-      expect(contrastRatio(cellStyle.color, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
-      expect(contrastRatio(headerStyle.color, headerStyle.backgroundColor, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+      if (theme === 'dark') expect(contrastRatio(cellStyle.color, '#eacb67')).toBe(1);
     }
+    expect(contrastRatio(cellStyle.color, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(headerStyle.color, headerStyle.backgroundColor, bodyStyle.backgroundColor)).toBeGreaterThanOrEqual(4.5);
     if (paint === 'default') expect(contrastRatio(headerStyle.backgroundColor, (theme === 'dark' ? DARK_THEME : LIGHT_THEME)['paper-2']!)).toBe(1);
     if (paint === 'projected palette fill') expect(contrastRatio(headerStyle.backgroundColor, theme === 'dark' ? '#F5D515' : '#F9E56F')).toBe(1);
     expect(value).toEqual(original);
   });
-  it.each(['text', 'shape', 'note', 'container', 'table'] as const)('respects literal low-contrast ink on %s in a dark workspace', async type => {
+  it.each(['light', 'dark'] as const)('keeps all six populated table body cells readable with stored light-theme ink in %s', async theme => {
+    host.dataset.studioTheme = theme;
+    const rows = [['名称', '说明', '状态'], ['项目 A', '第一行内容', '进行中'], ['项目 B', '第二行内容', '待处理']];
+    const value = element('table', { type: 'table', color: '#2d3142', fill: '#ffffff', data: { rows } });
+    const original = structuredClone(value);
+    await mount(board([value]));
+    const table = host.querySelector<HTMLTableElement>('table')!, cells = [...table.querySelectorAll('td')];
+    const paper = (theme === 'dark' ? DARK_THEME : LIGHT_THEME).paper;
+    expect(cells.map(cell => cell.textContent)).toEqual(rows.slice(1).flat());
+    for (const header of table.querySelectorAll('th')) expect(contrastRatio(getComputedStyle(header).color, '#2d3142')).toBe(1);
+    for (const cell of cells) expect(contrastRatio(getComputedStyle(cell).color, paper)).toBeGreaterThanOrEqual(4.5);
+    if (theme === 'light') expect(contrastRatio(getComputedStyle(cells[0]!).color, '#2d3142')).toBe(1);
+    await event(cells[0]!, 'dblclick');
+    const editor = host.querySelector<HTMLElement>('[role="textbox"]')!;
+    expect(editor.textContent).toBe(rows[1]![0]);
+    expect(contrastRatio(getComputedStyle(editor).color, paper)).toBeGreaterThanOrEqual(4.5);
+    expect(value).toEqual(original);
+  });
+  it.each(['text', 'shape', 'note', 'container'] as const)('respects literal low-contrast ink on %s in a dark workspace', async type => {
     host.dataset.studioTheme = 'dark';
-    const value = element('custom', { type, color: '#303645', ...(type === 'table' ? { data: { rows: [['Header'], ['Body']] } } : {}) });
+    const value = element('custom', { type, color: '#303645' });
     await mount(board([value]));
     const node = host.querySelector<HTMLElement>('[data-element-id="custom"]')!;
     expect(getComputedStyle(node).color).toBe('rgb(48, 54, 69)');
-    if (type === 'table') {
-      expect(getComputedStyle(node.querySelector('th')!).color).toBe('rgb(48, 54, 69)');
-      expect(getComputedStyle(node.querySelector('td')!).color).toBe('rgb(48, 54, 69)');
-    }
     expect(value.color).toBe('#303645');
   });
   it('renders the supported inline text and list format safely while keeping editable source markers', async () => {

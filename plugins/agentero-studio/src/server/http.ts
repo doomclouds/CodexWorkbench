@@ -113,6 +113,11 @@ export async function startStudioHost(options: { dataRoot?: string; html?: strin
       let agentName = header(request, 'x-studio-agent-name');
       if (agentName) { try { agentName = decodeURIComponent(agentName); } catch { throw new StudioError('INVALID_ARGUMENT', 'Agent 名称编码无效。'); } }
       const actor: Actor = header(request, 'x-studio-actor') === 'agent' ? { id: header(request, 'x-studio-agent-id') ? safeId(header(request, 'x-studio-agent-id'), 'Agent ID') : 'codex', name: agentName ? text(agentName, 'Codex', 60).trim() || 'Codex' : 'Codex', kind: 'agent', role: 'owner' } : { ...service.owner };
+      const presentationId = header(request, 'x-studio-agent-presentation-id');
+      if (actor.kind === 'agent' && presentationId) {
+        if (!/^agent-display-[0-9a-f]{32}$/.test(presentationId)) throw new StudioError('INVALID_ARGUMENT', 'Agent 呈现标识无效。');
+        actor.presentationId = presentationId;
+      }
       return { actor, token: provided, owner: true, access, viaLan: lanRequest, authority: { owner: true, actorId: actor.id, viaLan: lanRequest }, ...(scope ? { artifactId: scope } : {}) };
     }
     const access = scope ? await service.accessMode(scope, lanRequest) : 'local';

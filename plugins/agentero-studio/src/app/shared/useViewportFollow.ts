@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { CollaborationRoom, Presence } from '../../contracts/studio';
 import type { StudioDocument, Viewport } from '../products';
-import { ParticipantActivity } from './presence-members';
+import { ParticipantActivity, participantIdentity } from './presence-members';
 import { activeAgentTasks, agentPeerBounds, documentElements, type ActivityBounds } from './agent-activity';
 
 export function fitFollowViewport(viewport: Viewport, remote: { w: number; h: number }, local: { w: number; h: number }): Viewport | undefined {
@@ -26,7 +26,7 @@ export function useViewportFollow({ actorId, peerId, peers, following, room, are
   const stop = useCallback(() => { cancelMotion(); target.current = undefined; rendered.current = undefined; setViewport(undefined); }, [cancelMotion]);
   const [sizeRevision, resize] = useState(0), [clockRevision, tick] = useState(0);
   const now = Date.now() + clockOffsetMs, elements = documentElements(document);
-  const member = tracker.current.read(peers, actorId).find(item => item.actor.id === following);
+  const member = tracker.current.read(peers, actorId).find(item => participantIdentity(item.actor) === following);
   const agent = member?.actor.kind === 'agent';
   const peer = member?.peers.find(page => page.visible !== false && (agent ? !!agentPeerBounds(page, elements, now) : !!page.context?.viewport));
   const taskExpiry = agent ? Math.min(...(member?.peers.flatMap(page => activeAgentTasks(page, now).map(task => task.expiresAt)) ?? [])) : Infinity;
@@ -71,5 +71,5 @@ export function useViewportFollow({ actorId, peerId, peers, following, room, are
     animation.current = request(frame);
   }, [following, peer, peers, actorId, peerId, area, busy, onStop, sizeRevision, clockRevision, document, clockOffsetMs, cancelMotion, stop, agent]);
   useEffect(() => { void room.send('follow', { id: `follow-${peerId}`, seq: ++seq.current, phase: peer ? 'step' : 'end', of: peer?.peerId || null }); }, [room, peer?.peerId, peerId]);
-  return { viewport, peer: peer || (lastPeer.current?.actor.id === following ? lastPeer.current : undefined), stop };
+  return { viewport, peer: peer || (lastPeer.current && participantIdentity(lastPeer.current.actor) === following ? lastPeer.current : undefined), stop };
 }

@@ -311,7 +311,7 @@ describe('real MCP connection and explicit participant identity', () => {
     expect(baseActor.id).toMatch(/^agent-/); expect(baseActor.name).toContain('Planner MCP'); expect(again.value.data.historyEntry.actor).toEqual(baseActor);
     expect(second.value.data.historyEntry.actor.id).not.toBe(baseActor.id); expect(second.value.data.historyEntry.actor.name).toContain('Worker MCP');
     const main = await mutate(a, 4, { id: 'main', name: '主 Agent' }), mainAgain = await mutate(a, 5, { id: 'main', name: '主 Agent' }), child = await mutate(a, 6, { id: '/root/child', name: '子 Agent' });
-    expect(main.value.data.historyEntry.actor.id).not.toBe(baseActor.id); expect(mainAgain.value.data.historyEntry.actor).toEqual(main.value.data.historyEntry.actor); expect(child.value.data.historyEntry.actor.id).not.toBe(main.value.data.historyEntry.actor.id);
+    expect(main.value.data.historyEntry.actor.id).toBe(baseActor.id); expect(mainAgain.value.data.historyEntry.actor).toEqual(main.value.data.historyEntry.actor); expect(child.value.data.historyEntry.actor.id).not.toBe(main.value.data.historyEntry.actor.id);
     await a.call('artifact_read', { mode: 'objects', ids: ['node'] });
     const appearances = events.flatMap(event => event.type === 'presence' && Array.isArray(event.peers) ? event.peers as Presence[] : []);
     expect(appearances.some(peer => peer.actor.id === baseActor.id && peer.context?.activity === 'reading')).toBe(true);
@@ -323,6 +323,86 @@ describe('real MCP connection and explicit participant identity', () => {
     expect(spoof.value.data.feedback[0].author).toMatchObject({ id: signed.id, kind: 'human', role: 'editor', name: 'Human guest' });
     const peer = await viewer.request('/api/presence', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ artifactId, peerId: `agent-${baseActor.id}` }) }); expect(peer.status).toBe(403);
     expect((await a.call('artifact_read', { participant: { id: '   ', name: 'Invalid' } })).error).toBe(true);
+  });
+
+  it('reuses the main identity and task when alternating implicit and explicit participants without merging connections', async () => {
+    const a = await agentConnection('Main MCP'), b = await agentConnection('Main MCP');
+    const participant = { id: 'main', name: 'Main MCP' }, explicit = await claimNode(a, participant);
+    const initialActor = host.service.getPresence(artifactId).find(peer => peer.context?.agentTasks?.some(task => task.taskId === explicit.taskId))!.actor;
+    const updated = await a.call('artifact_apply', { ...explicit, expectedVersions: { node: 1 }, operations: [{ op: 'update', id: 'node', changes: { text: 'implicit continuation' } }] });
+    expect(updated.error, JSON.stringify(updated.value)).toBe(false);
+    expect(updated.value.data.historyEntry.actor).toEqual(initialActor);
+    expect((await a.call('artifact_activity', { action: 'update', ...explicit, phase: 'verifying' })).error).toBe(false);
+    expect((await b.call('artifact_activity', { action: 'update', ...explicit, phase: 'verifying', participant })).value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
+    expect((await a.call('artifact_activity', { action: 'end', ...explicit, participant })).error).toBe(false);
+    const implicit = await claimNode(a);
+    const continued = await a.call('artifact_apply', { ...implicit, expectedVersions: { node: 2 }, operations: [{ op: 'update', id: 'node', changes: { text: 'explicit continuation' } }], participant });
+    expect(continued.error, JSON.stringify(continued.value)).toBe(false);
+    expect(continued.value.data.historyEntry.actor).toEqual(initialActor);
+    expect((await a.call('artifact_activity', { action: 'end', ...implicit, participant })).error).toBe(false);
+    const actors = host.service.getPresence(artifactId).filter(peer => peer.actor.kind === 'agent');
+    expect(actors).toHaveLength(1); expect(actors[0]!.actor).toEqual(initialActor);
+    const ownBinding = await claimNode(b, participant);
+    const otherActor = host.service.getPresence(artifactId).find(peer => peer.context?.agentTasks?.some(task => task.taskId === ownBinding.taskId))!.actor;
+    expect(otherActor.id).not.toBe(initialActor.id);
+    expect((await b.call('artifact_activity', { action: 'end', ...ownBinding, participant })).error).toBe(false);
+  });
+
+  it('keeps a chat appearance across MCP reconnects while preserving task, feedback and guest authority boundaries', async () => {
+    const a = await agentConnection('Codex'), b = await agentConnection('Codex'), c = await agentConnection('Codex');
+    const appearanceKey = randomUUID(), anotherKey = randomUUID(), participant = { id: 'main', name: 'Main Agent', appearanceKey };
+    const sent: unknown[] = [], originalFetch = globalThis.fetch;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const headers = new Headers(init?.headers);
+      if (String(input).includes('/api/tools/') && headers.get('Authorization') === `Bearer ${host.token}`) sent.push({ headers: Object.fromEntries(headers), body: init?.body });
+      return originalFetch(input, init);
+    });
+    const first = await a.call('artifact_feedback', { action: 'create', text: 'Original connection message', participant });
+    const feedbackId = first.value.data.contextId, author: Actor = first.value.data.feedback.find((item: { id: string }) => item.id === feedbackId).author;
+    const reconnected = await b.call('artifact_feedback', { action: 'create', text: 'Reconnected appearance', participant });
+    const nextAuthor: Actor = reconnected.value.data.feedback.find((item: { id: string }) => item.id === reconnected.value.data.contextId).author;
+    expect(nextAuthor.id).not.toBe(author.id); expect(nextAuthor.presentationId).toBe(author.presentationId); expect(nextAuthor.name).toBe(author.name);
+    expect(author.presentationId).toMatch(/^agent-display-[0-9a-f]{32}$/);
+    const another = await c.call('artifact_feedback', { action: 'create', text: 'Another chat', participant: { ...participant, appearanceKey: anotherKey } });
+    const anotherAuthor = another.value.data.feedback.find((item: { id: string }) => item.id === another.value.data.contextId).author;
+    expect(anotherAuthor.presentationId).not.toBe(author.presentationId);
+    const child = await a.call('artifact_feedback', { action: 'create', text: 'Child agent', participant: { ...participant, id: '/root/child', name: 'Child Agent' } });
+    const childAuthor = child.value.data.feedback.find((item: { id: string }) => item.id === child.value.data.contextId).author;
+    expect(childAuthor.presentationId).not.toBe(author.presentationId);
+    expect((await b.call('artifact_feedback', { action: 'edit', feedbackId, text: 'Cannot borrow authorship', participant })).value).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+    const binding = await claimNode(a, participant);
+    const originalTask = host.service.getPresence(artifactId).find(peer => peer.actor.id === author.id)!.context!.agentTasks![0]!;
+    expect((await b.call('artifact_activity', { action: 'update', ...binding, phase: 'verifying', participant })).value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
+    expect((await b.call('artifact_activity', { action: 'begin', taskId: 'new-work', phase: 'writing', scope: { ids: ['node'] }, participant })).value).toMatchObject({ ok: false, error: { code: 'TASK_SCOPE_CONFLICT' } });
+    await b.call('artifact_read', { mode: 'summary', participant });
+    expect(host.service.getPresence(artifactId).find(peer => peer.actor.id === author.id)!.context!.agentTasks![0]!.expiresAt).toBe(originalTask.expiresAt);
+    const sameConnectionChat = { ...participant, appearanceKey: anotherKey };
+    const anotherTask = await a.call('artifact_activity', { action: 'begin', taskId: 'another-chat-work', phase: 'writing', scope: { rect: { x: 1000, y: 0, w: 300, h: 200 } }, participant: sameConnectionChat });
+    expect(anotherTask.error, JSON.stringify(anotherTask.value)).toBe(false);
+    const anotherBinding = { taskId: 'another-chat-work', generation: anotherTask.value.data.tasks[0].generation };
+    const sameConnectionActor = host.service.getPresence(artifactId).find(peer => peer.context?.agentTasks?.some(task => task.taskId === anotherBinding.taskId))!.actor;
+    expect(sameConnectionActor.id).not.toBe(author.id); expect(sameConnectionActor.presentationId).not.toBe(author.presentationId);
+    expect((await a.call('artifact_activity', { action: 'update', ...binding, phase: 'verifying', participant: sameConnectionChat })).value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
+    expect((await a.call('artifact_activity', { action: 'update', ...anotherBinding, phase: 'verifying', participant })).value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
+    expect((await a.call('artifact_activity', { action: 'update', ...binding, phase: 'verifying', participant })).error).toBe(false);
+    expect((await a.call('artifact_activity', { action: 'end', ...anotherBinding, participant: sameConnectionChat })).error).toBe(false);
+    expect((await a.call('artifact_activity', { action: 'update', ...binding, phase: 'verifying' })).value).toMatchObject({ ok: false, error: { code: 'TASK_STALE' } });
+    expect((await a.call('artifact_read', { participant: { ...participant, appearanceKey: 'main' } })).error).toBe(true);
+    await expect(a.bridge.execute('artifact_read', { artifactId, participant: { ...participant, appearanceKey: 'main' } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    const info = await share({ action: 'start', access: 'local' }), viewer = guest(tokenFor(info));
+    const signed = await viewer.join('Human appearance guest');
+    const spoofed = await viewer.call('artifact_feedback', { action: 'create', text: 'A human remains human', participant }, { 'X-Studio-Actor': 'agent', 'X-Studio-Agent-Id': author.id, 'X-Studio-Agent-Presentation-Id': author.presentationId! });
+    expect(spoofed.value.data.feedback.find((item: { id: string }) => item.id === spoofed.value.data.contextId).author).toEqual(signed);
+    expect(JSON.stringify(sent)).not.toContain(appearanceKey); expect(JSON.stringify(sent)).not.toContain(anotherKey);
+    expect(JSON.stringify([first, reconnected, another, child, spoofed, host.service.getPresence(artifactId)])).not.toContain(appearanceKey);
+    expect((await readFile(join(directory, 'artifacts', artifactId, 'artifact.sqlite'))).includes(Buffer.from(appearanceKey))).toBe(false);
+    const expiresAt = host.service.getPresence(artifactId).find(peer => peer.actor.id === author.id)!.context!.agentTasks![0]!.expiresAt;
+    vi.spyOn(Date, 'now').mockReturnValue(expiresAt + 1);
+    const fresh = await claimNode(b, participant);
+    expect(fresh.generation).not.toBe(binding.generation);
+    expect((await b.call('artifact_activity', { action: 'end', ...fresh, participant })).error).toBe(false);
+    vi.mocked(Date.now).mockReturnValue(expiresAt + 20_002);
+    expect(host.service.getPresence(artifactId).some(peer => peer.actor.id === author.id)).toBe(false);
   });
 
   it('protects human editing without letting the agent viewId hide it or the agent activity block itself', async () => {

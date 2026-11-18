@@ -18,6 +18,10 @@
 .studio-document-focus .studio-document-scroll{padding:30px max(24px,calc((100% - 880px)/2));}
 .studio-doc-prose{overflow-wrap:anywhere;max-width:none;margin:0;white-space:normal;user-select:text}.studio-document-focus .studio-doc-prose{max-width:820px;margin:0 auto}
 .studio-doc-block{margin:0 0 11px;border-radius:4px;scroll-margin-top:24px}
+/* Keep small body text legible without changing its layout or the expanded reader. */
+.studio-document-region .studio-doc-prose :is(p,.studio-doc-list-item,.studio-doc-task) {
+  -webkit-text-stroke-width: clamp(0px, calc((0.875 - var(--canvas-scale, 1)) * 1.52px), 0.38px);
+}
 .studio-doc-block.is-anchored{outline:2px solid var(--studio-accent,#9a456b);outline-offset:3px;background:var(--studio-accent-soft,#f8e8ef)}
 .studio-doc-block.is-find-match{background:#ffed91;color:#25272b;box-shadow:0 0 0 2px #ffed91}
 .studio-doc-block[data-document-annotation-target]{position:relative;cursor:var(--canvas-comment-cursor,text)}
