@@ -28,9 +28,9 @@ const changes = [
 
 it.each(changes)('rejects a label outside a rect workspace without persisting any part of the edit: %j', async patch => {
   const board = await create(), task = await begin(board, 'bounded', { rect: { x: 0, y: 0, w: 400, h: 120 } });
-  const before = await readFile(service.store.file(board.artifact.id), 'utf8');
+  const before = await readFile(service.store.file(board.artifact.id));
   await expect(service.execute('artifact_apply', { artifactId: board.artifact.id, taskId: task.taskId, generation: task.generation, operationId: 'outside-label', expectedVersions: { edge: 1 }, operations: [{ op: 'update', id: 'edge', changes: patch }] }, first)).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-  expect(await readFile(service.store.file(board.artifact.id), 'utf8')).toBe(before);
+  expect(await readFile(service.store.file(board.artifact.id))).toEqual(before);
 });
 
 it.each(changes)('keeps independent label fields valid when the whole visible arrow fits the declared rect: %j', async patch => {
@@ -42,9 +42,9 @@ it.each(changes)('keeps independent label fields valid when the whole visible ar
 it('rejects a label entering another reserved area even when the writer owns the arrow by explicit ID', async () => {
   const board = await create(), own = await begin(board, 'own-arrow', { ids: ['edge'] });
   await begin(board, 'reserved-area', { rect: { x: 80, y: 300, w: 200, h: 100 } }, second);
-  const before = await readFile(service.store.file(board.artifact.id), 'utf8');
+  const before = await readFile(service.store.file(board.artifact.id));
   await expect(service.execute('artifact_apply', { artifactId: board.artifact.id, taskId: own.taskId, generation: own.generation, operationId: 'into-reservation', expectedVersions: { edge: 1 }, operations: [{ op: 'update', id: 'edge', changes: changes[0] }] }, first)).rejects.toMatchObject({ code: 'TASK_SCOPE_CONFLICT' });
-  expect(await readFile(service.store.file(board.artifact.id), 'utf8')).toBe(before);
+  expect(await readFile(service.store.file(board.artifact.id))).toEqual(before);
 });
 
 it('preserves explicit ID ownership without inventing endpoint ownership or a rect constraint', async () => {

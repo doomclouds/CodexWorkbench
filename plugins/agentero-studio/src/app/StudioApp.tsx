@@ -71,6 +71,7 @@ function newId(prefix: string): string { return newClientId(prefix); }
 function emptyActivity(): ProductActivity { return { editingIds: [], movingIds: [], dirty: false, issues: [] }; }
 function initialPresence() { return { selectedIds: [] as string[], viewport: { x: 0, y: 0, zoom: 1 }, cursor: null as { x: number; y: number; t?: number; surface?: string } | null, following: '', ...emptyActivity() }; }
 function ArtifactPreview({ artifact, cached, client }: { artifact: Artifact; cached?: StudioDocument; client: StudioClient }) {
+  if (artifact.storageStatus === 'unsupported') return <div className="studio-artifact-preview studio-blank-preview"><AlertCircle size={28} /><span>不受支持</span></div>;
   const Preview = getProduct(artifact.type)?.Preview;
   return Preview ? <Preview artifact={artifact} cached={cached} client={client} /> : <div className="studio-artifact-preview studio-blank-preview">暂无预览</div>;
 }
@@ -103,6 +104,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
   const [panel, setPanel] = useState<Panel>(null);
   const [error, setError] = useState('');
+  const [unsupportedId, setUnsupportedId] = useState('');
   const [notice, setNotice] = useState('');
   const [copyFallback, setCopyFallback] = useState('');
   const [busy, setBusy] = useState('');
@@ -210,6 +212,11 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   const fail = useCallback((cause: unknown, retry?: () => void) => {
     if (!mounted.current) return;
     if (isAuthenticationFailure(cause) || (cause as { code?: string } | null)?.code === 'SESSION_PAUSED') return;
+    if ((cause as { code?: string } | null)?.code === 'UNSUPPORTED_STORAGE') {
+      if (activeRef.current) { setUnsupportedId(activeRef.current); setError(''); }
+      else setError(errorText(cause));
+      retryRef.current = null; return;
+    }
     setError(errorText(cause)); retryRef.current = retry || null;
   }, []);
   const inform = useCallback((message: string) => { setNotice(message); }, []);
@@ -243,7 +250,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   }, []);
 
   const collaboration = useCollaboration({
-    client, polling: !!transportClient.request, artifactId: activeId, peerId, enabled: !!activeId && !accessPending,
+    client, polling: !!transportClient.request, artifactId: activeId, peerId, enabled: !!activeId && !accessPending && unsupportedId !== activeId,
     getDocument: () => boardRef.current, onDocument: acceptBoard, onFeedback: setFeedback,
     onPresence: (nextPeers, nextTimer) => { setPeers(nextPeers); setRoomTimer(nextTimer); }, onClock: setClockOffsetMs,
     onCursorClear: () => { presenceRef.current.cursor = null; },
@@ -368,6 +375,8 @@ export default function StudioApp({ client: transportClient, actor: initialActor
   }, [panel, loadShare, accessPending]);
 
   function openArtifact(id: string, ready?: StudioDocument) {
+    if (artifacts.some(item => item.id === id && item.storageStatus === 'unsupported')) return;
+    setUnsupportedId('');
     onNavigate?.(id, 'editor');
     versionSequence.current += 1; activeRef.current = id; boardRef.current = null;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
@@ -377,6 +386,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
     if (ready) acceptBoard(ready);
   }
   function goHome(view: 'library' | 'trash' = filter === 'trash' ? 'trash' : 'library') {
+    setUnsupportedId('');
     onNavigate?.(undefined, view);
     activeRef.current = ''; boardRef.current = null; versionSequence.current += 1;
     presenceRef.current = initialPresence(); activitySources.current = { editor: emptyActivity(), toolbar: emptyActivity() };
@@ -420,7 +430,7 @@ export default function StudioApp({ client: transportClient, actor: initialActor
       if (action === 'duplicate') { openArtifact(result.artifact.id, result.board); return; }
       if (action === 'trash' && activeRef.current === artifact.id) goHome();
       if (!activeRef.current) await loadLibrary();
-      if (action === 'trash') inform('已移入回收站，可以随时恢复。');
+      if (action === 'trash') inform(artifact.storageStatus === 'unsupported' ? '已移入回收站。' : '已移入回收站，可以随时恢复。');
       if (action === 'restore') inform('作品已恢复。');
       if (action === 'rename') setRename(null);
     } catch (cause) { fail(cause, () => { void manageArtifact(action, artifact, extra); }); }
@@ -703,15 +713,15 @@ export default function StudioApp({ client: transportClient, actor: initialActor
           {libraryLoading && !libraryLoaded ? <div className="studio-empty"><Loader2 size={26} className="studio-spin" /><p>正在读取作品</p></div> : libraryLoaded && visibleArtifacts.length === 0 ? <div className="studio-empty">{filter === 'trash' ? <Trash2 size={32} /> : <LayoutGrid size={32} />}<h3>{query ? '没有找到匹配的作品' : filter === 'trash' ? '回收站为空' : filter === 'pinned' ? '还没有固定作品' : '从第一块白板开始'}</h3><p>{query ? '试试其他名称。' : filter === 'trash' ? '移入回收站的作品可以在这里恢复。' : filter === 'pinned' ? '把常用作品固定在这里，方便再次打开。' : '先创建一块空白白板，再与 Codex 一起整理思路。'}</p>{!query && filter === 'recent' && <button className="studio-button" onClick={() => void createBoard()} disabled={!!busy}><Plus size={16} />新建白板</button>}</div> : <div className={`studio-artifacts studio-artifacts-${layout}`} aria-busy={libraryLoading}>
             {visibleArtifacts.map(artifact => <article className={`studio-artifact ${artifact.trashedAt ? 'studio-artifact-trashed' : ''}${selectedTrash.has(artifact.id) ? ' is-selected' : ''}`} key={artifact.id}>
               {artifact.trashedAt && <label className="studio-trash-select"><input type="checkbox" aria-label={`选择作品：${artifact.title}`} checked={selectedTrash.has(artifact.id)} disabled={!!busy} onChange={event => setTrashSelection(previous => event.target.checked ? [...new Set([...previous, artifact.id])] : previous.filter(id => id !== artifact.id))} /></label>}
-              <button className="studio-artifact-open" aria-label={`打开${getProduct(artifact.type)?.label || "作品"}：${artifact.title}`} disabled={!!artifact.trashedAt} onClick={() => openArtifact(artifact.id)}>{layout === 'grid' && <ArtifactPreview artifact={artifact} cached={cachedBoards[artifact.id]} client={client} />}<div className="studio-artifact-details"><span className="studio-artifact-icon"><ProductGlyph type={artifact.type} /></span><div className="studio-artifact-copy"><h3 title={artifact.title}>{artifact.title}</h3><p>{filter === 'trash' ? `移入时间 ${new Date(artifact.trashedAt || artifact.updatedAt).toLocaleDateString('zh-CN')}` : relativeTime(artifact.updatedAt)}</p></div></div></button>
-              <div className="studio-artifact-actions">{artifact.trashedAt ? <><button type="button" className="studio-icon-button" aria-label={`恢复作品：${artifact.title}`} title="恢复" onClick={() => void manageArtifact('restore', artifact)} disabled={!!busy}><RotateCcw size={17} /></button><button type="button" className="studio-icon-button" aria-label={`永久删除作品：${artifact.title}`} title="永久删除" disabled={!!busy} onClick={() => confirmPurge([artifact.id])}><Trash2 size={17} /></button></> : <>{artifact.pinned && <Pin size={15} className="studio-pin-mark" aria-label="已固定" />}<LibraryArtifactMenu artifact={artifact} open={menuId === artifact.id} busy={!!busy} onOpenChange={open => setMenuId(open ? artifact.id : '')} onPin={() => void manageArtifact('pin', artifact, { pinned: !artifact.pinned })} onRename={() => { setRename({ artifact, title: artifact.title }); setMenuId(''); }} onCopyLink={() => void copyArtifactLink(artifact)} onDuplicate={() => void manageArtifact('duplicate', artifact)} onTrash={() => void manageArtifact('trash', artifact)} /></>}
+              <button className="studio-artifact-open" aria-label={`打开${getProduct(artifact.type)?.label || "作品"}：${artifact.title}`} disabled={!!artifact.trashedAt || artifact.storageStatus === 'unsupported'} onClick={() => openArtifact(artifact.id)}>{layout === 'grid' && <ArtifactPreview artifact={artifact} cached={cachedBoards[artifact.id]} client={client} />}<div className="studio-artifact-details"><span className="studio-artifact-icon"><ProductGlyph type={artifact.type} /></span><div className="studio-artifact-copy"><h3 title={artifact.title}>{artifact.title}</h3><p>{artifact.storageStatus === 'unsupported' ? '旧版作品 · 不受支持' : filter === 'trash' ? `移入时间 ${new Date(artifact.trashedAt || artifact.updatedAt).toLocaleDateString('zh-CN')}` : relativeTime(artifact.updatedAt)}</p></div></div></button>
+              <div className="studio-artifact-actions">{artifact.trashedAt ? <>{artifact.storageStatus !== 'unsupported' && <button type="button" className="studio-icon-button" aria-label={`恢复作品：${artifact.title}`} title="恢复" onClick={() => void manageArtifact('restore', artifact)} disabled={!!busy}><RotateCcw size={17} /></button>}<button type="button" className="studio-icon-button" aria-label={`永久删除作品：${artifact.title}`} title="永久删除" disabled={!!busy} onClick={() => confirmPurge([artifact.id])}><Trash2 size={17} /></button></> : <>{artifact.pinned && artifact.storageStatus !== 'unsupported' && <Pin size={15} className="studio-pin-mark" aria-label="已固定" />}<LibraryArtifactMenu artifact={artifact} open={menuId === artifact.id} busy={!!busy} onOpenChange={open => setMenuId(open ? artifact.id : '')} onPin={() => void manageArtifact('pin', artifact, { pinned: !artifact.pinned })} onRename={() => { setRename({ artifact, title: artifact.title }); setMenuId(''); }} onCopyLink={() => void copyArtifactLink(artifact)} onDuplicate={() => void manageArtifact('duplicate', artifact)} onTrash={() => void manageArtifact('trash', artifact)} /></>}
               </div>
             </article>)}
           </div>}
           {nextCursor && <div className="studio-load-more"><button className="studio-button" disabled={libraryLoading} onClick={() => void loadLibrary(nextCursor)}>{libraryLoading && <Loader2 className="studio-spin" size={16} />}加载更多</button></div>}
         </section>
       </> : <div className="studio-empty"><Share2 size={30} /><h3>从分享链接打开白板</h3><p>此页面仅显示你获准访问的作品。</p></div>}
-    </main> : <>
+    </main> : unsupportedId === activeId ? <main className="studio-empty" aria-label="不受支持的作品"><AlertCircle size={32} /><h1>旧版作品不受支持</h1><p>可返回作品中心，将此作品移入回收站。</p>{canManage && <button type="button" className="studio-button" onClick={() => goHome('library')}><ArrowLeft size={17} />返回作品中心</button>}</main> : <>
       <header className="studio-editor-header"><div className="studio-editor-title">{canManage ? <button className="studio-icon-button" aria-label="返回作品中心" onClick={() => goHome()}><ArrowLeft size={20} /></button> : <Share2 size={22} className="studio-guest-brand" />}<input aria-label={`${product.label}名称`} value={titleDraft} readOnly={!canManage || !!preview} onChange={event => setTitleDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); skipTitleBlur.current = true; setTitleDraft(boardRef.current?.artifact.title || ''); event.currentTarget.blur(); } }} onBlur={() => { if (skipTitleBlur.current) { skipTitleBlur.current = false; return; } if (!canManage) return; const title = titleDraft.trim(); if (board && title && title !== board.artifact.title) void manageArtifact('rename', board.artifact, { title }); else if (!title) setTitleDraft(board?.artifact.title || ''); }} /><SaveStatus activity={saveActivity} sync={sync} session={session.status} canEdit={canEdit} /></div><div className="studio-editor-actions">
         <OnlineParticipants peers={peers} actor={actor} following={following} document={board} clockOffsetMs={clockOffsetMs} preview={!!preview || !!suggestionPreview} onReleaseAgentTask={canReleaseAgentTasks ? releaseAgentTask : undefined} onFollow={id => { setTargetViewport(undefined); if (id) setFollowing(id); else stopFollowing(); }} />
         <div className="studio-editor-popover-anchor"><button ref={historyButton} className={`studio-icon-button${panel === 'history' ? ' is-active' : ''}`} aria-label="版本历史" title="版本历史" aria-expanded={panel === 'history'} onClick={() => togglePanel('history')}><Clock3 size={20} /></button>{panel === 'history' && <EditorPopover title="版本历史" className="studio-history-popover" hideHeading anchorRef={historyButton} onClose={() => setPanel(null)}>{historyContent}</EditorPopover>}</div>

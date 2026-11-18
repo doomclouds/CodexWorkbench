@@ -8,7 +8,7 @@ Agentero Studio 是 CodexWorkbench 的本地设计创作插件。通过 Codex �
 
 文档默认纸张色与分区一致，可从选区格式条改填充色；正文、编辑、展开阅读和导出共用纸张配色。普通画布中的文档正文按区域宽度靠左排版，横向拉伸只改变可排版宽度，不缩放字号；展开阅读采用居中限宽。拖动标题栏、六点把手或正文下方的空白可以移动文档，拖动已选中文档中的文字可选择文字。边角用于调整尺寸。缩小画布时，文档标题栏和 HTML 区域标签随对象缩小。选中文档后也可从选区工具栏展开阅读。右上角备注识别文字、段落和整区域目标。
 
-版本：`0.2.14`。运行要求：Node.js 24 或更高版本。
+版本：`0.2.15`。运行要求：包含内置 `node:sqlite` 的 Node.js 24 或更高版本。
 
 ## 使用流程
 
@@ -19,6 +19,8 @@ Agentero Studio 是 CodexWorkbench 的本地设计创作插件。通过 Codex �
 5. 在白板中查看历史、预览差异或恢复版本。恢复会生成新版本，不抹掉后续记录。
 
 作品中心提供作品查找、固定、改名、复制、回收与恢复。数据默认保存在用户主目录下的 `.codexworkbench/agentero-studio/`，可通过 `AGENTERO_STUDIO_DATA_ROOT` 指定数据根目录，不写入源码或插件安装目录。关闭页面不会删除作品。
+
+新作品使用每作品一个 SQLite 数据库。旧 JSON 作品保留原文件，在作品中心显示“不受支持”，提供移入回收站和永久删除入口；旧 JSON ZIP 不直接导入。用户需要继续编辑旧内容时，可让 AI 从副本读取并重建数据库作品，具体方法见[旧数据与 AI 辅助迁移](skills/agentero-studio/references/legacy-data-migration.md)。迁移报告应说明当前内容、资源、历史和备注来源各自保留的结果。
 
 宿主支持上下文更新时，MCP App 会上报 `appId:"agentero-studio"` 和 `panelOpen:true`，作品中心即使没有作品 ID 或选区也保持该标记。Agent 需要界面时先检查当前 App 上下文或面板清单；已有面板就复用，作品的读取、修改、验证和导出直接调用作品工具。打开请求未完成时先等待；句柄失效先重新查询，确认已经关闭且当前步骤确需界面时才再打开一次。该标记不授予作品权限，也不把历史消息当作实时面板状态。
 
@@ -40,7 +42,7 @@ Diagram Design 是可选的外部 Skill，不随 Studio 复制或安装。当前
 
 Studio 内只有一个中文版业务 Skill：[agentero-studio](skills/agentero-studio/SKILL.md)。它负责作品、反馈、版本和工具的工作流，不复刻 Diagram Design 的图种库。
 
-该 Skill 按任务读取八份中文参考：
+该 Skill 按任务读取九份中文参考：
 
 - [白板表达与布局](skills/agentero-studio/references/whiteboard-craft.md)：内容形式、标题、文字、关系、分区、间距、局部清理和人工布局的保留。
 - [图片与素描](skills/agentero-studio/references/pictures.md)：实物构图、干净绘图、马克笔表达、剖面、分镜、部件标注和 SVG 资源。
@@ -50,6 +52,7 @@ Studio 内只有一个中文版业务 Skill：[agentero-studio](skills/agentero-
 - [文档区域与段落修改](skills/agentero-studio/references/document-regions.md)：块 JSON、统一备注、冻结段落来源与局部修改。
 - [HTML 区域与反馈](skills/agentero-studio/references/html-feedback.md)：原始内容定位、冻结来源、版本与标注。
 - [配色与可读性](skills/agentero-studio/references/appearance.md)：界面与内容主题、对比度及中文可读性。
+- [旧数据与 AI 辅助迁移](skills/agentero-studio/references/legacy-data-migration.md)：旧作品保留与回收、内容重建、完整历史验收和数据库便携归档。
 
 ## 标注、共享和权限
 

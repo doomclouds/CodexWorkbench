@@ -210,10 +210,11 @@ describe('native layer ordering', () => {
 
   it('supports old snapshots without an order clock and preserves new order clocks through previews and portable exports', async () => {
     const initial = await create(['a', 'b', 'c'].map(id => ({ id, type: 'text', text: id }))), artifactId = initial.artifact.id;
-    await service.store.transaction(artifactId, state => {
-      delete (state.content as { orderVersion?: number }).orderVersion;
-      for (const snapshot of state.history) delete (snapshot.content as { orderVersion?: number }).orderVersion;
-    });
+    // Prepare an existing snapshot format before exercising the normal edit/restore paths.
+    const fixture = await service.store.read(artifactId);
+    delete (fixture.content as { orderVersion?: number }).orderVersion;
+    for (const snapshot of fixture.history) delete (snapshot.content as { orderVersion?: number }).orderVersion;
+    await service.store.write(fixture);
     const legacy = await read(artifactId), legacyVersion = (await service.execute('artifact_read', { artifactId, mode: 'history' })).history[0].id;
     expect(legacy.orderVersion).toBeUndefined();
     expect((await service.execute('artifact_read', { artifactId, mode: 'summary' })).orderVersion).toBe(0);

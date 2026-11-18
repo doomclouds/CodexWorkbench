@@ -7,6 +7,7 @@ export interface ShareMember { id: string; name: string; role: Exclude<Role, 'ow
 export interface Artifact {
   id: string; type: string; title: string; revision: number; createdAt: string; updatedAt: string;
   pinned: boolean; trashedAt?: string; thumbnail?: string; sharing?: boolean;
+  storageStatus?: 'unsupported';
   importedFrom?: { artifactId: string; title: string; createdAt: string; importedAt: string };
 }
 export interface StyleProfile {

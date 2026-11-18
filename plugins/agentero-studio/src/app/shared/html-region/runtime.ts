@@ -161,6 +161,14 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     return element;
   };
   const show = (element: HTMLDivElement, box: { x: number; y: number; width: number; height: number }) => Object.assign(element.style, { display: 'block', left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` });
+  const hideOutline = () => { if (outline) outline.style.display = 'none'; };
+  const showOutline = (element: Element, box: DOMRect) => {
+    if (!outline) return;
+    // SVG lines can have zero layout width or height while their strokes are visible.
+    const minimum = element instanceof SVGElement ? 6 : 0;
+    const width = Math.max(minimum, box.width), height = Math.max(minimum, box.height);
+    show(outline, { x: box.x - (width - box.width) / 2, y: box.y - (height - box.height) / 2, width, height });
+  };
   const cursorDocument = document;
   const cursorOverrides = new Map<CSSStyleDeclaration, { value: string; priority: string; element?: HTMLElement | SVGElement; sourceStyle?: string | null; appliedStyle?: string | null }>();
   const overrideCursor = (style: CSSStyleDeclaration, element?: HTMLElement | SVGElement) => {
@@ -227,14 +235,14 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
       cursorObserver.observe(cursorDocument.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
     }
   };
-  const setAnnotation = () => {
-    updateCursor();
-    if (outline) outline.style.display = 'none';
+  const clearAnnotation = () => {
+    hideOutline();
     if (area) area.style.display = 'none';
     areaStart = null;
     pointerStart = null;
     suppressClick = false;
   };
+  const setAnnotation = () => { updateCursor(); clearAnnotation(); };
   const sendEscape = () => window.parent.postMessage({ type: 'studio-html-escape', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision }, '*');
   const sendNavigation = (value: HtmlNavigationEvent) => window.parent.postMessage({ type: 'studio-html-navigation', channel: config.channel, regionId: config.regionId, sourceRevision: config.sourceRevision, ...value }, '*');
   const cancelNavigation = () => {
@@ -248,7 +256,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
   window.addEventListener('keydown', event => {
     if (event.code !== 'Space' || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey || event.altKey || navigationInput(event)) return;
     event.preventDefault(); event.stopImmediatePropagation();
-    if (!navigationSpace) { navigationSpace = true; updateCursor(); sendNavigation({ kind: 'space', held: true }); }
+    if (!navigationSpace) { navigationSpace = true; setAnnotation(); sendNavigation({ kind: 'space', held: true }); }
   }, true);
   window.addEventListener('keyup', event => {
     if (event.code !== 'Space' || !navigationSpace) return;
@@ -303,10 +311,11 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     pointerActive = true;
     if (pointerTimer === undefined) pointerTimer = window.setTimeout(() => { pointerTimer = undefined; sendPointer(pointerPosition); }, 16);
   };
-  window.addEventListener('pointerout', event => { if (!event.relatedTarget) clearPointer(); }, true);
+  window.addEventListener('pointerout', event => { if (!event.relatedTarget) { clearPointer(); clearAnnotation(); } }, true);
   window.addEventListener('pointercancel', clearPointer, true);
-  window.addEventListener('blur', event => { if (event.target === window) clearPointer(); }, true);
-  window.addEventListener('pagehide', clearPointer);
+  window.addEventListener('blur', event => { if (event.target === window) { clearPointer(); clearAnnotation(); } }, true);
+  window.addEventListener('pagehide', () => { clearPointer(); clearAnnotation(); });
+  window.addEventListener('scroll', hideOutline, { capture: true, passive: true });
   window.addEventListener('keydown', event => {
     if (!enabled || !/^[1-9]$/.test(event.key) || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     if (event.composedPath().some(node => node instanceof Element && node.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="menu"],[role="dialog"],[role="listbox"],[role="combobox"]'))) return;
@@ -375,18 +384,19 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     const element = semantic(target);
     if (!element || element.closest('[data-studio-runtime]')) return;
     const bounds = element.getBoundingClientRect();
-    if (outline) show(outline, bounds);
+    showOutline(element, bounds);
     send([element], visibleText(element), rectOf(bounds), { x: event.clientX, y: event.clientY });
   }, true);
   window.addEventListener('pointermove', (event: PointerEvent) => {
     reportPointer(event);
     if (!enabled) return;
     event.stopImmediatePropagation();
+    if (navigationSpace || externalPanMode) return;
     if (areaStart && area) {
       show(area, { x: Math.min(areaStart.x, event.clientX), y: Math.min(areaStart.y, event.clientY), width: Math.abs(event.clientX - areaStart.x), height: Math.abs(event.clientY - areaStart.y) });
-    } else if (!pointerStart && outline) {
+    } else if (!pointerStart) {
       const element = semantic(toElement(event.target));
-      if (element) show(outline, element.getBoundingClientRect()); else outline.style.display = 'none';
+      if (element) showOutline(element, element.getBoundingClientRect()); else hideOutline();
     }
   }, true);
   window.addEventListener('pointerdown', (event: PointerEvent) => {
@@ -395,7 +405,7 @@ function selectionRuntime(config: HtmlRuntimeOptions & { commentCursor: string; 
     suppressClick = false;
     if (event.button !== 0) { event.preventDefault(); return; }
     pointerStart = { x: event.clientX, y: event.clientY };
-    if (outline) outline.style.display = 'none';
+    hideOutline();
     if (event.shiftKey) {
       event.preventDefault();
       window.getSelection()?.removeAllRanges();

@@ -4,6 +4,7 @@ import { assertAlive, object, requireRole, text } from './shared/common.js';
 import { assertWorkspaceMutation, taskBinding, workspaceReadRelated } from './shared/agent-workspaces.js';
 import type { WhiteboardContent } from './products/whiteboard.js';
 import { createArtifact, listArtifacts, manageArtifact } from './shared/artifacts.js';
+import { readLegacyArtifact, trashLegacyArtifact } from './shared/legacy-artifacts.js';
 import { applyMutation, historyBatches, initializeVersionClocks, mutationTargets, version } from './shared/history.js';
 import { updateFeedback } from './shared/feedback.js';
 import { clearExpiredProposals, feedbackVisible, previewProposal, proposalExpired, updateProposal, visibleFeedback } from './shared/proposals.js';
@@ -95,7 +96,8 @@ export class StudioService {
     const binding = name === 'artifact_activity' ? undefined : taskBinding(args);
     let replay = false;
     const createsArtifact = name === 'artifact_manage' && ['create', 'import'].includes(text(args.action, 'create'));
-    if (actor.kind === 'agent' && args.artifactId !== undefined && !createsArtifact && name !== 'artifact_activity') {
+    const managesLegacyLifecycle = actor.kind === 'agent' && name === 'artifact_manage' && args.artifactId !== undefined && ['trash', 'purge'].includes(text(args.action)) && await readLegacyArtifact(this.dataRoot, safeId(args.artifactId));
+    if (actor.kind === 'agent' && args.artifactId !== undefined && !createsArtifact && !managesLegacyLifecycle && name !== 'artifact_activity') {
       const id = safeId(args.artifactId), projected = await this.store.readProjection(id, state => {
         const adapter = this.products.get(state.artifact.type).adapter;
         const ids = name === 'artifact_apply' && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap(operation => object(operation) && typeof operation.op === 'string' ? mutationTargets(state.content, operation as unknown as ContentOperation, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
@@ -134,8 +136,8 @@ export class StudioService {
     finally { finish?.(); }
   }
   private async dispatch(name: ToolName, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<any> {
-    if (name === 'studio_open') { if (args.artifactId) await this.store.read(safeId(args.artifactId)); return { view: args.view ?? (args.artifactId ? 'editor' : 'library'), products: this.products.catalog(), ...(args.artifactId ? { artifactId: args.artifactId } : {}) }; }
-    if (name === 'artifact_list') { const result = listArtifacts(await this.store.list(), args, actor); return { ...result, artifacts: result.artifacts.map(artifact => ({ ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` })) }; }
+    if (name === 'studio_open') { if (args.artifactId) await this.store.readProjection(safeId(args.artifactId), state => state.artifact); return { view: args.view ?? (args.artifactId ? 'editor' : 'library'), products: this.products.catalog(), ...(args.artifactId ? { artifactId: args.artifactId } : {}) }; }
+    if (name === 'artifact_list') { const result = listArtifacts(await this.store.catalog(), args, actor); return { ...result, artifacts: result.artifacts.map(artifact => artifact.storageStatus === 'unsupported' ? artifact : { ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` }) }; }
     if (name === 'artifact_manage') return this.manage(args, actor, authority);
     const id = safeId(args.artifactId);
     if (name === 'artifact_read') return this.read(id, args, actor, authority);
@@ -151,7 +153,7 @@ export class StudioService {
     if (action === 'purge') return this.purge(args, actor, authority);
     if (action === 'import') return this.importArchive(await readArchiveInput(args), actor, args.title);
     if (action === 'create' || action === 'duplicate') {
-      const base = action === 'duplicate' ? await this.store.read(safeId(args.artifactId)) : undefined;
+      const base = action === 'duplicate' ? await this.store.readProjection(safeId(args.artifactId), state => ({ artifact: state.artifact, content: state.content, assets: state.assets })) : undefined;
       const product = this.products.get(base?.artifact.type ?? text(args.type, 'whiteboard'));
       const title = text(args.title, base ? `${base.artifact.title} 副本` : product.defaultTitle, 200);
       const content = product.create(args, base?.content); product.adapter.validate(content);
@@ -167,9 +169,16 @@ export class StudioService {
       return { artifact: copy(state.artifact), ...product.result(state) };
     }
     const id = safeId(args.artifactId);
+    if (action === 'trash' && await readLegacyArtifact(this.dataRoot, id)) {
+      this.authorizeLegacyManagement(actor, authority);
+      const artifact = await trashLegacyArtifact(this.dataRoot, id, args.expectedRevision);
+      this.collaboration.forget(id); this.thumbnails.delete(id);
+      this.emit({ type: 'artifact', artifactId: id, artifact });
+      return { artifact };
+    }
     if (action === 'asset-import') {
-      const state = await this.store.read(id); assertAlive(state.artifact);
-      return { asset: await importAsset(this.store, id, args.assetPath, actor, this.products.get(state.artifact.type).validateAsset, current => this.authorizedActor(current, actor, authority)) };
+      const artifact = await this.store.readProjection(id, state => state.artifact); assertAlive(artifact);
+      return { asset: await importAsset(this.store, id, args.assetPath, actor, this.products.get(artifact.type).validateAsset, current => this.authorizedActor(current, actor, authority)) };
     }
     if (action === 'asset-delete') return deleteAsset(this.store, id, args.assetId, actor, current => this.authorizedActor(current, actor, authority));
     const result = await this.store.transaction(id, state => {
@@ -186,7 +195,11 @@ export class StudioService {
     const ids = [...new Set((multiple ? args.artifactIds as unknown[] : [args.artifactId]).map(id => safeId(id)))];
     const deletedIds: string[] = [], failures: { artifactId: string; code: string; message: string }[] = [];
     for (const id of ids) {
-      try { await this.store.purge(id, async () => { this.authorizedActor(await this.store.read(id), actor, authority); await purgeExports(this.dataRoot, id); }); }
+      try { await this.store.purge(id, async () => {
+        if (await readLegacyArtifact(this.dataRoot, id)) this.authorizeLegacyManagement(actor, authority);
+        else this.authorizedActor(await this.store.read(id), actor, authority);
+        await purgeExports(this.dataRoot, id);
+      }); }
       catch (error) {
         failures.push({ artifactId: id, code: error instanceof StudioError ? error.code : 'PURGE_FAILED', message: error instanceof StudioError ? error.message : `永久删除未完成，可能已移除部分所属资源；请检查存储状态后重试。${error instanceof Error ? ` ${error.message}` : ''}` });
         continue;
@@ -196,6 +209,10 @@ export class StudioService {
       this.emit({ type: 'purged', artifactId: id });
     }
     return { deletedIds, failures };
+  }
+  private authorizeLegacyManagement(actor: Actor, authority?: StudioAuthority): void {
+    requireRole(actor, ['owner']);
+    if (authority && (!authority.owner || authority.actorId !== actor.id || authority.viaLan)) throw new StudioError('FORBIDDEN', '仅本机房主可以回收不受支持的旧版作品。');
   }
   async importArchive(data: Uint8Array, actor: Actor = this.owner, title?: unknown) {
     if (this.closing) throw new StudioError('CLOSED', 'Studio 服务已经关闭。');
@@ -232,29 +249,32 @@ export class StudioService {
       const pending = state.feedback.filter(item => item.status === 'pending' && feedbackVisible(item, currentActor)).map(({ creationReceipt: _receipt, ...feedback }) => feedback);
       return { artifactId: id, contexts: peers.flatMap(peer => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []), pending, timer: this.getTimer(id) };
     });
-    const state = await this.store.read(id), product = this.products.get(state.artifact.type);
-    actor = this.authorizedActor(state, actor, authority);
-    if (mode === 'assets') return listAssets(state, args, actor);
-    // Filter at the shared boundary, including product-specific source readers and counts.
-    // A LAN visitor cannot recover a private option by guessing its feedback/context ID.
-    const hidden = state.feedback.filter(item => !feedbackVisible(item, actor));
-    if (hidden.some(item => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError('NOT_FOUND', '反馈上下文不存在。');
-    for (const item of hidden) delete state.sources[item.id];
-    state.feedback = visibleFeedback(state.feedback, actor);
-    if (mode === 'document' || mode === 'board') return product.project(state);
-    if (mode === 'history') { const history = state.history.map(item => item.entry); return { history, batches: historyBatches(history) }; }
-    if (mode === 'version') return product.result(version(state, args.versionId ?? args.revision));
-    if (mode === 'diff') {
-      const adjacent = args.adjacent === true;
-      const selected = adjacent ? version(state, args.versionId ?? args.revision) : undefined;
-      const before = selected ? state.history[state.history.indexOf(selected) - 1] : version(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
-      const after = selected ?? (args.toVersionId !== undefined || args.to !== undefined ? version(state, args.toVersionId ?? args.to) : state);
-      if (args.ids !== undefined && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '差异内容单元 ID 列表无效。');
-      const requestedIds = args.ids as string[] | undefined;
-      const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map(id => ({ id, before: null, after: product.adapter.readUnit(after.content, id) }));
-      return { ...(before ? product.diff(before, after) : { changes: units }), units: requestedIds ? units.filter(unit => requestedIds.includes(unit.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
-    }
-    return product.read(state, mode, args);
+    return this.store.readProjection(id, current => {
+      const product = this.products.get(current.artifact.type);
+      const currentActor = this.authorizedActor(current, actor, authority);
+      if (mode === 'assets') return listAssets(current, args, currentActor);
+      // Filter at the shared boundary, including product-specific source readers and counts.
+      // A LAN visitor cannot recover a private option by guessing its feedback/context ID.
+      const hidden = current.feedback.filter(item => !feedbackVisible(item, currentActor));
+      if (hidden.some(item => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError('NOT_FOUND', '反馈上下文不存在。');
+      const sources = { ...current.sources };
+      for (const item of hidden) delete sources[item.id];
+      const state = { ...current, sources, feedback: visibleFeedback(current.feedback, currentActor) };
+      if (mode === 'document' || mode === 'board') return product.project(state);
+      if (mode === 'history') { const history = state.history.map(item => item.entry); return { history, batches: historyBatches(history) }; }
+      if (mode === 'version') return product.result(version(state, args.versionId ?? args.revision));
+      if (mode === 'diff') {
+        const adjacent = args.adjacent === true;
+        const selected = adjacent ? version(state, args.versionId ?? args.revision) : undefined;
+        const before = selected ? state.history[state.history.indexOf(selected) - 1] : version(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
+        const after = selected ?? (args.toVersionId !== undefined || args.to !== undefined ? version(state, args.toVersionId ?? args.to) : state);
+        if (args.ids !== undefined && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '差异内容单元 ID 列表无效。');
+        const requestedIds = args.ids as string[] | undefined;
+        const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map(id => ({ id, before: null, after: product.adapter.readUnit(after.content, id) }));
+        return { ...(before ? product.diff(before, after) : { changes: units }), units: requestedIds ? units.filter(unit => requestedIds.includes(unit.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
+      }
+      return product.read(state, mode, args);
+    });
   }
   private async apply(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     if (actor.kind === 'agent' && typeof args.operationId === 'string' && await this.store.readProjection(id, state => state.operations.some(operation => operation.id === args.operationId))) {
@@ -351,7 +371,7 @@ export class StudioService {
     this.emit({ type: 'feedback', artifactId: id }); return result;
   }
   private async activity(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
-    const execute = (state: Readonly<ArtifactState>) => {
+    const execute = (state: AuthorizationState & Pick<ArtifactState, 'content'>) => {
       const current = this.authorizedActor(state, actor, authority);
       requireRole(current, ['owner']); assertAlive(state.artifact);
       if (args.action === 'release' ? current.kind !== 'human' : current.kind !== 'agent') throw new StudioError('FORBIDDEN', args.action === 'release' ? '只有房主本人可以结束其他 Agent 的工作。' : '工作区域声明仅供 Agent 使用。');
@@ -364,7 +384,7 @@ export class StudioService {
       }
       return this.collaboration.activity(id, args, current, (state.content as WhiteboardContent).elements);
     };
-    if (args.action === 'begin' || args.action === 'update') return this.store.withSnapshotLock(id, state => execute(state));
+    if (args.action === 'begin' || args.action === 'update') return this.store.withProjectionLock(id, state => ({ ...authorizationState(state), content: state.content }), execute);
     const result = await this.store.readProjection(id, state => execute(state));
     if (args.action === 'end' || args.action === 'release') await this.store.withProjectionLock(id, authorizationState, state => { requireRole(this.authorizedActor(state, actor, authority), ['owner']); });
     return result;
@@ -403,7 +423,7 @@ export class StudioService {
   async accessMode(artifactId: string, viaLan = false, allowMissing = false): Promise<'local' | 'lan'> {
     let state: Pick<AuthorizationState, 'artifact' | 'sharing'>;
     try { state = await this.store.readProjection(artifactId, state => ({ artifact: state.artifact, sharing: state.sharing })); }
-    catch (error) { if (error instanceof StudioError && error.code === 'NOT_FOUND') { if (allowMissing) return 'local'; throw new StudioError('UNAUTHORIZED', '分享链接无效。', { reason: 'invalid-link' }); } throw error; }
+    catch (error) { if (error instanceof StudioError && error.code === 'UNSUPPORTED_STORAGE' && allowMissing && !viaLan) return 'local'; if (error instanceof StudioError && error.code === 'NOT_FOUND') { if (allowMissing) return 'local'; throw new StudioError('UNAUTHORIZED', '分享链接无效。', { reason: 'invalid-link' }); } throw error; }
     const access = sharingAccess(state.sharing);
     if (viaLan && access === 'local') throw new StudioError('UNAUTHORIZED', state.sharing.enabled ? '这块白板仅允许在所有者电脑上访问。' : '这块白板的分享已关闭。', { reason: state.sharing.enabled ? 'local-only' : 'sharing-closed' });
     return access;
@@ -437,17 +457,22 @@ export class StudioService {
     if (roleChanged) { this.collaboration.revokeMembers(artifactId, [id]); this.emit({ type: 'share', artifactId, enabled: true, access: joinedAccess, reason: 'role-changed', revokedMemberIds: [id] }); }
     return joined;
   }
-  async hasShares() { return (await this.store.list()).some(state => state.sharing.enabled && sharingAccess(state.sharing) === 'lan' && !state.artifact.trashedAt); }
+  async hasShares() {
+    for (const artifact of await this.store.catalog()) if (artifact.storageStatus !== 'unsupported' && !artifact.trashedAt) {
+      if (await this.store.readProjection(artifact.id, state => state.sharing.enabled && sharingAccess(state.sharing) === 'lan')) return true;
+    }
+    return false;
+  }
   async resetSharingSessions() {
-    for (const saved of await this.store.list()) if (saved.sharing.enabled) {
-      await this.store.transaction(saved.artifact.id, state => { rememberGuestNames(state); revokeSharing(state.sharing); });
-      this.emit({ type: 'share', artifactId: saved.artifact.id, enabled: false, reason: 'sharing-closed', revokedRoles: [...SHARE_ROLES] });
+    for (const artifact of await this.store.catalog()) if (artifact.storageStatus !== 'unsupported' && await this.store.readProjection(artifact.id, state => state.sharing.enabled)) {
+      await this.store.transaction(artifact.id, state => { rememberGuestNames(state); revokeSharing(state.sharing); });
+      this.emit({ type: 'share', artifactId: artifact.id, enabled: false, reason: 'sharing-closed', revokedRoles: [...SHARE_ROLES] });
     }
   }
-  async putAsset(artifactId: string, data: Uint8Array, input: { filename?: string; mimeType?: string }, actor: Actor, authority?: StudioAuthority) { const state = await this.store.read(artifactId); return putAsset(this.store, artifactId, data, input, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).validateAsset, current => this.authorizedActor(current, actor, authority)); }
+  async putAsset(artifactId: string, data: Uint8Array, input: { filename?: string; mimeType?: string }, actor: Actor, authority?: StudioAuthority) { const state = await this.store.readProjection(artifactId, authorizationState); return putAsset(this.store, artifactId, data, input, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).validateAsset, current => this.authorizedActor(current, actor, authority)); }
   async getAsset(artifactId: string, assetId: string) { return getAsset(this.store, artifactId, assetId); }
   async getThumbnail(artifactId: string, actor: Actor = this.owner) {
-    const state = await this.store.read(safeId(artifactId));
+    const state = await this.store.readProjection(safeId(artifactId), state => ({ artifact: state.artifact, content: state.content }));
     if (state.artifact.trashedAt) requireRole(actor, ['owner']);
     const product = this.products.get(state.artifact.type);
     if (!product.thumbnail) throw new StudioError('NO_PREVIEW', '此产品未提供预览，请直接打开作品。');
@@ -470,14 +495,25 @@ export class StudioService {
   }
   async room(artifactId: string, input: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) { return this.store.withProjectionLock(artifactId, authorizationState, state => this.collaboration.room(artifactId, input, this.authorizedActor(state, actor, authority))); }
   private async export(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<ExportRecord> {
-    const state = await this.store.read(id); actor = this.authorizedActor(state, actor, authority); assertAlive(state.artifact); const format = text(args.format, 'json', 20).toLowerCase();
+    const format = text(args.format, 'json', 20).toLowerCase();
     let result;
     const { artifactId: _artifactId, format: _format, options: nestedOptions, ...flatOptions } = args;
     const options = { ...(object(nestedOptions) ? nestedOptions : {}), ...flatOptions };
     const resources = exportResources(this.store, id);
-    try { result = format === 'zip' ? await exportArchive(this.store, state, actor) : await this.products.get(state.artifact.type).export(state, format, options, resources); }
+    try {
+      if (format === 'zip') {
+        const state = await this.store.read(id); actor = this.authorizedActor(state, actor, authority); assertAlive(state.artifact);
+        result = await exportArchive(this.store, state, actor);
+      } else {
+        const snapshot = await this.store.readProjection(id, state => {
+          actor = this.authorizedActor(state, actor, authority); assertAlive(state.artifact);
+          return { artifact: state.artifact, content: state.content };
+        });
+        result = await this.products.get(snapshot.artifact.type).export(snapshot, format, options, resources);
+      }
+    }
     catch (error) { if (error instanceof Error && 'code' in error && typeof error.code === 'string') throw new StudioError(error.code, error.message); throw error; }
-    return this.store.transaction(id, current => { this.authorizedActor(current, actor, authority); assertAlive(current.artifact); return saveExport(this.dataRoot, id, result); });
+    return this.store.withProjectionLock(id, authorizationState, current => { this.authorizedActor(current, actor, authority); assertAlive(current.artifact); return saveExport(this.dataRoot, id, result); });
   }
   async getExport(exportId: string) { return getExport(this.dataRoot, exportId); }
   async close() { this.closing = true; await Promise.allSettled([...this.tasks]); this.collaboration.close(); this.thumbnails.clear(); }

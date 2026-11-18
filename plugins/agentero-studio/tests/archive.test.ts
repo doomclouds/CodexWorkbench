@@ -3,9 +3,11 @@ import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { Zip, ZipPassThrough, strToU8, unzipSync, zipSync } from 'fflate';
-import { LOCAL_ACTOR, type Actor } from '../src/contracts/studio.js';
+import { LOCAL_ACTOR, type Actor, type Board } from '../src/contracts/studio.js';
 import { StudioService } from '../src/core/service.js';
 import { startStudioHost, type StudioHost } from '../src/server/http.js';
+import { exportArchive } from '../src/core/shared/archive.js';
+import { archiveState, replaceArchiveState } from './helpers/archive-state.js';
 
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>();
@@ -30,9 +32,40 @@ async function fixture() {
 }
 
 describe('portable artifact archives', () => {
+  it('rejects legacy JSON backups without publishing or modifying any artifact', async () => {
+    const source = await fixture(), previous = await readFile(service.store.file(source.artifact.id));
+    const legacy = zipSync({ 'artifact.json': strToU8(JSON.stringify(await service.store.read(source.artifact.id))) });
+    await expect(service.importArchive(legacy)).rejects.toMatchObject({ code: 'UNSUPPORTED_STORAGE' });
+    expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
+    expect(await readFile(service.store.file(source.artifact.id))).toEqual(previous);
+  });
+
+  it('rejects an unknown archive version and an invalid database without publishing', async () => {
+    const source = await fixture(), files = unzipSync(source.data);
+    const metadata = JSON.parse(Buffer.from(files['manifest.json']!).toString());
+    await expect(service.importArchive(zipSync({ ...files, 'manifest.json': strToU8(JSON.stringify({ ...metadata, version: 99 })) }))).rejects.toMatchObject({ code: 'UNSUPPORTED_STORAGE' });
+    await expect(service.importArchive(zipSync({ ...files, 'artifact.sqlite': strToU8('invalid database') }))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
+    expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
+    expect(await readdir(join(directory, 'staging'))).toEqual([]);
+  });
+
+  it('bounds logical history expansion even when identical payloads make the database small', async () => {
+    const source = await fixture(), files = unzipSync(source.data), state = await archiveState(files, directory);
+    (state.content as Board).elements[0]!.html = '<p>' + 'bounded history '.repeat(27_000) + '</p>';
+    const base = state.history[0]!;
+    state.history = Array.from({ length: 180 }, (_, revision) => ({ entry: { ...base.entry, id: `expanded-${revision}`, revision }, artifact: { ...state.artifact, revision }, content: state.content }));
+    state.artifact.revision = 180;
+    await expect(exportArchive(service.store, state, LOCAL_ACTOR)).rejects.toMatchObject({ code: 'TOO_LARGE' });
+    await replaceArchiveState(files, state, directory);
+    expect(files['artifact.sqlite']!.length).toBeLessThan(2 * 1024 * 1024);
+    await expect(service.importArchive(zipSync(files))).rejects.toMatchObject({ code: 'TOO_LARGE' });
+    expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
+    expect(await readdir(join(directory, 'staging'))).toEqual([]);
+  });
+
   it.runIf(process.platform === 'win32')('retries only a temporarily blocked Windows import publication and retains complete assets', async () => {
-    const source = await fixture(), original = await readFile(service.store.file(source.artifact.id), 'utf8');
-    const accepted = await service.importArchive(source.data), acceptedContent = await readFile(service.store.file(accepted.artifact.id), 'utf8');
+    const source = await fixture(), original = await readFile(service.store.file(source.artifact.id));
+    const accepted = await service.importArchive(source.data), acceptedContent = await readFile(service.store.file(accepted.artifact.id));
     const before = (await readdir(join(directory, 'artifacts'))).sort(), attempts: { from: string; to: string }[] = [];
     vi.mocked(rename).mockImplementation(async (from, to) => {
       if (basename(String(from)).startsWith('import-')) {
@@ -47,14 +80,14 @@ describe('portable artifact archives', () => {
     expect(id).not.toBe(source.artifact.id);
     expect((await service.execute('artifact_read', { artifactId: id })).elements[1].src).toBe(`/assets/${id}/${source.asset.id}`);
     expect(Buffer.from((await service.getAsset(id, source.asset.id)).data)).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
-    expect(await readFile(service.store.file(source.artifact.id), 'utf8')).toBe(original);
-    expect(await readFile(service.store.file(accepted.artifact.id), 'utf8')).toBe(acceptedContent);
+    expect(await readFile(service.store.file(source.artifact.id))).toEqual(original);
+    expect(await readFile(service.store.file(accepted.artifact.id))).toEqual(acceptedContent);
     expect(await readdir(join(directory, 'staging'))).toEqual([]);
   });
 
   it.runIf(process.platform === 'win32')('reports a persistent Windows publish failure and removes staging without changing existing work', async () => {
-    const source = await fixture(), original = await readFile(service.store.file(source.artifact.id), 'utf8');
-    const accepted = await service.importArchive(source.data), acceptedContent = await readFile(service.store.file(accepted.artifact.id), 'utf8');
+    const source = await fixture(), original = await readFile(service.store.file(source.artifact.id));
+    const accepted = await service.importArchive(source.data), acceptedContent = await readFile(service.store.file(accepted.artifact.id));
     const before = (await readdir(join(directory, 'artifacts'))).sort(), error = Object.assign(new Error('Persistent Windows publication lock'), { code: 'EPERM' });
     let attempts = 0;
     vi.mocked(rename).mockImplementation(async (from, to) => { if (basename(String(from)).startsWith('import-')) { attempts++; throw error; } return actualFs.rename(from, to); });
@@ -62,8 +95,8 @@ describe('portable artifact archives', () => {
     expect(attempts).toBe(6);
     expect((await readdir(join(directory, 'artifacts'))).sort()).toEqual(before);
     expect(await readdir(join(directory, 'staging'))).toEqual([]);
-    expect(await readFile(service.store.file(source.artifact.id), 'utf8')).toBe(original);
-    expect(await readFile(service.store.file(accepted.artifact.id), 'utf8')).toBe(acceptedContent);
+    expect(await readFile(service.store.file(source.artifact.id))).toEqual(original);
+    expect(await readFile(service.store.file(accepted.artifact.id))).toEqual(acceptedContent);
     expect(Buffer.from((await service.getAsset(source.artifact.id, source.asset.id)).data)).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
   });
 
@@ -91,9 +124,9 @@ describe('portable artifact archives', () => {
     expect((await service.store.read(imported.artifact.id)).feedback[0]!.attachment).toEqual(attached.feedback[0].attachment);
     const originalEntries = unzipSync(data), before = (await service.execute('artifact_list')).artifacts.map((item: { id: string }) => item.id);
     for (const changed of [{ state: 'broken' }, { contentKey: '<not-a-content-key>' }, { attachedAt: undefined }, { attachedBy: { ...LOCAL_ACTOR, kind: 'agent' } }, { requestedBy: null }]) {
-      const entries = { ...originalEntries }, snapshot = JSON.parse(Buffer.from(entries['artifact.json']!).toString());
-      Object.assign(snapshot.feedback[0].attachment, changed);
-      entries['artifact.json'] = strToU8(JSON.stringify(snapshot));
+      const entries = { ...originalEntries }, snapshot = await archiveState(entries, directory);
+      Object.assign(snapshot.feedback[0]!.attachment!, changed);
+      await replaceArchiveState(entries, snapshot, directory);
       await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
     }
     expect((await service.execute('artifact_list')).artifacts.map((item: { id: string }) => item.id)).toEqual(before);
@@ -118,18 +151,22 @@ describe('portable artifact archives', () => {
 
   it('rejects malformed imported clocks before publishing a work', async () => {
     const source = await fixture(), entries = unzipSync(source.data);
-    const snapshot = JSON.parse(Buffer.from(entries['artifact.json']!).toString());
+    const snapshot = await archiveState(entries, directory);
     snapshot.unitClocks = { reused: { version: 1, incarnationStart: 2 } };
-    entries['artifact.json'] = strToU8(JSON.stringify(snapshot));
+    await replaceArchiveState(entries, snapshot, directory);
     const before = (await service.execute('artifact_list', {})).artifacts.length;
     await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
     expect((await service.execute('artifact_list', {})).artifacts).toHaveLength(before);
   });
 
   it('moves the full work to a new data root with history, feedback, sources and all assets', async () => {
-    const source = await fixture(), packed = unzipSync(source.data), snapshot = JSON.parse(Buffer.from(packed['artifact.json']!).toString());
+    const source = await fixture(), packed = unzipSync(source.data), snapshot = await archiveState(packed, directory);
     expect(snapshot.schemaVersion).toBe(2); expect(snapshot.sharing).toEqual({ enabled: false, generation: 0, tokens: {} }); expect(snapshot.operations).toEqual([]);
-    expect(Buffer.from(packed['artifact.json']!).toString()).not.toContain('private-share-secret');
+    expect(packed).not.toHaveProperty('artifact.json');
+    expect(JSON.parse(Buffer.from(packed['manifest.json']!).toString())).toMatchObject({ format: 'agentero-studio-archive', version: 2, database: 'artifact.sqlite' });
+    expect(Buffer.from(packed['artifact.sqlite']!).subarray(0, 16).toString()).toBe('SQLite format 3\0');
+    expect(JSON.stringify(snapshot)).not.toContain('private-share-secret');
+    expect(Buffer.from(packed['artifact.sqlite']!).includes(Buffer.from('private-share-secret'))).toBe(false);
     const target = new StudioService({ dataRoot: join(directory, 'another-machine') });
     try {
       const imported = await target.importArchive(source.data), id = imported.artifact.id;
@@ -149,6 +186,39 @@ describe('portable artifact archives', () => {
     } finally { await target.close(); }
   });
 
+  it('reopens a copied database and assets after its original data root is removed', async () => {
+    const source = await fixture(), transfer = join(directory, 'transfer'), relocated = join(directory, 'relocated');
+    const target = new StudioService({ dataRoot: transfer });
+    const imported = await target.importArchive(source.data);
+    await target.close();
+    await actualFs.rename(transfer, relocated);
+    const reopened = new StudioService({ dataRoot: relocated });
+    try {
+      const current = await reopened.execute('artifact_read', { artifactId: imported.artifact.id });
+      expect(current.elements[0].html).toContain('当前源码');
+      const frozen = await reopened.execute('artifact_read', { artifactId: imported.artifact.id, mode: 'source', feedbackId: source.feedback.id });
+      expect(frozen.html).toContain('原始源码');
+      expect(Buffer.from((await reopened.getAsset(imported.artifact.id, source.asset.id)).data)).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
+      expect((await reopened.store.read(imported.artifact.id)).sharing).toEqual({ enabled: false, generation: 0, tokens: {} });
+    } finally { await reopened.close(); }
+  });
+
+  it('imports into a deep Unicode data root without nesting an additional artifact store inside staging', async () => {
+    const source = await fixture();
+    let targetRoot = join(directory, 'portable 中文');
+    while (targetRoot.length < 132) targetRoot = join(targetRoot, 'deep-path-123456789');
+    const target = new StudioService({ dataRoot: targetRoot });
+    try {
+      const imported = await target.importArchive(source.data);
+      const current = await target.execute('artifact_read', { artifactId: imported.artifact.id });
+      expect(current.elements[0].html).toContain('当前源码');
+      const frozen = await target.execute('artifact_read', { artifactId: imported.artifact.id, mode: 'source', feedbackId: source.feedback.id });
+      expect(frozen.html).toContain('原始源码');
+      expect(Buffer.from((await target.getAsset(imported.artifact.id, source.asset.id)).data)).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
+      expect(await readdir(join(targetRoot, 'staging'))).toEqual([]);
+    } finally { await target.close(); }
+  });
+
   it('imports explicit file paths and rejects incomplete or unregistered content without publishing a partial work', async () => {
     const source = await fixture(), path = join(directory, 'selected.studio.zip'); await writeFile(path, source.data);
     const imported = await service.execute('artifact_manage', { action: 'import', archivePath: path, title: '导入副本' });
@@ -157,23 +227,23 @@ describe('portable artifact archives', () => {
     const before = (await service.execute('artifact_list')).artifacts.map((item: { id: string }) => item.id);
     const entries = unzipSync(source.data); delete entries[`assets/${source.asset.id}`];
     await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
-    const snapshot = JSON.parse(Buffer.from(entries['artifact.json']!).toString()); snapshot.artifact.type = 'missing-product'; entries['artifact.json'] = strToU8(JSON.stringify(snapshot));
+    const snapshot = await archiveState(entries, directory); snapshot.artifact.type = 'missing-product'; await replaceArchiveState(entries, snapshot, directory);
     await expect(service.importArchive(zipSync(entries))).rejects.toMatchObject({ code: 'UNSUPPORTED_PRODUCT' });
     expect((await service.execute('artifact_list')).artifacts.map((item: { id: string }) => item.id)).toEqual(before);
     expect(await readdir(join(directory, 'staging'))).toEqual([]);
-    expect(await readFile(service.store.file(source.artifact.id), 'utf8')).toContain('private-share-secret');
+    expect((await service.store.read(source.artifact.id)).sharing.tokens.viewer).toBe('private-share-secret');
   });
 
   it('rejects traversal, duplicate paths and expansion bombs before writing', async () => {
     const source = await fixture(), entries = unzipSync(source.data);
     await expect(service.importArchive(zipSync({ ...entries, '../escape': strToU8('bad') }))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
     const chunks: Uint8Array[] = [], zip = new Zip((error, chunk) => { if (error) throw error; chunks.push(chunk); });
-    for (let index = 0; index < 2; index++) { const entry = new ZipPassThrough('artifact.json'); zip.add(entry); entry.push(entries['artifact.json']!, true); } zip.end();
+    for (let index = 0; index < 2; index++) { const entry = new ZipPassThrough('artifact.sqlite'); zip.add(entry); entry.push(entries['artifact.sqlite']!, true); } zip.end();
     await expect(service.importArchive(Buffer.concat(chunks))).rejects.toMatchObject({ code: 'INVALID_ARCHIVE' });
     // The central directory advertises a forbidden resource size even though it compresses tiny.
     await expect(service.importArchive(zipSync({ ...entries, 'assets/bomb': new Uint8Array(21 * 1024 * 1024) }))).rejects.toMatchObject({ code: 'TOO_LARGE' });
     // A forged size also cannot hide a stream's actual expanded output.
-    const dishonest = Buffer.from(zipSync({ 'artifact.json': strToU8('x'.repeat(3 * 1024 * 1024)) }));
+    const dishonest = Buffer.from(zipSync({ ...entries, 'artifact.sqlite': strToU8('x'.repeat(3 * 1024 * 1024)) }));
     dishonest.writeUInt32LE(1, 22); dishonest.writeUInt32LE(1, dishonest.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 24);
     await expect(service.importArchive(dishonest)).rejects.toMatchObject({ code: 'TOO_LARGE' });
     expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);

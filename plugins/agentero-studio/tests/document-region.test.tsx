@@ -219,6 +219,88 @@ it('opens a precise paragraph note through the shared annotation tool and blocks
   expect(props.onInteract).not.toHaveBeenCalled(); expect(props.onExpand).not.toHaveBeenCalled();
 });
 
+it.each([false, true])('previews the exact block shared by hover and annotation in expanded=%s', async expanded => {
+  props = { ...props, expanded, interactive: expanded, element: { ...props.element, document: { schemaVersion: 1, blocks: [
+    { id: 'heading', type: 'heading', props: { level: 2 }, content: '备注标题' },
+    { id: 'list', type: 'bulletListItem', props: {}, content: '父列表项', children: [
+      { id: 'nested', type: 'paragraph', props: {}, content: '嵌套的段落' },
+    ] },
+    { id: 'table', type: 'table', props: {}, content: { type: 'tableContent', rows: [{ cells: ['表格内容'] }] } },
+  ] } }, target: { coordinateSpace: 'document', elementIds: [props.element.id], blockIds: ['heading'], sourceVersion: 1 } };
+  await render(); window.getSelection()?.removeAllRanges();
+  const toolbar = button('导出文档'); toolbar.focus();
+  props = { ...props, annotationActive: true }; await render();
+  const reader = surface().querySelector('.studio-document-scroll')!;
+  const block = (id: string) => reader.querySelector<HTMLElement>(`[data-document-block-id="${id}"]`)!;
+  const hovered = () => [...reader.querySelectorAll<HTMLElement>('[data-document-annotation-hover]')].map(node => node.dataset.documentBlockId);
+  const pointer = (node: Element, event: string, options: PointerEventInit = {}) => act(async () => node.dispatchEvent(new PointerEvent(event, { bubbles: true, pointerType: 'mouse', clientX: 100, clientY: 120, ...options })));
+  if (expanded) await change('表格', '文档内查找');
+  await pointer(block('heading').querySelector('h2')!, 'pointerover');
+  expect(hovered()).toEqual(['heading']);
+  expect(block('heading').classList.contains('is-anchored')).toBe(true);
+  if (expanded) expect(block('table').classList.contains('is-find-match')).toBe(true);
+  await pointer(block('list').querySelector('span')!, 'pointermove', { pointerType: 'pen' });
+  expect(hovered()).toEqual(['list']);
+  const nestedText = block('nested').querySelector('p')!, cell = block('table').querySelector('td')!;
+  await pointer(nestedText, 'pointermove');
+  expect(hovered()).toEqual(['nested']);
+  expect(document.activeElement).toBe(toolbar);
+  expect(props.onAnnotate).not.toHaveBeenCalled(); expect(props.onSave).not.toHaveBeenCalled();
+
+  const elementFromPoint = vi.fn(() => cell);
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: elementFromPoint });
+  try {
+    await act(async () => reader.dispatchEvent(new Event('scroll')));
+    expect(elementFromPoint).toHaveBeenCalledWith(100, 120);
+    expect(hovered()).toEqual(['table']);
+  } finally { Reflect.deleteProperty(document, 'elementFromPoint'); }
+  await pointer(cell, 'pointerout', { relatedTarget: toolbar });
+  expect(hovered()).toEqual([]);
+  await pointer(cell, 'pointermove', { pointerType: 'touch' });
+  expect(hovered()).toEqual([]);
+  await pointer(reader, 'pointermove');
+  expect(hovered()).toEqual([]);
+  const target = expanded ? cell : nestedText;
+  await pointer(target, 'pointermove');
+  await pointer(target, 'pointerdown');
+  expect(document.activeElement).toBe(toolbar);
+  await act(async () => target.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true })));
+  expect(props.onAnnotate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ coordinateSpace: 'document', elementIds: ['document-one'], blockIds: hovered(), quote: expanded ? '表格内容' : '嵌套的段落', sourceVersion: 1 }), 1, expect.any(Object));
+  expect(props.onSave).not.toHaveBeenCalled(); expect(props.onEdit).not.toHaveBeenCalled();
+
+  props = { ...props, annotationActive: false }; await render(); expect(hovered()).toEqual([]);
+  expect(reader.querySelector('[data-document-annotation-target]')).toBeNull();
+  await pointer(target, 'pointermove'); expect(hovered()).toEqual([]);
+});
+
+it('activates the focused block by keyboard only while the note tool is enabled', async () => {
+  props = { ...props, expanded: true }; await render();
+  const paragraph = portal.querySelector<HTMLElement>('[data-document-block-id="paragraph"]')!;
+  expect(paragraph.tabIndex).toBe(-1);
+  props = { ...props, annotationActive: true }; await render();
+  expect(paragraph.tabIndex).toBe(0);
+  paragraph.focus();
+  const activate = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  await act(async () => paragraph.dispatchEvent(activate));
+  expect(activate.defaultPrevented).toBe(true);
+  expect(props.onAnnotate).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ blockIds: ['paragraph'], quote: '已保存正文' }), 1, expect.any(Object));
+  expect(props.onEdit).not.toHaveBeenCalled(); expect(props.onSave).not.toHaveBeenCalled();
+  props = { ...props, annotationActive: false }; await render();
+  expect(paragraph.tabIndex).toBe(-1);
+});
+
+it('keeps annotation targeting out of the editor and does not refocus the reader when switching tools', async () => {
+  await render(); await edit();
+  const editor = portal.querySelector<HTMLElement>('[aria-label="测试块编辑器"]')!;
+  await act(async () => editor.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' })));
+  expect(portal.querySelector('[data-document-annotation-target],[data-document-annotation-hover]')).toBeNull();
+  const toolbar = button('导出文档'); toolbar.focus();
+  props = { ...props, annotationActive: true }; await render();
+  expect(document.activeElement).toBe(toolbar);
+  expect(portal.querySelector('[data-document-annotation-target]')).toBeTruthy();
+  expect(props.onAnnotate).not.toHaveBeenCalled(); expect(props.onSave).not.toHaveBeenCalled();
+});
+
 it('keeps the composing editor mounted when interaction stops and saves the final input against its original base', async () => {
   await render(); await edit(); vi.useFakeTimers();
   const editor = surface().querySelector<HTMLTextAreaElement>('[aria-label="测试块编辑器"]')!;

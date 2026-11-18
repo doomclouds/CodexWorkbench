@@ -34,11 +34,14 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const [editing, setEditing] = useState(false), [saving, setSaving] = useState(false), [leaving, setLeaving] = useState(false), [error, setError] = useState(''), [comparing, setComparing] = useState(false);
   const [exportMenu, setExportMenu] = useState(false), [tocOpen, setTocOpen] = useState(false);
   const [composing, setComposing] = useState(false);
+  const showEditor = expanded && editing && (canEdit && interactive && !annotationActive || composing);
+  const annotatingRead = annotationActive && canAnnotate && !showEditor;
   const [draftWarning, setDraftWarning] = useState('');
   const [recovered, setRecovered] = useState<SavedDraft | null>(null), [selection, setSelection] = useState<DocumentTextSelection | null>(null), [find, setFind] = useState('');
   const [findIndex, setFindIndex] = useState(0);
   const shell = useRef<HTMLDivElement>(null), focusShell = useRef<HTMLElement>(null), scroll = useRef<HTMLDivElement>(null), scrollPosition = useRef({ inline: 0, focus: 0 }), previousExpanded = useRef(false);
   const content = useRef<HTMLDivElement>(null);
+  const annotationHover = useRef<{ point: { x: number; y: number }; block: HTMLElement | null } | null>(null);
   const baseline = useRef(element), current = useRef(element); current.current = element;
   const draft = useRef({ document, title }); draft.current = { document, title };
   const mounted = useRef(true), inFlight = useRef<Promise<boolean> | null>(null);
@@ -50,7 +53,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const pendingEditBlock = useRef<string | undefined>(undefined);
   const [editFocusBlockId, setEditFocusBlockId] = useState<string | undefined>(undefined);
   const selectedText = useRef<DocumentTextSelection | null>(null), selectedDocument = useRef(''), previousAnnotation = useRef(false);
-  const scope = `${artifactId}:${element.id}:${interactive}:${annotationActive}:${expanded}`;
+  const scope = `${artifactId}:${element.id}:${interactive}:${annotationActive}:${canAnnotate}:${expanded}`;
   if (annotationScope.current !== scope) { annotationScope.current = scope; annotationRequest.current++; }
   const selectSelection = useCallback((value: DocumentTextSelection | null, preserveOnBlur = true) => {
     const active = window.document.activeElement;
@@ -137,7 +140,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   useEffect(() => { if (expanded && editRequest && canEdit && consumedEditRequest.current !== editRequest) { consumedEditRequest.current = editRequest; setEditFocusBlockId(pendingEditBlock.current); pendingEditBlock.current = undefined; setEditing(true); onInteract(true); } }, [expanded, editRequest, canEdit]);
   useEffect(() => { if ((!interactive || !expanded || annotationActive) && !composing) setEditing(false); }, [interactive, expanded, annotationActive, composing]);
   useEffect(() => { if (!interactive && !expanded) { selectedText.current = null; setSelection(null); } }, [interactive, expanded]);
-  useEffect(() => { if (interactive && !expanded && !editing) scroll.current?.focus({ preventScroll: true }); }, [interactive, expanded, editing]);
+  useEffect(() => { if (interactive && !expanded && !editing && !annotationActive) scroll.current?.focus({ preventScroll: true }); }, [interactive, expanded, editing]);
   useEffect(() => {
     const root = expanded ? focusShell.current : shell.current;
     if (!root) return;
@@ -155,7 +158,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   }, [expanded, editing, interactive, annotationActive, comparing, exportMenu, composing, requestExit]);
   useLayoutEffect(() => { if (expanded && !previousExpanded.current) scrollPosition.current.focus = scrollPosition.current.inline; previousExpanded.current = expanded; if (scroll.current) scroll.current.scrollTop = expanded ? scrollPosition.current.focus : scrollPosition.current.inline; }, [expanded, editing]);
   const baseWidth = useDocumentFocusSurface({ expanded, id: element.id, version: element.version, zoom: readingZoom, host: focusHost, scroll, content, prepareExit, onChange: onFocusSurface });
-  useEffect(() => { if (expanded && !editing) scroll.current?.focus({ preventScroll: true }); }, [expanded, editing]);
+  useEffect(() => { if (expanded && !editing && !annotationActive) scroll.current?.focus({ preventScroll: true }); }, [expanded, editing]);
   useEffect(() => {
     if (!exportMenu) return;
     const outside = (event: PointerEvent) => { const root = expanded ? focusShell.current : shell.current; if (event.target instanceof Node && !root?.querySelector('.studio-document-export')?.contains(event.target)) setExportMenu(false); };
@@ -168,29 +171,55 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     if (!targetIds.length) return;
     jump(targetIds[0]);
   }, [targetIds.join(','), element.version, editing]);
-  const readTextSelection = (): DocumentTextSelection | null => {
+  const readingSelection = () => {
     const selected = window.getSelection();
-    if (selected?.rangeCount && !selected.isCollapsed && scroll.current?.contains(selected.anchorNode) && scroll.current.contains(selected.focusNode)) {
+    return selected?.rangeCount && !selected.isCollapsed && scroll.current?.contains(selected.anchorNode) && scroll.current.contains(selected.focusNode) ? selected : null;
+  };
+  const readTextSelection = (selected = readingSelection()): DocumentTextSelection | null => {
+    if (selected && scroll.current) {
       const range = selected.getRangeAt(0), quote = selected.toString().trim();
       const blockIds = [...scroll.current.querySelectorAll<HTMLElement>('[data-document-block-id]')].filter(node => range.intersectsNode(node)).map(node => node.dataset.documentBlockId!);
       if (quote && blockIds.length) return { quote, blockIds };
     }
     return null;
   };
-  const selectText = (event: React.MouseEvent) => {
-    if ((!interactive && !annotationActive) || event.button !== 0) return;
-    const selected = window.getSelection();
-    let picked = readTextSelection();
-    if (annotationActive && !(selected?.rangeCount && !selected.isCollapsed && scroll.current?.contains(selected.anchorNode) && scroll.current.contains(selected.focusNode))) {
-      const id = (event.target as HTMLElement).closest<HTMLElement>('[data-document-block-id]')?.dataset.documentBlockId;
-      const block = id && flattenDocumentBlocks(document.blocks).find(item => item.id === id);
-      if (block) picked = { blockIds: [block.id], quote: documentBlockText(block).trim() };
+  const annotationBlock = useCallback((target: EventTarget | null) => {
+    const block = target instanceof Element ? target.closest<HTMLElement>('[data-document-annotation-target]') : null;
+    return block && scroll.current?.contains(block) ? block : null;
+  }, []);
+  const previewAnnotation = useCallback((point: { x: number; y: number } | null, target: EventTarget | null = null) => {
+    const previous = annotationHover.current?.block;
+    const block = annotationBlock(target);
+    if (previous !== block) {
+      previous?.removeAttribute('data-document-annotation-hover');
+      block?.setAttribute('data-document-annotation-hover', '');
     }
-    selectSelection(picked, false);
-    if (picked && annotationActive && canAnnotate) void annotate(picked);
+    annotationHover.current = point ? { point, block } : null;
+  }, [annotationBlock]);
+  useLayoutEffect(() => () => previewAnnotation(null), [annotatingRead, expanded, artifactId, element.id, document, previewAnnotation]);
+  const moveAnnotation = (event: React.PointerEvent) => {
+    if (event.pointerType === 'touch') { previewAnnotation(null); return; }
+    previewAnnotation({ x: event.clientX, y: event.clientY }, event.target);
   };
-  const annotate = async (selected = selection) => {
-    if (!selected || !canAnnotate || composing) return;
+  const scrollAnnotation = () => {
+    const point = annotationHover.current?.point;
+    if (point) previewAnnotation(point, window.document.elementFromPoint(point.x, point.y));
+  };
+  const blocks = flattenDocumentBlocks(document.blocks);
+  const pickAnnotationBlock = (target: EventTarget | null): DocumentTextSelection | null => {
+    const id = annotationBlock(target)?.dataset.documentBlockId;
+    const block = id && blocks.find(item => item.id === id);
+    return block ? { blockIds: [block.id], quote: documentBlockText(block).trim() } : null;
+  };
+  const selectText = (event: React.MouseEvent) => {
+    if ((!interactive && !expanded && !annotatingRead) || event.button !== 0) return;
+    const selected = readingSelection();
+    const picked = selected ? readTextSelection(selected) : annotatingRead ? pickAnnotationBlock(event.target) : null;
+    selectSelection(picked, false);
+    if (picked && annotatingRead) void annotate(picked);
+  };
+  const annotate = async (selected: DocumentTextSelection) => {
+    if (!canAnnotate || composing) return;
     const request = ++annotationRequest.current;
     const expected = JSON.stringify(draft.current);
     if (dirty && !await save()) return;
@@ -201,7 +230,10 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     selectedText.current = null; if (!annotationActive) setSelection(null);
   };
   useEffect(() => {
-    if (!annotationActive) { previousAnnotation.current = false; return; }
+    if (!annotationActive) {
+      if (previousAnnotation.current) { previousAnnotation.current = false; selectedText.current = null; setSelection(null); }
+      return;
+    }
     if (previousAnnotation.current) return;
     previousAnnotation.current = true;
     const picked = selectedText.current;
@@ -241,8 +273,8 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     try { value = localStorage.getItem(draftKey) || value; } catch { /* The current in-memory draft remains available when local storage is blocked. */ }
     try { await copyPlainText(value); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   };
-  const headings = flattenDocumentBlocks(document.blocks).filter(block => block.type === 'heading');
-  const matches = find.trim() ? flattenDocumentBlocks(document.blocks).filter(block => documentBlockText(block).toLocaleLowerCase().includes(find.trim().toLocaleLowerCase())) : [];
+  const headings = blocks.filter(block => block.type === 'heading');
+  const matches = find.trim() ? blocks.filter(block => documentBlockText(block).toLocaleLowerCase().includes(find.trim().toLocaleLowerCase())) : [];
   function jump(id: string) {
     const selector = editing ? `.bn-block-outer[data-id="${CSS.escape(id)}"]` : `[data-document-block-id="${CSS.escape(id)}"]`;
     const block = scroll.current?.querySelector<HTMLElement>(selector);
@@ -268,8 +300,9 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     {draftWarning && <div className="studio-document-message has-error" role="alert"><span>{draftWarning}</span><button type="button" onClick={() => void copyDraft()}>复制本机草稿</button></div>}
     <div className="studio-document-body">
       {expanded && tocOpen && headings.length > 0 && <nav className="studio-document-toc" aria-label="文档目录"><strong>目录</strong>{headings.map(block => <button type="button" key={block.id} onClick={() => jump(block.id)} style={{ paddingLeft: 10 + (Number(block.props.level) || 1) * 8 }}>{documentBlockText(block) || '未命名标题'}</button>)}</nav>}
-      <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={editing ? undefined : interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={editing ? undefined : selectText}>
-        <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{expanded && editing && (canEdit && interactive && !annotationActive || composing) ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={!leaving && canEdit && (interactive && !annotationActive || composing)} theme={surface.scheme} initialFocusBlockId={editFocusBlockId} highlightedIds={targetIds} find={find} onChange={setDocument} onSelection={selectSelection} onCompositionChange={setComposing} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} scheme={surface.scheme} highlightedIds={annotationActive && selection ? selection.blockIds : targetIds} find={find} />}</div>
+      <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={showEditor ? undefined : interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={showEditor ? undefined : selectText}
+        onPointerOver={annotatingRead ? moveAnnotation : undefined} onPointerMove={annotatingRead ? moveAnnotation : undefined} onPointerLeave={annotatingRead ? () => previewAnnotation(null) : undefined} onPointerCancel={annotatingRead ? () => previewAnnotation(null) : undefined} onScrollCapture={annotatingRead ? scrollAnnotation : undefined}>
+        <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{showEditor ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={!leaving && canEdit && (interactive && !annotationActive || composing)} theme={surface.scheme} initialFocusBlockId={editFocusBlockId} highlightedIds={targetIds} find={find} onChange={setDocument} onSelection={selectSelection} onCompositionChange={setComposing} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} scheme={surface.scheme} highlightedIds={annotationActive && selection ? selection.blockIds : targetIds} find={find} annotating={annotatingRead} interactive={interactive || expanded} />}</div>
       </div>
     </div>
     {error && <div className="studio-document-message has-error" role="alert"><span>{error}</span><button type="button" onClick={() => void save()} disabled={saving || !canEdit}>重试保存</button><button type="button" onClick={() => setComparing(true)}>比较最新内容</button><button type="button" onClick={() => void copyPlainText(JSON.stringify(draft.current)).catch(cause => setError(String(cause)))}>复制草稿</button></div>}
@@ -301,11 +334,18 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
       return;
     }
     if (event.button !== 0 || !interactive && !target.closest('button,input')) return;
-    if (!editing && interactive && target.closest('.studio-document-scroll') && !target.closest('button,a[href],input:not([disabled]),textarea,select,[contenteditable="true"]')) scroll.current?.focus({ preventScroll: true });
+    if (!editing && !annotationActive && interactive && target.closest('.studio-document-scroll') && !target.closest('button,a[href],input:not([disabled]),textarea,select,[contenteditable="true"]')) scroll.current?.focus({ preventScroll: true });
     event.stopPropagation();
   };
   const documentKeyDown = (event: React.KeyboardEvent) => {
     const target = event.target as HTMLElement;
+    if (annotatingRead && !event.repeat && !event.nativeEvent.isComposing && !event.ctrlKey && !event.metaKey && !event.altKey && ['Enter', ' '].includes(event.key)) {
+      const picked = pickAnnotationBlock(target);
+      if (picked) {
+        event.preventDefault(); event.stopPropagation(); selectSelection(picked, false); void annotate(picked);
+        return;
+      }
+    }
     if (!editing && interactive && !event.nativeEvent.isComposing && !event.altKey && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && target.closest('.studio-document-scroll') && !target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])')) {
       event.preventDefault(); event.stopPropagation();
       const selected = window.getSelection(), prose = content.current?.querySelector('.studio-doc-prose');

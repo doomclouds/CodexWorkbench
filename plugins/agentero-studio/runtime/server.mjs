@@ -145,7 +145,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.14";
+    PLUGIN_VERSION = "0.2.15";
   }
 });
 
@@ -7458,20 +7458,20 @@ function hunks(base, side, local) {
     y--;
   }
   const result = [];
-  let open5, i2 = 0, j = 0;
+  let open7, i2 = 0, j = 0;
   for (const op of ops.reverse()) {
     if (op === "=") {
-      open5 = void 0;
+      open7 = void 0;
       i2++;
       j++;
       continue;
     }
-    if (!open5) {
-      open5 = { start: i2, end: i2, lines: [], local };
-      result.push(open5);
+    if (!open7) {
+      open7 = { start: i2, end: i2, lines: [], local };
+      result.push(open7);
     }
-    if (op === "-") open5.end = ++i2;
-    else open5.lines.push(side[j++]);
+    if (op === "-") open7.end = ++i2;
+    else open7.lines.push(side[j++]);
   }
   return result.flatMap((hunk) => hunk.end - hunk.start > 1 && hunk.lines.length === hunk.end - hunk.start ? hunk.lines.flatMap((line, index) => line === base[hunk.start + index] ? [] : [{ ...hunk, start: hunk.start + index, end: hunk.start + index + 1, lines: [line] }]) : [hunk]);
 }
@@ -10242,8 +10242,8 @@ var require_graceful_fs = __commonJS({
       fs2.createReadStream = createReadStream;
       fs2.createWriteStream = createWriteStream;
       var fs$readFile = fs2.readFile;
-      fs2.readFile = readFile8;
-      function readFile8(path2, options, cb) {
+      fs2.readFile = readFile7;
+      function readFile7(path2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$readFile(path2, options, cb);
@@ -10314,9 +10314,9 @@ var require_graceful_fs = __commonJS({
         }
       }
       var fs$readdir = fs2.readdir;
-      fs2.readdir = readdir4;
+      fs2.readdir = readdir5;
       var noReaddirOptionVersions = /^v[0-5]\./;
-      function readdir4(path2, options, cb) {
+      function readdir5(path2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         var go$readdir = noReaddirOptionVersions.test(process.version) ? function go$readdir2(path3, options2, cb2, startTime) {
@@ -10419,7 +10419,7 @@ var require_graceful_fs = __commonJS({
       }
       function ReadStream$open() {
         var that = this;
-        open5(that.path, that.flags, that.mode, function(err2, fd2) {
+        open7(that.path, that.flags, that.mode, function(err2, fd2) {
           if (err2) {
             if (that.autoClose)
               that.destroy();
@@ -10439,7 +10439,7 @@ var require_graceful_fs = __commonJS({
       }
       function WriteStream$open() {
         var that = this;
-        open5(that.path, that.flags, that.mode, function(err2, fd2) {
+        open7(that.path, that.flags, that.mode, function(err2, fd2) {
           if (err2) {
             that.destroy();
             that.emit("error", err2);
@@ -10456,8 +10456,8 @@ var require_graceful_fs = __commonJS({
         return new fs2.WriteStream(path2, options);
       }
       var fs$open = fs2.open;
-      fs2.open = open5;
-      function open5(path2, flags, mode, cb) {
+      fs2.open = open7;
+      function open7(path2, flags, mode, cb) {
         if (typeof mode === "function")
           cb = mode, mode = null;
         return go$open(path2, flags, mode, cb);
@@ -10955,11 +10955,11 @@ var require_mtime_precision = __commonJS({
     function probe2(file2, fs, callback) {
       const cachedPrecision = fs[cacheSymbol];
       if (cachedPrecision) {
-        return fs.stat(file2, (err2, stat2) => {
+        return fs.stat(file2, (err2, stat) => {
           if (err2) {
             return callback(err2);
           }
-          callback(null, stat2.mtime, cachedPrecision);
+          callback(null, stat.mtime, cachedPrecision);
         });
       }
       const mtime = new Date(Math.ceil(Date.now() / 1e3) * 1e3 + 5);
@@ -10967,13 +10967,13 @@ var require_mtime_precision = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        fs.stat(file2, (err3, stat2) => {
+        fs.stat(file2, (err3, stat) => {
           if (err3) {
             return callback(err3);
           }
-          const precision = stat2.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
+          const precision = stat.mtime.getTime() % 1e3 === 0 ? "s" : "ms";
           Object.defineProperty(fs, cacheSymbol, { value: precision });
-          callback(null, stat2.mtime, precision);
+          callback(null, stat.mtime, precision);
         });
       });
     }
@@ -11027,14 +11027,14 @@ var require_lockfile = __commonJS({
         if (options.stale <= 0) {
           return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
         }
-        options.fs.stat(lockfilePath, (err3, stat2) => {
+        options.fs.stat(lockfilePath, (err3, stat) => {
           if (err3) {
             if (err3.code === "ENOENT") {
               return acquireLock(file2, { ...options, stale: 0 }, callback);
             }
             return callback(err3);
           }
-          if (!isLockStale(stat2, options)) {
+          if (!isLockStale(stat, options)) {
             return callback(Object.assign(new Error("Lock file is already being held"), { code: "ELOCKED", file: file2 }));
           }
           removeLock(file2, options, (err4) => {
@@ -11046,8 +11046,8 @@ var require_lockfile = __commonJS({
         });
       });
     }
-    function isLockStale(stat2, options) {
-      return stat2.mtime.getTime() < Date.now() - options.stale;
+    function isLockStale(stat, options) {
+      return stat.mtime.getTime() < Date.now() - options.stale;
     }
     function removeLock(file2, options, callback) {
       options.fs.rmdir(getLockFile(file2, options), (err2) => {
@@ -11058,68 +11058,68 @@ var require_lockfile = __commonJS({
       });
     }
     function updateLock(file2, options) {
-      const lock4 = locks[file2];
-      if (lock4.updateTimeout) {
+      const lock5 = locks[file2];
+      if (lock5.updateTimeout) {
         return;
       }
-      lock4.updateDelay = lock4.updateDelay || options.update;
-      lock4.updateTimeout = setTimeout(() => {
-        lock4.updateTimeout = null;
-        options.fs.stat(lock4.lockfilePath, (err2, stat2) => {
-          const isOverThreshold = lock4.lastUpdate + options.stale < Date.now();
+      lock5.updateDelay = lock5.updateDelay || options.update;
+      lock5.updateTimeout = setTimeout(() => {
+        lock5.updateTimeout = null;
+        options.fs.stat(lock5.lockfilePath, (err2, stat) => {
+          const isOverThreshold = lock5.lastUpdate + options.stale < Date.now();
           if (err2) {
             if (err2.code === "ENOENT" || isOverThreshold) {
-              return setLockAsCompromised(file2, lock4, Object.assign(err2, { code: "ECOMPROMISED" }));
+              return setLockAsCompromised(file2, lock5, Object.assign(err2, { code: "ECOMPROMISED" }));
             }
-            lock4.updateDelay = 1e3;
+            lock5.updateDelay = 1e3;
             return updateLock(file2, options);
           }
-          const isMtimeOurs = lock4.mtime.getTime() === stat2.mtime.getTime();
+          const isMtimeOurs = lock5.mtime.getTime() === stat.mtime.getTime();
           if (!isMtimeOurs) {
             return setLockAsCompromised(
               file2,
-              lock4,
+              lock5,
               Object.assign(
                 new Error("Unable to update lock within the stale threshold"),
                 { code: "ECOMPROMISED" }
               )
             );
           }
-          const mtime = mtimePrecision.getMtime(lock4.mtimePrecision);
-          options.fs.utimes(lock4.lockfilePath, mtime, mtime, (err3) => {
-            const isOverThreshold2 = lock4.lastUpdate + options.stale < Date.now();
-            if (lock4.released) {
+          const mtime = mtimePrecision.getMtime(lock5.mtimePrecision);
+          options.fs.utimes(lock5.lockfilePath, mtime, mtime, (err3) => {
+            const isOverThreshold2 = lock5.lastUpdate + options.stale < Date.now();
+            if (lock5.released) {
               return;
             }
             if (err3) {
               if (err3.code === "ENOENT" || isOverThreshold2) {
-                return setLockAsCompromised(file2, lock4, Object.assign(err3, { code: "ECOMPROMISED" }));
+                return setLockAsCompromised(file2, lock5, Object.assign(err3, { code: "ECOMPROMISED" }));
               }
-              lock4.updateDelay = 1e3;
+              lock5.updateDelay = 1e3;
               return updateLock(file2, options);
             }
-            lock4.mtime = mtime;
-            lock4.lastUpdate = Date.now();
-            lock4.updateDelay = null;
+            lock5.mtime = mtime;
+            lock5.lastUpdate = Date.now();
+            lock5.updateDelay = null;
             updateLock(file2, options);
           });
         });
-      }, lock4.updateDelay);
-      if (lock4.updateTimeout.unref) {
-        lock4.updateTimeout.unref();
+      }, lock5.updateDelay);
+      if (lock5.updateTimeout.unref) {
+        lock5.updateTimeout.unref();
       }
     }
-    function setLockAsCompromised(file2, lock4, err2) {
-      lock4.released = true;
-      if (lock4.updateTimeout) {
-        clearTimeout(lock4.updateTimeout);
+    function setLockAsCompromised(file2, lock5, err2) {
+      lock5.released = true;
+      if (lock5.updateTimeout) {
+        clearTimeout(lock5.updateTimeout);
       }
-      if (locks[file2] === lock4) {
+      if (locks[file2] === lock5) {
         delete locks[file2];
       }
-      lock4.options.onCompromised(err2);
+      lock5.options.onCompromised(err2);
     }
-    function lock3(file2, options, callback) {
+    function lock4(file2, options, callback) {
       options = {
         stale: 1e4,
         update: null,
@@ -11149,7 +11149,7 @@ var require_lockfile = __commonJS({
             if (err3) {
               return callback(operation2.mainError());
             }
-            const lock4 = locks[file3] = {
+            const lock5 = locks[file3] = {
               lockfilePath: getLockFile(file3, options),
               mtime,
               mtimePrecision: mtimePrecision2,
@@ -11158,7 +11158,7 @@ var require_lockfile = __commonJS({
             };
             updateLock(file3, options);
             callback(null, (releasedCallback) => {
-              if (lock4.released) {
+              if (lock5.released) {
                 return releasedCallback && releasedCallback(Object.assign(new Error("Lock is already released"), { code: "ERELEASED" }));
               }
               unlock(file3, { ...options, realpath: false }, releasedCallback);
@@ -11177,12 +11177,12 @@ var require_lockfile = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        const lock4 = locks[file3];
-        if (!lock4) {
+        const lock5 = locks[file3];
+        if (!lock5) {
           return callback(Object.assign(new Error("Lock is not acquired/owned by you"), { code: "ENOTACQUIRED" }));
         }
-        lock4.updateTimeout && clearTimeout(lock4.updateTimeout);
-        lock4.released = true;
+        lock5.updateTimeout && clearTimeout(lock5.updateTimeout);
+        lock5.released = true;
         delete locks[file3];
         removeLock(file3, options, callback);
       });
@@ -11199,11 +11199,11 @@ var require_lockfile = __commonJS({
         if (err2) {
           return callback(err2);
         }
-        options.fs.stat(getLockFile(file3, options), (err3, stat2) => {
+        options.fs.stat(getLockFile(file3, options), (err3, stat) => {
           if (err3) {
             return err3.code === "ENOENT" ? callback(null, false) : callback(err3);
           }
-          return callback(null, !isLockStale(stat2, options));
+          return callback(null, !isLockStale(stat, options));
         });
       });
     }
@@ -11219,7 +11219,7 @@ var require_lockfile = __commonJS({
         }
       }
     });
-    module.exports.lock = lock3;
+    module.exports.lock = lock4;
     module.exports.unlock = unlock;
     module.exports.check = check2;
     module.exports.getLocks = getLocks;
@@ -11297,7 +11297,7 @@ var require_proper_lockfile = __commonJS({
     "use strict";
     var lockfile = require_lockfile();
     var { toPromise, toSync, toSyncOptions } = require_adapter();
-    async function lock3(file2, options) {
+    async function lock4(file2, options) {
       const release = await toPromise(lockfile.lock)(file2, options);
       return toPromise(release);
     }
@@ -11317,8 +11317,8 @@ var require_proper_lockfile = __commonJS({
     function checkSync(file2, options) {
       return toSync(lockfile.check)(file2, toSyncOptions(options));
     }
-    module.exports = lock3;
-    module.exports.lock = lock3;
+    module.exports = lock4;
+    module.exports.lock = lock4;
     module.exports.unlock = unlock;
     module.exports.lockSync = lockSync;
     module.exports.unlockSync = unlockSync;
@@ -11327,157 +11327,628 @@ var require_proper_lockfile = __commonJS({
   }
 });
 
-// src/core/shared/store.ts
-import { lstat, mkdir as mkdir3, readFile as readFile3, readdir as readdir2, realpath, rm as rm2, rmdir, stat } from "node:fs/promises";
-import { homedir as homedir2 } from "node:os";
-import { join as join4, resolve as resolve2 } from "node:path";
-function freezeState(value) {
-  const pending = [value], seen = /* @__PURE__ */ new WeakSet();
-  while (pending.length) {
-    const current = pending.pop();
-    if (seen.has(current)) continue;
-    seen.add(current);
-    Object.freeze(current);
-    for (const child of Object.values(current)) if (child && typeof child === "object") pending.push(child);
+// src/core/shared/sqlite-artifact.ts
+import { createHash as createHash2 } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+function freezeArtifactValue(value) {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+    if ("value" in descriptor) freezeArtifactValue(descriptor.value);
   }
-  return value;
+  return Object.freeze(value);
 }
-async function validateDeletionTree(path2) {
-  const info = await lstat(path2);
-  if (info.isSymbolicLink() || !samePath(await realpath(path2), path2)) throw resourceScope();
-  if (info.isDirectory()) for (const entry of await readdir2(path2)) await validateDeletionTree(join4(path2, entry));
-  else if (!info.isFile()) throw resourceScope();
+var ARTIFACT_DATABASE_VERSION, ARTIFACT_DATABASE_APPLICATION_ID, SqliteArtifactRepository;
+var init_sqlite_artifact = __esm({
+  "src/core/shared/sqlite-artifact.ts"() {
+    "use strict";
+    init_common();
+    ARTIFACT_DATABASE_VERSION = 1;
+    ARTIFACT_DATABASE_APPLICATION_ID = 1095980117;
+    SqliteArtifactRepository = class {
+      database;
+      values = /* @__PURE__ */ new Map();
+      manifests = /* @__PURE__ */ new Map();
+      costs = /* @__PURE__ */ new Map();
+      historyContents = /* @__PURE__ */ new WeakMap();
+      knownPayloads = /* @__PURE__ */ new Set();
+      constructor(file2, create = false) {
+        this.database = new DatabaseSync(file2, { readOnly: !create, enableForeignKeyConstraints: true });
+        try {
+          this.database.exec("PRAGMA busy_timeout=5000");
+          const application = Number(this.database.prepare("PRAGMA application_id").get().application_id);
+          const version3 = Number(this.database.prepare("PRAGMA user_version").get().user_version);
+          if (create && application === 0 && version3 === 0 && !this.database.prepare("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get()) this.initialize();
+          else if (application !== ARTIFACT_DATABASE_APPLICATION_ID || version3 !== ARTIFACT_DATABASE_VERSION) {
+            throw new StudioError("UNSUPPORTED_STORAGE", "\u6B64\u4F5C\u54C1\u6570\u636E\u5E93\u7248\u672C\u6682\u4E0D\u53D7\u652F\u6301\u3002");
+          }
+          this.database.exec("PRAGMA trusted_schema=OFF");
+          const tables = /* @__PURE__ */ new Set(["storage_meta", "payload_blobs", "payload_links", "content_manifests", "content_payloads", "current_units", "history_versions", "state_records"]);
+          for (const row of this.database.prepare("SELECT name,type FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all()) {
+            if (row.type === "table" && tables.delete(String(row.name))) continue;
+            if (row.type === "index" && ["payload_links_child", "content_payloads_payload", "current_units_payload", "state_records_payload"].includes(String(row.name))) continue;
+            throw new StudioError("UNSUPPORTED_STORAGE", "\u4F5C\u54C1\u6570\u636E\u5E93\u542B\u6709\u4E0D\u53D7\u652F\u6301\u7684\u7ED3\u6784\u3002");
+          }
+          if (tables.size) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6570\u636E\u5E93\u7ED3\u6784\u4E0D\u5B8C\u6574\u3002");
+          if (this.database.prepare("PRAGMA journal_mode").get().journal_mode !== "delete") throw new StudioError("UNSUPPORTED_STORAGE", "\u6B64\u4F5C\u54C1\u6570\u636E\u5E93\u7684\u65E5\u5FD7\u683C\u5F0F\u6682\u4E0D\u53D7\u652F\u6301\u3002");
+          if (create) this.database.exec("PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON");
+        } catch (error62) {
+          this.database.close();
+          throw error62;
+        }
+      }
+      initialize() {
+        this.database.exec(`PRAGMA journal_mode=DELETE;
+      PRAGMA synchronous=FULL;
+      BEGIN IMMEDIATE;
+      CREATE TABLE storage_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+      CREATE TABLE payload_blobs (hash TEXT PRIMARY KEY, json TEXT NOT NULL) WITHOUT ROWID;
+      CREATE TABLE payload_links (parent_hash TEXT NOT NULL REFERENCES payload_blobs(hash) ON DELETE CASCADE, child_hash TEXT NOT NULL REFERENCES payload_blobs(hash), PRIMARY KEY(parent_hash,child_hash)) WITHOUT ROWID;
+      CREATE INDEX payload_links_child ON payload_links(child_hash);
+      CREATE TABLE content_manifests (hash TEXT PRIMARY KEY, json TEXT NOT NULL) WITHOUT ROWID;
+      CREATE TABLE content_payloads (manifest_hash TEXT NOT NULL REFERENCES content_manifests(hash) ON DELETE CASCADE, payload_hash TEXT NOT NULL REFERENCES payload_blobs(hash), PRIMARY KEY(manifest_hash,payload_hash)) WITHOUT ROWID;
+      CREATE INDEX content_payloads_payload ON content_payloads(payload_hash);
+      CREATE TABLE current_units (id TEXT PRIMARY KEY, ordinal INTEGER NOT NULL, payload_hash TEXT NOT NULL REFERENCES payload_blobs(hash)) WITHOUT ROWID;
+      CREATE INDEX current_units_payload ON current_units(payload_hash);
+      CREATE TABLE history_versions (id TEXT PRIMARY KEY, revision INTEGER NOT NULL UNIQUE, entry_json TEXT NOT NULL, artifact_json TEXT NOT NULL, content_hash TEXT NOT NULL REFERENCES content_manifests(hash)) WITHOUT ROWID;
+      CREATE TABLE state_records (collection TEXT NOT NULL, id TEXT NOT NULL, ordinal INTEGER NOT NULL, payload_hash TEXT NOT NULL REFERENCES payload_blobs(hash), PRIMARY KEY(collection,id)) WITHOUT ROWID;
+      CREATE INDEX state_records_payload ON state_records(payload_hash);
+      PRAGMA application_id=${ARTIFACT_DATABASE_APPLICATION_ID};
+      PRAGMA user_version=${ARTIFACT_DATABASE_VERSION};
+      COMMIT;`);
+      }
+      close() {
+        this.database.close();
+      }
+      jsonRow(sql, ...args) {
+        const row = this.database.prepare(sql).get(...args);
+        if (!row) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6570\u636E\u5E93\u7F3A\u5C11\u88AB\u5F15\u7528\u7684\u6570\u636E\u3002");
+        return row;
+      }
+      hash(json3) {
+        return createHash2("sha256").update(json3).digest("hex");
+      }
+      putBlob(json3) {
+        const hash2 = this.hash(json3);
+        if (!this.knownPayloads.has(hash2)) {
+          if (!this.database.prepare("SELECT 1 AS present FROM payload_blobs WHERE hash=?").get(hash2)) this.database.prepare("INSERT INTO payload_blobs(hash,json) VALUES(?,?)").run(hash2, json3);
+          this.knownPayloads.add(hash2);
+        }
+        return hash2;
+      }
+      encode(value, references) {
+        if (value === null || typeof value === "boolean") return value;
+        if (typeof value === "number") {
+          if (!Number.isFinite(value)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u5305\u542B\u65E0\u6CD5\u4FDD\u5B58\u7684\u6570\u503C\u3002");
+          return value;
+        }
+        if (typeof value === "string") {
+          if (value.length <= 1024) return value;
+          const hash2 = this.putBlob(JSON.stringify(value));
+          references.add(hash2);
+          return { blob: hash2 };
+        }
+        if (Array.isArray(value)) return value.map((item) => this.encode(item === void 0 ? null : item, references));
+        if (!object2(value)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u5305\u542B\u65E0\u6CD5\u4FDD\u5B58\u7684\u503C\u3002");
+        return { object: Object.entries(value).filter(([, item]) => item !== void 0).map(([key, item]) => [key, this.encode(item, references)]) };
+      }
+      decode(value, depth = 0) {
+        if (depth > 128) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5185\u5BB9\u5D4C\u5957\u8FC7\u6DF1\u3002");
+        if (!value || typeof value !== "object") return value;
+        if (Array.isArray(value)) return value.map((item) => this.decode(item, depth + 1));
+        if ("blob" in value) return this.stringBlob(value.blob);
+        return Object.fromEntries(value.object.map(([key, item]) => [key, this.decode(item, depth + 1)]));
+      }
+      putValue(value) {
+        const references = /* @__PURE__ */ new Set(), hash2 = this.putBlob(JSON.stringify(this.encode(value, references)));
+        const link2 = this.database.prepare("INSERT OR IGNORE INTO payload_links(parent_hash,child_hash) VALUES(?,?)");
+        for (const child of references) link2.run(hash2, child);
+        return hash2;
+      }
+      value(hash2) {
+        if (this.values.has(hash2)) return this.values.get(hash2);
+        const row = this.jsonRow("SELECT json FROM payload_blobs WHERE hash=?", hash2);
+        if (this.hash(String(row.json)) !== hash2) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5185\u5BB9\u6821\u9A8C\u5931\u8D25\u3002");
+        const parsed = this.decode(JSON.parse(String(row.json)));
+        const frozen = freezeArtifactValue(parsed);
+        this.values.set(hash2, frozen);
+        return frozen;
+      }
+      stringBlob(hash2) {
+        const cached2 = this.values.get(hash2);
+        if (typeof cached2 === "string") return cached2;
+        const json3 = String(this.jsonRow("SELECT json FROM payload_blobs WHERE hash=?", hash2).json);
+        if (this.hash(json3) !== hash2) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5185\u5BB9\u6821\u9A8C\u5931\u8D25\u3002");
+        const value = JSON.parse(json3);
+        if (typeof value !== "string") throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5927\u6587\u672C\u5F15\u7528\u65E0\u6548\u3002");
+        this.values.set(hash2, value);
+        return value;
+      }
+      expandedValueBytes(hash2, visiting = /* @__PURE__ */ new Set()) {
+        const cached2 = this.costs.get(hash2);
+        if (cached2 !== void 0) return cached2;
+        if (visiting.has(hash2)) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5185\u5BB9\u5F15\u7528\u6210\u73AF\u3002");
+        const raw = String(this.jsonRow("SELECT json FROM payload_blobs WHERE hash=?", hash2).json);
+        if (this.hash(raw) !== hash2) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5185\u5BB9\u6821\u9A8C\u5931\u8D25\u3002");
+        visiting.add(hash2);
+        const count = (value, depth) => {
+          if (depth > 128) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u5185\u5BB9\u5D4C\u5957\u8FC7\u6DF1\u3002");
+          if (!value || typeof value !== "object") return Buffer.byteLength(JSON.stringify(value));
+          if (Array.isArray(value)) return 2 + Math.max(0, value.length - 1) + value.reduce((size, item) => size + count(item, depth + 1), 0);
+          if ("blob" in value) return Buffer.byteLength(JSON.stringify(this.stringBlob(value.blob)));
+          return 2 + Math.max(0, value.object.length - 1) + value.object.reduce((size, [key, item]) => size + Buffer.byteLength(JSON.stringify(key)) + 1 + count(item, depth + 1), 0);
+        };
+        const bytes = count(JSON.parse(raw), 0);
+        visiting.delete(hash2);
+        this.costs.set(hash2, bytes);
+        return bytes;
+      }
+      expandedContentBytes(hash2) {
+        const manifest2 = this.manifest(hash2);
+        if (manifest2.value) return this.expandedValueBytes(manifest2.value);
+        return this.expandedValueBytes(manifest2.fields) + 16 + manifest2.units.reduce((total, unit2) => total + this.expandedValueBytes(unit2.hash) + 1, 0);
+      }
+      putContent(content) {
+        let manifest2;
+        if (object2(content) && Array.isArray(content.elements) && content.elements.every((element) => object2(element) && typeof element.id === "string")) {
+          const { elements, ...fields } = content;
+          manifest2 = { fields: this.putValue(fields), units: elements.map((element) => ({ id: String(element.id), hash: this.putValue(element) })) };
+        } else manifest2 = { value: this.putValue(content) };
+        const json3 = JSON.stringify(manifest2), hash2 = this.hash(json3);
+        this.database.prepare("INSERT OR IGNORE INTO content_manifests(hash,json) VALUES(?,?)").run(hash2, json3);
+        const link2 = this.database.prepare("INSERT OR IGNORE INTO content_payloads(manifest_hash,payload_hash) VALUES(?,?)");
+        for (const payload of new Set([manifest2.fields, manifest2.value, ...(manifest2.units ?? []).map((unit2) => unit2.hash)].filter((value) => value !== void 0))) link2.run(hash2, payload);
+        this.manifests.set(hash2, manifest2);
+        return hash2;
+      }
+      manifest(hash2) {
+        const cached2 = this.manifests.get(hash2);
+        if (cached2) return cached2;
+        const json3 = String(this.jsonRow("SELECT json FROM content_manifests WHERE hash=?", hash2).json);
+        if (this.hash(json3) !== hash2) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u7248\u672C\u6821\u9A8C\u5931\u8D25\u3002");
+        const parsed = JSON.parse(json3);
+        this.manifests.set(hash2, parsed);
+        return parsed;
+      }
+      content(hash2) {
+        const manifest2 = this.manifest(hash2);
+        if (manifest2.value) return this.value(manifest2.value);
+        return freezeArtifactValue({ ...this.value(manifest2.fields), elements: manifest2.units.map((unit2) => this.value(unit2.hash)) });
+      }
+      readMetadata() {
+        const artifact = JSON.parse(String(this.jsonRow("SELECT value FROM storage_meta WHERE key='artifact'").value));
+        const enabled = this.database.prepare("SELECT payload_hash FROM state_records WHERE collection='sharing' AND id='enabled'").get();
+        return { ...artifact, sharing: enabled ? this.value(String(enabled.payload_hash)) === true : false };
+      }
+      readState(options = {}) {
+        for (const [table2, maximum] of [["history_versions", 200], ["current_units", 2e3], ["state_records", 1e5]]) {
+          if (Number(this.database.prepare(`SELECT count(*) AS total FROM ${table2}`).get().total) > maximum) throw new StudioError("TOO_LARGE", "\u4F5C\u54C1\u6570\u636E\u5E93\u8D85\u8FC7\u8BFB\u53D6\u5BB9\u91CF\u3002");
+        }
+        const metadata = new Map(this.database.prepare("SELECT key,value FROM storage_meta").all().map((row) => [String(row.key), String(row.value)]));
+        if (!metadata.has("artifact") || !metadata.has("content")) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6570\u636E\u5E93\u7F3A\u5C11\u5F53\u524D\u5185\u5BB9\u3002");
+        let expandedBytes = Array.from(metadata.values()).reduce((total, value) => total + Buffer.byteLength(value), 0);
+        const checkBudget = (bytes) => {
+          expandedBytes += bytes;
+          if (options.maxExpandedBytes !== void 0 && expandedBytes > options.maxExpandedBytes) throw new StudioError("TOO_LARGE", "\u4F5C\u54C1\u5C55\u5F00\u5185\u5BB9\u8D85\u8FC7\u5BFC\u5165\u5BB9\u91CF\u3002");
+        };
+        const counted = /* @__PURE__ */ new Set();
+        const content = (hash2, identity) => {
+          if (options.maxExpandedBytes !== void 0 && !counted.has(identity)) {
+            checkBudget(this.expandedContentBytes(hash2));
+            counted.add(identity);
+          }
+          return this.content(hash2);
+        };
+        const state = { schemaVersion: 2, artifact: JSON.parse(metadata.get("artifact")), content: structuredClone(content(metadata.get("content"), "current")) };
+        const collections = /* @__PURE__ */ new Map();
+        for (const row of this.database.prepare("SELECT collection,id,payload_hash FROM state_records ORDER BY collection,ordinal").all()) {
+          const key = String(row.collection), records = collections.get(key) ?? [];
+          if (options.maxExpandedBytes !== void 0) checkBudget(this.expandedValueBytes(String(row.payload_hash)));
+          records.push({ id: String(row.id), value: structuredClone(this.value(String(row.payload_hash))) });
+          collections.set(key, records);
+        }
+        const kinds = JSON.parse(metadata.get("collections") ?? "{}");
+        for (const [key, kind] of Object.entries(kinds)) {
+          const records = collections.get(key) ?? [];
+          state[key] = kind === "array" ? records.map((record5) => record5.value) : kind === "record" ? Object.fromEntries(records.map((record5) => [record5.id, record5.value])) : records[0]?.value;
+        }
+        state.history = this.database.prepare("SELECT id,entry_json,artifact_json,content_hash FROM history_versions ORDER BY revision").all().map((row) => {
+          if (options.maxExpandedBytes !== void 0) checkBudget(Buffer.byteLength(String(row.entry_json)) + Buffer.byteLength(String(row.artifact_json)));
+          const hash2 = String(row.content_hash);
+          const saved = { entry: JSON.parse(String(row.entry_json)), artifact: JSON.parse(String(row.artifact_json)) };
+          Object.defineProperty(saved, "content", { enumerable: true, get: () => content(hash2, String(row.id)) });
+          this.historyContents.set(saved, hash2);
+          return saved;
+        });
+        return state;
+      }
+      writeState(state) {
+        const obsolete = /* @__PURE__ */ new Set();
+        const currentHash = this.putContent(state.content), manifest2 = this.manifest(currentHash);
+        const meta3 = this.database.prepare("INSERT INTO storage_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE value<>excluded.value");
+        meta3.run("artifact", JSON.stringify(state.artifact));
+        meta3.run("content", currentHash);
+        const oldUnits = new Map(this.database.prepare("SELECT id,ordinal,payload_hash FROM current_units").all().map((row) => [String(row.id), row]));
+        const setUnit = this.database.prepare("INSERT INTO current_units(id,ordinal,payload_hash) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET ordinal=excluded.ordinal,payload_hash=excluded.payload_hash WHERE ordinal<>excluded.ordinal OR payload_hash<>excluded.payload_hash");
+        for (const [ordinal, unit2] of (manifest2.units ?? []).entries()) {
+          const old = oldUnits.get(unit2.id);
+          if (old && old.payload_hash !== unit2.hash) obsolete.add(String(old.payload_hash));
+          setUnit.run(unit2.id, ordinal, unit2.hash);
+          oldUnits.delete(unit2.id);
+        }
+        for (const [id2, old] of oldUnits) {
+          obsolete.add(String(old.payload_hash));
+          this.database.prepare("DELETE FROM current_units WHERE id=?").run(id2);
+        }
+        const retained = new Set(state.history.map((saved) => saved.entry.id));
+        for (const row of this.database.prepare("SELECT id FROM history_versions").all()) if (!retained.has(String(row.id))) this.database.prepare("DELETE FROM history_versions WHERE id=?").run(String(row.id));
+        const setHistory = this.database.prepare("INSERT INTO history_versions(id,revision,entry_json,artifact_json,content_hash) VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,entry_json=excluded.entry_json,artifact_json=excluded.artifact_json,content_hash=excluded.content_hash WHERE entry_json<>excluded.entry_json OR artifact_json<>excluded.artifact_json OR content_hash<>excluded.content_hash");
+        for (const saved of state.history) {
+          const hash2 = this.historyContents.get(saved) ?? this.putContent(saved.content);
+          setHistory.run(saved.entry.id, saved.entry.revision, JSON.stringify(saved.entry), JSON.stringify(saved.artifact), hash2);
+        }
+        const oldRecords = new Map(this.database.prepare("SELECT collection,id,ordinal,payload_hash FROM state_records").all().map((row) => [JSON.stringify([row.collection, row.id]), row]));
+        const setRecord = this.database.prepare("INSERT INTO state_records(collection,id,ordinal,payload_hash) VALUES(?,?,?,?) ON CONFLICT(collection,id) DO UPDATE SET ordinal=excluded.ordinal,payload_hash=excluded.payload_hash WHERE ordinal<>excluded.ordinal OR payload_hash<>excluded.payload_hash");
+        const kinds = {};
+        for (const [key, value] of Object.entries(state)) {
+          if (["schemaVersion", "artifact", "content", "history"].includes(key) || value === void 0) continue;
+          kinds[key] = Array.isArray(value) ? "array" : object2(value) ? "record" : "value";
+          const records = Array.isArray(value) ? value.map((item, ordinal) => [object2(item) && typeof item.id === "string" ? item.id : object2(item) && typeof item.operationId === "string" ? item.operationId : String(ordinal), item]) : object2(value) ? Object.entries(value) : [["value", value]];
+          const previous = Array.from(oldRecords.values()).filter((row) => row.collection === key).sort((left, right) => Number(left.ordinal) - Number(right.ordinal));
+          const retainedIds = records.map(([id2]) => id2).filter((id2) => oldRecords.has(JSON.stringify([key, id2])));
+          const newIds = new Set(records.map(([id2]) => id2));
+          const stableOrder = JSON.stringify(previous.filter((row) => newIds.has(String(row.id))).map((row) => row.id)) === JSON.stringify(retainedIds) && records.every(([id2], index) => index < retainedIds.length ? oldRecords.has(JSON.stringify([key, id2])) : !oldRecords.has(JSON.stringify([key, id2])));
+          let nextOrdinal = previous.reduce((maximum, row) => Math.max(maximum, Number(row.ordinal)), -1) + 1;
+          for (const [index, [id2, record5]] of records.entries()) {
+            const recordKey = JSON.stringify([key, id2]), hash2 = this.putValue(record5), old = oldRecords.get(recordKey);
+            const ordinal = stableOrder ? old ? Number(old.ordinal) : nextOrdinal++ : index;
+            if (old && old.payload_hash !== hash2) obsolete.add(String(old.payload_hash));
+            if (!old || old.payload_hash !== hash2 || Number(old.ordinal) !== ordinal) setRecord.run(key, id2, ordinal, hash2);
+            oldRecords.delete(recordKey);
+          }
+        }
+        for (const [key, row] of oldRecords) {
+          const [collection, id2] = JSON.parse(key);
+          obsolete.add(String(row.payload_hash));
+          this.database.prepare("DELETE FROM state_records WHERE collection=? AND id=?").run(collection, id2);
+        }
+        meta3.run("collections", JSON.stringify(kinds));
+        for (const row of this.database.prepare("SELECT hash FROM content_manifests WHERE hash<>? AND hash NOT IN (SELECT content_hash FROM history_versions)").all(currentHash)) {
+          for (const child of this.database.prepare("SELECT payload_hash FROM content_payloads WHERE manifest_hash=?").all(String(row.hash))) obsolete.add(String(child.payload_hash));
+          this.database.prepare("DELETE FROM content_manifests WHERE hash=?").run(String(row.hash));
+        }
+        const referenced = this.database.prepare("SELECT 1 AS present WHERE EXISTS(SELECT 1 FROM content_payloads WHERE payload_hash=?) OR EXISTS(SELECT 1 FROM current_units WHERE payload_hash=?) OR EXISTS(SELECT 1 FROM state_records WHERE payload_hash=?) OR EXISTS(SELECT 1 FROM payload_links WHERE child_hash=?)");
+        while (obsolete.size) {
+          const hash2 = obsolete.values().next().value;
+          obsolete.delete(hash2);
+          if (referenced.get(hash2, hash2, hash2, hash2)) continue;
+          for (const child of this.database.prepare("SELECT child_hash FROM payload_links WHERE parent_hash=?").all(hash2)) obsolete.add(String(child.child_hash));
+          this.database.prepare("DELETE FROM payload_blobs WHERE hash=?").run(hash2);
+        }
+      }
+    };
+  }
+});
+
+// src/core/shared/legacy-artifacts.ts
+import { lstat, open as open3, readdir as readdir2, realpath } from "node:fs/promises";
+import { join as join4 } from "node:path";
+async function readTrashMarker(folder) {
+  let marker;
+  try {
+    marker = await open3(join4(folder, TRASH_MARKER), "r");
+  } catch (error62) {
+    if (error62.code === "ENOENT") return;
+    throw error62;
+  }
+  try {
+    const info = await marker.stat();
+    if (!info.isFile() || info.size > 4096) throw new Error("Invalid legacy trash marker");
+    const value = JSON.parse(await marker.readFile("utf8"));
+    if (!object2(value) || value.storageStatus !== "unsupported" || typeof value.trashedAt !== "string" || !timestamp(value.trashedAt, "")) throw new Error("Invalid legacy trash marker");
+    return { trashedAt: value.trashedAt, ...object2(value.artifact) ? { artifact: value.artifact } : {} };
+  } catch {
+    throw new StudioError("CORRUPT_ARTIFACT", "\u65E7\u7248\u4F5C\u54C1\u7684\u56DE\u6536\u7AD9\u8BB0\u5F55\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u76EE\u5F55\u3002");
+  } finally {
+    await marker.close();
+  }
 }
-var import_proper_lockfile, samePath, resourceScope, CACHE_ENTRIES, CACHE_BYTES, signature, ArtifactStore;
-var init_store = __esm({
-  "src/core/shared/store.ts"() {
+function metadataHeader(header2) {
+  const match = /"artifact"\s*:\s*\{/.exec(header2);
+  if (!match) return;
+  const start = match.index + match[0].lastIndexOf("{");
+  let depth = 0, quoted = false, escaped = false;
+  for (let index = start; index < header2.length; index++) {
+    const character = header2[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') quoted = true;
+    else if (character === "{") depth++;
+    else if (character === "}" && --depth === 0) {
+      try {
+        const value = JSON.parse(header2.slice(start, index + 1));
+        return object2(value) ? value : void 0;
+      } catch {
+        return;
+      }
+    }
+  }
+}
+async function readLegacyArtifact(root2, id2) {
+  const folder = join4(root2, "artifacts", safeId(id2));
+  try {
+    await lstat(join4(folder, "artifact.sqlite"));
+    return;
+  } catch (error62) {
+    if (error62.code !== "ENOENT") throw error62;
+  }
+  const marker = await readTrashMarker(folder);
+  let info;
+  try {
+    info = await lstat(join4(folder, "artifact.json"));
+  } catch (error62) {
+    if (error62.code !== "ENOENT") throw error62;
+    if (!marker) return;
+  }
+  let parsed;
+  if (info?.isFile() && !info.isSymbolicLink()) {
+    const handle = await open3(join4(folder, "artifact.json"), "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(LEGACY_HEADER_BYTES, info.size));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      parsed = metadataHeader(buffer.subarray(0, bytesRead).toString("utf8"));
+    } finally {
+      await handle.close();
+    }
+  }
+  const source = parsed?.id === id2 ? parsed : marker?.artifact?.id === id2 ? marker.artifact : void 0;
+  const fallbackTime = info?.mtime.toISOString() ?? marker.trashedAt;
+  const artifact = {
+    id: id2,
+    type: typeof source?.type === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(source.type) ? source.type : "whiteboard",
+    title: typeof source?.title === "string" && source.title.trim() ? source.title.slice(0, 200) : "\u65E7\u7248\u4F5C\u54C1",
+    revision: Number.isSafeInteger(source?.revision) && Number(source?.revision) >= 0 ? Number(source?.revision) : 0,
+    createdAt: timestamp(source?.createdAt, fallbackTime),
+    updatedAt: timestamp(source?.updatedAt, fallbackTime),
+    pinned: false,
+    sharing: false,
+    storageStatus: "unsupported",
+    ...marker ? { trashedAt: marker.trashedAt } : typeof source?.trashedAt === "string" && timestamp(source.trashedAt, "") ? { trashedAt: source.trashedAt } : {}
+  };
+  return artifact;
+}
+async function trashLegacyArtifact(root2, id2, expectedRevision) {
+  const folder = join4(root2, "artifacts", safeId(id2));
+  const canonical = await realpath(folder);
+  if (!samePath(canonical, join4(await realpath(root2), "artifacts", id2))) throw new StudioError("RESOURCE_SCOPE", "\u65E7\u7248\u4F5C\u54C1\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u76EE\u5F55\u5185\u3002");
+  let lost = false;
+  const release = await (0, import_proper_lockfile.lock)(join4(folder, "write"), { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: () => {
+    lost = true;
+  } });
+  try {
+    const artifact = await readLegacyArtifact(root2, id2);
+    if (!artifact) throw new StudioError("NOT_FOUND", "\u65E7\u7248\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
+    if (expectedRevision !== void 0 && expectedRevision !== artifact.revision) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u8BB0\u5F55\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5\u3002");
+    if (artifact.trashedAt) return artifact;
+    if (lost) throw new StudioError("LOCK_LOST", "\u4F5C\u54C1\u5199\u9501\u5DF2\u5931\u6548\uFF0C\u56DE\u6536\u64CD\u4F5C\u672A\u63D0\u4EA4\u3002");
+    const trashedAt = (/* @__PURE__ */ new Date()).toISOString();
+    await atomicWrite(join4(folder, TRASH_MARKER), JSON.stringify({ storageStatus: "unsupported", trashedAt, artifact }));
+    return { ...artifact, trashedAt };
+  } finally {
+    if (!lost) await release();
+  }
+}
+var import_proper_lockfile, LEGACY_HEADER_BYTES, TRASH_MARKER, samePath, timestamp;
+var init_legacy_artifacts = __esm({
+  "src/core/shared/legacy-artifacts.ts"() {
     "use strict";
     import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
     init_common();
+    LEGACY_HEADER_BYTES = 128 * 1024;
+    TRASH_MARKER = "unsupported-trash.json";
     samePath = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    timestamp = (value, fallback) => typeof value === "string" && value.length <= 32 && Number.isFinite(Date.parse(value)) ? value : fallback;
+  }
+});
+
+// src/core/shared/store.ts
+import { lstat as lstat2, mkdir as mkdir3, open as open4, readdir as readdir3, realpath as realpath2, rm as rm2, rmdir } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { randomUUID as randomUUID5 } from "node:crypto";
+import { join as join5, resolve as resolve2 } from "node:path";
+async function validateDeletionTree(path2) {
+  const info = await lstat2(path2);
+  if (info.isSymbolicLink() || !samePath2(await realpath2(path2), path2)) throw resourceScope();
+  if (info.isDirectory()) for (const entry of await readdir3(path2)) await validateDeletionTree(join5(path2, entry));
+  else if (!info.isFile()) throw resourceScope();
+}
+var import_proper_lockfile2, samePath2, resourceScope, ArtifactStore;
+var init_store = __esm({
+  "src/core/shared/store.ts"() {
+    "use strict";
+    import_proper_lockfile2 = __toESM(require_proper_lockfile(), 1);
+    init_common();
+    init_sqlite_artifact();
+    init_legacy_artifacts();
+    samePath2 = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
     resourceScope = () => new StudioError("RESOURCE_SCOPE", "\u5220\u9664\u8DEF\u5F84\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u7684\u771F\u5B9E\u76EE\u5F55\u4E2D\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u8BBF\u95EE\u5176\u4ED6\u4F4D\u7F6E\u3002");
-    CACHE_ENTRIES = 4;
-    CACHE_BYTES = 64 * 1024 * 1024;
-    signature = (info) => [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":");
     ArtifactStore = class {
       constructor(root2, decode4, validateState2) {
         this.decode = decode4;
         this.validateState = validateState2;
-        this.root = resolve2(root2 ?? join4(homedir2(), ".codexworkbench", "agentero-studio"));
+        this.root = resolve2(root2 ?? join5(homedir2(), ".codexworkbench", "agentero-studio"));
       }
       decode;
       validateState;
       root;
-      parsed = /* @__PURE__ */ new Map();
-      parsedBytes = 0;
       folder(id2) {
-        return join4(this.root, "artifacts", safeId(id2));
+        return join5(this.root, "artifacts", safeId(id2));
       }
       file(id2) {
-        return join4(this.folder(id2), "artifact.json");
+        return join5(this.folder(id2), "artifact.sqlite");
       }
-      async read(id2) {
-        return this.readProjection(id2, (state) => state);
-      }
-      /** Select synchronously from private frozen state; callers only receive an isolated copy. */
-      async readProjection(id2, pick2) {
+      async assertOwnedPath(id2, creating = false) {
+        const folder = this.folder(id2);
+        const canonical = await realpath2(folder);
+        if (!samePath2(canonical, join5(await realpath2(this.root), "artifacts", safeId(id2)))) throw resourceScope();
         try {
-          return structuredClone(pick2(await this.normalizedState(id2)));
+          const file2 = this.file(id2), info = await lstat2(file2);
+          if (!info.isFile() || info.isSymbolicLink() || !samePath2(await realpath2(file2), join5(canonical, "artifact.sqlite"))) throw resourceScope();
         } catch (error62) {
-          this.evict(id2);
-          throw error62;
-        }
-      }
-      evict(id2) {
-        const cached2 = this.parsed.get(id2);
-        if (cached2) {
-          this.parsedBytes -= cached2.bytes;
-          this.parsed.delete(id2);
+          if (!creating || error62.code !== "ENOENT") throw error62;
         }
       }
       normalize(value, id2) {
         const state = this.decode ? this.decode(value) : value;
-        if (!object2(state) || state.schemaVersion !== 2 || state.artifact?.id !== id2 || typeof state.artifact.type !== "string" || !("content" in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object2(state.sharing) || !object2(state.sources) || !object2(state.assets)) throw new Error("invalid artifact");
+        if (!object2(state) || state.schemaVersion !== 2 || state.artifact?.id !== id2 || typeof state.artifact.type !== "string" || !("content" in state) || !Array.isArray(state.history) || !Array.isArray(state.feedback) || !Array.isArray(state.operations) || !object2(state.sharing) || !object2(state.sources) || !object2(state.assets)) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6570\u636E\u5E93\u5185\u5BB9\u65E0\u6548\u3002");
         this.validateState?.(state);
         return state;
       }
-      remember(id2, key, bytes, state) {
-        freezeState(state);
-        this.evict(id2);
-        this.parsed.set(id2, { signature: key, bytes, state });
-        this.parsedBytes += bytes;
-        while (this.parsed.size > CACHE_ENTRIES || this.parsedBytes > CACHE_BYTES) this.evict(this.parsed.keys().next().value);
-      }
-      async normalizedState(id2) {
+      async assertDatabase(id2) {
         try {
-          const file2 = this.file(id2), before = await stat(file2, { bigint: true }), key = signature(before), cached2 = this.parsed.get(id2);
-          if (cached2?.signature === key) {
-            this.parsed.delete(id2);
-            this.parsed.set(id2, cached2);
-            return cached2.state;
-          }
-          this.evict(id2);
-          const raw = await readFile3(file2, "utf8");
-          let state;
-          try {
-            state = this.normalize(JSON.parse(raw), id2);
-          } catch {
-            throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6587\u4EF6\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\u5E76\u4ECE\u5907\u4EFD\u6062\u590D\u3002");
-          }
-          const after = await stat(file2, { bigint: true }), bytes = Buffer.byteLength(raw);
-          if (key === signature(after) && bytes <= CACHE_BYTES) this.remember(id2, key, bytes, state);
-          else freezeState(state);
-          return state;
+          await this.assertOwnedPath(id2);
         } catch (error62) {
-          this.evict(id2);
-          if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
-          throw error62;
+          if (error62.code !== "ENOENT") throw error62;
+          if (await readLegacyArtifact(this.root, id2)) throw new StudioError("UNSUPPORTED_STORAGE", "\u6B64\u65E7\u7248\u4F5C\u54C1\u4E0D\u53D7\u652F\u6301\uFF0C\u53EF\u5C06\u5176\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
+          throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
         }
       }
-      async list() {
+      failure(error62) {
+        if (error62 instanceof StudioError) throw error62;
+        const code = error62.code;
+        if (code === "SQLITE_BUSY" || error62.errcode === 5) throw new StudioError("BUSY", "\u53E6\u4E00\u4E2A\u8FDB\u7A0B\u6B63\u5728\u4FDD\u5B58\u4F5C\u54C1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+        throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6570\u636E\u5E93\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u8BF7\u4FDD\u7559\u539F\u6587\u4EF6\u5E76\u4ECE\u5907\u4EFD\u6062\u590D\u3002");
+      }
+      async read(id2, options = {}) {
+        return this.readProjection(id2, (state) => state, options);
+      }
+      /** Selection runs inside one SQLite read snapshot. Returned values contain no database-backed getters. */
+      async readProjection(id2, pick2, options = {}) {
+        await this.assertDatabase(id2);
+        let repository;
+        let selecting = false;
+        try {
+          repository = new SqliteArtifactRepository(this.file(id2));
+          repository.database.exec("BEGIN");
+          const state = this.normalize(repository.readState(options), id2);
+          freezeArtifactValue(state);
+          selecting = true;
+          const result = structuredClone(pick2(state));
+          selecting = false;
+          repository.database.exec("COMMIT");
+          return result;
+        } catch (error62) {
+          if (selecting) throw error62;
+          return this.failure(error62);
+        } finally {
+          repository?.close();
+        }
+      }
+      async catalog() {
         let entries;
         try {
-          entries = await readdir2(join4(this.root, "artifacts"), { withFileTypes: true });
+          entries = await readdir3(join5(this.root, "artifacts"), { withFileTypes: true });
         } catch (error62) {
           if (error62.code === "ENOENT") return [];
           throw error62;
         }
-        const values = [];
+        const result = [];
         for (const entry of entries) if (entry.isDirectory() && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(entry.name)) {
+          let repository;
           try {
-            values.push(await this.read(entry.name));
+            await this.assertOwnedPath(entry.name);
+            repository = new SqliteArtifactRepository(this.file(entry.name));
+            repository.database.exec("BEGIN");
+            const artifact = repository.readMetadata();
+            if (!object2(artifact) || artifact.id !== entry.name) throw new StudioError("CORRUPT_ARTIFACT", "\u4F5C\u54C1\u6570\u636E\u5E93\u4FE1\u606F\u65E0\u6548\u3002");
+            result.push(artifact);
+            repository.database.exec("COMMIT");
           } catch (error62) {
-            if (!(error62 instanceof StudioError) || !["NOT_FOUND", "CORRUPT_ARTIFACT"].includes(error62.code)) throw error62;
+            if (error62 instanceof StudioError && ["CORRUPT_ARTIFACT", "UNSUPPORTED_STORAGE"].includes(error62.code)) continue;
+            if (error62.code === "ERR_SQLITE_ERROR" || error62 instanceof SyntaxError) continue;
+            if (error62.code !== "ENOENT") throw error62;
+            const legacy = await readLegacyArtifact(this.root, entry.name);
+            if (legacy) result.push(legacy);
+          } finally {
+            repository?.close();
           }
         }
-        return values;
+        return result;
       }
-      async write(state, cacheCommitted = false) {
-        const id2 = state.artifact.id;
-        try {
-          const serialized = JSON.stringify(state), bytes = Buffer.byteLength(serialized);
-          const cached2 = cacheCommitted && bytes <= CACHE_BYTES ? this.normalize(structuredClone(state), id2) : void 0;
-          const written = await atomicWrite(this.file(id2), serialized);
-          this.evict(id2);
-          if (cached2) this.remember(id2, signature(written), bytes, cached2);
-        } catch (error62) {
-          this.evict(id2);
-          throw error62;
-        }
+      async list() {
+        const artifacts = await this.catalog();
+        return Promise.all(artifacts.filter((artifact) => artifact.storageStatus !== "unsupported").map((artifact) => this.read(artifact.id)));
+      }
+      /** Explicit creation/import uses this path; opening legacy JSON never invokes it. */
+      async write(state) {
+        const normalized = this.normalize(structuredClone(state), state.artifact.id);
+        await mkdir3(this.folder(state.artifact.id), { recursive: true });
+        await this.withLock(state.artifact.id, this.folder(state.artifact.id), async (assertLocked) => {
+          await this.assertOwnedPath(state.artifact.id, true);
+          let creating = false;
+          try {
+            await lstat2(this.file(state.artifact.id));
+          } catch (error62) {
+            if (error62.code !== "ENOENT") throw error62;
+            creating = true;
+          }
+          const target = creating ? join5(this.folder(state.artifact.id), `.${randomUUID5().slice(0, 8)}.db`) : this.file(state.artifact.id);
+          let repository;
+          let reserved = false;
+          try {
+            if (creating) {
+              const handle = await open4(target, "wx");
+              reserved = true;
+              await handle.close();
+            }
+            repository = new SqliteArtifactRepository(target, true);
+            repository.database.exec("BEGIN IMMEDIATE");
+            repository.writeState(normalized);
+            assertLocked();
+            repository.database.exec("COMMIT");
+            repository.close();
+            repository = void 0;
+            if (creating) {
+              assertLocked();
+              await renameWithRetry(target, this.file(state.artifact.id));
+            }
+          } catch (error62) {
+            try {
+              repository?.database.exec("ROLLBACK");
+            } catch {
+            }
+            throw error62;
+          } finally {
+            repository?.close();
+            if (reserved) await rm2(target, { force: true });
+          }
+        });
       }
       async transaction(id2, run) {
-        const folder = this.folder(id2);
-        try {
-          await mkdir3(folder, { recursive: true });
-        } catch (error62) {
-          this.evict(id2);
-          throw error62;
-        }
-        return this.withLock(id2, folder, async (assertLocked) => {
-          const state = await this.read(id2), result = await run(state);
-          assertLocked();
-          await this.write(state, true);
-          return result;
+        await this.assertDatabase(id2);
+        return this.withLock(id2, this.folder(id2), async (assertLocked) => {
+          await this.assertDatabase(id2);
+          const repository = new SqliteArtifactRepository(this.file(id2), true);
+          try {
+            repository.database.exec("BEGIN IMMEDIATE");
+            const state = this.normalize(repository.readState(), id2);
+            for (const saved of state.history) freezeArtifactValue(saved);
+            const result = structuredClone(await run(state));
+            assertLocked();
+            repository.writeState(state);
+            assertLocked();
+            repository.database.exec("COMMIT");
+            return result;
+          } catch (error62) {
+            try {
+              repository.database.exec("ROLLBACK");
+            } catch {
+            }
+            throw error62;
+          } finally {
+            repository.close();
+          }
         });
       }
       /** Serialize an external room commit with artifact permissions without rewriting unchanged content. */
@@ -11502,31 +11973,35 @@ var init_store = __esm({
       }
       /** Delete only a trashed artifact while retaining the same lock used by restore/save. */
       async purge(id2, beforeDelete) {
-        this.evict(id2);
         const folder = this.folder(id2);
         let canonical;
         try {
-          canonical = await realpath(folder);
-          if (!samePath(canonical, join4(await realpath(this.root), "artifacts", safeId(id2)))) throw resourceScope();
+          canonical = await realpath2(folder);
+          if (!samePath2(canonical, join5(await realpath2(this.root), "artifacts", safeId(id2)))) throw resourceScope();
         } catch (error62) {
           if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
           throw error62;
         }
         await this.withLock(id2, canonical, async (assertLocked) => {
-          const state = await this.read(id2);
-          if (!state.artifact.trashedAt) throw new StudioError("NOT_TRASHED", "\u4EC5\u80FD\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u4E2D\u7684\u4F5C\u54C1\uFF0C\u8BF7\u5148\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
-          const entries = (await readdir2(canonical)).filter((entry) => entry !== "write.lock");
-          for (const entry of entries) await validateDeletionTree(join4(canonical, entry));
+          const legacy = await readLegacyArtifact(this.root, id2);
+          const artifact = legacy ?? await this.readProjection(id2, (state) => state.artifact);
+          if (!artifact.trashedAt) throw new StudioError("NOT_TRASHED", "\u4EC5\u80FD\u6C38\u4E45\u5220\u9664\u56DE\u6536\u7AD9\u4E2D\u7684\u4F5C\u54C1\uFF0C\u8BF7\u5148\u79FB\u5165\u56DE\u6536\u7AD9\u3002");
+          const entries = (await readdir3(canonical)).filter((entry) => entry !== "write.lock");
+          for (const entry of entries) await validateDeletionTree(join5(canonical, entry));
           assertLocked();
           await beforeDelete();
-          for (const entry of entries.filter((entry2) => entry2 !== "artifact.json")) {
+          const metadataFile = legacy ? "artifact.json" : "artifact.sqlite";
+          for (const entry of entries.filter((entry2) => entry2 !== metadataFile && !(legacy && entry2 === "unsupported-trash.json"))) {
             assertLocked();
-            await rm2(join4(canonical, entry), { recursive: true, force: true });
+            await rm2(join5(canonical, entry), { recursive: true, force: true });
           }
           assertLocked();
-          await rm2(join4(canonical, "artifact.json"));
+          await rm2(join5(canonical, metadataFile), { force: true });
+          if (legacy) {
+            assertLocked();
+            await rm2(join5(canonical, "unsupported-trash.json"), { force: true });
+          }
         });
-        this.evict(id2);
         try {
           await rmdir(canonical);
         } catch (error62) {
@@ -11536,11 +12011,10 @@ var init_store = __esm({
       async withLock(id2, folder, run) {
         let lost, release;
         try {
-          release = await (0, import_proper_lockfile.lock)(join4(folder, "write"), { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: (error62) => {
+          release = await (0, import_proper_lockfile2.lock)(join5(folder, "write"), { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: (error62) => {
             lost = error62;
           } });
         } catch (error62) {
-          this.evict(id2);
           if (error62.code === "ELOCKED") throw new StudioError("BUSY", "\u53E6\u4E00\u4E2A\u8FDB\u7A0B\u6B63\u5728\u4FDD\u5B58\u4F5C\u54C1\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
           if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u4F5C\u54C1\u4E0D\u5B58\u5728\u3002");
           throw error62;
@@ -11551,13 +12025,11 @@ var init_store = __esm({
         try {
           return await run(assertLocked);
         } catch (error62) {
-          this.evict(id2);
           throw error62;
         } finally {
           try {
             if (!lost) await release();
           } catch (error62) {
-            this.evict(id2);
             throw error62;
           }
         }
@@ -11567,7 +12039,7 @@ var init_store = __esm({
 });
 
 // src/core/shared/history.ts
-import { createHash as createHash2, randomUUID as randomUUID5 } from "node:crypto";
+import { createHash as createHash3, randomUUID as randomUUID6 } from "node:crypto";
 function initializeVersionClocks(state, adapter) {
   if (!adapter.syncVersions) return;
   if (state.unitClocks === void 0) {
@@ -11583,7 +12055,7 @@ function initializeVersionClocks(state, adapter) {
   adapter.syncVersions(state.content, state.content, state.unitClocks);
 }
 function createState(artifact, content, actor, summary, changedIds) {
-  const entry = { id: randomUUID5(), revision: artifact.revision, createdAt: artifact.createdAt, actor: copy(actor), summary, changedIds: [...new Set(changedIds)] };
+  const entry = { id: randomUUID6(), revision: artifact.revision, createdAt: artifact.createdAt, actor: copy(actor), summary, changedIds: [...new Set(changedIds)] };
   return { schemaVersion: 2, artifact: copy(artifact), content: copy(content), feedback: [], history: [{ entry, artifact: copy(artifact), content: copy(content) }], operations: [], sources: {}, sharing: { enabled: false, generation: 0, tokens: {} }, assets: {} };
 }
 function version2(state, value) {
@@ -11615,7 +12087,7 @@ function makeHistory(state, actor, summary, changedIds, restoredFrom) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   state.artifact.revision++;
   state.artifact.updatedAt = now;
-  const entry = { id: randomUUID5(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restoredFrom ? { restoredFrom } : {} };
+  const entry = { id: randomUUID6(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restoredFrom ? { restoredFrom } : {} };
   state.history.push({ entry, artifact: copy(state.artifact), content: copy(state.content) });
   if (state.history.length > 200) state.history.splice(0, state.history.length - 200);
   return entry;
@@ -11670,10 +12142,10 @@ function applyWorkingMutation(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor"]);
   assertAlive(state.artifact);
   if (args.merge !== void 0 && args.merge !== "safe") throw new StudioError("INVALID_ARGUMENT", "merge \u4EC5\u652F\u6301 safe\u3002");
-  const operationId = safeId(args.operationId ?? randomUUID5(), "\u64CD\u4F5C ID"), operations = args.operations;
+  const operationId = safeId(args.operationId ?? randomUUID6(), "\u64CD\u4F5C ID"), operations = args.operations;
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u6B21\u63D0\u4EA4\u5E94\u5305\u542B 1 \u81F3 200 \u4E2A\u64CD\u4F5C\u3002");
   if (operations.some((operation2) => !object2(operation2))) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-  const fingerprint = createHash2("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
+  const fingerprint = createHash3("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
   const duplicate = state.operations.find((item) => item.id === operationId);
   if (duplicate) {
     if (duplicate.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u4FEE\u6539\u3002");
@@ -11872,12 +12344,12 @@ var init_agent_workspaces = __esm({
 });
 
 // src/core/shared/artifacts.ts
-import { randomUUID as randomUUID6 } from "node:crypto";
+import { randomUUID as randomUUID7 } from "node:crypto";
 function createArtifact(type, title, content, actor, summary, changedIds) {
   requireRole(actor, ["owner"]);
   const now = (/* @__PURE__ */ new Date()).toISOString(), name = text(title, "", 200).trim();
   if (!name) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-  return createState({ id: randomUUID6(), type, title: name, revision: 0, createdAt: now, updatedAt: now, pinned: false }, content, actor, summary, changedIds);
+  return createState({ id: randomUUID7(), type, title: name, revision: 0, createdAt: now, updatedAt: now, pinned: false }, content, actor, summary, changedIds);
 }
 function manageArtifact(state, action, args, actor) {
   requireRole(actor, ["owner"]);
@@ -11895,10 +12367,10 @@ function manageArtifact(state, action, args, actor) {
   else throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u4F5C\u54C1\u7BA1\u7406\u64CD\u4F5C\u3002");
   makeHistory(state, actor, { rename: "\u91CD\u547D\u540D\u4F5C\u54C1", pin: "\u8C03\u6574\u56FA\u5B9A\u72B6\u6001", trash: "\u79FB\u5165\u56DE\u6536\u7AD9", restore: "\u6062\u590D\u4F5C\u54C1" }[action], ["$artifact"]);
 }
-function listArtifacts(states, args, actor) {
+function listArtifacts(artifacts, args, actor) {
   requireRole(actor, ["owner"]);
   const query = text(args.query ?? args.search).trim().toLocaleLowerCase();
-  let list = states.map((state) => ({ ...copy(state.artifact), sharing: state.sharing.enabled })).filter((item) => Boolean(item.trashedAt) === (args.trashed === true));
+  let list = artifacts.map(copy).filter((item) => Boolean(item.trashedAt) === (args.trashed === true));
   if (query) list = list.filter((item) => item.title.toLocaleLowerCase().includes(query));
   if (args.pinned === true) list = list.filter((item) => item.pinned);
   if (Array.isArray(args.artifactIds)) list = list.filter((item) => args.artifactIds.includes(item.id));
@@ -11916,7 +12388,7 @@ var init_artifacts = __esm({
 });
 
 // src/core/shared/proposals.ts
-import { createHash as createHash3, randomUUID as randomUUID7 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID8 } from "node:crypto";
 function proposalExpired(item, now = Date.now()) {
   return !!item.proposal && Date.parse(item.proposal.expiresAt) <= now;
 }
@@ -11961,7 +12433,7 @@ function captureOption(state, raw, args, adapter) {
     versions[id2] = current;
     baseline[id2] = value;
   }
-  return { id: raw.id === void 0 ? randomUUID7() : safeId(raw.id, "\u65B9\u6848 ID"), label, ...description ? { description } : {}, operations, baselineRevision: state.artifact.revision, versions, baseline, wholeContent, targetIds, active: false };
+  return { id: raw.id === void 0 ? randomUUID8() : safeId(raw.id, "\u65B9\u6848 ID"), label, ...description ? { description } : {}, operations, baselineRevision: state.artifact.revision, versions, baseline, wholeContent, targetIds, active: false };
 }
 function previewProposal(saved, args, actor, adapter) {
   requireRole(actor, ["owner"]);
@@ -12008,7 +12480,7 @@ function updateProposal(state, args, actor, adapter) {
     }
     const options = args.options.map((option3) => captureOption(state, option3, args, adapter));
     if (new Set(options.map((option3) => option3.id)).size !== options.length || new Set(options.map((option3) => option3.label)).size !== options.length || new Set(options.map((option3) => digest(option3.operations))).size !== options.length) throw new StudioError("INVALID_ARGUMENT", "\u5EFA\u8BAE\u65B9\u6848\u7684 ID\u3001\u540D\u79F0\u548C\u5185\u5BB9\u5FC5\u987B\u5404\u4E0D\u76F8\u540C\u3002");
-    const id2 = randomUUID7(), anchor3 = object2(args.anchor) ? copy(args.anchor) : {};
+    const id2 = randomUUID8(), anchor3 = object2(args.anchor) ? copy(args.anchor) : {};
     if (Buffer.byteLength(JSON.stringify(anchor3)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5EFA\u8BAE\u5B9A\u4F4D\u4FE1\u606F\u8FC7\u5927\u3002");
     const frozen = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, void 0, state.unitClocks);
     const proposal2 = { audience: "owner", expiresAt: new Date(Date.now() + LIFETIME).toISOString(), options, ...creationId ? { creationId } : {}, fingerprint: fingerprint2, receipts: [] };
@@ -12029,7 +12501,7 @@ function updateProposal(state, args, actor, adapter) {
   const option2 = proposal.options.find((entry) => entry.id === args.optionId);
   if (!option2) throw new StudioError("NOT_FOUND", "\u5EFA\u8BAE\u65B9\u6848\u4E0D\u5B58\u5728\u3002");
   if (!["choose", "withdraw"].includes(action)) throw new StudioError("INVALID_ARGUMENT", "\u4E0D\u652F\u6301\u7684\u5EFA\u8BAE\u64CD\u4F5C\u3002");
-  const operationId = safeId(args.operationId ?? randomUUID7(), "\u64CD\u4F5C ID"), fingerprint = digest({ action, feedbackId: item.id, optionId: option2.id });
+  const operationId = safeId(args.operationId ?? randomUUID8(), "\u64CD\u4F5C ID"), fingerprint = digest({ action, feedbackId: item.id, optionId: option2.id });
   const previous = proposal.receipts.find((receipt) => receipt.id === operationId);
   if (previous) {
     if (previous.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u6267\u884C\u4E0D\u540C\u5EFA\u8BAE\u64CD\u4F5C\u3002");
@@ -12084,13 +12556,13 @@ var init_proposals = __esm({
     init_common();
     init_history();
     LIFETIME = 30 * 60 * 1e3;
-    digest = (value) => createHash3("sha256").update(JSON.stringify(value)).digest("hex");
+    digest = (value) => createHash4("sha256").update(JSON.stringify(value)).digest("hex");
     unit = (adapter, content, id2) => copy(adapter.readUnit(content, id2) ?? null);
   }
 });
 
 // src/core/shared/feedback.ts
-import { createHash as createHash4, randomUUID as randomUUID8 } from "node:crypto";
+import { createHash as createHash5, randomUUID as randomUUID9 } from "node:crypto";
 function updateFeedback(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor", "commenter"]);
   assertAlive(state.artifact);
@@ -12105,7 +12577,7 @@ function updateFeedback(state, args, actor, adapter) {
     const versions = args.versions === void 0 ? void 0 : copy(args.versions);
     if (versions && Buffer.byteLength(JSON.stringify(versions)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u9009\u533A\u7684\u7248\u672C\u4FE1\u606F\u8FC7\u5927\u3002");
     const operationId = args.operationId === void 0 ? void 0 : safeId(args.operationId, "\u64CD\u4F5C ID");
-    const fingerprint = createHash4("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
+    const fingerprint = createHash5("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
     const deleted = operationId && state.deletedFeedbackReceipts?.find((receipt) => receipt.operationId === operationId);
     if (deleted) {
       if (deleted.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
@@ -12116,7 +12588,7 @@ function updateFeedback(state, args, actor, adapter) {
       if (duplicate.creationReceipt.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
       return { feedback: visibleFeedback(state.feedback, actor), contextId: duplicate.id };
     }
-    const id2 = randomUUID8(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, versions, state.unitClocks);
+    const id2 = randomUUID9(), snapshot = adapter.snapshotFeedback(state.artifact.id, id2, [state, ...state.history.slice().reverse()], anchor3, versions, state.unitClocks);
     item = { id: id2, artifactId: state.artifact.id, type: args.type === "request" ? "request" : "comment", anchor: snapshot.anchor, author: copy(actor), text: content, status: "open", createdAt: now, updatedAt: now, replies: [], versions: copy(snapshot.versions) };
     if (operationId) item.creationReceipt = { operationId, fingerprint };
     state.feedback.push(item);
@@ -12131,7 +12603,7 @@ function updateFeedback(state, args, actor, adapter) {
     if (action === "reply") {
       const content = text(args.text).trim();
       if (!content) throw new StudioError("INVALID_ARGUMENT", "\u56DE\u590D\u5185\u5BB9\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-      const id2 = args.replyId === void 0 ? randomUUID8() : safeId(args.replyId, "\u56DE\u590D ID");
+      const id2 = args.replyId === void 0 ? randomUUID9() : safeId(args.replyId, "\u56DE\u590D ID");
       const duplicate = item.replies.find((reply) => reply.id === id2);
       if (duplicate) {
         if (duplicate.author.id !== actor.id || duplicate.author.kind !== actor.kind || duplicate.text !== content) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u56DE\u590D ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u4F5C\u8005\u6216\u5185\u5BB9\u3002");
@@ -12160,9 +12632,9 @@ function updateFeedback(state, args, actor, adapter) {
       item.status = action === "resolve" ? "resolved" : "open";
       delete item.processingBy;
     } else if (action === "send") {
-      const contentKey = createHash4("sha256").update(JSON.stringify({ text: item.text, replies: item.replies, anchor: item.anchor, versions: item.versions })).digest("hex");
+      const contentKey = createHash5("sha256").update(JSON.stringify({ text: item.text, replies: item.replies, anchor: item.anchor, versions: item.versions })).digest("hex");
       if (item.attachment?.contentKey === contentKey) return { feedback: visibleFeedback(state.feedback, actor), contextId: item.id };
-      item.attachment = { requestId: randomUUID8(), contentKey, state: "pending", requestedAt: now, requestedBy: copy(actor) };
+      item.attachment = { requestId: randomUUID9(), contentKey, state: "pending", requestedAt: now, requestedBy: copy(actor) };
       if (item.status === "open") item.status = "pending";
       if (typeof args.targetViewId === "string") item.targetViewId = text(args.targetViewId, "", 120);
       contextId = item.id;
@@ -12197,7 +12669,7 @@ var init_feedback = __esm({
 });
 
 // src/core/shared/sharing.ts
-import { createHash as createHash5, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash as createHash6, randomBytes, timingSafeEqual } from "node:crypto";
 function retireTokens(sharing, roles, reason) {
   sharing.retiredTokens ??= {};
   for (const role of roles) if (sharing.tokens[role]) sharing.retiredTokens[tokenKey(sharing.tokens[role])] = reason;
@@ -12392,7 +12864,7 @@ var init_sharing = __esm({
     newToken = () => randomBytes(24).toString("base64url");
     roleOn = (sharing, role) => sharing.roleEnabled?.[role] !== false;
     sharingAccess = (sharing) => sharing.enabled ? sharing.access ?? "lan" : "local";
-    tokenKey = (token) => createHash5("sha256").update(token).digest("hex");
+    tokenKey = (token) => createHash6("sha256").update(token).digest("hex");
     canonicalName = (name) => name.normalize("NFKC").trim();
   }
 });
@@ -12466,7 +12938,7 @@ var init_collaboration_room = __esm({
 });
 
 // src/core/shared/collaboration-events.ts
-import { randomUUID as randomUUID9 } from "node:crypto";
+import { randomUUID as randomUUID10 } from "node:crypto";
 var MAX_EVENTS, MAX_BYTES, CollaborationEvents;
 var init_collaboration_events = __esm({
   "src/core/shared/collaboration-events.ts"() {
@@ -12476,7 +12948,7 @@ var init_collaboration_events = __esm({
     MAX_EVENTS = 512;
     MAX_BYTES = 1024 * 1024;
     CollaborationEvents = class {
-      epoch = randomUUID9();
+      epoch = randomUUID10();
       sequence = 0;
       floor = 0;
       bytes = 0;
@@ -12527,7 +12999,7 @@ var init_collaboration_events = __esm({
 
 // src/core/shared/room-timers.ts
 import { readFileSync } from "node:fs";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 var RoomTimers;
 var init_room_timers = __esm({
   "src/core/shared/room-timers.ts"() {
@@ -12540,7 +13012,7 @@ var init_room_timers = __esm({
       dataRoot;
       values = /* @__PURE__ */ new Map();
       file(id2) {
-        return join5(this.dataRoot, "artifacts", safeId(id2), "room-timer.json");
+        return join6(this.dataRoot, "artifacts", safeId(id2), "room-timer.json");
       }
       get(id2, reload = false) {
         if (this.dataRoot && (reload || !this.values.has(id2))) {
@@ -12579,7 +13051,7 @@ var init_room_timers = __esm({
 });
 
 // src/core/shared/collaboration.ts
-import { createHash as createHash6, randomUUID as randomUUID10 } from "node:crypto";
+import { createHash as createHash7, randomUUID as randomUUID11 } from "node:crypto";
 var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, MAX_CLOSED_TASKS, StudioCollaboration;
 var init_collaboration = __esm({
   "src/core/shared/collaboration.ts"() {
@@ -12998,7 +13470,7 @@ var init_collaboration = __esm({
         assertWorkspaceAvailable(nextScope, actor.id, this.workspaces(artifactId), elements);
         if (previous && this.agentTasks.get(key)?.tasks.get(taskId) !== previous) throw new StudioError("TASK_STALE", "\u4EFB\u52A1\u5728\u91CD\u65B0\u7533\u8BF7\u524D\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u67E5\u8BE2\u6700\u8FD1\u4EE3\u6B21\u540E\u660E\u786E\u91CD\u65B0\u7533\u8BF7\u3002");
         const now = Date.now(), phase = input2.phase ?? previous?.phase ?? "preparing";
-        current.tasks.set(taskId, { taskId, generation: previous?.generation ?? randomUUID10(), scope: copy(nextScope), phase, label: input2.label === void 0 ? previous?.label : String(input2.label).trim() || void 0, startedAt: previous?.startedAt ?? now, lastActivityAt: now, lastProgressAt: !previous || previous.phase !== phase ? now : previous.lastProgressAt, expiresAt: now + AGENT_TASK_LEASE_MS });
+        current.tasks.set(taskId, { taskId, generation: previous?.generation ?? randomUUID11(), scope: copy(nextScope), phase, label: input2.label === void 0 ? previous?.label : String(input2.label).trim() || void 0, startedAt: previous?.startedAt ?? now, lastActivityAt: now, lastProgressAt: !previous || previous.phase !== phase ? now : previous.lastProgressAt, expiresAt: now + AGENT_TASK_LEASE_MS });
         this.agentTasks.set(key, current);
         this.publishAgent(artifactId, actor);
         this.scheduleTaskDeadline();
@@ -13008,7 +13480,7 @@ var init_collaboration = __esm({
         const key = `${artifactId}:${actor.id}`, live = [...this.agentTasks.get(key)?.tasks.values() ?? []];
         const entries = [...this.activities.get(key)?.values() ?? []].filter((entry) => !entry.binding || live.some((task) => task.taskId === entry.binding.taskId && task.generation === entry.binding.generation));
         const terminal = [...this.terminalTasks.values()].filter((item) => item.artifactId === artifactId && item.actor.id === actor.id && item.task.endedAt + AGENT_TASK_FADE_MS > Date.now()).map((item) => item.task), tasks = [...live, ...terminal];
-        const peers = this.group(artifactId), peerId = `agent-${createHash6("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
+        const peers = this.group(artifactId), peerId = `agent-${createHash7("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
         let peer = peers.get(peerId);
         if (!entries.length && !tasks.length) {
           if (!peer?.value) return;
@@ -13043,7 +13515,7 @@ var init_collaboration = __esm({
         if (actor.kind !== "agent") throw new StudioError("FORBIDDEN", "\u4EE3\u7406\u6D3B\u52A8\u5FC5\u987B\u7531\u670D\u52A1\u7AEF\u767B\u8BB0\u3002");
         if (input2.binding) this.assertTask(artifactId, actor, input2.binding);
         this.getTimer(artifactId);
-        const activityId = randomUUID10(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? /* @__PURE__ */ new Map();
+        const activityId = randomUUID11(), key = `${artifactId}:${actor.id}`, group = this.activities.get(key) ?? /* @__PURE__ */ new Map();
         group.set(activityId, { actor: copy(actor), ...copy(input2) });
         this.activities.set(key, group);
         this.publishAgent(artifactId, actor);
@@ -13093,24 +13565,24 @@ var init_collaboration = __esm({
 });
 
 // src/core/shared/files.ts
-import { randomUUID as randomUUID11 } from "node:crypto";
-import { cp, lstat as lstat2, mkdir as mkdir4, open as open3, readFile as readFile4, readdir as readdir3, realpath as realpath2, rename as rename3, rm as rm3 } from "node:fs/promises";
-import { basename, extname, isAbsolute, join as join6, resolve as resolve3 } from "node:path";
+import { randomUUID as randomUUID12 } from "node:crypto";
+import { cp, lstat as lstat3, mkdir as mkdir4, open as open5, readFile as readFile3, readdir as readdir4, realpath as realpath3, rename as rename3, rm as rm3 } from "node:fs/promises";
+import { basename, extname, isAbsolute, join as join7, resolve as resolve3 } from "node:path";
 async function assetDirectory(store, artifactId, directory, create = false) {
-  const root2 = await realpath2(store.root), folder = await realpath2(store.folder(artifactId));
-  if (!samePath2(folder, join6(root2, "artifacts", safeId(artifactId)))) throw resourceScope2();
-  const path2 = join6(folder, directory);
+  const root2 = await realpath3(store.root), folder = await realpath3(store.folder(artifactId));
+  if (!samePath3(folder, join7(root2, "artifacts", safeId(artifactId)))) throw resourceScope2();
+  const path2 = join7(folder, directory);
   if (create) await mkdir4(path2, { recursive: true });
-  if (!samePath2(await realpath2(path2), path2)) throw resourceScope2();
+  if (!samePath3(await realpath3(path2), path2)) throw resourceScope2();
   return path2;
 }
 async function regularFile(path2) {
-  const info = await lstat2(path2);
-  if (info.isSymbolicLink() || !info.isFile() || !samePath2(await realpath2(path2), path2)) throw resourceScope2();
+  const info = await lstat3(path2);
+  if (info.isSymbolicLink() || !info.isFile() || !samePath3(await realpath3(path2), path2)) throw resourceScope2();
   return info;
 }
 async function readBoundedAsset(path2) {
-  const before = await regularFile(path2), file2 = await open3(path2, "r");
+  const before = await regularFile(path2), file2 = await open5(path2, "r");
   try {
     const info = await file2.stat();
     if (!info.isFile() || info.dev !== before.dev || info.ino !== before.ino) throw resourceScope2();
@@ -13151,8 +13623,8 @@ async function importAsset(store, artifactId, assetPath, actor, validateMimeType
   requireRole(actor, ["owner"]);
   const path2 = text(assetPath, "", 4096);
   if (!path2 || !isAbsolute(path2)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u660E\u786E\u7684\u8D44\u6E90\u6587\u4EF6\u7EDD\u5BF9\u8DEF\u5F84\u3002");
-  const canonical = await realpath2(path2);
-  if (!samePath2(canonical, resolve3(path2))) throw new StudioError("RESOURCE_SCOPE", "\u8BF7\u63D0\u4F9B\u8D44\u6E90\u6587\u4EF6\u7684\u771F\u5B9E\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u5BFC\u5165\u3002");
+  const canonical = await realpath3(path2);
+  if (!samePath3(canonical, resolve3(path2))) throw new StudioError("RESOURCE_SCOPE", "\u8BF7\u63D0\u4F9B\u8D44\u6E90\u6587\u4EF6\u7684\u771F\u5B9E\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u5BFC\u5165\u3002");
   const data = await readBoundedAsset(canonical), filename = basename(canonical), mimeType = assetMimeType(data, filename);
   return putAsset(store, artifactId, data, { filename, mimeType }, actor, validateMimeType, authorize);
 }
@@ -13178,7 +13650,7 @@ async function deleteAsset(store, artifactId, assetId, actor, authorize) {
       assertAlive(state.artifact);
       if (!Object.hasOwn(state.assets, id2)) throw new StudioError("NOT_FOUND", "\u8D44\u6E90\u4E0D\u5B58\u5728\u3002");
       if (referencesAsset([state.content, state.history, state.sources, state.feedback], id2)) throw new StudioError("REFERENCE_IN_USE", "\u5F53\u524D\u5185\u5BB9\u3001\u4FDD\u7559\u5386\u53F2\u6216\u53CD\u9988\u4ECD\u5F15\u7528\u6B64\u8D44\u6E90\uFF0C\u8BF7\u4FDD\u7559\u8D44\u6E90\u4EE5\u4FBF\u6062\u590D\u3002");
-      const active = join6(await assetDirectory(store, artifactId, "assets"), id2), recycled = join6(await assetDirectory(store, artifactId, "recycle-assets", true), id2);
+      const active = join7(await assetDirectory(store, artifactId, "assets"), id2), recycled = join7(await assetDirectory(store, artifactId, "recycle-assets", true), id2);
       let activeExists = true;
       try {
         await regularFile(active);
@@ -13188,7 +13660,7 @@ async function deleteAsset(store, artifactId, assetId, actor, authorize) {
       }
       if (activeExists) {
         try {
-          await lstat2(recycled);
+          await lstat3(recycled);
           throw new StudioError("RESOURCE_STATE", "\u8D44\u6E90\u5DF2\u6709\u5185\u90E8\u56DE\u6536\u526F\u672C\uFF0C\u8BF7\u4FDD\u7559\u6587\u4EF6\u5E76\u68C0\u67E5\u4F5C\u54C1\u6570\u636E\u3002");
         } catch (error62) {
           if (error62.code !== "ENOENT") throw error62;
@@ -13213,7 +13685,7 @@ async function deleteAsset(store, artifactId, assetId, actor, authorize) {
   return { assetId: id2, removed: true };
 }
 async function duplicateAssets(store, from, to) {
-  await cp(join6(store.folder(from), "assets"), join6(store.folder(to), "assets"), { recursive: true }).catch((error62) => {
+  await cp(join7(store.folder(from), "assets"), join7(store.folder(to), "assets"), { recursive: true }).catch((error62) => {
     if (error62.code !== "ENOENT") throw error62;
   });
 }
@@ -13222,25 +13694,25 @@ async function putAsset(store, artifactId, data, input2, actor, validateMimeType
   if (!data.byteLength || data.byteLength > MAX_ASSET_BYTES) throw new StudioError("TOO_LARGE", "\u8D44\u6E90\u5E94\u5C0F\u4E8E 20 MB\u3002");
   const mimeType = text(input2.mimeType, "application/octet-stream", 100).split(";")[0];
   validateMimeType(mimeType);
-  const id2 = randomUUID11(), filename = basename(text(input2.filename, "resource", 250)).replace(/[\x00-\x1f]/g, "");
+  const id2 = randomUUID12(), filename = basename(text(input2.filename, "resource", 250)).replace(/[\x00-\x1f]/g, "");
   await store.transaction(artifactId, async (state) => {
     requireRole(authorize ? authorize(state) : actor, ["owner", "editor"]);
     assertAlive(state.artifact);
-    await atomicWrite(join6(await assetDirectory(store, artifactId, "assets", true), id2), data);
+    await atomicWrite(join7(await assetDirectory(store, artifactId, "assets", true), id2), data);
     state.assets[id2] = { id: id2, filename, mimeType, size: data.byteLength };
   });
   return { id: id2, url: `/assets/${artifactId}/${id2}`, src: `/assets/${artifactId}/${id2}`, filename, mimeType, size: data.byteLength };
 }
 async function getAsset(store, artifactId, assetId) {
   safeId(assetId, "\u8D44\u6E90 ID");
-  const state = await store.read(artifactId), asset = Object.hasOwn(state.assets, assetId) ? state.assets[assetId] : void 0;
+  const asset = await store.readProjection(artifactId, (state) => Object.hasOwn(state.assets, assetId) ? state.assets[assetId] : void 0);
   if (!asset) throw new StudioError("NOT_FOUND", "\u8D44\u6E90\u4E0D\u5B58\u5728\u3002");
   let data;
   try {
-    data = await readBoundedAsset(join6(await assetDirectory(store, artifactId, "assets"), assetId));
+    data = await readBoundedAsset(join7(await assetDirectory(store, artifactId, "assets"), assetId));
   } catch (error62) {
     if (error62.code !== "ENOENT") throw error62;
-    data = await readBoundedAsset(join6(await assetDirectory(store, artifactId, "recycle-assets"), assetId));
+    data = await readBoundedAsset(join7(await assetDirectory(store, artifactId, "recycle-assets"), assetId));
   }
   return { ...asset, data };
 }
@@ -13254,29 +13726,29 @@ function exportResources(store, artifactId) {
   } };
 }
 async function saveExport(root2, artifactId, result) {
-  const exportId = randomUUID11(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
+  const exportId = randomUUID12(), data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
   const record5 = { exportId, artifactId, filename: basename(result.filename), mimeType: result.mimeType, size: data.length, downloadPath: `/api/exports/${exportId}?artifactId=${encodeURIComponent(artifactId)}` };
-  await atomicWrite(join6(root2, "exports", exportId), data);
-  await atomicWrite(join6(root2, "exports", `${exportId}.json`), JSON.stringify(record5));
+  await atomicWrite(join7(root2, "exports", exportId), data);
+  await atomicWrite(join7(root2, "exports", `${exportId}.json`), JSON.stringify(record5));
   return record5;
 }
 async function getExport(root2, exportId) {
   safeId(exportId, "\u5BFC\u51FA ID");
   try {
-    const record5 = JSON.parse(await readFile4(join6(root2, "exports", `${exportId}.json`), "utf8"));
-    return { ...record5, data: await readFile4(join6(root2, "exports", exportId)) };
+    const record5 = JSON.parse(await readFile3(join7(root2, "exports", `${exportId}.json`), "utf8"));
+    return { ...record5, data: await readFile3(join7(root2, "exports", exportId)) };
   } catch (error62) {
     if (error62.code === "ENOENT") throw new StudioError("NOT_FOUND", "\u5BFC\u51FA\u6587\u4EF6\u4E0D\u5B58\u5728\u3002");
     throw error62;
   }
 }
 async function purgeExports(root2, artifactId) {
-  const directory = join6(await realpath2(root2), "exports");
+  const directory = join7(await realpath3(root2), "exports");
   let entries;
   try {
-    const info = await lstat2(directory);
-    if (!info.isDirectory() || info.isSymbolicLink() || !samePath2(await realpath2(directory), directory)) throw resourceScope2();
-    entries = await readdir3(directory);
+    const info = await lstat3(directory);
+    if (!info.isDirectory() || info.isSymbolicLink() || !samePath3(await realpath3(directory), directory)) throw resourceScope2();
+    entries = await readdir4(directory);
   } catch (error62) {
     if (error62.code === "ENOENT") return;
     throw error62;
@@ -13285,11 +13757,11 @@ async function purgeExports(root2, artifactId) {
   for (const name of entries) {
     const match = /^([A-Za-z0-9][A-Za-z0-9_-]{0,119})\.json$/.exec(name);
     if (!match) continue;
-    const metadata = join6(directory, name);
+    const metadata = join7(directory, name);
     let record5;
     try {
       await regularFile(metadata);
-      record5 = JSON.parse(await readFile4(metadata, "utf8"));
+      record5 = JSON.parse(await readFile3(metadata, "utf8"));
     } catch (error62) {
       if (error62.code === "ENOENT") continue;
       if (error62 instanceof SyntaxError) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u65E0\u6CD5\u8BFB\u53D6\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
@@ -13297,7 +13769,7 @@ async function purgeExports(root2, artifactId) {
     }
     if (!record5 || typeof record5 !== "object" || !("artifactId" in record5) || record5.artifactId !== artifactId) continue;
     if (!("exportId" in record5) || record5.exportId !== match[1]) throw new StudioError("CORRUPT_EXPORT", "\u5BFC\u51FA\u8BB0\u5F55\u4E0E\u6587\u4EF6\u540D\u4E0D\u7B26\uFF0C\u4F5C\u54C1\u5C1A\u672A\u5220\u9664\uFF1B\u8BF7\u4FDD\u7559\u5E76\u68C0\u67E5\u5BFC\u51FA\u76EE\u5F55\u3002");
-    const data = join6(directory, match[1]);
+    const data = join7(directory, match[1]);
     try {
       await regularFile(data);
     } catch (error62) {
@@ -13310,14 +13782,14 @@ async function purgeExports(root2, artifactId) {
     await rm3(entry.metadata, { force: true });
   }
 }
-var MAX_ASSET_BYTES, assetReference, samePath2, resourceScope2, EXTENSION_MIMES, MEDIA_MIMES;
+var MAX_ASSET_BYTES, assetReference, samePath3, resourceScope2, EXTENSION_MIMES, MEDIA_MIMES;
 var init_files = __esm({
   "src/core/shared/files.ts"() {
     "use strict";
     init_common();
     MAX_ASSET_BYTES = 20 * 1024 * 1024;
     assetReference = (artifactId, asset) => ({ ...asset, url: `/assets/${artifactId}/${asset.id}`, src: `/assets/${artifactId}/${asset.id}` });
-    samePath2 = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+    samePath3 = (left, right) => process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
     resourceScope2 = () => new StudioError("RESOURCE_SCOPE", "\u8D44\u6E90\u8DEF\u5F84\u5FC5\u987B\u4F4D\u4E8E\u5F53\u524D\u4F5C\u54C1\u7684\u771F\u5B9E\u76EE\u5F55\u4E2D\uFF0C\u4E0D\u80FD\u901A\u8FC7\u7B26\u53F7\u94FE\u63A5\u8BBF\u95EE\u5176\u4ED6\u4F4D\u7F6E\u3002");
     EXTENSION_MIMES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".svg": "image/svg+xml", ".pdf": "application/pdf", ".txt": "text/plain", ".json": "application/json", ".csv": "text/csv", ".html": "text/html", ".htm": "text/html" };
     MEDIA_MIMES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml", "video/mp4", "video/quicktime", "video/webm"]);
@@ -14534,9 +15006,9 @@ var init_esm = __esm({
 });
 
 // src/core/shared/archive.ts
-import { randomUUID as randomUUID12 } from "node:crypto";
-import { mkdir as mkdir5, mkdtemp, open as open4, readFile as readFile5, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
-import { basename as basename2, join as join7 } from "node:path";
+import { randomUUID as randomUUID13 } from "node:crypto";
+import { mkdir as mkdir5, mkdtemp, open as open6, readFile as readFile4, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
+import { basename as basename2, join as join8 } from "node:path";
 async function readArchiveInput(args) {
   if (args.archivePath !== void 0 === (args.archiveBase64 !== void 0)) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u63D0\u4F9B\u4E00\u4E2A\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u6216\u5907\u4EFD\u5185\u5BB9\u3002");
   if (args.archiveBase64 !== void 0) {
@@ -14550,7 +15022,7 @@ async function readArchiveInput(args) {
   }
   const path2 = text(args.archivePath, "", 4096);
   if (!path2.trim()) throw new StudioError("INVALID_ARGUMENT", "\u5907\u4EFD\u6587\u4EF6\u8DEF\u5F84\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-  const file2 = await open4(path2, "r");
+  const file2 = await open6(path2, "r");
   try {
     const info = await file2.stat();
     if (!info.isFile()) throw invalid2("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
@@ -14570,7 +15042,9 @@ async function readArchiveInput(args) {
   }
 }
 function entryLimit(name) {
-  if (name === "artifact.json") return MAX_SNAPSHOT_BYTES;
+  if (name === "artifact.json") throw unsupported();
+  if (name === "manifest.json") return MAX_MANIFEST_BYTES;
+  if (name === "artifact.sqlite") return MAX_SNAPSHOT_BYTES;
   if (name === "assets/") return 0;
   if (/^assets\/[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(name) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name.slice(7))) return MAX_ASSET_BYTES2;
   throw invalid2("\u5907\u4EFD\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u6587\u4EF6\u8DEF\u5F84\u3002");
@@ -14591,7 +15065,7 @@ function extract(data) {
       names.add(info.name.toLowerCase());
       return false;
     } });
-    if (!declared.has("artifact.json")) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u4F5C\u54C1\u5FEB\u7167\u3002");
+    if (!declared.has("manifest.json") || !declared.has("artifact.sqlite")) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u6570\u636E\u5E93\u6216\u683C\u5F0F\u8BF4\u660E\u3002");
     const seen = /* @__PURE__ */ new Set(), completed = /* @__PURE__ */ new Set();
     const unzipper = new Unzip((file2) => {
       const limit = entryLimit(file2.name), info = declared.get(file2.name);
@@ -14742,14 +15216,71 @@ function portable(state) {
   }
   return snapshot;
 }
+function manifest(files) {
+  let value;
+  try {
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(files.get("manifest.json")));
+  } catch {
+    throw invalid2("\u5907\u4EFD\u683C\u5F0F\u8BF4\u660E\u65E0\u6548\u3002");
+  }
+  if (!object2(value) || value.format !== "agentero-studio-archive" || value.version !== 2 || value.database !== "artifact.sqlite") throw unsupported();
+  safeId(value.artifactId, "\u4F5C\u54C1 ID");
+  return value;
+}
+async function databaseBytes(root2, state) {
+  await mkdir5(join8(root2, "staging"), { recursive: true });
+  const temporary = await mkdtemp(join8(root2, "staging", "db-"));
+  const file2 = join8(temporary, "artifact.sqlite");
+  let database;
+  try {
+    database = new SqliteArtifactRepository(file2, true);
+    database.database.exec("BEGIN IMMEDIATE");
+    database.writeState(state);
+    database.database.exec("COMMIT");
+    structuredClone(database.readState({ maxExpandedBytes: MAX_SNAPSHOT_BYTES }));
+    database.close();
+    database = void 0;
+    const bytes = await readFile4(file2);
+    if (bytes.length > MAX_SNAPSHOT_BYTES) throw tooLarge();
+    return bytes;
+  } finally {
+    database?.close();
+    await rm4(temporary, { recursive: true, force: true });
+  }
+}
+async function readDatabase(root2, files, metadata) {
+  const bytes = files.get(metadata.database);
+  if (!Buffer.from(bytes.subarray(0, 16)).equals(Buffer.from("SQLite format 3\0"))) throw invalid2("\u5907\u4EFD\u6570\u636E\u5E93\u65E0\u6548\u3002");
+  await mkdir5(join8(root2, "staging"), { recursive: true });
+  const temporary = await mkdtemp(join8(root2, "staging", "read-"));
+  let database;
+  try {
+    const file2 = join8(temporary, "artifact.sqlite");
+    await writeFile2(file2, bytes, { flag: "wx" });
+    try {
+      database = new SqliteArtifactRepository(file2);
+      const state = structuredClone(database.readState({ maxExpandedBytes: MAX_SNAPSHOT_BYTES }));
+      if (state.artifact.id !== metadata.artifactId) throw invalid2("\u5907\u4EFD\u4F5C\u54C1\u6807\u8BC6\u4E0E\u6570\u636E\u5E93\u4E0D\u4E00\u81F4\u3002");
+      return state;
+    } catch (error62) {
+      if (error62 instanceof StudioError && ["UNSUPPORTED_STORAGE", "TOO_LARGE"].includes(error62.code)) throw error62;
+      throw invalid2("\u5907\u4EFD\u6570\u636E\u5E93\u65E0\u6CD5\u8BFB\u53D6\u6216\u5185\u5BB9\u4E0D\u5B8C\u6574\u3002");
+    }
+  } finally {
+    database?.close();
+    await rm4(temporary, { recursive: true, force: true });
+  }
+}
 async function exportArchive(store, state, actor) {
   requireRole(actor, ["owner"]);
-  const snapshot = portable(state), json3 = Buffer.from(JSON.stringify(snapshot)), entries = { "artifact.json": json3 };
-  let size = json3.length;
-  if (json3.length > MAX_SNAPSHOT_BYTES || Object.keys(snapshot.assets).length + 1 > MAX_ENTRIES) throw tooLarge();
+  const snapshot = portable(state), database = await databaseBytes(store.root, snapshot);
+  const metadata = { format: "agentero-studio-archive", version: 2, database: "artifact.sqlite", artifactId: snapshot.artifact.id };
+  const description = Buffer.from(JSON.stringify(metadata)), entries = { "manifest.json": description, "artifact.sqlite": database };
+  let size = database.length + description.length;
+  if (Object.keys(snapshot.assets).length + 2 > MAX_ENTRIES) throw tooLarge();
   for (const [id2, asset] of Object.entries(snapshot.assets)) {
     safeId(id2, "\u8D44\u6E90 ID");
-    const bytes2 = await readFile5(join7(store.folder(state.artifact.id), "assets", id2));
+    const bytes2 = await readFile4(join8(store.folder(state.artifact.id), "assets", id2));
     if (bytes2.length !== asset.size) throw invalid2("\u4F5C\u54C1\u8D44\u6E90\u4E0D\u5B8C\u6574\uFF0C\u672A\u751F\u6210\u5907\u4EFD\u3002");
     size += bytes2.length;
     if (bytes2.length > MAX_ASSET_BYTES2 || size > MAX_EXPANDED_BYTES) throw tooLarge();
@@ -14763,12 +15294,7 @@ async function exportArchive(store, state, actor) {
 async function importArchive(store, products, data, actor, title) {
   requireRole(actor, ["owner"]);
   const files = extract(data);
-  let raw;
-  try {
-    raw = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(files.get("artifact.json")));
-  } catch {
-    throw invalid2("\u4F5C\u54C1\u5FEB\u7167\u4E0D\u662F\u6709\u6548\u7684 JSON\u3002");
-  }
+  const metadata = manifest(files), raw = await readDatabase(store.root, files, metadata);
   walk(raw);
   let original;
   try {
@@ -14782,8 +15308,8 @@ async function importArchive(store, products, data, actor, title) {
     const bytes = files.get(`assets/${id3}`);
     if (!bytes || bytes.length !== asset.size) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
   }
-  if ([...files.keys()].some((name) => name !== "artifact.json" && name !== "assets/" && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid2("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
-  const previous = copy(state.artifact), id2 = randomUUID12(), now = (/* @__PURE__ */ new Date()).toISOString();
+  if ([...files.keys()].some((name) => name !== "manifest.json" && name !== "artifact.sqlite" && name !== "assets/" && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid2("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
+  const previous = copy(state.artifact), id2 = randomUUID13(), now = (/* @__PURE__ */ new Date()).toISOString();
   walk(state, (record5, key, value) => {
     if (typeof value === "string") record5[key] = key === "artifactId" && value === previous.id ? id2 : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id2}/`);
   });
@@ -14799,13 +15325,13 @@ async function importArchive(store, products, data, actor, title) {
   for (const saved of state.history) saved.artifact.id = id2;
   products.validate(state);
   products.get(state.artifact.type).result(state);
-  await mkdir5(join7(store.root, "staging"), { recursive: true });
-  const staging = await mkdtemp(join7(store.root, "staging", "import-"));
+  await mkdir5(join8(store.root, "staging"), { recursive: true });
+  const staging = await mkdtemp(join8(store.root, "staging", "import-"));
   try {
-    await mkdir5(join7(staging, "assets"));
-    for (const assetId of Object.keys(state.assets)) await writeFile2(join7(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
-    await writeFile2(join7(staging, "artifact.json"), JSON.stringify(state), { flag: "wx" });
-    await mkdir5(join7(store.root, "artifacts"), { recursive: true });
+    await mkdir5(join8(staging, "assets"));
+    for (const assetId of Object.keys(state.assets)) await writeFile2(join8(staging, "assets", assetId), files.get(`assets/${assetId}`), { flag: "wx" });
+    await writeFile2(join8(staging, "artifact.sqlite"), await databaseBytes(store.root, state), { flag: "wx" });
+    await mkdir5(join8(store.root, "artifacts"), { recursive: true });
     await renameWithRetry(staging, store.folder(id2));
   } catch (error62) {
     await rm4(staging, { recursive: true, force: true });
@@ -14813,20 +15339,23 @@ async function importArchive(store, products, data, actor, title) {
   }
   return state;
 }
-var MAX_ARCHIVE_BYTES, MAX_EXPANDED_BYTES, MAX_SNAPSHOT_BYTES, MAX_ASSET_BYTES2, MAX_ENTRIES, invalid2, tooLarge;
+var MAX_ARCHIVE_BYTES, MAX_EXPANDED_BYTES, MAX_SNAPSHOT_BYTES, MAX_MANIFEST_BYTES, MAX_ASSET_BYTES2, MAX_ENTRIES, invalid2, tooLarge, unsupported;
 var init_archive = __esm({
   "src/core/shared/archive.ts"() {
     "use strict";
     init_esm();
     init_document();
     init_common();
+    init_sqlite_artifact();
     MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
     MAX_EXPANDED_BYTES = 256 * 1024 * 1024;
     MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+    MAX_MANIFEST_BYTES = 4096;
     MAX_ASSET_BYTES2 = 20 * 1024 * 1024;
     MAX_ENTRIES = 5e3;
     invalid2 = (message = "\u5907\u4EFD\u6587\u4EF6\u65E0\u6548\u6216\u4E0D\u5B8C\u6574\u3002") => new StudioError("INVALID_ARCHIVE", message);
     tooLarge = () => new StudioError("TOO_LARGE", "\u5907\u4EFD\u8D85\u8FC7\u5BB9\u91CF\u9650\u5236\uFF1AZIP 128 MB\uFF0C\u5C55\u5F00\u540E 256 MB\uFF0C\u5355\u4E2A\u8D44\u6E90 20 MB\u3002");
+    unsupported = () => new StudioError("UNSUPPORTED_STORAGE", "\u6B64\u5907\u4EFD\u4F7F\u7528\u4E0D\u53D7\u652F\u6301\u7684\u65E7\u7248\u5B58\u50A8\u683C\u5F0F\uFF0C\u8BF7\u7531 AI \u6309\u8FC1\u79FB\u8BF4\u660E\u91CD\u5EFA\u4F5C\u54C1\u3002");
   }
 });
 
@@ -14851,6 +15380,7 @@ var init_service = __esm({
     init_common();
     init_agent_workspaces();
     init_artifacts();
+    init_legacy_artifacts();
     init_history();
     init_feedback();
     init_proposals();
@@ -14951,7 +15481,8 @@ var init_service = __esm({
         const binding = name === "artifact_activity" ? void 0 : taskBinding2(args);
         let replay = false;
         const createsArtifact = name === "artifact_manage" && ["create", "import"].includes(text(args.action, "create"));
-        if (actor.kind === "agent" && args.artifactId !== void 0 && !createsArtifact && name !== "artifact_activity") {
+        const managesLegacyLifecycle = actor.kind === "agent" && name === "artifact_manage" && args.artifactId !== void 0 && ["trash", "purge"].includes(text(args.action)) && await readLegacyArtifact(this.dataRoot, safeId(args.artifactId));
+        if (actor.kind === "agent" && args.artifactId !== void 0 && !createsArtifact && !managesLegacyLifecycle && name !== "artifact_activity") {
           const id2 = safeId(args.artifactId), projected = await this.store.readProjection(id2, (state) => {
             const adapter = this.products.get(state.artifact.type).adapter;
             const ids2 = name === "artifact_apply" && Array.isArray(args.operations) ? [...new Set(args.operations.flatMap((operation2) => object2(operation2) && typeof operation2.op === "string" ? mutationTargets(state.content, operation2, adapter) ?? this.products.get(state.artifact.type).initialIds(state.content) : []))] : [];
@@ -14997,12 +15528,12 @@ var init_service = __esm({
       }
       async dispatch(name, args, actor, authority) {
         if (name === "studio_open") {
-          if (args.artifactId) await this.store.read(safeId(args.artifactId));
+          if (args.artifactId) await this.store.readProjection(safeId(args.artifactId), (state) => state.artifact);
           return { view: args.view ?? (args.artifactId ? "editor" : "library"), products: this.products.catalog(), ...args.artifactId ? { artifactId: args.artifactId } : {} };
         }
         if (name === "artifact_list") {
-          const result = listArtifacts(await this.store.list(), args, actor);
-          return { ...result, artifacts: result.artifacts.map((artifact) => ({ ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` })) };
+          const result = listArtifacts(await this.store.catalog(), args, actor);
+          return { ...result, artifacts: result.artifacts.map((artifact) => artifact.storageStatus === "unsupported" ? artifact : { ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` }) };
         }
         if (name === "artifact_manage") return this.manage(args, actor, authority);
         const id2 = safeId(args.artifactId);
@@ -15020,7 +15551,7 @@ var init_service = __esm({
         if (action === "purge") return this.purge(args, actor, authority);
         if (action === "import") return this.importArchive(await readArchiveInput(args), actor, args.title);
         if (action === "create" || action === "duplicate") {
-          const base = action === "duplicate" ? await this.store.read(safeId(args.artifactId)) : void 0;
+          const base = action === "duplicate" ? await this.store.readProjection(safeId(args.artifactId), (state2) => ({ artifact: state2.artifact, content: state2.content, assets: state2.assets })) : void 0;
           const product = this.products.get(base?.artifact.type ?? text(args.type, "whiteboard"));
           const title = text(args.title, base ? `${base.artifact.title} \u526F\u672C` : product.defaultTitle, 200);
           const content = product.create(args, base?.content);
@@ -15039,10 +15570,18 @@ var init_service = __esm({
           return { artifact: copy(state.artifact), ...product.result(state) };
         }
         const id2 = safeId(args.artifactId);
+        if (action === "trash" && await readLegacyArtifact(this.dataRoot, id2)) {
+          this.authorizeLegacyManagement(actor, authority);
+          const artifact = await trashLegacyArtifact(this.dataRoot, id2, args.expectedRevision);
+          this.collaboration.forget(id2);
+          this.thumbnails.delete(id2);
+          this.emit({ type: "artifact", artifactId: id2, artifact });
+          return { artifact };
+        }
         if (action === "asset-import") {
-          const state = await this.store.read(id2);
-          assertAlive(state.artifact);
-          return { asset: await importAsset(this.store, id2, args.assetPath, actor, this.products.get(state.artifact.type).validateAsset, (current) => this.authorizedActor(current, actor, authority)) };
+          const artifact = await this.store.readProjection(id2, (state) => state.artifact);
+          assertAlive(artifact);
+          return { asset: await importAsset(this.store, id2, args.assetPath, actor, this.products.get(artifact.type).validateAsset, (current) => this.authorizedActor(current, actor, authority)) };
         }
         if (action === "asset-delete") return deleteAsset(this.store, id2, args.assetId, actor, (current) => this.authorizedActor(current, actor, authority));
         const result = await this.store.transaction(id2, (state) => {
@@ -15065,7 +15604,8 @@ var init_service = __esm({
         for (const id2 of ids) {
           try {
             await this.store.purge(id2, async () => {
-              this.authorizedActor(await this.store.read(id2), actor, authority);
+              if (await readLegacyArtifact(this.dataRoot, id2)) this.authorizeLegacyManagement(actor, authority);
+              else this.authorizedActor(await this.store.read(id2), actor, authority);
               await purgeExports(this.dataRoot, id2);
             });
           } catch (error62) {
@@ -15079,6 +15619,10 @@ var init_service = __esm({
           this.emit({ type: "purged", artifactId: id2 });
         }
         return { deletedIds: deletedIds2, failures };
+      }
+      authorizeLegacyManagement(actor, authority) {
+        requireRole(actor, ["owner"]);
+        if (authority && (!authority.owner || authority.actorId !== actor.id || authority.viaLan)) throw new StudioError("FORBIDDEN", "\u4EC5\u672C\u673A\u623F\u4E3B\u53EF\u4EE5\u56DE\u6536\u4E0D\u53D7\u652F\u6301\u7684\u65E7\u7248\u4F5C\u54C1\u3002");
       }
       async importArchive(data, actor = this.owner, title) {
         if (this.closing) throw new StudioError("CLOSED", "Studio \u670D\u52A1\u5DF2\u7ECF\u5173\u95ED\u3002");
@@ -15108,42 +15652,45 @@ var init_service = __esm({
         });
         if (mode === "source" && args.contextId !== void 0 && args.feedbackId === void 0) args = { ...args, feedbackId: safeId(args.contextId, "\u53CD\u9988 ID") };
         if (mode === "assets") requireRole(actor, ["owner"]);
-        if (mode === "context") return this.store.readProjection(id2, (state2) => {
-          const currentActor = this.authorizedActor(state2, actor, authority);
+        if (mode === "context") return this.store.readProjection(id2, (state) => {
+          const currentActor = this.authorizedActor(state, actor, authority);
           if (args.feedbackId || args.contextId) {
-            const feedbackId = safeId(args.feedbackId ?? args.contextId, "\u53CD\u9988 ID"), found = state2.feedback.find((item) => item.id === feedbackId && feedbackVisible(item, currentActor));
+            const feedbackId = safeId(args.feedbackId ?? args.contextId, "\u53CD\u9988 ID"), found = state.feedback.find((item) => item.id === feedbackId && feedbackVisible(item, currentActor));
             if (!found) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
             const { creationReceipt: _receipt, ...feedback } = found;
-            return { contextId: feedbackId, artifact: state2.artifact, feedback, sources: state2.sources[feedbackId] ?? [], timer: this.getTimer(id2) };
+            return { contextId: feedbackId, artifact: state.artifact, feedback, sources: state.sources[feedbackId] ?? [], timer: this.getTimer(id2) };
           }
           const peers = this.getPresence(id2).filter((peer) => !args.viewId || peer.context?.viewId === args.viewId);
-          const pending = state2.feedback.filter((item) => item.status === "pending" && feedbackVisible(item, currentActor)).map(({ creationReceipt: _receipt, ...feedback }) => feedback);
+          const pending = state.feedback.filter((item) => item.status === "pending" && feedbackVisible(item, currentActor)).map(({ creationReceipt: _receipt, ...feedback }) => feedback);
           return { artifactId: id2, contexts: peers.flatMap((peer) => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []), pending, timer: this.getTimer(id2) };
         });
-        const state = await this.store.read(id2), product = this.products.get(state.artifact.type);
-        actor = this.authorizedActor(state, actor, authority);
-        if (mode === "assets") return listAssets(state, args, actor);
-        const hidden = state.feedback.filter((item) => !feedbackVisible(item, actor));
-        if (hidden.some((item) => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
-        for (const item of hidden) delete state.sources[item.id];
-        state.feedback = visibleFeedback(state.feedback, actor);
-        if (mode === "document" || mode === "board") return product.project(state);
-        if (mode === "history") {
-          const history = state.history.map((item) => item.entry);
-          return { history, batches: historyBatches(history) };
-        }
-        if (mode === "version") return product.result(version2(state, args.versionId ?? args.revision));
-        if (mode === "diff") {
-          const adjacent = args.adjacent === true;
-          const selected = adjacent ? version2(state, args.versionId ?? args.revision) : void 0;
-          const before = selected ? state.history[state.history.indexOf(selected) - 1] : version2(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
-          const after = selected ?? (args.toVersionId !== void 0 || args.to !== void 0 ? version2(state, args.toVersionId ?? args.to) : state);
-          if (args.ids !== void 0 && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some((id3) => typeof id3 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5DEE\u5F02\u5185\u5BB9\u5355\u5143 ID \u5217\u8868\u65E0\u6548\u3002");
-          const requestedIds = args.ids;
-          const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map((id3) => ({ id: id3, before: null, after: product.adapter.readUnit(after.content, id3) }));
-          return { ...before ? product.diff(before, after) : { changes: units }, units: requestedIds ? units.filter((unit2) => requestedIds.includes(unit2.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
-        }
-        return product.read(state, mode, args);
+        return this.store.readProjection(id2, (current) => {
+          const product = this.products.get(current.artifact.type);
+          const currentActor = this.authorizedActor(current, actor, authority);
+          if (mode === "assets") return listAssets(current, args, currentActor);
+          const hidden = current.feedback.filter((item) => !feedbackVisible(item, currentActor));
+          if (hidden.some((item) => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
+          const sources = { ...current.sources };
+          for (const item of hidden) delete sources[item.id];
+          const state = { ...current, sources, feedback: visibleFeedback(current.feedback, currentActor) };
+          if (mode === "document" || mode === "board") return product.project(state);
+          if (mode === "history") {
+            const history = state.history.map((item) => item.entry);
+            return { history, batches: historyBatches(history) };
+          }
+          if (mode === "version") return product.result(version2(state, args.versionId ?? args.revision));
+          if (mode === "diff") {
+            const adjacent = args.adjacent === true;
+            const selected = adjacent ? version2(state, args.versionId ?? args.revision) : void 0;
+            const before = selected ? state.history[state.history.indexOf(selected) - 1] : version2(state, args.fromVersionId ?? args.from ?? args.versionId ?? args.revision);
+            const after = selected ?? (args.toVersionId !== void 0 || args.to !== void 0 ? version2(state, args.toVersionId ?? args.to) : state);
+            if (args.ids !== void 0 && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some((id3) => typeof id3 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5DEE\u5F02\u5185\u5BB9\u5355\u5143 ID \u5217\u8868\u65E0\u6548\u3002");
+            const requestedIds = args.ids;
+            const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map((id3) => ({ id: id3, before: null, after: product.adapter.readUnit(after.content, id3) }));
+            return { ...before ? product.diff(before, after) : { changes: units }, units: requestedIds ? units.filter((unit2) => requestedIds.includes(unit2.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
+          }
+          return product.read(state, mode, args);
+        });
       }
       async apply(id2, args, actor, authority) {
         if (actor.kind === "agent" && typeof args.operationId === "string" && await this.store.readProjection(id2, (state) => state.operations.some((operation2) => operation2.id === args.operationId))) {
@@ -15258,7 +15805,7 @@ var init_service = __esm({
           }
           return this.collaboration.activity(id2, args, current, state.content.elements);
         };
-        if (args.action === "begin" || args.action === "update") return this.store.withSnapshotLock(id2, (state) => execute(state));
+        if (args.action === "begin" || args.action === "update") return this.store.withProjectionLock(id2, (state) => ({ ...authorizationState(state), content: state.content }), execute);
         const result = await this.store.readProjection(id2, (state) => execute(state));
         if (args.action === "end" || args.action === "release") await this.store.withProjectionLock(id2, authorizationState, (state) => {
           requireRole(this.authorizedActor(state, actor, authority), ["owner"]);
@@ -15313,6 +15860,7 @@ var init_service = __esm({
         try {
           state = await this.store.readProjection(artifactId, (state2) => ({ artifact: state2.artifact, sharing: state2.sharing }));
         } catch (error62) {
+          if (error62 instanceof StudioError && error62.code === "UNSUPPORTED_STORAGE" && allowMissing && !viaLan) return "local";
           if (error62 instanceof StudioError && error62.code === "NOT_FOUND") {
             if (allowMissing) return "local";
             throw new StudioError("UNAUTHORIZED", "\u5206\u4EAB\u94FE\u63A5\u65E0\u6548\u3002", { reason: "invalid-link" });
@@ -15359,26 +15907,29 @@ var init_service = __esm({
         return joined;
       }
       async hasShares() {
-        return (await this.store.list()).some((state) => state.sharing.enabled && sharingAccess(state.sharing) === "lan" && !state.artifact.trashedAt);
+        for (const artifact of await this.store.catalog()) if (artifact.storageStatus !== "unsupported" && !artifact.trashedAt) {
+          if (await this.store.readProjection(artifact.id, (state) => state.sharing.enabled && sharingAccess(state.sharing) === "lan")) return true;
+        }
+        return false;
       }
       async resetSharingSessions() {
-        for (const saved of await this.store.list()) if (saved.sharing.enabled) {
-          await this.store.transaction(saved.artifact.id, (state) => {
+        for (const artifact of await this.store.catalog()) if (artifact.storageStatus !== "unsupported" && await this.store.readProjection(artifact.id, (state) => state.sharing.enabled)) {
+          await this.store.transaction(artifact.id, (state) => {
             rememberGuestNames(state);
             revokeSharing(state.sharing);
           });
-          this.emit({ type: "share", artifactId: saved.artifact.id, enabled: false, reason: "sharing-closed", revokedRoles: [...SHARE_ROLES] });
+          this.emit({ type: "share", artifactId: artifact.id, enabled: false, reason: "sharing-closed", revokedRoles: [...SHARE_ROLES] });
         }
       }
       async putAsset(artifactId, data, input2, actor, authority) {
-        const state = await this.store.read(artifactId);
+        const state = await this.store.readProjection(artifactId, authorizationState);
         return putAsset(this.store, artifactId, data, input2, this.authorizedActor(state, actor, authority), this.products.get(state.artifact.type).validateAsset, (current) => this.authorizedActor(current, actor, authority));
       }
       async getAsset(artifactId, assetId) {
         return getAsset(this.store, artifactId, assetId);
       }
       async getThumbnail(artifactId, actor = this.owner) {
-        const state = await this.store.read(safeId(artifactId));
+        const state = await this.store.readProjection(safeId(artifactId), (state2) => ({ artifact: state2.artifact, content: state2.content }));
         if (state.artifact.trashedAt) requireRole(actor, ["owner"]);
         const product = this.products.get(state.artifact.type);
         if (!product.thumbnail) throw new StudioError("NO_PREVIEW", "\u6B64\u4EA7\u54C1\u672A\u63D0\u4F9B\u9884\u89C8\uFF0C\u8BF7\u76F4\u63A5\u6253\u5F00\u4F5C\u54C1\u3002");
@@ -15415,21 +15966,30 @@ var init_service = __esm({
         return this.store.withProjectionLock(artifactId, authorizationState, (state) => this.collaboration.room(artifactId, input2, this.authorizedActor(state, actor, authority)));
       }
       async export(id2, args, actor, authority) {
-        const state = await this.store.read(id2);
-        actor = this.authorizedActor(state, actor, authority);
-        assertAlive(state.artifact);
         const format = text(args.format, "json", 20).toLowerCase();
         let result;
         const { artifactId: _artifactId, format: _format, options: nestedOptions, ...flatOptions } = args;
         const options = { ...object2(nestedOptions) ? nestedOptions : {}, ...flatOptions };
         const resources = exportResources(this.store, id2);
         try {
-          result = format === "zip" ? await exportArchive(this.store, state, actor) : await this.products.get(state.artifact.type).export(state, format, options, resources);
+          if (format === "zip") {
+            const state = await this.store.read(id2);
+            actor = this.authorizedActor(state, actor, authority);
+            assertAlive(state.artifact);
+            result = await exportArchive(this.store, state, actor);
+          } else {
+            const snapshot = await this.store.readProjection(id2, (state) => {
+              actor = this.authorizedActor(state, actor, authority);
+              assertAlive(state.artifact);
+              return { artifact: state.artifact, content: state.content };
+            });
+            result = await this.products.get(snapshot.artifact.type).export(snapshot, format, options, resources);
+          }
         } catch (error62) {
           if (error62 instanceof Error && "code" in error62 && typeof error62.code === "string") throw new StudioError(error62.code, error62.message);
           throw error62;
         }
-        return this.store.transaction(id2, (current) => {
+        return this.store.withProjectionLock(id2, authorizationState, (current) => {
           this.authorizedActor(current, actor, authority);
           assertAlive(current.artifact);
           return saveExport(this.dataRoot, id2, result);
@@ -15449,21 +16009,21 @@ var init_service = __esm({
 });
 
 // src/server/guest-session.ts
-import { createHash as createHash7, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { mkdir as mkdir6, readFile as readFile6 } from "node:fs/promises";
-import { join as join8 } from "node:path";
+import { createHash as createHash8, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { mkdir as mkdir6, readFile as readFile5 } from "node:fs/promises";
+import { join as join9 } from "node:path";
 async function createGuestSessions(dataRoot) {
   await mkdir6(dataRoot, { recursive: true });
-  const file2 = join8(dataRoot, "guest-auth.json");
+  const file2 = join9(dataRoot, "guest-auth.json");
   let compromised = false;
-  const release = await (0, import_proper_lockfile2.lock)(file2, { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: () => {
+  const release = await (0, import_proper_lockfile3.lock)(file2, { realpath: false, stale: 3e4, update: 5e3, retries: { retries: 100, minTimeout: 10, maxTimeout: 50, factor: 1 }, onCompromised: () => {
     compromised = true;
   } });
   let secret;
   try {
     let saved;
     try {
-      saved = await readFile6(file2, "utf8");
+      saved = await readFile5(file2, "utf8");
     } catch (error62) {
       if (error62.code !== "ENOENT") throw error62;
       saved = JSON.stringify({ version: 1, secret: randomBytes2(32).toString("base64url") });
@@ -15482,7 +16042,7 @@ async function createGuestSessions(dataRoot) {
   } finally {
     if (!compromised) await release();
   }
-  const cookieName = `studio-guest-${createHash7("sha256").update(secret).digest("hex").slice(0, 24)}`;
+  const cookieName = `studio-guest-${createHash8("sha256").update(secret).digest("hex").slice(0, 24)}`;
   const sign = (id2) => createHmac("sha256", secret).update(id2).digest("base64url");
   const read = (request) => {
     const value = request.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
@@ -15498,11 +16058,11 @@ async function createGuestSessions(dataRoot) {
   };
   return Object.assign(resolve4, { read });
 }
-var import_proper_lockfile2;
+var import_proper_lockfile3;
 var init_guest_session = __esm({
   "src/server/guest-session.ts"() {
     "use strict";
-    import_proper_lockfile2 = __toESM(require_proper_lockfile(), 1);
+    import_proper_lockfile3 = __toESM(require_proper_lockfile(), 1);
     init_common();
   }
 });
@@ -16146,9 +16706,9 @@ var init_http = __esm({
 });
 
 // src/server/index.ts
-import { randomUUID as randomUUID13 } from "node:crypto";
-import { readFile as readFile7, unlink as unlink2 } from "node:fs/promises";
-import { join as join9 } from "node:path";
+import { randomUUID as randomUUID14 } from "node:crypto";
+import { readFile as readFile6, unlink as unlink2 } from "node:fs/promises";
+import { join as join10 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1_ce399f1e4e31d6809a54d35f78d374fe/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -37799,23 +38359,23 @@ async function discoverService(root2, entry) {
     }
   }
   if (!record5) {
-    const lock3 = join2(root2, "startup.lock");
+    const lock4 = join2(root2, "startup.lock");
     let acquired = false;
     for (let attempt = 0; attempt < 100; attempt++) {
       try {
-        await mkdir2(lock3);
-        await writeFile(join2(lock3, "owner"), String(process.pid));
+        await mkdir2(lock4);
+        await writeFile(join2(lock4, "owner"), String(process.pid));
         acquired = true;
         break;
       } catch {
         record5 = await probe(root2);
         if (record5) break;
         try {
-          const pid = Number(await readFile(join2(lock3, "owner"), "utf8"));
+          const pid = Number(await readFile(join2(lock4, "owner"), "utf8"));
           if (pid && !isAlive(pid)) {
-            await unlink(join2(lock3, "owner"));
+            await unlink(join2(lock4, "owner"));
             const { rmdir: rmdir2 } = await import("node:fs/promises");
-            await rmdir2(lock3);
+            await rmdir2(lock4);
           }
         } catch {
         }
@@ -37838,10 +38398,10 @@ async function discoverService(root2, entry) {
           }
         }
       } finally {
-        await unlink(join2(lock3, "owner")).catch(() => {
+        await unlink(join2(lock4, "owner")).catch(() => {
         });
         const { rmdir: rmdir2 } = await import("node:fs/promises");
-        await rmdir2(lock3).catch(() => {
+        await rmdir2(lock4).catch(() => {
         });
       }
     }
@@ -46078,7 +46638,7 @@ var schemas = {
 var descriptions = {
   studio_open: "\u4EC5\u5728\u5F53\u524D\u4F1A\u8BDD\u6CA1\u6709\u5DF2\u6253\u5F00\u7684 Agentero \u521B\u4F5C\u9762\u677F\u4E14\u672C\u6B65\u786E\u9700\u754C\u9762\u65F6\u8C03\u7528\u4E00\u6B21\uFF0C\u6253\u5F00\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\uFF1B\u8C03\u7528\u524D\u5148\u67E5\u5F53\u524D\u5BBF\u4E3B App \u4E0A\u4E0B\u6587\u6216\u9762\u677F\u6E05\u5355\u3002appId=agentero-studio\u3001panelOpen=true \u8868\u793A\u5DF2\u6709\u9762\u677F\uFF0C\u5373\u4F7F artifactId/viewId \u4E3A\u7A7A\u4E5F\u5E94\u590D\u7528\uFF1B\u540E\u7EED\u8BFB\u53D6\u3001\u4FEE\u6539\u548C\u9A8C\u8BC1\u76F4\u63A5\u4F7F\u7528\u4F5C\u54C1\u5DE5\u5177\uFF0C\u4E0D\u91CD\u590D\u8C03\u7528\u672C\u5DE5\u5177\u5237\u65B0\u3001\u8865\u8FDE\u63A5\u6216\u786E\u8BA4\u4FDD\u5B58\u3002\u6253\u5F00\u8BF7\u6C42\u8FDB\u884C\u4E2D\u5148\u7B49\u5F85\uFF1B\u53E5\u67C4\u5931\u6548\u5148\u91CD\u65B0\u67E5\u8BE2\uFF0C\u786E\u8BA4\u5173\u95ED\u540E\u624D\u53EF\u518D\u6B21\u6253\u5F00\u3002\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
   artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
-  artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u4F5C\u54C1\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
+  artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u6570\u636E\u5E93\u4F5C\u54C1\u3002\u65E7\u7248 JSON \u4F5C\u54C1\u663E\u793A storageStatus:unsupported\uFF0C\u4EC5\u652F\u6301\u79FB\u5165\u56DE\u6536\u7AD9\u4E0E purge\uFF0C\u65E0\u6CD5\u6253\u5F00\u3001\u6062\u590D\u3001\u590D\u5236\u6216\u7F16\u8F91\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A\u6570\u636E\u5E93\u5907\u4EFD ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
   artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u6587\u6863\u7528 blocks+elementId \u8BFB\u53D6\u7A33\u5B9A\u5757\uFF08\u53EF\u9644 feedbackId \u8BFB\u51BB\u7ED3\u5757\uFF09\uFF0Csource \u8FD4\u56DE\u53EF\u5206\u9875 JSON\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
   artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u6587\u6863\u533A\u57DF\u7528 document \u64CD\u4F5C\uFF1Aid \u6307\u5B9A\u533A\u57DF\uFF0Cdata.operations \u4E3A insert/update/delete/move \u5757\u64CD\u4F5C\uFF08insert \u542B block\uFF0Cupdate \u542B id/changes\uFF0Cmove \u542B id/parentId/afterId\uFF09\uFF1B\u6CBF\u7528\u533A\u57DF expectedVersions\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
   artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002Agent\u9009\u62E9\u6216\u64A4\u56DE\u5DF2\u5E94\u7528\u65B9\u6848\u4EA7\u751F\u5185\u5BB9\u53D8\u5316\u65F6\u4E5F\u9700\u6709\u6548taskId/generation\u3002send \u8BF7\u6C42\u623F\u4E3B\u9644\u52A0\u5230\u5BF9\u8BDD\uFF1B\u540C\u4E00\u5185\u5BB9\u91CD\u8BD5\u8FD4\u56DE\u539F attachment.requestId\uFF0C\u5185\u5BB9\u53D8\u5316\u540E\u751F\u6210\u65B0\u8BF7\u6C42\u3002attached \u4EC5\u623F\u4E3B\u754C\u9762\u5728\u5BBF\u4E3B\u6210\u529F\u540E\u6309\u8BE5\u8BF7\u6C42\u56DE\u5199\uFF1B\u4E0E\u5907\u6CE8\u89E3\u51B3\u548C Agent \u5904\u7406\u72B6\u6001\u72EC\u7ACB\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
@@ -46212,14 +46772,14 @@ var option = (key) => {
   return index < 0 ? void 0 : process.argv[index + 1];
 };
 var root = dataDirectory(option("--data-root"));
-var html = await readFile7(new URL("./app.html", import.meta.url), "utf8");
+var html = await readFile6(new URL("./app.html", import.meta.url), "utf8");
 if (process.argv.includes("--serve")) {
   const { startStudioHost: startStudioHost2 } = await Promise.resolve().then(() => (init_http(), http_exports));
   const host = await startStudioHost2({ dataRoot: root, html, port: Number(option("--port") || 0) });
-  await writeRecord(root, { origin: host.origin, token: host.token, pid: process.pid, instanceId: randomUUID13() });
+  await writeRecord(root, { origin: host.origin, token: host.token, pid: process.pid, instanceId: randomUUID14() });
   let closing;
   const close = () => closing ??= (async () => {
-    if ((await readRecord(root))?.pid === process.pid) await unlink2(join9(root, "service.json")).catch(() => {
+    if ((await readRecord(root))?.pid === process.pid) await unlink2(join10(root, "service.json")).catch(() => {
     });
     await host.close();
   })();

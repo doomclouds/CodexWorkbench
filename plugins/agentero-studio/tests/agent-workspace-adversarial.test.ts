@@ -37,7 +37,7 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 const read = () => service.execute('artifact_read', { artifactId }) as Promise<Board>;
-const bytes = () => readFile(service.store.file(artifactId), 'utf8');
+const bytes = () => readFile(service.store.file(artifactId));
 const binding = ({ taskId, generation }: AgentTaskBinding) => ({ taskId, generation });
 async function begin(taskId: string, scope: AgentActivityScope, actor = first, extra: Record<string, unknown> = {}): Promise<AgentTask> {
   const result = await service.execute('artifact_activity', { artifactId, action: 'begin', taskId, phase: 'preparing', scope, ...extra }, actor);
@@ -57,7 +57,7 @@ describe('agent workspace adversarial service boundaries', () => {
   it('rejects an unbound content write without creating history or receipts', async () => {
     const before = await bytes();
     await expect(mutate(changeA, first)).rejects.toMatchObject({ code: 'TASK_REQUIRED' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('revokes a queued generation before the real artifact lock opens and confirms only after the barrier', async () => {
@@ -74,16 +74,20 @@ describe('agent workspace adversarial service boundaries', () => {
       expect(released, 'release must wait for the ordinary store lock').toBe(false);
       unlock.resolve(); await held; expect(await ending).not.toHaveProperty('error');
       expect(await queued).toMatchObject({ error: { code: 'TASK_CLOSED' } });
-      expect(await bytes()).toBe(before);
+      expect(await bytes()).toEqual(before);
       await expect(mutate(changeA, first, binding(task))).rejects.toMatchObject({ code: 'TASK_CLOSED' });
-      expect(await bytes()).toBe(before);
+      expect(await bytes()).toEqual(before);
     } finally { unlock.resolve(); await held; await queued; }
   });
 
   it('waits for a save already inside the commit lock before acknowledging human release', async () => {
     const task = await begin('committing', { ids: ['a'] }), entered = deferred(), save = deferred();
-    const write = service.store.write.bind(service.store);
-    vi.spyOn(service.store, 'write').mockImplementationOnce(async state => { entered.resolve(); await save.promise; return write(state); });
+    const transaction = service.store.transaction.bind(service.store);
+    vi.spyOn(service.store, 'transaction').mockImplementationOnce((id, run) => transaction(id, async state => {
+      const result = await run(state);
+      entered.resolve(); await save.promise;
+      return result;
+    }));
     const committing = mutate(changeA, first, binding(task)).then(value => ({ value }), error => ({ error }));
     await entered.promise;
     let acknowledged = false;
@@ -95,7 +99,7 @@ describe('agent workspace adversarial service boundaries', () => {
       expect((await read()).elements.find(value => value.id === 'a')?.text).toBe('Agent update');
       const confirmed = await bytes();
       await expect(mutate(changeA, first, binding(task))).rejects.toMatchObject({ code: 'TASK_CLOSED' });
-      expect(await bytes()).toBe(confirmed);
+      expect(await bytes()).toEqual(confirmed);
     } finally { save.resolve(); await committing.catch(() => {}); await ending.catch(() => {}); }
   });
 
@@ -129,8 +133,11 @@ describe('agent workspace adversarial service boundaries', () => {
   it('does not let a late read completion refresh a replacement generation', async () => {
     const now = Date.now(), time = vi.spyOn(Date, 'now').mockReturnValue(now);
     const old = await begin('late-read', { ids: ['a'] }), entered = deferred(), finish = deferred();
-    const realRead = service.store.read.bind(service.store);
-    vi.spyOn(service.store, 'read').mockImplementationOnce(async id => { entered.resolve(); await finish.promise; return realRead(id); });
+    const realRead = service.store.readProjection.bind(service.store);
+    vi.spyOn(service.store, 'readProjection').mockImplementationOnce(realRead).mockImplementationOnce(async (id, pick, options) => {
+      entered.resolve(); await finish.promise;
+      return realRead(id, pick, options);
+    });
     const reading = service.execute('artifact_read', { artifactId, ...binding(old) }, first).then(value => ({ value }), error => ({ error }));
     await entered.promise;
     try {
@@ -173,7 +180,7 @@ describe('agent workspace adversarial service boundaries', () => {
     expect(await tasks()).toEqual([renewed]);
     time.mockReturnValue(renewed.expiresAt); expect(await tasks()).toEqual([]);
     const before = await bytes();
-    await expect(mutate(changeA, first, binding(task))).rejects.toMatchObject({ code: 'TASK_STALE' }); expect(await bytes()).toBe(before);
+    await expect(mutate(changeA, first, binding(task))).rejects.toMatchObject({ code: 'TASK_STALE' }); expect(await bytes()).toEqual(before);
   });
 
   it('counts a real phase transition as progress while an unchanged update only renews activity', async () => {
@@ -210,7 +217,7 @@ describe('agent workspace adversarial service boundaries', () => {
     await mutate([{ op: 'update', id: 'a', changes: { x: 510 } }]);
     const before = await bytes();
     await expect(mutate(changeA, first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE_CONFLICT' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it.each([
@@ -219,20 +226,20 @@ describe('agent workspace adversarial service boundaries', () => {
   ] as const)('checks the actual $type path instead of its declared box', async element => {
     const task = await begin('path', { rect: { x: 0, y: 0, w: 200, h: 200 } }), before = await bytes();
     await expect(mutate([{ op: 'add', element: structuredClone(element) as unknown as Operation['element'] }], first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('does not let a parent or group field authorize a new object outside explicit ids', async () => {
     const task = await begin('explicit-id', { ids: ['a'] }), before = await bytes();
     await expect(mutate([{ op: 'add', element: { id: 'child', type: 'text', x: 800, y: 800, w: 50, h: 50, parentId: 'a', groupId: 'a' } }], first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('checks cascaded descendants of a delete instead of only its explicit target', async () => {
     await mutate([{ op: 'add', element: { id: 'child', type: 'text', parentId: 'a', x: 800, y: 800, w: 50, h: 50 } }]);
     const task = await begin('parent-delete', { ids: ['a'] }), before = await bytes();
     await expect(mutate([{ op: 'delete', id: 'a' }], first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('includes implicitly changed bound-arrow geometry when moving an endpoint', async () => {
@@ -240,7 +247,7 @@ describe('agent workspace adversarial service boundaries', () => {
     const task = await begin('endpoint-only', { ids: ['a'] }), before = await bytes();
     const move: Operation[] = [{ op: 'update', id: 'a', changes: { x: 30 } }];
     await expect(mutate(move, first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
     await activity(task, 'end');
     const complete = await begin('endpoint-and-arrow', { ids: ['a', 'connector'] });
     await mutate(move, first, binding(complete));
@@ -253,7 +260,7 @@ describe('agent workspace adversarial service boundaries', () => {
       { op: 'add', element: { id: 'inside', type: 'text', x: 120, y: 120, w: 20, h: 20 } },
       { op: 'add', element: { id: 'outside', type: 'text', x: 900, y: 900, w: 20, h: 20 } },
     ], first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
     await mutate([{ op: 'add', element: { id: 'inside', type: 'text', x: 120, y: 120, w: 20, h: 20 } }], first, binding(task));
     expect((await read()).elements.find(value => value.id === 'inside')).toMatchObject({ x: 120, y: 120, w: 20, h: 20 });
   });
@@ -261,7 +268,7 @@ describe('agent workspace adversarial service boundaries', () => {
   it('does not infer whole-board authority from a global operation with no object targets', async () => {
     const task = await begin('local-style', { ids: ['a'] }), before = await bytes();
     await expect(mutate([{ op: 'style', style: { accent: '#ff0000' } }], first, binding(task))).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('does not let restoring the order unit reorder objects outside an explicit task', async () => {
@@ -271,7 +278,7 @@ describe('agent workspace adversarial service boundaries', () => {
     expect(current.elements.map(value => value.id)).toEqual(['a', 'html', 'b']);
     const operations: Operation[] = [{ op: 'restore', versionId: initial, id: '$order' }];
     await expect(mutate(operations, first, { ...binding(task), expectedVersions: { $order: current.orderVersion ?? 0 } })).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
     await activity(task, 'end');
     const full = await begin('full-order-restore', { ids: ['a', 'b', 'html'] });
     await mutate(operations, first, { ...binding(full), expectedVersions: { $order: current.orderVersion ?? 0 } });
@@ -288,7 +295,7 @@ describe('agent workspace adversarial service boundaries', () => {
     const operations: Operation[] = [{ op: 'layout', ids: ['b'], preset: 'front' }];
     const versions = { b: current.elements.find(value => value.id === 'b')!.version, $order: current.orderVersion ?? 0 };
     await expect(mutate(operations, first, { ...binding(task), expectedVersions: versions })).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
     await activity(task, 'end');
     const declared = await begin('layer-own-b', { ids: ['b'] });
     const accepted = await mutate(operations, first, { ...binding(declared), expectedVersions: versions });
@@ -302,9 +309,9 @@ describe('agent workspace adversarial service boundaries', () => {
     await mutate([{ op: 'update', id: 'a', changes: { text: 'Human revision' } }]);
     const before = await bytes();
     await expect(mutate(changeA, first, { ...binding(task), expectedVersions: { a: 1 }, expectedRevision: undefined })).rejects.toMatchObject({ code: 'CONFLICT' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
     await expect(mutate([{ op: 'update', id: 'b', changes: { text: 'Out of scope' } }], first, { ...binding(task), expectedVersions: { b: 1 } })).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('returns an ended lease receipt verbatim without a write or renewal and rejects altered reuse', async () => {
@@ -312,11 +319,11 @@ describe('agent workspace adversarial service boundaries', () => {
     const args = { artifactId, operationId: randomUUID(), expectedVersions: { a: 1 }, operations: changeA, ...binding(task) };
     const original = await service.execute('artifact_apply', args, first); await activity(task, 'end');
     const before = await bytes();
-    const writes = vi.spyOn(service.store, 'write');
+    const writes = vi.spyOn(service.store, 'transaction');
     expect(await service.execute('artifact_apply', args, first)).toEqual(original);
-    expect(await bytes()).toBe(before); expect(await tasks()).toEqual([]); expect(writes).not.toHaveBeenCalled();
+    expect(await bytes()).toEqual(before); expect(await tasks()).toEqual([]); expect(writes).not.toHaveBeenCalled();
     await expect(service.execute('artifact_apply', { ...args, operations: [{ op: 'update', id: 'a', changes: { text: 'Altered payload' } }] }, first)).rejects.toMatchObject({ code: 'OPERATION_REUSED' });
-    expect(await bytes()).toBe(before); expect(writes).not.toHaveBeenCalled();
+    expect(await bytes()).toEqual(before); expect(writes).not.toHaveBeenCalled();
   });
 
   it('enforces lease authority for proposal choice and active-option withdrawal content writes', async () => {
@@ -327,11 +334,11 @@ describe('agent workspace adversarial service boundaries', () => {
     const feedbackId = suggested.feedback[0].id, task = await begin('proposal', { ids: ['html'] });
     const choose = { artifactId, action: 'choose', feedbackId, optionId: 'one', operationId: randomUUID() };
     let before = await bytes();
-    await expect(service.execute('artifact_feedback', choose, first)).rejects.toMatchObject({ code: 'TASK_REQUIRED' }); expect(await bytes()).toBe(before);
+    await expect(service.execute('artifact_feedback', choose, first)).rejects.toMatchObject({ code: 'TASK_REQUIRED' }); expect(await bytes()).toEqual(before);
     await service.execute('artifact_feedback', { ...choose, ...binding(task) }, first);
     await release(task); before = await bytes();
     for (const action of ['choose', 'withdraw']) await expect(service.execute('artifact_feedback', { artifactId, action, feedbackId, optionId: 'one', operationId: randomUUID(), ...binding(task) }, first)).rejects.toMatchObject({ code: 'TASK_CLOSED' });
-    expect(await bytes()).toBe(before); expect((await read()).elements.find(value => value.id === 'html')?.html).toBe('<h1>First</h1>');
+    expect(await bytes()).toEqual(before); expect((await read()).elements.find(value => value.id === 'html')?.html).toBe('<h1>First</h1>');
   });
 
   it.each(['style', 'motion'] as const)('checks whole-board %s authority through proposal choose and withdrawal', async kind => {
@@ -344,13 +351,13 @@ describe('agent workspace adversarial service boundaries', () => {
     const choose = { artifactId, action: 'choose', feedbackId, optionId: 'one', operationId: randomUUID() };
     let before = await bytes();
     await expect(service.execute('artifact_feedback', { ...choose, ...binding(task) }, first)).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
     await activity(task, 'end');
     const full = await begin('full-global-proposal', { ids: ['a', 'b', 'html'] });
     await service.execute('artifact_feedback', { ...choose, ...binding(full) }, first); await activity(full, 'end');
     const withdraw = await begin('local-global-withdrawal', { ids: ['a'] }); before = await bytes();
     await expect(service.execute('artifact_feedback', { artifactId, action: 'withdraw', feedbackId, optionId: 'one', operationId: randomUUID(), ...binding(withdraw) }, first)).rejects.toMatchObject({ code: 'TASK_SCOPE' });
-    expect(await bytes()).toBe(before);
+    expect(await bytes()).toEqual(before);
   });
 
   it('allows human editing inside a reserved agent region but prevents an agent from releasing another', async () => {

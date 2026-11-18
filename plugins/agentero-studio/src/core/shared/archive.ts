@@ -9,15 +9,19 @@ import type { ExportBytes } from './files.js';
 import type { ArtifactMetadata, ArtifactState } from './model.js';
 import type { ProductRegistry } from './products.js';
 import type { ArtifactStore } from './store.js';
+import { SqliteArtifactRepository } from './sqlite-artifact.js';
 
 export const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
 const MAX_EXPANDED_BYTES = 256 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 4096;
 const MAX_ASSET_BYTES = 20 * 1024 * 1024;
 const MAX_ENTRIES = 5000;
 const invalid = (message = '备份文件无效或不完整。') => new StudioError('INVALID_ARCHIVE', message);
 const tooLarge = () => new StudioError('TOO_LARGE', '备份超过容量限制：ZIP 128 MB，展开后 256 MB，单个资源 20 MB。');
 type ImportedMetadata = ArtifactMetadata & { importedFrom?: { artifactId: string; title: string; createdAt: string; importedAt: string } };
+interface ArchiveManifest { format: 'agentero-studio-archive'; version: 2; database: 'artifact.sqlite'; artifactId: string }
+const unsupported = () => new StudioError('UNSUPPORTED_STORAGE', '此备份使用不受支持的旧版存储格式，请由 AI 按迁移说明重建作品。');
 
 /** One bounded input path for explicit owner file requests and internal transports. */
 export async function readArchiveInput(args: Record<string, unknown>): Promise<Uint8Array> {
@@ -40,7 +44,9 @@ export async function readArchiveInput(args: Record<string, unknown>): Promise<U
 }
 
 function entryLimit(name: string): number {
-  if (name === 'artifact.json') return MAX_SNAPSHOT_BYTES;
+  if (name === 'artifact.json') throw unsupported();
+  if (name === 'manifest.json') return MAX_MANIFEST_BYTES;
+  if (name === 'artifact.sqlite') return MAX_SNAPSHOT_BYTES;
   if (name === 'assets/') return 0;
   if (/^assets\/[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(name) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name.slice(7))) return MAX_ASSET_BYTES;
   // Archive paths are never joined to the filesystem before this exact whitelist.
@@ -59,7 +65,7 @@ function extract(data: Uint8Array): Map<string, Uint8Array> {
       declaredSize += info.originalSize; if (declaredSize > MAX_EXPANDED_BYTES) throw tooLarge();
       declared.set(info.name, info); names.add(info.name.toLowerCase()); return false;
     } });
-    if (!declared.has('artifact.json')) throw invalid('备份缺少作品快照。');
+    if (!declared.has('manifest.json') || !declared.has('artifact.sqlite')) throw invalid('备份缺少数据库或格式说明。');
     const seen = new Set<string>(), completed = new Set<string>();
     const unzipper = new Unzip(file => {
       const limit = entryLimit(file.name), info = declared.get(file.name);
@@ -173,10 +179,62 @@ function portable(state: ArtifactState<unknown>): ArtifactState<unknown> {
   return snapshot;
 }
 
+function manifest(files: Map<string, Uint8Array>): ArchiveManifest {
+  let value: unknown;
+  try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(files.get('manifest.json')!)); }
+  catch { throw invalid('备份格式说明无效。'); }
+  if (!object(value) || value.format !== 'agentero-studio-archive' || value.version !== 2 || value.database !== 'artifact.sqlite') throw unsupported();
+  safeId(value.artifactId, '作品 ID');
+  return value as unknown as ArchiveManifest;
+}
+
+async function databaseBytes(root: string, state: ArtifactState<unknown>): Promise<Buffer> {
+  await mkdir(join(root, 'staging'), { recursive: true });
+  const temporary = await mkdtemp(join(root, 'staging', 'db-'));
+  const file = join(temporary, 'artifact.sqlite');
+  let database: SqliteArtifactRepository | undefined;
+  try {
+    database = new SqliteArtifactRepository(file, true);
+    database.database.exec('BEGIN IMMEDIATE');
+    database.writeState(state);
+    database.database.exec('COMMIT');
+    // A produced backup must satisfy the same logical expansion limit as import.
+    structuredClone(database.readState({ maxExpandedBytes: MAX_SNAPSHOT_BYTES }));
+    database.close(); database = undefined;
+    const bytes = await readFile(file);
+    if (bytes.length > MAX_SNAPSHOT_BYTES) throw tooLarge();
+    return bytes;
+  } finally { database?.close(); await rm(temporary, { recursive: true, force: true }); }
+}
+
+async function readDatabase(root: string, files: Map<string, Uint8Array>, metadata: ArchiveManifest): Promise<ArtifactState<unknown>> {
+  const bytes = files.get(metadata.database)!;
+  if (!Buffer.from(bytes.subarray(0, 16)).equals(Buffer.from('SQLite format 3\0'))) throw invalid('备份数据库无效。');
+  await mkdir(join(root, 'staging'), { recursive: true });
+  const temporary = await mkdtemp(join(root, 'staging', 'read-'));
+  let database: SqliteArtifactRepository | undefined;
+  try {
+    const file = join(temporary, 'artifact.sqlite');
+    await writeFile(file, bytes, { flag: 'wx' });
+    try {
+      database = new SqliteArtifactRepository(file);
+      const state = structuredClone(database.readState<unknown, unknown, unknown>({ maxExpandedBytes: MAX_SNAPSHOT_BYTES }));
+      if (state.artifact.id !== metadata.artifactId) throw invalid('备份作品标识与数据库不一致。');
+      return state;
+    }
+    catch (error) {
+      if (error instanceof StudioError && ['UNSUPPORTED_STORAGE', 'TOO_LARGE'].includes(error.code)) throw error;
+      throw invalid('备份数据库无法读取或内容不完整。');
+    }
+  } finally { database?.close(); await rm(temporary, { recursive: true, force: true }); }
+}
+
 export async function exportArchive(store: ArtifactStore<unknown>, state: ArtifactState<unknown>, actor: Actor): Promise<ExportBytes> {
   requireRole(actor, ['owner']);
-  const snapshot = portable(state), json = Buffer.from(JSON.stringify(snapshot)), entries: Zippable = { 'artifact.json': json }; let size = json.length;
-  if (json.length > MAX_SNAPSHOT_BYTES || Object.keys(snapshot.assets).length + 1 > MAX_ENTRIES) throw tooLarge();
+  const snapshot = portable(state), database = await databaseBytes(store.root, snapshot);
+  const metadata: ArchiveManifest = { format: 'agentero-studio-archive', version: 2, database: 'artifact.sqlite', artifactId: snapshot.artifact.id };
+  const description = Buffer.from(JSON.stringify(metadata)), entries: Zippable = { 'manifest.json': description, 'artifact.sqlite': database }; let size = database.length + description.length;
+  if (Object.keys(snapshot.assets).length + 2 > MAX_ENTRIES) throw tooLarge();
   for (const [id, asset] of Object.entries(snapshot.assets)) {
     safeId(id, '资源 ID'); const bytes = await readFile(join(store.folder(state.artifact.id), 'assets', id));
     if (bytes.length !== asset.size) throw invalid('作品资源不完整，未生成备份。');
@@ -191,13 +249,12 @@ export async function exportArchive(store: ArtifactStore<unknown>, state: Artifa
 /** Validate completely, create a private staging folder, then publish a fresh artifact once. */
 export async function importArchive(store: ArtifactStore<unknown>, products: ProductRegistry, data: Uint8Array, actor: Actor, title?: unknown): Promise<ArtifactState<unknown>> {
   requireRole(actor, ['owner']); const files = extract(data);
-  let raw: unknown;
-  try { raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(files.get('artifact.json')!)); } catch { throw invalid('作品快照不是有效的 JSON。'); }
+  const metadata = manifest(files), raw = await readDatabase(store.root, files, metadata);
   walk(raw); let original: ArtifactState<unknown>;
   try { original = validateState(raw, products); } catch (error) { if (error instanceof StudioError) throw error; throw invalid(); }
   const state = portable(original);
   for (const [id, asset] of Object.entries(state.assets)) { const bytes = files.get(`assets/${id}`); if (!bytes || bytes.length !== asset.size) throw invalid('备份缺少资源或资源体积不符。'); }
-  if ([...files.keys()].some(name => name !== 'artifact.json' && name !== 'assets/' && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid('备份包含未登记资源。');
+  if ([...files.keys()].some(name => name !== 'manifest.json' && name !== 'artifact.sqlite' && name !== 'assets/' && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid('备份包含未登记资源。');
   const previous = copy(state.artifact), id = randomUUID(), now = new Date().toISOString();
   walk(state, (record, key, value) => {
     if (typeof value === 'string') record[key] = key === 'artifactId' && value === previous.id ? id : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id}/`);
@@ -213,7 +270,7 @@ export async function importArchive(store: ArtifactStore<unknown>, products: Pro
   try {
     await mkdir(join(staging, 'assets'));
     for (const assetId of Object.keys(state.assets)) await writeFile(join(staging, 'assets', assetId), files.get(`assets/${assetId}`)!, { flag: 'wx' });
-    await writeFile(join(staging, 'artifact.json'), JSON.stringify(state), { flag: 'wx' });
+    await writeFile(join(staging, 'artifact.sqlite'), await databaseBytes(store.root, state), { flag: 'wx' });
     await mkdir(join(store.root, 'artifacts'), { recursive: true });
     await renameWithRetry(staging, store.folder(id));
   } catch (error) { await rm(staging, { recursive: true, force: true }); throw error; }
