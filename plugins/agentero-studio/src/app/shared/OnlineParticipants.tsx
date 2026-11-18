@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot } from 'lucide-react';
 import type { Actor, AgentTask, AgentTaskReleaseTarget, Presence } from '../../contracts/studio';
 import { EditorPopover } from './editor-panels/EditorPopover';
-import { ParticipantActivity, type PresenceMember } from './presence-members';
+import { ParticipantActivity, participantIdentity, type PresenceMember } from './presence-members';
 import type { StudioDocument } from '../products';
 import { activeAgentTasks, agentPeerBounds, agentTaskDeadline, agentTaskStale, agentWorkStatus, documentElements, visibleAgentTasks } from './agent-activity';
 import './participants.css';
@@ -10,7 +10,7 @@ import './participants.css';
 function memberTasks(member: PresenceMember, now: number) {
   const tasks = new Map<string, { peer: Presence; task: AgentTask }>();
   for (const peer of [...member.peers].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))) for (const task of visibleAgentTasks(peer, now)) {
-    const key = `${task.taskId}\0${task.generation}`;
+    const key = `${peer.actor.id}\0${task.taskId}\0${task.generation}`;
     if (!tasks.has(key)) tasks.set(key, { peer, task });
   }
   return [...tasks.values()];
@@ -52,14 +52,15 @@ export function OnlineParticipants({ peers, actor, following, onFollow, document
     finally { pending.current.delete(key); setReleasing(new Set(pending.current)); }
   };
   if (!members.length) return null;
-  return <div className="studio-online-participants"><button ref={anchor} type="button" className="studio-online-trigger" aria-label="此刻在这里" title={members.map(member => member.actor.name).join('、')} aria-expanded={open} onClick={() => setOpen(value => !value)}><span className="studio-online-stack">{members.slice(0, 3).map(member => <Avatar member={member} now={now} followed={following === member.actor.id} key={member.actor.id} />)}</span>{members.length > 3 && <span className="studio-online-more">+{members.length - 3}</span>}</button>{open && <EditorPopover title="此刻在这里" className="studio-online-popover" anchorRef={anchor} onClose={() => setOpen(false)}><div className="studio-online-list">{members.map(member => {
+  return <div className="studio-online-participants"><button ref={anchor} type="button" className="studio-online-trigger" aria-label="此刻在这里" title={members.map(member => member.actor.name).join('、')} aria-expanded={open} onClick={() => setOpen(value => !value)}><span className="studio-online-stack">{members.slice(0, 3).map(member => <Avatar member={member} now={now} followed={following === participantIdentity(member.actor)} key={participantIdentity(member.actor)} />)}</span>{members.length > 3 && <span className="studio-online-more">+{members.length - 3}</span>}</button>{open && <EditorPopover title="此刻在这里" className="studio-online-popover" anchorRef={anchor} onClose={() => setOpen(false)}><div className="studio-online-list">{members.map(member => {
+    const identity = participantIdentity(member.actor);
     const canFollow = member.peers.some(peer => peer.visible !== false && (peer.actor.kind === 'agent' ? !!agentPeerBounds(peer, elements, now) : !!peer.context?.viewport));
     const tasks = memberTasks(member, now).filter(({ peer, task }) => activeAgentTasks(peer, now).includes(task));
     const showTaskRows = !preview && !!onReleaseAgentTask && tasks.length > 0;
     const summary = showTaskRows ? `${tasks.length}个工作区` : status(member, now);
-    return <div className="studio-online-row" key={member.actor.id}><Avatar member={member} now={now} followed={following === member.actor.id} /><div><strong>{member.actor.name}{member.actor.kind === 'agent' && <small>Agent</small>}</strong>{(!showTaskRows || tasks.length > 1) && <p title={summary}>{summary}{member.actor.kind === 'human' && <> · {({ owner: '所有者', editor: '可编辑', commenter: '可评论', viewer: '仅查看' })[member.actor.role]}</>}</p>}{showTaskRows && tasks.map(({ peer, task }) => {
-      const key = `${member.actor.id}\0${task.taskId}\0${task.generation}`;
-      return <div className={`studio-online-workspace${agentTaskStale(task, now) ? ' is-stale' : ''}`} key={key}><span>{agentWorkStatus(task, now)}</span><button type="button" data-agent-task-release={task.taskId} aria-label={`结束此工作区：${task.label || task.taskId}`} title="结束此工作区并撤销后续写入，不会停止模型运行" disabled={releasing.has(key)} onClick={() => void release({ artifactId: peer.context!.artifactId, targetActorId: member.actor.id, taskId: task.taskId, generation: task.generation })}>{releasing.has(key) ? '正在结束…' : '结束此工作区'}</button></div>;
-    })}</div><button className="studio-link-button studio-online-follow" disabled={preview || !canFollow && following !== member.actor.id} title={preview ? '预览期间不能跟随，请先退出预览' : !canFollow ? '当前没有可跟随的工作区域或视口' : undefined} onClick={() => { onFollow(following === member.actor.id ? '' : member.actor.id); setOpen(false); }}>{following === member.actor.id ? '停止跟随' : '跟随'}</button></div>;
+    return <div className="studio-online-row" key={identity}><Avatar member={member} now={now} followed={following === identity} /><div><strong>{member.actor.name}{member.actor.kind === 'agent' && <small>Agent</small>}</strong>{(!showTaskRows || tasks.length > 1) && <p title={summary}>{summary}{member.actor.kind === 'human' && <> · {({ owner: '所有者', editor: '可编辑', commenter: '可评论', viewer: '仅查看' })[member.actor.role]}</>}</p>}{showTaskRows && tasks.map(({ peer, task }) => {
+      const key = `${peer.actor.id}\0${task.taskId}\0${task.generation}`;
+      return <div className={`studio-online-workspace${agentTaskStale(task, now) ? ' is-stale' : ''}`} key={key}><span>{agentWorkStatus(task, now)}</span><button type="button" data-agent-task-release={task.taskId} aria-label={`结束此工作区：${task.label || task.taskId}`} title="结束此工作区并撤销后续写入，不会停止模型运行" disabled={releasing.has(key)} onClick={() => void release({ artifactId: peer.context!.artifactId, targetActorId: peer.actor.id, taskId: task.taskId, generation: task.generation })}>{releasing.has(key) ? '正在结束…' : '结束此工作区'}</button></div>;
+    })}</div><button className="studio-link-button studio-online-follow" disabled={preview || !canFollow && following !== identity} title={preview ? '预览期间不能跟随，请先退出预览' : !canFollow ? '当前没有可跟随的工作区域或视口' : undefined} onClick={() => { onFollow(following === identity ? '' : identity); setOpen(false); }}>{following === identity ? '停止跟随' : '跟随'}</button></div>;
   })}</div>{releaseError && <p className="studio-agent-release-error" role="alert">{releaseError}</p>}</EditorPopover>}</div>;
 }

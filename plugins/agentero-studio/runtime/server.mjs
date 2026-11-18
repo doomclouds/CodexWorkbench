@@ -145,7 +145,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.15";
+    PLUGIN_VERSION = "0.2.16";
   }
 });
 
@@ -8195,6 +8195,80 @@ var init_document_serialization = __esm({
   }
 });
 
+// src/core/products/native-surface.ts
+function nativeFill(element, style, value = element.fill) {
+  if (element.hollow || element.type === "text") return "transparent";
+  const fallback = element.type === "note" ? "#fff0b5" : element.type === "shape" || element.type === "table" ? style["paper-2"] ?? style.paper : element.type === "link" ? "#ffffff" : "transparent";
+  const color = semanticColor(value, style, fallback);
+  return color === "none" ? "transparent" : color;
+}
+function contrastInk(ink, fill, backdrop) {
+  try {
+    return contrastRatio(ink, fill, backdrop) < 4.5 ? readableText(fill, backdrop) : ink;
+  } catch {
+    return ink;
+  }
+}
+function nativeTextInk(value, style, fill, backdrop = style.paper) {
+  const ink = semanticColor(value, style, style.ink);
+  if (typeof value === "string" && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(value)) return ink;
+  return contrastInk(ink, fill, backdrop);
+}
+function nativeTableInk(value, style, fill) {
+  return contrastInk(semanticColor(value, style, style.ink), fill, style.paper);
+}
+function nativeSurfaces(elements, style, fillOf = (value) => nativeFill(value, style)) {
+  const order = /* @__PURE__ */ new Map(), surfaces = [];
+  elements.forEach((candidate, index) => {
+    order.set(candidate.id, index);
+    if (["text", "stroke", "arrow", "sticker"].includes(candidate.type)) return;
+    const radius = candidate.rotation ? Math.hypot(candidate.w, candidate.h) / 2 : 0;
+    const left = radius ? candidate.x + candidate.w / 2 - radius : candidate.x;
+    const top = radius ? candidate.y + candidate.h / 2 - radius : candidate.y;
+    const right = radius ? candidate.x + candidate.w / 2 + radius : candidate.x + candidate.w;
+    const bottom = radius ? candidate.y + candidate.h / 2 + radius : candidate.y + candidate.h;
+    const inset = candidate.type === "shape" && candidate.kind === "rect" || candidate.type === "note" ? 0 : 8;
+    const surface = { order: index, left, top, right, bottom, inset };
+    if (["container", "shape", "note", "link"].includes(candidate.type) && !candidate.rotation) {
+      try {
+        const fill = fillOf(candidate), alpha = parseColor(fill)[3];
+        if (alpha === 0) return;
+        if (alpha === 1 && (candidate.type !== "shape" || ["rect", "rounded"].includes(candidate.kind ?? "rounded"))) surface.fill = fill;
+      } catch {
+      }
+    }
+    surfaces.push(surface);
+  });
+  return { paper: style.paper, order, surfaces };
+}
+function nativeBackdrop(element, scene, fill) {
+  const { paper, order, surfaces } = scene;
+  if (!surfaces.length || element.rotation || !["text", "shape", "note", "link"].includes(element.type)) return paper;
+  if (typeof element.color === "string" && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(element.color)) return paper;
+  try {
+    if (fill !== "transparent" && parseColor(fill)[3] === 1) return paper;
+  } catch {
+    return paper;
+  }
+  const index = order.get(element.id) ?? -1;
+  for (let at = surfaces.length - 1; at >= 0; at--) {
+    const surface = surfaces[at];
+    if (surface.order >= index) continue;
+    const overlaps2 = surface.left < element.x + element.w && surface.right > element.x && surface.top < element.y + element.h && surface.bottom > element.y;
+    if (!overlaps2) continue;
+    if (!surface.fill) return paper;
+    const covers = surface.left + surface.inset <= element.x && surface.top + surface.inset <= element.y && surface.right - surface.inset >= element.x + element.w && surface.bottom - surface.inset >= element.y + element.h;
+    return covers ? surface.fill : paper;
+  }
+  return paper;
+}
+var init_native_surface = __esm({
+  "src/core/products/native-surface.ts"() {
+    "use strict";
+    init_theme();
+  }
+});
+
 // src/core/serialization.ts
 function escapeXml(value) {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -8367,7 +8441,7 @@ function headSvg(kind, tip, inside, color) {
   const dx = (inside.x - tip.x) / length, dy = (inside.y - tip.y) / length;
   return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color)}"/>`;
 }
-function elementSvg(e, board, options = {}) {
+function elementSvg(e, board, options = {}, surfaces = nativeSurfaces(selectedElements(board, options), board.style)) {
   const style = board.style;
   const ink = semanticColor(e.stroke, style, style.muted);
   let markup = "";
@@ -8390,7 +8464,8 @@ ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
       markup = `<foreignObject x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden">${safe}</div></foreignObject>`;
     }
   } else if (e.type === "sticker" && boardStickerMarkup(e.data?.stickerIconId)) markup = `<svg x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" viewBox="0 0 24 24" data-sticker-icon-id="${escapeXml(e.data?.stickerIconId)}">${boardStickerMarkup(e.data?.stickerIconId)}</svg>`;
-  else if (e.type === "text" || e.type === "sticker") markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
+  else if (e.type === "text") markup = textSvg(e, board, nativeTextInk(e.color, style, "transparent", nativeBackdrop(e, surfaces, "transparent")));
+  else if (e.type === "sticker") markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
   else if (e.type === "stroke") {
     markup = `<path d="${strokePath(e.points, e)}" fill="none" stroke="${escapeXml(semanticColor(e.stroke ?? e.color, style, style.muted))}" stroke-width="${scalar(e.strokeWidth ?? e.width, 3)}"${e.dash ? ' stroke-dasharray="6 5"' : ""} stroke-linecap="round" stroke-linejoin="round"/>`;
   } else if (e.type === "arrow") {
@@ -8426,12 +8501,18 @@ ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
     const proportions = Array.isArray(stored) && stored.length === cols && stored.every((value) => typeof value === "number" && Number.isFinite(value) && value > 0) ? stored : Array.from({ length: cols }, () => 1);
     const total = proportions.reduce((sum, value) => sum + value, 0), widths = proportions.map((value) => value / total * e.w), offsets = [0];
     for (const width of widths) offsets.push(offsets.at(-1) + width);
-    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri === 0 && e.data?.head !== false ? semanticColor(e.fill, style, style["paper-2"] ?? style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + offsets[ci] + 8, y: e.y + ri * rowHeight, w: widths[ci] - 16, h: rowHeight, text: String(cell), fontSize: e.fontSize ?? 14, bold: ri === 0 && e.data?.head !== false ? true : e.bold }, board, semanticColor(e.color, style, style.ink), true)}`).join("")).join("");
+    const headerFill = nativeFill(e, style);
+    const headerInk = nativeTableInk(e.color, style, headerFill);
+    const bodyInk = nativeTableInk(e.color, style, style.paper);
+    markup = rows.map((row, ri) => {
+      const header2 = ri === 0 && e.data?.head !== false;
+      const fill = header2 ? headerFill : style.paper;
+      const cellInk = header2 ? headerInk : bodyInk;
+      return row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(fill)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x: e.x + offsets[ci] + 8, y: e.y + ri * rowHeight, w: widths[ci] - 16, h: rowHeight, text: String(cell), fontSize: e.fontSize ?? 14, bold: header2 || e.bold }, board, cellInk, true)}`).join("");
+    }).join("");
   } else {
-    const fill = e.hollow ? "none" : semanticColor(e.fill, style, e.type === "container" ? "none" : e.type === "note" ? "#fff0b5" : style["paper-2"] ?? style.paper);
-    let textColor = semanticColor(e.color, style, style.ink);
-    const explicitInk = typeof e.color === "string" && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(e.color);
-    if (!explicitInk && contrastRatio(textColor, fill === "none" ? "transparent" : fill, style.paper) < 4.5) textColor = readableText(fill === "none" ? "transparent" : fill, style.paper);
+    const fill = nativeFill(e, style);
+    const textColor = nativeTextInk(e.color, style, fill, nativeBackdrop(e, surfaces, fill));
     markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
   }
   return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ""}>${markup}</g>`;
@@ -8439,7 +8520,8 @@ ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
 function buildBoardSvg(board, options = {}) {
   const elements = selectedElements(board, options);
   const bounds2 = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds2.width}" height="${bounds2.height}" viewBox="${bounds2.x} ${bounds2.y} ${bounds2.width} ${bounds2.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds2.x}" y="${bounds2.y}" width="${bounds2.width}" height="${bounds2.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options)).join("")}</svg>`;
+  const surfaces = nativeSurfaces(elements, board.style);
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds2.width}" height="${bounds2.height}" viewBox="${bounds2.x} ${bounds2.y} ${bounds2.width} ${bounds2.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds2.x}" y="${bounds2.y}" width="${bounds2.width}" height="${bounds2.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options, surfaces)).join("")}</svg>`;
 }
 function offlineEmbedState(initial) {
   let state = JSON.parse(JSON.stringify(initial));
@@ -8490,6 +8572,7 @@ function offlineRegionHtml(element) {
 function buildBoardHtml(board, options = {}) {
   const elements = selectedElements(board, options);
   const bounds2 = boardBounds(elements, 32, board.elements);
+  const surfaces = nativeSurfaces(elements, board.style);
   const layers = elements.map((e) => {
     if (e.type === "document" && e.document) {
       const surface = documentSurface(e, board.style);
@@ -8502,7 +8585,7 @@ function buildBoardHtml(board, options = {}) {
     }
     const box = boardBounds([e], 2, board.elements);
     const markerId = `arrow_${e.id.replace(/[^\w-]/g, "_")}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds2.x}px;top:${box.y - bounds2.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds2.x}px;top:${box.y - bounds2.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId }, surfaces)}</svg>`;
   }).join("");
   return `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds2.width}px;height:${bounds2.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
@@ -8519,6 +8602,7 @@ var init_serialization = __esm({
     init_document();
     init_document_serialization();
     init_document_surface();
+    init_native_surface();
     ExportError = class extends Error {
       constructor(code, message) {
         super(message);
@@ -16409,6 +16493,11 @@ async function startStudioHost(options = {}) {
         }
       }
       const actor = header(request, "x-studio-actor") === "agent" ? { id: header(request, "x-studio-agent-id") ? safeId(header(request, "x-studio-agent-id"), "Agent ID") : "codex", name: agentName ? text(agentName, "Codex", 60).trim() || "Codex" : "Codex", kind: "agent", role: "owner" } : { ...service.owner };
+      const presentationId = header(request, "x-studio-agent-presentation-id");
+      if (actor.kind === "agent" && presentationId) {
+        if (!/^agent-display-[0-9a-f]{32}$/.test(presentationId)) throw new StudioError("INVALID_ARGUMENT", "Agent \u5448\u73B0\u6807\u8BC6\u65E0\u6548\u3002");
+        actor.presentationId = presentationId;
+      }
       return { actor, token: provided, owner: true, access: access2, viaLan: lanRequest, authority: { owner: true, actorId: actor.id, viaLan: lanRequest }, ...scope2 ? { artifactId: scope2 } : {} };
     }
     const access = scope2 ? await service.accessMode(scope2, lanRequest) : "local";
@@ -38458,12 +38547,16 @@ async function connectStudio(root2 = dataDirectory(), entry = fileURLToPath(impo
       if (participant2 !== void 0 && !object2(participant2)) throw new StudioError("INVALID_ARGUMENT", "Agent participant \u5FC5\u987B\u63D0\u4F9B id \u548C name\u3002");
       const participantId = object2(participant2) ? text(participant2.id, "", 120).trim() : void 0;
       if (participantId === "") throw new StudioError("INVALID_ARGUMENT", "Agent participant ID \u4E0D\u80FD\u4E3A\u7A7A\u3002");
+      const appearanceKey = object2(participant2) ? participant2.appearanceKey : void 0;
+      if (appearanceKey !== void 0 && (typeof appearanceKey !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(appearanceKey))) throw new StudioError("INVALID_ARGUMENT", "Agent appearanceKey \u5FC5\u987B\u662F\u968F\u673A UUIDv4\u3002");
       const displayName = (object2(participant2) ? text(participant2.name, "", 60) : context?.clientInfo?.title || context?.clientInfo?.name || "Codex").trim();
       if (!displayName) throw new StudioError("INVALID_ARGUMENT", "Agent participant \u540D\u79F0\u4E0D\u80FD\u4E3A\u7A7A\u3002");
-      const agentId = `agent-${createHash("sha256").update(JSON.stringify({ connection: agentConnectionId, participant: participantId ?? null })).digest("hex").slice(0, 32)}`;
-      const agentName = `${Array.from(displayName).slice(0, 24).join("")} \xB7 ${agentId.slice(-8)}`;
+      const participantKey = participantId ?? "main";
+      const presentationId = typeof appearanceKey === "string" ? `agent-display-${createHash("sha256").update(JSON.stringify({ appearance: appearanceKey.toLowerCase(), participant: participantKey })).digest("hex").slice(0, 32)}` : void 0;
+      const agentId = `agent-${createHash("sha256").update(JSON.stringify({ connection: agentConnectionId, participant: participantKey, ...presentationId ? { presentation: presentationId } : {} })).digest("hex").slice(0, 32)}`;
+      const agentName = `${Array.from(displayName).slice(0, 24).join("")} \xB7 ${(presentationId ?? agentId).slice(-8)}`;
       const target = await freshRecord();
-      const response = await fetch(`${target.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${target.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": agentId, "X-Studio-Agent-Name": encodeURIComponent(agentName) }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(9e4) });
+      const response = await fetch(`${target.origin}/api/tools/${name}`, { method: "POST", headers: { Authorization: `Bearer ${target.token}`, "Content-Type": "application/json", "X-Studio-Actor": "agent", "X-Studio-Agent-Id": agentId, "X-Studio-Agent-Name": encodeURIComponent(agentName), ...presentationId ? { "X-Studio-Agent-Presentation-Id": presentationId } : {} }, body: JSON.stringify(operationArgs), signal: AbortSignal.timeout(9e4) });
       const result = await response.json();
       if (!result.ok) throw Object.assign(new Error(result.error?.message || "Studio \u64CD\u4F5C\u5931\u8D25"), { code: result.error?.code, details: result.error?.details });
       if (!closing && name === "artifact_activity" && typeof operationArgs.artifactId === "string" && ["begin", "update", "status", "end"].includes(String(operationArgs.action))) {
@@ -46591,7 +46684,7 @@ var STUDIO_ICON = {
 init_version();
 init_studio();
 var id = external_exports.string().min(1).max(200);
-var participant = external_exports.object({ id: external_exports.string().trim().min(1).max(120), name: external_exports.string().trim().min(1).max(60) }).optional().describe("\u4EC5\u6240\u6709\u8005\u7684 MCP \u8C03\u7528\u53EF\u63D0\u4F9B\uFF1A\u540C\u4E00\u8FDE\u63A5\u4E2D\u591A\u4E2A Agent \u4F7F\u7528\u7A33\u5B9A id/name \u533A\u5206\u534F\u4F5C\u8EAB\u4EFD\uFF1Bid \u662F\u4E0D\u900F\u660E\u6807\u8BC6\uFF0C\u53EF\u4EE5\u4F7F\u7528 Agent \u7684\u4EFB\u52A1\u8DEF\u5F84\uFF0C\u4E0D\u4F5C\u6587\u4EF6\u8DEF\u5F84\u89E3\u91CA\u3002\u8EAB\u4EFD\u7531\u670D\u52A1\u7AEF\u6309\u8FDE\u63A5\u547D\u540D\u7A7A\u95F4\u6D3E\u751F\uFF0C\u4E0D\u80FD\u7528\u4E8E\u8BBF\u5BA2\u63D0\u6743\u3002");
+var participant = external_exports.object({ id: external_exports.string().trim().min(1).max(120), name: external_exports.string().trim().min(1).max(60), appearanceKey: external_exports.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i).optional().describe("\u672C\u804A\u5929\u9996\u6B21\u751F\u6210\u5E76\u5728\u6BCF\u6B21\u8C03\u7528\u4E2D\u590D\u7528\u7684\u968F\u673A UUIDv4\uFF1B\u5404 Agent \u643A\u5E26\u540C\u4E00\u804A\u5929 key \u548C\u5404\u81EA\u56FA\u5B9A id\uFF0C\u4EE5\u4FDD\u6301\u91CD\u8FDE\u540E\u7684\u5934\u50CF\u3002\u540C\u4E00\u8FDE\u63A5\u627F\u8F7D\u4E0D\u540C\u804A\u5929\u65F6\uFF0C\u5404\u804A\u5929\u4F7F\u7528\u4E0D\u540C key\u3002\u670D\u52A1\u53EA\u516C\u5E03\u6D3E\u751F\u5448\u73B0\u6807\u8BC6\uFF1Bkey \u4E0D\u6062\u590D\u8DE8\u8FDE\u63A5\u4F5C\u8005\u6743\u9650\u6216\u4EFB\u52A1\u6388\u6743\u3002") }).optional().describe("\u4EC5\u6240\u6709\u8005\u7684 MCP \u8C03\u7528\u53EF\u63D0\u4F9B\uFF1A\u540C\u4E00\u8FDE\u63A5\u4E2D\u591A\u4E2A Agent \u4F7F\u7528\u7A33\u5B9A id/name \u533A\u5206\u534F\u4F5C\u8EAB\u4EFD\uFF1B\u4E0D\u5E26 appearanceKey \u65F6\uFF0C\u663E\u5F0F main \u4E0E\u7701\u7565 participant \u4F7F\u7528\u540C\u4E00\u4E3B\u8EAB\u4EFD\u3002id \u662F\u4E0D\u900F\u660E\u6807\u8BC6\uFF0C\u53EF\u4EE5\u4F7F\u7528 Agent \u7684\u4EFB\u52A1\u8DEF\u5F84\uFF0C\u4E0D\u4F5C\u6587\u4EF6\u8DEF\u5F84\u89E3\u91CA\u3002\u540C\u4E00\u4E3B\u4EE3\u7406\u8DE8\u8F6E\u6B21\u3001\u5207\u6362\u4EFB\u52A1\u548C\u91CD\u5F00\u9762\u677F\u65F6\u590D\u7528\u539F id/name/appearanceKey\u3002\u8EAB\u4EFD\u7531\u670D\u52A1\u7AEF\u6309\u8FDE\u63A5\u547D\u540D\u7A7A\u95F4\u6D3E\u751F\uFF0C\u4E0D\u80FD\u7528\u4E8E\u8BBF\u5BA2\u63D0\u6743\u3002");
 var coordinate = external_exports.number().min(-1e7).max(1e7);
 var taskBinding = {
   taskId: id.optional().describe("\u4E0E generation \u6210\u5BF9\u643A\u5E26\u7684\u672C\u6B21 Agent \u5DE5\u4F5C\u4EFB\u52A1 ID\uFF0C\u4E0D\u4ECE\u4E0A\u6B21\u4EFB\u52A1\u63A8\u65AD\u3002"),

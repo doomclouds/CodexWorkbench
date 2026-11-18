@@ -1,11 +1,12 @@
 import type { Board, BoardElement, Json } from '../contracts/studio.js';
-import { contrastRatio, readableText, semanticColor } from './theme.js';
+import { semanticColor } from './theme.js';
 import { arrowGeometry, arrowHeads, arrowLabelBox, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
 import { boardStickerMarkup } from './products/whiteboard-stickers.js';
 import { parseRichText, safeHttpLink, type RichTextSegment } from './shared/rich-text.js';
 import { documentPlainText, flattenDocumentBlocks } from '../contracts/document.js';
 import { blocksHtml, documentSurfaceCss, DOCUMENT_EXPORT_CSS } from './products/document-serialization.js';
 import { documentSurface } from './products/document-surface.js';
+import { nativeBackdrop, nativeFill, nativeSurfaces, nativeTableInk, nativeTextInk } from './products/native-surface.js';
 
 export interface ExportOptions { regionId?: string; elementId?: string; ids?: string[]; padding?: number; scale?: number; [key: string]: unknown }
 export class ExportError extends Error { constructor(public code: string, message: string) { super(message); this.name = 'ExportError'; } }
@@ -156,7 +157,7 @@ function headSvg(kind: string, tip: Point, inside: Point, color: string): string
   const dx = (inside.x - tip.x) / length, dy = (inside.y - tip.y) / length;
   return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color)}"/>`;
 }
-export function elementSvg(e: BoardElement, board: Board, options: ExportOptions = {}): string {
+export function elementSvg(e: BoardElement, board: Board, options: ExportOptions = {}, surfaces = nativeSurfaces(selectedElements(board, options), board.style)): string {
   const style = board.style; const ink = semanticColor(e.stroke, style, style.muted);
   let markup = '';
   if (e.type === 'document' && e.document) {
@@ -177,7 +178,8 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
       markup = `<foreignObject x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;overflow:hidden">${safe}</div></foreignObject>`;
     }
   } else if (e.type === 'sticker' && boardStickerMarkup(e.data?.stickerIconId)) markup = `<svg x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" viewBox="0 0 24 24" data-sticker-icon-id="${escapeXml(e.data?.stickerIconId)}">${boardStickerMarkup(e.data?.stickerIconId)}</svg>`;
-  else if (e.type === 'text' || e.type === 'sticker') markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
+  else if (e.type === 'text') markup = textSvg(e, board, nativeTextInk(e.color, style, 'transparent', nativeBackdrop(e, surfaces, 'transparent')));
+  else if (e.type === 'sticker') markup = textSvg(e, board, semanticColor(e.color, style, style.ink));
   else if (e.type === 'stroke') {
     markup = `<path d="${strokePath(e.points, e)}" fill="none" stroke="${escapeXml(semanticColor(e.stroke ?? e.color, style, style.muted))}" stroke-width="${scalar(e.strokeWidth ?? e.width, 3)}"${e.dash ? ' stroke-dasharray="6 5"' : ''} stroke-linecap="round" stroke-linejoin="round"/>`;
   } else if (e.type === 'arrow') {
@@ -213,20 +215,27 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
     const proportions = Array.isArray(stored) && stored.length === cols && stored.every(value => typeof value === 'number' && Number.isFinite(value) && value > 0) ? stored as number[] : Array.from({length:cols},()=>1);
     const total = proportions.reduce((sum,value)=>sum+value,0), widths=proportions.map(value=>value/total*e.w), offsets=[0];
     for(const width of widths)offsets.push(offsets.at(-1)!+width);
-    markup = rows.map((row, ri) => row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(ri===0 && e.data?.head!==false ? semanticColor(e.fill,style,style['paper-2']??style.paper) : style.paper)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x:e.x+offsets[ci]+8, y:e.y+ri*rowHeight, w:widths[ci]-16, h:rowHeight, text:String(cell), fontSize:e.fontSize??14, bold:ri===0&&e.data?.head!==false?true:e.bold },board,semanticColor(e.color,style,style.ink),true)}`).join('')).join('');
+    const headerFill = nativeFill(e, style);
+    const headerInk = nativeTableInk(e.color, style, headerFill);
+    const bodyInk = nativeTableInk(e.color, style, style.paper);
+    markup = rows.map((row, ri) => {
+      const header = ri === 0 && e.data?.head !== false;
+      const fill = header ? headerFill : style.paper;
+      const cellInk = header ? headerInk : bodyInk;
+      return row.map((cell, ci) => `<rect x="${e.x + offsets[ci]}" y="${e.y + ri * rowHeight}" width="${widths[ci]}" height="${rowHeight}" fill="${escapeXml(fill)}" stroke="${escapeXml(ink)}"/>${textSvg({ ...e, x:e.x+offsets[ci]+8, y:e.y+ri*rowHeight, w:widths[ci]-16, h:rowHeight, text:String(cell), fontSize:e.fontSize??14, bold:header||e.bold },board,cellInk,true)}`).join('');
+    }).join('');
 
   } else {
-    const fill = e.hollow ? 'none' : semanticColor(e.fill, style, e.type === 'container' ? 'none' : e.type === 'note' ? '#fff0b5' : style['paper-2'] ?? style.paper);
-    let textColor = semanticColor(e.color, style, style.ink);
-    const explicitInk = typeof e.color === 'string' && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(e.color);
-    if (!explicitInk && contrastRatio(textColor, fill === 'none' ? 'transparent' : fill, style.paper) < 4.5) textColor = readableText(fill === 'none' ? 'transparent' : fill, style.paper);
+    const fill = nativeFill(e, style);
+    const textColor = nativeTextInk(e.color, style, fill, nativeBackdrop(e, surfaces, fill));
     markup = shapeSvg(e, fill, ink) + textSvg(e, board, textColor, true);
   }
   return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ''}>${markup}</g>`;
 }
 export function buildBoardSvg(board: Board, options: ExportOptions = {}): string {
   const elements = selectedElements(board, options); const bounds = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">白板版本 ${board.artifact.revision}，包含 ${elements.length} 个对象。</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map(e => elementSvg(e, board, options)).join('')}</svg>`;
+  const surfaces = nativeSurfaces(elements, board.style);
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">白板版本 ${board.artifact.revision}，包含 ${elements.length} 个对象。</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map(e => elementSvg(e, board, options, surfaces)).join('')}</svg>`;
 }
 /** A downloaded page owns only transient state; it never writes back to the Studio host. */
 function offlineEmbedState(initial: Json): void {
@@ -258,6 +267,7 @@ function offlineRegionHtml(element: BoardElement): string {
 }
 export function buildBoardHtml(board: Board, options: ExportOptions = {}): string {
   const elements = selectedElements(board, options); const bounds = boardBounds(elements, 32, board.elements);
+  const surfaces = nativeSurfaces(elements, board.style);
   const layers = elements.map(e => {
     if (e.type === 'document' && e.document) {
       const surface = documentSurface(e, board.style);
@@ -269,7 +279,7 @@ export function buildBoardHtml(board: Board, options: ExportOptions = {}): strin
       return `<video data-studio-id="${escapeXml(e.id)}" controls playsinline preload="metadata" src="${escapeXml(e.video)}"${e.src ? ` poster="${escapeXml(e.src)}"` : ''} style="position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;object-fit:contain;transform:rotate(${scalar(e.rotation, 0)}deg)"></video>`;
     }
     const box = boardBounds([e], 2, board.elements); const markerId = `arrow_${e.id.replace(/[^\w-]/g, '_')}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId })}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId }, surfaces)}</svg>`;
   }).join('');
   return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
 }

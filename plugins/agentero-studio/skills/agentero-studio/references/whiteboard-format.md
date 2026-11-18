@@ -42,22 +42,27 @@
 
 文字使用 `text`、`fontSize`、`fontFamily`、`bold`、`italic`、`textAlign`（left/center/right）。`color` 是文字或笔迹/箭头颜色，`fill` 是对象填充，`stroke` 是形状边框。支持十六进制色和程序已声明的语义角色，例如 `paper/ink/muted/accent/link`；不要把未知字符串当有效 CSS。明暗要求见 [配色](appearance.md)。
 
+新建普通原生文字时，优先省略 `color` 或使用 `"ink"`，次要说明可用 `"muted"`。十六进制色表达固定颜色，使用时核对文字所在的实际背景；保留用户明确指定的颜色，按[配色与可读性](appearance.md)检查明暗显示。
+
 原生文字支持不嵌套的 `**粗体**`、`*斜体*`、反引号代码、`[文字](https://...)`，以及行首 `- ` 或 `1. ` 列表。原始 HTML 作为普通文字显示；需要 HTML 排版时用 HTML Region。链接仅 HTTP(S)。
 
 ## 名称与标题
 
-HTML 区域与原生分区（`type: "container"`，用于框住一组内容）的外层名称都写在 **`element.text`**，不是 `title`、`name` 或 `label`。`artifact_manage.title` 只命名整块作品，HTML 内部的 `<title>`／标题也不会自动替外层命名。
+HTML 区域、文档区域与原生分区（`type: "container"`，用于框住一组内容）的自带标题都写在 **`element.text`**。`artifact_manage.title` 命名整块作品，HTML 内部的 `<title>`／标题与文档正文标题分别保留在各自内容中，外层标题仍需显式设置 `text`。
 
 新增时根据内容主旨设置简短、可辨识的 `text`。优先采用用户提供的名称；未指定时可取 HTML 的正文标题或 `<title>`，原生分区取所含内容的主题。例如“录制入口与路径设置”“批处理结果与异常”，不要留下空白或“HTML 图解”“HTML 内部选区”“分区”“选区”等通用占位名，也不要只加序号掩盖没有主题。多张同主题图可加实际差别，如“录制流程 · 入口设置”“录制流程 · 导出结果”。
+
+对象自带标题已足以识别内容时，省略上方重复的独立 `type:"text"`。跨多个对象的章节标题、导语或用户要求的独立说明可以保留，按其实际字号、宽度和换行后的完整高度安排位置。计算占用范围时包含内容框外的标题栏、分区标题和必要间距；以当前画布实测为准，不能只用对象的 `x/y/w/h` 推断所有文字都在框内。
 
 ```json
 [
   { "op": "add", "element": { "id": "recording-options", "type": "html", "x": 80, "y": 80, "w": 1440, "h": 1120, "text": "录制入口与路径设置", "html": "<!doctype html><title>录制入口与路径设置</title><h1>录制入口与路径设置</h1>" } },
-  { "op": "add", "element": { "id": "batch-results", "type": "container", "x": 1600, "y": 80, "w": 600, "h": 360, "text": "批处理结果与异常" } }
+  { "op": "add", "element": { "id": "batch-results", "type": "container", "x": 1600, "y": 80, "w": 600, "h": 360, "text": "批处理结果与异常" } },
+  { "op": "add", "element": { "id": "recording-notes", "type": "document", "x": 2280, "y": 80, "w": 680, "h": 540, "text": "录制验收记录", "document": { "schemaVersion": 1, "blocks": [{ "id": "recording-result", "type": "paragraph", "props": {}, "content": "核对录制状态与导出文件。", "children": [] }] } } }
 ]
 ```
 
-上例是 `artifact_apply.operations` 片段；实际提交仍带本次任务绑定、操作标识和必要版本检查。完成后用 `artifact_read mode: "objects", ids: [...]` 读回新增对象，确认 `text` 与预期名称一致；概要中的 `items[].label` 是该字段的摘要。只改源码或已有内容时保留既有名称，不因看到默认名就批量改名；用户明确要求命名或本次创建的对象遗留占位名时，再用目标对象的 `update` 和 `changes.text` 修正。
+上例是 `artifact_apply.operations` 片段；实际提交仍带本次任务绑定、操作标识和必要版本检查，预留范围覆盖全部新增对象。完成后用 `artifact_read mode: "objects", ids: [...]` 读回新增对象，确认 `text` 与预期名称一致；概要中的 `items[].label` 是该字段的摘要。随后查看当前实际画布，确认自带标题、额外文字和相邻内容完整可见；有遮挡或裁切时调整本次范围内的位置、宽高或间距，复查后再交付。只改源码或已有内容时保留既有名称，不因看到默认名就批量改名；用户明确要求命名或本次创建的对象遗留占位名时，再用目标对象的 `update` 和 `changes.text` 修正。
 
 ## 各类对象
 

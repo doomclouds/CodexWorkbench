@@ -10,7 +10,7 @@ import { appTransportSchema, createAppTransport } from './app-transport.js';
 export interface StudioExecutionContext { clientInfo?: { name: string; version: string; title?: string } }
 export interface StudioExecutor { execute(name: ToolName, args: Record<string, unknown>, context?: StudioExecutionContext): Promise<unknown>; connection(): Promise<Connection>; requestUi?: UiRequester }
 const id = z.string().min(1).max(200);
-const participant = z.object({ id: z.string().trim().min(1).max(120), name: z.string().trim().min(1).max(60) }).optional().describe('仅所有者的 MCP 调用可提供：同一连接中多个 Agent 使用稳定 id/name 区分协作身份；id 是不透明标识，可以使用 Agent 的任务路径，不作文件路径解释。身份由服务端按连接命名空间派生，不能用于访客提权。');
+const participant = z.object({ id: z.string().trim().min(1).max(120), name: z.string().trim().min(1).max(60), appearanceKey: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i).optional().describe('本聊天首次生成并在每次调用中复用的随机 UUIDv4；各 Agent 携带同一聊天 key 和各自固定 id，以保持重连后的头像。同一连接承载不同聊天时，各聊天使用不同 key。服务只公布派生呈现标识；key 不恢复跨连接作者权限或任务授权。') }).optional().describe('仅所有者的 MCP 调用可提供：同一连接中多个 Agent 使用稳定 id/name 区分协作身份；不带 appearanceKey 时，显式 main 与省略 participant 使用同一主身份。id 是不透明标识，可以使用 Agent 的任务路径，不作文件路径解释。同一主代理跨轮次、切换任务和重开面板时复用原 id/name/appearanceKey。身份由服务端按连接命名空间派生，不能用于访客提权。');
 const coordinate = z.number().min(-10_000_000).max(10_000_000);
 const taskBinding = {
   taskId: id.optional().describe('与 generation 成对携带的本次 Agent 工作任务 ID，不从上次任务推断。'),

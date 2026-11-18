@@ -71,11 +71,13 @@ describe('model MCP contracts through the real SDK', () => {
   });
 
   it('preserves explicit Agent participants and documented MCP client identity through schema parsing', async () => {
-    await call('artifact_read', { mode: 'summary', participant: { id: 'review-agent', name: 'Reviewer' } });
-    expect(execution).toMatchObject({ name: 'artifact_read', args: { participant: { id: 'review-agent', name: 'Reviewer' } }, context: { clientInfo: { name: 'studio-contract-regression', version: '1.0.0' } } });
+    const participant = { id: 'review-agent', name: 'Reviewer', appearanceKey: randomUUID() };
+    await call('artifact_read', { mode: 'summary', participant });
+    expect(execution).toMatchObject({ name: 'artifact_read', args: { participant }, context: { clientInfo: { name: 'studio-contract-regression', version: '1.0.0' } } });
     const { tools } = await client.listTools();
     for (const tool of tools.filter(tool => TOOL_NAMES.includes(tool.name as typeof TOOL_NAMES[number]))) {
       expect((tool.inputSchema.properties as Record<string, any>).participant.properties.id.maxLength).toBe(120);
+      expect((tool.inputSchema.properties as Record<string, any>).participant.properties.appearanceKey.type).toBe('string');
     }
     expect((tools.find(tool => tool.name === 'artifact_apply')!.inputSchema.properties as Record<string, any>).merge.const).toBe('safe');
   });

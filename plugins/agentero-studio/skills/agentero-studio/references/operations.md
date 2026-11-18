@@ -57,7 +57,7 @@
 
 安全合并不是多 Agent 分工许可。不同 Agent 只可并行写互不重叠的对象／区域；同一原生对象、同一 HTML Region 都应串行处理，包括同一 HTML Region 内不同 DOM、文字或样式。不能用修改不同字段、safe merge 或更换 participant 规避此规则。范围不可靠时先协调或串行；这是 Agent 的组织约束，人类仍可编辑，版本与正在编辑检查继续生效。范围变更和交接细则见[多 Agent 身份与活动](#多-agent-身份与活动)。
 
-多 Agent 工具调用使用 `participant: { id, name }` 区分分工；同一 Agent 在连续调用中固定该身份。省略时使用当前 MCP 连接身份。参与者标识不属于白板内容，不能通过写元素、评论或请求头假冒人类身份；署名也不改变原有角色权限。`artifact_read mode:"context"` 的 `viewId` 是本次明确的人类视图，不是 Agent 自己的页面身份。
+多 Agent 工具调用使用 `participant: { id, name, appearanceKey }` 区分分工；同一 Agent 在连续调用中固定这组值。`appearanceKey` 使用本聊天首次生成的随机 UUIDv4，保持重连后的头像；省略时只有当前 MCP 连接内的身份连续性。参与者标识不属于白板内容，不能通过写元素、评论或请求头假冒人类身份；署名也不改变原有角色权限。`artifact_read mode:"context"` 的 `viewId` 是本次明确的人类视图，不是 Agent 自己的页面身份。
 
 表格数据包含稳定的 `data.rowIds` 和 `data.columnIds`。只修改单元格时保留这些标识；插入、删除或改变行列结构必须同步维护对应标识，不能仅因行列数量相同就假定两个表格结构相同。安全合并依赖真实行列身份。
 
@@ -198,7 +198,11 @@ draw();
 
 ## 多 Agent 身份与活动
 
-每个 MCP 连接有稳定独立的 Agent 身份，显示名来自公开的 MCP `clientInfo` 并带短标识。多个 Agent 共用一个 MCP 连接时，在各工具调用中显式携带 `participant:{id,name}`，为各自使用不同且稳定的非空 `id`（最多120字符，例如 `main` 或 `/root/child`）；id只用于连接内身份命名空间，不当作文件路径。`name` 同样固定，使用可识别的 Agent 名（如 Agent A、Agent B），不能用“绘制架构图”等任务动作代替身份，也不随工作切换改名。重试保留同一 participant。该扩展通过现有所有者授权连接生效，访客请求头、名字或页面 peerId不能冒充 Agent，不依赖未公开的宿主 thread/subagent 字段自动猜测身份。
+每个 MCP 连接有稳定独立的 Agent 身份，显示名来自公开的 MCP `clientInfo` 并带短标识。不带 appearanceKey 时，省略 `participant` 与显式 `participant.id:"main"` 使用同一主代理身份。主代理在本聊天第一次 Studio 调用前，用运行环境的随机 UUIDv4 生成器生成一次 `appearanceKey`，确定 `participant:{id:"main",name:"主代理",appearanceKey}` 并在后续轮次、切换任务、重新打开面板和重试时复用。将这组值保留在本聊天的续接上下文中；新聊天生成自己的随机值，不能照抄示例、使用任务名或多个聊天共用的固定 key。任务动作只写入 `label`，新任务只更换 `taskId`。各子代理携带主代理交接的同一聊天 key，使用不同且稳定的非空 `id`（最多120字符，例如 `/root/child`）和可识别的固定 `name`。id不作文件路径解释；name不能用“绘制架构图”等任务动作代替，也不随工作切换改名。该扩展通过现有所有者授权连接生效，访客请求头、名字或页面 peerId不能冒充 Agent，不依赖未公开的宿主 thread/subagent 字段自动猜测身份。
+
+连接内身份不随 Studio 页面的关闭或重开而改变。同一 `appearanceKey` 和 participant.id 跨 MCP 重连时保持头像、颜色和显示短号，不同子代理仍各自显示。同一连接也可能承载多个聊天，每次调用都必须从首次起显式携带本聊天的 key；省略时无法推断属于哪个聊天，也不会取得带 key 的任务授权。原始 key由 MCP 客户端剥离，HTTP、公开结果和白板数据库只得到派生的 `presentationId`；不要把 key写进元素、备注或交付文档。
+
+头像连续性不恢复旧连接的作者编辑权限或任务授权。MCP 连接重建后，重新读取白板并核对现有工作声明，再按新任务规则申请范围；不能复用旧 taskId/generation绕过范围占用。同一头像下可能短暂显示旧连接尚未结束的工作区；正常关闭会尽力取消已登记任务，异常断线由原有有限租约回收。新连接的读取不会续旧任务，房主可以按具体工作区结束它。
 
 Agent读取或写入作品时，在线协作仍可显示单次工具的 `reading`/`writing` 活动；finally只清理该次忙碌，不结束跨调用的工作任务。目标页面 `viewId` 只用于读取用户指定的视图上下文，不能作为 Agent 自己的页面身份，也不能用它绕过正在编辑的人类或其他 Agent。遇到 `EDIT_IN_PROGRESS` 保留任务和读取依据，等待相应编辑完成后再核对版本，不用更换 participant 或连续重试绕过占用。
 
@@ -206,28 +210,32 @@ Agent读取或写入作品时，在线协作仍可显示单次工具的 `reading
 
 并行写入前明确各 Agent 的对象／区域，保证不同 Agent 范围不重叠。同一原生对象或同一 HTML Region 的任意内部 DOM 都算同一写入范围。需要扩大、移动范围或交接时，前一 Agent 先停止该范围的修改并 `end`；接手者重读目标内容与当前版本，确认新范围与其他 Agent 不重叠后再 `begin`。同一 Agent 改变范围也先结束旧声明、重读新范围再声明。拿不到可靠边界时协调或串行，不以租约过期或没有动画推断前一 Agent 已停止操作。
 
-首次查找作品、空地或参考内容时，允许不带绑定的只读 `artifact_read`，它不续任何任务。确认分工后开始准备阶段：
+主代理委派绘制时，先给出同一块白板的 `artifactId`、各区域完整边界或目标对象 ID、各自的任务目标、聊天 appearanceKey 和稳定 participant。子代理在负责范围内自行申请 `preparing` 任务，读当前内容和对象版本，进入 `writing` 后直接局部提交。每个区域可独立呈现进展；只有任务确需离线素材时才将素材准备作为阶段，不能默认等全部子代理返回后才集中绘制。
+
+子代理写入后进入 `verifying`，读回目标对象并查看实际画布。按所用绘图规范检查标题、正文、连线、图层和相邻对象，确认完整可见且留白足够。发现意外遮挡、裁切或叠放错误时在自身范围内修正，再次读回和查看画面。确实无法检查实际画布时，说明原因及未验证内容。完成核对后以原 participant、taskId 和 generation 结束任务，并向主代理回报实际对象 ID、区域边界、检查结果与证据位置。主代理负责整板布局、区域衔接和最终实画面验收。
+
+首次查找作品、空地或参考内容时，允许不带绑定的只读 `artifact_read`，它不续任何任务。以下示例的 appearanceKey 为占位说明，须替换为本聊天已经生成的同一个随机 UUIDv4。确认分工后开始准备阶段：
 
 ```json
-{"artifactId":"实际作品ID","action":"begin","taskId":"extend-diagram","phase":"preparing","scope":{"ids":["目标对象ID"]},"label":"准备修改图解","participant":{"id":"diagram-builder","name":"Agent A"}}
+{"artifactId":"实际作品ID","action":"begin","taskId":"extend-diagram","phase":"preparing","scope":{"ids":["目标对象ID"]},"label":"准备修改图解","participant":{"id":"diagram-builder","name":"Agent A","appearanceKey":"<本聊天随机UUIDv4>"}}
 ```
 
 从成功返回的 `tasks` 取本任务真实 `generation`。下面的代次和对象版本均是占位说明，必须分别替换为实际返回值；后续调用保持同一participant：
 
 ```json
-{"artifactId":"实际作品ID","taskId":"extend-diagram","generation":"begin返回的generation","mode":"objects","ids":["目标对象ID"],"participant":{"id":"diagram-builder","name":"Agent A"}}
+{"artifactId":"实际作品ID","taskId":"extend-diagram","generation":"begin返回的generation","mode":"objects","ids":["目标对象ID"],"participant":{"id":"diagram-builder","name":"Agent A","appearanceKey":"<本聊天随机UUIDv4>"}}
 ```
 
 准备完成后用 `artifact_activity update` 携带本绑定及 `phase:"writing"`。真实内容提交带回同一绑定，仍需独立核对对象CAS版本：
 
 ```json
-{"artifactId":"实际作品ID","taskId":"extend-diagram","generation":"begin返回的generation","operationId":"本次稳定操作ID","expectedVersions":{"目标对象ID":7},"operations":[{"op":"update","id":"目标对象ID","changes":{"text":"更新后的内容"}}],"participant":{"id":"diagram-builder","name":"Agent A"}}
+{"artifactId":"实际作品ID","taskId":"extend-diagram","generation":"begin返回的generation","operationId":"本次稳定操作ID","expectedVersions":{"目标对象ID":7},"operations":[{"op":"update","id":"目标对象ID","changes":{"text":"更新后的内容"}}],"participant":{"id":"diagram-builder","name":"Agent A","appearanceKey":"<本聊天随机UUIDv4>"}}
 ```
 
 保存后进入 `verifying` 并读回实际目标；完成时结束本代任务：
 
 ```json
-{"artifactId":"实际作品ID","action":"end","taskId":"extend-diagram","generation":"begin返回的generation","outcome":"completed","participant":{"id":"diagram-builder","name":"Agent A"}}
+{"artifactId":"实际作品ID","action":"end","taskId":"extend-diagram","generation":"begin返回的generation","outcome":"completed","participant":{"id":"diagram-builder","name":"Agent A","appearanceKey":"<本聊天随机UUIDv4>"}}
 ```
 
 `begin` 提供非空scope：已有对象使用 `ids`（最多200个，去重，必须实际存在），新增空地使用覆盖完整几何的 `rect:{x,y,w,h}`。`label`最多80字，只写可读任务动作，不重复UI阶段前缀或身份。phase为 `preparing/writing/verifying`；只有实际换阶段才更新进度，重复同阶段／label的update只续活动。任务活跃且scope相同时重复begin保留generation；不能在同一代里扩大或改变范围。

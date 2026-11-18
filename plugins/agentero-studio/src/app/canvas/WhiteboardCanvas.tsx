@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowUpRight, FileText, Braces, ChevronDown, Circle, Copy, ExternalLink, Frame, Group, Hand, Link, Loader2, Lock, Maximize, Minus, MousePointer2, PenLine, Plus, Redo2, RotateCcw, Smile, Square, StickyNote, Table2, Trash2, Type, Ungroup, Unlock, X } from 'lucide-react';
 import type { Actor, AgentTaskReleaseTarget, Anchor, Board, BoardElement, CollaborationRoom, ElementType, Feedback, HtmlSelection, Json, Operation, Presence, StudioClient } from '../../contracts/studio.js';
-import { contrastRatio, readableText, semanticColor } from '../../core/theme.js';
+import { readableText, semanticColor } from '../../core/theme.js';
+import { nativeBackdrop, nativeFill, nativeSurfaces, nativeTableInk, nativeTextInk } from '../../core/products/native-surface.js';
 import HtmlRegion from '../shared/html-region/HtmlRegion.js';
 import type { HtmlNavigationEvent } from '../shared/html-region/runtime.js';
 import { anchorBounds, arrowGeometry, arrowHeads, assetDisplayUrl, boundsOf, canvasStyle, clamp, duplicateElements, elementBounds, expandMoveIds, fitViewport, intersects, makeElement, moveOperations, newId, normalizedRect, relativeElementPoint, safeHttpLink, tableRows, wheelZoomFactor, zoomAt, type Point, type Rect, type Viewport } from './canvas-model.js';
@@ -49,6 +50,7 @@ export interface WhiteboardCanvasProps {
   onChanged: (board: Board) => void;
   onAnnotate: (selection: HtmlSelection) => void;
   readOnly?: boolean;
+  viewTheme?: 'light' | 'dark';
   onSelectionChange?: (ids: string[]) => void;
   onViewportChange?: (viewport: Viewport) => void;
   presence?: Presence[];
@@ -129,7 +131,7 @@ function drawnElement(gesture: Extract<Gesture, { kind: 'draw' }>, points = gest
     : { ...gesture.element, ...box, w: Math.max(1,box.w), h: Math.max(1,box.h), points: points.flatMap(point => [point.x - box.x, point.y - box.y]) };
 }
 
-export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onReadingChange, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
+export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, viewTheme = 'light', onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onReadingChange, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
   const viewportElement = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const htmlInput = useRef<HTMLInputElement>(null);
@@ -214,7 +216,6 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const [penColor, setPenColor] = useState('#0B0B0B');
   const penWidth = 3;
   const [sticker, setSticker] = useState('smile');
-  const [viewTheme, setViewTheme] = useState<'light' | 'dark'>('light');
   const viewStyle = canvasStyle(board.style, viewTheme);
   const [undo, setUndo] = useState<ChangeRecord[]>([]);
   const [redo, setRedo] = useState<ChangeRecord[]>([]);
@@ -351,19 +352,6 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       else if (hadLocalDraft.current) { localStorage.removeItem(draftStorageKey); hadLocalDraft.current = false; }
     } catch { if (!storageFailed.current) { storageFailed.current = true; setError('本机草稿保存失败，请复制草稿或下载副本后再关闭。'); } }
   }, [draftStorageKey, draftOwner, queueScope, editing, textDirty, propertyDrafts, tableDrafts, queueRevision, preview]);
-
-  useEffect(() => {
-    const ancestor = viewportElement.current?.closest('[data-studio-theme]') ?? document.documentElement;
-    const update = () => {
-      const value = ancestor.getAttribute('data-studio-theme') ?? document.documentElement.getAttribute('data-theme');
-      setViewTheme(value === 'dark' || value !== 'light' && globalThis.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    };
-    update();
-    const observer = new MutationObserver(update);
-    observer.observe(ancestor, { attributes: true, attributeFilter: ['data-studio-theme', 'data-theme'] });
-    if (ancestor !== document.documentElement) observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    return () => observer.disconnect();
-  }, []);
 
   const selectIds = useCallback((ids: string[], recordIntent = true) => {
     if (recordIntent && JSON.stringify(ids) !== JSON.stringify(selectionRef.current)) interactionIntent.current++;
@@ -1129,6 +1117,11 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     }
     return remoteElements;
   }, [board.elements, queueRevision, propertyDrafts, peerGestures, gesture, viewport.zoom, penColor, preview]);
+  const surfaceScene = useMemo(() => nativeSurfaces(
+    reading ? renderedElements.filter(element => reading.ids.includes(element.id)) : renderedElements,
+    viewStyle,
+    element => nativeFill(element, viewStyle, nativePaint(element.fill, viewTheme)),
+  ), [renderedElements, reading, board.style, viewTheme]);
   const peerPreviewFrames = peerGestures.flatMap(peer => {
     const page = presence.find(page => page.peerId === peer.peerId), busyIds = [...(page?.context?.editingIds ?? []), ...(Array.isArray(page?.context?.movingIds) ? page.context.movingIds as string[] : [])];
     if (peer.kind === 'upload' && peer.elements.length && peer.elements.every(element => busyIds.includes(element.id))) return [];
@@ -1227,14 +1220,13 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         {(element.label || editing?.id === element.id) && <foreignObject x={geometry.label.x - (element.labelSize?.w ?? 200) / 2} y={geometry.label.y - (element.labelSize ? element.labelSize.h / 2 : 28)} width={element.labelSize?.w ?? 200} height={element.labelSize?.h ?? 54} overflow="visible"><div className="studio-arrow-label" style={element.labelSize ? { maxWidth: element.labelSize.w } : undefined}>{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.label} />}</div></foreignObject>}
       </svg>;
     }
-    const fill = element.hollow ? 'transparent' : semanticColor(nativePaint(element.fill,viewTheme), viewStyle, element.type === 'note' ? '#fff0b5' : element.type === 'shape' || element.type === 'table' ? viewStyle['paper-2'] ?? viewStyle.paper : 'transparent');
+    const fill = nativeFill(element, viewStyle, nativePaint(element.fill, viewTheme));
     const textFill = element.type === 'table' ? viewStyle.paper : element.type === 'container' ? 'transparent' : fill;
-    const preferredInk = semanticColor(nativePaint(element.color,viewTheme), viewStyle, viewStyle.ink);
-    const explicitInk = typeof element.color === 'string' && /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/i.test(element.color);
-    let ink = preferredInk, headerInk = preferredInk;
-    // Literal paints are user choices; theme-derived ink still adapts to the surface.
-    try { if (!explicitInk && element.type !== 'sticker' && contrastRatio(ink, textFill, viewStyle.paper) < 4.5) ink = readableText(textFill, viewStyle.paper); } catch { /* Unknown user paint is left for the renderer rather than rewritten. */ }
-    try { if (!explicitInk && element.type === 'table' && contrastRatio(headerInk, fill, viewStyle.paper) < 4.5) headerInk = readableText(fill, viewStyle.paper); } catch { /* Keep the same handling for unsupported header paint. */ }
+    const color = nativePaint(element.color, viewTheme);
+    const backdrop = nativeBackdrop(element, surfaceScene, fill);
+    const ink = element.type === 'table' ? nativeTableInk(color, viewStyle, textFill)
+      : element.type === 'sticker' ? semanticColor(color, viewStyle, viewStyle.ink) : nativeTextInk(color, viewStyle, textFill, backdrop);
+    const headerInk = element.type === 'table' ? nativeTableInk(color, viewStyle, fill) : ink;
     const style: CSSProperties = { display: hidden ? 'none' : undefined, left: element.x, top: element.y, width: element.w, height: element.h, color: ink, fontSize: element.fontSize ?? 17, fontFamily: element.fontFamily || viewStyle.fontFamily, fontWeight: element.bold ? 600 : 400, fontStyle: element.italic ? 'italic' : 'normal', textAlign: element.textAlign ?? (element.type === 'shape' ? 'center' : 'left'), transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined, ...(element.type === 'container' ? { borderColor: lineColor, borderStyle: element.dash ? 'dashed' : 'solid', borderWidth: element.strokeWidth ?? 1, background: fill !== 'transparent' ? fill : undefined } : {}) };
     let content;
     if (element.type === 'html' || element.type === 'diagram' && typeof element.html === 'string') content = <HtmlRegion element={element} zoom={viewport.zoom} annotation={annotating} interactive={reading ? reading.ids.includes(element.id) : interactiveId === element.id && selection.length === 1 && selection[0] === element.id} preserveScroll panMode={spacePan || tool === 'pan' && !annotating} onNavigation={input => htmlNavigation(element, input)} onPointerPosition={point => { const position = point && anchorBounds({ coordinateSpace: 'element', elementIds: [element.id], x: point.x, y: point.y }, [element]); onCursorMove?.(position ? { x: position.x, y: position.y } : null); }} onAnnotate={selection=>{selectIds([element.id]);onAnnotate(selection);}} onToolShortcut={key=>{numericTool.current(key);}} onStateChange={canEdit ? async (state: Json, expectedVersion: number) => {
@@ -1279,7 +1271,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       content = <>{video ? <video src={video} controls preload="metadata" playsInline poster={src} data-native-interactive="true" /> : src ? <><CroppedImage element={element} src={src} />{href && <a className="studio-image-link" href={href} target="_blank" rel="noopener noreferrer" aria-label="打开图片链接" data-native-interactive="true"><ExternalLink size={16} /></a>}</> : null}
         {unavailable && <div className="studio-media-missing studio-media-state" role={mediaState?.status === 'error' ? 'alert' : 'status'}>{mediaState?.status === 'loading' ? '正在加载媒体…' : mediaState?.status === 'error' ? mediaState.message || '媒体加载失败。' : '无法读取媒体'}</div>}</>;
     } else if (element.type === 'table') content = <NativeTable bodyPaint={{background:viewStyle.paper,color:ink}} headerPaint={{background:fill,color:headerInk}} key={queueScope+':'+element.id+':'+draftGeneration} initialDraft={preview?undefined:tableDrafts[element.id]} onDraftChange={draft=>setTableDrafts(current=>{const next={...current};if(draft)next[element.id]=draft;else delete next[element.id];return next;})} element={element} selected={picked && !reading && tool==='select' && !spacePan && gesture?.kind!=='pan'} viewport={viewport} editRequest={tableEditRequest?.id===element.id?tableEditRequest.sequence:undefined} canEdit={canEdit && !reading && !annotating && tool==='select' && !spacePan} onRequestLink={value=>setLinkRequest({key:newClientId(),value})} onFormatStateChange={setFormatState} onEditingChange={active=>setPropertyEditingIds(ids=>active?[...new Set([...ids,element.id])]:ids.filter(id=>id!==element.id))} onSave={async(changes,base)=>{const failed=queue.tasks.find(task=>task.state==='failed'&&JSON.stringify(task.operations)===JSON.stringify([{op:'update',id:element.id,changes}]));const saved=failed?(await queue.retry(failed.id))?.board:await apply([{op:'update',id:element.id,changes}],'编辑表格',[base]);return saved?.elements.find(item=>item.id===element.id)??false;}}/>;
-    else if (element.type === 'link') content = <div className="studio-link-card" style={{ background: element.fill ?? '#ffffff' }}><Link size={22} /><div><strong>{element.text || '链接'}</strong><span>{element.href}</span></div><a href={safeHttpLink(element.href)} target="_blank" rel="noreferrer" aria-label="打开链接" data-native-interactive="true"><ExternalLink size={17} /></a></div>;
+    else if (element.type === 'link') content = <div className="studio-link-card" style={{ background: fill }}><Link size={22} /><div><strong>{element.text || '链接'}</strong><span style={{ color: nativeTextInk(color ?? 'muted', viewStyle, fill, backdrop) }}>{element.href}</span></div><a href={safeHttpLink(element.href)} target="_blank" rel="noreferrer" aria-label="打开链接" data-native-interactive="true"><ExternalLink size={17} /></a></div>;
     else if (element.type === 'sticker' && getBoardSticker(element.data?.stickerIconId)) content = <Sticker id={element.data?.stickerIconId} />;
     else if (element.type === 'container') content = <div className="studio-section-title">{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.text} />}</div>;
     else content = <>{element.type === 'shape' && <Shape element={{ ...element, fill, stroke: lineColor }} />}{element.type === 'note' && <div className="studio-note-fill" style={{ background: fill }} />}<div className={`studio-element-text${element.type === 'sticker' ? ' studio-sticker-text' : ''}`} style={{ padding: element.type === 'text' || element.type === 'sticker' ? 2 : 16, ...(element.kind === 'person' ? { top: '39%', paddingTop: 4 } : {}) }}>{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.text} />}</div></>;

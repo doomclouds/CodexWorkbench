@@ -816,7 +816,7 @@ describe('whiteboard direct interaction', () => {
   it('applies and reselects custom text ink on a position-locked object without changing its lock or geometry', async () => {
     host.dataset.studioTheme = 'dark';
     const locked = element('locked', { type: 'text', text: 'Custom ink', locked: true, color: '#D97757' });
-    const call = await editable([locked]); await select('locked'); await click('文字颜色');
+    const call = await editable([locked], { viewTheme: 'dark' }); await select('locked'); await click('文字颜色');
     await click('添加自定义颜色'); await input(query('颜色值') as HTMLInputElement, '#303645');
     expect(call).not.toHaveBeenCalled(); await event(host.querySelector('button[type="submit"]')!, 'click');
     expect(call.mock.calls[0]![1].operations).toEqual([{ op: 'update', id: 'locked', changes: { color: '#303645' } }, { op: 'style', style: { nativeInks: '303645' } }]);

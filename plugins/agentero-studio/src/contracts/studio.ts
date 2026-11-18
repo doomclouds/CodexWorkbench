@@ -2,7 +2,7 @@ import type { Proposal } from './proposals.js';
 import type { DocumentContent } from './document.js';
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Role = 'owner' | 'editor' | 'commenter' | 'viewer';
-export interface Actor { id: string; name: string; kind: 'human' | 'agent'; role: Role }
+export interface Actor { id: string; name: string; kind: 'human' | 'agent'; role: Role; /** Display continuity only; authorization always uses id. */ presentationId?: string }
 export interface ShareMember { id: string; name: string; role: Exclude<Role, 'owner'>; joinedAt: string; lastSeenAt: string; active: boolean; online: boolean }
 export interface Artifact {
   id: string; type: string; title: string; revision: number; createdAt: string; updatedAt: string;

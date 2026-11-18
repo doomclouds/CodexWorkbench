@@ -286,3 +286,47 @@ it('shows a workspace count summary with one status and release action for each 
   expect(release.mock.calls.map(([target]) => target)).toEqual(tasks.map(task => ({ artifactId: 'board', targetActorId: 'builder', taskId: task.taskId, generation: task.generation })));
   expect(follow).not.toHaveBeenCalled();
 });
+
+it('shows one stable chat avatar across connections and releases each workspace through its actual actor', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000);
+  const presentationId = 'agent-display-12345678901234567890123456789012';
+  const peer = (id: string, generation: string, x: number): Presence => ({ peerId: `${id}-peer`, actor: { ...LOCAL_ACTOR, id, name: 'Main Agent', kind: 'agent', presentationId }, context: { artifactId: 'board', viewId: `${id}-peer`, selectedIds: [], agentTasks: [{ ...taskMeta(), taskId: 'work', generation, scope: { rect: { x, y: 0, w: 200, h: 100 } }, expiresAt: 601_000 }] }, updatedAt: new Date().toISOString() });
+  const first = peer('first-connection', 'first-generation', 0), next = peer('next-connection', 'next-generation', 300);
+  const release = vi.fn().mockResolvedValue(undefined), follow = vi.fn();
+  const render = (peers: Presence[]) => act(async () => root.render(<OnlineParticipants actor={LOCAL_ACTOR} peers={peers} following="" onFollow={follow} onReleaseAgentTask={release} />));
+  await render([first, next]);
+  expect(container.querySelectorAll('.studio-online-stack .studio-online-avatar')).toHaveLength(1);
+  expect(participantColor(first.actor)).toBe(participantColor(next.actor));
+  const color = (container.querySelector('.studio-online-avatar') as HTMLElement).style.background;
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="此刻在这里"]')!.click());
+  expect(container.querySelectorAll('.studio-online-row')).toHaveLength(1);
+  const actions = [...container.querySelectorAll<HTMLButtonElement>('[data-agent-task-release]')];
+  expect(actions).toHaveLength(2);
+  for (const action of actions) await act(async () => action.click());
+  expect(release.mock.calls.map(([target]) => target)).toEqual([
+    { artifactId: 'board', targetActorId: first.actor.id, taskId: 'work', generation: 'first-generation' },
+    { artifactId: 'board', targetActorId: next.actor.id, taskId: 'work', generation: 'next-generation' },
+  ]);
+  await render([next]);
+  expect(container.querySelectorAll('.studio-online-row')).toHaveLength(1);
+  expect((container.querySelector('.studio-online-avatar') as HTMLElement).style.background).toBe(color);
+  await act(async () => container.querySelector<HTMLButtonElement>('.studio-online-follow')!.click());
+  expect(follow).toHaveBeenCalledWith(presentationId);
+});
+
+it('continues following the stable presentation when a chat reconnects under a new authority actor', async () => {
+  vi.useFakeTimers(); vi.setSystemTime(1000); vi.stubGlobal('matchMedia', () => ({ matches: true }));
+  const presentationId = 'agent-display-12345678901234567890123456789012';
+  const peer = (id: string, x: number): Presence => ({ peerId: `${id}-peer`, actor: { ...LOCAL_ACTOR, id, name: 'Main Agent', kind: 'agent', presentationId }, context: { artifactId: 'board', viewId: `${id}-peer`, selectedIds: [], agentTasks: [{ ...taskMeta(), taskId: 'work', generation: id, scope: { rect: { x, y: 0, w: 200, h: 100 } }, expiresAt: 601_000 }] }, updatedAt: new Date().toISOString() });
+  const onStop = vi.fn(), room: CollaborationRoom = { send: vi.fn().mockResolvedValue(true), subscribe: () => () => {} };
+  function Fixture({ peers }: { peers: Presence[] }) {
+    const area = useRef<HTMLDivElement>(null);
+    const follow = useViewportFollow({ actorId: 'local', peerId: 'own', peers, following: presentationId, room, area, busy: false, onStop });
+    return <div ref={area}><output>{follow.peer?.actor.id}</output></div>;
+  }
+  await act(async () => root.render(<Fixture peers={[peer('first-connection', 0)]} />));
+  expect(container.querySelector('output')!.textContent).toBe('first-connection');
+  await act(async () => root.render(<Fixture peers={[peer('next-connection', 300)]} />));
+  expect(container.querySelector('output')!.textContent).toBe('next-connection');
+  expect(onStop).not.toHaveBeenCalled();
+});

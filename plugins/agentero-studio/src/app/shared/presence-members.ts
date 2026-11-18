@@ -1,9 +1,11 @@
 import type { Actor, Presence } from '../../contracts/studio';
 
 export const PARTICIPANT_COLORS = ['#785ee8', '#dc3c3d', '#019c7f', '#fbb315', '#ce447d', '#10a122', '#257de0', '#d25f25'] as const;
+/** Presentation continuity never grants another connection the actor's permissions. */
+export function participantIdentity(actor: Actor): string { return actor.kind === 'agent' ? actor.presentationId ?? actor.id : actor.id; }
 export function participantColor(actor: Actor, chosen?: string): string {
   if (chosen && PARTICIPANT_COLORS.includes(chosen.toLowerCase() as typeof PARTICIPANT_COLORS[number])) return chosen.toLowerCase();
-  let hash = 0; for (const character of actor.id) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  let hash = 0; for (const character of participantIdentity(actor)) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
   return PARTICIPANT_COLORS[hash % (actor.kind === 'agent' ? 8 : 7)]!;
 }
 export interface PresenceMember { actor: Actor; peer: Presence; peers: Presence[]; activeAt: number; color: string }
@@ -12,8 +14,8 @@ export function presenceMembers(peers: Presence[], selfActorId: string): Presenc
   const grouped = new Map<string, Presence[]>();
   for (const peer of peers) {
     if (peer.actor.id === selfActorId) continue;
-    const pages = grouped.get(peer.actor.id) || [];
-    pages.push(peer); grouped.set(peer.actor.id, pages);
+    const key = participantIdentity(peer.actor), pages = grouped.get(key) || [];
+    pages.push(peer); grouped.set(key, pages);
   }
   return [...grouped.values()].map(pages => {
     pages.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
