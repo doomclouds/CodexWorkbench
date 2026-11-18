@@ -8,7 +8,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { JSDOM } from 'jsdom';
 import { StudioService } from '../src/core/service.js';
 import { createStudioServer } from '../src/server/protocol.js';
-import { LOCAL_ACTOR, type Actor, type Board, type Operation } from '../src/contracts/studio.js';
+import { LOCAL_ACTOR, type Actor, type Board, type CommentPin, type Feedback, type Operation } from '../src/contracts/studio.js';
 import { applyDocumentOperations, defaultDocument, documentAnchorState, documentBlockText, documentOperations, documentPlainText, normalizeDocument, type DocumentBlock, type DocumentBlockOperation, type DocumentContent } from '../src/contracts/document.js';
 import { buildBoardHtml } from '../src/core/serialization.js';
 import { documentHtml } from '../src/core/products/document-serialization.js';
@@ -77,6 +77,64 @@ describe('canonical document JSON and block operations', () => {
 });
 
 describe('document service contracts', () => {
+  it.each<CommentPin>([
+    { coordinateSpace: 'board', x: -132.75, y: 428.5 },
+    { coordinateSpace: 'document', x: .23, y: .81 },
+  ])('preserves a $coordinateSpace pin independently of frozen document context through retry, reopen and archive', async pin => {
+    const anchor = { coordinateSpace: 'document' as const, elementIds: ['doc'], blockIds: ['one'], sourceVersion: 1, quote: '第一段原文', pin };
+    const create = { artifactId, action: 'create', operationId: 'stable-comment-position', text: '核对原段落', anchor, versions: { doc: 1 } };
+    const first = await service.execute('artifact_feedback', create);
+    const saved = first.feedback.find((item: Feedback) => item.id === first.contextId)!;
+    expect(saved.anchor).toEqual(anchor);
+    const revision = (await read()).artifact.revision;
+    const retry = await service.execute('artifact_feedback', create);
+    expect(retry.contextId).toBe(first.contextId);
+    expect(retry.feedback).toEqual(first.feedback);
+    expect((await read()).artifact.revision).toBe(revision);
+    await expect(service.execute('artifact_feedback', { ...create, anchor: { ...anchor, pin: { ...pin, x: pin.x / 2 } } })).rejects.toMatchObject({ code: 'OPERATION_REUSED' });
+
+    const requested = await service.execute('artifact_feedback', { artifactId, action: 'send', feedbackId: saved.id });
+    const attachment = requested.feedback.find((item: Feedback) => item.id === saved.id)!.attachment;
+    expect(attachment).toMatchObject({ requestId: expect.any(String), state: 'pending' });
+    const retriedAttachment = await service.execute('artifact_feedback', { artifactId, action: 'send', feedbackId: saved.id });
+    expect(retriedAttachment.feedback.find((item: Feedback) => item.id === saved.id)!.attachment).toEqual(attachment);
+
+    await patch([{ op: 'update', id: 'one', changes: { content: '当前内容已经修改' } }]);
+    const reopened = new StudioService({ dataRoot: directory });
+    try {
+      const feedback = (await reopened.execute('artifact_feedback', { artifactId, action: 'get', feedbackId: saved.id })).feedback.find((item: Feedback) => item.id === saved.id)!;
+      expect(feedback.anchor).toEqual(anchor);
+      const frozen = await reopened.execute('artifact_read', { artifactId, mode: 'source', elementId: 'doc', feedbackId: saved.id });
+      expect(documentPlainText(frozen.document)).toBe('第一段原文\n第二段不变');
+    } finally { await reopened.close(); }
+
+    const exported = await service.execute('artifact_export', { artifactId, format: 'zip' });
+    const imported = await service.importArchive((await service.getExport(exported.exportId)).data);
+    const importedId = imported.artifact.id;
+    const importedFeedback = (await service.execute('artifact_feedback', { artifactId: importedId, action: 'get', feedbackId: saved.id })).feedback.find((item: Feedback) => item.id === saved.id)!;
+    expect(importedFeedback.anchor).toEqual(anchor);
+    const importedSource = await service.execute('artifact_read', { artifactId: importedId, mode: 'source', elementId: 'doc', feedbackId: saved.id });
+    expect(documentPlainText(importedSource.document)).toBe('第一段原文\n第二段不变');
+  });
+  it.each([
+    null, [], {}, { coordinateSpace: 'html', x: 1, y: 2 },
+    { coordinateSpace: 'board', x: undefined, y: 0 }, { coordinateSpace: 'board', x: '3', y: 0 },
+    { coordinateSpace: 'board', x: Infinity, y: 0 }, { coordinateSpace: 'board', x: 10_000_001, y: 0 },
+    { coordinateSpace: 'document', x: -.01, y: .5 }, { coordinateSpace: 'document', x: .5, y: 1.01 },
+  ])('rejects an invalid presentation pin without writing feedback or history (%j)', async pin => {
+    const before = await read();
+    await expect(service.execute('artifact_feedback', { artifactId, action: 'create', text: '无效点位', anchor: { coordinateSpace: 'document', elementIds: ['doc'], blockIds: ['one'], pin }, versions: { doc: 1 } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    expect((await service.execute('artifact_feedback', { artifactId, action: 'list' })).feedback).toEqual([]);
+    expect((await read()).artifact.revision).toBe(before.artifact.revision);
+  });
+  it('requires a document target for block-relative pins while allowing a board point with any source target', async () => {
+    await expect(service.execute('artifact_feedback', { artifactId, action: 'create', text: '对象不能使用段落坐标', anchor: { coordinateSpace: 'element', elementIds: ['other'], x: .5, y: .5, pin: { coordinateSpace: 'document', x: .2, y: .3 } }, versions: { other: 1 } })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    const anchor = { coordinateSpace: 'element' as const, elementIds: ['other'], x: .5, y: .5, pin: { coordinateSpace: 'board' as const, x: 420, y: 560 } };
+    const created = await service.execute('artifact_feedback', { artifactId, action: 'create', text: '固定的画布位置', anchor, versions: { other: 1 } });
+    expect(created.feedback[0].anchor).toEqual(anchor);
+    const source = await service.execute('artifact_read', { artifactId, mode: 'source', elementId: 'other', feedbackId: created.contextId });
+    expect(source.element.text).toBe('不相关内容');
+  });
   it('patches only named blocks, preserves geometry and unrelated objects, and persists across services', async () => {
     const before = await read();
     const saved = await patch([{ op: 'update', id: 'one', changes: { content: '第一段修改' } }, { op: 'insert', block: paragraph('three', '新增段落'), afterId: 'one' }]);

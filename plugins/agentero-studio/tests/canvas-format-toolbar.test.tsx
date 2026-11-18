@@ -102,3 +102,138 @@ it('keeps both native endpoint choices readable and preserves the opposite endpo
   const scroll = getComputedStyle(host.querySelector('.studio-selection-toolbar-scroll')!);
   expect(scroll.flexWrap).toBe('nowrap'); expect(scroll.overflowX).toBe('auto');
 });
+
+interface PanelLayout { canvasWidth: number; canvasHeight: number; toolbarWidth: number; panelWidth: number; panelHeight: number; triggerOffset: number }
+function measurePanels(layout: PanelLayout) {
+  const rect = (x: number, y: number, w: number, h: number) => ({ x, y, left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, toJSON() {} });
+  const toolbarRect = () => {
+    const toolbar = query('选区格式');
+    const center = parseFloat(toolbar?.style.left || '460'), top = parseFloat(toolbar?.style.top || '100');
+    return rect(80 + center - layout.toolbarWidth / 2, 40 + top, layout.toolbarWidth, 42);
+  };
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return rect(80, 40, layout.canvasWidth, layout.canvasHeight);
+    const bar = toolbarRect();
+    if (this.classList.contains('studio-selection-toolbar')) return bar;
+    if (this.classList.contains('studio-selection-toolbar-scroll')) return rect(bar.left + 7, bar.top + 5, layout.toolbarWidth - 14, 30);
+    if (this.classList.contains('studio-format-popover')) {
+      const width = Math.min(layout.panelWidth, parseFloat(this.style.maxWidth || String(layout.panelWidth)));
+      const height = Math.min(layout.panelHeight, parseFloat(this.style.maxHeight || String(layout.panelHeight)));
+      return rect(bar.left + parseFloat(this.style.left || '0'), bar.top + parseFloat(this.style.top || '0'), width, height);
+    }
+    if (this.parentElement?.classList.contains('studio-selection-toolbar-scroll')) {
+      return rect(bar.left + layout.triggerOffset - this.parentElement.scrollLeft, bar.top + 5, 29, 30);
+    }
+    return rect(0, 0, 0, 0);
+  });
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('studio-format-popover') ? layout.panelHeight : 0; });
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('studio-format-popover') ? this.getBoundingClientRect().height : 0; });
+}
+
+it.each(['文字对齐', '文字颜色', '文字链接', '填充颜色', '边框与线条', '对齐对象'])('anchors the %s panel at its actual trigger rather than the toolbar origin', async name => {
+  measurePanels({ canvasWidth: 900, canvasHeight: 600, toolbarWidth: 660, panelWidth: 220, panelHeight: 90, triggerOffset: 365 });
+  await mount(name === '对齐对象' ? [element('shape'), element('shape', { id: 'second' })] : [element('shape')], { style: { left: 450, top: 120 } });
+  const trigger = query<HTMLButtonElement>(name);
+  await click(name);
+  const panel = host.querySelector<HTMLElement>('.studio-format-popover')!;
+  const anchor = trigger.getBoundingClientRect(), bounds = panel.getBoundingClientRect(), bar = query('选区格式').getBoundingClientRect();
+  expect(bounds.left).toBe(anchor.left);
+  expect(bounds.top).toBe(bar.bottom + 7);
+  expect(bounds.left - bar.left).toBeGreaterThan(300);
+  expect(panel.dataset.placement).toBe('below');
+  expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  expect(trigger.getAttribute('aria-controls')).toBe(panel.id);
+  expect(panel.parentElement).toBe(query('选区格式'));
+  expect(panel.closest('.studio-selection-toolbar-scroll')).toBeNull();
+});
+
+it('flips a panel above a low toolbar and clamps it within the right canvas edge', async () => {
+  measurePanels({ canvasWidth: 600, canvasHeight: 330, toolbarWidth: 540, panelWidth: 220, panelHeight: 130, triggerOffset: 490 });
+  await mount([element('shape')], { style: { left: 500, top: 265 } });
+  await click('填充颜色');
+  const panel = host.querySelector<HTMLElement>('.studio-format-popover')!, bounds = panel.getBoundingClientRect(), bar = query('选区格式').getBoundingClientRect();
+  expect(panel.dataset.placement).toBe('above');
+  expect(bounds.bottom).toBe(bar.top - 7);
+  expect(bounds.left).toBeGreaterThanOrEqual(92);
+  expect(bounds.right).toBeLessThanOrEqual(668);
+  expect(bounds.top).toBeGreaterThanOrEqual(52);
+});
+
+it('constrains a tall panel and closes it when its trigger scrolls out of the toolbar', async () => {
+  const layout = { canvasWidth: 320, canvasHeight: 260, toolbarWidth: 296, panelWidth: 420, panelHeight: 600, triggerOffset: 150 };
+  measurePanels(layout);
+  await mount([element('shape')], { style: { left: 160, top: 110 } });
+  await click('文字颜色');
+  const panel = host.querySelector<HTMLElement>('.studio-format-popover')!, bounds = panel.getBoundingClientRect();
+  expect(parseFloat(panel.style.maxWidth)).toBe(296);
+  expect(bounds.left).toBeGreaterThanOrEqual(92);
+  expect(bounds.right).toBeLessThanOrEqual(388);
+  expect(bounds.top).toBeGreaterThanOrEqual(52);
+  expect(bounds.bottom).toBeLessThanOrEqual(288);
+  expect(getComputedStyle(panel).overflow).toBe('auto');
+  const scroller = host.querySelector<HTMLElement>('.studio-selection-toolbar-scroll')!;
+  await act(async () => { scroller.scrollLeft = 400; scroller.dispatchEvent(new Event('scroll', { bubbles: false })); });
+  expect(host.querySelector('.studio-format-popover')).toBeNull();
+});
+
+it('repositions an open panel after toolbar scrolling and after its content grows', async () => {
+  const layout = { canvasWidth: 900, canvasHeight: 480, toolbarWidth: 660, panelWidth: 220, panelHeight: 70, triggerOffset: 365 };
+  measurePanels(layout);
+  await mount([element('shape')], { style: { left: 450, top: 240 } });
+  await click('文字颜色');
+  const panel = host.querySelector<HTMLElement>('.studio-format-popover')!;
+  const before = panel.getBoundingClientRect();
+  const scroller = host.querySelector<HTMLElement>('.studio-selection-toolbar-scroll')!;
+  await act(async () => { scroller.scrollLeft = 80; scroller.dispatchEvent(new Event('scroll')); });
+  expect(panel.getBoundingClientRect().left).toBe(before.left - 80);
+  layout.panelHeight = 250;
+  await act(async () => window.dispatchEvent(new Event('resize')));
+  expect(panel.dataset.placement).toBe('above');
+  expect(panel.getBoundingClientRect().bottom).toBe(query('选区格式').getBoundingClientRect().top - 7);
+});
+
+it('preserves the active text selection for quick colors and restores its focus on Escape', async () => {
+  await mount([element('text')]);
+  const editor = document.createElement('div'); editor.setAttribute('contenteditable', 'true'); editor.tabIndex = 0; editor.textContent = 'Selected words'; document.body.append(editor);
+  try {
+    editor.focus();
+    const range = document.createRange(); range.setStart(editor.firstChild!, 0); range.setEnd(editor.firstChild!, 8);
+    document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range);
+    const pointer = new MouseEvent('pointerdown', { bubbles: true, cancelable: true });
+    await act(async () => query('文字颜色').dispatchEvent(pointer));
+    expect(pointer.defaultPrevented).toBe(true);
+    await click('文字颜色');
+    expect(document.activeElement).toBe(editor);
+    expect(document.getSelection()!.toString()).toBe('Selected');
+    await click('墨色 蓝色');
+    expect(document.getSelection()!.toString()).toBe('Selected');
+    await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(host.querySelector('.studio-format-popover')).toBeNull();
+    expect(document.activeElement).toBe(editor);
+  } finally { editor.remove(); }
+});
+
+it('focuses the link field and restores the invoking button after applying', async () => {
+  const format = vi.fn();
+  await mount([element('text')], { onTextFormat: format });
+  await click('文字链接');
+  const input = query<HTMLInputElement>('文字链接地址');
+  expect(document.activeElement).toBe(input);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'https://example.com');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => input.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(format).toHaveBeenCalledWith('link', 'https://example.com');
+  expect(host.querySelector('.studio-format-popover')).toBeNull();
+  expect(document.activeElement).toBe(query('文字链接'));
+});
+
+it('anchors a keyboard-requested link at its link button and focuses the existing address', async () => {
+  measurePanels({ canvasWidth: 900, canvasHeight: 600, toolbarWidth: 660, panelWidth: 220, panelHeight: 90, triggerOffset: 365 });
+  await mount([element('text')], { style: { left: 450, top: 120 }, requestLink: { key: 'link-request', value: 'https://example.com' } });
+  const input = query<HTMLInputElement>('文字链接地址');
+  expect(document.activeElement).toBe(input);
+  expect(input.value).toBe('https://example.com');
+  expect(host.querySelector('.studio-format-popover')!.getBoundingClientRect().left).toBe(query('文字链接').getBoundingClientRect().left);
+});

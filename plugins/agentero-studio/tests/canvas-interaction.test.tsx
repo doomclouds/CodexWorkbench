@@ -424,6 +424,65 @@ describe('whiteboard direct interaction', () => {
     expect(call).toHaveBeenCalledTimes(3);
     expect(call.mock.calls[2]![1].operations[0]).toMatchObject({ op: 'delete' });
   });
+  it('previews a document from the insert menu without mounting or saving it before placement', async () => {
+    const call = await editable([element('existing')]);
+    await click('形状'); await click('添加文档区域');
+    expect(call).not.toHaveBeenCalled();
+    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('document');
+    expect(document.activeElement).toBe(query('白板画布'));
+    await event(query('白板画布'), 'pointermove', 320, 250);
+    const preview = host.querySelector<HTMLElement>('[data-document-placement]')!;
+    expect(preview.style.left).toBe('320px'); expect(preview.style.width).toBe('680px');
+    expect(host.querySelector('.studio-document-region')).toBeNull();
+    await event(query('白板画布'), 'pointerdown', 320, 250);
+    expect(host.querySelector('.studio-document-region')).toBeNull(); expect(call).not.toHaveBeenCalled();
+    await event(query('白板画布'), 'pointerup', 320, 250);
+    expect(call).toHaveBeenCalledOnce();
+    const created = call.mock.calls[0]![1].operations[0]!.element as BoardElement;
+    expect(created).toMatchObject({ type: 'document', x: 320, y: 250, w: 680, h: 560 });
+    expect(created.document!.blocks[0]!.id).toMatch(/^block/);
+    expect(host.querySelector(`[data-element-id="${created.id}"].is-selected`)).not.toBeNull();
+    expect(host.querySelector('.studio-document-focus')).toBeNull();
+    expect(host.querySelector('[data-document-placement]')).toBeNull();
+    expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
+  });
+  it.each([
+    { zoom: .25, start: { x: 200, y: 160 }, end: { x: 100, y: 80 }, bounds: { x: 400, y: 320, w: 400, h: 320 } },
+    { zoom: 2, start: { x: 100, y: 80 }, end: { x: 200, y: 160 }, bounds: { x: 50, y: 40, w: 50, h: 40 } },
+    { zoom: .5, start: { x: 200, y: 160 }, end: { x: 204, y: 160 }, bounds: { x: 400, y: 320, w: 680, h: 560 } },
+  ])('places a document with the shared screen drag threshold at $zoom', async ({ zoom, start, end, bounds }) => {
+    const call = await editable([], { externalViewport: { x: 0, y: 0, zoom } });
+    const entry = [...host.querySelectorAll('button')].find(button => button.textContent === '添加文档')!;
+    await event(entry, 'click'); await pointer(start.x, start.y, end);
+    expect(call).toHaveBeenCalledOnce();
+    expect(call.mock.calls[0]![1].operations[0]!.element).toMatchObject({ type: 'document', ...bounds });
+    expect(host.querySelector('.studio-document-focus')).toBeNull();
+  });
+  it('cancels document placement before or during the drag without saving a document', async () => {
+    const call = await editable();
+    const entry = () => [...host.querySelectorAll('button')].find(button => button.textContent === '添加文档')!;
+    await event(entry(), 'click'); await event(query('白板画布'), 'pointermove', 100, 100);
+    await key(query('白板画布'), 'Escape');
+    expect(host.querySelector('[data-document-placement]')).toBeNull();
+    await event(entry(), 'click'); await event(query('白板画布'), 'pointerdown', 100, 100);
+    await event(query('白板画布'), 'pointermove', 400, 300); await key(query('白板画布'), 'Escape');
+    await event(query('白板画布'), 'pointerup', 400, 300);
+    expect(call).not.toHaveBeenCalled(); expect(host.querySelector('.studio-document-region')).toBeNull();
+  });
+  it('consumes the placement double click and preserves the next explicit document edit', async () => {
+    const call = await editable();
+    await event([...host.querySelectorAll('button')].find(button => button.textContent === '添加文档')!, 'click');
+    await pointer(200, 100);
+    const id = call.mock.calls[0]![1].operations[0]!.id!;
+    const target = host.querySelector(`[data-element-id="${id}"]`)!;
+    await act(async () => target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+    await act(async () => target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+    await act(async () => target.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 })));
+    expect(call).toHaveBeenCalledOnce(); expect(host.querySelector('.studio-document-focus')).toBeNull();
+    await act(async () => target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+    await event(target, 'dblclick');
+    expect(host.querySelector('.studio-document-focus')).not.toBeNull();
+  });
   it('creates sections with the white fill selected and keeps palette changes in the saved element', async () => {
     const call = await editable();
     await click('分区'); await pointer(100, 100, { x: 500, y: 350 });
@@ -574,10 +633,10 @@ describe('whiteboard direct interaction', () => {
     const annotate = vi.fn();
     await mount([element('one')], { annotationActive: true, onAnnotateNative: annotate });
     await event(host.querySelector('[data-element-id="one"]')!, 'pointerdown', 150, 145); await event(query('白板画布'), 'pointerup', 150, 145);
-    expect(annotate.mock.lastCall?.[0]).toMatchObject({ anchor: { coordinateSpace: 'element', elementIds: ['one'], x: .25, y: .25 }, versions: { one: 1 }, screenPoint: { x: 150, y: 145 } });
-    await pointer(500, 400); expect(annotate.mock.lastCall?.[0].anchor).toEqual({ coordinateSpace: 'board', elementIds: [], x: 500, y: 400 });
+    expect(annotate.mock.lastCall?.[0]).toMatchObject({ anchor: { coordinateSpace: 'element', elementIds: ['one'], x: .25, y: .25, pin: { coordinateSpace: 'board', x: 150, y: 145 } }, versions: { one: 1 }, screenPoint: { x: 150, y: 145 } });
+    await pointer(500, 400); expect(annotate.mock.lastCall?.[0].anchor).toEqual({ coordinateSpace: 'board', elementIds: [], x: 500, y: 400, pin: { coordinateSpace: 'board', x: 500, y: 400 } });
     await pointer(80, 100, { x: 330, y: 250 });
-    expect(annotate.mock.lastCall?.[0].anchor).toEqual({ coordinateSpace: 'board', elementIds: ['one'], x: 80, y: 100, w: 250, h: 150 });
+    expect(annotate.mock.lastCall?.[0].anchor).toEqual({ coordinateSpace: 'board', elementIds: ['one'], x: 80, y: 100, w: 250, h: 150, pin: { coordinateSpace: 'board', x: 330, y: 250 } });
     expect(host.querySelector('.studio-inline-editor')).toBeNull();
   });
   it('enters comment mode from pan and returns to a valid select tool when the header exits', async () => {

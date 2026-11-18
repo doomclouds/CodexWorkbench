@@ -45,6 +45,24 @@ async function tick(ms: number) { await act(async () => { await vi.advanceTimers
 const surface = () => props.expanded ? portal : host;
 const storedDraft = () => localStorage.getItem('studio-document-draft:owner:artifact-one:document-one');
 
+it('keeps a document-relative pin in its paragraph after returning to the board', async () => {
+  const selectRemark = vi.fn();
+  props = { ...props, expanded: true, onFeedbackSelect: selectRemark, activities: [{
+    id: 'note-one', artifactId: props.artifactId, type: 'comment', author: props.actor,
+    anchor: { coordinateSpace: 'document', elementIds: [props.element.id], blockIds: ['paragraph'], pin: { coordinateSpace: 'document', x: .25, y: .5 } },
+    text: '段落备注', status: 'open', createdAt: '', updatedAt: '', replies: [],
+  }] };
+  await render();
+  const selector = '[data-document-block-id="paragraph"] [data-feedback-pin="note-one"]';
+  expect(portal.querySelector<HTMLButtonElement>(selector)?.style.left).toBe('25%');
+  props = { ...props, expanded: false, interactive: false };
+  await render();
+  expect(portal.querySelector(selector)).toBeNull();
+  expect(host.querySelector<HTMLButtonElement>(selector)?.style.top).toBe('50%');
+  await click('备注 1：段落备注');
+  expect(selectRemark).toHaveBeenCalledWith(props.activities![0], expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
+});
+
 it('keeps document paper independent from UI theme in reading, editing and expansion', async () => {
   props = { ...props, theme: 'dark' }; await render();
   const shell = surface().querySelector<HTMLElement>('.studio-document-region')!;

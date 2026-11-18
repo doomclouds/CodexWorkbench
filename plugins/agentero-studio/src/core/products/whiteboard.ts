@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_STYLE, type Anchor, type Board, type BoardElement, type Operation } from '../../contracts/studio.js';
+import { DEFAULT_STYLE, isCommentPin, type Anchor, type Board, type BoardElement, type Operation } from '../../contracts/studio.js';
 import { copy, finite, object, safeId, same, StudioError } from '../shared/common.js';
 import type { ArtifactState, ContentChange, ProductAdapter, Snapshot, UnitClock } from '../shared/model.js';
 import { jsonEqual, mergeConflictDetails, mergeJson } from '../shared/safe-merge.js';
@@ -328,6 +328,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
   },
   snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
     const anchor: Anchor = object(value) ? copy(value) : {};
+    if (anchor.pin !== undefined && (!isCommentPin(anchor.pin) || anchor.pin.coordinateSpace === 'document' && anchor.coordinateSpace !== 'document')) throw new StudioError('INVALID_ARGUMENT', '备注气泡位置无效。');
     if (anchor.elementIds !== undefined && (!Array.isArray(anchor.elementIds) || anchor.elementIds.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '备注元素定位无效。');
     if (anchor.coordinateSpace !== undefined && !['board', 'element', 'html', 'document'].includes(anchor.coordinateSpace)) throw new StudioError('INVALID_ARGUMENT', '备注坐标空间无效。');
     for (const key of ['x', 'y', 'w', 'h'] as const) if (anchor[key] !== undefined) finite(anchor[key], 0);
