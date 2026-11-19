@@ -275,7 +275,7 @@ describe('feedback and sharing schema through the real MCP SDK', () => {
     try {
       const listing = await client.listTools();
       const modelTools = listing.tools.filter(tool => { const ui = tool._meta?.ui as { visibility?: string[] } | undefined; return !ui?.visibility || ui.visibility.includes('model'); });
-      expect(modelTools.map(tool => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+      expect(modelTools.map(tool => tool.name).sort()).toEqual(TOOL_NAMES.filter(name => name !== 'studio_open').sort());
       expect(modelTools.map(tool => tool.name)).not.toContain('studio_app_request');
       expect(listing.tools.find(tool => tool.name === 'studio_app_request')).toMatchObject({ _meta: { ui: { visibility: ['app'] } } });
       const call = async (name: string, args: Record<string, unknown>) => client.callTool({ name, arguments: { artifactId, ...args } });

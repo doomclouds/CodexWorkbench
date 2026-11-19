@@ -81,11 +81,20 @@ describe('model MCP contracts through the real SDK', () => {
     }
     expect((tools.find(tool => tool.name === 'artifact_apply')!.inputSchema.properties as Record<string, any>).merge.const).toBe('safe');
   });
-  it('publishes coordinate/version/lock semantics with all model tools and one app-only transport', async () => {
+  it('publishes the background model tools and keeps the conversation entrypoint app-only', async () => {
     const { tools } = await client.listTools();
     const visible = tools.filter(tool => !(tool._meta?.ui as { visibility?: string[] } | undefined)?.visibility || (tool._meta?.ui as { visibility: string[] }).visibility.includes('model'));
-    expect(visible.map(tool => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect(visible).toHaveLength(8);
+    expect(visible.map(tool => tool.name).sort()).toEqual(TOOL_NAMES.filter(name => name !== 'studio_open').sort());
+    for (const tool of visible) {
+      expect((tool._meta?.ui as { resourceUri?: string } | undefined)?.resourceUri).toBeUndefined();
+      expect(tool._meta?.['openai/ui']).toBeUndefined();
+    }
     expect(tools).toHaveLength(TOOL_NAMES.length + 1);
+    expect(tools.find(tool => tool.name === 'studio_open')?._meta).toMatchObject({
+      ui: { visibility: ['app'], resourceUri: 'ui://agentero-studio/app' },
+      'openai/ui': { entrypoints: [{ type: 'thread' }] },
+    });
     expect(tools.find(tool => tool.name === APP_TOOL_NAME)?._meta).toMatchObject({ ui: { visibility: ['app'] } });
     const feedback = tools.find(tool => tool.name === 'artifact_feedback')!, fields = feedback.inputSchema.properties as Record<string, any>;
     expect(fields.versions).toMatchObject({ type: 'object', description: expect.stringContaining('选取时') });
@@ -104,6 +113,26 @@ describe('model MCP contracts through the real SDK', () => {
     expect(manageFields.artifactIds).toMatchObject({ type: 'array', minItems: 1, maxItems: 100, description: expect.stringContaining('二选一') });
     expect(manage.annotations?.destructiveHint).toBe(true);
     expect(tools.some(tool => /reader/.test(tool.name))).toBe(false);
+  });
+
+  it('saves and verifies an Agent change without returning an App result', async () => {
+    const binding = await fixtureTask();
+    const write = await client.callTool({
+      name: 'artifact_apply',
+      arguments: {
+        artifactId, ...binding, operationId: randomUUID(), expectedRevision: 0,
+        operations: [{ op: 'add', element: { id: 'background-note', type: 'text', text: 'Background update' } }],
+      },
+    });
+    expect(write).toMatchObject({ content: [], structuredContent: { ok: true, data: { artifact: { id: artifactId, revision: 1 } } } });
+    expect(write._meta).toBeUndefined();
+
+    const read = await client.callTool({
+      name: 'artifact_read',
+      arguments: { artifactId, ...binding, mode: 'objects', ids: ['background-note'] },
+    });
+    expect(read).toMatchObject({ content: [], structuredContent: { ok: true, data: { elements: [{ id: 'background-note', text: 'Background update', version: 1 }] } } });
+    expect(read._meta).toBeUndefined();
   });
 
   it('publishes explicit task generations and lifecycle actions without exposing the UI transport to models', async () => {

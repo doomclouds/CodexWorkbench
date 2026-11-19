@@ -46,6 +46,7 @@ beforeEach(async () => {
   await client.connect(clientTransport);
   const opened = await client.callTool({ name: 'studio_open', arguments: {} });
   expect(opened.isError).not.toBe(true);
+  expect(opened.structuredContent).toMatchObject({ ok: true, data: { view: 'library' } });
   expect(opened._meta?.connection).toMatchObject({ baseUrl: host.origin, actor: host.service.owner });
 
   actions = []; activeTransfers = new Set();
@@ -101,7 +102,7 @@ describe('first-run MCP App with unavailable browser networking', () => {
       const ui = tool._meta?.ui as { visibility?: string[] } | undefined;
       return !ui?.visibility || ui.visibility.includes('model');
     });
-    expect(visible.map(tool => tool.name).sort()).toEqual([...TOOL_NAMES].sort());
+    expect(visible.map(tool => tool.name).sort()).toEqual(TOOL_NAMES.filter(name => name !== 'studio_open').sort());
     expect(tools).toHaveLength(TOOL_NAMES.length + 1);
     expect(tools.find(tool => tool.name === APP_TOOL_NAME)?._meta).toMatchObject({ ui: { visibility: ['app'] } });
     expect(await call('artifact_list', {})).toMatchObject({ artifacts: [] });
