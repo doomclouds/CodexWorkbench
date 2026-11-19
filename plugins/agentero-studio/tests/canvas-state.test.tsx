@@ -16,6 +16,7 @@ it('forwards only current interactive-frame pointer messages and clears position
   const render = (interactive: boolean, element = region) => host.root.render(<HtmlRegion element={element} annotation={false} interactive={interactive} onAnnotate={() => {}} onPointerPosition={pointer} />);
   await act(async () => render(true));
   const frame = host.dom.window.document.querySelector('iframe')!, { identity } = await host.messages(frame);
+  expect(frame.tabIndex).toBe(0);
   const message = { type: 'studio-html-pointer', ...identity, point: { x: .2, y: .75 } };
   host.send(frame, message);
   expect(pointer).toHaveBeenLastCalledWith({ x: .2, y: .75 });
@@ -27,6 +28,7 @@ it('forwards only current interactive-frame pointer messages and clears position
   host.send(frame, message);
   await act(async () => render(false));
   expect(pointer).toHaveBeenLastCalledWith(null);
+  expect(frame.tabIndex).toBe(-1);
   const afterDisable = pointer.mock.calls.length;
   host.send(frame, message);
   expect(pointer).toHaveBeenCalledTimes(afterDisable);
@@ -42,9 +44,10 @@ it('forwards only current interactive-frame pointer messages and clears position
 
 it('forwards only current visible annotation-frame numeric shortcuts', async () => {
   const host = mount(), shortcut = vi.fn();
-  const render = (annotation: boolean) => host.root.render(<HtmlRegion element={region} annotation={annotation} interactive onAnnotate={() => {}} onToolShortcut={shortcut} />);
+  const render = (annotation: boolean) => host.root.render(<HtmlRegion element={region} annotation={annotation} interactive={false} onAnnotate={() => {}} onToolShortcut={shortcut} />);
   await act(async () => render(true));
   const frame = host.dom.window.document.querySelector('iframe')!, { identity } = await host.messages(frame);
+  expect(frame.tabIndex).toBe(0);
   const message = { type: 'studio-html-tool-shortcut', ...identity, key: '2' };
   host.send(frame, { ...message, channel: 'stale' }); host.send(frame, { ...message, sourceRevision: 1 }); host.send(frame, { ...message, regionId: 'other' }); host.send(frame, message, null); host.send(frame, { ...message, key: '0' });
   expect(shortcut).not.toHaveBeenCalled();
@@ -110,14 +113,17 @@ it('changes raster zoom without replacing the live frame, its channel or a pendi
   const runtime = await connectRuntime(host, frame);
   await act(async () => { runtime.save({ votes: 1, label: 'A' }); runtime.save({ votes: 2, label: 'A' }); });
   expect(change).toHaveBeenCalledExactlyOnceWith({ votes: 1, label: 'A' }, 4);
-  for (const zoom of [.867, 1.5, .55]) {
+  const rasters = [[.867, .867], [1.5, 1.5], [.63, .63], [.5, .5], [.28, 1], [.103, 1], [1, 1]];
+  for (const [zoom, rasterZoom] of rasters) {
     await act(async () => render(zoom));
     expect(host.dom.window.document.querySelector('iframe')).toBe(frame); expect(frame.contentWindow).toBe(originalWindow); expect(frame.srcdoc).toBe(originalSource);
     expect(input.ownerDocument).toBe(frame.contentDocument); expect(input.value).toBe('未提交的输入'); expect(frame.style.pointerEvents).toBe('auto');
     expect(runtime.load()).toEqual({ votes: 2, label: 'A' }); expect(change).toHaveBeenCalledTimes(1);
     expect(runtime.post.mock.calls.filter(([message]) => message.type === 'studio-html-mode').every(([message]) => message.channel === runtime.identity.channel)).toBe(true);
-    // This only checks that the density request reaches the iframe; raster clarity requires a real browser.
-    expect(frame.style.zoom).toBe(String(zoom));
+    expect(frame.style.zoom).toBe(String(rasterZoom));
+    expect(frame.style.width).toBe(`${rasterZoom * 100}%`);
+    expect(frame.style.height).toBe(`${rasterZoom * 100}%`);
+    expect(frame.style.transform).toBe(zoom === rasterZoom ? `scale(${1 / zoom})` : '');
   }
   await act(async () => waiting.shift()!({ state: { votes: 1, label: 'Remote' }, version: 5 }));
   expect(runtime.load()).toEqual({ votes: 2, label: 'Remote' }); expect(change).toHaveBeenNthCalledWith(2, { votes: 2, label: 'Remote' }, 5);
@@ -133,7 +139,7 @@ it('keeps normalized pointer/navigation and logical annotation coordinates acros
   const frame = host.dom.window.document.querySelector('iframe')!;
   Object.defineProperties(frame, { clientWidth: { value: 500 }, clientHeight: { value: 300 }, getBoundingClientRect: { value: () => ({ left: 100, top: 200, width: 500 * zoom, height: 300 * zoom }) } });
   const { identity } = await host.messages(frame);
-  for (zoom of [.867, 1.5, .55]) {
+  for (zoom of [.867, 1.5, .55, .103]) {
     await act(async () => render());
     await act(async () => {
       host.send(frame, { type: 'studio-html-pointer', ...identity, point: { x: .2, y: .75 } });
@@ -147,7 +153,7 @@ it('keeps normalized pointer/navigation and logical annotation coordinates acros
     expect(selection.screenPoint.x).toBeCloseTo(100 + 40 * zoom); expect(selection.screenPoint.y).toBeCloseTo(200 + 50 * zoom);
     expect(selection).not.toHaveProperty('point');
   }
-  expect(pointer).toHaveBeenCalledTimes(3); expect(navigate).toHaveBeenCalledTimes(3); expect(annotate).toHaveBeenCalledTimes(3);
+  expect(pointer).toHaveBeenCalledTimes(4); expect(navigate).toHaveBeenCalledTimes(4); expect(annotate).toHaveBeenCalledTimes(4);
 });
 
 it('retains authenticated logical scroll through zoom changes before a later source replacement', async () => {

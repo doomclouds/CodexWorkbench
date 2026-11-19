@@ -68,11 +68,20 @@ it('lets a selected document be read without an extra interaction mode and relea
   expect(selected()).toEqual(['doc']); expect(documents.get('doc')!.interactive).toBe(true); expect(call).not.toHaveBeenCalled();
 });
 
-it('releases HTML without replacing its iframe and keeps its first return click in selection mode', async () => {
-  const call = await mount([item('html', 'html'), item('shape', 'shape', 900)]), frame = host.querySelector('iframe')!;
-  await click('与 HTML 内容交互'); expect(frame.style.pointerEvents).toBe('auto');
+it('selects HTML with a canvas-owned first press and preserves its iframe as selection changes', async () => {
+  const call = await mount([item('html', 'html'), item('shape', 'shape', 900)], { externalSelectedIds: [] }), frame = host.querySelector('iframe')!;
+  expect(frame.style.pointerEvents).toBe('none'); expect(frame.tabIndex).toBe(-1);
+  await selectElement('html');
+  expect(query('白板画布').setPointerCapture).toHaveBeenCalledWith(1);
+  expect(query('与 HTML 内容交互')).toBeNull();
+  expect(frame.style.pointerEvents).toBe('auto'); expect(frame.tabIndex).toBe(0);
   await selectElement('shape'); expect(frame.style.pointerEvents).toBe('none');
-  await selectElement('html'); expect(selected()).toEqual(['html']); expect(frame.style.pointerEvents).toBe('none');
+  await selectElement('html'); expect(selected()).toEqual(['html']); expect(frame.style.pointerEvents).toBe('auto');
+  await pointer(host.querySelector('.studio-html-move-edge')!, 'pointerdown');
+  expect(frame.style.pointerEvents).toBe('none');
+  await pointer(query('白板画布'), 'pointerup');
+  expect(frame.style.pointerEvents).toBe('auto');
+  await render({ externalSelectedIds: ['html', 'shape'] }); expect(frame.style.pointerEvents).toBe('none');
   expect(host.querySelector('iframe')).toBe(frame); expect(call).not.toHaveBeenCalled();
 });
 

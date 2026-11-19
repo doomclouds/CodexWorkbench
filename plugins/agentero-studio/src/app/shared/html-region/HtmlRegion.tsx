@@ -142,10 +142,20 @@ export default function HtmlRegion({ element, annotation, interactive, zoom = 1,
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ type: 'studio-html-state-update', channel, regionId: element.id, state: element.state ?? null, version: element.version }, '*');
   }, [element.state, element.version, element.id, channel, ready]);
-  // Let the embedded document rasterize at the display zoom, then cancel the world's
-  // transform on its surface. Percentage sizes need compensation to keep its viewport.
+  // Keep the iframe layout at its logical size in the overview. Inverse scaling at
+  // small zooms magnifies layout rounding, which can add scrollbars to a fitting page.
+  const displayRaster = zoom >= .5;
+  const rasterZoom = displayRaster ? zoom : 1;
+  const receivesInput = annotation || interactive;
   return <div className={`studio-html-region${annotation ? ' is-annotating' : ''}`}>
-    <iframe ref={frame} title={element.text || 'HTML 图解'} srcDoc={source} sandbox="allow-scripts" referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*')} style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%`, zoom, transform: `scale(${1 / zoom})`, transformOrigin: '0 0', pointerEvents: annotation || interactive ? 'auto' : 'none' }} />
+    <iframe ref={frame} title={element.text || 'HTML 图解'} srcDoc={source} sandbox="allow-scripts" referrerPolicy="no-referrer" allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" tabIndex={receivesInput ? 0 : -1} onLoad={() => frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*')} style={{
+      width: `${rasterZoom * 100}%`,
+      height: `${rasterZoom * 100}%`,
+      zoom: rasterZoom,
+      transform: displayRaster ? `scale(${1 / zoom})` : undefined,
+      transformOrigin: '0 0',
+      pointerEvents: receivesInput ? 'auto' : 'none',
+    }} />
     {saveError?.channel === channel && <div className="studio-html-state-error" data-native-interactive="true" role="alert">
       <span>{saveError.message} 本地交互修改已保留。</span>
       <button type="button" disabled={!onStateChange || processingChannel === channel} onClick={() => { queue.paused = false; setSaveError(null); void saveProcessor.current(); }}>重试保存</button>

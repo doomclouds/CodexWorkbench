@@ -68,6 +68,13 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const callbacks = useRef({ onSave, onActivity, onAnnotate, onInteract, onAnnotationModeChange, onExit }); callbacks.current = { onSave, onActivity, onAnnotate, onInteract, onAnnotationModeChange, onExit };
   const dirty = JSON.stringify(document) !== JSON.stringify(baseline.current.document ?? defaultDocument()) || title !== (baseline.current.text || '文档');
   const surface = documentSurface(element, styleProfile);
+  const projectedWidth = element.w * readingZoom, projectedHeight = element.h * readingZoom;
+  let inlineLayout = 'detail';
+  if (projectedWidth < 120 || projectedHeight < 56) inlineLayout = 'outline';
+  else if (projectedWidth < 220 || projectedHeight < 90) inlineLayout = 'thumbnail';
+  else if (projectedWidth < 320 || projectedHeight < 140) inlineLayout = 'compact';
+  const showHeading = expanded || inlineLayout !== 'outline';
+  const showHeadingActions = expanded || inlineLayout === 'detail' || inlineLayout === 'compact';
   const surfaceStyle = { '--document-backdrop': surface.backdrop, '--document-paper': surface.paper, '--document-ink': surface.ink, '--document-muted': surface.muted, '--document-rule': surface.rule, '--document-code': surface.code, '--document-link': surface.link, '--document-danger': surface.scheme === 'dark' ? '#FFADB5' : '#9E303B', '--document-ui-scale': expanded ? 1 : Math.min(1 / readingZoom, 1.5), colorScheme: surface.scheme } as CSSProperties;
   const draftKey = `studio-document-draft:${actor.id}:${artifactId}:${element.id}`;
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -165,10 +172,11 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   useEffect(() => { if (expanded && !editing && !annotationActive) scroll.current?.focus({ preventScroll: true }); }, [expanded, editing]);
   useEffect(() => {
     if (!exportMenu) return;
+    if (!showHeadingActions) { setExportMenu(false); return; }
     const outside = (event: PointerEvent) => { const root = expanded ? focusShell.current : shell.current; if (event.target instanceof Node && !root?.querySelector('.studio-document-export')?.contains(event.target)) setExportMenu(false); };
     window.document.addEventListener('pointerdown', outside, true);
     return () => window.document.removeEventListener('pointerdown', outside, true);
-  }, [exportMenu, expanded]);
+  }, [exportMenu, expanded, showHeadingActions]);
   const targetIds = target?.coordinateSpace === 'document' && target.elementIds?.includes(element.id) ? target.blockIds ?? [] : [];
   const anchorState = targetIds.length ? documentAnchorState(target!, element) : null;
   useEffect(() => {
@@ -315,16 +323,18 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     commentPins.set(blockId, pins);
   });
   const body = <>
-    <header className="studio-document-heading" data-document-controls="true">
+    {showHeading && <header className="studio-document-heading" data-document-controls="true">
       {expanded && <button type="button" className="studio-button" disabled={composing || leaving} onClick={() => void requestExit()}><ArrowLeft size={16} />返回画板</button>}
-      {!expanded && onMoveStart && <button type="button" className="studio-document-move" aria-label="移动文档" title={element.locked ? '文档位置已锁定' : '拖动把手移动文档'} disabled={!canEdit || element.locked} data-document-move-handle="true" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); if (event.button === 0 && canEdit && !element.locked) onMoveStart(event); }} onClick={event => event.stopPropagation()}><GripVertical size={16} /></button>}
-      <FileText className="studio-document-kind" size={18} />{expanded ? <input aria-label="文档标题" value={title} readOnly={!canEdit || !editing || !interactive || annotationActive || leaving} onChange={event => setTitle(event.target.value)} maxLength={200} /> : <span className="studio-document-title" aria-label="文档标题" title={title}>{title}</span>}
-      <span className={`studio-document-save${error ? ' has-error' : ''}`} role="status">{saving ? <><Loader2 size={13} className="studio-spin" />保存中</> : error ? '未保存' : dirty ? '待保存' : <><Check size={13} />已保存</>}</span>
-      <button type="button" className="studio-icon-button studio-document-edit" aria-label={editing ? '阅读文档' : canEdit ? '编辑文档' : '阅读文档'} title={editing ? '阅读文档' : canEdit ? '编辑文档' : '阅读文档'} disabled={composing || leaving} onClick={() => { if (editing) setEditing(false); else if (canEdit) requestEdit(); else onExpand(); }}>{editing ? <BookOpen size={17} /> : <Pencil size={17} />}</button>
-      {!expanded && <button type="button" className="studio-icon-button" aria-label="展开文档" title="展开阅读与编辑" onClick={onExpand}><Maximize size={17} /></button>}
-      {expanded && headings.length > 0 && <button type="button" className="studio-icon-button" aria-label="切换文档目录" title="文档目录" aria-expanded={tocOpen} onClick={() => setTocOpen(value => !value)}><List size={17} /></button>}
-      <div className="studio-document-export"><button type="button" className="studio-icon-button" aria-label="导出文档" title="导出全文" aria-expanded={exportMenu} onClick={() => setExportMenu(value => !value)}><Download size={16} /></button>{exportMenu && <div role="menu" aria-label="文档导出格式"><button type="button" role="menuitem" onClick={() => void exportDocument('html')}>全文 HTML</button><button type="button" role="menuitem" onClick={() => void exportDocument('json')}>块 JSON</button></div>}</div>
-    </header>
+      {showHeadingActions && !expanded && onMoveStart && <button type="button" className="studio-document-move" aria-label="移动文档" title={element.locked ? '文档位置已锁定' : '拖动把手移动文档'} disabled={!canEdit || element.locked} data-document-move-handle="true" onPointerDown={event => { event.preventDefault(); event.stopPropagation(); if (event.button === 0 && canEdit && !element.locked) onMoveStart(event); }} onClick={event => event.stopPropagation()}><GripVertical size={16} /></button>}
+      {showHeadingActions && <FileText className="studio-document-kind" size={18} />}{expanded ? <input aria-label="文档标题" value={title} readOnly={!canEdit || !editing || !interactive || annotationActive || leaving} onChange={event => setTitle(event.target.value)} maxLength={200} /> : <span className="studio-document-title" aria-label="文档标题" title={title}>{title}</span>}
+      {showHeadingActions && <>
+        <span className={`studio-document-save${error ? ' has-error' : ''}`} role="status">{saving ? <><Loader2 size={13} className="studio-spin" />保存中</> : error ? '未保存' : dirty ? '待保存' : <><Check size={13} />已保存</>}</span>
+        <button type="button" className="studio-icon-button studio-document-edit" aria-label={editing ? '阅读文档' : canEdit ? '编辑文档' : '阅读文档'} title={editing ? '阅读文档' : canEdit ? '编辑文档' : '阅读文档'} disabled={composing || leaving} onClick={() => { if (editing) setEditing(false); else if (canEdit) requestEdit(); else onExpand(); }}>{editing ? <BookOpen size={17} /> : <Pencil size={17} />}</button>
+        {!expanded && <button type="button" className="studio-icon-button" aria-label="展开文档" title="展开阅读与编辑" onClick={onExpand}><Maximize size={17} /></button>}
+        {expanded && headings.length > 0 && <button type="button" className="studio-icon-button" aria-label="切换文档目录" title="文档目录" aria-expanded={tocOpen} onClick={() => setTocOpen(value => !value)}><List size={17} /></button>}
+        <div className="studio-document-export"><button type="button" className="studio-icon-button" aria-label="导出文档" title="导出全文" aria-expanded={exportMenu} onClick={() => setExportMenu(value => !value)}><Download size={16} /></button>{exportMenu && <div role="menu" aria-label="文档导出格式"><button type="button" role="menuitem" onClick={() => void exportDocument('html')}>全文 HTML</button><button type="button" role="menuitem" onClick={() => void exportDocument('json')}>块 JSON</button></div>}</div>
+      </>}
+    </header>}
     {expanded && <div className="studio-document-find"><Search size={15} /><input aria-label="文档内查找" placeholder="查找文档…" value={find} onChange={event => setFind(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); nextMatch(event.shiftKey ? -1 : 1); } }} /><span>{find.trim() ? `${matches.length ? Math.min(findIndex + 1, matches.length) + ' / ' : ''}${matches.length} 处` : ''}</span>{matches.length > 0 && <><button type="button" className="studio-link-button" onClick={() => jump(matches[Math.min(findIndex, matches.length - 1)].id)}>定位</button><button type="button" className="studio-icon-button" aria-label="上一个匹配" onClick={() => nextMatch(-1)}>‹</button><button type="button" className="studio-icon-button" aria-label="下一个匹配" onClick={() => nextMatch(1)}>›</button></>}{find && <button type="button" className="studio-icon-button" aria-label="清除文档查找" onClick={() => setFind('')}><X size={14} /></button>}</div>}
     {expanded && tocOpen && headings.length > 0 && <select className="studio-document-mobile-toc" aria-label="跳转文档标题" value="" onChange={event => jump(event.target.value)}><option value="" disabled>文档目录</option>{headings.map(block => <option key={block.id} value={block.id}>{documentBlockText(block) || '未命名标题'}</option>)}</select>}
     {anchorState && anchorState !== 'current' && <div className="studio-document-message" role="status">{anchorState === 'missing' ? '备注对应的段落已删除，原选区仍保留在备注来源中。' : '备注对应的原文已有变化，请核对冻结来源。'}</div>}
@@ -350,7 +360,7 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   const documentPointerDown = (event: React.PointerEvent) => {
     const target = event.target as HTMLElement;
     const heading = target.closest('.studio-document-heading') && !target.closest('button,a[href],input,textarea,select,[role="menu"]');
-    const blank = target.matches('.studio-document-body,.studio-document-scroll,.studio-document-content,.studio-doc-prose');
+    const blank = target === shell.current || target.matches('.studio-document-body,.studio-document-scroll,.studio-document-content,.studio-doc-prose');
     const movable = !expanded && !editing && !annotationActive && canEdit && !element.locked;
     const plainMouse = event.button === 0 && (!event.pointerType || event.pointerType === 'mouse') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
     if (movable && plainMouse && (heading || blank) && onMoveStart) {
@@ -395,5 +405,5 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     if (interactive && !(editing && canEdit) && (event.target as HTMLElement).closest('.studio-document-scroll') && !navigation) event.stopPropagation();
   };
   const interactiveEvents = { onKeyDownCapture: captureEscape, onPointerDown: documentPointerDown, onClickCapture: (event: React.MouseEvent) => { if (annotationActive && (event.target as HTMLElement).closest('.studio-document-scroll')) event.preventDefault(); }, onDoubleClick: (event: React.MouseEvent) => { const target = event.target as HTMLElement; if (editing || annotationActive || leaving || !target.closest('.studio-document-scroll') || target.closest('button,input,textarea,select,a')) return; event.stopPropagation(); if (canEdit) requestEdit(target.closest<HTMLElement>('[data-document-block-id]')?.dataset.documentBlockId); }, onKeyDown: documentKeyDown };
-  return <><div ref={shell} className={`studio-document-region${interactive ? ' is-interactive' : ''}${annotationActive ? ' is-annotating' : ''}${element.w * readingZoom < 320 ? ' is-compact' : ''}${element.w * readingZoom < 220 ? ' is-thumbnail' : ''}`} style={surfaceStyle} data-document-id={element.id} data-native-interactive={interactive ? 'true' : undefined} {...interactiveEvents}>{expanded ? <div className="studio-document-expanded-placeholder">正在展开文档</div> : body}</div>{expanded && focusHost && createPortal(<section ref={focusShell} className="studio-document-focus" style={surfaceStyle} data-document-id={element.id} aria-label={`文档：${title}`} data-native-interactive="true" {...interactiveEvents}>{body}</section>, focusHost)}</>;
+  return <><div ref={shell} className={`studio-document-region${interactive ? ' is-interactive' : ''}${annotationActive ? ' is-annotating' : ''}`} style={surfaceStyle} data-document-id={element.id} data-document-layout={inlineLayout} data-native-interactive={interactive ? 'true' : undefined} {...interactiveEvents}>{expanded ? <div className="studio-document-expanded-placeholder">正在展开文档</div> : body}</div>{expanded && focusHost && createPortal(<section ref={focusShell} className="studio-document-focus" style={surfaceStyle} data-document-id={element.id} aria-label={`文档：${title}`} data-native-interactive="true" {...interactiveEvents}>{body}</section>, focusHost)}</>;
 }

@@ -14,6 +14,15 @@ const world = () => host.querySelector<HTMLElement>('.studio-canvas-world')!;
 async function event(node: Element, type: string, extra: MouseEventInit = {}) { await act(async () => { node.dispatchEvent(new MouseEvent(type, { bubbles: true, button: 0, ...extra })); }); }
 async function click(label: string) { await event(query(label), 'click'); }
 async function key(key: string) { await act(async () => { query('白板画布').dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); }); }
+async function escapeFromHtmlFrame(frame: HTMLIFrameElement) {
+  const post = vi.spyOn(frame.contentWindow!, 'postMessage');
+  await act(async () => { frame.dispatchEvent(new Event('load')); });
+  const { channel, regionId, sourceRevision } = post.mock.calls.find(([value]) => value.type === 'studio-html-mode')![0];
+  post.mockRestore();
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: 'studio-html-escape', channel, regionId, sourceRevision } }));
+  });
+}
 async function mount(elements: BoardElement[], props: Partial<WhiteboardCanvasProps> = {}) {
   await act(async () => { root.render(<WhiteboardCanvas board={board(elements)} client={{ embedded: true, call: vi.fn() }} actor={LOCAL_ACTOR} onChanged={() => {}} onAnnotate={() => {}} externalViewport={originalViewport} externalSelectedIds={[elements[0]!.id]} {...props} />); });
 }
@@ -73,31 +82,66 @@ it.each([['Enter', 'Enter'], [' ', 'Space']])('lets %s activate the reading butt
   await click('全屏观看选区'); expect(host.querySelector('.is-reading')).not.toBeNull();
 });
 
-it.each([false, true])('makes HTML interactive without reloading it, then restores its previous interactive=%s mode through iframe Escape', async previous => {
-  await mount([element('html', { type: 'html', html: '<button>Count</button>', sourceRevision: 1 })]);
+it.each([false, true])('makes HTML interactive while reading, then restores whether it was singly selected (%s)', async singlySelected => {
+  const html = element('html', { type: 'html', html: '<button>Count</button>', sourceRevision: 1 });
+  await mount([html, element('shape', { x: 360 })], { externalSelectedIds: singlySelected ? ['html'] : ['html', 'shape'] });
   const frame = host.querySelector('iframe')!;
-  if (previous) await event(host.querySelector('[data-element-id="html"]')!, 'dblclick');
-  const source = frame.srcdoc, post = vi.spyOn(frame.contentWindow!, 'postMessage');
-  await act(async () => { frame.dispatchEvent(new Event('load')); });
-  const mode = post.mock.calls.find(([value]) => value.type === 'studio-html-mode')![0];
+  const source = frame.srcdoc;
+  expect(frame.tabIndex).toBe(singlySelected ? 0 : -1);
   await click('全屏观看选区');
   expect(host.querySelector('iframe')).toBe(frame); expect(frame.srcdoc).toBe(source); expect(frame.style.pointerEvents).toBe('auto');
+  expect(frame.tabIndex).toBe(0);
   expect(query('白板画布').getAttribute('tabindex')).toBe('0');
-  await act(async () => { window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { type: 'studio-html-escape', channel: mode.channel, regionId: 'html', sourceRevision: 1 } })); });
-  expect(host.querySelector('.is-reading')).toBeNull(); expect(frame.style.pointerEvents).toBe(previous ? 'auto' : 'none');
+  frame.focus();
+  await escapeFromHtmlFrame(frame);
+  expect(host.querySelector('.is-reading')).toBeNull(); expect(frame.style.pointerEvents).toBe(singlySelected ? 'auto' : 'none');
+  expect(frame.tabIndex).toBe(singlySelected ? 0 : -1);
   expect(query('白板画布').getAttribute('tabindex')).toBe('0');
   expect(host.querySelector('iframe')).toBe(frame);
+  await vi.waitFor(() => expect(document.activeElement).toBe(query('全屏观看选区')));
 });
 
-it('passes ordinary and reading zoom through the real Canvas call site without replacing the HTML frame', async () => {
+it('returns focus to the whiteboard on iframe Escape before a second Escape clears selection', async () => {
+  const changed = vi.fn();
+  await mount([element('html', { type: 'html', html: '<input>', sourceRevision: 1 })], { externalSelectedIds: [], onChanged: changed });
+  const target = host.querySelector<HTMLElement>('[data-element-id="html"]')!, frame = target.querySelector('iframe')!;
+  expect(frame.style.pointerEvents).toBe('none');
+  await event(target, 'pointerdown', { clientX: 90, clientY: 120 });
+  await event(query('白板画布'), 'pointerup', { clientX: 90, clientY: 120 });
+  expect(target.classList.contains('is-selected')).toBe(true);
+  expect(frame.style.pointerEvents).toBe('auto');
+  frame.focus(); expect(document.activeElement).toBe(frame);
+  await escapeFromHtmlFrame(frame);
+  expect(document.activeElement).toBe(query('白板画布'));
+  expect(target.classList.contains('is-selected')).toBe(true);
+  expect(frame.tabIndex).toBe(0);
+  await key('Escape');
+  expect(target.classList.contains('is-selected')).toBe(false);
+  expect(frame.style.pointerEvents).toBe('none');
+  expect(frame.tabIndex).toBe(-1);
+  expect(changed).not.toHaveBeenCalled();
+});
+
+it('keeps one HTML frame across overview, ordinary and reading zoom', async () => {
   const ordinaryView = { ...originalViewport, zoom: .867 };
-  await mount([element('html', { type: 'html', w: 500, h: 300, html: '<input value="Keep the current document"/>', sourceRevision: 1 })], { externalViewport: ordinaryView });
+  const html = element('html', { type: 'html', w: 500, h: 300, html: '<input value="Keep the current document"/>', sourceRevision: 1 });
+  await mount([html], { externalViewport: ordinaryView });
   const frame = host.querySelector('iframe')!, source = frame.srcdoc, contentWindow = frame.contentWindow, before = world().style.transform;
-  const expectCurrentFrame = (zoom: number) => {
+  const expectCurrentFrame = (rasterZoom: number) => {
     expect(host.querySelector('iframe')).toBe(frame); expect(frame.contentWindow).toBe(contentWindow); expect(frame.srcdoc).toBe(source);
     // This is the parent/child zoom contract, not a jsdom claim about raster clarity or physical layout.
-    expect(Number(frame.style.zoom)).toBeCloseTo(zoom, 12);
+    expect(Number(frame.style.zoom)).toBeCloseTo(rasterZoom, 12);
   };
+  expectCurrentFrame(.867);
+  for (const zoom of [.28, .103]) {
+    await mount([html], { externalViewport: { ...ordinaryView, zoom } });
+    expect(world().style.transform).toContain(`scale(${zoom})`);
+    expectCurrentFrame(1);
+    expect(frame.style.width).toBe('100%');
+    expect(frame.style.height).toBe('100%');
+    expect(frame.style.transform).toBe('');
+  }
+  await mount([html], { externalViewport: ordinaryView });
   expectCurrentFrame(.867);
   await click('全屏观看选区');
   const fittedZoom = Number(/scale\(([^)]+)\)/.exec(world().style.transform)![1]);
@@ -107,7 +151,7 @@ it('passes ordinary and reading zoom through the real Canvas call site without r
   await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
   expectCurrentFrame(1.375);
   await click('退出全屏观看');
-  expectCurrentFrame(.867); expect(world().style.transform).toBe(before); expect(frame.style.pointerEvents).toBe('none');
+  expectCurrentFrame(.867); expect(world().style.transform).toBe(before); expect(frame.style.pointerEvents).toBe('auto');
 });
 
 it('exits safely if the viewed component is deleted remotely', async () => {
@@ -161,7 +205,6 @@ it('offers fit selection in the element context menu and fits selected rotated g
 it('converts an interactive iframe pointer through element rotation independently of canvas zoom and clears it on leave', async () => {
   const cursor = vi.fn();
   await mount([element('html', { type: 'html', html: '<p>Pointer</p>', rotation: 90, sourceRevision: 1 })], { onCursorMove: cursor });
-  await event(host.querySelector('[data-element-id="html"]')!, 'dblclick');
   const frame = host.querySelector('iframe')!, post = vi.spyOn(frame.contentWindow!, 'postMessage');
   await act(async () => { frame.dispatchEvent(new Event('load')); });
   const mode = post.mock.calls.find(([value]) => value.type === 'studio-html-mode')![0];

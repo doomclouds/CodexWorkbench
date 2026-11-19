@@ -58,7 +58,13 @@ it('keeps a document-relative pin in its paragraph after returning to the board'
   props = { ...props, expanded: false, interactive: false };
   await render();
   expect(portal.querySelector(selector)).toBeNull();
-  expect(host.querySelector<HTMLButtonElement>(selector)?.style.top).toBe('50%');
+  const inlinePin = host.querySelector<HTMLButtonElement>(selector)!;
+  expect(inlinePin.style.top).toBe('50%');
+  props = { ...props, readingZoom: .1 };
+  await render();
+  expect(host.querySelector(selector)).toBe(inlinePin);
+  expect(inlinePin.style.left).toBe('25%');
+  expect(inlinePin.style.top).toBe('50%');
   await click('备注 房主：段落备注');
   expect(selectRemark).toHaveBeenCalledWith(props.activities![0], expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
 });
@@ -739,22 +745,54 @@ it('uses Escape to dismiss a local export menu before leaving document editing',
 });
 
 it.each([
-  { zoom: .05, compensation: 1.5, header: 3.45 },
-  { zoom: .25, compensation: 1.5, header: 17.25 },
-  { zoom: .5, compensation: 1.5, header: 34.5 },
-  { zoom: 1, compensation: 1, header: 46 },
-  { zoom: 2, compensation: .5, header: 46 },
-])('lets the whole inline document header shrink in distant views at $zoom', async ({ zoom, compensation, header }) => {
+  { zoom: .05, compensation: 1.5, layout: 'outline' },
+  { zoom: .25, compensation: 1.5, layout: 'thumbnail' },
+  { zoom: .5, compensation: 1.5, layout: 'compact' },
+  { zoom: .63, compensation: 1.5, layout: 'detail' },
+  { zoom: 1, compensation: 1, layout: 'detail' },
+  { zoom: 2, compensation: .5, layout: 'detail' },
+])('keeps the inline document header appropriate at $zoom and restores all focused controls', async ({ zoom, compensation, layout }) => {
   props = { ...props, readingZoom: zoom, canEdit: false };
   await render();
   const region = host.querySelector<HTMLElement>('.studio-document-region')!;
-  const scale = Number(region.style.getPropertyValue('--document-ui-scale'));
-  expect(scale).toBe(compensation);
-  expect(46 * scale * zoom).toBeCloseTo(header);
-  expect(region.classList.contains('is-thumbnail')).toBe(props.element.w * zoom < 220);
-  expect(region.querySelector('[aria-label="展开文档"]')).not.toBeNull();
+  expect(Number(region.style.getPropertyValue('--document-ui-scale'))).toBe(compensation);
+  expect(region.dataset.documentLayout).toBe(layout);
+  expect(Boolean(region.querySelector('.studio-document-title'))).toBe(layout !== 'outline');
+  expect(Boolean(region.querySelector('[aria-label="展开文档"]'))).toBe(layout === 'detail' || layout === 'compact');
+  expect(region.querySelector('[data-document-block-id="paragraph"]')?.textContent).toBe('已保存正文');
   expect(region.querySelector('[aria-label="测试块编辑器"]')).toBeNull();
   props = { ...props, expanded: true };
   await render();
   expect(portal.querySelector<HTMLElement>('.studio-document-focus')!.style.getPropertyValue('--document-ui-scale')).toBe('1');
+  expect(portal.querySelector('input[aria-label="文档标题"]')).not.toBeNull();
+  expect(portal.querySelector('[aria-label="导出文档"]')).not.toBeNull();
+});
+
+it('shortens a wide and shallow document without replacing the scroll surface or losing its drag target', async () => {
+  const move = vi.fn();
+  props = { ...props, onMoveStart: move };
+  await render();
+  const region = host.querySelector<HTMLElement>('.studio-document-region')!;
+  const scroll = region.querySelector<HTMLElement>('.studio-document-scroll')!;
+  const block = scroll.querySelector('[data-document-block-id="paragraph"]');
+  scroll.scrollTop = 32;
+  await click('导出文档');
+
+  for (const [height, layout] of [[130, 'compact'], [85, 'thumbnail'], [50, 'outline']] as const) {
+    props = { ...props, element: { ...props.element, h: height } };
+    await render();
+    expect(region.dataset.documentLayout).toBe(layout);
+    expect(region.querySelector('.studio-document-scroll')).toBe(scroll);
+    expect(scroll.querySelector('[data-document-block-id="paragraph"]')).toBe(block);
+    expect(scroll.tabIndex).toBe(0);
+    expect(scroll.scrollTop).toBe(32);
+  }
+  await act(async () => region.dispatchEvent(new MouseEvent('pointerdown', { button: 0, bubbles: true, cancelable: true })));
+  expect(move).toHaveBeenCalledTimes(1);
+
+  props = { ...props, element: { ...props.element, h: 350 } };
+  await render();
+  expect(region.querySelector('[aria-label="文档导出格式"]')).toBeNull();
+  expect(button('导出文档').getAttribute('aria-expanded')).toBe('false');
+  expect(props.onSave).not.toHaveBeenCalled();
 });
