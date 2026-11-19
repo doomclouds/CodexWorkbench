@@ -344,12 +344,13 @@ describe('whiteboard direct interaction', () => {
     const before = host.querySelector('.studio-whiteboard')!.getAttribute('data-tool');
     await key(query('白板画布'), '2'); expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe(before);
   });
-  it('leaves HTML interaction before switching from a toolbar button and does not steal its numeric input', async () => {
-    await editable([element('html', { type: 'html', html: '<p>Hello</p>' })]); await select('html'); await click('与 HTML 内容交互');
+  it('releases selected HTML when changing tools and does not steal its numeric input', async () => {
+    await editable([element('html', { type: 'html', html: '<p>Hello</p>' })]); await select('html');
     expect(host.querySelector<HTMLIFrameElement>('iframe')!.style.pointerEvents).toBe('auto');
     await key(host.querySelector('iframe')!, '2'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
     await click('平移'); expect(host.querySelector<HTMLIFrameElement>('iframe')!.style.pointerEvents).toBe('none'); expect(query('选区格式')).toBeNull();
     await key(query('白板画布'), '1'); expect(query('选区格式')).not.toBeNull();
+    expect(host.querySelector<HTMLIFrameElement>('iframe')!.style.pointerEvents).toBe('auto');
   });
   it.each(['Enter', 'F2'])('starts the selected native element editor with %s without consuming typed digits', async editKey => {
     await editable([element('a', { locked: true })]); await select('a'); await key(query('白板画布'), editKey);
@@ -941,33 +942,33 @@ describe('whiteboard direct interaction', () => {
       await act(async () => root.render(null)); await service.close(); await rm(folder, { recursive: true, force: true });
     }
   });
-  it('formats only the chosen native text range before saving and bounds HTML caption zoom compensation', async () => {
+  it('formats only the chosen native text range before saving', async () => {
     const call=await editable([element('one',{text:'alpha beta'})]);await select('one');await event(host.querySelector('[data-element-id="one"]')!,'dblclick');
     const editor=query('编辑文字');const text=editor.firstChild!.firstChild as Text;
     const range=document.createRange();range.setStart(text,6);range.setEnd(text,10);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range);document.dispatchEvent(new Event('selectionchange'));
     await click('加粗');await key(editor,'Escape');expect(call.mock.calls[0]![1].operations[0]!.changes?.text).toBe('alpha **beta**');
-    await act(async()=>root.render(null));await mount([element('region',{type:'html',html:'<p>Hi</p>'})],{externalViewport:{x:0,y:0,zoom:.5}});
-    const caption = host.querySelector<HTMLElement>('.studio-html-caption')!;
-    expect(caption.style.transform).toBe('scale(1.5)');
-    expect((query('移动 HTML 区域') as HTMLElement).style.width).toBe('28px');
-    expect((host.querySelector('.studio-canvas-world') as HTMLElement).style.transform).toContain('scale(0.5)');
   });
   it.each([
-    { zoom: .05, compensation: 1.5, badge: false },
-    { zoom: .25, compensation: 1.5, badge: false },
-    { zoom: .5, compensation: 1.5, badge: true },
-    { zoom: 1, compensation: 1, badge: true },
-    { zoom: 2, compensation: .5, badge: true },
-  ])('shrinks HTML caption, move button and gap with its region in a distant view at $zoom', async ({ zoom, compensation, badge }) => {
+    { zoom: .05, visible: false },
+    { zoom: .25, visible: false },
+    { zoom: .5, visible: true },
+    { zoom: 1, visible: true },
+    { zoom: 2, visible: true },
+  ])('keeps the HTML caption proportional and retains selected move access at $zoom', async ({ zoom, visible }) => {
     await mount([element('region', { type: 'html', w: 800, html: '<p>Hi</p>' })], { externalViewport: { x: 0, y: 0, zoom } });
-    const caption = host.querySelector<HTMLElement>('.studio-html-caption')!;
-    expect(caption.style.transform).toBe(`scale(${compensation})`);
-    expect(parseFloat(caption.style.width) * compensation * zoom).toBeCloseTo(800 * zoom);
-    expect(caption.style.bottom).toBe(`calc(100% + ${10 * compensation}px)`);
-    expect(caption.querySelector('span') !== null).toBe(badge);
-    const move = query('移动 HTML 区域') as HTMLButtonElement;
-    expect(parseFloat(move.style.width) * compensation * zoom).toBeLessThanOrEqual(28);
-    expect(move.disabled).toBe(false);
+    const caption = host.querySelector<HTMLElement>('.studio-html-caption');
+    expect(Boolean(caption)).toBe(visible);
+    if (caption) {
+      const scale = Math.min(1, 1 / zoom);
+      expect(caption.style.transform).toBe(`scale(${scale})`);
+      expect(parseFloat(caption.style.width) * scale * zoom).toBeCloseTo(800 * zoom);
+      expect(caption.style.bottom).toBe(`calc(100% + ${8 * scale}px)`);
+    }
+    expect(query('移动 HTML 区域')).toBeNull();
+    await select('region');
+    expect(host.querySelector('.studio-html-move-edge')).not.toBeNull();
+    expect(host.querySelector('.studio-selection-label')!.textContent).toBe('A');
+    expect(query('编辑 HTML 源码')).not.toBeNull();
   });
   it('saves real layer commands and restores their persisted order through undo and redo', async () => {
     const folder=await mkdtemp(join(tmpdir(),'studio-canvas-layers-')),service=new StudioService({dataRoot:folder});

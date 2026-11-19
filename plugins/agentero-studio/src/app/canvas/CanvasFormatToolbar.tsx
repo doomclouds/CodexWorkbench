@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { AlignCenter, AlignLeft, AlignRight, Bold, Braces, Crop, Maximize, Italic, Link, List, Lock, MessageSquare, MoreHorizontal, MousePointer2, Unlock } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, Braces, Crop, Maximize, Italic, Link, List, Lock, MessageSquare, MoreHorizontal, Unlock } from 'lucide-react';
 import type { BoardElement } from '../../contracts/studio.js';
 import { getBoardSticker } from '../../core/products/whiteboard-stickers.js';
 import { arrowHeads, placeFormatToolbar } from './canvas-model.js';
@@ -8,15 +8,15 @@ import ColorPalette from './ColorPalette.js';
 import { registerEscapeLayer } from '../shared/escape.js';
 
 interface Props {
-  elements: BoardElement[]; style: CSSProperties; canEdit: boolean; canAnnotate: boolean; saving: boolean; interactive: boolean; theme: 'light' | 'dark';
+  elements: BoardElement[]; style: CSSProperties; canEdit: boolean; canAnnotate: boolean; saving: boolean; theme: 'light' | 'dark';
   onChange: (changes: Partial<BoardElement>, customColors?: string[]) => void; onEditText: () => void;
   onTextFormat: (format: 'bold' | 'italic' | 'list' | 'link' | 'numbered', value?: string) => void;
-  onAnnotate: () => void; onToggleInteractive: () => void; onReadSelection?: () => void; onEditHtml?: () => void; onCrop?: () => void;
+  onAnnotate: () => void; onReadSelection?: () => void; onEditHtml?: () => void; onCrop?: () => void;
   requestLink?:{key:string;value:string}; formatState?:InlineTextFormatState;
   customColors?: string[]; onCustomColorsChange?: (colors: string[]) => void;
   onMore: (point: { x: number; y: number }) => void; onAlign: (edge: 'left'|'hcenter'|'right'|'top'|'vcenter'|'bottom') => void;
 }
-export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnotate, saving, interactive, theme, onChange, onEditText, onTextFormat, onAnnotate, onToggleInteractive, onReadSelection, onEditHtml, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
+export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnotate, saving, theme, onChange, onEditText, onTextFormat, onAnnotate, onReadSelection, onEditHtml, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
   const [popover, setPopover] = useState<string | null>(null), [link, setLink] = useState('');
   const toolbar = useRef<HTMLDivElement>(null);
   const popoverId = useId();
@@ -102,6 +102,7 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
   const selected = elements.length === 1 ? elements[0] : undefined;
   const html = selected && (selected.type === 'html' || selected.type === 'diagram' && typeof selected.html === 'string');
   const documentRegion = selected?.type === 'document';
+  const regionTitle = selected?.text || (documentRegion ? '文档' : 'HTML 图解');
   const text = elements.every(element => ['shape','note','text','container','arrow','table'].includes(element.type) || element.type === 'sticker' && !getBoardSticker(element.data?.stickerIconId));
   const fill = elements.every(element => ['shape','note','container','table','document'].includes(element.type));
   const line = elements.every(element => ['shape','stroke','arrow','container'].includes(element.type));
@@ -114,7 +115,10 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
   };
   return <div ref={toolbar} className="studio-selection-toolbar" role="toolbar" aria-label="选区格式" data-native-interactive="true" style={{ ...style, ...position }} onPointerDown={event => { if ((event.target as HTMLElement).closest('button')) event.preventDefault(); }}><div className="studio-selection-toolbar-scroll">
     {onReadSelection && <button type="button" aria-label="全屏观看选区" title="全屏观看" onClick={onReadSelection}><Maximize size={18}/></button>}
-    {documentRegion ? <span className="studio-selection-label">文档</span> : html ? <><span className="studio-selection-label">HTML 图解</span><button type="button" aria-label="与 HTML 内容交互" title="与内容交互" aria-pressed={interactive} onClick={onToggleInteractive}><MousePointer2 size={18}/></button>{canEdit && onEditHtml && <button type="button" aria-label="编辑 HTML 源码" title="编辑 HTML 源码" onClick={onEditHtml}><Braces size={18}/></button>}</> : canEdit && <>
+    {documentRegion || html ? <>
+      <span className="studio-selection-label" title={regionTitle}>{regionTitle}</span>
+      {html && canEdit && onEditHtml && <button type="button" aria-label="编辑 HTML 源码" title="编辑 HTML 源码" onClick={onEditHtml}><Braces size={18}/></button>}
+    </> : canEdit && <>
       {text && <>{elements.every(element=>['shape','text'].includes(element.type)) && <select aria-label="形状类型" disabled={allLocked} value={selected?.type==='text'?'text':selected?.kind??'rounded'} onChange={event=>onChange(event.target.value==='text'?{type:'text',fill:'transparent'}:{type:'shape',kind:event.target.value,fill:selected?.fill==='transparent'?'#EFEFEF':selected?.fill})}>{[['text','文字'],['rounded','圆角矩形'],['rect','矩形'],['ellipse','椭圆'],['diamond','菱形'],['pill','胶囊'],['hexagon','六边形'],['parallelogram','平行四边形'],['database','数据库'],['queue','队列'],['document','文档'],['cloud','云'],['person','人物']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select>}<select aria-label="文字大小" value={elements.every(element => element.fontSize === elements[0].fontSize) ? selected?.fontSize ?? elements[0].fontSize ?? 16 : ''} disabled={saving} onChange={event => onChange({fontSize:Number(event.target.value)})}><option value="" disabled>混合</option>{[[14,'小'],[16,'正文'],[28,'大'],[48,'标题'],[96,'超大'],...selected?.fontSize && ![14,16,28,48,96].includes(selected.fontSize) ? [[selected.fontSize,String(selected.fontSize)]] : []].map(([size,label]) => <option key={size} value={size}>{label} · {size}px</option>)}</select><button type="button" aria-label="加粗" title="加粗（Ctrl/⌘ B）" aria-pressed={formatState?.bold ?? elements.every(element => element.bold)} onClick={() => onTextFormat('bold')} disabled={saving}><Bold size={17}/></button><button type="button" aria-label="斜体" title="斜体（Ctrl/⌘ I）" aria-pressed={formatState?.italic ?? elements.every(element => element.italic)} onClick={() => onTextFormat('italic')} disabled={saving}><Italic size={17}/></button>{selected && <><button ref={linkButton} type="button" aria-label="文字链接" title="文字链接" aria-haspopup="dialog" aria-expanded={popover === '文字链接'} aria-controls={popover === '文字链接' ? popoverId : undefined} onClick={event => toggle('文字链接', event.currentTarget)}><Link size={17}/></button><button type="button" aria-label="切换列表" title="无序列表" onClick={() => onTextFormat('list')}><List size={17}/></button></>}<button type="button" aria-label="文字对齐" title="文字对齐" aria-haspopup="dialog" aria-expanded={popover === '文字对齐'} aria-controls={popover === '文字对齐' ? popoverId : undefined} onClick={event => toggle('文字对齐', event.currentTarget)}><Align size={17}/></button><button type="button" aria-label="文字颜色" title="文字颜色" aria-haspopup="dialog" aria-expanded={popover === '文字颜色'} aria-controls={popover === '文字颜色' ? popoverId : undefined} onClick={event => toggle('文字颜色', event.currentTarget)}>A</button></>}
       {line && <button type="button" aria-label="边框与线条" title="边框与线条" aria-haspopup="dialog" aria-expanded={popover === '边框与线条'} aria-controls={popover === '边框与线条' ? popoverId : undefined} onClick={event => toggle('边框与线条', event.currentTarget)}>☰</button>}
       {selected?.type === 'arrow' && <><select className="studio-arrow-endpoint-select" aria-label="连接线起点" value={arrowHeads(selected)[0]} onChange={event => onChange({heads:[event.target.value as 'none'|'arrow'|'circle',arrowHeads(selected)[1]]})}>{['none','arrow','circle'].map(value => <option key={value} value={value}>{value==='none'?'无':value==='arrow'?'箭头':'圆点'}</option>)}</select><select className="studio-arrow-endpoint-select" aria-label="连接线终点" value={arrowHeads(selected)[1]} onChange={event => onChange({heads:[arrowHeads(selected)[0],event.target.value as 'none'|'arrow'|'circle']})}>{['none','arrow','circle'].map(value => <option key={value} value={value}>{value==='none'?'无':value==='arrow'?'箭头':'圆点'}</option>)}</select></>}

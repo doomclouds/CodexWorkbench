@@ -276,11 +276,28 @@ describe('component capability matrix', () => {
 
   it.each(['image', 'link', 'html', 'diagram-html', 'diagram', 'chart'] as const)('routes %s double click to its actual capability without a generic text editor', async kind => {
     const value = capabilityFixtures.find(item => item.name === kind)!.value;
-    const fixture = await mount([value]); await select(fixture.current().elements[0]!); await event(target(), 'dblclick');
+    const fixture = await mount([value]);
+    const frame = target().querySelector('iframe');
+    if (frame) {
+      expect(frame.style.pointerEvents).toBe('none');
+      expect(frame.tabIndex).toBe(-1);
+    }
+    await select(fixture.current().elements[0]!);
+    if (frame) {
+      expect(frame.style.pointerEvents).toBe('auto');
+      expect(frame.tabIndex).toBe(0);
+    }
+    await event(target(), 'dblclick');
     expect(query('编辑文字')).toBeNull();
     if (kind === 'image') expect(host.querySelector('[role="dialog"][aria-label="裁剪图片"]')).not.toBeNull();
     else if (kind === 'link') expect(host.querySelector('[role="dialog"]')).not.toBeNull();
-    else if (kind === 'html' || kind === 'diagram-html') expect(query('与 HTML 内容交互')?.getAttribute('aria-pressed')).toBe('true');
+    else if (kind === 'html' || kind === 'diagram-html') {
+      expect(frame).not.toBeNull();
+      expect(target().querySelector('iframe')).toBe(frame);
+      expect(frame!.style.pointerEvents).toBe('auto');
+      expect(query('与 HTML 内容交互')).toBeNull();
+      expect(query('编辑 HTML 源码')).not.toBeNull();
+    }
     else expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(fixture.call).not.toHaveBeenCalled();
   });

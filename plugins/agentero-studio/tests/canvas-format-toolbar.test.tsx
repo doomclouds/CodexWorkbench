@@ -19,7 +19,7 @@ async function mount(elements: BoardElement[], props: Partial<Props> = {}, withV
   const changed = vi.fn();
   function Harness() {
     const [values, setValues] = useState(elements);
-    return <>{withViewControls && <div className="studio-canvas-top-tools" />}<CanvasFormatToolbar elements={values} style={{ left: 200, top: 12 }} canEdit canAnnotate saving={false} interactive={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onToggleInteractive={() => {}} onMore={() => {}} onAlign={() => {}} onChange={changes => { changed(changes); setValues(previous => previous.map(value => ({ ...value, ...changes }))); }} {...props} /></>;
+    return <>{withViewControls && <div className="studio-canvas-top-tools" />}<CanvasFormatToolbar elements={values} style={{ left: 200, top: 12 }} canEdit canAnnotate saving={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onMore={() => {}} onAlign={() => {}} onChange={changes => { changed(changes); setValues(previous => previous.map(value => ({ ...value, ...changes }))); }} {...props} /></>;
   }
   await act(async () => root.render(<Harness />));
   return changed;
