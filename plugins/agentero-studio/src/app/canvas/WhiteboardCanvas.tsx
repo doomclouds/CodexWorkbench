@@ -31,6 +31,7 @@ import { nativePaint, PEN_CURSOR } from './native-palette.js';
 import { alignSelection, tidySelection, geometryBounds, selectionBounds as nativeSelectionBounds, resizeBox, resizeElement, resizeSelection, rotateSelection, snapMove, type ResizeHandle, type AlignmentGuide } from './native-geometry.js';
 import { commentBoardTip, visibleCommentCorner } from '../shared/comments/comment-target.js';
 import { CommentPin } from '../shared/comments/CommentPin.js';
+import { CommentClusters } from '../shared/comments/CommentClusters.js';
 import { copyPlainText } from '../clipboard.js';
 import { studioRequest } from '../transport.js';
 import { participantColor } from '../shared/presence-members.js';
@@ -66,6 +67,7 @@ export interface WhiteboardCanvasProps {
   activities?: Feedback[];
   annotationActive?: boolean;
   annotationTarget?: Anchor;
+  activeFeedbackId?: string;
   onAnnotationModeChange?: (active: boolean) => void;
   onAnnotateNative?: (selection: NativeAnnotation) => void;
   onFeedbackSelect?: (feedback: Feedback, screenPoint: Point) => void;
@@ -132,7 +134,7 @@ function drawnElement(gesture: Extract<Gesture, { kind: 'draw' }>, points = gest
     : { ...gesture.element, ...box, w: Math.max(1,box.w), h: Math.max(1,box.h), points: points.flatMap(point => [point.x - box.x, point.y - box.y]) };
 }
 
-export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, viewTheme = 'light', onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onReadingChange, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
+export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, viewTheme = 'light', onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, activeFeedbackId, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onReadingChange, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
   const viewportElement = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const htmlInput = useRef<HTMLInputElement>(null);
@@ -1434,13 +1436,14 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
           if (!frame) return null;
           return <div key={activity.id} className="studio-processing-frame" data-feedback-id={activity.id} role="status" aria-label={`${activity.processingBy?.name || 'Codex'} 正在处理此范围`} style={{ left: frame.x - 8, top: frame.y - 8, width: frame.w + 16, height: frame.h + 16, borderWidth: 1.5 / viewport.zoom }}><span style={{ transform: `scale(${1 / viewport.zoom})` }}>{activity.processingBy?.name || 'Codex'} 正在处理</span></div>;
         })}
-        {activities.map((feedback, index) => {
+        {activities.map(feedback => {
           const tip = commentBoardTip(feedback.anchor, renderedElements);
-          return tip && <CommentPin key={feedback.id} feedback={feedback} index={index} left={tip.x} top={tip.y} zoom={viewport.zoom} onSelect={onFeedbackSelect} />;
+          return tip && <CommentPin key={feedback.id} feedback={feedback} left={tip.x} top={tip.y} zoom={viewport.zoom} onSelect={onFeedbackSelect} />;
         })}
         <PeerPresenceOverlay peers={presence} geometryTargets={peerPreviewFrames.filter(({peer})=>peer.kind!=='upload').map(({peer})=>({peerId:peer.peerId,elementIds:peer.elements.map(element=>element.id)}))} elements={renderedElements} artifactId={board.artifact.id} selfActorId={actor.id} zoom={viewport.zoom} clockOffsetMs={clockOffsetMs} preview={preview} onReleaseAgentTask={onReleaseAgentTask} />
         {(gesture?.kind === 'marquee' || gesture?.kind === 'annotate') && <div className="studio-marquee" style={{ left: Math.min(gesture.start.x, gesture.end.x), top: Math.min(gesture.start.y, gesture.end.y), width: Math.abs(gesture.end.x - gesture.start.x), height: Math.abs(gesture.end.y - gesture.start.y), borderWidth: 1 / viewport.zoom }} />}
       </div>
+      {onFeedbackSelect && activities.length > 1 && <CommentClusters containerRef={viewportElement} activities={activities} activeFeedbackId={activeFeedbackId} onSelect={onFeedbackSelect} />}
       {!board.elements.length && !gesture && <div className="studio-canvas-empty"><div className="studio-empty-symbol"><Square size={27} /><Circle size={25} /><ArrowUpRight size={24} /></div><strong>从一个想法开始</strong><p>{canEdit ? '添加文档、文字、便签或图形，也可以导入 HTML 图解。' : '这块白板还没有内容。'}</p>{canEdit && <><button type="button" data-native-interactive="true" onClick={() => { void addDocument(); }}><FileText size={16} />添加文档</button><button type="button" data-native-interactive="true" onClick={() => void openHtmlEditor()}><Braces size={16} />添加 HTML 图解</button></>}</div>}
     </div>
     <div className="studio-canvas-toolbar" hidden={Boolean(reading)} role="toolbar" aria-label="白板工具" data-native-interactive="true">

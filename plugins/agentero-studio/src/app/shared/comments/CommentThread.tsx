@@ -3,6 +3,7 @@ import { ArrowUp, Check, MoreHorizontal, Pencil, RotateCcw, Send, Trash2, X } fr
 import { createPortal } from 'react-dom';
 import type { Actor, Feedback } from '../../../contracts/studio';
 import { attachmentStatus } from './attachment';
+import { CommentAuthorAvatar, commentAuthorName } from './comment-author';
 import { newClientId } from '../client-id';
 
 export type CommentAction = 'reply' | 'edit' | 'delete' | 'resolve' | 'reopen' | 'send';
@@ -37,7 +38,7 @@ export function CommentMenu({ label, items, disabled, icon }: { label: string; i
 function stamp(value: string, expanded: boolean) { return new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', ...(expanded ? { year: 'numeric' } : {}) }); }
 function own(author: Actor, actor: Actor) { return author.kind === 'human' && author.kind === actor.kind && author.id === actor.id; }
 function MessageHeader({ author, date, expanded, children }: { author: Actor; date: string; expanded: boolean; children?: ReactNode }) {
-  return <div className="studio-comment-message-header"><span className={`studio-comment-avatar${author.kind === 'agent' ? ' is-agent' : ''}`} aria-hidden="true">{(author.name || (author.kind === 'agent' ? 'Codex' : '协作者')).slice(0, 1)}</span><div className="studio-comment-author"><strong>{author.name || (author.kind === 'agent' ? 'Codex' : '协作者')}</strong><time dateTime={date}>{stamp(date, expanded)}</time></div><div className="studio-comment-message-actions">{children}</div></div>;
+  return <div className="studio-comment-message-header"><CommentAuthorAvatar author={author} /><div className="studio-comment-author"><strong>{commentAuthorName(author)}</strong><time dateTime={date}>{stamp(date, expanded)}</time></div><div className="studio-comment-message-actions">{children}</div></div>;
 }
 
 interface Props {
@@ -101,7 +102,8 @@ export function CommentThread({ feedback, actor, busy, compact = false, onOpen, 
       if (currentReplyText.current === replyText) onReplyTextChange?.('');
     }
     if (attach && commentPermission.current) {
-      if (await attachToConversation(saved)) setPendingReply(null); else setPendingReply(saved);
+      if (await attachToConversation(saved)) { setPendingReply(null); setAttach(false); }
+      else setPendingReply(saved);
     }
   }
   const editor = <form className="studio-comment-edit" onSubmit={event => void saveEdit(event)}><textarea ref={input} aria-label="编辑备注内容" value={editText} rows={3} maxLength={16000} readOnly={!canComment} disabled={disabled || !!savedEdit} onChange={event => setEditText(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditing(null); } }} /><label className="studio-comment-edit-attach"><input type="checkbox" checked={editAttach} disabled={!canComment || disabled || !!savedEdit} onChange={event => setEditAttach(event.target.checked)} />附加到对话</label><div><button type="button" className="studio-button" disabled={disabled} onClick={() => setEditing(null)}>取消</button><button type="submit" className="studio-button studio-primary" disabled={!canComment || disabled || !editText.trim()}>{savedEdit ? '重试附加' : '保存'}</button></div></form>;

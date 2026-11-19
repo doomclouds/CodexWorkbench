@@ -1,0 +1,80 @@
+.studio-comments-panel.studio-editor-popover {
+  width: min(360px, calc(100vw - 24px));
+}
+
+.studio-comment-list-controls {
+  margin: 0 0 6px;
+  border-bottom: 1px solid var(--studio-border);
+}
+
+.studio-comment-scope {
+  display: flex;
+  gap: 10px;
+  border-bottom: 1px solid var(--studio-border);
+}
+
+.studio-comment-scope button {
+  padding: 5px 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--studio-muted);
+  white-space: nowrap;
+}
+
+.studio-comment-scope button[aria-pressed="true"] {
+  border-bottom-color: var(--studio-accent);
+  color: var(--studio-text);
+  font-weight: 600;
+}
+
+.studio-comment-list-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 9px 0;
+}
+
+.studio-comment-author-filter,
+.studio-comment-resolved-filter {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.studio-comment-author-filter {
+  flex: 1 1 140px;
+}
+
+.studio-comment-author-filter select {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--studio-border);
+  border-radius: 6px;
+  background: var(--studio-soft);
+  color: var(--studio-text);
+  text-overflow: ellipsis;
+}
+
+.studio-comment-resolved-filter input {
+  margin: 0;
+  accent-color: var(--studio-accent);
+}
+
+.studio-comment-list-row {
+  min-width: 0;
+  border-bottom: 1px solid var(--studio-border);
+}
+
+.studio-comment-list-row.is-expanded {
+  margin: 6px 0;
+  padding: 8px;
+  border: 1px solid var(--studio-accent);
+  border-radius: 8px;
+}

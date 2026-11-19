@@ -490,7 +490,7 @@ describe('Studio real management workflows', () => {
       if (action === 'create') await submit(container.querySelector<HTMLFormElement>('.studio-comment-compose')!);
       else await click(button('删除'));
       await waitUntil(() => listStarted);
-      await waitUntil(() => action === 'create' ? !container.querySelector('.studio-comment-compose') && !!container.querySelector('.studio-feedback-message') : !container.querySelector('.studio-comment-popover'));
+      await waitUntil(() => action === 'create' ? !container.querySelector('.studio-comment-compose') && !!container.querySelector('.studio-feedback-message') : !container.querySelector('.studio-comments-panel .studio-comment-thread'));
       if (action === 'create') {
         expect(container.querySelector('.studio-feedback-message')?.textContent).toBe('立即显示已保存的备注');
         expect(button('备注操作').disabled).toBe(false);
@@ -502,7 +502,7 @@ describe('Studio real management workflows', () => {
   it('keeps newer collaborative threads when an older deletion acknowledgement arrives', async () => {
     const fixture = await createFixture([region()]), artifactId = fixture.board.artifact.id;
     const first = (await service.execute('artifact_feedback', { action: 'create', artifactId, text: '删除目标' }, LOCAL_ACTOR)).feedback[0] as Feedback;
-    const other = (await service.execute('artifact_feedback', { action: 'create', artifactId, text: '原来的另一条备注' }, LOCAL_ACTOR)).feedback[1] as Feedback;
+    const other = (await service.execute('artifact_feedback', { action: 'create', artifactId, text: '原来的另一条备注' }, LOCAL_ACTOR)).feedback.find((item: Feedback) => item.text === '原来的另一条备注') as Feedback;
     const streams: { onmessage: ((event: { data: string }) => void) | null }[] = [];
     vi.stubGlobal('EventSource', class {
       onmessage: ((event: { data: string }) => void) | null = null; onerror = null;
@@ -515,7 +515,8 @@ describe('Studio real management workflows', () => {
     await mount({ artifactId }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
     await click(button('备注列表')); await waitUntil(() => container.querySelectorAll('.studio-comment-list-item').length === 2);
     await click(container.querySelector<HTMLElement>(`[data-feedback-id="${first.id}"]`)!);
-    await click(button('备注操作')); await click(button('删除备注线程'));
+    const opened = container.querySelector<HTMLElement>(`.studio-comment-thread.is-expanded[data-feedback-id="${first.id}"]`)!;
+    await click(opened.querySelector<HTMLButtonElement>('[aria-label="备注操作"]')!); await click(button('删除备注线程'));
     const execute = call.getMockImplementation()!;
     let releaseAck!: () => void, releaseList!: () => void, committed = false, holdLists = false, listStarted = false;
     const ack = new Promise<void>(resolve => { releaseAck = resolve; }), list = new Promise<void>(resolve => { releaseList = resolve; });
@@ -530,8 +531,6 @@ describe('Studio real management workflows', () => {
       await service.execute('artifact_feedback', { action: 'edit', artifactId, feedbackId: other.id, text: '另一窗口更新的备注', expectedText: other.text }, LOCAL_ACTOR);
       await service.execute('artifact_feedback', { action: 'create', artifactId, text: '另一窗口新增的备注' }, LOCAL_ACTOR);
       await act(async () => streams.at(-1)!.onmessage!({ data: JSON.stringify({ type: 'feedback', artifactId, cursor: 'fixture:2' }) }));
-      await waitUntil(() => !container.querySelector('.studio-comment-popover'));
-      await click(button('备注列表'));
       await waitUntil(() => container.textContent?.includes('另一窗口新增的备注') === true);
       holdLists = true; await act(async () => releaseAck()); await waitUntil(() => listStarted);
       expect(container.textContent).toContain('另一窗口更新的备注');
@@ -680,6 +679,8 @@ describe('Studio real management workflows', () => {
     await click(button('备注列表'));
     await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
     await click(container.querySelector<HTMLButtonElement>('.studio-comment-list-item')!);
+    expect(container.querySelector('.studio-comments-panel .studio-reply-form')).not.toBeNull();
+    expect(container.querySelector('.studio-comment-popover')).toBeNull();
     await change(container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注：需要补充说明"]')!, '已补充接口约束');
     await submit(container.querySelector<HTMLFormElement>('.studio-reply-form')!);
     await waitUntil(() => container.querySelector('.studio-feedback-reply')?.textContent?.includes('已补充接口约束') === true);
@@ -687,11 +688,8 @@ describe('Studio real management workflows', () => {
     expect(result.feedback[0].replies).toHaveLength(1);
     expect(result.feedback[0].replies[0].text).toBe('已补充接口约束');
     await click(button('解决'));
-    await waitUntil(() => !container.querySelector('.studio-comment-popover'));
-    await click(button('备注列表'));
-    expect(container.querySelector('.studio-comment-list-item')).toBeNull();
-    await click(button('筛选备注'));
-    await click(button('显示已解决'));
+    await waitUntil(() => !container.querySelector('.studio-comments-panel .studio-comment-thread'));
+    await click(container.querySelector<HTMLInputElement>('.studio-comment-resolved-filter input')!);
     await waitUntil(() => !!container.querySelector('.studio-comment-list-item[data-status="resolved"]'));
     await click(container.querySelector<HTMLButtonElement>('.studio-comment-list-item')!);
     await click(button('备注操作'));
@@ -712,7 +710,11 @@ describe('Studio real management workflows', () => {
       return result;
     });
     await mount({ artifactId: fixture.board.artifact.id }); await waitUntil(() => !!container.querySelector('[aria-label="白板画布"]'));
-    const open = async () => { await click(button('备注列表')); await waitUntil(() => !!container.querySelector('.studio-comment-list-item')); await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!); };
+    const open = async () => {
+      if (!container.querySelector('.studio-comments-panel')) await click(button('备注列表'));
+      await waitUntil(() => !!container.querySelector('.studio-comment-list-item'));
+      await click(container.querySelector<HTMLElement>('.studio-comment-list-item')!);
+    };
     await open();
     await change(container.querySelector<HTMLTextAreaElement>('[aria-label="回复批注：回复确认测试"]')!, '保持这条回复');
     await submit(container.querySelector<HTMLFormElement>('.studio-reply-form')!);

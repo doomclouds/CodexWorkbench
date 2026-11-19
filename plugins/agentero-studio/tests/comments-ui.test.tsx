@@ -20,19 +20,100 @@ function button(label: string) { const found = [...host.querySelectorAll<HTMLBut
 async function click(node: HTMLElement) { await act(async () => { node.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); node.click(); }); }
 async function change(node: HTMLTextAreaElement, text: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(node, text); node.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function submit(form: HTMLFormElement) { await act(async () => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }); }
+function authorSelect() { return host.querySelector<HTMLSelectElement>('.studio-comment-author-filter select')!; }
+async function chooseAuthor(name: string) {
+  const select = authorSelect();
+  const option = [...select.options].find(item => item.textContent === name);
+  if (!option) throw new Error(`Missing author: ${name}`);
+  await act(async () => { select.value = option.value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+}
+function visibleThreads() { return [...host.querySelectorAll('[data-feedback-id]')].map(node => node.getAttribute('data-feedback-id')); }
 
-it('lists authors, first messages and reply counts and filters resolved threads through a menu', async () => {
+it('lists authors, first messages and reply counts and filters resolved threads through a checkbox', async () => {
   function Panel() { const [resolved, setResolved] = useState(false); return <CommentsPanel feedback={[feedback, { ...feedback, id: 'resolved', status: 'resolved', text: '已经完成' }]} actor={LOCAL_ACTOR} busy={false} showResolved={resolved} onShowResolved={setResolved} onOpen={() => {}} onAction={action()} onAttach={async () => {}} renderSuggestion={() => null} />; }
   await render(<Panel />);
   expect(host.querySelectorAll('.studio-comment-list-item')).toHaveLength(1);
   expect(host.textContent).toContain('1 条回复');
   expect(host.textContent).not.toContain('添加备注');
   expect(host.querySelector('.studio-comment-list-item time')?.getAttribute('datetime')).toBe(feedback.createdAt);
-  await click(button('筛选备注'));
-  const option = host.querySelector<HTMLButtonElement>('[role=menuitemcheckbox]')!;
-  expect(option.getAttribute('aria-checked')).toBe('false');
+  const option = host.querySelector<HTMLInputElement>('.studio-comment-resolved-filter input')!;
+  expect(option.checked).toBe(false);
   await click(option);
   expect(host.querySelectorAll('.studio-comment-list-item')).toHaveLength(2);
+});
+
+it('filters by thread author while keeping full numeric names and a separate mine scope', async () => {
+  const other: Actor = { ...colleague, id: 'other', name: '10062' };
+  const records: Feedback[] = [
+    { ...feedback, id: 'colleague-thread' },
+    { ...feedback, id: 'mine', author: LOCAL_ACTOR, replies: [] },
+    { ...feedback, id: 'numeric', author: other, replies: [] },
+  ];
+  await render(<CommentsPanel feedback={records} actor={LOCAL_ACTOR} busy={false} showResolved={false} onShowResolved={() => {}} onOpen={() => {}} onAction={action()} onAttach={async () => {}} renderSuggestion={() => null} />);
+  expect(button('全部').getAttribute('aria-pressed')).toBe('true');
+  expect(visibleThreads()).toEqual(['colleague-thread', 'mine', 'numeric']);
+  await chooseAuthor('10062');
+  expect(visibleThreads()).toEqual(['numeric']);
+  await click(button('我发起'));
+  expect(button('我发起').getAttribute('aria-pressed')).toBe('true');
+  expect(authorSelect()).toBeNull();
+  expect(visibleThreads()).toEqual(['mine']);
+  await click(button('全部'));
+  expect(visibleThreads()).toEqual(['numeric']);
+  await chooseAuthor('所有作者');
+  expect(visibleThreads()).toEqual(['colleague-thread', 'mine', 'numeric']);
+});
+
+it('opens a thread in the list and keeps a reply draft after collapse and author filtering', async () => {
+  const onAction = action();
+  const onAttach = vi.fn(async () => {});
+  const own: Feedback = { ...feedback, id: 'another', author: { ...LOCAL_ACTOR, name: '我' }, replies: [] };
+  function Panel() {
+    const [openFeedbackId, setOpen] = useState<string>();
+    const [replyTextById, setReplies] = useState<Record<string, string>>({});
+    return <CommentsPanel feedback={[feedback, own]} actor={LOCAL_ACTOR} busy={false} showResolved={false} onShowResolved={() => {}}
+      onOpen={item => setOpen(item.id)} onAction={onAction} onAttach={onAttach} renderSuggestion={() => null} renderAnchorNotice={item => <p data-notice-for={item.id}>原段落已更新</p>}
+      openFeedbackId={openFeedbackId} onCloseFeedback={() => setOpen(undefined)} replyTextById={replyTextById}
+      onReplyTextChange={(id, value) => setReplies(previous => ({ ...previous, [id]: value }))} />;
+  }
+  await render(<Panel />);
+  const thread = host.querySelector<HTMLElement>('[data-feedback-id="thread"]')!;
+  expect(host.querySelector('[data-notice-for]')).toBeNull();
+  await act(async () => { thread.focus(); thread.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+  const reply = () => host.querySelector<HTMLTextAreaElement>('[data-feedback-id="thread"] .studio-reply-form textarea')!;
+  const attachmentCheckbox = () => host.querySelector<HTMLInputElement>('[data-feedback-id="thread"] .studio-reply-form input[type="checkbox"]')!;
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('备注讨论 · 同事');
+  expect(host.querySelector('[data-notice-for]')?.getAttribute('data-notice-for')).toBe('thread');
+  expect(attachmentCheckbox().checked).toBe(false);
+  await change(reply(), '稍后发送的回复');
+  await click(button('关闭备注'));
+  expect(document.activeElement).toBe(thread);
+  expect(host.querySelector('[data-notice-for]')).toBeNull();
+  expect(reply()).toBeNull();
+  await click(thread);
+  expect(reply().value).toBe('稍后发送的回复');
+  await chooseAuthor('我');
+  expect(visibleThreads()).toEqual(['another']);
+  await chooseAuthor('所有作者');
+  expect(reply()).toBeNull();
+  await click(host.querySelector<HTMLElement>('[data-feedback-id="thread"]')!);
+  expect(reply().value).toBe('稍后发送的回复');
+  expect(attachmentCheckbox().checked).toBe(false);
+  await click(attachmentCheckbox());
+  await submit(reply().form!);
+  expect(onAction).toHaveBeenCalledWith('reply', feedback, expect.objectContaining({ text: '稍后发送的回复' }));
+  expect(onAttach).toHaveBeenCalledOnce();
+  expect(reply().value).toBe('');
+  expect(attachmentCheckbox().checked).toBe(false);
+});
+
+it('keeps expanded discussions read-only for viewers', async () => {
+  await render(<CommentsPanel feedback={[feedback]} actor={{ ...colleague, role: 'viewer' }} busy={false} showResolved={false}
+    onShowResolved={() => {}} onOpen={() => {}} onAction={action()} onAttach={async () => {}} renderSuggestion={() => null} openFeedbackId={feedback.id} />);
+  expect(host.textContent).toContain('我来补充');
+  expect(host.querySelector('.studio-reply-form')).toBeNull();
+  expect(host.querySelector('[aria-label="解决"]')).toBeNull();
+  expect(host.textContent).not.toContain('附加到对话');
 });
 
 it('matches first-author editing and owner-or-first-author deletion without granting foreign commenter management', async () => {

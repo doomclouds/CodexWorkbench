@@ -59,7 +59,7 @@ it('keeps a document-relative pin in its paragraph after returning to the board'
   await render();
   expect(portal.querySelector(selector)).toBeNull();
   expect(host.querySelector<HTMLButtonElement>(selector)?.style.top).toBe('50%');
-  await click('备注 1：段落备注');
+  await click('备注 房主：段落备注');
   expect(selectRemark).toHaveBeenCalledWith(props.activities![0], expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
 });
 
