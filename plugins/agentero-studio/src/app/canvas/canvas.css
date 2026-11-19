@@ -166,8 +166,7 @@
 .studio-format-link { position: absolute; left: 0; top: calc(100% + 8px); display: flex; gap: 6px; width: min(300px, 90vw); padding: 8px; border: 1px solid var(--canvas-ui-border); border-radius: 7px; background: var(--canvas-ui); }
 .studio-format-link input { min-width: 0; flex: 1; padding: 6px; border: 1px solid var(--canvas-ui-border); border-radius: 4px; color: var(--canvas-ui-text); background: var(--canvas-ui); font-size: 12px; }
 .studio-format-link button { width: 42px; font-size: 12px; }
-.studio-feedback-pin { position: absolute; z-index: 75; background: var(--canvas-accent); cursor: pointer; }
-.studio-feedback-pin.is-resolved { background: #677873; }
+.studio-feedback-pin { position: absolute; z-index: 75; cursor: pointer; }
 .studio-shape-options { position: absolute; left: 50%; bottom: 83px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid var(--canvas-ui-border); border-radius: 7px; background: var(--canvas-ui); font-size: 12px; color: var(--canvas-ui-muted); z-index: 35; white-space: nowrap; }
 .studio-shape-options select { border: 0; background: var(--canvas-ui-soft); color: var(--canvas-ui-text); border-radius: 4px; padding: 5px 8px; }
 .studio-insert-menu, .studio-pen-menu, .studio-sticker-menu { align-items: stretch; gap: 8px; width: 255px; max-width: calc(100% - 24px); white-space: normal; box-shadow: 0 5px 20px #0002; }

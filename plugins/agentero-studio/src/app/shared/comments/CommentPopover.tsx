@@ -1,10 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowUp, Loader2, X } from 'lucide-react';
+import { LOCAL_ACTOR, type Actor } from '../../../contracts/studio';
+import { CommentAuthorGlyph, commentAuthorName, commentAuthorStyle } from './comment-author';
 import { COMMENT_PIN_SIZE, type CommentPoint } from './comment-target';
 import './comments.css';
 import { registerEscapeLayer } from '../escape';
 
-interface Props { point?: CommentPoint; locate?: () => CommentPoint | undefined; label?: string; draft?: boolean; showDraftPin?: boolean; pinLabel?: string; onClose: () => void; onOutside?: () => void; children: ReactNode }
+interface Props { point?: CommentPoint; locate?: () => CommentPoint | undefined; label?: string; draft?: boolean; showDraftPin?: boolean; pinAuthor?: Actor; onClose: () => void; onOutside?: () => void; children: ReactNode }
 
 export function placeCommentPopover(point: CommentPoint, size: { width: number; height: number }, viewport: { width: number; height: number }) {
   const gutter = 8, gap = 6, pinTop = point.y - COMMENT_PIN_SIZE;
@@ -27,7 +29,7 @@ export function placeCommentPopover(point: CommentPoint, size: { width: number; 
 }
 
 /** Positions a comment beside its target without changing the canvas layout. */
-export function CommentPopover({ point, locate, label, draft, showDraftPin = true, pinLabel, onClose, onOutside, children }: Props) {
+export function CommentPopover({ point, locate, label, draft, showDraftPin = true, pinAuthor = LOCAL_ACTOR, onClose, onOutside, children }: Props) {
   const root = useRef<HTMLElement>(null);
   const close = useRef(onClose); close.current = onClose;
   const outsideClose = useRef(onOutside || onClose); outsideClose.current = onOutside || onClose;
@@ -57,7 +59,7 @@ export function CommentPopover({ point, locate, label, draft, showDraftPin = tru
     document.addEventListener('pointerdown', outside, true);
     return () => { document.removeEventListener('pointerdown', outside, true); unregister(); };
   }, []);
-  return <>{draft && showDraftPin && pin && <span className="studio-comment-pin studio-comment-draft-pin" aria-hidden="true" style={{ left: pin.x, top: pin.y }}>{(pinLabel || '我').slice(0, 1)}</span>}<section ref={root} className={`studio-comment-popover${draft ? ' is-draft' : ''}`} role="dialog" aria-label={draft ? '新建备注' : '备注线程'} style={position} onPointerDown={event => event.stopPropagation()}>
+  return <>{draft && showDraftPin && pin && <span className="studio-comment-pin studio-comment-draft-pin" aria-hidden="true" title={commentAuthorName(pinAuthor)} style={{ ...commentAuthorStyle(pinAuthor), left: pin.x, top: pin.y }}><CommentAuthorGlyph author={pinAuthor} /></span>}<section ref={root} className={`studio-comment-popover${draft ? ' is-draft' : ''}`} role="dialog" aria-label={draft ? '新建备注' : '备注线程'} style={position} onPointerDown={event => event.stopPropagation()}>
     {label && <div className="studio-comment-target"><span title={label}>{label}</span><button type="button" className="studio-icon-button" aria-label="关闭备注" onClick={onClose}><X size={15} /></button></div>}
     {children}
   </section></>;

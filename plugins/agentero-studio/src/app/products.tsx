@@ -22,6 +22,7 @@ export interface ProductEditorProps<Document = StudioDocument> {
   presence: Presence[]; selfPeerId: string; externalViewport?: Viewport; externalSelectedIds?: string[];
   annotationActive?: boolean; onAnnotationModeChange?: (active: boolean) => void;
   annotationTarget?: Anchor;
+  activeFeedbackId?: string;
   onFeedbackSelect?: (feedback: Feedback, screenPoint: { x: number; y: number }) => void;
   onReadingChange?: (active: boolean, kind?: 'canvas' | 'document') => void; documentControls?: ReactNode;
 }

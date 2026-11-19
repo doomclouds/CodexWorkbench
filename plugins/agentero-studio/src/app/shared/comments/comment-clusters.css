@@ -1,0 +1,20 @@
+/* Keep the original dimensions so overlap can still be measured while a pin is grouped. */
+.studio-feedback-pin[data-comment-clustered]{visibility:hidden;pointer-events:none}
+.studio-comment-clusters{position:absolute;inset:0;z-index:61;pointer-events:none}
+.studio-comment-cluster-marker{position:absolute;max-width:100%;left:0;top:0;translate:0 -100%;pointer-events:none}
+.studio .studio-comment-cluster{display:inline-flex;align-items:center;gap:5px;min-height:28px;max-width:104px;padding:3px 7px;border:1px solid var(--studio-border);border-radius:999px;background:var(--studio-surface);box-shadow:var(--studio-shadow);color:var(--studio-text);font-size:12px;line-height:1.3;font-weight:600;white-space:nowrap;cursor:pointer;pointer-events:auto}
+.studio-comment-cluster:focus-visible{outline:2px solid var(--studio-focus);outline-offset:2px}
+.studio-comment-cluster-authors{display:inline-flex;align-items:center}
+.studio-comment-cluster-authors .studio-comment-avatar{width:21px;height:21px;border:1px solid var(--studio-surface);font-size:10px}
+.studio-comment-cluster-authors .studio-comment-avatar + .studio-comment-avatar{margin-left:-5px}
+.studio .studio-comment-cluster-chooser{width:min(332px,calc(100vw - 24px));border-radius:12px}
+.studio-comment-cluster-chooser .studio-editor-popover-content{padding:10px 12px 12px}
+.studio-comment-cluster-chooser .studio-editor-popover-heading{margin-bottom:4px}
+.studio-comment-cluster-chooser .studio-editor-popover-heading h2{font-size:14px}
+.studio-comment-cluster-list{list-style:none;padding:0;margin:0}
+.studio-comment-cluster-list li+li{border-top:1px solid var(--studio-border)}
+.studio .studio-comment-cluster-row{display:flex;align-items:flex-start;gap:9px;width:100%;padding:8px 5px;border:0;border-radius:6px;color:var(--studio-text);background:transparent;text-align:left;cursor:pointer}
+.studio .studio-comment-cluster-row:hover,.studio .studio-comment-cluster-row:focus-visible{background:var(--studio-hover)}
+.studio-comment-cluster-summary{display:grid;min-width:0;gap:1px}
+.studio-comment-cluster-summary>strong,.studio-comment-cluster-summary>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-comment-cluster-summary>span,.studio-comment-cluster-summary>small{color:var(--studio-muted)}

@@ -306,12 +306,12 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
   useEffect(() => { setFindIndex(0); if (find.trim() && matches.length) jump(matches[0].id); }, [find]);
   function nextMatch(delta: number) { if (!matches.length) return; const index = (findIndex + delta + matches.length) % matches.length; setFindIndex(index); jump(matches[index].id); }
   const commentPins = activities?.length ? new Map<string, ReactNode[]>() : undefined;
-  if (commentPins) activities?.forEach((feedback, index) => {
+  if (commentPins) activities?.forEach(feedback => {
     const { pin, blockIds, elementIds } = feedback.anchor;
     const blockId = blockIds?.[0];
     if (pin?.coordinateSpace !== 'document' || elementIds?.[0] !== element.id || !blockId) return;
     const pins = commentPins.get(blockId) ?? [];
-    pins.push(<CommentPin key={feedback.id} feedback={feedback} index={index} left={`${pin.x * 100}%`} top={`${pin.y * 100}%`} zoom={readingZoom} onSelect={onFeedbackSelect} />);
+    pins.push(<CommentPin key={feedback.id} feedback={feedback} left={`${pin.x * 100}%`} top={`${pin.y * 100}%`} zoom={readingZoom} onSelect={onFeedbackSelect} />);
     commentPins.set(blockId, pins);
   });
   const body = <>
