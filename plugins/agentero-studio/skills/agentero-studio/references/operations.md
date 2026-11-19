@@ -9,8 +9,8 @@
 | 读全板、集合、单个文档 | `artifact_read` 的白板、概要、对象或源码读取 |
 | 批量写入、部分更新与删除 | `artifact_apply`，使用稳定对象 ID、操作 ID 和版本前置条件 |
 | 声明 Agent 任务范围、阶段、工作提示与可跟随区域 | `artifact_activity`，begin/update/status/end；房主界面可release，不锁住人类 |
-| 使用界面 | 先查询并复用当前会话面板；确认没有且确需界面时 `studio_open` 一次；创建另由 `artifact_manage` 完成 |
-| 当前视图上下文 | `artifact_read` 的明确视图或反馈上下文 |
+| 查看界面 | 用户从 Codex 对话顶部切到已有的「Agentero 创作」标签页，首次进入时通过「＋」菜单选择「Agentero 创作」。`studio_open` 是该入口使用的 App-only API |
+| 当前视图上下文 | 按需读取本会话已有面板的宿主上下文，使用 `artifact_read` 读取明确的视图或反馈上下文，用户继续留在当前对话 |
 | 读评论、回复、编辑本人消息、删除讨论、解决与重开 | `artifact_feedback` |
 | 分享、角色链接开关与重置、成员角色、移除和恢复访问 | `artifact_share` |
 | 历史、差异与恢复 | `artifact_read` 读取，`artifact_apply` 提交恢复 |
