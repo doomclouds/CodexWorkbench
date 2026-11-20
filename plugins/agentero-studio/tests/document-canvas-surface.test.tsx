@@ -94,9 +94,9 @@ it('keeps a later geometry task when replacing a failed document save and waits 
   const queue = new NativeContentQueue({ send, changed: vi.fn(), accepted: vi.fn() });
   props = { ...props, contentQueue: queue }; await act(async () => root.render(<WhiteboardCanvas {...props} />));
   const draft: DocumentContent = { schemaVersion: 1, blocks: [{ id: 'paragraph', type: 'paragraph', props: {}, content: '本机正文', children: [] }] };
-  let initial!: BoardElement | false;
-  await act(async () => { initial = await controller.save!(draft, '方案', board.elements[0]!); });
-  expect(initial).toBe(false);
+  await act(async () => {
+    await expect(controller.save!(draft, '方案', board.elements[0]!)).rejects.toThrow('CONFLICT');
+  });
   const failedId = queue.tasks[0]!.id;
   queue.setEnabled(false);
   await act(async () => { void queue.enqueue(board, [{ op: 'update', id: 'doc', changes: { x: 250 } }], '移动元素', board.elements, true, undefined, 'later-geometry'); });

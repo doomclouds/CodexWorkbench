@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { Actor, Board, StudioClient, ToolName } from '../src/contracts/studio';
+import { LOCAL_ACTOR, type Actor, type Board, type StudioClient, type ToolName } from '../src/contracts/studio';
 import { startStudioHost, type StudioHost } from '../src/server/http';
 import { createCollaboration } from '../src/app/shared/useCollaboration';
 
@@ -22,6 +22,41 @@ function client(token: string, cookie?: string): StudioClient {
   const request: NonNullable<StudioClient['request']> = (input, init) => fetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), ...(cookie ? { Cookie: cookie } : {}) } });
   return { embedded: true, baseUrl: host.origin, token, request, async call<T>(name: ToolName, args = {}) { const response = await request(`${host.origin}/api/tools/${name}`, { method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) }); const result = await response.json(); if (!response.ok) throw Object.assign(new Error(result.error.message), result.error); return result.data as T; } };
 }
+
+it('shows loading while the saved board resynchronizes after returning to the Studio tab', async () => {
+  const created = await host.service.execute('artifact_manage', { action: 'create', title: '切回同一白板' });
+  const id = created.artifact.id;
+  const transport = client(host.token), request = transport.request!;
+  let holdSnapshot = false, waiting = false, release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  transport.request = async (input, init) => {
+    if (holdSnapshot && new URL(String(input)).pathname === '/api/tools/artifact_read') {
+      waiting = true;
+      await gate;
+    }
+    return request(input, init);
+  };
+  const setVisibility = (next: DocumentVisibilityState) => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(next);
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+  const badge = () => container!.querySelector('[data-save-status]');
+  const revision = () => container!.querySelector('[aria-label="协作白板"]')?.getAttribute('data-revision');
+  try {
+    await act(async () => root!.render(<StudioApp client={transport} actor={LOCAL_ACTOR} initialArtifactId={id} />));
+    await until(() => badge()?.getAttribute('data-save-status') === 'saved' && revision() === '0');
+    await act(async () => setVisibility('hidden'));
+    holdSnapshot = true;
+    await act(async () => setVisibility('visible'));
+    await until(() => waiting);
+    expect(badge()?.getAttribute('aria-label')).toBe('加载中');
+    expect(revision()).toBe('0');
+    release();
+    await until(() => badge()?.getAttribute('data-save-status') === 'saved');
+    expect(revision()).toBe('0');
+  } finally { release(); }
+});
 
 it('consumes concurrent committed unit changes through real long polling and coalesces cursor writes', async () => {
   const created = await host.service.execute('artifact_manage', { action: 'create', title: '并发白板' });

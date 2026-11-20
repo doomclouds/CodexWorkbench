@@ -296,3 +296,26 @@ it('avoids actual section text and its focused editor while measuring only neigh
   await act(async () => query('文字链接地址').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(document.activeElement).toBe(editor);
 });
+
+it('measures the hit box of a neighboring compact caption beyond its tiny world text projection', async () => {
+  const target = element('shape', { x: 3400, y: 2400, w: 500, h: 250 });
+  const neighbor = element('container', { id: 'neighbor', x: 3500, y: 2510, w: 340, h: 270, text: '甲', fontSize: 17 });
+  const rect = new DOMRect(350, 231, 30, 16);
+  if (!globalThis.CSS?.escape) vi.stubGlobal('CSS', { escape: (id: string) => id });
+  const measured = vi.fn();
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return new DOMRect(0, 0, 800, 600);
+    if (this.dataset.canvasExternalTitle === 'overview') { measured(); return rect; }
+    if (this.classList.contains('studio-selection-toolbar')) return new DOMRect(0, 0, 420, 42);
+    return new DOMRect();
+  });
+  await act(async () => root.render(<>
+    <div data-element-id={neighbor.id}><div data-canvas-external-title="overview">甲</div></div>
+    <CanvasFormatToolbar elements={[target]} selectionBounds={target} viewport={{ x: 0, y: 0, zoom: .1 }} titles={[neighbor]}
+      canEdit canAnnotate saving={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onChange={() => {}} onAnnotate={() => {}} onMore={() => {}} onAlign={() => {}} />
+  </>));
+  const toolbar = query('选区格式'), center = parseFloat(toolbar.style.left), top = parseFloat(toolbar.style.top);
+  const width = parseFloat(toolbar.style.maxWidth);
+  expect(measured).toHaveBeenCalledOnce();
+  expect(top + 42 <= rect.top || top >= rect.bottom || center + width / 2 <= rect.left || center - width / 2 >= rect.right).toBe(true);
+});

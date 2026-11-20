@@ -193,6 +193,11 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     const b = base as unknown as BoardElement, c = current as unknown as BoardElement;
     const local = { ...copy(b), ...copy(operation.changes), id: b.id, version: b.version };
     if (local.type !== b.type) throw new StudioError('CONFLICT', '对象类型发生变化，不能自动合并过期修改。', mergeConflictDetails(base, local, current, ['type']));
+    const changesEmbeddedState = Object.hasOwn(operation.changes, 'state')
+      && (b.type === 'html' || b.type === 'diagram' && typeof b.html === 'string');
+    if (changesEmbeddedState && (b.sourceRevision !== c.sourceRevision || b.html !== c.html)) {
+      throw new StudioError('CONFLICT', 'HTML 源码已有变化，旧的交互状态不能合并到新源码。', mergeConflictDetails(base, local, current, ['state']));
+    }
     // An unversioned matrix replacement does not assert stable row/column identities.
     if (b.type === 'table' && object(operation.changes.data) && Object.hasOwn(operation.changes.data, 'rows') && (!Array.isArray(operation.changes.data.rowIds) || !Array.isArray(operation.changes.data.columnIds))) throw new StudioError('CONFLICT', '并发表格编辑需要稳定的行列标识，请比较后重新提交。', mergeConflictDetails(base, local, current, ['data.rows']));
     const merged = safeElementMerge(b, local, c);
@@ -204,6 +209,8 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
   targets(content, operation) {
     if (operation.op === 'restore') { const ids = operation.ids ?? (operation.id === undefined ? undefined : [operation.id]); return ids?.some(id => id.startsWith('$') && id !== '$order') ? undefined : ids; }
     if (['style', 'motion'].includes(operation.op)) return;
+    // An anchored section uses bounds computed from the exact board revision.
+    if (operation.op === 'add' && operation.data?.beforeId !== undefined) return;
     if (operation.op === 'layout') { const ids = operation.ids ?? content.elements.map(element => element.id); return ['front', 'back', 'forward', 'backward'].includes(operation.preset ?? '') ? [...ids, '$order'] : ids; }
     // Deleting a node also deletes attached arrows; CAS covers those indirect edits.
     if (operation.op === 'delete') return [...new Set([...(operation.ids ?? [safeId(operation.id, '元素 ID')]), ...deletedIds(content, operation)])];
@@ -216,7 +223,16 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (element.type === 'html') element.sourceRevision = 1;
       if (content.elements.some(item => item.id === element.id)) throw new StudioError('CONFLICT', '元素 ID 已存在。', { elementId: element.id });
       assertLockedGeometry(content, { ...content, elements: [...content.elements, element] }, baseline);
-      content.elements.push(element); content.orderVersion = (content.orderVersion ?? 0) + 1; return [element.id];
+      const beforeId = operation.data?.beforeId;
+      if (beforeId === undefined) content.elements.push(element);
+      else {
+        if (element.type !== 'container') throw new StudioError('INVALID_ARGUMENT', '仅可为新增分区指定层级锚点。');
+        const anchor = safeId(beforeId, '层级锚点 ID');
+        const index = content.elements.findIndex(item => item.id === anchor);
+        if (index < 0) throw new StudioError('NOT_FOUND', '分区的层级锚点已不存在。', { elementId: anchor });
+        content.elements.splice(index, 0, element);
+      }
+      content.orderVersion = (content.orderVersion ?? 0) + 1; return [element.id];
     }
     if (operation.op === 'update') {
       const id = safeId(operation.id, '元素 ID'), index = content.elements.findIndex(item => item.id === id), current = content.elements[index];

@@ -22,12 +22,12 @@ function fixture(read: (input: string | URL, init?: RequestInit) => Promise<Resp
   const streams: any[] = [];
   vi.stubGlobal('EventSource', class { onmessage: ((event: { data: string }) => void) | null = null; onerror: (() => void) | null = null; close = vi.fn(); addEventListener() {} constructor(public url: string) { streams.push(this); } });
   let current: Board | null = null;
-  const onPresence = vi.fn(), onEvent = vi.fn(), onError = vi.fn(), onFeedback = vi.fn(), onClock = vi.fn(), onDocument = vi.fn(next => { current = next as Board; });
+  const onPresence = vi.fn(), onEvent = vi.fn(), onError = vi.fn(), onFeedback = vi.fn(), onClock = vi.fn(), onStatus = vi.fn(), onDocument = vi.fn(next => { current = next as Board; });
   const client: StudioClient = { embedded: polling, baseUrl: 'http://studio.test', token: 'fixture', request: read, call: vi.fn().mockRejectedValue(new Error('use abortable reads')) };
-  const controller = createCollaboration({ client, polling, artifactId, peerId: 'page', getDocument: () => current, onDocument, onFeedback, onPresence, onEvent, onError, onClock, onStatus: vi.fn() });
+  const controller = createCollaboration({ client, polling, artifactId, peerId: 'page', getDocument: () => current, onDocument, onFeedback, onPresence, onEvent, onError, onClock, onStatus });
   closes.push(controller.close);
   const emit = async (message: object) => { streams.at(-1).onmessage({ data: JSON.stringify({ artifactId, ...message }) }); await tick(); };
-  return { controller, streams, emit, onPresence, onEvent, onError, onFeedback, onClock, onDocument, get: () => current };
+  return { controller, streams, emit, onPresence, onEvent, onError, onFeedback, onClock, onStatus, onDocument, get: () => current };
 }
 function reply(next: Board) { return Response.json({ ok: true, data: next }); }
 function reads(next: () => Board) { return vi.fn(async (input: string | URL, init?: RequestInit) => new URL(String(input)).pathname === '/api/tools/artifact_read' ? reply(next()) : new URL(String(input)).pathname === '/api/tools/artifact_feedback' ? Response.json({ ok: true, data: { feedback: [] } }) : Response.json({ peers: [], timer: null, cursor: 'epoch:1', accepted: true, serverTime: Date.now() })); }
@@ -81,6 +81,21 @@ describe('collaboration client transport', () => {
     expect(states.at(-1)).toEqual({ type: 'reset', reason: 'pause' });
     expect(view.get()?.artifact.revision).toBe(1);
     view.controller.close(); expect(states.at(-1)).toEqual({ type: 'reset', reason: 'close' });
+  });
+
+  it('keeps a real connection failure visible until the retry synchronizes successfully', async () => {
+    const view = fixture(reads(() => board(1)));
+    await view.emit(ready());
+    expect(view.onStatus.mock.lastCall).toEqual(['saved']);
+    view.streams[0].onerror();
+    expect(view.onStatus.mock.lastCall).toEqual(['reconnecting']);
+    expect(view.onError).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(view.streams).toHaveLength(2);
+    expect(view.onStatus.mock.lastCall).toEqual(['reconnecting']);
+    await view.emit(ready('epoch:2'));
+    expect(view.onStatus.mock.lastCall).toEqual(['saved']);
+    expect(view.get()?.artifact.revision).toBe(1);
   });
 
   it('waits for exact unit repair before publishing an invalidated commit and resets transient state on hidden pages', async () => {

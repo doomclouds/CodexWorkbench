@@ -359,6 +359,30 @@ describe('whiteboard direct interaction', () => {
     await key(query('编辑文字'), '2'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
     expect(query('编辑文字').textContent).toBe('123456789');
   });
+  it('wraps selected objects with one anchored section operation without moving them', async () => {
+    const outer = element('outer', { type: 'container', x: 0, y: 0, w: 500, h: 360 });
+    const diagram = element('diagram', { type: 'html', html: '<p>Diagram</p>', locked: true });
+    const note = element('note', { type: 'note', x: 330, y: 125, w: 110, h: 110 });
+    const onSelectionChange = vi.fn();
+    const call = await editable([outer, diagram, note], { externalSelectedIds: ['note', 'diagram'], onSelectionChange });
+    await click('更多操作');
+    const wrap = [...host.querySelectorAll('[role="menuitem"]')].find(item => item.textContent === '从选区创建分区');
+    expect(wrap).toBeDefined();
+    await event(wrap!, 'click');
+    expect(call).toHaveBeenCalledTimes(1);
+    const args = call.mock.lastCall![1];
+    const frame = args.operations[0]!.element!;
+    expect(frame).toMatchObject({ type: 'container', text: '分区', fill: 'transparent', x: 76, y: 64, w: 388, h: 195 });
+    expect(args).toMatchObject({ expectedRevision: 1, operations: [{ op: 'add', data: { beforeId: 'diagram' } }] });
+    expect(args.operations).toHaveLength(1);
+    expect(onSelectionChange).toHaveBeenLastCalledWith([frame.id]);
+  });
+  it.each([[false, ['a']], [true, ['a', 'b']]] as const)('keeps section creation out of invalid selections and read-only menus', async (readOnly, ids) => {
+    await mount([element('a'), element('b', { x: 450 })], { readOnly, externalSelectedIds: [...ids] });
+    await event(query('白板画布'), 'contextmenu');
+    expect(query('白板操作')).not.toBeNull();
+    expect([...host.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === '从选区创建分区')).toBe(false);
+  });
   it('renames one editable section from its existing actions menu', async () => {
     const section = element('section', { type: 'container', text: '数据架构' });
     const shape = element('shape', { x: 400 });
@@ -375,6 +399,24 @@ describe('whiteboard direct interaction', () => {
     await select('shape');
     await click('更多操作');
     expect([...host.querySelectorAll('[role="menuitem"]')].some(item => item.textContent?.includes('重命名分区'))).toBe(false);
+  });
+  it.each([[.1, 'light'], [.25, 'dark'], [.5, 'light']] as const)('keeps an overview section name readable and editable at %s in %s', async (zoom, viewTheme) => {
+    const name = '数据架构与访问权限长分区';
+    const section = element('section', { type: 'container', text: `**${name}**`, w: 640, h: 360, fontSize: 17 });
+    const call = await editable([section], { viewTheme, externalViewport: { x: 0, y: 0, zoom } });
+    const caption = host.querySelector<HTMLElement>('[data-canvas-external-title="overview"]')!;
+    expect(caption.textContent).toBe(name);
+    expect(caption.title).toBe(name);
+    expect(parseFloat(caption.style.fontSize) * zoom).toBeCloseTo(12);
+    expect(parseFloat(caption.style.lineHeight) * zoom).toBeCloseTo(16);
+    await event(caption, 'pointerdown');
+    await event(query('白板画布'), 'pointerup');
+    expect(host.querySelector('[data-element-id="section"]')?.classList.contains('is-selected')).toBe(true);
+    await key(query('白板画布'), 'F2');
+    expect(document.activeElement).toBe(query('编辑文字'));
+    expect(query('编辑文字').textContent).toBe(name);
+    expect(host.querySelector('[data-canvas-external-title="overview"]')).toBeNull();
+    expect(call).not.toHaveBeenCalled();
   });
   it('routes keyboard editing to the existing HTML source and table cell editors', async () => {
     const onEditHtml = vi.fn(); await editable([element('html', { type: 'html', html: '<p>Hello</p>' }), element('table', { type: 'table', data: { rows: [['header'],['value']] } })], { onEditHtml });
