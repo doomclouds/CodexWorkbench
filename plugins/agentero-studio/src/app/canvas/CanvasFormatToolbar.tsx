@@ -3,6 +3,7 @@ import { AlignCenter, AlignLeft, AlignRight, Bold, Braces, Crop, Maximize, Itali
 import type { BoardElement } from '../../contracts/studio.js';
 import { getBoardSticker } from '../../core/products/whiteboard-stickers.js';
 import { arrowHeads, boundsOf, intersects, placeFormatToolbar, type Rect, type Viewport } from './canvas-model.js';
+import { overviewSectionTitle } from './canvas-presentation.js';
 import type { InlineTextFormatState } from './InlineTextEditor.js';
 import ColorPalette from './ColorPalette.js';
 import { registerEscapeLayer } from '../shared/escape.js';
@@ -28,6 +29,7 @@ function titleRect(title: HTMLElement, canvas: DOMRect): Rect | undefined {
   const editor = title.querySelector<HTMLElement>('[contenteditable="true"]');
   if (editor) return visibleRect(editor.getBoundingClientRect(), canvas);
   if (!title.textContent?.trim()) return;
+  if (title.dataset.canvasExternalTitle === 'overview') return visibleRect(title.getBoundingClientRect(), canvas);
   const range = document.createRange();
   range.selectNodeContents(title);
   const text = range.getBoundingClientRect?.() ?? title.getBoundingClientRect();
@@ -71,7 +73,10 @@ export default function CanvasFormatToolbar({ elements, selectionBounds, viewpor
     const selectedHeaders = (titles ?? []).filter(element => selectedIds.has(element.id) || element.id === editingTitle);
     const neighboringHeaders = (titles ?? []).filter(element => !selectedIds.has(element.id) && element.id !== editingTitle).map(element => {
       const bottom = viewport.y + element.y * viewport.zoom;
-      const height = element.type === 'html' ? 48 : ((element.text?.length ?? 0) + 1) * Math.max(32, (element.fontSize ?? 16) * 2 + 10) * viewport.zoom;
+      const height = element.type === 'html' ? 48 : Math.max(
+        overviewSectionTitle.height + overviewSectionTitle.gap + 2,
+        ((element.text?.length ?? 0) + 1) * Math.max(32, (element.fontSize ?? 16) * 2 + 10) * viewport.zoom,
+      );
       return { id: element.id, bounds: { x: viewport.x + element.x * viewport.zoom, y: bottom - height, w: element.w * viewport.zoom, h: height } };
     });
     const observedTitles = new Set<Element>();

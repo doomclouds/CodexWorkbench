@@ -9,6 +9,7 @@ import { STUDIO_ICON } from '../contracts/brand-icon';
 import { PLUGIN_VERSION } from '../contracts/version';
 import { APP_MAX_BYTES } from '../contracts/transport';
 import { createWebNavigation } from './web-navigation';
+import { loadPanelReadingView, restorePanelView, storePanelReadingView, type RestoredPanelView } from './panel-view-state';
 
 declare global { interface Window { __STUDIO_BOOT__?: Connection } }
 export interface StudioBridge {
@@ -16,6 +17,7 @@ export interface StudioBridge {
   actor: Actor;
   artifactId?: string;
   view?: string;
+  restoredView?: RestoredPanelView;
   navigate?: (artifactId?: string, view?: string) => void;
   attachContext?: (feedback: Feedback, document: ArtifactView) => Promise<void>;
   updateContext?: (context: ViewContext | null) => void;
@@ -46,22 +48,44 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   let connection: Connection | undefined;
   let initialArtifactId: string | undefined;
   let initialView = 'library';
+  let hostOpeningRoute: { artifactId?: string; view: string } | undefined;
+  let hostCallId: string | number | undefined;
+  let localRoute = false;
   let bridge: StudioBridge | undefined;
   let contextUpdater: ReturnType<typeof createHostContextUpdater> | undefined;
   let tornDown = false;
   const bootstrapAbort = new AbortController();
   let bridgeTransportClose: (() => void) | undefined;
-  const navigate = (args: Record<string, unknown>) => {
-    initialArtifactId = typeof args.artifactId === 'string' && args.artifactId ? args.artifactId : undefined;
-    initialView = typeof args.view === 'string' && ['library', 'editor', 'board', 'trash'].includes(args.view) ? args.view : initialArtifactId ? 'editor' : 'library';
-    if (bridge) { bridge.artifactId = initialArtifactId; bridge.view = initialView; }
-    onNavigate(initialArtifactId, initialView);
+  const selectRoute = (artifactId: string | undefined, view: string) => {
+    if (initialArtifactId === artifactId && initialView === view) return;
+    initialArtifactId = artifactId;
+    initialView = view;
+    if (bridge) { bridge.artifactId = artifactId; bridge.view = view; }
+    onNavigate(artifactId, view);
+  };
+  const navigate = (args: Record<string, unknown>, fromInput = false) => {
+    if (tornDown) return;
+    const artifactId = typeof args.artifactId === 'string' && args.artifactId ? args.artifactId : undefined;
+    const view = args.view === 'trash' && !artifactId ? 'trash' : artifactId ? args.view === 'board' ? 'board' : 'editor' : 'library';
+    const nextCallId = app.getHostContext()?.toolInfo?.id;
+    const newCall = nextCallId !== undefined && hostCallId !== undefined && nextCallId !== hostCallId;
+    const replay = !hostOpeningRoute || hostOpeningRoute.artifactId === artifactId && hostOpeningRoute.view === view;
+    const explicitLibrary = fromInput && args.view === 'library' && newCall;
+    if (localRoute && (view === 'library' ? !explicitLibrary : !newCall && replay)) {
+      hostOpeningRoute ??= { artifactId, view };
+      return;
+    }
+    // JSON-RPC ids only distinguish invocations in this instance; they are not storage keys.
+    if (nextCallId !== undefined) hostCallId = nextCallId;
+    hostOpeningRoute = { artifactId, view };
+    if (newCall) localRoute = false;
+    selectRoute(artifactId, view);
   };
   app.onhostcontextchanged = context => {
     if (context.styles?.variables) applyHostStyleVariables(context.styles.variables);
     if (context.theme) { applyDocumentTheme(context.theme); document.documentElement.dataset.theme = context.theme; }
   };
-  app.ontoolinput = ({ arguments: args }) => { if (args) navigate(args); };
+  app.ontoolinput = ({ arguments: args }) => { if (args) navigate(args, true); };
   app.ontoolresult = result => {
     const payload = result.structuredContent as ToolResponse<{ artifactId?: string; view?: string }> | undefined;
     if (payload?.ok) {
@@ -95,6 +119,13 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
     throw error;
   }
   const context = app.getHostContext();
+  hostCallId ??= context?.toolInfo?.id;
+  const restoredView = restorePanelView(extensions.modelContext?.getCurrent());
+  if (restoredView) {
+    localRoute = true;
+    initialArtifactId = restoredView.artifactId;
+    initialView = 'editor';
+  }
   if (context?.styles?.variables) applyHostStyleVariables(context.styles.variables);
   if (context?.theme) { applyDocumentTheme(context.theme); document.documentElement.dataset.theme = context.theme; }
   const transport = createRpcTransport(connection.baseUrl, async (args, signal) => {
@@ -124,7 +155,15 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
     },
   };
   bridge = {
-    client, actor: connection.actor, artifactId: initialArtifactId, view: initialView,
+    client, actor: connection.actor, artifactId: initialArtifactId, view: initialView, restoredView,
+    navigate(artifactId, view) {
+      localRoute = true;
+      // The editor already performed its own navigation. Keep the bridge's current route for re-entry.
+      initialArtifactId = artifactId;
+      initialView = view ?? (artifactId ? 'editor' : 'library');
+      bridge!.artifactId = initialArtifactId;
+      bridge!.view = initialView;
+    },
     async close() {
       transport.close();
       contextUpdater?.close();
@@ -137,12 +176,21 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
   };
   const formats = app.getHostCapabilities()?.updateModelContext;
   if (formats?.text || formats?.structuredContent) {
-    contextUpdater = createHostContextUpdater(snapshot => app.updateModelContext(formats.structuredContent
-      ? { structuredContent: { ...snapshot } }
-      : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] }));
+    let priorViewId = restoredView?.viewId;
+    contextUpdater = createHostContextUpdater(async snapshot => {
+      await app.updateModelContext(formats.structuredContent
+        ? { structuredContent: { ...snapshot } }
+        : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] });
+      // Keep the old record until its replacement is present and the host accepts the new view identity.
+      if (priorViewId && snapshot.viewId && snapshot.viewId !== priorViewId && snapshot.artifactId === restoredView?.artifactId &&
+        loadPanelReadingView(snapshot.viewId, snapshot.artifactId)) {
+        storePanelReadingView(priorViewId, null);
+        priorViewId = undefined;
+      }
+    });
     bridge.updateContext = contextUpdater.update;
     // The library is an open App too, even before a work or selection exists.
-    contextUpdater.update(null);
+    if (!restoredView) contextUpdater.update(null);
   }
   return bridge;
 }

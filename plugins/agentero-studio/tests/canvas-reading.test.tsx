@@ -70,6 +70,53 @@ it('views multiple native components and keeps locked contents of a selected con
   await click('退出全屏观看'); expect(host.querySelector('.is-reading')).toBeNull();
 });
 
+it('resumes the expanded document, scroll and return viewport only in the restored panel', async () => {
+  const elements = [element('document', { type: 'document', w: 820, h: 560, text: '恢复文档' }), element('other')];
+  const remount = async () => { await act(async () => root.unmount()); root = createRoot(host); };
+  const view = { panelViewId: 'view-reading-a' };
+  try {
+    await mount(elements, view);
+    const previousViewport = world().style.transform;
+    await click('展开文档');
+    const scroll = query('文档正文：恢复文档');
+    await act(async () => { scroll.scrollTop = 246; scroll.dispatchEvent(new Event('scroll', { bubbles: true })); });
+
+    await remount();
+    await mount(elements, { restoreReadingFrom: 'view-reading-b', panelViewId: 'view-reading-b-remounted', externalSelectedIds: ['other'] });
+    expect(host.querySelector('.is-reading')).toBeNull();
+    expect(host.querySelector('[data-element-id="other"]')!.classList.contains('is-selected')).toBe(true);
+
+    await remount();
+    const wrongBoard = board(elements);
+    await mount(elements, { panelViewId: 'view-reading-wrong-board', restoreReadingFrom: view.panelViewId, board: { ...wrongBoard, artifact: { ...wrongBoard.artifact, id: 'different-board' } } });
+    expect(host.querySelector('.is-reading')).toBeNull();
+
+    await remount();
+    const resumedViewId = 'view-reading-a-remounted';
+    await mount(elements, { panelViewId: resumedViewId, restoreReadingFrom: view.panelViewId });
+    expect(host.querySelector('.is-reading')).not.toBeNull();
+    expect(query('文档正文：恢复文档').scrollTop).toBe(246);
+    expect(sessionStorage.getItem('studio-panel-reading:' + resumedViewId)).toContain('"y":246');
+    await event([...host.querySelectorAll('button')].find(button => button.textContent === '返回画板')!, 'click');
+    expect(world().style.transform).toBe(previousViewport);
+    expect(host.querySelector('[data-element-id="document"]')!.classList.contains('is-selected')).toBe(true);
+
+    await click('展开文档');
+    await remount();
+    // Explicit board opening starts in ordinary mode and replaces the previous reading snapshot.
+    await mount(elements, { panelViewId: resumedViewId });
+    expect(host.querySelector('.is-reading')).toBeNull();
+    expect(sessionStorage.getItem('studio-panel-reading:' + resumedViewId)).toBeNull();
+    await remount();
+    await mount(elements, { panelViewId: 'view-reading-a-remounted-again', restoreReadingFrom: resumedViewId });
+    expect(host.querySelector('.is-reading')).toBeNull();
+  } finally {
+    sessionStorage.removeItem('studio-panel-reading:view-reading-a');
+    sessionStorage.removeItem('studio-panel-reading:view-reading-b');
+    sessionStorage.removeItem('studio-panel-reading:view-reading-a-remounted');
+  }
+});
+
 it.each([['Enter', 'Enter'], [' ', 'Space']])('lets %s activate the reading button instead of editing or panning', async (key, code) => {
   await mount([element('one', { type: 'note' })]);
   const button = query('全屏观看选区'); button.focus();

@@ -4,9 +4,12 @@ import type { Actor, AgentTaskReleaseTarget, Anchor, Board, BoardElement, Collab
 import { readableText, semanticColor } from '../../core/theme.js';
 import { nativeBackdrop, nativeFill, nativeSurfaces, nativeTableInk, nativeTextInk } from '../../core/products/native-surface.js';
 import HtmlRegion from '../shared/html-region/HtmlRegion.js';
+import OperationNotice from '../shared/OperationNotice.js';
+import { loadPanelReadingView, storePanelReadingView, type PanelReadingView } from '../panel-view-state.js';
 import type { HtmlNavigationEvent } from '../shared/html-region/runtime.js';
 import { anchorBounds, arrowGeometry, arrowHeads, assetDisplayUrl, boundsOf, canvasStyle, clamp, duplicateElements, elementBounds, expandMoveIds, fitViewport, intersects, makeElement, moveOperations, newId, normalizedRect, relativeElementPoint, safeHttpLink, tableRows, wheelZoomFactor, zoomAt, type Point, type Rect, type Viewport } from './canvas-model.js';
-import { canReadCanvasText, canvasGridSpacing, mediaControlsFit, overviewStrokeWidth, projectedSize, tableDetail } from './canvas-presentation.js';
+import { canReadCanvasText, canvasGridSpacing, mediaControlsFit, overviewSectionTitle, overviewStrokeWidth, projectedSize, sectionTitleDetails, showHtmlCaption, tableDetail } from './canvas-presentation.js';
+import { parseRichText } from '../../core/shared/rich-text.js';
 import { shapePath, strokePath } from '../../core/products/whiteboard-geometry.js';
 import { CroppedImage, ImageCropDialog } from './NativeMedia.js';
 import { measureNativeIssues, type NativeIssue } from './native-issues.js';
@@ -66,6 +69,8 @@ export interface WhiteboardCanvasProps {
   room?: CollaborationRoom;
   externalViewport?: Viewport;
   externalSelectedIds?: string[];
+  panelViewId?: string;
+  restoreReadingFrom?: string;
   onActivityChange?: (state: { editingIds: string[]; movingIds: string[]; savingIds?: string[]; dirty: boolean; saving?: boolean; saveError?: string; issues?: NativeIssue[] }) => void;
   activities?: Feedback[];
   annotationActive?: boolean;
@@ -106,7 +111,6 @@ interface MediaUploadBatch { id: string; scope: string; artifactId: string; base
 const SHAPES = [['rounded', '圆角矩形'], ['rect', '矩形'], ['ellipse', '椭圆'], ['diamond', '菱形'], ['pill', '胶囊'], ['hexagon', '六边形'], ['parallelogram', '平行四边形'], ['database', '数据库'], ['queue', '队列'], ['document', '文档'], ['cloud', '云'], ['person', '人物']] as const;
 const CLIPBOARD_PREFIX = 'AGENTERO_STUDIO_ELEMENTS_V1\n';
 const isHtmlEmbed = (element: BoardElement) => element.type === 'html' || element.type === 'diagram' && typeof element.html === 'string';
-const showHtmlCaption = (element: BoardElement, zoom: number) => element.type === 'html' && zoom >= .5 && element.w * zoom >= 96;
 const TOOL_OPTIONS: { tool: Tool; label: string; key: string; icon: typeof Square }[] = [
   { tool: 'select', label: '选择', key: '1', icon: MousePointer2 }, { tool: 'pan', label: '平移', key: '2', icon: Hand },
   { tool: 'text', label: '文字', key: '3', icon: Type }, { tool: 'container', label: '分区', key: '4', icon: Frame },
@@ -117,6 +121,29 @@ const TOOL_OPTIONS: { tool: Tool; label: string; key: string; icon: typeof Squar
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : typeof error === 'object' && error !== null && 'message' in error ? String(error.message) : String(error);
   return /CONFLICT|已被修改|版本/i.test(message) ? '对象已被其他人修改，本次更改未覆盖他人的内容。请比较双方内容后选择，或保留草稿。' : message;
+}
+
+const inlineCanvasNotice: CSSProperties = { position: 'relative', bottom: 'auto', left: 'auto', maxWidth: 'none', flexWrap: 'wrap' };
+
+function isEmbeddedStateSave(task: ContentTask, id: string): boolean {
+  const operation = task.operations[0];
+  return task.operations.length === 1 && operation?.op === 'update' && operation.id === id
+    && Boolean(operation.changes && Object.keys(operation.changes).length === 1 && Object.hasOwn(operation.changes, 'state'));
+}
+
+function embeddedSaveSourceChanged(task: ContentTask, elements: readonly BoardElement[]): boolean {
+  const source = task.sources.find(item => isHtmlEmbed(item) && isEmbeddedStateSave(task, item.id));
+  if (!source) return false;
+  const current = elements.find(item => item.id === source.id);
+  return Boolean(current && (!isHtmlEmbed(current) || source.sourceRevision !== current.sourceRevision || source.html !== current.html));
+}
+
+function isDocumentSave(task: ContentTask, id: string): boolean {
+  return (task.stream === '编辑文档' || task.summary === '编辑文档')
+    && task.sources.some(source => source.id === id && source.type === 'document')
+    && task.operations.length > 0 && task.operations.every(operation => operation.id === id
+      && (operation.op === 'document' || operation.op === 'update' && operation.changes
+        && Object.keys(operation.changes).length === 1 && Object.hasOwn(operation.changes, 'text')));
 }
 
 
@@ -141,7 +168,7 @@ function drawnElement(gesture: Extract<Gesture, { kind: 'draw' }>, points = gest
     : { ...gesture.element, ...box, w: Math.max(1,box.w), h: Math.max(1,box.h), points: points.flatMap(point => [point.x - box.x, point.y - box.y]) };
 }
 
-export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, viewTheme = 'light', onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, onActivityChange, activities = [], annotationActive, annotationTarget, activeFeedbackId, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onReadingChange, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
+export default function WhiteboardCanvas({ board, client, actor, onChanged, onAnnotate, readOnly, viewTheme = 'light', onSelectionChange, onViewportChange, presence = [], selfPeerId, onCursorMove, externalViewport, externalSelectedIds, panelViewId, restoreReadingFrom, onActivityChange, activities = [], annotationActive, annotationTarget, activeFeedbackId, onAnnotationModeChange, onAnnotateNative, onFeedbackSelect, onReadingChange, onEditHtml, documentControls, preview, contentQueue, room, onViewportInteract, onReleaseAgentTask, clockOffsetMs, insertedElementId }: WhiteboardCanvasProps) {
   const viewportElement = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const htmlInput = useRef<HTMLInputElement>(null);
@@ -205,6 +232,42 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const activityCallback = useRef(onActivityChange); activityCallback.current = onActivityChange;
   const [reading, setReading] = useState<{ ids: string[]; viewport: Viewport; tool: Tool } | null>(null);
   const readingRef = useRef(reading); readingRef.current = reading;
+  const readingScroll = useRef<PanelReadingView['scroll']>(undefined);
+  const [restoredReadingScroll, setRestoredReadingScroll] = useState<PanelReadingView['scroll']>();
+  const restoredReadingViewport = useRef(false);
+  const panelViewTimer = useRef<number | undefined>(undefined);
+  const readingStorageId = preview ? undefined : panelViewId;
+  const viewArtifactId = board.artifact.id;
+  const saveReadingView = useCallback(() => {
+    const current = readingRef.current;
+    if (!readingStorageId || !current) return;
+    storePanelReadingView(readingStorageId, { artifactId: viewArtifactId, ids: current.ids, viewport: viewportRef.current, returnViewport: current.viewport, scroll: readingScroll.current });
+  }, [readingStorageId, viewArtifactId]);
+  const scheduleReadingView = useCallback(() => {
+    if (!readingStorageId || panelViewTimer.current !== undefined) return;
+    panelViewTimer.current = window.setTimeout(() => {
+      panelViewTimer.current = undefined;
+      saveReadingView();
+    }, 150);
+  }, [readingStorageId, saveReadingView]);
+  const regionScrolled = (elementId: string, point: { x: number; y: number }) => {
+    if (!readingStorageId || !readingRef.current?.ids.includes(elementId)) return;
+    readingScroll.current = { elementId, ...point };
+    scheduleReadingView();
+  };
+  useEffect(() => { if (reading) scheduleReadingView(); }, [reading, viewport, scheduleReadingView]);
+  useEffect(() => {
+    if (!readingStorageId) return;
+    const visibility = () => { if (document.visibilityState === 'hidden') saveReadingView(); };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pagehide', saveReadingView);
+    return () => {
+      window.clearTimeout(panelViewTimer.current); panelViewTimer.current = undefined;
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pagehide', saveReadingView);
+      saveReadingView();
+    };
+  }, [readingStorageId, saveReadingView]);
   const readingDocument = Boolean(reading?.ids.length === 1 && board.elements.find(element => element.id === reading.ids[0])?.type === 'document');
   const readingCallback = useRef(onReadingChange); readingCallback.current = onReadingChange;
   const [readingHint, setReadingHint] = useState(false);
@@ -245,7 +308,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const [, renderAssets] = useState(0);
   useEffect(() => client.subscribeAssets?.(() => renderAssets(value => value + 1)), [client.subscribeAssets]);
   const queueCallbacks = useRef({ accepted: (_task: ContentTask, _receipt: ContentReceipt) => {}, changed: () => {} });
-  const lastQueueError = useRef('');
+  const regionFailures = useRef(new Map<string, string>());
   const queueScope = `${board.artifact.id}:${actor.id}`;
   const currentScope = useRef(queueScope); currentScope.current = queueScope;
   const uploadRoom = useRef(room); uploadRoom.current = room;
@@ -270,7 +333,24 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const activeQueue = useRef(queue); activeQueue.current = queue;
   queue.observe(board);
   const unconfirmedHistory = queue.unconfirmedHistory;
-  queueCallbacks.current.changed = () => { setQueueSaving(queue.tasks.some(task => task.state !== 'failed')); const failed = queue.drafts.find(task => task.state === 'failed'); setQueueSaveError(failed ? errorText(failed.failure ?? failed.error) : ''); if (failed) { lastQueueError.current = errorText(failed.failure ?? failed.error); setError(lastQueueError.current); } else if (lastQueueError.current) { const previous = lastQueueError.current; setError(current => current === previous ? '' : current); lastQueueError.current = ''; } const batch = mediaUploadRef.current; if(batch?.referenceQueued && !queue.tasks.some(task => task.keys.some(id => batch.placeholders.some(element => element.id === id)))) finishUpload(batch); renderQueue(value => value + 1); };
+  queueCallbacks.current.changed = () => {
+    setQueueSaving(queue.tasks.some(task => task.state !== 'failed'));
+    const failed = queue.drafts.find(task => task.state === 'failed');
+    setQueueSaveError(failed ? errorText(failed.failure ?? failed.error) : '');
+    for (const id of regionFailures.current.keys()) {
+      if (!queue.tasks.some(task => task.id === id)) regionFailures.current.delete(id);
+    }
+    const batch = mediaUploadRef.current;
+    if (batch?.referenceQueued && !queue.tasks.some(task => task.keys.some(id => batch.placeholders.some(element => element.id === id)))) finishUpload(batch);
+    renderQueue(value => value + 1);
+  };
+  const reportRegionSaveFailure = (elementId: string, task: ContentTask | undefined, fallback: string) => {
+    if (task && !regionFailures.current.has(task.id)) {
+      regionFailures.current.set(task.id, elementId);
+      renderQueue(value => value + 1);
+    }
+    return task?.failure instanceof Error ? task.failure : new Error(task?.error || fallback);
+  };
   queueCallbacks.current.accepted = (task, response) => {
     const batch = mediaUploadRef.current;
     if (batch?.referenceQueued && task.operations.some(operation => operation.op === 'add' && batch.elements.some(element => element.id === (operation.id ?? operation.element?.id))) && batch.elements.every(element => response.board.elements.some(saved => saved.id === element.id))) finishUpload(batch, true, response.board);
@@ -303,6 +383,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const annotationMode = useRef({ annotating, onAnnotationModeChange }); annotationMode.current = { annotating, onAnnotationModeChange };
   const setAnnotation = (active: boolean) => { annotationMode.current.annotating = active; onAnnotationModeChange?.(active); setTool(active ? 'annotate' : 'select'); setToolMenu(null); updateGesture(null); };
   const contentElements = preview ? board.elements : overlayContent(board.elements, queue.tasks).map(element => ({ ...element, ...propertyDrafts[element.id]?.changes }));
+  const committedHtml = useMemo(() => new Map(board.elements.filter(isHtmlEmbed).map(element => [element.id, element])), [board.elements]);
   const selectedElements = contentElements.filter((element) => selection.includes(element.id));
   const selected = selectedElements.length === 1 ? selectedElements[0] : undefined;
   const updateGesture = (value: Gesture | null) => {
@@ -406,6 +487,23 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     selectIds([]); setTool('select'); setEditing(null); setDialog(null); setCropDialog(null); setDialogDirty(false); setPropertyDrafts({}); setTableDrafts({}); setPropertyEditingIds([]);
     updateHistory({ undo: [], redo: [], lastEditRevision: -1 }); setHistoryError('');
     setDraftOwner(`${board.artifact.id}:${actor.id}`);
+    const savedReading = readingStorageId && restoreReadingFrom ? loadPanelReadingView(restoreReadingFrom, board.artifact.id) : undefined;
+    const ids = savedReading?.ids.filter(id => boardRef.current.elements.some(element => element.id === id));
+    if (savedReading && ids?.length) {
+      if (readingStorageId) storePanelReadingView(readingStorageId, { ...savedReading, ids });
+      const restored = { ids, viewport: savedReading.returnViewport, tool: 'select' as const };
+      const selection = externalSelectedIds?.filter(id => boardRef.current.elements.some(element => element.id === id));
+      selectIds(selection ?? ids, false);
+      restoredReadingViewport.current = true;
+      readingScroll.current = savedReading.scroll;
+      setRestoredReadingScroll(savedReading.scroll);
+      setViewport(savedReading.viewport);
+      readingRef.current = restored;
+      setReading(restored);
+      readingCallback.current?.(true, ids.length === 1 && boardRef.current.elements.some(element => element.id === ids[0] && element.type === 'document') ? 'document' : 'canvas');
+      return;
+    }
+    if (readingStorageId) storePanelReadingView(readingStorageId, null);
     const frame = requestAnimationFrame(() => {
       const host = viewportElement.current;
       if (host && !externalViewportRef.current) setViewport(fitViewport(boardRef.current.elements, host.clientWidth, host.clientHeight));
@@ -502,8 +600,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       emptyTextDelete.current = undefined;
     }
     setEditing(null);
-    const remaining = queue.drafts.find(task => task.state === 'failed');
-    setError(remaining ? errorText(remaining.failure ?? remaining.error) : '');
+    setError('');
     requestAnimationFrame(() => viewportElement.current?.focus({preventScroll:true}));
   };
   const liveCommit = useRef(() => {}); liveCommit.current = () => { void commitEditing(false, false); };
@@ -577,6 +674,8 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if (!previous) return;
     cancelGesture(); setPointer(null);
     readingRef.current = null; setReading(null); setReadingHint(false); setReadingMarker(false);
+    readingScroll.current = undefined; setRestoredReadingScroll(undefined);
+    if (readingStorageId) storePanelReadingView(readingStorageId, null);
     documentFocusSurface.current = null; setFocusedDocumentSurface(null);
     setViewport(previous.viewport); setTool(previous.tool);
     readingCallback.current?.(false);
@@ -636,8 +735,13 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if (!reading) return;
     const host = viewportElement.current!;
     const fitReading = fitReadingContent;
-    fitReading();
-    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(fitReading) : undefined;
+    let width = host.clientWidth, height = host.clientHeight;
+    if (!restoredReadingViewport.current) fitReading();
+    restoredReadingViewport.current = false;
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+      if (width === host.clientWidth && height === host.clientHeight) return;
+      width = host.clientWidth; height = host.clientHeight; fitReading();
+    }) : undefined;
     observer?.observe(host); window.addEventListener('resize', fitReading);
     return () => { observer?.disconnect(); window.removeEventListener('resize', fitReading); };
   }, [reading, readingBoundsKey]);
@@ -670,6 +774,30 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     const groupId = newId();
     await updateSelected({ groupId }, '组合元素');
   };
+
+  const createSelectionSection = async (elements: BoardElement[], ids: string[]) => {
+    if (!canEditRef.current || readingRef.current) return;
+    const selected = elements.filter(element => ids.includes(element.id));
+    if (selected.length < 2) return;
+    const boxes = selected.map(element => {
+      const body = geometryBounds(element, elements);
+      if (element.type !== 'container' && element.type !== 'html') return body;
+      const title = viewportElement.current?.querySelector<HTMLElement>(`[data-element-id="${element.id}"] > [data-canvas-external-title]`)?.getBoundingClientRect();
+      if (title?.width && title.height) {
+        const topLeft = boardPoint(title.left, title.top);
+        const bottomRight = boardPoint(title.right, title.bottom);
+        return boundsOf([body, { ...topLeft, w: bottomRight.x - topLeft.x, h: bottomRight.y - topLeft.y }])!;
+      }
+      const titleSpace = element.type === 'html' ? 32 : 10 + (element.fontSize ?? 17) * 1.5;
+      return { ...body, y: body.y - titleSpace, h: body.h + titleSpace };
+    });
+    const bounds = boundsOf(boxes)!;
+    const padding = 24;
+    const frame = makeElement('container', { x: bounds.x - padding, y: bounds.y - padding }, { w: bounds.w + 2 * padding, h: bounds.h + 2 * padding, fill: 'transparent' });
+    const scope = currentScope.current, intent = interactionIntent.current;
+    const saved = await apply([{ op: 'add', id: frame.id, element: frame, data: { beforeId: selected[0]!.id } }], '从选区创建分区');
+    if (saved && currentScope.current === scope && interactionIntent.current === intent) selectIds([frame.id]);
+  };
   const copiedElements = () => {const ids=expandMoveIds(boardRef.current.elements,selectionRef.current);return structuredClone(boardRef.current.elements.filter(element=>ids.includes(element.id)));};
   const copySelection = async () => {const elements=copiedElements();await copyPlainText(CLIPBOARD_PREFIX+JSON.stringify(elements));clipboard.current=elements;};
   const command = async (action: CanvasCommand) => {
@@ -684,6 +812,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     if(action==='fit-selection'){fit('selection');return;}
     if(action==='group'){void group();return;}
     if(action==='ungroup'){void updateSelected({groupId:''},'取消组合');return;}
+    if(action==='create-section'){await createSelectionSection(elements,ids);return;}
     if(action==='lock'){void updateSelected({locked:!elements.filter(element=>ids.includes(element.id)).every(element=>element.locked)},'锁定位置与尺寸');return;}
     if(action==='tidy'){void apply(tidySelection(elements,ids),'整理元素',elements);return;}
     if(['front','back','forward','backward'].includes(action))void apply([{op:'layout',preset:action,ids}],'调整层级',elements);
@@ -1186,9 +1315,10 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     }
     return remoteElements;
   }, [board.elements, queueRevision, propertyDrafts, peerGestures, gesture, viewport.zoom, penColor, preview]);
+  const sectionTitles = useMemo(() => sectionTitleDetails(renderedElements, presentationZoom), [renderedElements, presentationZoom]);
   const titleCandidates = useMemo(() => renderedElements.filter(element => showHtmlCaption(element, viewport.zoom) || (
-    element.type === 'container' && (element.id === editing?.id || canReadCanvasText(projectedSize(element, presentationZoom), element.fontSize ?? 17, presentationZoom))
-  )), [renderedElements, viewport.zoom, presentationZoom, editing?.id]);
+    element.type === 'container' && (element.id === editing?.id || sectionTitles.has(element.id))
+  )), [renderedElements, viewport.zoom, sectionTitles, editing?.id]);
   const documentPlacement = !reading && canEdit && !annotating && (gesture?.kind === 'create' && gesture.element.type === 'document' ? gesture.element : tool === 'document' && pointer && !gesture ? makeElement('document', pointer, { id: 'document-placement-preview' }) : null);
   const surfaceScene = useMemo(() => nativeSurfaces(
     reading ? renderedElements.filter(element => reading.ids.includes(element.id)) : renderedElements,
@@ -1259,7 +1389,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       finishUpload(batch, true, receipt.board);
     } catch (failure) {
       if (!live()) return;
-      batch.phase = 'failed'; batch.error = errorText(failure); setMediaUpload({ ...batch }); setUploadError(batch.error); setError(batch.error); publishUpload(batch, false, true);
+      batch.phase = 'failed'; batch.error = errorText(failure); setMediaUpload({ ...batch }); setUploadError(batch.error); publishUpload(batch, false, true);
     } finally { if (live()) { uploadBusyRef.current = false; setUploading(false); } }
   };
   const uploadMedia = async (files: FileList | File[] | null, position = centerPoint()) => {
@@ -1280,6 +1410,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     const size = projectedSize(element, presentationZoom);
     const fontSize = element.fontSize ?? 17;
     const showText = expanded || isEditing || canReadCanvasText(size, fontSize, presentationZoom);
+    const sectionTitle = sectionTitles.get(element.id);
     const showMediaControls = expanded || mediaControlsFit(size);
     const dash = element.dash && presentationZoom * 5 >= 1 ? '6 5' : undefined;
     const captionScale = Math.min(1 / viewport.zoom, 1);
@@ -1315,21 +1446,31 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     const style: CSSProperties = { display: hidden ? 'none' : undefined, left: element.x, top: element.y, width: element.w, height: element.h, color: ink, fontSize, fontFamily: element.fontFamily || viewStyle.fontFamily, fontWeight: element.bold ? 600 : 400, fontStyle: element.italic ? 'italic' : 'normal', textAlign: element.textAlign ?? (element.type === 'shape' ? 'center' : 'left'), transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined, ...(element.type === 'container' ? { borderColor: lineColor, borderStyle: element.dash && (expanded || dash) ? 'dashed' : 'solid', borderWidth: overviewStrokeWidth(element.strokeWidth ?? 1, viewport.zoom), background: fill !== 'transparent' ? fill : undefined } : {}) };
     let content;
     // Moving a region owns the whole pointer gesture, even when it crosses the iframe.
-    if (isHtmlEmbed(element)) content = <HtmlRegion element={element} zoom={viewport.zoom} annotation={annotating} interactive={reading ? reading.ids.includes(element.id) : inlineSelected && gesture?.kind !== 'move'} preserveScroll panMode={spacePan || tool === 'pan' && !annotating} onNavigation={input => htmlNavigation(element, input)} onPointerPosition={point => { const position = point && anchorBounds({ coordinateSpace: 'element', elementIds: [element.id], x: point.x, y: point.y }, [element]); onCursorMove?.(position ? { x: position.x, y: position.y } : null); }} onAnnotate={selection => {
+    if (isHtmlEmbed(element)) content = <HtmlRegion element={element} committedState={committedHtml.get(element.id)} zoom={viewport.zoom} annotation={annotating} interactive={reading ? reading.ids.includes(element.id) : inlineSelected && gesture?.kind !== 'move'} preserveScroll initialScroll={restoredReadingScroll?.elementId === element.id ? restoredReadingScroll : undefined} onReadingScroll={reading && readingStorageId ? point => regionScrolled(element.id, point) : undefined} panMode={spacePan || tool === 'pan' && !annotating} onNavigation={input => htmlNavigation(element, input)} onPointerPosition={point => { const position = point && anchorBounds({ coordinateSpace: 'element', elementIds: [element.id], x: point.x, y: point.y }, [element]); onCursorMove?.(position ? { x: position.x, y: position.y } : null); }} onAnnotate={selection => {
       selectIds([element.id]);
       const point = selection.screenPoint;
       if (point) onAnnotate(selection, { coordinateSpace: 'board', ...boardPoint(point.x, point.y) });
       else onAnnotate(selection);
-    }} onToolShortcut={key=>{numericTool.current(key);}} onStateChange={canEdit ? async (state: Json, expectedVersion: number) => {
-      const current = boardRef.current.elements.find((item) => item.id === element.id);
+    }} onToolShortcut={key=>{numericTool.current(key);}} onUseSharedState={() => {
+      for (const task of queue.drafts) if (task.state === 'failed' && isEmbeddedStateSave(task, element.id)) queue.discard(task.id);
+    }} onStateChange={canEdit ? async (state: Json, expectedVersion: number) => {
+      const current = boardRef.current.elements.find(item => item.id === element.id);
       if (!current) throw new Error('此嵌入区域已被删除，交互草稿仍保留。');
-      const source = queue.source(element.id, expectedVersion);
-      if (!source) throw new Error('嵌入内容的编辑基准已过期，请保留草稿后重新打开。');
+      const operations: Operation[] = [{ op: 'update', id: element.id, changes: { state } }];
       const failed = queue.drafts.find(task => task.state === 'failed' && task.keys.includes(element.id));
-      if (failed && !await queue.retry(failed.id)) throw failed.failure ?? new Error(failed.error);
-      const saved = await apply([{ op: 'update', id: element.id, changes: { state } }], '更新嵌入交互状态', [source], false);
-      const next = saved?.elements.find((item) => item.id === element.id);
-      if (!next) throw queue.drafts.find(task => task.state === 'failed' && task.keys.includes(element.id))?.failure ?? new Error('交互状态未能保存。');
+      if (failed && !isEmbeddedStateSave(failed, element.id)) throw new Error('此区域还有未确认的画布操作，请先处理对应的画布通知。');
+      if (failed && embeddedSaveSourceChanged(failed, boardRef.current.elements)) throw new Error('HTML 源码已有变化，请先处理旧的交互草稿。');
+      const replay = !!failed && JSON.stringify(failed.operations) === JSON.stringify(operations);
+      const source = queue.source(element.id, expectedVersion);
+      if (!replay && !source) throw new Error('嵌入内容的编辑基准已过期，请保留草稿后重新打开。');
+      const previous = failed ? await queue.retry(failed.id) : null;
+      if (failed && !previous) throw reportRegionSaveFailure(element.id, failed, '交互状态未能保存。');
+      const saved = replay ? previous?.board : await apply(operations, '更新嵌入交互状态', [source!], false);
+      const next = saved?.elements.find(item => item.id === element.id);
+      if (!next) {
+        const task = queue.drafts.find(candidate => candidate.state === 'failed' && isEmbeddedStateSave(candidate, element.id));
+        throw reportRegionSaveFailure(element.id, task, '交互状态未能保存。');
+      }
       return { state: next.state ?? null, version: next.version };
     } : undefined} />;
     else if (element.type === 'todo') {
@@ -1379,17 +1520,12 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
             zoom={viewport.zoom} onSelect={onFeedbackSelect} />)}
       />;
     }
-    else if (element.type === 'document') content = <DocumentRegion boardPoint={boardPoint} activities={activities} onFeedbackSelect={onFeedbackSelect} annotationActive={annotating} onAnnotationModeChange={setAnnotation} styleProfile={board.style} onMoveStart={event => moveRegion(event, element)} element={element} artifactId={board.artifact.id} actor={actor} client={client} canEdit={canEdit && !preview} canAnnotate={canAnnotate && !preview} interactive={reading ? reading.ids.includes(element.id) : selection.length === 1 && selection[0] === element.id} expanded={!!reading && reading.ids.length === 1 && reading.ids[0] === element.id} focusHost={viewportElement.current} theme={viewTheme} readingZoom={viewport.zoom} editRequest={documentEditRequest?.id === element.id ? documentEditRequest.sequence : undefined} target={annotationTarget} onInteract={active => { if (active) { selectIds([element.id]); setTool('select'); } else if (!readingRef.current) { selectIds([]); viewportElement.current?.focus({ preventScroll: true }); } }} onEdit={() => { void requestDocumentEdit(element.id); }} onExpand={() => { selectIds([element.id]); void readSelection(); }} onExit={exitReading} onFocusSurface={surface => { if (surface || documentFocusSurface.current?.id === element.id) { documentFocusSurface.current = surface; setFocusedDocumentSurface(surface); } }} onActivity={state => { setDocumentActivities(previous => { if (JSON.stringify(previous[element.id]) === JSON.stringify(state)) return previous; return { ...previous, [element.id]: state }; }); }} onSave={async (document, title, base, overwrite) => {
+    else if (element.type === 'document') content = <DocumentRegion boardPoint={boardPoint} activities={activities} onFeedbackSelect={onFeedbackSelect} annotationActive={annotating} onAnnotationModeChange={setAnnotation} styleProfile={board.style} onMoveStart={event => moveRegion(event, element)} element={element} artifactId={board.artifact.id} actor={actor} client={client} canEdit={canEdit && !preview} canAnnotate={canAnnotate && !preview} interactive={reading ? reading.ids.includes(element.id) : selection.length === 1 && selection[0] === element.id} expanded={!!reading && reading.ids.length === 1 && reading.ids[0] === element.id} initialScrollTop={restoredReadingScroll?.elementId === element.id ? restoredReadingScroll.y : undefined} onReadingScroll={readingStorageId ? point => regionScrolled(element.id, point) : undefined} focusHost={viewportElement.current} theme={viewTheme} readingZoom={viewport.zoom} editRequest={documentEditRequest?.id === element.id ? documentEditRequest.sequence : undefined} target={annotationTarget} onInteract={active => { if (active) { selectIds([element.id]); setTool('select'); } else if (!readingRef.current) { selectIds([]); viewportElement.current?.focus({ preventScroll: true }); } }} onEdit={() => { void requestDocumentEdit(element.id); }} onExpand={() => { selectIds([element.id]); void readSelection(); }} onExit={exitReading} onFocusSurface={surface => { if (surface || documentFocusSurface.current?.id === element.id) { documentFocusSurface.current = surface; setFocusedDocumentSurface(surface); } }} onActivity={state => { setDocumentActivities(previous => { if (JSON.stringify(previous[element.id]) === JSON.stringify(state)) return previous; return { ...previous, [element.id]: state }; }); }} onSave={async (document, title, base, overwrite) => {
       const operations: Operation[] = [];
       const blocks = documentOperations(base.document ?? defaultDocument(), document);
       if (blocks.length) operations.push({ op: 'document', id: element.id, data: { operations: blocks } });
       if (title !== base.text) operations.push({ op: 'update', id: element.id, changes: { text: title } });
-      let failed = queue.tasks.find(task => task.state === 'failed'
-        && (task.stream === '编辑文档' || task.summary === '编辑文档')
-        && task.sources.some(source => source.id === element.id && source.type === 'document')
-        && task.operations.length > 0 && task.operations.every(operation => operation.id === element.id
-          && (operation.op === 'document' || operation.op === 'update' && operation.changes
-            && Object.keys(operation.changes).length === 1 && Object.hasOwn(operation.changes, 'text'))));
+      let failed = queue.drafts.find(task => task.state === 'failed' && isDocumentSave(task, element.id));
       if (overwrite && failed) {
         // Replacing this save must leave later movement/style intentions in the queue.
         queue.discard(failed.id); failed = undefined;
@@ -1398,7 +1534,13 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       if (!operations.length) return base;
       if (failed && JSON.stringify(failed.operations) !== JSON.stringify(operations)) throw new Error('前次文档草稿尚未保存，请先比较最新内容后保存。');
       const saved = failed ? (await queue.retry(failed.id))?.board : await apply(operations, '编辑文档', [base]);
-      return saved?.elements.find(item => item.id === element.id) ?? false;
+      const next = saved?.elements.find(item => item.id === element.id);
+      if (next) return next;
+      const task = queue.drafts.find(candidate => candidate.state === 'failed' && isDocumentSave(candidate, element.id));
+      if (task) throw reportRegionSaveFailure(element.id, task, '文档尚未保存，请比较最新内容或重试。');
+      return false;
+    }} onUseCurrent={() => {
+      for (const task of queue.drafts) if (task.state === 'failed' && isDocumentSave(task, element.id)) queue.discard(task.id);
     }} onAnnotate={(anchor, version, screenPoint) => { selectIds([element.id]); onAnnotateNative?.({ anchor, label: '文档选区 · ' + (element.text || '文档'), versions: { [element.id]: version }, screenPoint }); }} />;
     else if (element.type === 'stroke') {
       content = <svg className="studio-stroke-svg" overflow="visible" aria-hidden="true"><path d={strokePath(element.points)} fill="none" stroke={lineColor} strokeWidth={overviewStrokeWidth(Number(element.strokeWidth ?? element.width ?? 3), viewport.zoom)} strokeDasharray={expanded && element.dash ? '6 5' : dash} strokeLinecap="round" strokeLinejoin="round" /></svg>;
@@ -1411,7 +1553,16 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     } else if (element.type === 'table') content = <NativeTable bodyPaint={{background:viewStyle.paper,color:ink}} headerPaint={{background:fill,color:headerInk}} key={queueScope+':'+element.id+':'+draftGeneration} initialDraft={preview?undefined:tableDrafts[element.id]} onDraftChange={draft=>setTableDrafts(current=>{const next={...current};if(draft)next[element.id]=draft;else delete next[element.id];return next;})} element={element} detail={expanded ? 'full' : tableDetail(size, fontSize, presentationZoom)} selected={picked && !reading && tool==='select' && !spacePan && gesture?.kind!=='pan'} viewport={viewport} editRequest={objectEditRequest?.id===element.id?objectEditRequest.sequence:undefined} canEdit={canEdit && !reading && !annotating && tool==='select' && !spacePan} onRequestLink={value=>setLinkRequest({key:newClientId(),value})} onFormatStateChange={setFormatState} onEditingChange={active=>setPropertyEditingIds(ids=>active?[...new Set([...ids,element.id])]:ids.filter(id=>id!==element.id))} onSave={async(changes,base)=>{const failed=queue.drafts.find(task=>task.state==='failed'&&JSON.stringify(task.operations)===JSON.stringify([{op:'update',id:element.id,changes}]));const saved=failed?(await queue.retry(failed.id))?.board:await apply([{op:'update',id:element.id,changes}],'编辑表格',[base]);return saved?.elements.find(item=>item.id===element.id)??false;}}/>;
     else if (element.type === 'link') content = <div className="studio-link-card" style={{ background: fill }}><Link size={22} />{showText && <><div><strong>{element.text || '链接'}</strong><span style={{ color: nativeTextInk(color ?? 'muted', viewStyle, fill, backdrop) }}>{element.href}</span></div><a href={safeHttpLink(element.href)} target="_blank" rel="noreferrer" aria-label="打开链接" data-native-interactive="true"><ExternalLink size={17} /></a></>}</div>;
     else if (element.type === 'sticker' && getBoardSticker(element.data?.stickerIconId)) content = <Sticker id={element.data?.stickerIconId} />;
-    else if (element.type === 'container') content = showText && <div className="studio-section-title" data-canvas-external-title="">{isEditing ? renderTextEditor(element) : <RichText text={element.text} />}</div>;
+    else if (element.type === 'container') {
+      if (isEditing || expanded || sectionTitle?.mode === 'full') {
+        content = <div className="studio-section-title" data-canvas-external-title="">{isEditing ? renderTextEditor(element) : <RichText text={element.text} />}</div>;
+      } else if (sectionTitle?.mode === 'overview') {
+        const name = parseRichText(element.text ?? '').map(line => line.segments.map(segment => segment.text).join('')).join(' ').trim();
+        const { fontSize, height, gap } = overviewSectionTitle;
+        content = <div className="studio-section-title is-overview" data-canvas-external-title="overview" title={name}
+          style={{ fontSize: fontSize / viewport.zoom, lineHeight: `${height / viewport.zoom}px`, maxWidth: `min(100%, ${sectionTitle.width}px)`, bottom: `calc(100% + ${gap / viewport.zoom}px)` }}>{name}</div>;
+      }
+    }
     else content = <>
       {element.type === 'shape' && <Shape element={{ ...element, fill, stroke: lineColor, dash: !!(element.dash && (expanded || dash)) }} />}
       {element.type === 'note' && <div className="studio-note-fill" style={{ background: fill }} />}
@@ -1419,7 +1570,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         {isEditing ? renderTextEditor(element) : <RichText text={element.text} />}
       </div> : element.type === 'text' && !!element.text && <span className="studio-text-preview" aria-hidden="true" style={{ height: Math.min(2 / viewport.zoom, element.h / 3) }} />}
     </>;
-    return <div key={element.id} className={`studio-board-element studio-element-${element.type}${picked ? ' is-selected' : ''}${element.locked ? ' is-locked' : ''}${isEditing ? ' is-editing' : ''}`} data-element-id={element.id} title={!showText && element.text ? element.text.slice(0, 160) : undefined} style={style} onClickCapture={captureAnnotationClick} onPointerDown={(event) => begin(event, element)} onDoubleClick={(event) => {
+    return <div key={element.id} className={`studio-board-element studio-element-${element.type}${picked ? ' is-selected' : ''}${element.locked ? ' is-locked' : ''}${isEditing ? ' is-editing' : ''}`} data-element-id={element.id} title={!(element.type === 'container' ? expanded || isEditing || sectionTitle : showText) && element.text ? element.text.slice(0, 160) : undefined} style={style} onClickCapture={captureAnnotationClick} onPointerDown={(event) => begin(event, element)} onDoubleClick={(event) => {
       if (reading || annotating || (event.target as HTMLElement).closest('[data-native-interactive]')) return;
       event.stopPropagation();
       if (element.type === 'document') { void requestDocumentEdit(element.id); return; }
@@ -1442,6 +1593,12 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     return <InlineTextEditor key={element.id} ref={textEditor} className="studio-inline-editor" value={editing?.text??''} disabled={!canEdit} style={{fontWeight:400,fontStyle:'normal'}} singleLine={['container','arrow'].includes(element.type)} ariaLabel={element.type==='arrow'?'连接线文字':'编辑文字'} onChange={text=>setEditing(current=>({id:element.id,text,base:current?.base??element,initialText:current?.initialText}))} onFormatStateChange={setFormatState} onRequestLink={value=>setLinkRequest({key:newClientId(),value})} onCommit={adjacent=>{void commitEditing(adjacent);}} />;
   }
   const failedDrafts = queue.drafts.filter(task => task.state === 'failed');
+  const failedDraftNotices = failedDrafts.filter(task => {
+    if (mediaUpload?.phase === 'failed' && task.id === mediaUpload.id) return false;
+    const regionId = regionFailures.current.get(task.id);
+    return !regionId || embeddedSaveSourceChanged(task, board.elements)
+      || !renderedElements.some(element => element.id === regionId && (element.type === 'document' || isHtmlEmbed(element)));
+  });
   const comparingTask = queue.drafts.find(task => task.id === comparison) ?? detachedTask;
   const dialogPortalRoot = viewportElement.current?.closest<HTMLElement>('.studio-session-content') ?? viewportElement.current?.closest<HTMLElement>('.studio') ?? null;
   const forgetDraft = (task: ContentTask) => {
@@ -1554,7 +1711,28 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       {reading && !readingDocument && <ReadingMarker viewport={focusedDocumentSurface ? { x: focusedDocumentSurface.origin.x, y: focusedDocumentSurface.origin.y, zoom: focusedDocumentSurface.zoom } : viewport} clip={focusedDocumentSurface?.clip} active={readingMarker} scopeKey={focusedDocumentSurface ? `${queueScope}:${focusedDocumentSurface.scopeKey}` : `${queueScope}:${reading.ids.join(',')}:${readingBoundsKey}`} clearRevision={readingClearRevision} navigationActive={spacePan || gesture?.kind === 'pan'} />}
       <div className="studio-canvas-world" style={{ transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})` }}>
         {renderedElements.map(renderElement)}
-        {!preview && mediaUpload && mediaUpload.placeholders.map((placeholder,index)=>{const element=mediaUpload.elements[index]??placeholder;return <div key={`upload-${placeholder.id}`} data-upload-placeholder={placeholder.id} data-upload-phase={mediaUpload.phase} style={{position:'absolute',left:element.x,top:element.y,width:element.w,height:element.h,border:`${1/viewport.zoom}px dashed var(--studio-accent)`,background:mediaUpload.phase==='uploading'?'color-mix(in srgb, var(--canvas-ui) 85%, transparent)':undefined,pointerEvents:'none',zIndex:73}}><div style={{position:'absolute',left:8/viewport.zoom,top:8/viewport.zoom,transform:`scale(${1/viewport.zoom})`,transformOrigin:'left top',padding:'6px 8px',borderRadius:5,background:'var(--canvas-ui)',color:'var(--canvas-ui-text)',font:'12px/1.5 Arial,"Microsoft YaHei",sans-serif',maxWidth:280}}>{mediaUpload.phase!=='failed'&&<Loader2 size={13} className="studio-spin" aria-hidden="true"/>} {mediaUpload.phase==='uploading'?'正在上传':mediaUpload.phase==='queued'?'正在加入白板':'尚未加入白板'} · {mediaUpload.files[index]!.name}{mediaUpload.phase==='failed'&&index===0&&<div data-native-interactive="true" style={{pointerEvents:'auto'}} onPointerDown={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}><p role="alert">{mediaUpload.error}</p><button type="button" className="studio-button" disabled={!canEdit} onClick={()=>{const batch=mediaUploadRef.current;if(batch)void runMediaUpload(batch);}}>重试加入白板</button><button type="button" className="studio-button" onClick={()=>{const batch=mediaUploadRef.current;if(batch){batch.abort.abort();queue.discardFor(batch.placeholders.map(element=>element.id));finishUpload(batch);setError('');}}}>移除上传草稿</button></div>}</div></div>;})}
+        {!preview && mediaUpload && mediaUpload.placeholders.map((placeholder, index) => {
+          const element = mediaUpload.elements[index] ?? placeholder;
+          return <div key={`upload-${placeholder.id}`} data-upload-placeholder={placeholder.id} data-upload-phase={mediaUpload.phase}
+            style={{ position: 'absolute', left: element.x, top: element.y, width: element.w, height: element.h, border: `${1 / viewport.zoom}px dashed var(--studio-accent)`, background: mediaUpload.phase === 'uploading' ? 'color-mix(in srgb, var(--canvas-ui) 85%, transparent)' : undefined, pointerEvents: 'none', zIndex: 73 }}>
+            <div style={{ position: 'absolute', left: 8 / viewport.zoom, top: 8 / viewport.zoom, transform: `scale(${1 / viewport.zoom})`, transformOrigin: 'left top', padding: '6px 8px', borderRadius: 5, background: 'var(--canvas-ui)', color: 'var(--canvas-ui-text)', font: '12px/1.5 Arial,"Microsoft YaHei",sans-serif', maxWidth: 280 }}>
+              {mediaUpload.phase !== 'failed' && <Loader2 size={13} className="studio-spin" aria-hidden="true" />}
+              {mediaUpload.phase === 'uploading' ? '正在上传' : mediaUpload.phase === 'queued' ? '正在加入白板' : '尚未加入白板'} · {mediaUpload.files[index]!.name}
+              {mediaUpload.phase === 'failed' && index === 0 && <OperationNotice source="媒体上传" message={mediaUpload.error || '媒体尚未加入白板。'}
+                fallbackStyle={{ pointerEvents: 'auto' }} closeLabel="关闭媒体上传通知" actions={<>
+                  <button type="button" disabled={!canEdit} onClick={() => { const batch = mediaUploadRef.current; if (batch) void runMediaUpload(batch); }}>重试加入白板</button>
+                  <button type="button" onClick={() => {
+                    const batch = mediaUploadRef.current;
+                    if (!batch) return;
+                    batch.abort.abort();
+                    queue.discardFor(batch.placeholders.map(placeholder => placeholder.id));
+                    finishUpload(batch);
+                    setError('');
+                  }}>移除上传草稿</button>
+                </>} />}
+            </div>
+          </div>;
+        })}
         {peerPreviewFrames.map(({peer,bounds}) => { const page = presence.find(page => page.peerId === peer.peerId), color = participantColor(peer.actor, page?.color); return <div key={`${peer.peerId}:${peer.id}`} aria-label={`${peer.actor.name}${peer.kind === 'upload' ? '正在上传' : '正在调整对象'}`} style={{ position: 'absolute', left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h, border: `${1 / viewport.zoom}px dashed ${color}`, pointerEvents: 'none' }}><span style={{ position: 'absolute', bottom: '100%', fontSize: 12 / viewport.zoom, whiteSpace: 'nowrap', color: readableText(color), background: color }}>{peer.actor.name} · {peer.kind === 'upload' ? '正在上传…' : '正在调整'}</span></div>; })}
         {documentPlacement && <div className="studio-document-placement" data-document-placement="true" aria-hidden="true" style={{ left: documentPlacement.x, top: documentPlacement.y, width: documentPlacement.w, height: documentPlacement.h }}><FileText size={18} /><span>文档</span></div>}
         {pointer && !gesture && !editing && !annotating && canEdit && ['text','shape','note','container','table','sticker','todo'].includes(tool) && <div className="studio-placement-ghost" aria-hidden="true">{renderElement(makeElement(tool as ElementType,pointer,{id:'placement-ghost',text:tool==='text'?'文字':'',...(tool==='shape'?{kind:shapeKind}:{}),...(tool==='sticker'?{text:getBoardSticker(sticker)?.label,data:{stickerIconId:sticker}}:{})}))}</div>}
@@ -1597,15 +1775,36 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     {menu && <CanvasActionsMenu point={menu} canEdit={canEdit} selected={selection.length} locked={selectedElements.some(element=>element.locked)} hasClipboard={Boolean(navigator.clipboard?.readText)} onCommand={command} onRenameSection={selected?.type === 'container' && canEdit && !annotating && tool === 'select' ? editSelected : undefined} onClose={()=>setMenu(null)}/>}
     <div aria-label="草稿与保存提示" style={{position:'absolute',bottom:87,left:18,maxWidth:'min(620px, calc(100% - 36px))',maxHeight:'45%',overflowY:'auto',display:'flex',flexDirection:'column',gap:8,zIndex:60}}>
     {(toolNotice || previewStatus) && <div role="status" style={{padding:'8px 12px',border:'1px solid var(--canvas-ui-border)',borderRadius:7,background:'var(--canvas-ui)',color:'var(--canvas-ui-text)'}}>{toolNotice || previewStatus}</div>}
-    {previewError && <div role="alert" className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto'}}>{previewError}</div>}
-     {historyError && <div role="alert" className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}}><span>{historyError}</span><button type="button" aria-label="关闭撤销或重做提示" onClick={() => setHistoryError('')}><X size={16} /></button></div>}
-     {unconfirmedHistory && <div role="alert" className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}}><span>「{unconfirmedHistory.summary}」的结果待确认。</span><button type="button" disabled={!canEdit} onClick={() => void queue.retry(unconfirmedHistory.id)}>重试确认原结果</button></div>}
-     {(error || failedDrafts.length > 0) && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert"><span>{error || '有尚未保存的草稿，请比较内容或重试。'}</span>{(emptyTextBlocked || failedEmptyTextDelete) && <button type="button" aria-label="取消本次文字编辑" onClick={cancelEmptyTextEdit}>取消本次文字编辑</button>}{failedDrafts.map(task => <span key={task.id}><button type="button" onClick={() => {setComparisonBoard(boardRef.current);setComparison(task.id);}}>比较双方内容</button><button type="button" disabled={!canEdit} onClick={() => queue.retry(task.id)}>重试原操作</button></span>)}<button type="button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={16} /></button></div>}
+    {previewError && <OperationNotice source="画布预览" message={previewError} fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice} />}
+    {historyError && <OperationNotice source="撤销与重做" message={historyError} closeLabel="关闭撤销或重做提示"
+      onClose={() => setHistoryError('')} fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice} />}
+    {unconfirmedHistory && <OperationNotice key={unconfirmedHistory.id} source="撤销与重做" message={`「${unconfirmedHistory.summary}」的结果待确认。`}
+      fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice}
+      actions={<button type="button" disabled={!canEdit} onClick={() => void queue.retry(unconfirmedHistory.id)}>重试确认原结果</button>} />}
+    {error && <OperationNotice source="画布操作" message={error} closeLabel="关闭错误提示" onClose={() => setError('')}
+      fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice}
+      actions={emptyTextBlocked ? <button type="button" aria-label="取消本次文字编辑" onClick={cancelEmptyTextEdit}>取消本次文字编辑</button> : undefined} />}
+    {failedDraftNotices.map(task => {
+      const sourceChanged = embeddedSaveSourceChanged(task, board.elements);
+      return <OperationNotice key={task.id} source={`画布 · ${task.summary}`}
+        message={sourceChanged ? 'HTML 源码已有变化，旧的交互草稿仍可查看。' : errorText(task.failure ?? task.error ?? '有尚未保存的草稿，请比较内容或重试。')}
+        closeLabel="关闭画布保存通知" fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice} actions={<>
+          {failedEmptyTextDelete?.id === task.id && <button type="button" aria-label="取消本次文字编辑" onClick={cancelEmptyTextEdit}>取消本次文字编辑</button>}
+          <button type="button" onClick={() => { setComparisonBoard(boardRef.current); setComparison(task.id); }}>比较双方内容</button>
+          {!sourceChanged && <button type="button" disabled={!canEdit} onClick={() => void queue.retry(task.id)}>重试原操作</button>}
+        </>} />;
+    })}
     {!preview && recovered && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="status"><span>此白板有上次未保存的本机草稿。</span><button type="button" onClick={() => { setEditing(recovered.text ?? null); setPropertyDrafts(recovered.properties ?? {}); setTableDrafts(recovered.tables ?? {}); queue.restore(recovered.tasks ?? []); setDraftGeneration(value => value + 1); setRecovered(null); }}>恢复上次草稿</button><button type="button" onClick={() => void copyPlainText(JSON.stringify(recovered, null, 2)).catch(failure => setError(errorText(failure)))}>复制草稿</button><button type="button" onClick={() => void downloadStudioBlob(client, new Blob([JSON.stringify(recovered, null, 2)], { type: 'application/json' }), 'whiteboard-draft.json').catch(failure => setError(errorText(failure)))}>下载草稿副本</button><button type="button" onClick={() => { localStorage.removeItem(draftStorageKey); setRecovered(null); }}>放弃上次草稿</button></div>}
-    {!preview && editing?.base && !board.elements.some(element => element.id === editing.id && element.type === editing.base?.type) && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert"><span>正在编辑的对象已被删除，文字草稿仍可恢复。</span><button type="button" onClick={() => inspectDetached(editing.base!, { [editing.base!.type === 'arrow' ? 'label' : 'text']: editing.text })}>查看并恢复文字草稿</button></div>}
-    {!preview && Object.entries(tableDrafts).filter(([id]) => !board.elements.some(element => element.id === id && element.type === 'table')).map(([id, draft]) => <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert" key={id}><span>正在编辑的表格已被删除，草稿仍可恢复。</span><button type="button" onClick={() => inspectDetached(draft.base, draft.changes)}>查看并恢复表格草稿</button></div>)}
+    {!preview && editing?.base && !board.elements.some(element => element.id === editing.id && element.type === editing.base?.type)
+      && <OperationNotice key={editing.id} source="文字草稿" message="正在编辑的对象已被删除，文字草稿仍可恢复。"
+        fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice}
+        actions={<button type="button" onClick={() => inspectDetached(editing.base!, { [editing.base!.type === 'arrow' ? 'label' : 'text']: editing.text })}>查看并恢复文字草稿</button>} />}
+    {!preview && Object.entries(tableDrafts).filter(([id]) => !board.elements.some(element => element.id === id && element.type === 'table')).map(([id, draft]) =>
+      <OperationNotice key={id} source="表格草稿" message="正在编辑的表格已被删除，草稿仍可恢复。"
+        fallbackClass="studio-canvas-error" fallbackStyle={inlineCanvasNotice}
+        actions={<button type="button" onClick={() => inspectDetached(draft.base, draft.changes)}>查看并恢复表格草稿</button>} />)}
     </div>
-    {comparingTask && <ContentConflictDialog portalRoot={dialogPortalRoot} task={comparingTask} current={comparisonBoard ?? board} disabled={!canEdit} onKeep={() => { setComparison(null); setDetachedTask(null); }} onRemote={() => forgetDraft(comparingTask)} onOverwrite={() => void overwriteDraft(comparingTask)} onCopy={() => void copyPlainText(JSON.stringify(comparingTask.operations, null, 2)).catch(failure => setError(errorText(failure)))} />}
+    {comparingTask && <ContentConflictDialog portalRoot={dialogPortalRoot} task={comparingTask} current={comparisonBoard ?? board} disabled={!canEdit || embeddedSaveSourceChanged(comparingTask, board.elements)} onKeep={() => { setComparison(null); setDetachedTask(null); }} onRemote={() => forgetDraft(comparingTask)} onOverwrite={() => void overwriteDraft(comparingTask)} onCopy={() => void copyPlainText(JSON.stringify(comparingTask.operations, null, 2)).catch(failure => setError(errorText(failure)))} />}
     <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime" multiple hidden onChange={(event) => { void uploadMedia(event.target.files); event.currentTarget.value = ''; }} />
     <input ref={htmlInput} type="file" accept=".html,.htm,text/html" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void file.text().then((html) => addElements([makeElement('html', centerPoint(), { html, text: file.name.replace(/\.html?$/i, '') })], '导入 HTML 图解')); event.currentTarget.value = ''; }} />
     {cropDialog && <ImageCropDialog element={cropDialog} src={assetDisplayUrl(cropDialog.src, client)!} onDirtyChange={setDialogDirty} onClose={() => { setCropDialog(null); setDialogDirty(false); }} onSave={async changes => {

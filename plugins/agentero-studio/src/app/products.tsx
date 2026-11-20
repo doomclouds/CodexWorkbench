@@ -20,6 +20,7 @@ export interface ProductEditorProps<Document = StudioDocument> {
   room?: CollaborationRoom;
   onActivityChange?: (state: ProductActivity) => void; activities?: Feedback[];
   presence: Presence[]; selfPeerId: string; externalViewport?: Viewport; externalSelectedIds?: string[];
+  panelViewId?: string; restoreReadingFrom?: string;
   annotationActive?: boolean; onAnnotationModeChange?: (active: boolean) => void;
   annotationTarget?: Anchor;
   activeFeedbackId?: string;

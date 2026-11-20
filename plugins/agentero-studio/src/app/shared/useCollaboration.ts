@@ -32,6 +32,7 @@ export function createCollaboration(options: Options) {
   const { client, artifactId, peerId } = options;
   const identity = options.identity || { epoch: newClientId('epoch'), presence: 0, room: 0 }, peerEpoch = identity.epoch;
   let closed = false, connected = false, generation = 0, cursor = '', receivedCursor = '', peerCursor = '', authorityCursor = '';
+  let syncStatus: Parameters<Callbacks['onStatus']>[0] = 'loading';
   let stream: EventSource | undefined, pollAbort: AbortController | undefined, presenceAbort: AbortController | undefined, roomAbort: AbortController | undefined;
   let reconnect: ReturnType<typeof setTimeout> | undefined, presenceTimer: ReturnType<typeof setTimeout> | undefined, roomTimer: ReturnType<typeof setTimeout> | undefined, idleTimer: ReturnType<typeof setTimeout> | undefined;
   let pending: PresencePatch = {}, published: PresencePatch = {}, presenceBusy = false, roomBusy = false, lastPresence = 0;
@@ -51,6 +52,7 @@ export function createCollaboration(options: Options) {
   const headers = () => ({ ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' });
   const alive = (serial: number) => !closed && generation === serial && document.visibilityState !== 'hidden';
   const localState = (event: CollaborationStateEvent) => { for (const listener of stateListeners) listener(event); };
+  const reportStatus = (status: typeof syncStatus) => { syncStatus = status; options.onStatus(status); };
   function documentState(message?: StudioEvent, appliedRevision = 0) {
     const document = options.getDocument();
     if (!document || document.artifact.id !== artifactId || document.artifact.revision < Math.max(appliedRevision, message?.revision ?? 0) || message?.cursor && position(message.cursor).epoch !== position(receivedCursor).epoch) return;
@@ -172,7 +174,7 @@ export function createCollaboration(options: Options) {
     else if (result.type && result.type !== 'reset') await event(result, serial);
     if (!alive(serial) || result.cursor && position(result.cursor).epoch !== position(receivedCursor).epoch) return;
     if (result.cursor) cursor = result.cursor;
-    connected = true; options.onStatus('saved'); flushPresence(); flushRoom();
+    connected = true; reportStatus('saved'); flushPresence(); flushRoom();
   }
   function enqueue(result: Partial<SyncBatch> & StudioEvent, serial: number) {
     if (!alive(serial)) return Promise.resolve();
@@ -235,8 +237,19 @@ export function createCollaboration(options: Options) {
     // Re-entry always takes an authoritative snapshot before replaying subsequent events.
     cursor = ''; receivedCursor = ''; peerCursor = ''; authorityCursor = '';
     pending = { ...published, ...pending, visible: true };
-    connected = false; options.onStatus(options.getDocument() ? 'reconnecting' : 'loading');
-    if (!client.baseUrl) { void snapshot(serial).then(() => { if (alive(serial)) options.onStatus('saved'); }, options.onError); return; }
+    connected = false;
+    // A visibility pause is intentional. Keep the error status after an observed failure.
+    reportStatus(syncStatus === 'reconnecting' ? 'reconnecting' : 'loading');
+    if (!client.baseUrl) {
+      void snapshot(serial).then(() => {
+        if (alive(serial)) reportStatus('saved');
+      }, error => {
+        if (!alive(serial)) return;
+        reportStatus('reconnecting');
+        options.onError(error);
+      });
+      return;
+    }
     if (options.polling || typeof EventSource === 'undefined') { void polling(serial); return; }
     const endpoint = url('/api/events'); endpoint.searchParams.set('peerId', peerId); endpoint.searchParams.set('peerEpoch', peerEpoch); if (client.token) endpoint.searchParams.set('token', client.token); if (cursor) endpoint.searchParams.set('after', cursor);
     stream = new EventSource(endpoint.href);
@@ -246,7 +259,7 @@ export function createCollaboration(options: Options) {
     stream.onerror = () => { if (alive(serial)) lost(new Error('实时连接已中断，正在重新连接。')); };
   }
   function lost(error: unknown) {
-    pause(false); options.onStatus('reconnecting'); options.onError(error);
+    pause(false); reportStatus('reconnecting'); options.onError(error);
     if (!closed && document.visibilityState !== 'hidden') reconnect = setTimeout(connect, 1000);
   }
   function pause(leave: boolean, reason: 'pause' | 'close' = 'pause') {

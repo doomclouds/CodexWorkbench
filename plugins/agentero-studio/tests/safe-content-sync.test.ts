@@ -23,6 +23,47 @@ function stale(target: WhiteboardState, changes: Partial<BoardElement>, version 
   return apply(target, [{ op: 'update', id: 'a', changes }], { expectedRevision: 0, expectedVersions: { a: version }, merge: 'safe', ...extra });
 }
 
+it('keeps an embedded state retry tied to the source revision that created it', () => {
+  const original = { id: 'a', type: 'html' as const, html: '<p>original</p>', state: null };
+  const moved = state([original]);
+  apply(moved, [{ op: 'update', id: 'a', changes: { x: 30 } }], {}, colleague);
+  stale(moved, { state: { count: 1 } });
+  expect(moved.content.elements[0]).toMatchObject({ x: 30, state: { count: 1 } });
+
+  const replaced = state([original]);
+  apply(replaced, [{ op: 'update', id: 'a', changes: { html: '<p>replacement</p>' } }], {}, colleague);
+  const committed = structuredClone(replaced);
+  expect(() => stale(replaced, { state: { count: 1 } })).toThrow(/HTML 源码已有变化/);
+  expect(replaced).toEqual(committed);
+});
+
+describe('anchored section insertion', () => {
+  const wrap: Operation = { op: 'add', element: { id: 'new-section', type: 'container', x: 40, y: 40, w: 720, h: 320 }, data: { beforeId: 'a' } };
+  it('layers the section between the enclosing frame and existing objects, including after undo and redo', () => {
+    const s = state([{ id: 'outer', type: 'container', locked: true, w: 900, h: 440 }, { id: 'a', type: 'text', x: 60, y: 80, locked: true }, { id: 'b', type: 'shape', x: 360, y: 90 }]);
+    const original = structuredClone(s.content.elements);
+    const order = () => s.content.elements.map(element => element.id);
+    const added = apply(s, [wrap]);
+    expect(order()).toEqual(['outer', 'new-section', 'a', 'b']);
+    expect(added.historyEntry.changedIds).toEqual(['new-section']);
+    expect(s.content.elements.filter(element => element.id !== 'new-section')).toEqual(original);
+    const undone = apply(s, [{ op: 'restore', versionId: added.historyEntry.id, data: { mode: 'undo' } }]);
+    expect(s.content.elements).toEqual(original);
+    apply(s, [{ op: 'restore', versionId: undone.historyEntry.id, data: { mode: 'undo' } }]);
+    expect(order()).toEqual(['outer', 'new-section', 'a', 'b']);
+    expect(s.content.elements.filter(element => element.id !== 'new-section')).toEqual(original);
+  });
+  it('rejects moved selections, missing anchors and unsupported shapes without creating objects', () => {
+    const s = state();
+    apply(s, [{ op: 'update', id: 'a', changes: { x: 120 } }], {}, colleague);
+    const current = structuredClone(s);
+    expect(() => apply(s, [wrap], { expectedRevision: 0, expectedVersions: { $order: 0 } })).toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
+    expect(() => apply(s, [{ ...wrap, data: { beforeId: 'gone' } }])).toThrowError(expect.objectContaining({ code: 'NOT_FOUND' }));
+    expect(() => apply(s, [{ ...wrap, element: { ...wrap.element, type: 'shape' } }])).toThrowError(expect.objectContaining({ code: 'INVALID_ARGUMENT' }));
+    expect(s).toEqual(current);
+  });
+});
+
 describe('safe JSON merge', () => {
   it('merges only independent fields and non-overlapping lines', () => {
     expect(mergeJson({ x: 0, text: 'a\nb\nc' }, { x: 1, text: 'A\nb\nc' }, { x: 0, text: 'a\nb\nC' })).toEqual({ result: { x: 1, text: 'A\nb\nC' }, conflicts: [] });

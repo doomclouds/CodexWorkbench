@@ -71,6 +71,9 @@ it('uses the latest pop route when bootstrap completes and removes its listener 
 it('never changes browser history for an embedded MCP App', async () => {
   const dom = page('https://codex.test/chat/current'); Object.defineProperty(dom.window, 'parent', { value: {} });
   const push = vi.spyOn(dom.window.history, 'pushState'), replace = vi.spyOn(dom.window.history, 'replaceState');
-  const { bridge, onNavigate } = await connect(); expect(bridge.navigate).toBeUndefined(); dom.window.dispatchEvent(new dom.window.PopStateEvent('popstate'));
+  const { bridge, onNavigate } = await connect();
+  bridge.navigate?.('board-in-panel', 'editor');
+  expect(bridge.artifactId).toBe('board-in-panel');
+  dom.window.dispatchEvent(new dom.window.PopStateEvent('popstate'));
   expect(push).not.toHaveBeenCalled(); expect(replace).not.toHaveBeenCalled(); expect(onNavigate).not.toHaveBeenCalled(); expect(dom.window.location.href).toBe('https://codex.test/chat/current');
 });

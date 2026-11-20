@@ -7,7 +7,7 @@ import { downloadBoard } from '../src/app/export';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { APP_MAX_BYTES } from '../src/contracts/transport';
 
-const mocks = vi.hoisted(() => ({ downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), updateModelContext: vi.fn(), capabilities: {} as Record<string, unknown> }));
+const mocks = vi.hoisted(() => ({ downloadFile: vi.fn(), close: vi.fn(), connect: vi.fn(), callServerTool: vi.fn(), updateModelContext: vi.fn(), capabilities: {} as Record<string, unknown>, hostContext: undefined as undefined | Record<string, unknown>, currentView: vi.fn() }));
 vi.mock('@modelcontextprotocol/ext-apps', () => ({
   App: class {
     connect = mocks.connect;
@@ -15,13 +15,13 @@ vi.mock('@modelcontextprotocol/ext-apps', () => ({
     downloadFile = mocks.downloadFile;
     callServerTool = mocks.callServerTool;
     updateModelContext = mocks.updateModelContext;
-    getHostContext() { return undefined; }
+    getHostContext() { return mocks.hostContext; }
     getHostCapabilities() { return mocks.capabilities; }
   },
   PostMessageTransport: class {}, applyDocumentTheme: vi.fn(), applyHostStyleVariables: vi.fn(),
 }));
-vi.mock('@openai/mcp-extensions/app', () => ({ OpenAIExtensions: class {} }));
-beforeEach(() => { mocks.capabilities = {}; mocks.close.mockResolvedValue(undefined); mocks.updateModelContext.mockResolvedValue(undefined); mocks.callServerTool.mockReset().mockResolvedValue({ _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }); });
+vi.mock('@openai/mcp-extensions/app', () => ({ OpenAIExtensions: class { modelContext = { getCurrent: mocks.currentView }; } }));
+beforeEach(() => { mocks.capabilities = {}; mocks.hostContext = undefined; mocks.currentView.mockReset(); mocks.close.mockResolvedValue(undefined); mocks.updateModelContext.mockResolvedValue(undefined); mocks.callServerTool.mockReset().mockResolvedValue({ _meta: { connection: { baseUrl: 'http://127.0.0.1:5000', token: 'owner-secret', actor: { id: 'local', name: '我', kind: 'human', role: 'owner' } } } }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('host connection adaptation', () => {
@@ -72,6 +72,67 @@ describe('host connection adaptation', () => {
       expect(bridge.artifactId).toBe('selected-board'); expect(bridge.view).toBe('editor');
       await bridge.close();
     } finally { dom.window.close(); }
+  });
+
+  it('keeps local navigation through a replay of the original opening tool and honors explicit navigation', async () => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    let app!: { ontoolinput(value: unknown): void; ontoolresult(value: unknown): void };
+    const navigate = vi.fn();
+    mocks.hostContext = { toolInfo: { id: 1 } };
+    mocks.connect.mockImplementationOnce(async function (this: typeof app) {
+      app = this;
+      this.ontoolinput({ arguments: {} });
+    });
+    const bridge = await createStudioBridge(navigate);
+    try {
+      bridge.navigate?.('board-a', 'editor');
+      app.ontoolinput({ arguments: {} });
+      app.ontoolresult({ structuredContent: { ok: true, data: { view: 'library' } } });
+      expect(bridge.artifactId).toBe('board-a');
+      expect(navigate).not.toHaveBeenCalled();
+
+      app.ontoolinput({ arguments: { artifactId: 'board-b', view: 'board' } });
+      expect(navigate).toHaveBeenLastCalledWith('board-b', 'board');
+      bridge.navigate?.('board-b', 'editor');
+      mocks.hostContext = { toolInfo: { id: 2 } };
+      app.ontoolinput({ arguments: { view: 'library' } });
+      expect(navigate).toHaveBeenLastCalledWith(undefined, 'library');
+      bridge.navigate?.(undefined, 'trash');
+      app.ontoolresult({ structuredContent: { ok: true, data: { view: 'library' } } });
+      expect(bridge.artifactId).toBeUndefined();
+      expect(bridge.view).toBe('trash');
+    } finally { await bridge.close(); dom.window.close(); }
+  });
+
+  it.each(['structuredContent', 'text'] as const)('rehydrates only the instance-specific %s state without replaying the launch route', async format => {
+    const dom = new JSDOM('<div></div>'); Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+    const snapshot = { appId: 'agentero-studio', panelOpen: true, artifactId: 'board-a', viewId: 'view-a', selectedIds: ['element-one'], viewport: { x: 38, y: 62, zoom: .75 } };
+    const content = format === 'structuredContent' ? { structuredContent: snapshot } : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] };
+    mocks.currentView.mockReturnValueOnce({ updateId: 'accepted-1', ...content });
+    let app!: { ontoolinput(value: unknown): void; ontoolresult(value: unknown): void };
+    const navigate = vi.fn();
+    mocks.connect.mockImplementationOnce(async function (this: typeof app) {
+      app = this;
+      this.ontoolinput({ arguments: { artifactId: 'launch-board' } });
+    });
+    const bridge = await createStudioBridge(navigate);
+    try {
+      expect(bridge.artifactId).toBe('board-a');
+      expect(bridge.restoredView).toEqual({ viewId: 'view-a', artifactId: 'board-a', selectedIds: ['element-one'], viewport: { x: 38, y: 62, zoom: .75 } });
+      navigate.mockClear();
+      app.ontoolresult({ structuredContent: { ok: true, data: { artifactId: 'launch-board', view: 'editor' } } });
+      expect(bridge.artifactId).toBe('board-a');
+      expect(navigate).not.toHaveBeenCalled();
+
+      const next = await createStudioBridge(() => {});
+      try {
+        expect(next.artifactId).toBeUndefined();
+        expect(next.restoredView).toBeUndefined();
+        expect(next.view).toBe('library');
+      } finally { await next.close(); }
+    } finally { await bridge.close(); dom.window.close(); }
   });
 
   it('does not ask a retired host view to discover or open a connection after teardown', async () => {

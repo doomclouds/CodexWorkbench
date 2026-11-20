@@ -87,7 +87,7 @@ export class NativeContentQueue {
   enqueue(before: Board, operations: Operation[], summary: string, sources = before.elements, remember = true, stream?: string, operationId?: string, strictVersions?: Record<string, number>): Promise<ContentReceipt | null> {
     // Read dependencies guard CAS; only write targets own drafts and block local edits.
     const keys = [...new Set(operations.flatMap(op => contentTargets(before, op)))];
-    if (operations.some(op => ['style', 'layout', 'restore', 'motion'].includes(op.op))) keys.push('$board');
+    if (operations.some(op => ['style', 'layout', 'restore', 'motion'].includes(op.op) || op.op === 'add' && op.data?.beforeId !== undefined)) keys.push('$board');
     const previous = this.tasks.findLast(task => !(task.history && task.state === 'failed') && task.keys.some(key => keys.includes(key) || key === '$board' || keys.includes('$board')));
     if (previous && equal(previous.operations, operations) && (!operationId || previous.id === operationId)) return this.promises.get(previous.id) ?? Promise.resolve(null);
     let sourceElements = keys.flatMap(id => { const source = sources.find(element => element.id === id) ?? before.elements.find(element => element.id === id); return source ? [source] : []; });
@@ -220,7 +220,11 @@ export function overlayContent(elements: BoardElement[], tasks: ContentTask[]): 
   for (const task of tasks.filter(isContentDraft)) for (const op of task.operations) {
     if (op.op === 'update') result = result.map(element => { const base = task.sources.find(item => item.id === op.id); return element.id === op.id && base ? applyContentIntent(base, { ...base, ...op.changes }, element) as BoardElement : element; });
     else if (op.op === 'delete') { const ids = contentTargets({ ...task.before, elements: task.sources }, op); result = result.filter(element => !ids.includes(element.id)); }
-    else if (op.op === 'add' && op.element?.id && !result.some(element => element.id === op.element?.id)) result = [...result, { ...op.element, version: 0 } as BoardElement];
+    else if (op.op === 'add' && op.element?.id && !result.some(element => element.id === op.element?.id)) {
+      const beforeId = op.data?.beforeId;
+      const index = beforeId === undefined ? result.length : result.findIndex(element => element.id === beforeId);
+      if (index >= 0) result = [...result.slice(0, index), { ...op.element, version: 0 } as BoardElement, ...result.slice(index)];
+    }
   }
   return result;
 }

@@ -151,7 +151,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.20";
+    PLUGIN_VERSION = "0.2.21";
   }
 });
 
@@ -9922,6 +9922,10 @@ var init_whiteboard = __esm({
         const b = base, c = current;
         const local = { ...copy(b), ...copy(operation2.changes), id: b.id, version: b.version };
         if (local.type !== b.type) throw new StudioError("CONFLICT", "\u5BF9\u8C61\u7C7B\u578B\u53D1\u751F\u53D8\u5316\uFF0C\u4E0D\u80FD\u81EA\u52A8\u5408\u5E76\u8FC7\u671F\u4FEE\u6539\u3002", mergeConflictDetails(base, local, current, ["type"]));
+        const changesEmbeddedState = Object.hasOwn(operation2.changes, "state") && (b.type === "html" || b.type === "diagram" && typeof b.html === "string");
+        if (changesEmbeddedState && (b.sourceRevision !== c.sourceRevision || b.html !== c.html)) {
+          throw new StudioError("CONFLICT", "HTML \u6E90\u7801\u5DF2\u6709\u53D8\u5316\uFF0C\u65E7\u7684\u4EA4\u4E92\u72B6\u6001\u4E0D\u80FD\u5408\u5E76\u5230\u65B0\u6E90\u7801\u3002", mergeConflictDetails(base, local, current, ["state"]));
+        }
         if (b.type === "table" && object2(operation2.changes.data) && Object.hasOwn(operation2.changes.data, "rows") && (!Array.isArray(operation2.changes.data.rowIds) || !Array.isArray(operation2.changes.data.columnIds))) throw new StudioError("CONFLICT", "\u5E76\u53D1\u8868\u683C\u7F16\u8F91\u9700\u8981\u7A33\u5B9A\u7684\u884C\u5217\u6807\u8BC6\uFF0C\u8BF7\u6BD4\u8F83\u540E\u91CD\u65B0\u63D0\u4EA4\u3002", mergeConflictDetails(base, local, current, ["data.rows"]));
         const merged = safeElementMerge(b, local, c);
         if (merged.conflicts.length) throw new StudioError("CONFLICT", "\u8FD9\u4E9B\u5B57\u6BB5\u540C\u65F6\u88AB\u4FEE\u6539\uFF0C\u672A\u8986\u76D6\u4EFB\u4F55\u4E00\u65B9\u3002", mergeConflictDetails(base, local, current, merged.conflicts));
@@ -9935,6 +9939,7 @@ var init_whiteboard = __esm({
           return ids?.some((id2) => id2.startsWith("$") && id2 !== "$order") ? void 0 : ids;
         }
         if (["style", "motion"].includes(operation2.op)) return;
+        if (operation2.op === "add" && operation2.data?.beforeId !== void 0) return;
         if (operation2.op === "layout") {
           const ids = operation2.ids ?? content.elements.map((element) => element.id);
           return ["front", "back", "forward", "backward"].includes(operation2.preset ?? "") ? [...ids, "$order"] : ids;
@@ -9949,7 +9954,15 @@ var init_whiteboard = __esm({
           if (element.type === "html") element.sourceRevision = 1;
           if (content.elements.some((item) => item.id === element.id)) throw new StudioError("CONFLICT", "\u5143\u7D20 ID \u5DF2\u5B58\u5728\u3002", { elementId: element.id });
           assertLockedGeometry(content, { ...content, elements: [...content.elements, element] }, baseline);
-          content.elements.push(element);
+          const beforeId = operation2.data?.beforeId;
+          if (beforeId === void 0) content.elements.push(element);
+          else {
+            if (element.type !== "container") throw new StudioError("INVALID_ARGUMENT", "\u4EC5\u53EF\u4E3A\u65B0\u589E\u5206\u533A\u6307\u5B9A\u5C42\u7EA7\u951A\u70B9\u3002");
+            const anchor3 = safeId(beforeId, "\u5C42\u7EA7\u951A\u70B9 ID");
+            const index = content.elements.findIndex((item) => item.id === anchor3);
+            if (index < 0) throw new StudioError("NOT_FOUND", "\u5206\u533A\u7684\u5C42\u7EA7\u951A\u70B9\u5DF2\u4E0D\u5B58\u5728\u3002", { elementId: anchor3 });
+            content.elements.splice(index, 0, element);
+          }
           content.orderVersion = (content.orderVersion ?? 0) + 1;
           return [element.id];
         }

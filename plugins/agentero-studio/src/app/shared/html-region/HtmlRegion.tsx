@@ -4,19 +4,21 @@ import type { HtmlRegionContent, HtmlSelection, Json } from '../../../contracts/
 import { buildHtmlRegionDocument, rebaseHtmlState, validateHtmlNavigationMessage, validateHtmlPointerMessage, validateHtmlScrollMessage, validateHtmlSelectionMessage, validateHtmlStateMessage, type HtmlNavigationEvent, type HtmlPointerPosition, type HtmlStateSave } from './runtime.js';
 import { newClientId } from '../client-id.js';
 import { dismissEscapeLayer, isEscapeActive } from '../escape.js';
+import OperationNotice from '../OperationNotice.js';
 
-interface Props { element: HtmlRegionContent; annotation: boolean; interactive: boolean; zoom?: number; preserveScroll?: boolean; panMode?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onNavigation?: (event: HtmlNavigationEvent) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }> }
+interface Props { element: HtmlRegionContent; committedState?: Pick<HtmlRegionContent, 'state' | 'version'>; annotation: boolean; interactive: boolean; zoom?: number; preserveScroll?: boolean; initialScroll?: { x: number; y: number }; onReadingScroll?: (point: { x: number; y: number }) => void; panMode?: boolean; onAnnotate: (selection: HtmlSelection) => void; onToolShortcut?: (key: string) => void; onPointerPosition?: (point: HtmlPointerPosition | null) => void; onNavigation?: (event: HtmlNavigationEvent) => void; onStateChange?: (state: Json, expectedVersion: number) => Promise<{ state: Json; version: number }>; onUseSharedState?: () => void }
 interface SaveQueue {
   active: boolean; processing: boolean; paused: boolean; sequence: number; pending: HtmlStateSave | null;
   accepted: { baseVersion: number; submitted: Json; state: Json; version: number }[];
 }
 
-export default function HtmlRegion({ element, annotation, interactive, zoom = 1, preserveScroll = false, panMode = false, onAnnotate, onToolShortcut, onPointerPosition, onNavigation, onStateChange }: Props) {
+export default function HtmlRegion({ element, committedState, annotation, interactive, zoom = 1, preserveScroll = false, initialScroll, onReadingScroll, panMode = false, onAnnotate, onToolShortcut, onPointerPosition, onNavigation, onStateChange, onUseSharedState }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   const sourceRevision = useMemo(() => typeof element.sourceRevision === 'number' ? element.sourceRevision : element.version, [element.id, element.html, element.sourceRevision]);
   const channel = useMemo(() => newClientId(), [element.id, element.html, sourceRevision]);
   const [ready, setReady] = useState(false);
-  const source = useMemo(() => buildHtmlRegionDocument(element.html ?? '', { channel, regionId: element.id, sourceRevision, annotation, preserveScroll, state: element.state ?? null, elementVersion: element.version, writable: Boolean(onStateChange) }), [element.html, element.id, sourceRevision, channel]);
+  const saved = committedState ?? element;
+  const source = useMemo(() => buildHtmlRegionDocument(element.html ?? '', { channel, regionId: element.id, sourceRevision, annotation, preserveScroll, state: saved.state ?? null, elementVersion: saved.version, writable: Boolean(onStateChange) }), [element.html, element.id, sourceRevision, channel]);
   const callback = useRef(onAnnotate);
   callback.current = onAnnotate;
   const toolShortcut = useRef(onToolShortcut); toolShortcut.current = onToolShortcut;
@@ -37,16 +39,17 @@ export default function HtmlRegion({ element, annotation, interactive, zoom = 1,
   };
   const annotationRef = useRef(annotation); annotationRef.current = annotation;
   const preserveScrollRef = useRef(preserveScroll); preserveScrollRef.current = preserveScroll;
+  const onScrollRef = useRef(onReadingScroll); onScrollRef.current = onReadingScroll;
   const scrollPosition = useRef<{ regionId: string; x: number; y: number } | null>(null);
   const readyDocument = useRef<string | null>(null);
   const stateCallback = useRef(onStateChange); stateCallback.current = onStateChange;
-  const currentElement = useRef(element); currentElement.current = element;
+  const currentSavedState = useRef(saved); currentSavedState.current = saved;
   const queue = useMemo<SaveQueue>(() => ({ active: true, processing: false, paused: false, sequence: 0, pending: null, accepted: [] }), [channel]);
   const [saveError, setSaveError] = useState<{ channel: string; message: string } | null>(null);
   const [processingChannel, setProcessingChannel] = useState<string | null>(null);
   const postState = (type: string, value: Record<string, unknown>) => frame.current?.contentWindow?.postMessage({ type, channel, regionId: element.id, ...value }, '*');
   const authority = () => {
-    const accepted = queue.accepted.at(-1), current = currentElement.current;
+    const accepted = queue.accepted.at(-1), current = currentSavedState.current;
     return accepted && accepted.version > current.version ? { state: accepted.state, version: accepted.version } : { state: current.state ?? null, version: current.version };
   };
   const advanceAccepted = (task: HtmlStateSave): HtmlStateSave => {
@@ -120,7 +123,11 @@ export default function HtmlRegion({ element, annotation, interactive, zoom = 1,
         setReady(true); return;
       }
       const scroll = validateHtmlScrollMessage(event.data, { channel, regionId: element.id, sourceRevision });
-      if (scroll && preserveScrollRef.current && readyDocument.current === channel) { scrollPosition.current = { regionId: element.id, x: scroll.x, y: scroll.y }; return; }
+      if (scroll && preserveScrollRef.current && readyDocument.current === channel) {
+        scrollPosition.current = { regionId: element.id, x: scroll.x, y: scroll.y };
+        onScrollRef.current?.({ x: scroll.x, y: scroll.y });
+        return;
+      }
       const state = validateHtmlStateMessage(event.data, { channel, regionId: element.id, sourceRevision });
       if (state && stateCallback.current && state.saveId > queue.sequence) { queue.sequence = state.saveId; queue.pending = state; void saveProcessor.current(); return; }
       const selection = validateHtmlSelectionMessage(event.data, { channel, regionId: element.id, sourceRevision });
@@ -135,13 +142,18 @@ export default function HtmlRegion({ element, annotation, interactive, zoom = 1,
     window.addEventListener('message', receive);
     return () => { queue.active = false; clearNavigation(); if (pointerInside.current) reportPointer(null); window.removeEventListener('message', receive); };
   }, [channel, element.id, sourceRevision, queue]);
+  useEffect(() => {
+    if (!initialScroll || !preserveScroll) return;
+    scrollPosition.current = { regionId: element.id, ...initialScroll };
+    if (readyDocument.current === channel) postState('studio-html-scroll-restore', { sourceRevision, ...initialScroll });
+  }, [element.id, initialScroll, preserveScroll]);
   useEffect(() => { if (!annotation && !interactive) { clearNavigation(); if (pointerInside.current) reportPointer(null); } }, [annotation, interactive]);
   useEffect(() => {
     frame.current?.contentWindow?.postMessage({ type: 'studio-html-mode', channel, regionId: element.id, sourceRevision, enabled: annotation, writable: Boolean(onStateChange), preserveScroll, panMode }, '*');
   }, [annotation, channel, element.id, sourceRevision, ready, Boolean(onStateChange), preserveScroll, panMode]);
   useEffect(() => {
-    frame.current?.contentWindow?.postMessage({ type: 'studio-html-state-update', channel, regionId: element.id, state: element.state ?? null, version: element.version }, '*');
-  }, [element.state, element.version, element.id, channel, ready]);
+    postState('studio-html-state-update', authority());
+  }, [saved.state, saved.version, element.id, channel, ready]);
   // Keep the iframe layout at its logical size in the overview. Inverse scaling at
   // small zooms magnifies layout rounding, which can add scrollbars to a fitting page.
   const displayRaster = zoom >= .5;
@@ -156,11 +168,10 @@ export default function HtmlRegion({ element, annotation, interactive, zoom = 1,
       transformOrigin: '0 0',
       pointerEvents: receivesInput ? 'auto' : 'none',
     }} />
-    {saveError?.channel === channel && <div className="studio-html-state-error" data-native-interactive="true" role="alert">
-      <span>{saveError.message} 本地交互修改已保留。</span>
+    {saveError?.channel === channel && <OperationNotice key={channel} source={element.text ? `HTML 图解 · ${element.text}` : 'HTML 图解'} message={saveError.message + ' 本地交互修改已保留。'} closeLabel="关闭 HTML 保存通知" fallbackClass="studio-html-state-error" actions={<>
       <button type="button" disabled={!onStateChange || processingChannel === channel} onClick={() => { queue.paused = false; setSaveError(null); void saveProcessor.current(); }}>重试保存</button>
-      <button type="button" disabled={processingChannel === channel} onClick={() => { if (queue.processing) return; queue.pending = null; queue.paused = false; setSaveError(null); postState('studio-html-state-reset', authority()); }}>使用共享状态</button>
+      <button type="button" disabled={processingChannel === channel} onClick={() => { if (queue.processing) return; onUseSharedState?.(); queue.pending = null; queue.paused = false; setSaveError(null); postState('studio-html-state-reset', authority()); }}>使用共享状态</button>
       <details><summary>查看共享状态</summary><pre>{JSON.stringify(authority().state, null, 2)}</pre></details>
-    </div>}
+    </>} />}
   </div>;
 }

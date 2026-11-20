@@ -6,6 +6,7 @@ import { documentSurface } from '../../core/products/document-surface.js';
 import { applyDocumentOperations, defaultDocument, documentAnchorState, documentBlockText, documentOperations, documentPlainText, flattenDocumentBlocks, normalizeDocument, type DocumentContent } from '../../contracts/document.js';
 import { assetDisplayUrl, clamp, type Point } from './canvas-model.js';
 import { isEscapeActive, registerEscapeLayer } from '../shared/escape.js';
+import OperationNotice from '../shared/OperationNotice.js';
 import { studioRequest, downloadStudioBlob, downloadStudioFile } from '../transport.js';
 import { copyPlainText } from '../clipboard.js';
 import DocumentReadView from './DocumentReadView.js';
@@ -24,7 +25,10 @@ interface Props {
   onMoveStart?(event: React.PointerEvent): void;
   onInteract(active: boolean): void; onEdit(): void; onExpand(): void; onExit(): void;
   onSave(document: DocumentContent, title: string, base: BoardElement, overwrite: boolean): Promise<BoardElement | false>;
+  onUseCurrent?: () => void;
   onActivity(activity: DocumentActivity): void;
+  initialScrollTop?: number;
+  onReadingScroll?(point: Point): void;
   onFocusSurface?(surface: DocumentFocusSurface | null): void;
   boardPoint?(clientX: number, clientY: number): Point;
   activities?: readonly Feedback[];
@@ -32,7 +36,7 @@ interface Props {
   onAnnotate(anchor: Anchor, version: number, point?: { x: number; y: number }): void;
 }
 interface SavedDraft { base: BoardElement; document: DocumentContent; title: string }
-export default function DocumentRegion({ element, artifactId, actor, client, canEdit, canAnnotate, interactive, expanded, focusHost, readingZoom = 1, editRequest, target, annotationActive = false, onAnnotationModeChange, styleProfile, onMoveStart, onInteract, onEdit, onExpand, onExit, onSave, onActivity, onAnnotate, onFocusSurface, boardPoint, activities, onFeedbackSelect }: Props) {
+export default function DocumentRegion({ element, artifactId, actor, client, canEdit, canAnnotate, interactive, expanded, focusHost, readingZoom = 1, editRequest, target, annotationActive = false, onAnnotationModeChange, styleProfile, onMoveStart, onInteract, onEdit, onExpand, onExit, onSave, onUseCurrent, onActivity, initialScrollTop, onReadingScroll, onAnnotate, onFocusSurface, boardPoint, activities, onFeedbackSelect }: Props) {
   const [document, setDocument] = useState<DocumentContent>(() => element.document ?? defaultDocument());
   const [title, setTitle] = useState(element.text || '文档');
   const [editing, setEditing] = useState(false), [saving, setSaving] = useState(false), [leaving, setLeaving] = useState(false), [error, setError] = useState(''), [comparing, setComparing] = useState(false);
@@ -167,7 +171,11 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
       return false;
     }, 30);
   }, [expanded, editing, interactive, annotationActive, comparing, exportMenu, composing, requestExit]);
-  useLayoutEffect(() => { if (expanded && !previousExpanded.current) scrollPosition.current.focus = scrollPosition.current.inline; previousExpanded.current = expanded; if (scroll.current) scroll.current.scrollTop = expanded ? scrollPosition.current.focus : scrollPosition.current.inline; }, [expanded, editing]);
+  useLayoutEffect(() => {
+    if (expanded && !previousExpanded.current) scrollPosition.current.focus = initialScrollTop ?? scrollPosition.current.inline;
+    previousExpanded.current = expanded;
+    if (scroll.current) scroll.current.scrollTop = expanded ? scrollPosition.current.focus : scrollPosition.current.inline;
+  }, [expanded, editing, initialScrollTop]);
   const baseWidth = useDocumentFocusSurface({ expanded, id: element.id, version: element.version, zoom: readingZoom, host: focusHost, scroll, content, prepareExit, onChange: onFocusSurface });
   useEffect(() => { if (expanded && !editing && !annotationActive) scroll.current?.focus({ preventScroll: true }); }, [expanded, editing]);
   useEffect(() => {
@@ -339,16 +347,44 @@ export default function DocumentRegion({ element, artifactId, actor, client, can
     {expanded && tocOpen && headings.length > 0 && <select className="studio-document-mobile-toc" aria-label="跳转文档标题" value="" onChange={event => jump(event.target.value)}><option value="" disabled>文档目录</option>{headings.map(block => <option key={block.id} value={block.id}>{documentBlockText(block) || '未命名标题'}</option>)}</select>}
     {anchorState && anchorState !== 'current' && <div className="studio-document-message" role="status">{anchorState === 'missing' ? '备注对应的段落已删除，原选区仍保留在备注来源中。' : '备注对应的原文已有变化，请核对冻结来源。'}</div>}
     {recovered && <div className="studio-document-message" role="status">有上次未保存的文档草稿。<button type="button" onClick={() => { recoveryPresent.current = false; baseline.current = recovered.base; setDocument(recovered.document); setTitle(recovered.title); setRecovered(null); requestEdit(); }}>恢复草稿</button><button type="button" onClick={() => { recoveryPresent.current = false; localStorage.removeItem(draftKey); setRecovered(null); }}>放弃草稿</button></div>}
-    {draftWarning && <div className="studio-document-message has-error" role="alert"><span>{draftWarning}</span><button type="button" onClick={() => void copyDraft()}>复制本机草稿</button></div>}
+    {draftWarning && <OperationNotice source="文档草稿" message={draftWarning} closeLabel="关闭文档草稿通知" fallbackClass="studio-document-message has-error"
+      actions={<button type="button" onClick={() => void copyDraft()}>复制本机草稿</button>} />}
     <div className="studio-document-body">
       {expanded && tocOpen && headings.length > 0 && <nav className="studio-document-toc" aria-label="文档目录"><strong>目录</strong>{headings.map(block => <button type="button" key={block.id} onClick={() => jump(block.id)} style={{ paddingLeft: 10 + (Number(block.props.level) || 1) * 8 }}>{documentBlockText(block) || '未命名标题'}</button>)}</nav>}
-      <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={showEditor ? undefined : interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => { scrollPosition.current[expanded ? 'focus' : 'inline'] = event.currentTarget.scrollTop; }} onMouseUp={showEditor ? undefined : selectText}
+      <div ref={scroll} className="studio-document-scroll" data-document-content="true" tabIndex={showEditor ? undefined : interactive || expanded ? 0 : -1} aria-label={`文档正文：${title}`} onCopy={event => event.stopPropagation()} onCut={event => event.stopPropagation()} onPaste={event => event.stopPropagation()} onScroll={event => {
+        const y = event.currentTarget.scrollTop;
+        scrollPosition.current[expanded ? 'focus' : 'inline'] = y;
+        if (expanded) onReadingScroll?.({ x: 0, y });
+      }} onMouseUp={showEditor ? undefined : selectText}
         onPointerOver={annotatingRead ? moveAnnotation : undefined} onPointerMove={annotatingRead ? moveAnnotation : undefined} onPointerLeave={annotatingRead ? () => previewAnnotation(null) : undefined} onPointerCancel={annotatingRead ? () => previewAnnotation(null) : undefined} onScrollCapture={annotatingRead ? scrollAnnotation : undefined}>
         <div ref={content} className="studio-document-content" style={{ zoom: expanded ? readingZoom : 1, width: baseWidth }}>{showEditor ? <Suspense fallback={<div className="studio-document-message"><Loader2 size={16} className="studio-spin" />正在打开编辑器…</div>}><DocumentEditor value={document} editable={!leaving && canEdit && (interactive && !annotationActive || composing)} theme={surface.scheme} initialFocusBlockId={editFocusBlockId} highlightedIds={targetIds} find={find} onChange={setDocument} onSelection={selectSelection} onCompositionChange={setComposing} uploadFile={uploadFile} resolveFileUrl={resolveFileUrl} /></Suspense> : <DocumentReadView document={document} client={client} scheme={surface.scheme} highlightedIds={annotationActive && selection ? selection.blockIds : targetIds} find={find} annotating={annotatingRead} interactive={interactive || expanded} renderCommentPins={commentPins ? blockId => commentPins.get(blockId) : undefined} />}</div>
       </div>
     </div>
-    {error && <div className="studio-document-message has-error" role="alert"><span>{error}</span><button type="button" onClick={() => void save()} disabled={saving || !canEdit}>重试保存</button><button type="button" onClick={() => setComparing(true)}>比较最新内容</button><button type="button" onClick={() => void copyPlainText(JSON.stringify(draft.current)).catch(cause => setError(String(cause)))}>复制草稿</button></div>}
-    {comparing && <div className="studio-document-comparison" role="dialog" aria-label="比较文档草稿"><h3>比较最新内容后再保存</h3><div><section><strong>当前已保存内容 · {current.current.text || '文档'}</strong><pre>{documentPlainText(current.current.document ?? defaultDocument())}</pre></section><section><strong>你的文档草稿 · {title}</strong><pre>{documentPlainText(document)}</pre></section></div><footer><button type="button" onClick={() => setComparing(false)}>保留草稿</button><button type="button" onClick={() => { baseline.current = current.current; setDocument(current.current.document ?? defaultDocument()); setTitle(current.current.text || '文档'); setError(''); setComparing(false); }}>采用当前内容</button><button type="button" disabled={saving || !canEdit} onClick={() => void save(true)}>保存已比较的草稿</button></footer></div>}
+    {error && <OperationNotice source={`文档 · ${title}`} message={error} closeLabel="关闭文档保存通知" fallbackClass="studio-document-message has-error" actions={<>
+      <button type="button" onClick={() => void save()} disabled={saving || !canEdit}>重试保存</button>
+      <button type="button" onClick={() => setComparing(true)}>比较最新内容</button>
+      <button type="button" onClick={() => void copyPlainText(JSON.stringify(draft.current)).catch(cause => setError(String(cause)))}>复制草稿</button>
+    </>} />}
+    {comparing && <div className="studio-document-comparison" role="dialog" aria-label="比较文档草稿">
+      <h3>比较最新内容后再保存</h3>
+      <div>
+        <section><strong>当前已保存内容 · {current.current.text || '文档'}</strong><pre>{documentPlainText(current.current.document ?? defaultDocument())}</pre></section>
+        <section><strong>你的文档草稿 · {title}</strong><pre>{documentPlainText(document)}</pre></section>
+      </div>
+      <footer>
+        <button type="button" onClick={() => setComparing(false)}>保留草稿</button>
+        <button type="button" disabled={saving} onClick={() => {
+          if (inFlight.current) return;
+          onUseCurrent?.();
+          baseline.current = current.current;
+          setDocument(current.current.document ?? defaultDocument());
+          setTitle(current.current.text || '文档');
+          setError('');
+          setComparing(false);
+        }}>采用当前内容</button>
+        <button type="button" disabled={saving || !canEdit} onClick={() => void save(true)}>保存已比较的草稿</button>
+      </footer>
+    </div>}
   </>;
   const captureEscape = (event: React.KeyboardEvent) => {
     if (event.key !== 'Escape' || event.repeat || composing || event.nativeEvent.isComposing || event.keyCode === 229 || !editing || comparing || exportMenu) return;

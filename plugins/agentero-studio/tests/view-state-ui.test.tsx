@@ -36,6 +36,45 @@ it('publishes actual activity for this view, passes only processing feedback and
   expect(onContext.mock.calls.at(-1)?.[0]).toMatchObject({ artifactId: 'second', viewId: context.viewId, selectedIds: [], editingIds: [], movingIds: [], dirty: false, issues: [] });
 });
 
+it('keeps the confirmed host context during a slow remount and publishes a fresh live identity when ready', async () => {
+  const board = makeBoard('resume-board'), onContext = vi.fn(), collaboration = new StudioCollaboration();
+  let allowSession!: (response: Response) => void, allowBoard!: (response: Response) => void;
+  const session = new Promise<Response>(resolve => { allowSession = resolve; });
+  const contents = new Promise<Response>(resolve => { allowBoard = resolve; });
+  const request: StudioClient['request'] = vi.fn(async (input, options) => {
+    const url = new URL(String(input));
+    if (url.pathname === '/api/session') return session;
+    if (url.pathname === '/api/sync') return Response.json(await collaboration.sync(board.artifact.id, {
+      after: url.searchParams.get('after') || undefined, wait: Number(url.searchParams.get('wait')),
+      peerId: url.searchParams.get('peerId') || undefined, peerEpoch: url.searchParams.get('peerEpoch') || undefined,
+      signal: options?.signal || undefined,
+    }, LOCAL_ACTOR));
+    if (url.pathname.endsWith('artifact_read')) return contents;
+    if (url.pathname.endsWith('artifact_feedback')) return Response.json({ ok: true, data: { feedback: [] } });
+    return Response.json({ peers: [], timer: null });
+  });
+  const client: StudioClient = { embedded: true, baseUrl: 'http://studio.test', request, call: vi.fn(async () => ({ artifacts: [] })) as StudioClient['call'] };
+  const retained = { artifactId: board.artifact.id, viewId: 'old-view', selectedIds: ['region'], viewport: { x: 40, y: 55, zoom: .75 } };
+  try {
+    await act(async () => root.render(<StudioApp client={client} actor={LOCAL_ACTOR} initialArtifactId={board.artifact.id} restoredView={retained} onViewContext={onContext} />));
+    expect(onContext).not.toHaveBeenCalled();
+    await act(async () => allowSession(Response.json({ actor: LOCAL_ACTOR, access: 'local' })));
+    await waitUntil(() => vi.mocked(request).mock.calls.some(([input]) => String(input).endsWith('/api/tools/artifact_read')));
+    expect(onContext).not.toHaveBeenCalled();
+    await act(async () => allowBoard(Response.json({ ok: true, data: board })));
+    await waitUntil(() => !!container.querySelector('[aria-label="测试画布"]') && onContext.mock.calls.length > 0);
+    const current = onContext.mock.calls.at(-1)?.[0];
+    expect(current).toMatchObject({ artifactId: retained.artifactId, selectedIds: retained.selectedIds, viewport: retained.viewport });
+    expect(current.viewId).not.toBe(retained.viewId);
+    expect(vi.mocked(request).mock.calls.some(([input]) => {
+      const url = new URL(String(input));
+      return url.pathname === '/api/sync' && url.searchParams.get('peerId') === current.viewId;
+    })).toBe(true);
+    await click('返回作品中心');
+    expect(onContext.mock.calls.at(-1)?.[0]).toBeNull();
+  } finally { collaboration.close(); }
+});
+
 it('reports source editing and preserves the dirty draft and failure until a successful retry', async () => {
   const board = makeBoard('source-board'), onActivity = vi.fn(), onChanged = vi.fn(), onError = vi.fn();
   let attempts = 0;

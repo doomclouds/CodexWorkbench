@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { canReadCanvasText, canvasGridSpacing, mediaControlsFit, overviewStrokeWidth, projectedSize, tableDetail } from '../src/app/canvas/canvas-presentation.js';
+import { canReadCanvasText, canvasGridSpacing, mediaControlsFit, overviewStrokeWidth, projectedSize, sectionTitleDetails, tableDetail } from '../src/app/canvas/canvas-presentation.js';
+import type { BoardElement } from '../src/contracts/studio.js';
 
 describe('canvas presentation', () => {
   it('chooses table detail from full projected space and font at the same zoom', () => {
@@ -22,5 +23,40 @@ describe('canvas presentation', () => {
   it('allocates playback controls only to large enough projected areas', () => {
     expect(mediaControlsFit(projectedSize({ w: 360, h: 240 }, .28))).toBe(false);
     expect(mediaControlsFit(projectedSize({ w: 360, h: 240 }, .63))).toBe(true);
+  });
+
+  it('reserves compact section captions within projected width and clear space', () => {
+    const section = (id: string, overrides: Partial<BoardElement> = {}): BoardElement => ({
+      id, type: 'container', x: 0, y: 400, w: 600, h: 200, text: '架构', version: 1, ...overrides,
+    });
+    const first = section('first'), beside = section('beside', { x: 600 });
+    const below = section('below', { y: 630 });
+    const tooNarrow = section('narrow', { x: 1200, w: 40 });
+    const html = section('html', { type: 'html', x: 1800, y: 0, h: 390 });
+    const underHtml = section('under-html', { x: 1800 });
+    const sameTopHtml = section('same-top-html', { type: 'html', x: 2500 });
+    const nearHtml = section('near-html', { x: 2400 });
+    const shortcuts = [first, beside, below, tooNarrow, html, underHtml];
+    for (const zoom of [.1, .25, .5]) {
+      const titles = sectionTitleDetails(shortcuts, zoom);
+      expect(titles.get('first')).toEqual({ mode: 'overview', width: 600 });
+      expect(titles.get('beside')).toEqual({ mode: 'overview', width: 600 });
+      expect(titles.has('below')).toBe(false);
+      expect(titles.has('narrow')).toBe(false);
+      expect(titles.has('under-html')).toBe(false);
+    }
+    expect(sectionTitleDetails([nearHtml, sameTopHtml], .5).get('near-html')).toEqual({ mode: 'overview', width: 92 });
+    expect(sectionTitleDetails(shortcuts, 2).get('below')).toEqual({ mode: 'full' });
+    const parent = section('parent', { x: -100, y: 180, w: 800, h: 700 });
+    expect(sectionTitleDetails([parent, first], .1).get('first')).toEqual({ mode: 'overview', width: 600 });
+  });
+
+  it('preserves a low-zoom caption when a raised neighbor snaps flush to its left edge', () => {
+    const left: BoardElement = { id: 'left', type: 'container', x: 130, y: 146.5, w: 820, h: 445, text: '作品与历史', fontSize: 17, version: 1 };
+    const middle: BoardElement = { ...left, id: 'middle', x: 950, y: 170, text: '界面呈现和交互规则的长期维护与复核清单说明' };
+    for (const zoom of [.25, .5]) {
+      expect(sectionTitleDetails([left, middle], zoom).get(middle.id)).toEqual({ mode: 'overview', width: 820 });
+      expect(sectionTitleDetails([{ ...left, x: 131 }, middle], zoom).has(middle.id)).toBe(false);
+    }
   });
 });

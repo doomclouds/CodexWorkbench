@@ -48,6 +48,7 @@
 .studio-board-element.is-editing { outline: calc(1px / var(--canvas-scale, 1)) solid var(--canvas-selection, #a78bfa); }
 .studio-element-container { border: 1px dashed #bfc0c0; border-radius: 8px; background: color-mix(in srgb, var(--canvas-ui-text) 5%, transparent); pointer-events: auto; }
 .studio-section-title { position: absolute; left: 1px; bottom: calc(100% + 10px); width: 100%; min-height: 22px; font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.studio-section-title.is-overview { left: 0; width: max-content; max-width: 100%; min-height: 0; overflow: hidden; white-space: nowrap; text-align: left; text-overflow: ellipsis; }
 .studio-element-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: inherit; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; line-height: 1.45; overflow: hidden; }
 .studio-element-text > textarea { align-self: stretch; }
 .studio-element-shape .studio-element-text { justify-content: center; }
