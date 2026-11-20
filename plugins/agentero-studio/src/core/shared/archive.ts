@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import { Unzip, UnzipInflate, unzipSync, zipSync, type UnzipFileInfo, type Zippable } from 'fflate';
 import { isCommentPin, type Actor } from '../../contracts/studio.js';
 import { normalizeDocument } from '../../contracts/document.js';
+import { isTodoId, normalizeTodoItems } from '../../contracts/todo.js';
 import { copy, object, renameWithRetry, requireRole, safeId, StudioError, text } from './common.js';
 import type { ExportBytes } from './files.js';
 import type { ArtifactMetadata, ArtifactState } from './model.js';
@@ -125,6 +126,11 @@ function validateState(value: unknown, products: ProductRegistry): ArtifactState
       const pin = feedback.anchor.pin;
       if (!isCommentPin(pin)) throw invalid('备份备注气泡位置无效。');
       if (pin.coordinateSpace === 'document' && (feedback.anchor.coordinateSpace !== 'document' || !Array.isArray(feedback.anchor.elementIds) || feedback.anchor.elementIds.length !== 1 || typeof feedback.anchor.elementIds[0] !== 'string' || !Array.isArray(feedback.anchor.blockIds) || !feedback.anchor.blockIds.length || feedback.anchor.blockIds.length > 100 || feedback.anchor.blockIds.some(id => typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id)))) throw invalid('备份文档气泡缺少有效段落定位。');
+      if (pin.coordinateSpace === 'todo' && feedback.anchor.coordinateSpace !== 'todo') throw invalid('备份任务气泡缺少任务行定位。');
+    }
+    if (feedback.anchor.coordinateSpace === 'todo') {
+      const { elementIds, itemId, sourceVersion } = feedback.anchor;
+      if (!Array.isArray(elementIds) || elementIds.length !== 1 || !isTodoId(elementIds[0]) || !isTodoId(itemId) || !Number.isSafeInteger(sourceVersion) || Number(sourceVersion) < 1) throw invalid('备份任务行来源无效。');
     }
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) { if (!object(reply) || typeof reply.text !== 'string' || !validDate(reply.createdAt)) throw invalid(); safeId(reply.id, '回复 ID'); validateActor(reply.author); }
@@ -154,7 +160,10 @@ function validateState(value: unknown, products: ProductRegistry): ArtifactState
   }
   for (const [feedbackId, sources] of Object.entries(state.sources)) {
     if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid('备份来源记录无效。');
-    for (const source of sources) if (object(source) && object(source.element) && source.element.type === 'document') normalizeDocument(source.element.document);
+    for (const source of sources) if (object(source) && object(source.element)) {
+      if (source.element.type === 'document') normalizeDocument(source.element.document);
+      if (source.element.type === 'todo') normalizeTodoItems(object(source.element.data) ? source.element.data.items : undefined);
+    }
   }
   for (const [assetId, asset] of Object.entries(state.assets)) {
     safeId(assetId, '资源 ID');

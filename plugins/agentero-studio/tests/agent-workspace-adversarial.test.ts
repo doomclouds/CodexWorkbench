@@ -36,7 +36,7 @@ afterEach(async () => {
   if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected workspace fixture directory');
   await rm(directory, { recursive: true, force: true });
 });
-const read = () => service.execute('artifact_read', { artifactId }) as Promise<Board>;
+const read = () => service.execute('artifact_read', { artifactId, mode: 'board' }, LOCAL_ACTOR) as Promise<Board>;
 const bytes = () => readFile(service.store.file(artifactId));
 const binding = ({ taskId, generation }: AgentTaskBinding) => ({ taskId, generation });
 async function begin(taskId: string, scope: AgentActivityScope, actor = first, extra: Record<string, unknown> = {}): Promise<AgentTask> {
@@ -299,9 +299,12 @@ describe('agent workspace adversarial service boundaries', () => {
     await activity(task, 'end');
     const declared = await begin('layer-own-b', { ids: ['b'] });
     const accepted = await mutate(operations, first, { ...binding(declared), expectedVersions: versions });
-    expect(accepted.board.elements.map((value: { id: string }) => value.id)).toEqual(['a', 'b']);
-    expect(accepted.board.elements.find((value: { id: string }) => value.id === 'b').version).toBe(versions.b + 1);
-    expect(accepted.board.orderVersion).toBe(versions.$order + 1);
+    expect(accepted).toMatchObject({ historyEntry: { changedIds: ['b', '$order'] } });
+    expect(accepted).not.toHaveProperty('board');
+    const saved = await read();
+    expect(saved.elements.map(value => value.id)).toEqual(['a', 'b']);
+    expect(saved.elements.find(value => value.id === 'b')?.version).toBe(versions.b + 1);
+    expect(saved.orderVersion).toBe(versions.$order + 1);
   });
 
   it('keeps scope authorization independent of object-version CAS', async () => {

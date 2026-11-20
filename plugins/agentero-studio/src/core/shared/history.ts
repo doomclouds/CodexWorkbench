@@ -46,13 +46,41 @@ export function mutationTargets<C, O extends ContentOperation, A, S>(content: C,
   if (operation.op === 'restore' && !restoreUnitIds(operation)) return;
   return adapter.targets(content, operation);
 }
-export function makeHistory<Content>(state: { artifact: ArtifactMetadata; content: Content; history: SavedVersion<Content>[] }, actor: Actor, summary: string, changedIds: string[], restoredFrom?: string): HistoryEntry {
+function isUndo(operation: ContentOperation): boolean {
+  return operation.op === 'restore' && (operation.data?.mode === 'undo' || operation.data?.undo === true || operation.preset === 'undo');
+}
+const isAuthor = (entry: HistoryEntry, actor: Actor) => entry.actor.id === actor.id && entry.actor.kind === actor.kind;
+const unitVersion = (unit: unknown) => object(unit) ? unit.version : undefined;
+
+export function makeHistory<Content>(state: { artifact: ArtifactMetadata; content: Content; history: SavedVersion<Content>[] }, actor: Actor, summary: string, changedIds: string[], restore: Pick<HistoryEntry, 'restoredFrom' | 'restoreMode'> = {}): HistoryEntry {
   const now = new Date().toISOString(); state.artifact.revision++; state.artifact.updatedAt = now;
-  const entry: HistoryEntry = { id: randomUUID(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...(restoredFrom ? { restoredFrom } : {}) };
+  const entry: HistoryEntry = { id: randomUUID(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restore };
   state.history.push({ entry, artifact: copy(state.artifact), content: copy(state.content) });
   if (state.history.length > 200) state.history.splice(0, state.history.length - 200);
   return entry;
 }
+
+/** Prove continuity by pairing only explicit inverses of the requesting actor's later changes to this unit. */
+function ownChangesWereReversed<C>(history: readonly SavedVersion<C>[], target: number, currentRevision: number, actor: Actor, read: (content: C) => unknown, current: unknown, didChange: (before: unknown, after: unknown) => boolean): boolean {
+  const pending: HistoryEntry[] = [];
+  let previous = read(history[target]!.content);
+  let revision = history[target]!.entry.revision;
+  let reversed = false;
+  for (const { entry, content } of history.slice(target + 1)) {
+    if (entry.revision !== ++revision) return false;
+    const value = read(content);
+    if (didChange(previous, value)) {
+      const candidate = pending.at(-1);
+      if (candidate && entry.restoreMode === 'undo' && entry.restoredFrom === candidate.id && isAuthor(entry, actor) && isAuthor(candidate, actor)) {
+        pending.pop();
+        reversed = true;
+      } else pending.push(entry);
+    }
+    previous = value;
+  }
+  return reversed && !pending.length && currentRevision === revision && !didChange(previous, current);
+}
+
 export function restoreVersion<C, O extends ContentOperation, A, S>(state: ArtifactState<C, A, S>, saved: SavedVersion<C>, actor: Actor, adapter: ProductAdapter<C, O, A, S>, undo = false, ids?: string[], baseline = state.content): string[] {
   const current = state.content, history = state.history.map(item => item.content);
   if (ids && undo) throw new StudioError('INVALID_ARGUMENT', '安全撤回事务不能同时指定局部恢复对象。');
@@ -75,15 +103,21 @@ export function restoreVersion<C, O extends ContentOperation, A, S>(state: Artif
     state.content = restored; state.artifact.title = saved.artifact.title;
     return changedIds;
   }
-  const before = state.history[state.history.indexOf(saved) - 1];
-  if (saved.entry.actor.id !== actor.id || !before) throw new StudioError('FORBIDDEN', '只能撤回自己提交的内容修改。');
+  const index = state.history.indexOf(saved), before = state.history[index - 1];
+  if (!isAuthor(saved.entry, actor)) throw new StudioError('FORBIDDEN', '只能撤回自己提交的内容修改。');
+  if (!before || before.entry.revision !== saved.entry.revision - 1) throw new StudioError('NOT_FOUND', '此操作的原始版本已超出可撤销范围。');
   const differences = adapter.diff(before.content, saved.content);
   // Apply to detached content so any unit conflict leaves the whole transaction intact.
   const restored = copy(current);
   for (const difference of differences) {
-    const clock = state.unitClocks?.[difference.id], savedAfter = object(difference.after) ? difference.after.version : undefined, savedBefore = object(difference.before) ? difference.before.version : undefined;
-    if (clock && (typeof savedAfter === 'number' && savedAfter < clock.incarnationStart || difference.after == null && typeof savedBefore === 'number' && savedBefore < clock.version)) throw new StudioError('CONFLICT', '此对象已删除并重建，不能撤回旧对象的事务。', { elementId: difference.id, currentVersion: adapter.versionOf(current, difference.id) });
-    if (adapter.undoUnit) adapter.undoUnit(restored, difference, history);
+    const readUnit = (content: C) => adapter.readUnit(content, difference.id);
+    const currentUnit = readUnit(current);
+    const changesWereReversed = (didChange: (before: unknown, after: unknown) => boolean) => ownChangesWereReversed(state.history, index, state.artifact.revision, actor, readUnit, currentUnit, didChange);
+    const clock = state.unitClocks?.[difference.id], savedAfter = unitVersion(difference.after), savedBefore = unitVersion(difference.before);
+    const changedIncarnation = clock && (typeof savedAfter === 'number' && savedAfter < clock.incarnationStart || difference.after == null && typeof savedBefore === 'number' && savedBefore < clock.version);
+    // An intervening transaction may delete and re-add the same ID without changing its presence.
+    if (changedIncarnation && !changesWereReversed((a, b) => unitVersion(a) !== unitVersion(b))) throw new StudioError('CONFLICT', '此对象已删除并重建，不能撤回旧对象的事务。', { elementId: difference.id, currentVersion: adapter.versionOf(current, difference.id) });
+    if (adapter.undoUnit) adapter.undoUnit(restored, difference, history, { current: currentUnit, changesWereReversed });
     else {
       if (!same(adapter.readUnit(restored, difference.id), difference.after)) throw new StudioError('CONFLICT', '后来有人修改了这项内容，不能直接撤回。', { elementId: difference.id });
       adapter.restoreUnit(restored, difference, history);
@@ -105,6 +139,8 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(state: Artifa
   const operationId = safeId(args.operationId ?? randomUUID(), '操作 ID'), operations = args.operations;
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) throw new StudioError('INVALID_ARGUMENT', '每次提交应包含 1 至 200 个操作。');
   if (operations.some(operation => !object(operation))) throw new StudioError('INVALID_ARGUMENT', '作品操作无效。');
+  const first = operations[0]!;
+  const standaloneUndo = operations.length === 1 && isUndo(first) && first.id === undefined && first.ids === undefined;
   const fingerprint = createHash('sha256').update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest('hex');
   const duplicate = state.operations.find(item => item.id === operationId);
   if (duplicate) {
@@ -122,12 +158,18 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(state: Artifa
     }
   }
   if (args.expectedRevision !== undefined && args.expectedRevision !== state.artifact.revision) {
-    if (!expected || !Object.keys(expected).length) throw new StudioError('CONFLICT', '作品已被修改，请读取最新版本后重试。', { revision: state.artifact.revision });
-    for (const operation of operations) {
-      if (!object(operation)) throw new StudioError('INVALID_ARGUMENT', '作品操作无效。');
-      const targets = mutationTargets(state.content, operation, adapter);
-      if (!targets) throw new StudioError('CONFLICT', '整体操作需要读取最新版本后重试。', { revision: state.artifact.revision });
-      if (targets.some(id => typeof id !== 'string' || !Object.hasOwn(expected, id))) throw new StudioError('CONFLICT', '过期提交必须核对所有目标对象的版本。', { revision: state.artifact.revision });
+    if (standaloneUndo) {
+      const target = version(state, first.versionId);
+      if (Number(args.expectedRevision) < target.entry.revision || Number(args.expectedRevision) > state.artifact.revision) throw new StudioError('CONFLICT', '请读取包含所选操作的作品版本后再撤销。', { revision: state.artifact.revision });
+      // The original transaction and live affected units are checked atomically by restoreVersion below.
+    } else {
+      if (!expected || !Object.keys(expected).length) throw new StudioError('CONFLICT', '作品已被修改，请读取最新版本后重试。', { revision: state.artifact.revision });
+      for (const operation of operations) {
+        if (!object(operation)) throw new StudioError('INVALID_ARGUMENT', '作品操作无效。');
+        const targets = mutationTargets(state.content, operation, adapter);
+        if (!targets) throw new StudioError('CONFLICT', '整体操作需要读取最新版本后重试。', { revision: state.artifact.revision });
+        if (targets.some(id => typeof id !== 'string' || !Object.hasOwn(expected, id))) throw new StudioError('CONFLICT', '过期提交必须核对所有目标对象的版本。', { revision: state.artifact.revision });
+      }
     }
   }
   const bases = new Map<string, unknown>();
@@ -160,13 +202,13 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(state: Artifa
     }
     if (operation.op === 'restore') {
       const saved = version(state, operation.versionId);
-      changedIds.push(...restoreVersion(state, saved, actor, adapter, operation.data?.mode === 'undo' || operation.data?.undo === true || operation.preset === 'undo', restoreUnitIds(operation), baseline));
+      changedIds.push(...restoreVersion(state, saved, actor, adapter, isUndo(operation), restoreUnitIds(operation), baseline));
       restoredFrom = saved.entry.id;
     } else changedIds.push(...adapter.apply(state.content, operation, baseline));
     if (adapter.syncVersions) adapter.syncVersions(state.content, previous, state.unitClocks!);
   }
   adapter.validate(state.content);
-  const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? '恢复作品内容' : '修改作品', 500), changedIds, restoredFrom);
+  const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? '恢复作品内容' : '修改作品', 500), changedIds, { ...(restoredFrom ? { restoredFrom } : {}), ...(standaloneUndo ? { restoreMode: 'undo' } : {}) });
   state.operations.push({ id: operationId, fingerprint, historyId: historyEntry.id });
   state.operations = state.operations.filter(item => state.history.some(saved => saved.entry.id === item.historyId)).slice(-500);
   return { snapshot: copy({ artifact: state.artifact, content: state.content }), historyEntry: copy(historyEntry), changed: true };

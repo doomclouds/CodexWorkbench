@@ -129,6 +129,7 @@ export function makeElement(type: ElementType, point: Point, overrides: Partial<
     arrow: { w: 180, h: 1, from: [point.x, point.y], to: [point.x + 180, point.y], color: 'muted', head: 'end' },
     html: { w: 1440, h: 1120, text: 'HTML 图解', html: '' },
     document: { w: 680, h: 560, text: '文档', fill: DEFAULT_REGION_FILL, document: defaultDocument() },
+    todo: { w: 540, h: 420, text: '任务清单', fill: DEFAULT_REGION_FILL, data: { items: [] } },
     image: { w: 360, h: 240 },
     table: { w: 480, h: 180, data: { rows: [['名称', '说明', '状态'], ['项目 A', '双击编辑表格', '进行中'], ['项目 B', '待补充', '待处理']] }, fill: '#ffffff', color: '#2d3142' },
     link: { w: 320, h: 94, text: '链接', href: 'https://example.com', fill: '#ffffff' },
@@ -198,16 +199,36 @@ export function tableRows(element: BoardElement): string[][] {
   return [['']];
 }
 
-/** Keep selection actions inside the canvas without covering its persistent view controls. */
-export function placeFormatToolbar(anchor: Point, size: { w: number; h: number }, viewport: { w: number; h: number }, topTools?: Rect): Point {
-  const margin = 12;
-  const position = {
-    x: clamp(anchor.x, margin + size.w / 2, Math.max(margin + size.w / 2, viewport.w - margin - size.w / 2)),
-    y: clamp(anchor.y, margin, Math.max(margin, viewport.h - margin - size.h)),
-  };
-  const gap = 8;
-  if (!topTools || position.x + size.w / 2 <= topTools.x - gap || position.x - size.w / 2 >= topTools.x + topTools.w + gap || position.y + size.h <= topTools.y - gap || position.y >= topTools.y + topTools.h + gap) return position;
-  const left = topTools.x - gap - size.w / 2;
-  if (left >= margin + size.w / 2) return { x: left, y: position.y };
-  return { x: position.x, y: clamp(topTools.y + topTools.h + gap, margin, Math.max(margin, viewport.h - margin - size.h)) };
+/** Place selection actions in screen space, beyond the projected object and its editing affordances. */
+export function placeFormatToolbar(anchor: Rect, size: { w: number; h: number }, viewport: { w: number; h: number }, obstacles: readonly Rect[] = []): (Point & { w: number }) | undefined {
+  const margin = 12, gap = 8;
+  const right = viewport.w - margin, bottom = viewport.h - margin - size.h;
+  const width = Math.min(size.w, right - margin);
+  if (width <= 0 || bottom < margin) return;
+  const center = anchor.x + anchor.w / 2;
+  const above = anchor.y - gap - size.h, below = anchor.y + anchor.h + gap;
+  const fallbackRows = [margin, bottom, ...obstacles.flatMap(rect => [rect.y - gap - size.h, rect.y + rect.h + gap])];
+  fallbackRows.sort((a, b) => Math.abs(a - above) - Math.abs(b - above));
+  const rows = [...new Set([above, below, clamp(above, margin, bottom), ...fallbackRows])].filter(y => y >= margin && y <= bottom);
+  let compact: (Point & { w: number }) | undefined;
+  for (const y of rows) {
+    const blocks = obstacles.filter(rect => y + size.h + gap > rect.y && y < rect.y + rect.h + gap).sort((a, b) => a.x - b.x);
+    const free: Array<{ left: number; right: number }> = [];
+    let left = margin;
+    for (const block of blocks) {
+      const end = Math.min(right, block.x - gap);
+      if (end > left) free.push({ left, right: end });
+      left = Math.max(left, block.x + block.w + gap);
+    }
+    if (left < right) free.push({ left, right });
+    const candidates = free.map(slot => {
+      const w = Math.min(width, slot.right - slot.left);
+      return { x: clamp(center, slot.left + w / 2, slot.right - w / 2), y, w };
+    }).sort((a, b) => Math.abs(a.x - center) - Math.abs(b.x - center));
+    const full = candidates.find(candidate => candidate.w === width);
+    if (full) return full;
+    // Keep the same scroller and controls if only a narrower slot is available.
+    compact ??= candidates.find(candidate => candidate.w >= Math.min(144, width));
+  }
+  return compact;
 }

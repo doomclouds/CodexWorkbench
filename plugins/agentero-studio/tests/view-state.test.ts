@@ -20,7 +20,11 @@ async function agentTask(board: Board) {
   if (!task) throw new Error('The fixture Agent task was not created');
   return { taskId: task.taskId, generation: task.generation };
 }
-function operation(board: Board, id = 'a') { return { artifactId: board.artifact.id, operationId: randomUUID(), expectedVersions: { [id]: board.elements.find(element => element.id === id)!.version }, operations: [{ op: 'update', id, changes: { text: '更新' } }] }; }
+type ReadObjects = Pick<Board, 'artifact' | 'elements'>;
+function operation(board: ReadObjects, id = 'a', text = '更新') { return { artifactId: board.artifact.id, operationId: randomUUID(), expectedVersions: { [id]: board.elements.find(element => element.id === id)!.version }, operations: [{ op: 'update', id, changes: { text } }] }; }
+function readObject(artifactId: string, id: string): Promise<ReadObjects> {
+  return service.execute('artifact_read', { artifactId, mode: 'objects', ids: [id] }, agent);
+}
 
 describe('live view activity and Agent coordination', () => {
   it('preserves each view selection and activity and limits its reported issues', async () => {
@@ -38,7 +42,8 @@ describe('live view activity and Agent coordination', () => {
     await service.updatePresence(artifactId, { peerId: 'peer-a', context: { artifactId, viewId: 'view-a', selectedIds: [], editingIds: ['a'] } }, editor);
     await expect(service.execute('artifact_apply', { ...operation(board), ...binding }, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS', details: { ids: ['a'] } });
     const independent = await service.execute('artifact_apply', { ...operation(board, 'b'), ...binding }, agent);
-    expect(independent.board.elements.find((element: { id: string }) => element.id === 'b').text).toBe('更新');
+    expect(independent).not.toHaveProperty('board');
+    expect((await readObject(artifactId, 'b')).elements).toMatchObject([{ id: 'b', text: '更新' }]);
     const human = await service.execute('artifact_apply', operation(board), LOCAL_ACTOR);
     expect(human.board.elements.find((element: { id: string }) => element.id === 'a').text).toBe('更新');
   });
@@ -48,16 +53,23 @@ describe('live view activity and Agent coordination', () => {
     await service.updatePresence(artifactId, { peerId: 'peer-a', context: { artifactId, viewId: 'view-a', selectedIds: [], editingIds: ['a'] } }, editor);
     expect(await service.execute('artifact_apply', args, agent)).toEqual(first);
     await service.updatePresence(artifactId, { peerId: 'peer-a', leave: true }, editor);
-    expect(await service.execute('artifact_apply', { ...operation(first.board), taskId: args.taskId, generation: args.generation }, agent)).toHaveProperty('board');
+    const before = await readObject(artifactId, 'a');
+    const changed = await service.execute('artifact_apply', { ...operation(before, 'a', '离开后更新'), taskId: args.taskId, generation: args.generation }, agent);
+    expect(changed).toMatchObject({ artifact: { revision: before.artifact.revision + 1 } });
+    expect((await readObject(artifactId, 'a')).elements).toMatchObject([{ id: 'a', text: '离开后更新' }]);
   });
   it('does not treat a viewer selection as an editor lock and expires stale editing views', async () => {
     const board = await create(), artifactId = board.artifact.id;
     const binding = await agentTask(board);
     await service.updatePresence(artifactId, { peerId: 'viewer-a', context: { artifactId, viewId: 'viewer-view', selectedIds: ['a'], editingIds: ['a'] } }, viewer);
     const first = await service.execute('artifact_apply', { ...operation(board), ...binding }, agent);
+    expect(first).not.toHaveProperty('board');
     await service.updatePresence(artifactId, { peerId: 'editor-a', context: { artifactId, viewId: 'editor-view', selectedIds: [], editingIds: ['a'] } }, editor);
     const now = Date.now(); vi.spyOn(Date, 'now').mockReturnValue(now + 46_000);
-    expect(await service.execute('artifact_apply', { ...operation(first.board), ...binding }, agent)).toHaveProperty('board');
+    const before = await readObject(artifactId, 'a');
+    const changed = await service.execute('artifact_apply', { ...operation(before, 'a', '过期后更新'), ...binding }, agent);
+    expect(changed).toMatchObject({ artifact: { revision: before.artifact.revision + 1 } });
+    expect((await readObject(artifactId, 'a')).elements).toMatchObject([{ id: 'a', text: '过期后更新' }]);
   });
   it('retains the processing actor through replies and clears it only on an explicit state transition', async () => {
     const board = await create(), artifactId = board.artifact.id;

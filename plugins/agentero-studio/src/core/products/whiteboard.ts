@@ -7,6 +7,7 @@ import type { ProductDefinition } from '../shared/products.js';
 import { arrowGeometry } from './whiteboard-geometry.js';
 import { inlineExportAssets } from '../serialization.js';
 import { applyDocumentOperations, defaultDocument, documentBlockText, documentPlainText, flattenDocumentBlocks, normalizeDocument, type DocumentBlockOperation } from '../../contracts/document.js';
+import { applyTodoOperations, isTodoId, normalizeTodoItems, TODO_ITEM_LIMIT, TODO_TEXT_BYTES, type TodoItem, type TodoOperation } from '../../contracts/todo.js';
 
 export type WhiteboardContent = Omit<Board, 'artifact'>;
 export type SourceSnapshot = { version: number; artifactId: string; feedbackId?: string; element?: BoardElement } & (
@@ -18,7 +19,7 @@ export function boardView(snapshot: Snapshot<WhiteboardContent>): Board { return
 export function validateWhiteboardAsset(mimeType: string): void {
   if (!/^(image\/(png|jpeg|gif|webp|svg\+xml)|video\/(mp4|webm|quicktime))$/.test(mimeType)) throw new StudioError('INVALID_ARGUMENT', '白板仅接收图片和视频资源。');
 }
-const TYPES = new Set(['shape', 'container', 'text', 'stroke', 'arrow', 'image', 'html', 'document', 'table', 'link', 'note', 'sticker', 'diagram', 'chart']);
+const TYPES = new Set(['shape', 'container', 'text', 'stroke', 'arrow', 'image', 'html', 'document', 'table', 'link', 'note', 'sticker', 'diagram', 'chart', 'todo']);
 function validateLayoutLabel(element: BoardElement): void {
   const offset = element.labelOffset, size = element.labelSize;
   if (offset !== undefined && (!object(offset) || !['x', 'y'].every(key => typeof offset[key as 'x' | 'y'] === 'number' && Number.isFinite(offset[key as 'x' | 'y']) && Math.abs(offset[key as 'x' | 'y']) <= 10_000_000))) throw new StudioError('INVALID_ARGUMENT', '连接线标签偏移无效。');
@@ -56,7 +57,13 @@ export function normalizeElement(input: Partial<BoardElement>, id?: string): Boa
     result.document = normalizeDocument(input.document ?? defaultDocument());
     if (result.html !== undefined) throw new StudioError('INVALID_ARGUMENT', '文档使用块 JSON 保存，不能同时包含 HTML 源。');
   }
+  if (result.type === 'todo') result.data = todoData(result);
   return result;
+}
+function todoData(element: BoardElement): Record<string, unknown> {
+  if ((element.data !== undefined && !object(element.data)) || element.html !== undefined || element.document !== undefined) throw new StudioError('INVALID_ARGUMENT', '任务清单须使用 data.items 保存任务行。');
+  if (element.text !== undefined && (typeof element.text !== 'string' || Buffer.byteLength(element.text) > TODO_TEXT_BYTES)) throw new StudioError('INVALID_ARGUMENT', '任务清单标题无效或过长。');
+  return { ...element.data, items: normalizeTodoItems(element.data?.items) };
 }
 function tableIdentity(id: string, value: unknown): Record<string, unknown> {
   const data = object(value) ? copy(value) : {}, rows = data.rows;
@@ -81,6 +88,21 @@ function safeElementMerge(base: BoardElement, local: BoardElement, current: Boar
     const bd = b.data as Record<string, unknown>, ld = l.data as Record<string, unknown>, cd = c.data as Record<string, unknown>;
     if (jsonEqual(bd.rowIds, ld.rowIds) && jsonEqual(bd.rowIds, cd.rowIds) && jsonEqual(bd.columnIds, ld.columnIds) && jsonEqual(bd.columnIds, cd.columnIds)) matrices.push('data.rows');
     else if (!jsonEqual(bd.rows, ld.rows) && !jsonEqual(bd.rows, cd.rows)) return { result: c, conflicts: ['data.rows', 'data.rowIds', 'data.columnIds'] };
+  }
+  if (base.type === 'todo' && local.type === 'todo' && current.type === 'todo') {
+    const original = normalizeTodoItems(base.data?.items), incoming = normalizeTodoItems(local.data?.items), saved = normalizeTodoItems(current.data?.items);
+    if (original.length === incoming.length && original.length === saved.length && original.every((item, index) => item.id === incoming[index]!.id && item.id === saved[index]!.id)) {
+      const conflicts: string[] = [];
+      const items = original.map((item, index) => {
+        const next = incoming[index]!, existing = saved[index]!;
+        if (jsonEqual(item, next)) return existing;
+        if (jsonEqual(item, existing) || jsonEqual(next, existing)) return next;
+        conflicts.push('data.items.' + item.id);
+        return existing;
+      });
+      if (conflicts.length) return { result: c, conflicts };
+      b.data = { ...base.data, items }; l.data = { ...local.data, items }; c.data = { ...current.data, items };
+    }
   }
   return mergeJson(b, l, c, matrices);
 }
@@ -162,6 +184,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       normalizeDocument(element.document);
       if (element.html !== undefined) throw new StudioError('INVALID_ARGUMENT', '文档不能同时保存 HTML 源。');
     }
+    for (const element of content.elements) if (element.type === 'todo') todoData(element);
   },
   versionOf: (content, id) => id === '$order' ? content.orderVersion ?? 0 : content.elements.find(item => item.id === id)?.version ?? 0,
   syncVersions: syncElementVersions,
@@ -184,7 +207,7 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     if (operation.op === 'layout') { const ids = operation.ids ?? content.elements.map(element => element.id); return ['front', 'back', 'forward', 'backward'].includes(operation.preset ?? '') ? [...ids, '$order'] : ids; }
     // Deleting a node also deletes attached arrows; CAS covers those indirect edits.
     if (operation.op === 'delete') return [...new Set([...(operation.ids ?? [safeId(operation.id, '元素 ID')]), ...deletedIds(content, operation)])];
-    if (operation.op === 'update' || operation.op === 'document') return [safeId(operation.id, '元素 ID')];
+    if (operation.op === 'update' || operation.op === 'document' || operation.op === 'todo') return [safeId(operation.id, '元素 ID')];
     return [];
   },
   apply(content, operation, baseline = content) {
@@ -202,6 +225,13 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (Object.hasOwn(operation.changes, 'locked') && typeof operation.changes.locked !== 'boolean') throw new StudioError('INVALID_ARGUMENT', 'locked 必须是布尔值。');
       if (current.locked && operation.changes.locked === false && Object.keys(operation.changes).length !== 1) throw new StudioError('LOCKED', '请通过单独的锁定操作明确解锁。', { elementId: id });
       const { id: _id, version: _version, ...changes } = copy(operation.changes);
+      if (changes.type !== undefined && changes.type !== current.type && (current.type === 'todo' || changes.type === 'todo')) throw new StudioError('INVALID_ARGUMENT', '请单独创建任务清单，不能直接转换已有对象的类型。');
+      if (current.type === 'todo' && Object.hasOwn(changes, 'data')) {
+        if (!object(changes.data)) throw new StudioError('INVALID_ARGUMENT', '任务清单属性无效。');
+        const items = normalizeTodoItems(current.data?.items);
+        if (Object.hasOwn(changes.data, 'items') && !jsonEqual(normalizeTodoItems(changes.data.items), items)) throw new StudioError('INVALID_ARGUMENT', '任务内容请使用 todo 逐行修改。');
+        changes.data = { ...current.data, ...changes.data, items };
+      }
       if (current.type === 'arrow' && [...['from', 'to', 'fromSide', 'toSide', 'bends'], ...(!current.locked ? ['label'] : [])].some(key => Object.hasOwn(changes, key) && !same(changes[key], current[key]))) {
         if (!Object.hasOwn(changes, 'labelOffset')) changes.labelOffset = undefined;
         if (!Object.hasOwn(changes, 'labelSize')) changes.labelSize = undefined;
@@ -222,6 +252,14 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       const document = applyDocumentOperations(current.document, operation.data?.operations as DocumentBlockOperation[]);
       if (same(document, current.document)) return [];
       current.document = document; current.version++; return [id];
+    }
+    if (operation.op === 'todo') {
+      const id = safeId(operation.id, '任务清单 ID'), current = content.elements.find(item => item.id === id);
+      if (!current || current.type !== 'todo') throw new StudioError('NOT_FOUND', '任务清单不存在。');
+      const before = normalizeTodoItems(current.data?.items);
+      const items = applyTodoOperations(before, operation.data?.operations as TodoOperation[]);
+      if (same(items, before)) return [];
+      current.data = { ...current.data, items }; current.version++; return [id];
     }
     if (operation.op === 'delete') { const ids = deletedIds(content, operation), elements = content.elements.filter(element => !ids.includes(element.id)); assertLockedGeometry(content, { ...content, elements }, baseline); content.elements = elements; if (ids.length) content.orderVersion = (content.orderVersion ?? 0) + 1; return ids; }
     if (operation.op === 'style') {
@@ -261,10 +299,14 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
     return [...elementChanges(before, after), ...(orderChanged(before, after) ? [{ id: '$order', before: orderUnit(before), after: orderUnit(after) }] : []), ...(['style', 'motion'] as const).flatMap(key => same(before[key], after[key]) ? [] : [{ id: `$${key}`, before: before[key], after: after[key] }])];
   },
   readUnit(content, id) { return id === '$style' ? content.style : id === '$motion' ? content.motion : id === '$order' ? orderUnit(content) : content.elements.find(item => item.id === id) ?? null; },
-  undoUnit(content, change, history = []) {
-    const current = this.readUnit(content, change.id);
+  undoUnit(content, change, history, { current, changesWereReversed }) {
     if (change.id === '$order' || !object(change.before) || !object(change.after) || !object(current)) {
-      if (!jsonEqual(current, change.after)) throw new StudioError('CONFLICT', '后来有人修改了这项内容，不能直接撤回。', { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, ['.']) });
+      if (!jsonEqual(current, change.after)) {
+        const sameValue = object(current) && object(change.after)
+          && (change.id === '$order' ? jsonEqual(current.ids, change.after.ids) : jsonEqual(mergeFields(current), mergeFields(change.after)));
+        const unitVersion = (value: unknown) => object(value) ? value.version : undefined;
+        if (!sameValue || !changesWereReversed((before, after) => unitVersion(before) !== unitVersion(after))) throw new StudioError('CONFLICT', '后来有人修改了这项内容，不能直接撤回。', { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, ['.']) });
+      }
       this.restoreUnit(content, change, history); return;
     }
     if (change.id === '$style' || change.id === '$motion') {
@@ -328,9 +370,9 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
   },
   snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
     const anchor: Anchor = object(value) ? copy(value) : {};
-    if (anchor.pin !== undefined && (!isCommentPin(anchor.pin) || anchor.pin.coordinateSpace === 'document' && anchor.coordinateSpace !== 'document')) throw new StudioError('INVALID_ARGUMENT', '备注气泡位置无效。');
+    if (anchor.pin !== undefined && (!isCommentPin(anchor.pin) || (anchor.pin.coordinateSpace !== 'board' && anchor.pin.coordinateSpace !== anchor.coordinateSpace))) throw new StudioError('INVALID_ARGUMENT', '备注气泡位置无效。');
     if (anchor.elementIds !== undefined && (!Array.isArray(anchor.elementIds) || anchor.elementIds.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '备注元素定位无效。');
-    if (anchor.coordinateSpace !== undefined && !['board', 'element', 'html', 'document'].includes(anchor.coordinateSpace)) throw new StudioError('INVALID_ARGUMENT', '备注坐标空间无效。');
+    if (anchor.coordinateSpace !== undefined && !['board', 'element', 'html', 'document', 'todo'].includes(anchor.coordinateSpace)) throw new StudioError('INVALID_ARGUMENT', '备注坐标空间无效。');
     for (const key of ['x', 'y', 'w', 'h'] as const) if (anchor[key] !== undefined) finite(anchor[key], 0);
     if ((anchor.w ?? 0) < 0 || (anchor.h ?? 0) < 0) throw new StudioError('INVALID_ARGUMENT', '备注范围尺寸不能为负数。');
     if (anchor.coordinateSpace === 'element' && (!anchor.elementIds?.length || [anchor.x, anchor.y].some(value => value !== undefined && (value < 0 || value > 1)))) throw new StudioError('INVALID_ARGUMENT', '对象备注需要定位对象，且相对坐标须在 0 到 1 之间。');
@@ -340,6 +382,12 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (anchor.sourceVersion !== undefined && (!Number.isSafeInteger(anchor.sourceVersion) || anchor.sourceVersion < 1)) throw new StudioError('INVALID_ARGUMENT', '文档来源版本无效。');
       if (!versions && anchor.sourceVersion !== undefined) versions = { [anchor.elementIds[0]!]: anchor.sourceVersion };
       if (versions && anchor.sourceVersion !== undefined && versions[anchor.elementIds[0]!] !== anchor.sourceVersion) throw new StudioError('INVALID_ARGUMENT', '文档来源版本与选区版本不一致。');
+    }
+    if (anchor.coordinateSpace === 'todo') {
+      if (anchor.elementIds?.length !== 1 || anchor.regionId !== undefined || !isTodoId(anchor.itemId) || [anchor.x, anchor.y].some(value => value !== undefined && (value < 0 || value > 1))) throw new StudioError('INVALID_ARGUMENT', '任务备注需要一个清单和实际任务行 ID，行内坐标须在 0 到 1 之间。');
+      if (!Number.isSafeInteger(anchor.sourceVersion) || anchor.sourceVersion! < 1) throw new StudioError('INVALID_ARGUMENT', '任务行备注需要有效的来源版本。');
+      if (!versions) versions = { [anchor.elementIds[0]!]: anchor.sourceVersion! };
+      if (versions[anchor.elementIds[0]!] !== anchor.sourceVersion) throw new StudioError('INVALID_ARGUMENT', '任务行来源版本与选区版本不一致。');
     }
     if (anchor.sourceRevision !== undefined && (!Number.isInteger(anchor.sourceRevision) || anchor.sourceRevision < 1 || !anchor.regionId)) throw new StudioError('INVALID_ARGUMENT', '备注源码版本无效。');
     if (anchor.targetIds !== undefined && (!Array.isArray(anchor.targetIds) || anchor.targetIds.length > 100 || anchor.targetIds.some(id => typeof id !== 'string' || id.length > 160 || /[\u0000-\u001f]/.test(id)))) throw new StudioError('INVALID_ARGUMENT', 'HTML 备注目标无效。');
@@ -362,20 +410,28 @@ export const whiteboardAdapter: ProductAdapter<WhiteboardContent, Operation, Anc
       if (!selected || ambiguous) throw new StudioError('CONFLICT', '原选区的对象版本已不可用，请重新选择目标后保存备注。', { elementId: id, version: versions[id] });
       return selected;
     });
+    const normalizeQuote = (value: string) => value.replace(/\s+/g, ' ').trim();
     if (anchor.coordinateSpace === 'document') {
       const element = elements[0]!;
       if (element.type !== 'document' || !element.document) throw new StudioError('INVALID_ARGUMENT', '备注目标不是文档区域。');
       const blocks = flattenDocumentBlocks(element.document.blocks), selected = anchor.blockIds!.map(id => blocks.find(block => block.id === id));
       if (selected.some(block => !block)) throw new StudioError('CONFLICT', '原选区的段落已不可用，请重新选择。');
-      const normalize = (value: string) => value.replace(/\s+/g, ' ').trim();
-      if (anchor.quote && !normalize(selected.map(block => documentBlockText(block!)).join('\n')).includes(normalize(anchor.quote))) throw new StudioError('CONFLICT', '选中文字不属于所提供的文档段落版本。');
+      if (anchor.quote && !normalizeQuote(selected.map(block => documentBlockText(block!)).join('\n')).includes(normalizeQuote(anchor.quote))) throw new StudioError('CONFLICT', '选中文字不属于所提供的文档段落版本。');
+      anchor.sourceVersion = element.version;
+    }
+    let todoItem: TodoItem | undefined;
+    if (anchor.coordinateSpace === 'todo') {
+      const element = elements[0]!;
+      if (element.type !== 'todo') throw new StudioError('INVALID_ARGUMENT', '备注目标不是任务清单。');
+      todoItem = normalizeTodoItems(element.data?.items).find(item => item.id === anchor.itemId);
+      if (!todoItem || (anchor.quote && !normalizeQuote(todoItem.text).includes(normalizeQuote(anchor.quote)))) throw new StudioError('CONFLICT', '选中的任务行或原文字不属于所提供的来源版本。');
       anchor.sourceVersion = element.version;
     }
     // Historical source references remain valid; current-element coordinates cannot cross reincarnation.
-    if (anchor.coordinateSpace === 'element' || anchor.coordinateSpace === 'document') for (const element of elements) if (element.version < (clocks?.[element.id]?.incarnationStart ?? 1)) throw new StudioError('CONFLICT', '原选区属于已删除的对象，请重新选择目标后保存备注。', { elementId: element.id, version: element.version });
+    if (anchor.coordinateSpace === 'element' || anchor.coordinateSpace === 'document' || anchor.coordinateSpace === 'todo') for (const element of elements) if (element.version < (clocks?.[element.id]?.incarnationStart ?? 1)) throw new StudioError('CONFLICT', '原选区属于已删除的对象，请重新选择目标后保存备注。', { elementId: element.id, version: element.version });
     const sources: SourceSnapshot[] = elements.map(element => typeof element.html === 'string'
       ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) }
-      : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });
+      : { artifactId, feedbackId, elementId: element.id, element: todoItem ? { ...copy(element), data: { items: [todoItem] } } : copy(element), version: element.version });
     return { anchor, versions: Object.fromEntries(elements.map(element => [element.id, element.version])), sources };
   },
 };
@@ -405,6 +461,26 @@ export const whiteboardProduct: ProductDefinition<WhiteboardContent, Operation, 
       return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, counts: state.content.elements.reduce<Record<string, number>>((out, item) => { out[item.type] = (out[item.type] ?? 0) + 1; return out; }, {}), items, totalCount: state.content.elements.length, offset, ...(offset + limit < state.content.elements.length ? { nextOffset: offset + limit } : {}), feedback: state.feedback.filter(item => item.status !== 'resolved').length };
     }
     if (mode === 'objects') { const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : undefined; return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, elements: state.content.elements.filter(item => !ids || ids.includes(item.id)), ...(ids?.includes('$order') ? { units: [{ id: '$order', value: orderUnit(state.content) }] } : {}) }; }
+    if (mode === 'tasks') {
+      const elementId = safeId(args.elementId, '任务清单 ID');
+      const element = args.feedbackId === undefined ? state.content.elements.find(item => item.id === elementId)
+        : state.sources[safeId(args.feedbackId, '反馈 ID')]?.find(source => source.element?.id === elementId)?.element;
+      if (!element || element.type !== 'todo') throw new StudioError('NOT_FOUND', '任务清单不存在。');
+      const ids = args.itemIds;
+      if (ids !== undefined && (!Array.isArray(ids) || !ids.length || ids.length > TODO_ITEM_LIMIT || !ids.every(isTodoId))) throw new StudioError('INVALID_ARGUMENT', '任务行 ID 列表无效。');
+      if (args.checked !== undefined && typeof args.checked !== 'boolean') throw new StudioError('INVALID_ARGUMENT', '任务完成筛选须为布尔值。');
+      if ((args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0)) ||
+          (args.limit !== undefined && (!Number.isSafeInteger(args.limit) || Number(args.limit) < 1 || Number(args.limit) > 20))) throw new StudioError('INVALID_ARGUMENT', '任务行分页无效，每页最多 20 行。');
+      const all = normalizeTodoItems(element.data?.items);
+      const selected = all.filter(item => (!ids || ids.includes(item.id)) && (args.checked === undefined || item.checked === args.checked));
+      const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? 10), next = offset + limit;
+      return {
+        artifactId: state.artifact.id, elementId, version: element.version, title: element.text ?? '任务清单',
+        items: selected.slice(offset, next), totalCount: selected.length, totalItems: all.length,
+        completedCount: all.filter(item => item.checked).length, offset,
+        ...(next < selected.length ? { nextOffset: next } : {}),
+      };
+    }
     if (mode === 'blocks') {
       const elementId = safeId(args.elementId ?? args.regionId, '文档 ID');
       const element = args.feedbackId ? state.sources[safeId(args.feedbackId, '反馈 ID')]?.find(source => source.element?.id === elementId)?.element : state.content.elements.find(item => item.id === elementId && item.type === 'document');

@@ -62,7 +62,9 @@ describe('whiteboard geometry locks', () => {
     await add({ id: 'html-a', type: 'html', html: '<h1>Before</h1>', locked: true, x: 20, y: 30, w: 400, h: 300 });
     const task = actor.kind === 'agent' ? await beginAgentTask(['html-a']) : {};
     const first = await apply([{ op: 'update', id: 'html-a', changes: { html: '<h2>After</h2>', state: { active: true }, text: 'Updated', fill: '#ffeedd', stroke: '#333', fontSize: 28 } }], actor, task);
-    expect(first.board.elements[0]).toMatchObject({ x: 20, y: 30, w: 400, h: 300, locked: true, version: 2, sourceRevision: 2, state: { active: true }, text: 'Updated', fill: '#ffeedd' });
+    expect(first.historyEntry.changedIds).toEqual(['html-a']);
+    const verified = await service.execute('artifact_read', { artifactId, mode: 'objects', ids: ['html-a'] }, actor);
+    expect(verified.elements).toMatchObject([{ id: 'html-a', x: 20, y: 30, w: 400, h: 300, locked: true, version: 2, sourceRevision: 2, state: { active: true }, text: 'Updated', fill: '#ffeedd' }]);
     await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Stale' } }], actor, { ...task, expectedVersions: { 'html-a': 1 } })).rejects.toMatchObject({ code: 'CONFLICT' });
     await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Viewer' } }], viewer)).rejects.toMatchObject({ code: 'FORBIDDEN' });
     await expect(apply([{ op: 'update', id: 'html-a', changes: { text: 'Commenter' } }], commenter)).rejects.toMatchObject({ code: 'FORBIDDEN' });

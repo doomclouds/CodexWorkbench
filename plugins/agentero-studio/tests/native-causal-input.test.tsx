@@ -108,8 +108,10 @@ it.each([false, true])('retains undo across a remote revision and protects later
   const current = await service.execute('artifact_read', { artifactId: board.artifact.id }) as Board, target = current.elements.find(element => element.id === (sameField ? 'one' : 'two'))!;
   const { board: remote } = await service.execute('artifact_apply', { artifactId: board.artifact.id, operationId: crypto.randomUUID(), expectedVersions: { [target.id]: target.version }, operations: [{ op: 'update', id: target.id, changes: sameField ? { color: '#2E8B57' } : { text: 'remote survives' } }] }, { ...LOCAL_ACTOR, id: 'remote', role: 'editor' }) as { board: Board };
   await act(async () => receive(remote)); await event(query('缩放菜单'), 'click'); expect((query('撤销') as HTMLButtonElement).disabled).toBe(false); await event(query('撤销'), 'click');
-  if (sameField) await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); }); expect(activity.mock.lastCall?.[0].saveError).toBeTruthy(); });
-  else await settled(call, 2, activity);
+  if (sameField) {
+    await until(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('无法撤销'));
+    expect(activity.mock.lastCall?.[0].saveError).toBe('');
+  } else await settled(call, 2, activity);
   const latest = await service.execute('artifact_read', { artifactId: board.artifact.id }) as Board;
   expect(latest.elements.find(element => element.id === 'one')!.color).toBe(sameField ? '#2E8B57' : '#0B0B0B');
   if (!sameField) expect(latest.elements.find(element => element.id === 'two')!.text).toBe('remote survives');

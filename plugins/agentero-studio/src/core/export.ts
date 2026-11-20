@@ -37,7 +37,7 @@ async function systemFontBuffers(): Promise<Uint8Array[]> {
   })();
   return await fonts;
 }
-async function png(svg: string, options: ExportOptions): Promise<string> {
+export async function renderSvgPng(svg: string, options: Pick<ExportOptions, 'scale'> = {}, maxPixels = 32_000_000): Promise<{ bytes: Buffer; width: number; height: number }> {
   if (/<foreignObject\b/i.test(svg)) throw new ExportError('EXPORT_BROWSER_REQUIRED', '完整 HTML 布局需要浏览器渲染，请在白板界面导出 PNG；也可以单独导出区域内的 SVG 图解。');
   if (/(?:href|xlink:href)\s*=\s*["'](?!#|data:image\/)/i.test(svg)) throw new ExportError('ASSET_NOT_EMBEDDED', 'PNG 导出包含尚未嵌入的外部资源，无法离线完整渲染。');
   await initializeRenderer();
@@ -48,9 +48,12 @@ async function png(svg: string, options: ExportOptions): Promise<string> {
   const renderer = new Resvg(svg, { font: { fontBuffers, defaultFontFamily: process.platform === 'win32' ? 'Microsoft YaHei' : process.platform === 'darwin' ? 'PingFang SC' : 'DejaVu Sans', defaultFontSize: 16 }, fitTo: { mode: 'zoom', value: scale } });
   try {
     const width = Math.ceil(renderer.width * scale); const height = Math.ceil(renderer.height * scale);
-    if (width > 16384 || height > 16384 || width * height > 32_000_000) throw new ExportError('EXPORT_TOO_LARGE', 'PNG 超过 3200 万像素，请缩小范围或降低导出倍数。');
+    if (width > 16384 || height > 16384 || width * height > maxPixels) throw new ExportError('EXPORT_TOO_LARGE', 'PNG 超过像素上限，请缩小范围或降低导出倍数。');
     const image = renderer.render();
-    try { return Buffer.from(image.asPng()).toString('base64'); } finally { image.free(); }
+    try {
+      if (image.width * image.height > maxPixels) throw new ExportError('EXPORT_TOO_LARGE', 'PNG 超过像素上限，请缩小范围或降低导出倍数。');
+      return { bytes: Buffer.from(image.asPng()), width: image.width, height: image.height };
+    } finally { image.free(); }
   } finally { renderer.free(); }
 }
 export async function exportArtifact(board: Board, format: string, options: Record<string, unknown> = {}): Promise<ExportedArtifact> {
@@ -69,7 +72,8 @@ export async function exportArtifact(board: Board, format: string, options: Reco
       svg = buildBoardSvg(board, options);
     }
     if (format === 'svg') return { mimeType: 'image/svg+xml', filename: filenameFor(title, 'svg'), encoding: 'utf8', data: `${svg}\n` };
-    return { mimeType: 'image/png', filename: filenameFor(title, 'png'), encoding: 'base64', data: await png(svg, options) };
+    const { bytes } = await renderSvgPng(svg, options);
+    return { mimeType: 'image/png', filename: filenameFor(title, 'png'), encoding: 'base64', data: bytes.toString('base64') };
   }
   throw new ExportError('UNSUPPORTED_EXPORT', '支持导出 HTML、SVG、PNG 和白板 JSON。');
 }

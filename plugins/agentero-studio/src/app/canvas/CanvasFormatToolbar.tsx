@@ -1,14 +1,15 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { AlignCenter, AlignLeft, AlignRight, Bold, Braces, Crop, Maximize, Italic, Link, List, Lock, MessageSquare, MoreHorizontal, Unlock } from 'lucide-react';
 import type { BoardElement } from '../../contracts/studio.js';
 import { getBoardSticker } from '../../core/products/whiteboard-stickers.js';
-import { arrowHeads, placeFormatToolbar } from './canvas-model.js';
+import { arrowHeads, boundsOf, intersects, placeFormatToolbar, type Rect, type Viewport } from './canvas-model.js';
 import type { InlineTextFormatState } from './InlineTextEditor.js';
 import ColorPalette from './ColorPalette.js';
 import { registerEscapeLayer } from '../shared/escape.js';
 
 interface Props {
-  elements: BoardElement[]; style: CSSProperties; canEdit: boolean; canAnnotate: boolean; saving: boolean; theme: 'light' | 'dark';
+  elements: BoardElement[]; selectionBounds: Rect; viewport: Viewport; titles?: readonly BoardElement[]; editingTitle?: string;
+  canEdit: boolean; canAnnotate: boolean; saving: boolean; theme: 'light' | 'dark';
   onChange: (changes: Partial<BoardElement>, customColors?: string[]) => void; onEditText: () => void;
   onTextFormat: (format: 'bold' | 'italic' | 'list' | 'link' | 'numbered', value?: string) => void;
   onAnnotate: () => void; onReadSelection?: () => void; onEditHtml?: () => void; onCrop?: () => void;
@@ -16,7 +17,26 @@ interface Props {
   customColors?: string[]; onCustomColorsChange?: (colors: string[]) => void;
   onMore: (point: { x: number; y: number }) => void; onAlign: (edge: 'left'|'hcenter'|'right'|'top'|'vcenter'|'bottom') => void;
 }
-export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnotate, saving, theme, onChange, onEditText, onTextFormat, onAnnotate, onReadSelection, onEditHtml, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
+
+function visibleRect(bounds: DOMRect, canvas: DOMRect): Rect | undefined {
+  const x = Math.max(bounds.left, canvas.left), y = Math.max(bounds.top, canvas.top);
+  const w = Math.min(bounds.right, canvas.right) - x, h = Math.min(bounds.bottom, canvas.bottom) - y;
+  return w > 0 && h > 0 ? { x: x - canvas.left, y: y - canvas.top, w, h } : undefined;
+}
+
+function titleRect(title: HTMLElement, canvas: DOMRect): Rect | undefined {
+  const editor = title.querySelector<HTMLElement>('[contenteditable="true"]');
+  if (editor) return visibleRect(editor.getBoundingClientRect(), canvas);
+  if (!title.textContent?.trim()) return;
+  const range = document.createRange();
+  range.selectNodeContents(title);
+  const text = range.getBoundingClientRect?.() ?? title.getBoundingClientRect();
+  const bounds = title.getBoundingClientRect();
+  const left = Math.max(text.left, bounds.left), top = Math.max(text.top, bounds.top);
+  return visibleRect(new DOMRect(left, top, Math.max(0, Math.min(text.right, bounds.right) - left), Math.max(0, Math.min(text.bottom, bounds.bottom) - top)), canvas);
+}
+
+export default function CanvasFormatToolbar({ elements, selectionBounds, viewport, titles, editingTitle, canEdit, canAnnotate, saving, theme, onChange, onTextFormat, onAnnotate, onReadSelection, onEditHtml, onCrop, onMore, onAlign, requestLink, formatState, customColors, onCustomColorsChange }: Props) {
   const [popover, setPopover] = useState<string | null>(null), [link, setLink] = useState('');
   const toolbar = useRef<HTMLDivElement>(null);
   const popoverId = useId();
@@ -42,24 +62,77 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
     const unregister = registerEscapeLayer(toolbar.current!, () => closePopover(true));
     return () => { document.removeEventListener('pointerdown', outside, true); unregister(); };
   }, [Boolean(popover)]);
-  const [position, setPosition] = useState<{ left: number; top: number }>();
   useLayoutEffect(() => {
     const node = toolbar.current, host = node?.parentElement;
     if (!node || !host) return;
-    const topTools = host.querySelector<HTMLElement>('.studio-canvas-top-tools');
+    const controls = [...host.querySelectorAll<HTMLElement>('.studio-canvas-top-tools, .studio-canvas-toolbar')];
+    const scroller = node.querySelector<HTMLElement>('.studio-selection-toolbar-scroll')!;
+    const selectedIds = new Set(elements.map(element => element.id));
+    const selectedHeaders = (titles ?? []).filter(element => selectedIds.has(element.id) || element.id === editingTitle);
+    const neighboringHeaders = (titles ?? []).filter(element => !selectedIds.has(element.id) && element.id !== editingTitle).map(element => {
+      const bottom = viewport.y + element.y * viewport.zoom;
+      const height = element.type === 'html' ? 48 : ((element.text?.length ?? 0) + 1) * Math.max(32, (element.fontSize ?? 16) * 2 + 10) * viewport.zoom;
+      return { id: element.id, bounds: { x: viewport.x + element.x * viewport.zoom, y: bottom - height, w: element.w * viewport.zoom, h: height } };
+    });
+    const observedTitles = new Set<Element>();
     const place = () => {
-      const bounds = node.getBoundingClientRect(), canvas = host.getBoundingClientRect();
-      if (!canvas.width || !canvas.height || !bounds.width) return;
-      const controls = topTools?.getBoundingClientRect();
-      const reserved = controls?.width && controls.height ? { x: controls.left - canvas.left, y: controls.top - canvas.top, w: controls.width, h: controls.height } : undefined;
-      const next = placeFormatToolbar({ x: Number(style.left), y: Number(style.top) }, { w: bounds.width, h: bounds.height }, { w: canvas.width, h: canvas.height }, reserved);
-      setPosition(current => current?.left === next.x && current.top === next.y ? current : { left: next.x, top: next.y });
+      const measured = node.getBoundingClientRect(), canvas = host.getBoundingClientRect();
+      if (!canvas.width || !canvas.height || !measured.width) return;
+      const size = { w: measured.width + Math.max(0, scroller.scrollWidth - scroller.clientWidth), h: measured.height };
+      const area = { w: canvas.width, h: canvas.height };
+      const selectedBox = {
+        x: viewport.x + selectionBounds.x * viewport.zoom, y: viewport.y + selectionBounds.y * viewport.zoom,
+        w: selectionBounds.w * viewport.zoom, h: selectionBounds.h * viewport.zoom,
+      };
+      const rectangles = (nodes: Iterable<Element>) => [...nodes].flatMap(element => visibleRect(element.getBoundingClientRect(), canvas) ?? []);
+      const reserved = rectangles(controls);
+      const chrome = rectangles(host.querySelectorAll('.studio-selection-frame > button, .studio-connection-port, .studio-arrow-handle'));
+      const nearbyNodes = new Set<Element>();
+      const measuredTitles = new Set<string>();
+      const measureTitle = (id: string) => {
+        measuredTitles.add(id);
+        const title = host.querySelector<HTMLElement>(`[data-element-id="${CSS.escape(id)}"] [data-canvas-external-title]`);
+        if (!title) return;
+        nearbyNodes.add(title);
+        return titleRect(title, canvas);
+      };
+      const selectedTitles = selectedHeaders.flatMap(element => measureTitle(element.id) ?? []);
+      const neighboringTitles: Rect[] = [];
+      // Camera changes only project the title candidates. DOM reads are scoped to a proposed toolbar or panel slot.
+      const measureNearby = (rect: Rect) => {
+        const boxes = neighboringHeaders.flatMap(title => !measuredTitles.has(title.id) && intersects(title.bounds, rect) ? measureTitle(title.id) ?? [] : []);
+        neighboringTitles.push(...boxes);
+        return boxes;
+      };
+      const observeTitles = () => {
+        for (const title of observedTitles) if (!nearbyNodes.has(title)) { observer?.unobserve(title); observedTitles.delete(title); }
+        for (const title of nearbyNodes) if (!observedTitles.has(title)) { observer?.observe(title); observedTitles.add(title); }
+      };
+      const anchor = boundsOf([selectedBox, ...chrome, ...selectedTitles])!;
+      const essential = [...reserved, ...chrome, ...selectedTitles];
+      const solve = () => {
+        const protectedArea = [...essential, ...neighboringTitles];
+        return placeFormatToolbar(anchor, size, area, [selectedBox, ...protectedArea])
+          ?? placeFormatToolbar(anchor, size, area, protectedArea)
+          ?? placeFormatToolbar(anchor, size, area, essential);
+      };
+      let next = solve();
+      while (next) {
+        const slot = { x: next.x - next.w / 2 - 8, y: next.y - 8, w: next.w + 16, h: size.h + 16 };
+        if (!measureNearby(slot).some(rect => intersects(rect, slot))) break;
+        next = solve();
+      }
+      node.style.visibility = next ? 'visible' : 'hidden';
+      if (!next) { observeTitles(); return; }
+      node.style.left = `${next.x}px`;
+      node.style.top = `${next.y}px`;
+      node.style.maxWidth = `${next.w}px`;
       const dialog = node.querySelector<HTMLElement>('.studio-format-popover');
       if (dialog) {
         const button = trigger.current;
         if (!button?.isConnected) { setPopover(null); return; }
-        const anchor = button.getBoundingClientRect(), scroller = button.parentElement?.getBoundingClientRect();
-        if (scroller?.width && (anchor.right <= scroller.left || anchor.left >= scroller.right)) { setPopover(null); return; }
+        const bounds = node.getBoundingClientRect(), triggerBounds = button.getBoundingClientRect(), scrollBounds = scroller.getBoundingClientRect();
+        if (scrollBounds.width && (triggerBounds.right <= scrollBounds.left || triggerBounds.left >= scrollBounds.right)) { setPopover(null); return; }
         const leftEdge = Math.max(canvas.left, 0) + 12, rightEdge = Math.min(canvas.right, window.innerWidth) - 12;
         const topEdge = Math.max(canvas.top, 0) + 12, bottomEdge = Math.min(canvas.bottom, window.innerHeight) - 12;
         const maxWidth = Math.max(0, rightEdge - leftEdge);
@@ -67,27 +140,34 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
         dialog.style.minWidth = `${Math.min(220, maxWidth)}px`;
         const panelBounds = dialog.getBoundingClientRect();
         const height = dialog.scrollHeight + panelBounds.height - dialog.clientHeight;
-        const below = Math.max(0, bottomEdge - bounds.bottom - 7), above = Math.max(0, bounds.top - topEdge - 7);
+        const left = Math.max(leftEdge, Math.min(triggerBounds.left, rightEdge - panelBounds.width));
+        measureNearby({ x: left - canvas.left, y: Math.max(topEdge, bounds.top - 7 - height) - canvas.top, w: panelBounds.width, h: Math.min(bottomEdge, bounds.bottom + 7 + height) - Math.max(topEdge, bounds.top - 7 - height) });
+        const blockers = [...reserved, ...selectedTitles, ...neighboringTitles].filter(rect => canvas.left + rect.x < left + panelBounds.width && canvas.left + rect.x + rect.w > left);
+        const belowTop = bounds.bottom + 7, aboveBottom = bounds.top - 7;
+        const belowLimit = Math.min(bottomEdge, ...blockers.filter(rect => canvas.top + rect.y + rect.h > belowTop).map(rect => canvas.top + rect.y - 7));
+        const aboveLimit = Math.max(topEdge, ...blockers.filter(rect => canvas.top + rect.y < aboveBottom).map(rect => canvas.top + rect.y + rect.h + 7));
+        const below = Math.max(0, belowLimit - belowTop), above = Math.max(0, aboveBottom - aboveLimit);
         const useAbove = height > below && above > below, maxHeight = useAbove ? above : below;
-        const left = Math.max(leftEdge, Math.min(anchor.left, rightEdge - panelBounds.width));
-        const top = useAbove ? bounds.top - 7 - Math.min(height, maxHeight) : bounds.bottom + 7;
+        const top = useAbove ? aboveBottom - Math.min(height, maxHeight) : belowTop;
         dialog.style.left = `${left - bounds.left - node.clientLeft}px`;
         dialog.style.top = `${top - bounds.top - node.clientTop}px`;
         dialog.style.maxHeight = `${maxHeight}px`;
         dialog.dataset.placement = useAbove ? 'above' : 'below';
         dialog.style.visibility = 'visible';
       }
+      observeTitles();
     };
-    place();
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(place) : undefined;
-    observer?.observe(node); observer?.observe(host); if (topTools) observer?.observe(topTools);
+    observer?.observe(node); observer?.observe(host);
+    for (const control of controls) observer?.observe(control);
     const dialog = node.querySelector<HTMLElement>('.studio-format-popover');
     if (dialog) observer?.observe(dialog);
+    place();
     const scroll = (event: Event) => { if (!(event.target instanceof Node) || !dialog?.contains(event.target)) place(); };
     document.addEventListener('scroll', scroll, true);
     window.addEventListener('resize', place);
     return () => { observer?.disconnect(); document.removeEventListener('scroll', scroll, true); window.removeEventListener('resize', place); };
-  }, [style.left, style.top, elements.length, popover, position?.left, position?.top]);
+  }, [selectionBounds.x, selectionBounds.y, selectionBounds.w, selectionBounds.h, viewport, titles, editingTitle, popover]);
   useEffect(() => {
     if (!requestLink || !linkButton.current) return;
     rememberTrigger(linkButton.current);
@@ -102,7 +182,8 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
   const selected = elements.length === 1 ? elements[0] : undefined;
   const html = selected && (selected.type === 'html' || selected.type === 'diagram' && typeof selected.html === 'string');
   const documentRegion = selected?.type === 'document';
-  const regionTitle = selected?.text || (documentRegion ? '文档' : 'HTML 图解');
+  const todo = selected?.type === 'todo';
+  const regionTitle = selected?.text || (documentRegion ? '文档' : todo ? '任务清单' : 'HTML 图解');
   const text = elements.every(element => ['shape','note','text','container','arrow','table'].includes(element.type) || element.type === 'sticker' && !getBoardSticker(element.data?.stickerIconId));
   const fill = elements.every(element => ['shape','note','container','table','document'].includes(element.type));
   const line = elements.every(element => ['shape','stroke','arrow','container'].includes(element.type));
@@ -113,9 +194,9 @@ export default function CanvasFormatToolbar({ elements, style, canEdit, canAnnot
     if (popover === name) { closePopover(true); return; }
     rememberTrigger(button); setPopover(name);
   };
-  return <div ref={toolbar} className="studio-selection-toolbar" role="toolbar" aria-label="选区格式" data-native-interactive="true" style={{ ...style, ...position }} onPointerDown={event => { if ((event.target as HTMLElement).closest('button')) event.preventDefault(); }}><div className="studio-selection-toolbar-scroll">
+  return <div ref={toolbar} className="studio-selection-toolbar" role="toolbar" aria-label="选区格式" data-native-interactive="true" onPointerDown={event => { if ((event.target as HTMLElement).closest('button')) event.preventDefault(); }}><div className="studio-selection-toolbar-scroll">
     {onReadSelection && <button type="button" aria-label="全屏观看选区" title="全屏观看" onClick={onReadSelection}><Maximize size={18}/></button>}
-    {documentRegion || html ? <>
+    {documentRegion || html || todo ? <>
       <span className="studio-selection-label" title={regionTitle}>{regionTitle}</span>
       {html && canEdit && onEditHtml && <button type="button" aria-label="编辑 HTML 源码" title="编辑 HTML 源码" onClick={onEditHtml}><Braces size={18}/></button>}
     </> : canEdit && <>

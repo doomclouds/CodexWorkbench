@@ -8,20 +8,30 @@ const shape = (id: string, x = 0, y = 0, extra: Partial<BoardElement> = {}): Boa
 describe('whiteboard geometry', () => {
   it('keeps offscreen selection actions beside the view controls with a usable gap', () => {
     const size = { w: 264, h: 42 }, viewport = { w: 800, h: 600 }, hud = { x: 660, y: 12, w: 126, h: 38 };
-    const position = placeFormatToolbar({ x: 1600, y: -200 }, size, viewport, hud);
+    const position = placeFormatToolbar({ x: 1590, y: -200, w: 20, h: 10 }, size, viewport, [hud])!;
     expect(position.x + size.w / 2).toBeLessThanOrEqual(hud.x - 8);
     expect(position.x - size.w / 2).toBeGreaterThanOrEqual(12); expect(position.y).toBe(12);
   });
   it('moves selection actions below the view controls when a narrow canvas cannot fit them beside it', () => {
     const size = { w: 264, h: 42 }, viewport = { w: 300, h: 400 }, hud = { x: 160, y: 12, w: 126, h: 38 };
-    const position = placeFormatToolbar({ x: 1600, y: 12 }, size, viewport, hud);
+    const position = placeFormatToolbar({ x: 1590, y: 12, w: 20, h: 10 }, size, viewport, [hud])!;
     expect(position.y).toBeGreaterThanOrEqual(hud.y + hud.h + 8);
     expect(position.x - size.w / 2).toBeGreaterThanOrEqual(12); expect(position.x + size.w / 2).toBeLessThanOrEqual(viewport.w - 12);
   });
   it('keeps nonconflicting selection actions at their original position', () => {
-    const anchor = { x: 240, y: 150 }, size = { w: 264, h: 42 }, viewport = { w: 800, h: 600 };
-    expect(placeFormatToolbar(anchor, size, viewport, { x: 660, y: 12, w: 126, h: 38 })).toEqual(anchor);
-    expect(placeFormatToolbar({ x: 1600, y: -200 }, size, viewport)).toEqual({ x: 656, y: 12 });
+    const anchor = { x: 140, y: 200, w: 200, h: 80 }, size = { w: 264, h: 42 }, viewport = { w: 800, h: 600 };
+    expect(placeFormatToolbar(anchor, size, viewport, [{ x: 660, y: 12, w: 126, h: 38 }])).toEqual({ x: 240, y: 150, w: 264 });
+    expect(placeFormatToolbar({ x: 1590, y: -200, w: 20, h: 10 }, size, viewport)).toEqual({ x: 656, y: 12, w: 264 });
+  });
+  it('uses the expanded title and handle bounds, preferring a clear row above or below', () => {
+    const size = { w: 264, h: 42 }, viewport = { w: 800, h: 600 };
+    const anchor = { x: 260, y: 160, w: 240, h: 220 }, neighbor = { x: 400, y: 110, w: 300, h: 24 };
+    expect(placeFormatToolbar(anchor, size, viewport, [neighbor])).toEqual({ x: 260, y: 110, w: 264 });
+    expect(placeFormatToolbar({ ...anchor, y: 4 }, size, viewport, [neighbor])?.y).toBe(232);
+  });
+  it('narrows the existing scrolling toolbar when neither side of an obstacle fits its full width', () => {
+    const position = placeFormatToolbar({ x: 70, y: 120, w: 120, h: 80 }, { w: 340, h: 42 }, { w: 400, h: 300 }, [{ x: 185, y: 0, w: 30, h: 300 }]);
+    expect(position).toEqual({ x: 94.5, y: 70, w: 165 });
   });
   it('projects an uncustomized theme with matching paper and ink without mutating shared content', () => {
     const original = structuredClone(DEFAULT_STYLE);

@@ -14,7 +14,7 @@ export interface StyleProfile {
   name: string; paper: string; ink: string; muted: string; accent: string; link: string;
   fontFamily: string; titleFont: string; monoFont: string; [key: string]: string;
 }
-export type ElementType = 'shape' | 'container' | 'text' | 'stroke' | 'arrow' | 'image' | 'html' | 'document' | 'table' | 'link' | 'note' | 'sticker' | 'diagram' | 'chart';
+export type ElementType = 'shape' | 'container' | 'text' | 'stroke' | 'arrow' | 'image' | 'html' | 'document' | 'table' | 'link' | 'note' | 'sticker' | 'diagram' | 'chart' | 'todo';
 export interface BoardElement {
   id: string; type: ElementType; x: number; y: number; w: number; h: number; version: number;
   text?: string; kind?: string; color?: string; stroke?: string; fill?: string; fontSize?: number;
@@ -33,15 +33,15 @@ export interface BoardElement {
 export interface ArtifactView { artifact: Artifact }
 export interface HtmlRegionContent { id: string; version: number; html?: string; sourceRevision?: number; text?: string; state?: Json }
 export interface Board extends ArtifactView { elements: BoardElement[]; style: StyleProfile; motion?: Record<string, unknown>; orderVersion?: number }
-/** Board pins use world units; document pins use the first selected block's normalized bounds. */
-export interface CommentPin { coordinateSpace: 'board' | 'document'; x: number; y: number }
+/** Board pins use world units. Document and Todo pins use their content target's normalized bounds. */
+export interface CommentPin { coordinateSpace: 'board' | 'document' | 'todo'; x: number; y: number }
 export function isCommentPin(value: unknown): value is CommentPin {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const pin = value as Record<string, unknown>;
-  if (pin.coordinateSpace !== 'board' && pin.coordinateSpace !== 'document') return false;
+  if (pin.coordinateSpace !== 'board' && pin.coordinateSpace !== 'document' && pin.coordinateSpace !== 'todo') return false;
   return [pin.x, pin.y].every(coordinate => typeof coordinate === 'number' && Number.isFinite(coordinate) && (pin.coordinateSpace === 'board' ? Math.abs(coordinate) <= 10_000_000 : coordinate >= 0 && coordinate <= 1));
 }
-export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html' | 'document'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; blockIds?: string[]; sourceVersion?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number; pin?: CommentPin }
+export interface Anchor { coordinateSpace?: 'board' | 'element' | 'html' | 'document' | 'todo'; elementIds?: string[]; regionId?: string; targetIds?: string[]; sourceRevision?: number; blockIds?: string[]; itemId?: string; sourceVersion?: number; quote?: string; excerpt?: string; selector?: string; x?: number; y?: number; w?: number; h?: number; pin?: CommentPin }
 export interface FeedbackAttachment {
   requestId: string; contentKey: string; state: 'pending' | 'attached'; requestedAt: string; requestedBy: Actor;
   attachedAt?: string; attachedBy?: Actor;
@@ -55,7 +55,7 @@ export interface Feedback {
   processingBy?: Actor;
   attachment?: FeedbackAttachment;
 }
-export interface HistoryEntry { id: string; revision: number; createdAt: string; actor: Actor; summary: string; changedIds: string[]; restoredFrom?: string }
+export interface HistoryEntry { id: string; revision: number; createdAt: string; actor: Actor; summary: string; changedIds: string[]; restoredFrom?: string; restoreMode?: 'undo' }
 /** Display grouping only; every version remains independently addressable. */
 export interface HistoryBatch extends HistoryEntry { firstVersionId: string; firstRevision: number; firstCreatedAt: string; beforeVersionId?: string; versionIds: string[] }
 export interface AgentActivityScope { ids?: string[]; rect?: { x: number; y: number; w: number; h: number } }
@@ -87,7 +87,7 @@ export interface CollaborationRoom {
 export interface SyncBatch { cursor: string; reset: boolean; events: StudioEvent[]; peers: Presence[]; timer: RoomTimer | null; serverTime: number; actor?: Actor; access?: 'local' | 'lan' }
 export interface RoomTimer { durationMs: number; deadline: number | null; remainingMs: number; paused: boolean; source: Actor }
 export interface Operation {
-  op: 'add' | 'update' | 'delete' | 'layout' | 'style' | 'restore' | 'motion' | 'document';
+  op: 'add' | 'update' | 'delete' | 'layout' | 'style' | 'restore' | 'motion' | 'document' | 'todo';
   id?: string; element?: Partial<BoardElement>; changes?: Partial<BoardElement>; ids?: string[];
   preset?: string; style?: Partial<StyleProfile>; versionId?: string; data?: Record<string, unknown>;
 }

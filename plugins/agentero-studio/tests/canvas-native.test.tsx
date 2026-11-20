@@ -117,7 +117,7 @@ describe('native canvas parity', () => {
     const rows = [['名称', '说明', '状态'], ['项目 A', '第一行内容', '进行中'], ['项目 B', '第二行内容', '待处理']];
     const value = element('table', { type: 'table', color: '#2d3142', fill: '#ffffff', data: { rows } });
     const original = structuredClone(value);
-    await mount(board([value]));
+    await mount(board([value]), { externalViewport: { x: 0, y: 0, zoom: 1 } });
     const table = host.querySelector<HTMLTableElement>('table')!, cells = [...table.querySelectorAll('td')];
     const paper = (theme === 'dark' ? DARK_THEME : LIGHT_THEME).paper;
     expect(cells.map(cell => cell.textContent)).toEqual(rows.slice(1).flat());
@@ -152,7 +152,7 @@ describe('native canvas parity', () => {
     expect(host.querySelector('[aria-label="编辑文字"] strong')!.textContent).toBe('重点');
   });
   it('draws hollow and person shapes, real line style and an explicit unknown-kind fallback', async () => {
-    await mount(board([element('hollow', { hollow: true, strokeWidth: 5, dash: true }), element('person', { kind: 'person' }), element('unknown', { kind: 'invented-kind' }), element('pen', { type: 'stroke', points: [0, 0, 20, 20], width: 7, dash: true })]));
+    await mount(board([element('hollow', { hollow: true, strokeWidth: 5, dash: true }), element('person', { kind: 'person' }), element('unknown', { kind: 'invented-kind' }), element('pen', { type: 'stroke', points: [0, 0, 20, 20], width: 7, dash: true })]), { externalViewport: { x: 0, y: 0, zoom: 1 } });
     const hollow = host.querySelector('[data-element-id="hollow"] rect')!;
     expect(hollow.getAttribute('fill')).toBe('none'); expect(hollow.getAttribute('stroke-width')).toBe('5'); expect(hollow.getAttribute('stroke-dasharray')).toBe('6 5');
     expect(host.querySelector('[data-element-id="person"] path')!.getAttribute('d')).toContain(' A ');
@@ -162,7 +162,7 @@ describe('native canvas parity', () => {
     expect(() => normalizeElement(element('invalid', { kind: 'invented-kind' }))).toThrow('不支持此原生形状');
   });
   it('gives heads precedence over head and renders circles without inventing an end arrow', async () => {
-    await mount(board([element('line', { type: 'arrow', from: [0, 0], to: [200, 100], heads: ['circle', 'none'], head: 'both', dash: true, strokeWidth: 4 })]));
+    await mount(board([element('line', { type: 'arrow', from: [0, 0], to: [200, 100], heads: ['circle', 'none'], head: 'both', dash: true, strokeWidth: 4 })]), { externalViewport: { x: 0, y: 0, zoom: 1 } });
     const line = host.querySelector('[data-element-id="line"] > path[stroke-dasharray]')!;
     expect(line.hasAttribute('marker-start')).toBe(true); expect(line.hasAttribute('marker-end')).toBe(false);
     expect(line.getAttribute('stroke-width')).toBe('4'); expect(host.querySelector('marker circle')).not.toBeNull();

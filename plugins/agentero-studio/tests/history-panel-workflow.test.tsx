@@ -26,9 +26,10 @@ it('lets an editor inspect the batch before/after in place and restore only that
     const agent: Actor = { ...LOCAL_ACTOR, id: 'agent-one', name: 'Agent', kind: 'agent' };
     const begun = await service.execute('artifact_activity', { artifactId: created.board.artifact.id, action: 'begin', taskId: 'reference-edit', phase: 'writing', scope: { ids: ['a'] } }, agent);
     const binding = { taskId: 'reference-edit', generation: begun.tasks[0].generation };
-    const first = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, ...binding, expectedRevision: 0, operationId: 'change-a', operations: [{ op: 'update', id: 'a', changes: { text: '参考文字' } }] }, agent) as { board: Board };
+    const first = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, ...binding, expectedRevision: 0, operationId: 'change-a', operations: [{ op: 'update', id: 'a', changes: { text: '参考文字' } }] }, agent) as { artifact: Board['artifact'] };
+    expect(first).not.toHaveProperty('board');
     await service.execute('artifact_activity', { artifactId: created.board.artifact.id, action: 'end', ...binding, outcome: 'completed' }, agent);
-    const head = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, expectedRevision: first.board.artifact.revision, operationId: 'change-head', operations: [{ op: 'update', id: 'a', changes: { text: '后续文字' } }, { op: 'update', id: 'b', changes: { text: '保留其他对象' } }] }, LOCAL_ACTOR) as { board: Board };
+    const head = await service.execute('artifact_apply', { artifactId: created.board.artifact.id, expectedRevision: first.artifact.revision, operationId: 'change-head', operations: [{ op: 'update', id: 'a', changes: { text: '后续文字' } }, { op: 'update', id: 'b', changes: { text: '保留其他对象' } }] }, LOCAL_ACTOR) as { board: Board };
     const history = await service.execute('artifact_read', { artifactId: created.board.artifact.id, mode: 'history' }, actor);
     const selected = history.batches.find((entry: { revision: number }) => entry.revision === 1);
     await act(async () => root.render(<StudioApp client={client} actor={actor} initialArtifactId={created.board.artifact.id} />));

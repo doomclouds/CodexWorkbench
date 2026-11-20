@@ -101,7 +101,7 @@ describe('model MCP contracts through the real SDK', () => {
     expect(fields.operationId.description).toContain('重试');
     expect(fields.action.enum).toContain('attached');
     expect(fields.requestId.description).toContain('宿主确认附加成功');
-    expect(fields.anchor.properties.coordinateSpace.enum).toEqual(['board', 'element', 'html', 'document']);
+    expect(fields.anchor.properties.coordinateSpace.enum).toEqual(['board', 'element', 'html', 'document', 'todo']);
     expect(fields.anchor.properties.blockIds.maxItems).toBe(100);
     expect(fields.anchor.properties.sourceVersion.description).toContain('element.version');
     expect(fields.anchor.properties.coordinateSpace.description).toContain('CSS 像素');
@@ -241,9 +241,9 @@ describe('model MCP contracts through the real SDK', () => {
     const reordered = await apply({ expectedVersions: { a: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['a'] }] });
     expect(reordered.historyEntry.changedIds).toEqual(['a', '$order']);
     const undo = await apply({ expectedRevision: reordered.artifact.revision, operations: [{ op: 'restore', versionId: reordered.historyEntry.id, data: { mode: 'undo' } }] });
-    expect((await call('artifact_read', { mode: 'objects' })).elements.map((element: { id: string }) => element.id)).toEqual(['a', 'b', 'c']);
+    expect((await call('artifact_read', { mode: 'objects', ids: ['a', 'b', 'c'] })).elements.map((element: { id: string }) => element.id)).toEqual(['a', 'b', 'c']);
     await apply({ expectedRevision: undo.artifact.revision, operations: [{ op: 'restore', versionId: undo.historyEntry.id, data: { mode: 'undo' } }] });
-    const result = await call('artifact_read', { mode: 'objects' });
+    const result = await call('artifact_read', { mode: 'objects', ids: ['a', 'b', 'c'] });
     expect(result.orderVersion).toBe(6); expect(result.elements.map((element: { id: string }) => element.id)).toEqual(['b', 'c', 'a']);
     await applyFailure({ expectedVersions: { b: 1, $order: baseline.orderVersion }, operations: [{ op: 'layout', preset: 'front', ids: ['b'] }] }, 'CONFLICT');
   });
@@ -273,7 +273,9 @@ describe('model MCP contracts through the real SDK', () => {
     await applyFailure({ expectedVersions: { region: 2 }, operations: [{ op: 'update', id: 'region', changes: { x: 100 } }] }, 'LOCKED');
     await applyFailure({ expectedVersions: { region: 2 }, operations: [{ op: 'update', id: 'region', changes: { locked: false } }, { op: 'delete', id: 'region' }] }, 'LOCKED');
     const document = await call('artifact_read', { mode: 'objects', ids: ['region'] });
-    expect(document.elements[0]).toMatchObject({ locked: true, x: 20, html: '<h2>Changed</h2>', state: { tab: 2 }, fill: '#abcdef', version: 2 });
+    expect(document.elements[0]).toMatchObject({ locked: true, x: 20, htmlLength: '<h2>Changed</h2>'.length, state: { tab: 2 }, fill: '#abcdef', version: 2 });
+    expect(document.elements[0]).not.toHaveProperty('html');
+    expect((await call('artifact_read', { mode: 'source', regionId: 'region' })).html).toBe('<h2>Changed</h2>');
   });
 
   it('roundtrips single permanent deletion only after trashing and rejects malformed batches before deletion', async () => {
@@ -315,13 +317,106 @@ describe('model MCP contracts through the real SDK', () => {
     expect(JSON.stringify(context).length).toBeLessThan(10_000);
     const native = await call('artifact_read', { mode: 'source', feedbackId: feedback.contextId, elementId: 'native' });
     expect(native.element.text).toBe('Frozen native'); expect(native).not.toHaveProperty('sources');
-    let offset = 0, combined = '';
+    let cursor: string | undefined, combined = '';
     do {
-      const page = await call('artifact_read', { mode: 'source', feedbackId: feedback.contextId, regionId: 'region', offset, limit: 64_000 });
+      const page = await call('artifact_read', { mode: 'source', feedbackId: feedback.contextId, regionId: 'region', ...(cursor ? { cursor } : {}), limit: 32 * 1024 });
       expect(page.totalLength).toBe(html.length); expect(page.element).not.toHaveProperty('html'); expect(page).not.toHaveProperty('sources');
-      expect(JSON.stringify(page).length).toBeLessThan(70_000);
-      combined += page.html; offset = page.nextOffset ?? -1;
-    } while (offset >= 0);
+      expect(Buffer.byteLength(JSON.stringify({ ok: true, data: page }), 'utf8')).toBeLessThanOrEqual(32 * 1024);
+      combined += page.html; cursor = page.nextCursor;
+    } while (cursor);
     expect(combined).toBe(html);
+  });
+
+  it('slices retained history before reply and rejects a stale cursor or an oversized page', async () => {
+    for (let revision = 1; revision <= 23; revision++) await service.execute('artifact_manage', { artifactId, action: 'rename', title: `修订 ${revision}` });
+    const first = await call('artifact_read', { mode: 'history', limit: 3 });
+    expect(first.history.map((entry: { revision: number }) => entry.revision)).toEqual([21, 22, 23]);
+    expect(first).toMatchObject({ totalCount: 24, nextOffset: 3, nextCursor: expect.any(String) });
+    const second = await call('artifact_read', { mode: 'history', cursor: first.nextCursor, limit: 3 });
+    expect(second.history.map((entry: { revision: number }) => entry.revision)).toEqual([18, 19, 20]);
+    expect((await call('artifact_read', { mode: 'history', limit: 20 })).history).toHaveLength(20);
+    await failure('artifact_read', { mode: 'history', limit: 21 }, 'LIMIT_EXCEEDED');
+    await failure('artifact_read', { mode: 'summary', cursor: first.nextCursor }, 'INVALID_ARGUMENT');
+    await service.execute('artifact_manage', { artifactId, action: 'rename', title: '新修订' });
+    await failure('artifact_read', { mode: 'history', cursor: first.nextCursor }, 'CURSOR_STALE');
+    expect((await service.execute('artifact_read', { artifactId, mode: 'history' })).history).toHaveLength(25);
+  });
+
+  it('requires precise model read and export targets while retaining full reads for the App', async () => {
+    const { historyEntry } = await add(Array.from({ length: 12 }, (_, index) => ({ id: `item-${index}`, type: 'text', text: `组件 ${index}` })));
+    await failure('artifact_read', { mode: 'objects' }, 'INVALID_ARGUMENT');
+    await failure('artifact_read', { mode: 'units', atRevision: 1 }, 'INVALID_ARGUMENT');
+    await failure('artifact_read', { mode: 'objects', ids: Array.from({ length: 11 }, (_, index) => `item-${index}`) }, 'LIMIT_EXCEEDED');
+    await failure('artifact_read', { mode: 'diff', versionId: historyEntry.id, adjacent: true }, 'INVALID_ARGUMENT');
+    await failure('artifact_read', { mode: 'version', versionId: historyEntry.id }, 'APP_ONLY');
+    await failure('artifact_read', { mode: 'document' }, 'APP_ONLY');
+    await failure('artifact_feedback', { action: 'preview', feedbackId: 'example' }, 'APP_ONLY');
+    await failure('artifact_export', { format: 'json' }, 'INVALID_ARGUMENT');
+    await failure('artifact_export', { format: 'zip', ids: ['item-0'] }, 'APP_ONLY');
+    await expect(service.execute('artifact_export', { artifactId, format: 'ZIP', ids: ['item-0'] }, actor)).rejects.toMatchObject({ code: 'APP_ONLY' });
+    await failure('artifact_export', { format: 'png', ids: ['item-0'], viewId: 'example' }, 'LIVE_CAPTURE_REQUIRED');
+    const diff = await call('artifact_read', { mode: 'diff', versionId: historyEntry.id, adjacent: true, ids: ['item-0'] });
+    expect(diff.units).toMatchObject([{ id: 'item-0', before: null, after: { text: '组件 0' } }]);
+    expect(diff).not.toHaveProperty('changes');
+    expect((await service.execute('artifact_read', { artifactId, mode: 'document' })).elements).toHaveLength(12);
+  });
+
+  it('finds Chinese snippets with bounded scope and keeps the cursor tied to its query and revision', async () => {
+    await add(Array.from({ length: 13 }, (_, index) => ({ id: `item-${index}`, type: 'text', text: `系统架构 ${index}`, x: index * 40, y: 0, w: 30, h: 35 })));
+    const first = await call('artifact_read', { mode: 'search', query: '架构', limit: 4 });
+    expect(first.items).toHaveLength(4);
+    expect(first.items[0]).toMatchObject({ id: 'item-0', version: 1, snippet: expect.stringContaining('架构'), bounds: { x: 0, y: 0, w: 30, h: 35 } });
+    expect(first.nextCursor).toEqual(expect.any(String));
+    const second = await call('artifact_read', { mode: 'search', query: '架构', cursor: first.nextCursor, limit: 4 });
+    expect(second.items[0]).toMatchObject({ id: 'item-4' });
+    await failure('artifact_read', { mode: 'search', query: '组件', cursor: first.nextCursor }, 'INVALID_ARGUMENT');
+    const region = await call('artifact_read', { mode: 'region', rect: { x: 75, y: -1, w: 38, h: 40 } });
+    expect(region.items.map((item: { id: string }) => item.id)).toEqual(['item-2']);
+    await apply({ expectedVersions: { 'item-0': 1 }, operations: [{ op: 'update', id: 'item-0', changes: { text: '修订后' } }] });
+    await failure('artifact_read', { mode: 'search', query: '架构', cursor: first.nextCursor }, 'CURSOR_STALE');
+    const historical = await call('artifact_read', { mode: 'source', elementId: 'item-0', atRevision: 1 });
+    expect(JSON.parse(historical.json)).toMatchObject({ id: 'item-0', text: '系统架构 0', version: 1 });
+  });
+
+  it('returns one bounded PNG image and a separate saved-render receipt without exposing bytes as model text', async () => {
+    await add([{ id: 'capture-target', type: 'shape', kind: 'rect', x: 0, y: 0, w: 100, h: 80, fill: '#417a9c' }]);
+    const arguments_ = { artifactId, format: 'png', rect: { x: 0, y: 0, w: 120, h: 90 }, atRevision: 1 };
+    const captured = await client.callTool({ name: 'artifact_export', arguments: arguments_ });
+    expect(captured.isError).not.toBe(true);
+    expect(captured.structuredContent).toMatchObject({ ok: true, data: {
+      source: 'saved-render', revision: 1, width: 120, height: 90, ids: ['capture-target'], bounds: arguments_.rect, downloadPath: expect.any(String),
+    } });
+    expect((captured.structuredContent as unknown as ToolResponse).data).not.toHaveProperty('image');
+    const content = (captured.content as { type: string; mimeType: string; data: string }[])[0];
+    expect(captured.content).toHaveLength(1);
+    expect(content).toMatchObject({ type: 'image', mimeType: 'image/png' });
+    expect(Buffer.from(content.data, 'base64').subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(Buffer.byteLength(content.data, 'base64')).toBeLessThanOrEqual(1024 * 1024);
+    const pathOnly = await client.callTool({ name: 'artifact_export', arguments: { ...arguments_, includeImage: false } });
+    expect(pathOnly.content).toEqual([]);
+    expect(pathOnly.structuredContent).toMatchObject({ ok: true, data: { revision: 1, downloadPath: expect.any(String) } });
+  });
+
+  it('lists only requested task rows and keeps other nodes out of the update receipt', async () => {
+    await add([{ id: 'list-a', type: 'todo', text: '发布验收', data: { items: [
+      { id: 'scope', text: '整理需求', checked: true }, { id: 'limits', text: '核对读取上限', checked: false },
+      { id: 'scale', text: '验证缩放显示', checked: false },
+    ] } }]);
+    const selected = await call('artifact_read', { mode: 'tasks', elementId: 'list-a', checked: false, limit: 1 });
+    expect(selected).toMatchObject({ version: 1, elementId: 'list-a', totalCount: 2, items: [{ id: 'limits' }], nextCursor: expect.any(String) });
+    const next = await call('artifact_read', { mode: 'tasks', elementId: 'list-a', checked: false, cursor: selected.nextCursor });
+    expect(next.items).toMatchObject([{ id: 'scale' }]);
+    await failure('artifact_read', { mode: 'tasks', elementId: 'list-a', checked: true, cursor: selected.nextCursor }, 'INVALID_ARGUMENT');
+    const object = await call('artifact_read', { mode: 'objects', ids: ['list-a'] });
+    expect(object.elements[0]).toMatchObject({ id: 'list-a', readWith: 'artifact_read tasks + elementId' });
+    expect(object.elements[0]).not.toHaveProperty('data');
+    const anchor = { coordinateSpace: 'todo', elementIds: ['list-a'], itemId: 'limits', sourceVersion: 1, pin: { coordinateSpace: 'todo', x: .4, y: .7 } };
+    const feedback = await call('artifact_feedback', { action: 'create', anchor, text: '按这一行核对', versions: { 'list-a': 1 } });
+    expect(feedback.feedback[0].anchor).toMatchObject(anchor);
+    const edited = await apply({ expectedVersions: { 'list-a': 1 }, operations: [{ op: 'todo', id: 'list-a', data: { operations: [{ op: 'update', id: 'limits', changes: { checked: true } }] } }] });
+    expect(edited).toMatchObject({ artifact: { revision: 3 }, historyEntry: { changedIds: ['list-a'] } });
+    expect(edited).not.toHaveProperty('board');
+    expect((await call('artifact_read', { mode: 'tasks', elementId: 'list-a', itemIds: ['limits'] })).items).toMatchObject([{ id: 'limits', checked: true }]);
+    expect((await call('artifact_read', { mode: 'tasks', elementId: 'list-a', feedbackId: feedback.contextId, itemIds: ['limits'] })).items).toMatchObject([{ id: 'limits', checked: false }]);
   });
 });
