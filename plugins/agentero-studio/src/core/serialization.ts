@@ -1,4 +1,5 @@
 import type { Board, BoardElement, Json } from '../contracts/studio.js';
+import { normalizeTodoItems, type TodoItem } from '../contracts/todo.js';
 import { semanticColor } from './theme.js';
 import { arrowGeometry, arrowHeads, arrowLabelBox, shapePath, strokePath, type Point } from './products/whiteboard-geometry.js';
 import { boardStickerMarkup } from './products/whiteboard-stickers.js';
@@ -9,6 +10,7 @@ import { documentSurface } from './products/document-surface.js';
 import { nativeBackdrop, nativeFill, nativeSurfaces, nativeTableInk, nativeTextInk } from './products/native-surface.js';
 
 export interface ExportOptions { regionId?: string; elementId?: string; ids?: string[]; padding?: number; scale?: number; [key: string]: unknown }
+interface SvgViewport { bounds: { x: number; y: number; width: number; height: number }; width: number; height: number }
 export class ExportError extends Error { constructor(public code: string, message: string) { super(message); this.name = 'ExportError'; } }
 export function escapeXml(value: unknown): string { return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 export function filenameFor(title: string, extension: string): string {
@@ -144,6 +146,33 @@ function shapeSvg(e: BoardElement, fill: string, stroke: string): string {
   if (path) return `<path transform="translate(${x} ${y})" d="${path}" ${common}/>`;
   return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${e.kind === 'pill' ? h / 2 : e.kind === 'rect' || e.kind === 'queue' ? 0 : 7}" ${common}/>` + (e.kind === 'queue' ? `<path d="M${x + 14},${y}V${y + h} M${x + w - 14},${y}V${y + h}" fill="none" stroke="${escapeXml(stroke)}"/>` : '');
 }
+function todoSourceAttribute(item: TodoItem): string {
+  return item.sourceRef ? ` data-source-ref="${escapeXml(JSON.stringify(item.sourceRef))}"` : '';
+}
+
+function todoSvg(e: BoardElement, board: Board): string {
+  const surface = documentSurface(e, board.style), items = normalizeTodoItems(e.data?.items);
+  const count = items.filter(item => item.checked).length;
+  const { x, y, w, h } = e;
+  const clipId = `studio-todo-${[...e.id].map(c => c.codePointAt(0)!.toString(16)).join('_')}`;
+  const paper = escapeXml(surface.paper), ink = escapeXml(surface.ink), muted = escapeXml(surface.muted);
+  const line = escapeXml(surface.rule), accent = escapeXml(surface.link);
+  const title = `<svg x="${x + 12}" y="${y}" width="${Math.max(1, w - 72)}" height="40" overflow="hidden"><text y="26" fill="${ink}" font-size="17" font-weight="600">${escapeXml(e.text || '任务清单')}</text></svg>`;
+  const progress = `<text x="${x + w - 12}" y="${y + 25}" fill="${muted}" font-size="12" text-anchor="end">${count}/${items.length}</text>`;
+  const rows = items.map((item, index) => {
+    const rowY = y + 40 + index * 32, bx = x + 14, by = rowY + 9;
+    const check = item.checked ? `<path d="M${bx + 3} ${by + 7}l3 3l5 -6" fill="none" stroke="${paper}" stroke-width="1.5"/>` : '';
+    return `<g data-studio-task-id="${escapeXml(item.id)}" data-checked="${item.checked}"${todoSourceAttribute(item)}>
+      <path d="M${x} ${rowY}H${x + w}" stroke="${line}"/>
+      <rect x="${bx}" y="${by}" width="14" height="14" rx="3" fill="${item.checked ? accent : paper}" stroke="${item.checked ? accent : line}"/>${check}
+      <text x="${x + 38}" y="${rowY + 21}" fill="${item.checked ? muted : ink}" font-size="14">${escapeXml(item.text.replace(/\s+/g, ' '))}</text>
+    </g>`;
+  }).join('');
+  return `<defs><clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7"/></clipPath></defs>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="7" fill="${paper}" stroke="${line}"/>
+    <g clip-path="url(#${clipId})" font-family="${escapeXml(e.fontFamily ?? board.style.fontFamily)}">${title}${progress}${rows}</g>`;
+}
+
 function endpoint(value: BoardElement['from'], elements: BoardElement[]): [number, number] {
   if (Array.isArray(value)) return value;
   const target = elements.find(e => e.id === value);
@@ -160,7 +189,9 @@ function headSvg(kind: string, tip: Point, inside: Point, color: string): string
 export function elementSvg(e: BoardElement, board: Board, options: ExportOptions = {}, surfaces = nativeSurfaces(selectedElements(board, options), board.style)): string {
   const style = board.style; const ink = semanticColor(e.stroke, style, style.muted);
   let markup = '';
-  if (e.type === 'document' && e.document) {
+  if (e.type === 'todo') {
+    markup = todoSvg(e, board);
+  } else if (e.type === 'document' && e.document) {
     const surface = documentSurface(e, style);
     const preview = { ...e, text: `${e.text || '文档'}\n${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
     markup = `<rect data-document-backdrop="true" x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="${escapeXml(surface.backdrop)}" rx="7"/><rect data-document-paper="true" x="${e.x}" y="${e.y}" width="${e.w}" height="${e.h}" fill="${escapeXml(surface.paper)}" stroke="${escapeXml(surface.rule)}" rx="7"/>${textSvg(preview, board, surface.ink)}`;
@@ -232,10 +263,11 @@ export function elementSvg(e: BoardElement, board: Board, options: ExportOptions
   }
   return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ''}>${markup}</g>`;
 }
-export function buildBoardSvg(board: Board, options: ExportOptions = {}): string {
-  const elements = selectedElements(board, options); const bounds = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
+export function buildBoardSvg(board: Board, options: ExportOptions = {}, viewport?: SvgViewport): string {
+  const elements = selectedElements(board, options);
+  const bounds = viewport?.bounds ?? boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
   const surfaces = nativeSurfaces(elements, board.style);
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds.width}" height="${bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">白板版本 ${board.artifact.revision}，包含 ${elements.length} 个对象。</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map(e => elementSvg(e, board, options, surfaces)).join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${viewport?.width ?? bounds.width}" height="${viewport?.height ?? bounds.height}" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}"${viewport ? ' preserveAspectRatio="none"' : ''} role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">白板版本 ${board.artifact.revision}，包含 ${elements.length} 个对象。</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map(e => elementSvg(e, board, options, surfaces)).join('')}</svg>`;
 }
 /** A downloaded page owns only transient state; it never writes back to the Studio host. */
 function offlineEmbedState(initial: Json): void {
@@ -265,10 +297,30 @@ function offlineRegionHtml(element: BoardElement): string {
   const prefix = /^(?:\uFEFF|\s|<!--[^]*?-->)*<!doctype[^>]*>/i.exec(source)?.[0] ?? '';
   return `${prefix}${bridge}${source.slice(prefix.length)}`;
 }
+const TODO_EXPORT_CSS = `.studio-export-todo{box-sizing:border-box;overflow:auto;border:1px solid;border-radius:7px;font:14px/1.5 system-ui,sans-serif}
+.studio-export-todo header{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 12px;position:sticky;top:0;background:inherit}
+.studio-export-todo h1{margin:0;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-export-todo header span{color:var(--todo-muted);white-space:nowrap}
+.studio-export-todo ul{margin:0;padding:0;list-style:none}
+.studio-export-todo li{border-top:1px solid var(--todo-rule)}
+.studio-export-todo label{display:flex;align-items:flex-start;gap:8px;padding:6px 12px}
+.studio-export-todo input{margin:3px 0 0;accent-color:var(--todo-accent)}
+.studio-export-todo li span{white-space:pre-wrap;overflow-wrap:anywhere}
+.studio-export-todo li:has(input:checked) span{color:var(--todo-muted)}`;
+
 export function buildBoardHtml(board: Board, options: ExportOptions = {}): string {
   const elements = selectedElements(board, options); const bounds = boardBounds(elements, 32, board.elements);
   const surfaces = nativeSurfaces(elements, board.style);
   const layers = elements.map(e => {
+    if (e.type === 'todo') {
+      const surface = documentSurface(e, board.style), items = normalizeTodoItems(e.data?.items);
+      const count = items.filter(item => item.checked).length;
+      const design = `background:${surface.paper};color:${surface.ink};border-color:${surface.rule};--todo-rule:${surface.rule};--todo-muted:${surface.muted};--todo-accent:${surface.link};`;
+      const rows = items.map(item => `<li data-studio-task-id="${escapeXml(item.id)}"${todoSourceAttribute(item)}><label><input disabled type="checkbox"${item.checked ? ' checked' : ''}><span>${escapeXml(item.text)}</span></label></li>`).join('');
+      return `<section data-studio-id="${escapeXml(e.id)}" class="studio-export-todo" aria-label="${escapeXml(e.text || '任务清单')}" style="${escapeXml(design)}position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)">
+        <header><h1>${escapeXml(e.text || '任务清单')}</h1><span>${count}/${items.length} 完成</span></header><ul>${rows}</ul>
+      </section>`;
+    }
     if (e.type === 'document' && e.document) {
       const surface = documentSurface(e, board.style);
       return `<section data-studio-id="${escapeXml(e.id)}" class="studio-document" aria-label="${escapeXml(e.text || '文档')}" style="${escapeXml(documentSurfaceCss(surface))}position:absolute;left:${e.x - bounds.x}px;top:${e.y - bounds.y}px;width:${e.w}px;height:${e.h}px;overflow:auto;transform:rotate(${scalar(e.rotation, 0)}deg)"><h1>${escapeXml(e.text || '文档')}</h1>${blocksHtml(e.document.blocks, surface.scheme)}</section>`;
@@ -281,5 +333,6 @@ export function buildBoardHtml(board: Board, options: ExportOptions = {}): strin
     const box = boardBounds([e], 2, board.elements); const markerId = `arrow_${e.id.replace(/[^\w-]/g, '_')}`;
     return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds.x}px;top:${box.y - bounds.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId }, surfaces)}</svg>`;
   }).join('');
-  return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
+  const todoCss = elements.some(element => element.type === 'todo') ? TODO_EXPORT_CSS : '';
+  return `<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds.width}px;height:${bounds.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}${todoCss}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>\n`;
 }

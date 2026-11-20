@@ -4,6 +4,7 @@ import { anchorBounds, tableRows, type Point, type Rect } from '../../canvas/can
 
 /** A comment point is the lower-left tip of the pin, in screen coordinates. */
 export type CommentPoint = Point;
+export const TODO_OVERVIEW_PIN_INSET = { right: 34, bottom: 6 };
 
 export const COMMENT_PIN_SIZE = 28;
 
@@ -30,6 +31,7 @@ export function describeElement(element: BoardElement, elements: readonly BoardE
     case 'note': return withText('便签', element.text);
     case 'text': return withText('文字', element.text);
     case 'document': return withText('文档', element.text);
+    case 'todo': return withText('任务清单', element.text);
     case 'shape': return withText(shapes[element.kind || 'rounded'] || '形状', element.text);
     case 'container': {
       const count = elements.filter(item => item.id !== element.id && item.x >= element.x && item.y >= element.y && item.x + item.w <= element.x + element.w && item.y + item.h <= element.y + element.h).length;
@@ -69,7 +71,7 @@ export function describeCommentTarget(document: StudioDocument, anchor: Anchor, 
 
 export function commentBoardTip(anchor: Anchor, elements: readonly BoardElement[]): Point | null {
   if (anchor.pin?.coordinateSpace === 'board') return { x: anchor.pin.x, y: anchor.pin.y };
-  if (anchor.pin?.coordinateSpace === 'document') return null;
+  if (anchor.pin?.coordinateSpace === 'document' || anchor.coordinateSpace === 'todo') return null;
   const bounds = anchorBounds(anchor, elements);
   if (!bounds) return null;
   const carriesPoint = Number.isFinite(anchor.x) && Number.isFinite(anchor.y);
@@ -102,6 +104,20 @@ export function liveCommentPoint(canvas: HTMLElement | null, document: StudioDoc
       const point = documentCommentTip(root, anchor);
       if (point) return point;
     }
+  }
+  if (anchor.coordinateSpace === 'todo' && anchor.pin?.coordinateSpace !== 'board' && anchor.elementIds?.[0]) {
+    const root = canvas.querySelector<HTMLElement>(`[data-todo-id="${CSS.escape(anchor.elementIds[0])}"]`);
+    const row = anchor.itemId && root?.querySelector<HTMLElement>(`[data-todo-item-id="${CSS.escape(anchor.itemId)}"]`);
+    const box = row && row.getBoundingClientRect();
+    if (box && box.width && box.height) {
+      const point = anchor.pin?.coordinateSpace === 'todo' ? anchor.pin : { x: .97, y: .9 };
+      return { x: box.left + point.x * box.width, y: box.top + point.y * box.height };
+    }
+    const card = root?.getBoundingClientRect();
+    if (card?.width && card.height) return {
+      x: Math.max(card.left, card.right - TODO_OVERVIEW_PIN_INSET.right),
+      y: Math.max(card.top, card.bottom - TODO_OVERVIEW_PIN_INSET.bottom),
+    };
   }
   if (!document || !('elements' in document) || !viewport) return fallback;
   const tip = commentBoardTip(anchor, (document as Board).elements);

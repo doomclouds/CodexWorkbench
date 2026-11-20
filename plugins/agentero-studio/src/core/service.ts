@@ -1,4 +1,4 @@
-import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Presence, type Role, type StudioEvent, type StudioUnitEvent, type ToolName } from '../contracts/studio.js';
+import { LOCAL_ACTOR, TOOL_NAMES, type Actor, type Board, type Presence, type Role, type StudioEvent, type StudioUnitEvent, type ToolName } from '../contracts/studio.js';
 import { copy, safeId, StudioError, StudioStore, type ArtifactState } from './store.js';
 import { assertAlive, object, requireRole, text } from './shared/common.js';
 import { assertWorkspaceMutation, taskBinding, workspaceReadRelated } from './shared/agent-workspaces.js';
@@ -13,11 +13,15 @@ import { studioProducts } from './products/index.js';
 import type { ProductRegistry } from './shared/products.js';
 import type { ContentOperation, Snapshot } from './shared/model.js';
 import { StudioCollaboration, type SyncOptions } from './shared/collaboration.js';
-import { duplicateAssets, importAsset, deleteAsset, listAssets, putAsset, getAsset, saveExport, getExport, exportResources, purgeExports, type ExportRecord } from './shared/files.js';
+import { duplicateAssets, importAsset, deleteAsset, listAssets, putAsset, getAsset, saveExport, getExport, exportResources, purgeExports } from './shared/files.js';
 import { ThumbnailCache } from './shared/thumbnails.js';
 import { exportArchive, importArchive as importArtifactArchive, readArchiveInput } from './shared/archive.js';
 import { userInfo } from 'node:os';
 import { jsonEqual } from './shared/safe-merge.js';
+import { createHash } from 'node:crypto';
+import { boundedModelRequest, boundedModelResult, MODEL_MAX_IDS, MODEL_MAX_ITEMS, modelDataBudget, modelDataFits, modelElement, modelFeedbackItem, modelPage, modelPageResult, modelResponseParts, modelSource, modelSourcePage, modelUnit } from './shared/model-read.js';
+import { queryWhiteboard, type WhiteboardQueryOptions } from './products/whiteboard-query.js';
+import type { CaptureRect, SavedRegionCapture } from './products/scoped-capture.js';
 
 export { StudioError } from './store.js';
 export type { ExportRecord } from './shared/files.js';
@@ -88,8 +92,15 @@ export class StudioService {
     if (this.closing) throw new StudioError('CLOSED', 'Studio 服务已经关闭。');
     if (!TOOL_NAMES.includes(name)) throw new StudioError('UNKNOWN_TOOL', '不支持的 Studio 操作。');
     if (!object(args)) throw new StudioError('INVALID_ARGUMENT', '操作参数必须是对象。');
-    const task = this.perform(name, args, copy(actor), authority); this.tasks.add(task);
-    try { return await task; } finally { this.tasks.delete(task); }
+    const request = actor.kind === 'agent' ? boundedModelRequest(name, args) : args;
+    const task = this.perform(name, request, copy(actor), authority); this.tasks.add(task);
+    try {
+      const result = await task;
+      if (actor.kind !== 'agent') return result;
+      const { data, image } = modelResponseParts(name, request, result);
+      const response = boundedModelResult(name, request, data);
+      return image && object(response) ? { ...response, image } : response;
+    } finally { this.tasks.delete(task); }
   }
   private async perform(name: ToolName, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<any> {
     let finish: (() => void) | undefined;
@@ -120,6 +131,7 @@ export class StudioService {
         if (object(result)) {
           for (const key of ['elements', 'items', 'units']) if (Array.isArray(result[key])) for (const item of result[key]) if (object(item) && typeof item.id === 'string') targetIds.add(item.id);
           if (typeof result.regionId === 'string') targetIds.add(result.regionId);
+          if (typeof result.elementId === 'string') targetIds.add(result.elementId);
           if (object(result.element) && typeof result.element.id === 'string') targetIds.add(result.element.id);
         }
         const current = await this.store.readProjection(safeId(args.artifactId), state => ({ authorization: authorizationState(state), type: state.artifact.type, content: state.content }));
@@ -137,7 +149,17 @@ export class StudioService {
   }
   private async dispatch(name: ToolName, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<any> {
     if (name === 'studio_open') { if (args.artifactId) await this.store.readProjection(safeId(args.artifactId), state => state.artifact); return { view: args.view ?? (args.artifactId ? 'editor' : 'library'), products: this.products.catalog(), ...(args.artifactId ? { artifactId: args.artifactId } : {}) }; }
-    if (name === 'artifact_list') { const result = listArtifacts(await this.store.catalog(), args, actor); return { ...result, artifacts: result.artifacts.map(artifact => artifact.storageStatus === 'unsupported' ? artifact : { ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` }) }; }
+    if (name === 'artifact_list') {
+      const catalog = await this.store.catalog();
+      if (actor.kind === 'agent') {
+        const stamp = createHash('sha256').update(JSON.stringify(catalog.map(artifact => [artifact.id, artifact.revision, artifact.updatedAt, artifact.trashedAt, artifact.pinned]))).digest('base64url');
+        const page = modelPage(args, 'catalog', stamp);
+        const { artifacts, nextCursor } = listArtifacts(catalog, { ...args, cursor: String(page.offset) }, actor);
+        return modelPageResult(args, page, { artifacts, nextOffset: nextCursor === undefined ? undefined : Number(nextCursor) }, 'artifacts', name);
+      }
+      const result = listArtifacts(catalog, args, actor);
+      return { ...result, artifacts: result.artifacts.map(artifact => artifact.storageStatus === 'unsupported' ? artifact : { ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` }) };
+    }
     if (name === 'artifact_manage') return this.manage(args, actor, authority);
     const id = safeId(args.artifactId);
     if (name === 'artifact_read') return this.read(id, args, actor, authority);
@@ -225,6 +247,7 @@ export class StudioService {
   }
   private async read(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     const mode = text(args.mode, 'document');
+    const model = actor.kind === 'agent';
     if (mode === 'layout-preview' || mode === 'layout-cancel') throw new StudioError('INVALID_ARGUMENT', '自动布局功能已移除。');
     if (mode === 'units') return this.store.readProjection(id, current => {
       this.authorizedActor(current, actor, authority);
@@ -233,7 +256,8 @@ export class StudioService {
       const snapshot = current.artifact.revision === args.atRevision ? current : current.history.find(saved => saved.artifact.revision === args.atRevision);
       if (!snapshot) throw new StudioError('VERSION_NOT_FOUND', '该同步版本已不在保留历史中，请重新读取作品。');
       const adapter = this.products.get(current.artifact.type).adapter;
-      return { artifact: copy(snapshot.artifact), units: [...new Set(args.ids as string[])].map(unitId => ({ id: unitId, after: copy(adapter.readUnit(snapshot.content, unitId) ?? null) })) };
+      const units = [...new Set(args.ids as string[])].map(unitId => ({ id: unitId, after: copy(adapter.readUnit(snapshot.content, unitId) ?? null) }));
+      return { artifact: copy(snapshot.artifact), units: model ? units.map(modelUnit) : units };
     });
     if (mode === 'source' && args.contextId !== undefined && args.feedbackId === undefined) args = { ...args, feedbackId: safeId(args.contextId, '反馈 ID') };
     if (mode === 'assets') requireRole(actor, ['owner']);
@@ -243,25 +267,56 @@ export class StudioService {
         const feedbackId = safeId(args.feedbackId ?? args.contextId, '反馈 ID'), found = state.feedback.find(item => item.id === feedbackId && feedbackVisible(item, currentActor));
         if (!found) throw new StudioError('NOT_FOUND', '反馈上下文不存在。');
         const { creationReceipt: _receipt, ...feedback } = found;
-        return { contextId: feedbackId, artifact: state.artifact, feedback, sources: state.sources[feedbackId] ?? [], timer: this.getTimer(id) };
+        const sources = state.sources[feedbackId] ?? [];
+        const metadata = { contextId: feedbackId, artifact: state.artifact, feedback, timer: this.getTimer(id) };
+        if (!model) return { ...metadata, sources };
+        const page = modelPage(args, id, state.artifact.revision), end = page.offset + page.limit;
+        return modelPageResult(args, page, { ...metadata, feedback: modelFeedbackItem(feedback), sources: sources.slice(page.offset, end).map(modelSource), totalCount: sources.length, ...(end < sources.length ? { nextOffset: end } : {}) }, 'sources');
       }
       const peers = this.getPresence(id).filter(peer => !args.viewId || peer.context?.viewId === args.viewId);
       const pending = state.feedback.filter(item => item.status === 'pending' && feedbackVisible(item, currentActor)).map(({ creationReceipt: _receipt, ...feedback }) => feedback);
-      return { artifactId: id, contexts: peers.flatMap(peer => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []), pending, timer: this.getTimer(id) };
+      const contexts = peers.flatMap(peer => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []);
+      if (model) return { artifactId: id, contexts: contexts.slice(0, MODEL_MAX_ITEMS).map(context => ({ artifactId: context.artifactId, viewId: context.viewId, actor: context.actor, updatedAt: context.updatedAt, viewport: context.viewport, selectedIds: context.selectedIds.slice(0, MODEL_MAX_IDS), selectedCount: context.selectedIds.length })), pendingCount: pending.length, timer: this.getTimer(id) };
+      return { artifactId: id, contexts, pending, timer: this.getTimer(id) };
     });
     return this.store.readProjection(id, current => {
       const product = this.products.get(current.artifact.type);
       const currentActor = this.authorizedActor(current, actor, authority);
-      if (mode === 'assets') return listAssets(current, args, currentActor);
+      if (mode === 'assets') {
+        if (!model) return listAssets(current, args, currentActor);
+        const stamp = createHash('sha256').update(JSON.stringify([current.artifact.revision, Object.keys(current.assets)])).digest('base64url');
+        const page = modelPage(args, id, stamp);
+        return modelPageResult(args, page, listAssets(current, { ...args, offset: page.offset }, currentActor), 'assets');
+      }
       // Filter at the shared boundary, including product-specific source readers and counts.
       // A LAN visitor cannot recover a private option by guessing its feedback/context ID.
       const hidden = current.feedback.filter(item => !feedbackVisible(item, currentActor));
       if (hidden.some(item => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError('NOT_FOUND', '反馈上下文不存在。');
       const sources = { ...current.sources };
       for (const item of hidden) delete sources[item.id];
-      const state = { ...current, sources, feedback: visibleFeedback(current.feedback, currentActor) };
+      const scoped = { ...current, sources, feedback: visibleFeedback(current.feedback, currentActor) };
+      const pinned = model && args.atRevision !== undefined && ['summary', 'objects', 'blocks', 'tasks', 'source', 'search', 'region'].includes(mode);
+      const snapshot = pinned
+        ? current.artifact.revision === args.atRevision ? current : current.history.find(saved => saved.artifact.revision === args.atRevision) : undefined;
+      if (pinned && !snapshot) throw new StudioError('VERSION_NOT_FOUND', '该读取修订已不在保留历史中，请指定可用版本。');
+      const state = snapshot ? {
+        ...scoped, artifact: snapshot.artifact, content: snapshot.content,
+        ...(mode === 'source' ? { history: scoped.history.filter(saved => saved.artifact.revision <= snapshot.artifact.revision) } : {}),
+      } : scoped;
       if (mode === 'document' || mode === 'board') return product.project(state);
-      if (mode === 'history') { const history = state.history.map(item => item.entry); return { history, batches: historyBatches(history) }; }
+      if (mode === 'history') {
+        if (!model) { const history = state.history.map(item => item.entry); return { history, batches: historyBatches(history) }; }
+        const page = modelPage(args, id, state.artifact.revision);
+        const end = Math.max(0, state.history.length - page.offset), start = Math.max(0, end - page.limit);
+        // Model history traverses from newest to oldest; preserve chronological order within a page.
+        const selection = state.history.slice(start, end).reverse().map(({ entry }) => ({
+          ...entry, ...(entry.changedIds.length > MODEL_MAX_IDS ? { changedIds: entry.changedIds.slice(0, MODEL_MAX_IDS), changedCount: entry.changedIds.length } : {}),
+        }));
+        const result = modelPageResult(args, page, { artifact: state.artifact, history: selection, totalCount: state.history.length, ...(start > 0 ? { nextOffset: page.offset + selection.length } : {}) }, 'history');
+        const history = selection.slice(0, (result.history as unknown[]).length).reverse();
+        const grouped = { ...result, history, batches: historyBatches(history) };
+        return modelDataFits(grouped, modelDataBudget('artifact_read', args)) ? grouped : { ...result, history };
+      }
       if (mode === 'version') return product.result(version(state, args.versionId ?? args.revision));
       if (mode === 'diff') {
         const adjacent = args.adjacent === true;
@@ -270,8 +325,44 @@ export class StudioService {
         const after = selected ?? (args.toVersionId !== undefined || args.to !== undefined ? version(state, args.toVersionId ?? args.to) : state);
         if (args.ids !== undefined && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some(id => typeof id !== 'string'))) throw new StudioError('INVALID_ARGUMENT', '差异内容单元 ID 列表无效。');
         const requestedIds = args.ids as string[] | undefined;
+        if (model && requestedIds) {
+          const units = [...new Set(requestedIds)].flatMap(unitId => {
+            const previous = before ? product.adapter.readUnit(before.content, unitId) ?? null : null;
+            const currentValue = product.adapter.readUnit(after.content, unitId) ?? null;
+            return jsonEqual(previous, currentValue) ? [] : [modelUnit({ id: unitId, before: previous, after: currentValue })];
+          });
+          return { units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
+        }
         const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map(id => ({ id, before: null, after: product.adapter.readUnit(after.content, id) }));
         return { ...(before ? product.diff(before, after) : { changes: units }), units: requestedIds ? units.filter(unit => requestedIds.includes(unit.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
+      }
+      if (!model) return product.read(state, mode, args);
+      if (mode === 'source') {
+        const page = modelPage(args, id, state.artifact.revision);
+        const element = state.artifact.type === 'whiteboard' && !args.feedbackId && (state.content as WhiteboardContent).elements.find(item => item.id === (args.elementId ?? args.regionId));
+        const result = element && element.type !== 'document' && typeof element.html !== 'string'
+          ? { artifactId: id, elementId: element.id, version: element.version, json: JSON.stringify(element) }
+          : product.read(state, mode, args);
+        return modelSourcePage(result as Record<string, unknown>, page);
+      }
+      if (mode === 'objects') {
+        const result = product.read(state, mode, args) as Record<string, unknown>;
+        return { ...result, elements: Array.isArray(result.elements) ? result.elements.map(modelElement) : [], ...(Array.isArray(result.units) ? { units: result.units.map(modelUnit) } : {}) };
+      }
+      if (mode === 'search' || mode === 'region') {
+        if (state.artifact.type !== 'whiteboard') throw new StudioError('INVALID_ARGUMENT', '当前作品不支持白板范围查询。');
+        const page = modelPage(args, id, state.artifact.revision);
+        const { query, rect, type, parentId, ids } = args as WhiteboardQueryOptions;
+        const result = queryWhiteboard({ artifact: state.artifact as Board['artifact'], elements: (state.content as WhiteboardContent).elements }, {
+          query: mode === 'search' ? query : undefined, rect, type, parentId, ids, offset: page.offset, limit: page.limit,
+          maxBytes: modelDataBudget('artifact_read', args) - 512,
+        });
+        return modelPageResult(args, page, { ...result }, 'items');
+      }
+      if (mode === 'summary' || mode === 'blocks' || mode === 'tasks') {
+        const page = modelPage(args, id, state.artifact.revision);
+        const result = product.read(state, mode, { ...args, offset: page.offset }) as Record<string, unknown>;
+        return modelPageResult(args, page, result, mode === 'blocks' ? 'blocks' : 'items');
       }
       return product.read(state, mode, args);
     });
@@ -329,6 +420,11 @@ export class StudioService {
       if (state.feedback.some(item => proposalExpired(item))) state = await this.store.transaction(id, current => { this.authorizedActor(current, actor, authority); clearExpiredProposals(current); return copy({ ...authorizationState(current), feedback: current.feedback }); });
       const feedback = visibleFeedback(state.feedback, actor).filter(item => (args.status === undefined || item.status === args.status) && (args.feedbackId === undefined || item.id === args.feedbackId));
       if (action === 'get' && !feedback.length) throw new StudioError('NOT_FOUND', '反馈不存在。');
+      if (actor.kind === 'agent' && action === 'list') {
+        const stamp = createHash('sha256').update(JSON.stringify([state.artifact.revision, feedback.map(item => [item.id, item.updatedAt, item.status])])).digest('base64url');
+        const page = modelPage(args, id, stamp), end = page.offset + page.limit;
+        return modelPageResult(args, page, { feedback: feedback.slice(page.offset, end).map(modelFeedbackItem), totalCount: feedback.length, ...(end < feedback.length ? { nextOffset: end } : {}) }, 'feedback', 'artifact_feedback');
+      }
       return { feedback };
     }
     if (['suggest', 'choose', 'withdraw'].includes(action)) {
@@ -494,9 +590,10 @@ export class StudioService {
     return { ...result, actor: confirmedActor, access: sharingAccess(current.sharing) };
   }
   async room(artifactId: string, input: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) { return this.store.withProjectionLock(artifactId, authorizationState, state => this.collaboration.room(artifactId, input, this.authorizedActor(state, actor, authority))); }
-  private async export(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority): Promise<ExportRecord> {
+  private async export(id: string, args: Record<string, unknown>, actor: Actor, authority?: StudioAuthority) {
     const format = text(args.format, 'json', 20).toLowerCase();
     let result;
+    let capture: SavedRegionCapture | undefined;
     const { artifactId: _artifactId, format: _format, options: nestedOptions, ...flatOptions } = args;
     const options = { ...(object(nestedOptions) ? nestedOptions : {}), ...flatOptions };
     const resources = exportResources(this.store, id);
@@ -507,13 +604,31 @@ export class StudioService {
       } else {
         const snapshot = await this.store.readProjection(id, state => {
           actor = this.authorizedActor(state, actor, authority); assertAlive(state.artifact);
-          return { artifact: state.artifact, content: state.content };
+          if (args.atRevision === undefined || args.atRevision === state.artifact.revision) return { artifact: state.artifact, content: state.content };
+          if (!Number.isSafeInteger(args.atRevision) || Number(args.atRevision) < 0) throw new StudioError('INVALID_ARGUMENT', '请指定有效的作品修订。');
+          const saved = state.history.find(item => item.artifact.revision === args.atRevision);
+          if (!saved) throw new StudioError('VERSION_NOT_FOUND', '该导出修订已不在保留历史中，请指定可用版本。');
+          return { artifact: saved.artifact, content: saved.content };
         });
-        result = await this.products.get(snapshot.artifact.type).export(snapshot, format, options, resources);
+        if (actor.kind === 'agent' && args.rect !== undefined && snapshot.artifact.type !== 'whiteboard') throw new StudioError('INVALID_ARGUMENT', '当前作品不支持矩形范围导出。');
+        if (actor.kind === 'agent' && format === 'png' && snapshot.artifact.type === 'whiteboard') {
+          const { captureSavedRegion } = await import('./products/scoped-capture.js');
+          const board = { artifact: snapshot.artifact as Board['artifact'], ...(snapshot.content as WhiteboardContent) };
+          const target = object(args.rect) ? { rect: args.rect as unknown as CaptureRect } : { ids: (args.ids ?? [args.regionId]) as string[] };
+          capture = await captureSavedRegion(board, target, resources.assetDataUri);
+          result = capture;
+        } else result = await this.products.get(snapshot.artifact.type).export(snapshot, format, options, resources);
+        if (actor.kind === 'agent' && Buffer.byteLength(result.data, result.encoding === 'base64' ? 'base64' : 'utf8') > 1024 * 1024) throw new StudioError('LIMIT_EXCEEDED', '局部导出超过 1 MiB，请缩小范围或从作品界面导出。');
       }
     }
     catch (error) { if (error instanceof Error && 'code' in error && typeof error.code === 'string') throw new StudioError(error.code, error.message); throw error; }
-    return this.store.withProjectionLock(id, authorizationState, current => { this.authorizedActor(current, actor, authority); assertAlive(current.artifact); return saveExport(this.dataRoot, id, result); });
+    return this.store.withProjectionLock(id, authorizationState, async current => {
+      this.authorizedActor(current, actor, authority); assertAlive(current.artifact);
+      const saved = await saveExport(this.dataRoot, id, result);
+      if (!capture) return saved;
+      const { source, revision, bounds, width, height, ids } = capture;
+      return { ...saved, source, revision, bounds, width, height, ids, ...(args.includeImage === false ? {} : { image: { mimeType: capture.mimeType, data: capture.data } }) };
+    });
   }
   async getExport(exportId: string) { return getExport(this.dataRoot, exportId); }
   async close() { this.closing = true; await Promise.allSettled([...this.tasks]); this.collaboration.close(); this.thumbnails.clear(); }

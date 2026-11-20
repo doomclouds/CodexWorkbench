@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowUpRight, FileText, Braces, ChevronDown, Circle, Copy, ExternalLink, Frame, Group, Hand, Link, Loader2, Lock, Maximize, Minus, MousePointer2, PenLine, Plus, Redo2, RotateCcw, Smile, Square, StickyNote, Table2, Trash2, Type, Ungroup, Unlock, X } from 'lucide-react';
+import { ArrowUpRight, FileText, Braces, ChevronDown, Circle, Copy, ExternalLink, Frame, Group, Hand, Link, ListTodo, Loader2, Lock, Maximize, Minus, MousePointer2, PenLine, Plus, Redo2, RotateCcw, Smile, Square, StickyNote, Table2, Trash2, Type, Ungroup, Unlock, X } from 'lucide-react';
 import type { Actor, AgentTaskReleaseTarget, Anchor, Board, BoardElement, CollaborationRoom, ElementType, Feedback, HtmlSelection, Json, Operation, Presence, StudioClient } from '../../contracts/studio.js';
 import { readableText, semanticColor } from '../../core/theme.js';
 import { nativeBackdrop, nativeFill, nativeSurfaces, nativeTableInk, nativeTextInk } from '../../core/products/native-surface.js';
 import HtmlRegion from '../shared/html-region/HtmlRegion.js';
 import type { HtmlNavigationEvent } from '../shared/html-region/runtime.js';
 import { anchorBounds, arrowGeometry, arrowHeads, assetDisplayUrl, boundsOf, canvasStyle, clamp, duplicateElements, elementBounds, expandMoveIds, fitViewport, intersects, makeElement, moveOperations, newId, normalizedRect, relativeElementPoint, safeHttpLink, tableRows, wheelZoomFactor, zoomAt, type Point, type Rect, type Viewport } from './canvas-model.js';
+import { canReadCanvasText, canvasGridSpacing, mediaControlsFit, overviewStrokeWidth, projectedSize, tableDetail } from './canvas-presentation.js';
 import { shapePath, strokePath } from '../../core/products/whiteboard-geometry.js';
 import { CroppedImage, ImageCropDialog } from './NativeMedia.js';
 import { measureNativeIssues, type NativeIssue } from './native-issues.js';
@@ -21,6 +22,8 @@ import CanvasActionsMenu, { type CanvasCommand } from './CanvasActionsMenu.js';
 import ColorPalette from './ColorPalette.js';
 import NativeTable from './NativeTable.js';
 import DocumentRegion, { type DocumentActivity, type DocumentFocusSurface } from './DocumentRegion.js';
+import TodoRegion from './TodoRegion.js';
+import { normalizeTodoItems, type TodoSourceRef } from '../../contracts/todo.js';
 import { defaultDocument, documentOperations } from '../../contracts/document.js';
 import SelectionChrome from './SelectionChrome.js';
 import ConnectionPorts from './ConnectionPorts.js';
@@ -29,14 +32,14 @@ import InlineTextEditor, { type InlineTextEditorHandle, type InlineTextFormatSta
 import { newClientId } from '../shared/client-id.js';
 import { nativePaint, PEN_CURSOR } from './native-palette.js';
 import { alignSelection, tidySelection, geometryBounds, selectionBounds as nativeSelectionBounds, resizeBox, resizeElement, resizeSelection, rotateSelection, snapMove, type ResizeHandle, type AlignmentGuide } from './native-geometry.js';
-import { commentBoardTip, visibleCommentCorner } from '../shared/comments/comment-target.js';
+import { commentBoardTip, TODO_OVERVIEW_PIN_INSET, visibleCommentCorner } from '../shared/comments/comment-target.js';
 import { CommentPin } from '../shared/comments/CommentPin.js';
 import { CommentClusters } from '../shared/comments/CommentClusters.js';
 import { copyPlainText } from '../clipboard.js';
 import { studioRequest } from '../transport.js';
 import { participantColor } from '../shared/presence-members.js';
 import PeerPresenceOverlay from './PeerPresenceOverlay.js';
-import { NativeContentQueue, overlayContent, type ContentTask, type ContentReceipt } from './content-queue.js';
+import { isContentDraft, NativeContentQueue, overlayContent, type ContentTask, type ContentReceipt } from './content-queue.js';
 import { downloadStudioBlob } from '../transport.js';
 import type { NativeTableDraft } from './NativeTable.js';
 import ContentConflictDialog from './ContentConflictDialog.js';
@@ -82,7 +85,7 @@ export interface WhiteboardCanvasProps {
 
 export interface NativeAnnotation { anchor: Anchor; label: string; versions: Record<string, number>; screenPoint?: Point }
 
-type Tool = 'select' | 'pan' | 'annotate' | 'shape' | 'note' | 'text' | 'container' | 'stroke' | 'arrow' | 'sticker' | 'table' | 'document';
+type Tool = 'select' | 'pan' | 'annotate' | 'shape' | 'note' | 'text' | 'container' | 'stroke' | 'arrow' | 'sticker' | 'table' | 'document' | 'todo';
 type Gesture = { operationId?: string; baseRevision?: number } & (
   | { kind: 'pan'; start: Point; viewport: Viewport; pointerId?: number; frame?: { regionId: string; pointerId: number }; documentId?: string }
   | { kind: 'marquee'; start: Point; end: Point; additive: boolean }
@@ -95,7 +98,9 @@ type Gesture = { operationId?: string; baseRevision?: number } & (
   | { kind: 'connect'; start: Point; current: Point; element: BoardElement; side: ConnectionSide }
   | { kind: 'create'; start: Point; element: BoardElement });
 interface Dialog { type: 'html' | 'table' | 'link' | 'sticker'; element?: BoardElement }
-interface ChangeRecord { before: BoardElement[]; after: BoardElement[]; ids: string[]; summary: string; historyId?: string; snapshot?: boolean; fields?: Record<string, string[]> }
+interface ChangeRecord { before: BoardElement[]; after: BoardElement[]; ids: string[]; summary: string; revision: number; historyId?: string; fields?: Record<string, string[]> }
+interface CanvasHistory { undo: ChangeRecord[]; redo: ChangeRecord[]; lastEditRevision: number }
+const insertUndoEntry = (entries: ChangeRecord[], entry: ChangeRecord) => [...entries, entry].sort((a, b) => a.revision - b.revision).slice(-50);
 interface MediaUploadBatch { id: string; scope: string; artifactId: string; baseRevision: number; intent: number; files: File[]; position: Point; placeholders: BoardElement[]; elements: BoardElement[]; phase: 'uploading' | 'queued' | 'failed'; referenceQueued: boolean; error?: string; frame: number; sequence: number; abort: AbortController }
 
 const SHAPES = [['rounded', '圆角矩形'], ['rect', '矩形'], ['ellipse', '椭圆'], ['diamond', '菱形'], ['pill', '胶囊'], ['hexagon', '六边形'], ['parallelogram', '平行四边形'], ['database', '数据库'], ['queue', '队列'], ['document', '文档'], ['cloud', '云'], ['person', '人物']] as const;
@@ -146,6 +151,11 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const selectionCallback = useRef(onSelectionChange); selectionCallback.current = onSelectionChange;
   const viewportCallback = useRef(onViewportChange); viewportCallback.current = onViewportChange;
   const [viewport, setViewport] = useState<Viewport>({ x: 100, y: 80, zoom: 1 });
+  const [presentationZoom, setPresentationZoom] = useState(externalViewport?.zoom ?? viewport.zoom);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPresentationZoom(viewport.zoom), 110);
+    return () => window.clearTimeout(timer);
+  }, [viewport.zoom]);
   const viewportRef = useRef(viewport); viewportRef.current = viewport;
   const externalViewportRef = useRef(externalViewport); externalViewportRef.current = externalViewport;
   const [tool, setTool] = useState<Tool>('select');
@@ -170,6 +180,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const mediaUploadRef = useRef<MediaUploadBatch | null>(null), uploadBusyRef = useRef(false), uploadAlive = useRef(true);
   const [uploadError, setUploadError] = useState('');
   const [error, setError] = useState('');
+  const [historyError, setHistoryError] = useState('');
   const [toolNotice, setToolNotice] = useState('');
   const [queueSaveError, setQueueSaveError] = useState('');
   const saveError = uploadError || queueSaveError || Object.values(documentActivities).find(state => state.error)?.error || '';
@@ -216,14 +227,15 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const penWidth = 3;
   const [sticker, setSticker] = useState('smile');
   const viewStyle = canvasStyle(board.style, viewTheme);
-  const [undo, setUndo] = useState<ChangeRecord[]>([]);
-  const [redo, setRedo] = useState<ChangeRecord[]>([]);
+  const historyRef = useRef<CanvasHistory>({ undo: [], redo: [], lastEditRevision: -1 });
+  const [{ undo, redo }, setHistory] = useState(historyRef.current);
+  const updateHistory = (value: CanvasHistory) => { historyRef.current = value; setHistory(value); };
   const clipboard = useRef<BoardElement[]>([]);
   const spaceHeld = useRef(false);
   const navigationClick = useRef(false);
   const documentPlacementClick = useRef<'released' | 'clicked' | null>(null);
   const [spacePan,setSpacePan]=useState(false);
-  const [tableEditRequest, setTableEditRequest] = useState<{ id: string; sequence: number }>();
+  const [objectEditRequest, setObjectEditRequest] = useState<{ id: string; sequence: number }>();
   const canEdit = !readOnly && !preview && ['owner', 'editor'].includes(actor.role);
   const canEditRef = useRef(canEdit); canEditRef.current = canEdit;
   const { gestures: peerGestures, publish: publishGesture, confirm: confirmGesture, fail: failGesture, previewStatus, previewError } = useNativeGestureSync({ room, document: board, selfPeerId, readOnly: !canEdit, preview });
@@ -255,8 +267,10 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     }
   };
   const queue = useMemo(() => contentQueue ?? new NativeContentQueue({ send: args => clientRef.current.call<ContentReceipt>('artifact_apply', args), accepted: (task, receipt) => { if (currentScope.current === queueScope) queueCallbacks.current.accepted(task, receipt); }, changed: () => { if (currentScope.current === queueScope) queueCallbacks.current.changed(); } }), [queueScope, contentQueue]);
+  const activeQueue = useRef(queue); activeQueue.current = queue;
   queue.observe(board);
-  queueCallbacks.current.changed = () => { setQueueSaving(queue.tasks.some(task => task.state !== 'failed')); const failed = queue.tasks.find(task => task.state === 'failed'); setQueueSaveError(failed ? errorText(failed.failure ?? failed.error) : ''); if (failed) { lastQueueError.current = errorText(failed.failure ?? failed.error); setError(lastQueueError.current); } else if (lastQueueError.current) { const previous = lastQueueError.current; setError(current => current === previous ? '' : current); lastQueueError.current = ''; } const batch = mediaUploadRef.current; if(batch?.referenceQueued && !queue.tasks.some(task => task.keys.some(id => batch.placeholders.some(element => element.id === id)))) finishUpload(batch); renderQueue(value => value + 1); };
+  const unconfirmedHistory = queue.unconfirmedHistory;
+  queueCallbacks.current.changed = () => { setQueueSaving(queue.tasks.some(task => task.state !== 'failed')); const failed = queue.drafts.find(task => task.state === 'failed'); setQueueSaveError(failed ? errorText(failed.failure ?? failed.error) : ''); if (failed) { lastQueueError.current = errorText(failed.failure ?? failed.error); setError(lastQueueError.current); } else if (lastQueueError.current) { const previous = lastQueueError.current; setError(current => current === previous ? '' : current); lastQueueError.current = ''; } const batch = mediaUploadRef.current; if(batch?.referenceQueued && !queue.tasks.some(task => task.keys.some(id => batch.placeholders.some(element => element.id === id)))) finishUpload(batch); renderQueue(value => value + 1); };
   queueCallbacks.current.accepted = (task, response) => {
     const batch = mediaUploadRef.current;
     if (batch?.referenceQueued && task.operations.some(operation => operation.op === 'add' && batch.elements.some(element => element.id === (operation.id ?? operation.element?.id))) && batch.elements.every(element => response.board.elements.some(saved => saved.id === element.id))) finishUpload(batch, true, response.board);
@@ -274,8 +288,9 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       const knownFields: Record<string, string[]> = {};
       for (const operation of operations) if (operation.id && (operation.op === 'update' || operation.op === 'document')) knownFields[operation.id] = [...new Set([...(knownFields[operation.id] ?? []), ...(operation.op === 'document' ? ['document'] : Object.keys(operation.changes ?? {}))])];
       const mergedWithoutHistory = !response.historyEntry && operations.some(operation => operation.op === 'update' && Object.entries(operation.changes ?? {}).some(([field, value]) => JSON.stringify(response.board.elements.find(element => element.id === operation.id)?.[field]) !== JSON.stringify(value)));
-      if (!mergedWithoutHistory) setUndo(items => [...items.slice(-49), { before: task.appliedSources ?? task.sources, after: response.board.elements.filter(element => ids.includes(element.id)), ids, summary: task.summary, historyId: response.historyEntry?.id, snapshot: task.keys.includes('$board'), fields: knownFields }]);
-      setRedo([]);
+      const history = historyRef.current, revision = response.historyEntry?.revision ?? response.board.artifact.revision;
+      const entry = { before: task.appliedSources ?? task.sources, after: response.board.elements.filter(element => ids.includes(element.id)), ids, summary: task.summary, revision, historyId: response.historyEntry?.id, fields: knownFields };
+      updateHistory({ undo: mergedWithoutHistory ? history.undo : insertUndoEntry(history.undo, entry), redo: [], lastEditRevision: Math.max(history.lastEditRevision, revision) });
     }
   };
   useEffect(() => { queue.setEnabled(canEdit && !preview); }, [queue, canEdit, preview]);
@@ -295,7 +310,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     gestureRef.current = value; setGesture(value);
   };
   const cancelGesture = () => { setAnnotationHoverId(null); if (publishedGesture.current) publishGesture({ ...publishedGesture.current, cancelled: true }); publishedGesture.current = undefined; updateGesture(null); };
-  const beginEditing = (element: BoardElement) => {if(readingRef.current || ['html','document','image','table','stroke','diagram','chart'].includes(element.type))return;interactionIntent.current++;let text=(element.type==='arrow'?element.label:element.text)??'';if(element.bold)text=`**${text}**`;if(element.italic)text=`_${text}_`;setEditing({id:element.id,text,base:element,initialText:text});};
+  const beginEditing = (element: BoardElement) => {if(readingRef.current || ['html','document','image','table','todo','stroke','diagram','chart'].includes(element.type))return;interactionIntent.current++;let text=(element.type==='arrow'?element.label:element.text)??'';if(element.bold)text=`**${text}**`;if(element.italic)text=`_${text}_`;setEditing({id:element.id,text,base:element,initialText:text});};
 
   useEffect(() => {
     setAnnotationHoverId(null);
@@ -333,7 +348,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const pendingTextDiffers = Boolean(editing && queue.tasks.some(task => task.keys.includes(editing.id) && task.operations.some(operation => operation.op === 'update' && (typeof operation.changes?.text === 'string' && operation.changes.text !== editing.text || typeof operation.changes?.label === 'string' && operation.changes.label !== editing.text))));
   const textDirty = Boolean(editing && (pendingTextDiffers || editing.text !== (editing.initialText ?? ((editBase?.type === 'arrow' ? editBase.label : editBase?.text) ?? ''))));
   const gestureDirty = gesture?.kind === 'move' || gesture?.kind === 'connect' ? gesture.current.x !== gesture.start.x || gesture.current.y !== gesture.start.y : gesture?.kind === 'resize' || gesture?.kind === 'rotate' || gesture?.kind === 'arrow-point' ? gesture.operations.length > 0 : gesture?.kind === 'draw' || gesture?.kind === 'create';
-  const activity = JSON.stringify({ editingIds, movingIds, savingIds, dirty: documentDirty || !!mediaUpload || queue.tasks.length > 0 || Object.keys(tableDrafts).length > 0 || saving || textDirty || dialogDirty || Object.keys(propertyDrafts).length > 0 || Boolean(gestureDirty), saving, saveError, issues });
+  const activity = JSON.stringify({ editingIds, movingIds, savingIds, dirty: documentDirty || !!mediaUpload || queue.drafts.length > 0 || Object.keys(tableDrafts).length > 0 || saving || textDirty || dialogDirty || Object.keys(propertyDrafts).length > 0 || Boolean(gestureDirty), saving, saveError, issues });
   useEffect(() => { activityCallback.current?.(JSON.parse(activity)); }, [activity]);
   useEffect(() => () => activityCallback.current?.({ editingIds: [], movingIds: [], dirty: false, issues: [] }), []);
   const draftStorageKey = `studio-draft:${client.baseUrl ?? 'embedded'}:${actor.id}:${board.artifact.id}`;
@@ -341,14 +356,23 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   useEffect(() => {
     if (preview) return;
     setRecovered(null); hadLocalDraft.current = false;
-    try { const stored = localStorage.getItem(draftStorageKey); if (stored) setRecovered(JSON.parse(stored)); }
+    try {
+      const stored = localStorage.getItem(draftStorageKey);
+      if (stored) {
+        const draft = JSON.parse(stored) as NonNullable<typeof recovered>;
+        const tasks = draft.tasks?.filter(isContentDraft);
+        if (draft.text || Object.keys(draft.properties ?? {}).length || Object.keys(draft.tables ?? {}).length || tasks?.length) setRecovered({ ...draft, tasks });
+        else localStorage.removeItem(draftStorageKey);
+      }
+    }
     catch { setError('无法读取本机草稿，请在关闭前复制重要内容。'); }
   }, [draftStorageKey, preview]);
   useEffect(() => {
     if (preview || draftOwner !== queueScope) return;
-    const dirty = textDirty || Object.keys(propertyDrafts).length > 0 || Object.keys(tableDrafts).length > 0 || queue.tasks.length > 0;
+    const tasks = queue.drafts;
+    const dirty = textDirty || Object.keys(propertyDrafts).length > 0 || Object.keys(tableDrafts).length > 0 || tasks.length > 0;
     try {
-      if (dirty) { localStorage.setItem(draftStorageKey, JSON.stringify({ text: textDirty ? editing : undefined, properties: propertyDrafts, tables: tableDrafts, tasks: queue.tasks })); hadLocalDraft.current = true; }
+      if (dirty) { localStorage.setItem(draftStorageKey, JSON.stringify({ text: textDirty ? editing : undefined, properties: propertyDrafts, tables: tableDrafts, tasks })); hadLocalDraft.current = true; }
       else if (hadLocalDraft.current) { localStorage.removeItem(draftStorageKey); hadLocalDraft.current = false; }
     } catch { if (!storageFailed.current) { storageFailed.current = true; setError('本机草稿保存失败，请复制草稿或下载副本后再关闭。'); } }
   }, [draftStorageKey, draftOwner, queueScope, editing, textDirty, propertyDrafts, tableDrafts, queueRevision, preview]);
@@ -379,7 +403,8 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   }, [board, selectIds]);
   useEffect(() => {
     if (readingRef.current) exitReading();
-    selectIds([]); setTool('select'); setEditing(null); setDialog(null); setCropDialog(null); setDialogDirty(false); setPropertyDrafts({}); setTableDrafts({}); setPropertyEditingIds([]); setUndo([]); setRedo([]);
+    selectIds([]); setTool('select'); setEditing(null); setDialog(null); setCropDialog(null); setDialogDirty(false); setPropertyDrafts({}); setTableDrafts({}); setPropertyEditingIds([]);
+    updateHistory({ undo: [], redo: [], lastEditRevision: -1 }); setHistoryError('');
     setDraftOwner(`${board.artifact.id}:${actor.id}`);
     const frame = requestAnimationFrame(() => {
       const host = viewportElement.current;
@@ -477,14 +502,14 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       emptyTextDelete.current = undefined;
     }
     setEditing(null);
-    const remaining = queue.tasks.find(task => task.state === 'failed');
+    const remaining = queue.drafts.find(task => task.state === 'failed');
     setError(remaining ? errorText(remaining.failure ?? remaining.error) : '');
     requestAnimationFrame(() => viewportElement.current?.focus({preventScroll:true}));
   };
   const liveCommit = useRef(() => {}); liveCommit.current = () => { void commitEditing(false, false); };
   const textWaitStarted = useRef<number | null>(null);
   useEffect(() => {
-    if (!canEdit || preview || !textDirty || queue.tasks.some(task => task.state === 'failed' && task.keys.includes(editing?.id ?? ''))) { textWaitStarted.current = null; return; }
+    if (!canEdit || preview || !textDirty || queue.drafts.some(task => task.state === 'failed' && task.keys.includes(editing?.id ?? ''))) { textWaitStarted.current = null; return; }
     textWaitStarted.current ??= Date.now();
     const timeout = setTimeout(() => { textWaitStarted.current = null; liveCommit.current(); }, Math.max(0, Math.min(250, 1000 - (Date.now() - textWaitStarted.current))));
     return () => clearTimeout(timeout);
@@ -531,6 +556,21 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     const host = viewportElement.current;
     const bounds = nativeSelectionBounds(boardRef.current.elements, scope !== 'all' && selectionRef.current.length ? selectionRef.current : boardRef.current.elements.map(element => element.id));
     if (host && bounds) setViewport(fitViewport([bounds], host.clientWidth, host.clientHeight, 72, scope === 'selection' ? 8 : 1));
+  };
+  const openTodoSource = (source: TodoSourceRef) => {
+    const current = boardRef.current;
+    if ((source.artifactId && source.artifactId !== current.artifact.id) || !current.elements.some(element => element.id === source.elementId)) {
+      setToolNotice('当前白板找不到这条任务的来源。');
+      return;
+    }
+    if (readingRef.current) exitReading();
+    selectIds([source.elementId]);
+    fit('selection');
+    const unitSelector = source.blockId ? `[data-document-block-id="${CSS.escape(source.blockId)}"]`
+      : source.itemId ? `[data-todo-item-id="${CSS.escape(source.itemId)}"]` : '';
+    if (unitSelector) requestAnimationFrame(() => {
+      viewportElement.current?.querySelector(`[data-element-id="${CSS.escape(source.elementId)}"] ${unitSelector}`)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    });
   };
   const exitReading = () => {
     const previous = readingRef.current;
@@ -677,42 +717,80 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     else if (selected.type === 'image') {
       if (!selected.src || selected.video || selected.locked) return false;
       setCropDialog(selected);
-    } else if (selected.type === 'table') setTableEditRequest(current => ({ id: selected.id, sequence: (current?.sequence ?? 0) + 1 }));
+    } else if (selected.type === 'table' || selected.type === 'todo') setObjectEditRequest(current => ({ id: selected.id, sequence: (current?.sequence ?? 0) + 1 }));
     else if (!['stroke', 'diagram', 'chart'].includes(selected.type) && !(selected.type === 'sticker' && getBoardSticker(selected.data?.stickerIconId))) beginEditing(selected);
     else return false;
     updateGesture(null); return true;
   };
-  const changeHistory = async (direction: 'undo' | 'redo') => {
-    const records = direction === 'undo' ? undo : redo;
-    const record = records.at(-1);
-    if (!record) return;
-    if(record.historyId){const saved=await apply([{op:'restore',versionId:record.historyId,data:{mode:'undo'}}],`${direction==='undo'?'撤销':'重做'}：${record.summary}`,undefined,false);if(saved){const next={...record,historyId:queue.historyId(saved.artifact.revision)};if(direction==='undo'){setUndo(items=>items.slice(0,-1));setRedo(items=>[...items,next]);}else{setRedo(items=>items.slice(0,-1));setUndo(items=>[...items,next]);}}return;}
+  const inverseOperations = (direction: 'undo' | 'redo', record: ChangeRecord, current: BoardElement[]): Operation[] => {
+    if (record.historyId) return [{ op: 'restore', versionId: record.historyId, data: { mode: 'undo' } }];
     const target = direction === 'undo' ? record.before : record.after;
-    const current = boardRef.current.elements;
     const operations: Operation[] = [];
     for (const id of record.ids) {
       const old = current.find((element) => element.id === id);
       const next = target.find((element) => element.id === id);
       const expected = (direction === 'undo' ? record.after : record.before).find(element => element.id === id);
       const sameContent = (a: BoardElement | undefined, b: BoardElement | undefined) => JSON.stringify(a && Object.fromEntries(Object.entries(a).filter(([key]) => key !== 'version'))) === JSON.stringify(b && Object.fromEntries(Object.entries(b).filter(([key]) => key !== 'version')));
-      if (!next && old) { if (!sameContent(old, expected)) { setError('此对象后来已被修改，无法安全撤销。'); return; } operations.push({ op: 'delete', id }); }
-      else if (next && !old) { if (expected) { setError('此对象后来已被删除，无法安全撤销。'); return; } operations.push({ op: 'add', id, element: next }); }
+      if (!next && old) {
+        if (!sameContent(old, expected)) throw Object.assign(new Error('对象后来已被修改。'), { details: { elementId: id } });
+        operations.push({ op: 'delete', id });
+      } else if (next && !old) {
+        if (expected) throw Object.assign(new Error('对象后来已被删除。'), { details: { elementId: id } });
+        operations.push({ op: 'add', id, element: next });
+      }
       else if (next && old) {
         const changes: Partial<BoardElement> = {};
         const defaults: Partial<BoardElement> = { groupId: '', parentId: '', fontFamily: '', bold: false, italic: false, locked: false, hollow: false, dash: false, text: '', label: '', fill: next.type === 'link' ? '#ffffff' : '', color: '', stroke: '', fontSize: 17, textAlign: next.type === 'shape' ? 'center' : 'left', strokeWidth: Number(next.width ?? (next.type === 'stroke' ? 3 : next.type === 'shape' ? 1.4 : 1.8)), heads: arrowHeads(next), crop: { zoom: 1, x: .5, y: .5 }, data: {} };
         for (const key of record.fields?.[id] ?? new Set([...Object.keys(expected ?? {}), ...Object.keys(next)])) {
           if (key === 'id' || key === 'version' || JSON.stringify(expected?.[key]) === JSON.stringify(next[key])) continue;
-          if (JSON.stringify(old[key] ?? defaults[key]) !== JSON.stringify(expected?.[key] ?? defaults[key])) { setError('这项内容后来已被修改，无法安全撤销。'); return; }
+          if (JSON.stringify(old[key] ?? defaults[key]) !== JSON.stringify(expected?.[key] ?? defaults[key])) throw Object.assign(new Error('这项内容后来已被修改。'), { details: { elementId: id } });
           changes[key] = next[key] ?? defaults[key];
         }
         if (Object.keys(changes).length) operations.push({ op: 'update', id, changes });
       }
     }
-    const saved = await apply(operations, `${direction === 'undo' ? '撤销' : '重做'}：${record.summary}`, current, false);
-    if (saved) {
-      if (direction === 'undo') { setUndo((items) => items.slice(0, -1)); setRedo((items) => [...items, record]); }
-      else { setRedo((items) => items.slice(0, -1)); setUndo((items) => [...items, record]); }
-    }
+    return operations;
+  };
+  const changeHistory = (direction: 'undo' | 'redo') => {
+    if (!canEditRef.current || queue.unconfirmedHistory) return;
+    setHistoryError('');
+    const command = direction === 'undo' ? '撤销' : '重做';
+    let record: ChangeRecord | undefined;
+    queue.enqueueHistory(boardRef.current, command, {
+      prepare: () => {
+        if (!canEditRef.current || activeQueue.current !== queue || currentScope.current !== queueScope) return;
+        const next = historyRef.current[direction].at(-1);
+        if (!next) return;
+        record = next;
+        const before = boardRef.current;
+        const operations = inverseOperations(direction, next, before.elements);
+        if (!operations.length) return;
+        return {
+          before, operations, summary: `${command}：${next.summary}`,
+          accepted: receipt => {
+            if (activeQueue.current !== queue || currentScope.current !== queueScope) return;
+            const history = historyRef.current, revision = receipt.historyEntry?.revision ?? receipt.board.artifact.revision;
+            const entry = { ...next, revision, historyId: receipt.historyEntry?.id };
+            const laterEdit = history.lastEditRevision > revision;
+            // A reply replayed after another write identifies the original transaction, not the current stack top.
+            if (direction === 'undo') {
+              updateHistory({ ...history, undo: history.undo.filter(item => item !== next), redo: laterEdit ? history.redo : [...history.redo, entry] });
+            } else {
+              const undo = insertUndoEntry(history.undo, entry);
+              updateHistory({ ...history, undo, redo: history.redo.filter(item => item !== next) });
+            }
+          },
+        };
+      },
+      rejected: failure => {
+        if (activeQueue.current !== queue || currentScope.current !== queueScope) return;
+        const error = failure as { message?: string; details?: { elementId?: string } } | null;
+        const id = error?.details?.elementId;
+        const element = id ? boardRef.current.elements.find(item => item.id === id) ?? record?.after.find(item => item.id === id) ?? record?.before.find(item => item.id === id) : undefined;
+        const target = id === '$order' ? '图层顺序' : id === '$style' ? '白板样式' : element?.text?.trim().slice(0, 60) || element?.label?.trim().slice(0, 60) || id;
+        setHistoryError(`无法${command}${record ? `「${record.summary}」` : '这一步'}。${target ? `涉及「${target}」。` : ''}${error?.message || '请查看当前内容。'}`);
+      },
+    });
   };
 
   const actionsRef = useRef({ remove, duplicate, changeHistory, fit, command, stepZoom, updateSelected, chooseTool, editSelected });
@@ -828,7 +906,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     updateGesture({ kind: 'pan', start: { x: event.clientX, y: event.clientY }, viewport: viewportRef.current, pointerId: event.pointerId, documentId: documentFocusSurface.current?.id });
   };
   const nativeAnnotationHit = (target: Element): BoardElement | 'blocked' | undefined => {
-    if (target.closest('[data-document-content],[data-document-controls],iframe,.studio-html-state-error')) return 'blocked';
+    if (target.closest('[data-document-content],[data-document-controls],[data-todo-item-id],iframe,.studio-html-state-error')) return 'blocked';
     const id = target.closest('[data-element-id]')?.getAttribute('data-element-id');
     if (id) return contentElements.find(element => element.id === id) ?? 'blocked';
     return target.closest('[data-native-interactive]') ? 'blocked' : undefined;
@@ -949,7 +1027,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       const position = inside && target ? anchorBounds({ coordinateSpace: 'element', elementIds: [surface.id], x: (point.x - surface.clip.x) / surface.clip.w, y: (point.y - surface.clip.y) / surface.clip.h }, [target]) : null;
       onCursorMove?.(position ? { x: position.x, y: position.y } : null);
     } else onCursorMove?.(hovering);
-    if(canEdit&&!annotating&&['text','shape','note','container','table','sticker','document'].includes(tool))setPointer(hovering);
+    if(canEdit&&!annotating&&['text','shape','note','container','table','sticker','document','todo'].includes(tool))setPointer(hovering);
     const current = gestureRef.current;
     if (current?.kind === 'pan' && current.frame) return;
     previewAnnotation(event);
@@ -1108,6 +1186,9 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     }
     return remoteElements;
   }, [board.elements, queueRevision, propertyDrafts, peerGestures, gesture, viewport.zoom, penColor, preview]);
+  const titleCandidates = useMemo(() => renderedElements.filter(element => showHtmlCaption(element, viewport.zoom) || (
+    element.type === 'container' && (element.id === editing?.id || canReadCanvasText(projectedSize(element, presentationZoom), element.fontSize ?? 17, presentationZoom))
+  )), [renderedElements, viewport.zoom, presentationZoom, editing?.id]);
   const documentPlacement = !reading && canEdit && !annotating && (gesture?.kind === 'create' && gesture.element.type === 'document' ? gesture.element : tool === 'document' && pointer && !gesture ? makeElement('document', pointer, { id: 'document-placement-preview' }) : null);
   const surfaceScene = useMemo(() => nativeSurfaces(
     reading ? renderedElements.filter(element => reading.ids.includes(element.id)) : renderedElements,
@@ -1194,6 +1275,13 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   const renderElement = (element: BoardElement) => {
     const picked = !reading && selection.includes(element.id);
     const hidden = Boolean(reading && !reading.ids.includes(element.id));
+    const expanded = Boolean(reading && !hidden);
+    const isEditing = editing?.id === element.id;
+    const size = projectedSize(element, presentationZoom);
+    const fontSize = element.fontSize ?? 17;
+    const showText = expanded || isEditing || canReadCanvasText(size, fontSize, presentationZoom);
+    const showMediaControls = expanded || mediaControlsFit(size);
+    const dash = element.dash && presentationZoom * 5 >= 1 ? '6 5' : undefined;
     const captionScale = Math.min(1 / viewport.zoom, 1);
     const inlineSelected = picked && selection.length === 1 && tool === 'select' && !annotating;
     const htmlMovable = !reading && tool === 'select' && !annotating && canEdit && !element.locked;
@@ -1204,14 +1292,17 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       const startMarker = `studio-arrow-start-${element.id}`;
       const [fromHead, toHead] = arrowHeads(element);
       const markerColor = picked ? viewStyle.accent : lineColor;
-      const renderMarker = (id: string, head: string) => <marker id={id} viewBox="0 0 10 10" refX={head === 'circle' ? 5 : 8} refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">{head === 'circle' ? <circle cx="5" cy="5" r="3" fill={viewStyle.paper} stroke={markerColor} strokeWidth="1.5" /> : <path d="M 1 1 L 8 5 L 1 9" fill="none" stroke={markerColor} strokeWidth="1.5" />}</marker>;
+      const strokeWidth = Number(element.strokeWidth ?? element.width ?? 1.8);
+      const labelSize = element.labelSize ?? { w: 200, h: 54 };
+      const showLabel = expanded || isEditing || canReadCanvasText(projectedSize(labelSize, presentationZoom), 13, presentationZoom);
+      const renderMarker = (id: string, head: string) => <marker id={id} viewBox="0 0 10 10" refX={head === 'circle' ? 5 : 8} refY="5" markerUnits="userSpaceOnUse" markerWidth={7 * strokeWidth} markerHeight={7 * strokeWidth} orient="auto-start-reverse">{head === 'circle' ? <circle cx="5" cy="5" r="3" fill={viewStyle.paper} stroke={markerColor} strokeWidth="1.5" /> : <path d="M 1 1 L 8 5 L 1 9" fill="none" stroke={markerColor} strokeWidth="1.5" />}</marker>;
       const annotationHovered = annotationHover?.id === element.id;
       return <svg key={element.id} className={`studio-canvas-arrow${picked ? ' is-selected' : ''}${annotationHovered ? ' is-annotation-hovered' : ''}`} data-element-id={element.id} aria-label={element.label || '连接线'} style={{ overflow: 'visible', display: hidden ? 'none' : undefined }} onClickCapture={captureAnnotationClick}>
         <defs>{renderMarker(startMarker, fromHead)}{renderMarker(marker, toHead)}</defs>
         {annotationHovered && <path d={geometry.path} className="studio-annotation-hover-path" data-annotation-hover={element.id} fill="none" strokeWidth={Number(element.strokeWidth ?? element.width ?? 1.8) + 4 / viewport.zoom} pointerEvents="none" aria-hidden="true" />}
         <path d={geometry.path} fill="none" stroke="transparent" strokeWidth={16 / viewport.zoom} pointerEvents="stroke" onPointerDown={(event) => begin(event as unknown as ReactPointerEvent<HTMLDivElement>, element)} onDoubleClick={event => { event.stopPropagation(); if (canEdit && !annotating) beginEditing(element); }} />
-        <path d={geometry.path} fill="none" stroke={markerColor} strokeWidth={Number(element.strokeWidth ?? element.width ?? 1.8)} strokeDasharray={element.dash ? '6 5' : undefined} markerStart={fromHead !== 'none' ? `url(#${startMarker})` : undefined} markerEnd={toHead !== 'none' ? `url(#${marker})` : undefined} pointerEvents="none" />
-        {(element.label || editing?.id === element.id) && <foreignObject x={geometry.label.x - (element.labelSize?.w ?? 200) / 2} y={geometry.label.y - (element.labelSize ? element.labelSize.h / 2 : 28)} width={element.labelSize?.w ?? 200} height={element.labelSize?.h ?? 54} overflow="visible"><div className="studio-arrow-label" style={element.labelSize ? { maxWidth: element.labelSize.w } : undefined}>{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.label} />}</div></foreignObject>}
+        <path d={geometry.path} fill="none" stroke={markerColor} strokeWidth={overviewStrokeWidth(strokeWidth, viewport.zoom)} strokeDasharray={expanded && element.dash ? '6 5' : dash} markerStart={fromHead !== 'none' ? `url(#${startMarker})` : undefined} markerEnd={toHead !== 'none' ? `url(#${marker})` : undefined} pointerEvents="none" />
+        {showLabel && (element.label || isEditing) && <foreignObject x={geometry.label.x - labelSize.w / 2} y={geometry.label.y - (element.labelSize ? labelSize.h / 2 : 28)} width={labelSize.w} height={labelSize.h} overflow="visible"><div className="studio-arrow-label" style={element.labelSize ? { maxWidth: element.labelSize.w } : undefined}>{isEditing ? renderTextEditor(element) : <RichText text={element.label} />}</div></foreignObject>}
       </svg>;
     }
     const fill = nativeFill(element, viewStyle, nativePaint(element.fill, viewTheme));
@@ -1221,7 +1312,7 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     const ink = element.type === 'table' ? nativeTableInk(color, viewStyle, textFill)
       : element.type === 'sticker' ? semanticColor(color, viewStyle, viewStyle.ink) : nativeTextInk(color, viewStyle, textFill, backdrop);
     const headerInk = element.type === 'table' ? nativeTableInk(color, viewStyle, fill) : ink;
-    const style: CSSProperties = { display: hidden ? 'none' : undefined, left: element.x, top: element.y, width: element.w, height: element.h, color: ink, fontSize: element.fontSize ?? 17, fontFamily: element.fontFamily || viewStyle.fontFamily, fontWeight: element.bold ? 600 : 400, fontStyle: element.italic ? 'italic' : 'normal', textAlign: element.textAlign ?? (element.type === 'shape' ? 'center' : 'left'), transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined, ...(element.type === 'container' ? { borderColor: lineColor, borderStyle: element.dash ? 'dashed' : 'solid', borderWidth: element.strokeWidth ?? 1, background: fill !== 'transparent' ? fill : undefined } : {}) };
+    const style: CSSProperties = { display: hidden ? 'none' : undefined, left: element.x, top: element.y, width: element.w, height: element.h, color: ink, fontSize, fontFamily: element.fontFamily || viewStyle.fontFamily, fontWeight: element.bold ? 600 : 400, fontStyle: element.italic ? 'italic' : 'normal', textAlign: element.textAlign ?? (element.type === 'shape' ? 'center' : 'left'), transform: element.rotation ? `rotate(${element.rotation}deg)` : undefined, ...(element.type === 'container' ? { borderColor: lineColor, borderStyle: element.dash && (expanded || dash) ? 'dashed' : 'solid', borderWidth: overviewStrokeWidth(element.strokeWidth ?? 1, viewport.zoom), background: fill !== 'transparent' ? fill : undefined } : {}) };
     let content;
     // Moving a region owns the whole pointer gesture, even when it crosses the iframe.
     if (isHtmlEmbed(element)) content = <HtmlRegion element={element} zoom={viewport.zoom} annotation={annotating} interactive={reading ? reading.ids.includes(element.id) : inlineSelected && gesture?.kind !== 'move'} preserveScroll panMode={spacePan || tool === 'pan' && !annotating} onNavigation={input => htmlNavigation(element, input)} onPointerPosition={point => { const position = point && anchorBounds({ coordinateSpace: 'element', elementIds: [element.id], x: point.x, y: point.y }, [element]); onCursorMove?.(position ? { x: position.x, y: position.y } : null); }} onAnnotate={selection => {
@@ -1234,14 +1325,61 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
       if (!current) throw new Error('此嵌入区域已被删除，交互草稿仍保留。');
       const source = queue.source(element.id, expectedVersion);
       if (!source) throw new Error('嵌入内容的编辑基准已过期，请保留草稿后重新打开。');
-      const failed = queue.tasks.find(task => task.state === 'failed' && task.keys.includes(element.id));
+      const failed = queue.drafts.find(task => task.state === 'failed' && task.keys.includes(element.id));
       if (failed && !await queue.retry(failed.id)) throw failed.failure ?? new Error(failed.error);
       const saved = await apply([{ op: 'update', id: element.id, changes: { state } }], '更新嵌入交互状态', [source], false);
       const next = saved?.elements.find((item) => item.id === element.id);
-      if (!next) throw queue.tasks.find(task => task.state === 'failed' && task.keys.includes(element.id))?.failure ?? new Error('交互状态未能保存。');
+      if (!next) throw queue.drafts.find(task => task.state === 'failed' && task.keys.includes(element.id))?.failure ?? new Error('交互状态未能保存。');
       return { state: next.state ?? null, version: next.version };
     } : undefined} />;
-    else if (element.type === 'document') content = <DocumentRegion boardPoint={boardPoint} activities={activities} onFeedbackSelect={onFeedbackSelect} annotationActive={annotating} onAnnotationModeChange={setAnnotation} styleProfile={board.style} onMoveStart={event => moveRegion(event, element)} element={element} artifactId={board.artifact.id} actor={actor} client={client} canEdit={canEdit && !preview} canAnnotate={canAnnotate && !preview} interactive={reading ? reading.ids.includes(element.id) : selection.length === 1 && selection[0] === element.id} expanded={!!reading && reading.ids.length === 1 && reading.ids[0] === element.id} focusHost={viewportElement.current} theme={viewTheme} readingZoom={viewport.zoom} editRequest={documentEditRequest?.id === element.id ? documentEditRequest.sequence : undefined} target={annotationTarget} onInteract={active => { if (active) { selectIds([element.id]); setTool('select'); } else if (!readingRef.current) { selectIds([]); viewportElement.current?.focus({ preventScroll: true }); } }} onEdit={() => { void requestDocumentEdit(element.id); }} onExpand={() => { selectIds([element.id]); void readSelection(); }} onExit={exitReading} onFocusSurface={surface => { if (surface || documentFocusSurface.current?.id === element.id) { documentFocusSurface.current = surface; setFocusedDocumentSurface(surface); } }} onActivity={state => setDocumentActivities(previous => { if (JSON.stringify(previous[element.id]) === JSON.stringify(state)) return previous; return { ...previous, [element.id]: state }; })} onSave={async (document, title, base, overwrite) => {
+    else if (element.type === 'todo') {
+      const rowFeedback = activities.filter(item => item.anchor.coordinateSpace === 'todo'
+        && item.anchor.elementIds?.[0] === element.id && item.anchor.pin?.coordinateSpace !== 'board');
+      content = <TodoRegion
+        element={element} interactive={expanded || inlineSelected} expanded={expanded}
+        overview={size.w < 228 || size.h < 110}
+        uiScale={Math.min(1 / viewport.zoom, 1.8)}
+        canEdit={canEdit && !preview && !annotating}
+        annotationActive={annotating && canAnnotate && !preview}
+        editRequest={objectEditRequest?.id === element.id ? objectEditRequest.sequence : undefined}
+        styleProfile={board.style}
+        onMoveStart={event => moveRegion(event, element)}
+        onExpand={() => { selectIds([element.id]); void readSelection(); }}
+        onOpenSource={openTodoSource}
+        sourceLabel={source => !source.artifactId || source.artifactId === board.artifact.id ? board.elements.find(item => item.id === source.elementId)?.text : undefined}
+        onEditingChange={active => setPropertyEditingIds(ids => active ? [...new Set([...ids, element.id])] : ids.filter(id => id !== element.id))}
+        onSave={async (operations, base) => {
+           const failed = queue.drafts.find(task => task.state === 'failed' && JSON.stringify(task.operations) === JSON.stringify(operations));
+          const saved = failed ? (await queue.retry(failed.id))?.board : await apply(operations, '编辑任务清单', [base]);
+          return saved?.elements.find(item => item.id === element.id) ?? false;
+        }}
+        onAnnotateItem={(itemId, point) => {
+          const item = normalizeTodoItems(element.data?.items).find(row => row.id === itemId);
+          const row = viewportElement.current?.querySelector(`[data-todo-id="${CSS.escape(element.id)}"] [data-todo-item-id="${CSS.escape(itemId)}"]`);
+          const bounds = row?.getBoundingClientRect();
+          if (!item || !bounds || !bounds.width || !bounds.height) return;
+          const tip = point ?? { x: bounds.right - 8, y: bounds.bottom - 4 };
+          const pin: NonNullable<Anchor['pin']> = {
+            coordinateSpace: 'todo',
+            x: clamp((tip.x - bounds.left) / bounds.width, 0, 1),
+            y: clamp((tip.y - bounds.top) / bounds.height, 0, 1),
+          };
+          const anchor: Anchor = { coordinateSpace: 'todo', elementIds: [element.id], itemId, sourceVersion: element.version, quote: item.text.slice(0, 240), pin };
+          selectIds([element.id]);
+          onAnnotateNative?.({ anchor, label: item.text || '任务项', versions: { [element.id]: element.version }, screenPoint: tip });
+        }}
+        renderItemAdornment={itemId => rowFeedback.filter(feedback => feedback.anchor.itemId === itemId).map(feedback => {
+          const pin = feedback.anchor.pin?.coordinateSpace === 'todo' ? feedback.anchor.pin : { x: .97, y: .9 };
+          return <CommentPin key={feedback.id} feedback={feedback} left={`${pin.x * 100}%`} top={`${pin.y * 100}%`} zoom={viewport.zoom} onSelect={onFeedbackSelect} />;
+        })}
+        renderOutsideRows={ids => rowFeedback.filter(feedback => !ids.includes(feedback.anchor.itemId ?? '')).map(feedback =>
+          <CommentPin key={feedback.id} feedback={feedback}
+            left={`max(0px, calc(100% - ${TODO_OVERVIEW_PIN_INSET.right / viewport.zoom}px))`}
+            top={`max(0px, calc(100% - ${TODO_OVERVIEW_PIN_INSET.bottom / viewport.zoom}px))`}
+            zoom={viewport.zoom} onSelect={onFeedbackSelect} />)}
+      />;
+    }
+    else if (element.type === 'document') content = <DocumentRegion boardPoint={boardPoint} activities={activities} onFeedbackSelect={onFeedbackSelect} annotationActive={annotating} onAnnotationModeChange={setAnnotation} styleProfile={board.style} onMoveStart={event => moveRegion(event, element)} element={element} artifactId={board.artifact.id} actor={actor} client={client} canEdit={canEdit && !preview} canAnnotate={canAnnotate && !preview} interactive={reading ? reading.ids.includes(element.id) : selection.length === 1 && selection[0] === element.id} expanded={!!reading && reading.ids.length === 1 && reading.ids[0] === element.id} focusHost={viewportElement.current} theme={viewTheme} readingZoom={viewport.zoom} editRequest={documentEditRequest?.id === element.id ? documentEditRequest.sequence : undefined} target={annotationTarget} onInteract={active => { if (active) { selectIds([element.id]); setTool('select'); } else if (!readingRef.current) { selectIds([]); viewportElement.current?.focus({ preventScroll: true }); } }} onEdit={() => { void requestDocumentEdit(element.id); }} onExpand={() => { selectIds([element.id]); void readSelection(); }} onExit={exitReading} onFocusSurface={surface => { if (surface || documentFocusSurface.current?.id === element.id) { documentFocusSurface.current = surface; setFocusedDocumentSurface(surface); } }} onActivity={state => { setDocumentActivities(previous => { if (JSON.stringify(previous[element.id]) === JSON.stringify(state)) return previous; return { ...previous, [element.id]: state }; }); }} onSave={async (document, title, base, overwrite) => {
       const operations: Operation[] = [];
       const blocks = documentOperations(base.document ?? defaultDocument(), document);
       if (blocks.length) operations.push({ op: 'document', id: element.id, data: { operations: blocks } });
@@ -1256,38 +1394,44 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         // Replacing this save must leave later movement/style intentions in the queue.
         queue.discard(failed.id); failed = undefined;
       }
-      if (queue.tasks.some(task => (task.keys.includes(element.id) || task.keys.includes('$board')) && task.id !== failed?.id)) throw new Error('此文档还有未确认的白板操作，请先返回画板处理，再比较最新内容后保存正文。');
+      if (queue.tasks.some(task => (!task.history || task.state !== 'failed') && (task.keys.includes(element.id) || task.keys.includes('$board')) && task.id !== failed?.id)) throw new Error('此文档还有未确认的白板操作，请先返回画板处理，再比较最新内容后保存正文。');
       if (!operations.length) return base;
       if (failed && JSON.stringify(failed.operations) !== JSON.stringify(operations)) throw new Error('前次文档草稿尚未保存，请先比较最新内容后保存。');
       const saved = failed ? (await queue.retry(failed.id))?.board : await apply(operations, '编辑文档', [base]);
       return saved?.elements.find(item => item.id === element.id) ?? false;
     }} onAnnotate={(anchor, version, screenPoint) => { selectIds([element.id]); onAnnotateNative?.({ anchor, label: '文档选区 · ' + (element.text || '文档'), versions: { [element.id]: version }, screenPoint }); }} />;
     else if (element.type === 'stroke') {
-      content = <svg className="studio-stroke-svg" overflow="visible" aria-hidden="true"><path d={strokePath(element.points)} fill="none" stroke={lineColor} strokeWidth={Number(element.strokeWidth ?? element.width ?? 3)} strokeDasharray={element.dash ? '6 5' : undefined} strokeLinecap="round" strokeLinejoin="round" /></svg>;
+      content = <svg className="studio-stroke-svg" overflow="visible" aria-hidden="true"><path d={strokePath(element.points)} fill="none" stroke={lineColor} strokeWidth={overviewStrokeWidth(Number(element.strokeWidth ?? element.width ?? 3), viewport.zoom)} strokeDasharray={expanded && element.dash ? '6 5' : dash} strokeLinecap="round" strokeLinejoin="round" /></svg>;
     } else if (element.type === 'image') {
       const src = assetDisplayUrl(element.src, client), video = assetDisplayUrl(element.video, client), href = safeHttpLink(element.href);
       const mediaState = client.assetState?.(element.video || element.src || '');
       const unavailable = Boolean(element.video && !video || !element.video && !src);
-      content = <>{video ? <video src={video} controls preload="metadata" playsInline poster={src} data-native-interactive="true" /> : src ? <><CroppedImage element={element} src={src} />{href && <a className="studio-image-link" href={href} target="_blank" rel="noopener noreferrer" aria-label="打开图片链接" data-native-interactive="true"><ExternalLink size={16} /></a>}</> : null}
+      content = <>{video ? <video src={video} controls={showMediaControls} preload="metadata" playsInline poster={src} data-native-interactive={showMediaControls ? 'true' : undefined} style={showMediaControls ? undefined : { pointerEvents: 'none' }} tabIndex={showMediaControls ? undefined : -1} /> : src ? <><CroppedImage element={element} src={src} />{href && showMediaControls && <a className="studio-image-link" href={href} target="_blank" rel="noopener noreferrer" aria-label="打开图片链接" data-native-interactive="true"><ExternalLink size={16} /></a>}</> : null}
         {unavailable && <div className="studio-media-missing studio-media-state" role={mediaState?.status === 'error' ? 'alert' : 'status'}>{mediaState?.status === 'loading' ? '正在加载媒体…' : mediaState?.status === 'error' ? mediaState.message || '媒体加载失败。' : '无法读取媒体'}</div>}</>;
-    } else if (element.type === 'table') content = <NativeTable bodyPaint={{background:viewStyle.paper,color:ink}} headerPaint={{background:fill,color:headerInk}} key={queueScope+':'+element.id+':'+draftGeneration} initialDraft={preview?undefined:tableDrafts[element.id]} onDraftChange={draft=>setTableDrafts(current=>{const next={...current};if(draft)next[element.id]=draft;else delete next[element.id];return next;})} element={element} selected={picked && !reading && tool==='select' && !spacePan && gesture?.kind!=='pan'} viewport={viewport} editRequest={tableEditRequest?.id===element.id?tableEditRequest.sequence:undefined} canEdit={canEdit && !reading && !annotating && tool==='select' && !spacePan} onRequestLink={value=>setLinkRequest({key:newClientId(),value})} onFormatStateChange={setFormatState} onEditingChange={active=>setPropertyEditingIds(ids=>active?[...new Set([...ids,element.id])]:ids.filter(id=>id!==element.id))} onSave={async(changes,base)=>{const failed=queue.tasks.find(task=>task.state==='failed'&&JSON.stringify(task.operations)===JSON.stringify([{op:'update',id:element.id,changes}]));const saved=failed?(await queue.retry(failed.id))?.board:await apply([{op:'update',id:element.id,changes}],'编辑表格',[base]);return saved?.elements.find(item=>item.id===element.id)??false;}}/>;
-    else if (element.type === 'link') content = <div className="studio-link-card" style={{ background: fill }}><Link size={22} /><div><strong>{element.text || '链接'}</strong><span style={{ color: nativeTextInk(color ?? 'muted', viewStyle, fill, backdrop) }}>{element.href}</span></div><a href={safeHttpLink(element.href)} target="_blank" rel="noreferrer" aria-label="打开链接" data-native-interactive="true"><ExternalLink size={17} /></a></div>;
+    } else if (element.type === 'table') content = <NativeTable bodyPaint={{background:viewStyle.paper,color:ink}} headerPaint={{background:fill,color:headerInk}} key={queueScope+':'+element.id+':'+draftGeneration} initialDraft={preview?undefined:tableDrafts[element.id]} onDraftChange={draft=>setTableDrafts(current=>{const next={...current};if(draft)next[element.id]=draft;else delete next[element.id];return next;})} element={element} detail={expanded ? 'full' : tableDetail(size, fontSize, presentationZoom)} selected={picked && !reading && tool==='select' && !spacePan && gesture?.kind!=='pan'} viewport={viewport} editRequest={objectEditRequest?.id===element.id?objectEditRequest.sequence:undefined} canEdit={canEdit && !reading && !annotating && tool==='select' && !spacePan} onRequestLink={value=>setLinkRequest({key:newClientId(),value})} onFormatStateChange={setFormatState} onEditingChange={active=>setPropertyEditingIds(ids=>active?[...new Set([...ids,element.id])]:ids.filter(id=>id!==element.id))} onSave={async(changes,base)=>{const failed=queue.drafts.find(task=>task.state==='failed'&&JSON.stringify(task.operations)===JSON.stringify([{op:'update',id:element.id,changes}]));const saved=failed?(await queue.retry(failed.id))?.board:await apply([{op:'update',id:element.id,changes}],'编辑表格',[base]);return saved?.elements.find(item=>item.id===element.id)??false;}}/>;
+    else if (element.type === 'link') content = <div className="studio-link-card" style={{ background: fill }}><Link size={22} />{showText && <><div><strong>{element.text || '链接'}</strong><span style={{ color: nativeTextInk(color ?? 'muted', viewStyle, fill, backdrop) }}>{element.href}</span></div><a href={safeHttpLink(element.href)} target="_blank" rel="noreferrer" aria-label="打开链接" data-native-interactive="true"><ExternalLink size={17} /></a></>}</div>;
     else if (element.type === 'sticker' && getBoardSticker(element.data?.stickerIconId)) content = <Sticker id={element.data?.stickerIconId} />;
-    else if (element.type === 'container') content = <div className="studio-section-title">{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.text} />}</div>;
-    else content = <>{element.type === 'shape' && <Shape element={{ ...element, fill, stroke: lineColor }} />}{element.type === 'note' && <div className="studio-note-fill" style={{ background: fill }} />}<div className={`studio-element-text${element.type === 'sticker' ? ' studio-sticker-text' : ''}`} style={{ padding: element.type === 'text' || element.type === 'sticker' ? 2 : 16, ...(element.kind === 'person' ? { top: '39%', paddingTop: 4 } : {}) }}>{editing?.id === element.id ? renderTextEditor(element) : <RichText text={element.text} />}</div></>;
-    return <div key={element.id} className={`studio-board-element studio-element-${element.type}${picked ? ' is-selected' : ''}${element.locked ? ' is-locked' : ''}${editing?.id === element.id ? ' is-editing' : ''}`} data-element-id={element.id} style={style} onClickCapture={captureAnnotationClick} onPointerDown={(event) => begin(event, element)} onDoubleClick={(event) => {
+    else if (element.type === 'container') content = showText && <div className="studio-section-title" data-canvas-external-title="">{isEditing ? renderTextEditor(element) : <RichText text={element.text} />}</div>;
+    else content = <>
+      {element.type === 'shape' && <Shape element={{ ...element, fill, stroke: lineColor, dash: !!(element.dash && (expanded || dash)) }} />}
+      {element.type === 'note' && <div className="studio-note-fill" style={{ background: fill }} />}
+      {showText || element.type === 'sticker' ? <div className={`studio-element-text${element.type === 'sticker' ? ' studio-sticker-text' : ''}`} style={{ padding: element.type === 'text' || element.type === 'sticker' ? 2 : 16, ...(element.kind === 'person' ? { top: '39%', paddingTop: 4 } : {}) }}>
+        {isEditing ? renderTextEditor(element) : <RichText text={element.text} />}
+      </div> : element.type === 'text' && !!element.text && <span className="studio-text-preview" aria-hidden="true" style={{ height: Math.min(2 / viewport.zoom, element.h / 3) }} />}
+    </>;
+    return <div key={element.id} className={`studio-board-element studio-element-${element.type}${picked ? ' is-selected' : ''}${element.locked ? ' is-locked' : ''}${isEditing ? ' is-editing' : ''}`} data-element-id={element.id} title={!showText && element.text ? element.text.slice(0, 160) : undefined} style={style} onClickCapture={captureAnnotationClick} onPointerDown={(event) => begin(event, element)} onDoubleClick={(event) => {
       if (reading || annotating || (event.target as HTMLElement).closest('[data-native-interactive]')) return;
       event.stopPropagation();
       if (element.type === 'document') { void requestDocumentEdit(element.id); return; }
       if (!canEdit) return;
       if (element.type === 'link') setDialog({ type: 'link', element });
       else if (element.type === 'image' && element.src && !element.video && !element.locked) setCropDialog(element);
-      else if (element.type === 'table') setTableEditRequest(current => ({ id: element.id, sequence: (current?.sequence ?? 0) + 1 }));
+      else if (element.type === 'table' || element.type === 'todo') setObjectEditRequest(current => ({ id: element.id, sequence: (current?.sequence ?? 0) + 1 }));
       else if (!['html', 'document', 'image', 'stroke', 'diagram', 'chart'].includes(element.type) && !(element.type === 'sticker' && getBoardSticker(element.data?.stickerIconId))) beginEditing(element);
     }}>
       {content}
       {isHtmlEmbed(element) && inlineSelected && htmlMovable && <div className="studio-html-move-edge" aria-hidden="true" style={{ height: Math.min(6 / viewport.zoom, element.h / 4) }} onPointerDown={event => moveRegion(event, element)} />}
-      {showHtmlCaption(element, viewport.zoom) && <div className="studio-html-caption" style={{ bottom: `calc(100% + ${8 * captionScale}px)`, width: element.w / captionScale, transform: `scale(${captionScale})` }}
+      {showHtmlCaption(element, viewport.zoom) && <div className="studio-html-caption" data-canvas-external-title="" style={{ bottom: `calc(100% + ${8 * captionScale}px)`, width: element.w / captionScale, transform: `scale(${captionScale})` }}
         onPointerDown={htmlMovable ? event => moveRegion(event, element) : undefined}>
         <strong title={element.text}>{element.text || 'HTML 图解'}</strong>
       </div>}
@@ -1297,7 +1441,8 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
   function renderTextEditor(element: BoardElement) {
     return <InlineTextEditor key={element.id} ref={textEditor} className="studio-inline-editor" value={editing?.text??''} disabled={!canEdit} style={{fontWeight:400,fontStyle:'normal'}} singleLine={['container','arrow'].includes(element.type)} ariaLabel={element.type==='arrow'?'连接线文字':'编辑文字'} onChange={text=>setEditing(current=>({id:element.id,text,base:current?.base??element,initialText:current?.initialText}))} onFormatStateChange={setFormatState} onRequestLink={value=>setLinkRequest({key:newClientId(),value})} onCommit={adjacent=>{void commitEditing(adjacent);}} />;
   }
-  const comparingTask = queue.tasks.find(task => task.id === comparison) ?? detachedTask;
+  const failedDrafts = queue.drafts.filter(task => task.state === 'failed');
+  const comparingTask = queue.drafts.find(task => task.id === comparison) ?? detachedTask;
   const dialogPortalRoot = viewportElement.current?.closest<HTMLElement>('.studio-session-content') ?? viewportElement.current?.closest<HTMLElement>('.studio') ?? null;
   const forgetDraft = (task: ContentTask) => {
     if (task.strictVersions) {
@@ -1401,19 +1546,19 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
         <div className="studio-zoom-steps"><button type="button" aria-label="缩小" onClick={() => stepZoom(1 / 1.2)}><Minus size={16} /></button><span>{Math.round(viewport.zoom * 100)}%</span><button type="button" aria-label="放大" onClick={() => stepZoom(1.2)}><Plus size={16} /></button></div>
         {[25, 50, 75, 100, 150, 200].map(value => <button type="button" role="menuitem" key={value} onClick={() => { stepZoom(value / 100 / viewport.zoom); setZoomMenu(false); }}>{value}%</button>)}
         <button type="button" role="menuitem" onClick={() => { fit('all'); setZoomMenu(false); }}><Maximize size={15} />适应白板</button><button type="button" role="menuitem" disabled={!selection.length} onClick={() => { fit('selection'); setZoomMenu(false); }}><Maximize size={15} />适应选区</button>
-        <hr /><button type="button" role="menuitem" aria-label="撤销" disabled={!canEdit || queueSaving || !undo.length} onClick={() => void changeHistory('undo')}><RotateCcw size={15} />撤销<span>⌘/Ctrl Z</span></button><button type="button" role="menuitem" aria-label="重做" disabled={!canEdit || queueSaving || !redo.length} onClick={() => void changeHistory('redo')}><Redo2 size={15} />重做</button>
+        <hr /><button type="button" role="menuitem" aria-label="撤销" disabled={!canEdit || queueSaving || !!unconfirmedHistory || !undo.length} onClick={() => changeHistory('undo')}><RotateCcw size={15} />撤销<span>⌘/Ctrl Z</span></button><button type="button" role="menuitem" aria-label="重做" disabled={!canEdit || queueSaving || !!unconfirmedHistory || !redo.length} onClick={() => changeHistory('redo')}><Redo2 size={15} />重做</button>
         <details><summary>视图设置</summary><label><input type="checkbox" checked={showGrid} onChange={event => setShowGrid(event.target.checked)} />显示网格</label><label><input type="checkbox" checked={singleKeys} onChange={event=>setSingleKeys(event.target.checked)}/>数字工具快捷键</label></details>
       </div>}
     </div>
-    <div ref={viewportElement} className="studio-canvas-viewport" tabIndex={readingDocument ? undefined : 0} aria-label="白板画布" onPointerDownCapture={captureNavigation} onClickCapture={event => { if (documentPlacementClick.current === 'released') documentPlacementClick.current = 'clicked'; else if (event.detail === 1) documentPlacementClick.current = null; const blocked = navigationClick.current; navigationClick.current = false; if (blocked && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } }} onDoubleClickCapture={event => { if (documentPlacementClick.current === 'clicked') { documentPlacementClick.current = null; event.preventDefault(); event.stopPropagation(); } }} onAuxClick={event => { if (event.button === 1) event.preventDefault(); }} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('[data-native-interactive]')) { setToolMenu(null); setZoomMenu(false); } begin(event); }} onDoubleClick={event => { if (reading || !canEdit || annotating || tool !== 'select' || editing || dialog || (event.target as HTMLElement).closest('[data-element-id],[data-native-interactive]')) return; updateGesture(null); void addElements([makeElement('text', boardPoint(event.clientX, event.clientY), { text: '' })], '添加文字', { edit: true }); }} onPointerMove={move} onPointerOver={previewAnnotation} onPointerOut={event => { if (event.relatedTarget instanceof HTMLIFrameElement) setAnnotationHoverId(null); }} onPointerLeave={()=>{setPointer(null);setAnnotationHoverId(null);onCursorMove?.(null);}} onPointerUp={finish} onPointerCancel={cancelGesture} onLostPointerCapture={()=>{if(gestureRef.current)cancelGesture();}} onContextMenu={event=>{if((event.target as HTMLElement).closest('[data-native-interactive]'))return;if(reading){event.preventDefault();return;}event.preventDefault();const id=(event.target as HTMLElement).closest('[data-element-id]')?.getAttribute('data-element-id');if(id&&!selectionRef.current.includes(id))selectIds([id]);openMenu({x:event.clientX,y:event.clientY});}} onDragOver={(event) => { if (!reading && canEdit && event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if(reading)return; void uploadMedia(event.dataTransfer.files, boardPoint(event.clientX, event.clientY)); }} style={{ cursor: gesture?.kind === 'pan' ? 'grabbing' : undefined, backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${24 * viewport.zoom}px ${24 * viewport.zoom}px`, ...(!showGrid || reading ? { backgroundImage: 'none' } : {}) }}>
+    <div ref={viewportElement} className="studio-canvas-viewport" tabIndex={readingDocument ? undefined : 0} aria-label="白板画布" onPointerDownCapture={captureNavigation} onClickCapture={event => { if (documentPlacementClick.current === 'released') documentPlacementClick.current = 'clicked'; else if (event.detail === 1) documentPlacementClick.current = null; const blocked = navigationClick.current; navigationClick.current = false; if (blocked && event.detail !== 0) { event.preventDefault(); event.stopPropagation(); } }} onDoubleClickCapture={event => { if (documentPlacementClick.current === 'clicked') { documentPlacementClick.current = null; event.preventDefault(); event.stopPropagation(); } }} onAuxClick={event => { if (event.button === 1) event.preventDefault(); }} onPointerDown={(event) => { if (!(event.target as HTMLElement).closest('[data-native-interactive]')) { setToolMenu(null); setZoomMenu(false); } begin(event); }} onDoubleClick={event => { if (reading || !canEdit || annotating || tool !== 'select' || editing || dialog || (event.target as HTMLElement).closest('[data-element-id],[data-native-interactive]')) return; updateGesture(null); void addElements([makeElement('text', boardPoint(event.clientX, event.clientY), { text: '' })], '添加文字', { edit: true }); }} onPointerMove={move} onPointerOver={previewAnnotation} onPointerOut={event => { if (event.relatedTarget instanceof HTMLIFrameElement) setAnnotationHoverId(null); }} onPointerLeave={()=>{setPointer(null);setAnnotationHoverId(null);onCursorMove?.(null);}} onPointerUp={finish} onPointerCancel={cancelGesture} onLostPointerCapture={()=>{if(gestureRef.current)cancelGesture();}} onContextMenu={event=>{if((event.target as HTMLElement).closest('[data-native-interactive]'))return;if(reading){event.preventDefault();return;}event.preventDefault();const id=(event.target as HTMLElement).closest('[data-element-id]')?.getAttribute('data-element-id');if(id&&!selectionRef.current.includes(id))selectIds([id]);openMenu({x:event.clientX,y:event.clientY});}} onDragOver={(event) => { if (!reading && canEdit && event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if(reading)return; void uploadMedia(event.dataTransfer.files, boardPoint(event.clientX, event.clientY)); }} style={{ cursor: gesture?.kind === 'pan' ? 'grabbing' : undefined, backgroundPosition: `${viewport.x}px ${viewport.y}px`, backgroundSize: `${canvasGridSpacing(viewport.zoom)}px ${canvasGridSpacing(viewport.zoom)}px`, ...(!showGrid || reading ? { backgroundImage: 'none' } : {}) }}>
       {reading && !readingDocument && <ReadingMarker viewport={focusedDocumentSurface ? { x: focusedDocumentSurface.origin.x, y: focusedDocumentSurface.origin.y, zoom: focusedDocumentSurface.zoom } : viewport} clip={focusedDocumentSurface?.clip} active={readingMarker} scopeKey={focusedDocumentSurface ? `${queueScope}:${focusedDocumentSurface.scopeKey}` : `${queueScope}:${reading.ids.join(',')}:${readingBoundsKey}`} clearRevision={readingClearRevision} navigationActive={spacePan || gesture?.kind === 'pan'} />}
       <div className="studio-canvas-world" style={{ transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})` }}>
         {renderedElements.map(renderElement)}
         {!preview && mediaUpload && mediaUpload.placeholders.map((placeholder,index)=>{const element=mediaUpload.elements[index]??placeholder;return <div key={`upload-${placeholder.id}`} data-upload-placeholder={placeholder.id} data-upload-phase={mediaUpload.phase} style={{position:'absolute',left:element.x,top:element.y,width:element.w,height:element.h,border:`${1/viewport.zoom}px dashed var(--studio-accent)`,background:mediaUpload.phase==='uploading'?'color-mix(in srgb, var(--canvas-ui) 85%, transparent)':undefined,pointerEvents:'none',zIndex:73}}><div style={{position:'absolute',left:8/viewport.zoom,top:8/viewport.zoom,transform:`scale(${1/viewport.zoom})`,transformOrigin:'left top',padding:'6px 8px',borderRadius:5,background:'var(--canvas-ui)',color:'var(--canvas-ui-text)',font:'12px/1.5 Arial,"Microsoft YaHei",sans-serif',maxWidth:280}}>{mediaUpload.phase!=='failed'&&<Loader2 size={13} className="studio-spin" aria-hidden="true"/>} {mediaUpload.phase==='uploading'?'正在上传':mediaUpload.phase==='queued'?'正在加入白板':'尚未加入白板'} · {mediaUpload.files[index]!.name}{mediaUpload.phase==='failed'&&index===0&&<div data-native-interactive="true" style={{pointerEvents:'auto'}} onPointerDown={event=>event.stopPropagation()} onKeyDown={event=>event.stopPropagation()}><p role="alert">{mediaUpload.error}</p><button type="button" className="studio-button" disabled={!canEdit} onClick={()=>{const batch=mediaUploadRef.current;if(batch)void runMediaUpload(batch);}}>重试加入白板</button><button type="button" className="studio-button" onClick={()=>{const batch=mediaUploadRef.current;if(batch){batch.abort.abort();queue.discardFor(batch.placeholders.map(element=>element.id));finishUpload(batch);setError('');}}}>移除上传草稿</button></div>}</div></div>;})}
         {peerPreviewFrames.map(({peer,bounds}) => { const page = presence.find(page => page.peerId === peer.peerId), color = participantColor(peer.actor, page?.color); return <div key={`${peer.peerId}:${peer.id}`} aria-label={`${peer.actor.name}${peer.kind === 'upload' ? '正在上传' : '正在调整对象'}`} style={{ position: 'absolute', left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h, border: `${1 / viewport.zoom}px dashed ${color}`, pointerEvents: 'none' }}><span style={{ position: 'absolute', bottom: '100%', fontSize: 12 / viewport.zoom, whiteSpace: 'nowrap', color: readableText(color), background: color }}>{peer.actor.name} · {peer.kind === 'upload' ? '正在上传…' : '正在调整'}</span></div>; })}
         {documentPlacement && <div className="studio-document-placement" data-document-placement="true" aria-hidden="true" style={{ left: documentPlacement.x, top: documentPlacement.y, width: documentPlacement.w, height: documentPlacement.h }}><FileText size={18} /><span>文档</span></div>}
-        {pointer && !gesture && !editing && !annotating && canEdit && ['text','shape','note','container','table','sticker'].includes(tool) && <div className="studio-placement-ghost" aria-hidden="true">{renderElement(makeElement(tool as ElementType,pointer,{id:'placement-ghost',text:tool==='text'?'文字':'',...(tool==='shape'?{kind:shapeKind}:{}),...(tool==='sticker'?{text:getBoardSticker(sticker)?.label,data:{stickerIconId:sticker}}:{})}))}</div>}
-        {!reading && selectionBounds && selection.length>0 && (selected?.type!=='arrow'||annotating||selected.locked) && (annotating || tool==='select' && !spacePan && gesture?.kind!=='pan') && (!editing || selected?.id===editing.id && ['text','note'].includes(selected.type)) && <SelectionChrome bounds={selectionElement&&selectionElement.rotation?{x:selectionElement.x,y:selectionElement.y,w:selectionElement.w,h:selectionElement.h}:selectionBounds} rotation={selectionElement?.rotation??0} zoom={viewport.zoom} outsideResize={!!selected && (selected.type === 'document' || isHtmlEmbed(selected))} locked={annotating || !canEdit || selectedElements.some(element=>element.locked)} resizable={selectedElements.some(element=>!['arrow','link'].includes(element.type))} rotatable={selectedElements.every(element=>element.type==='arrow'||ROTATABLE_TYPES.has(element.type))} edges={selected?.type==='text'?['w','e']:selectedElements.some(element=>element.type==='image')||selected?.type==='sticker'||selection.length>1&&selectedElements.some(element=>element.rotation)?[]:undefined} onResize={resizeBegin} onRotate={rotateBegin}/>}
+        {pointer && !gesture && !editing && !annotating && canEdit && ['text','shape','note','container','table','sticker','todo'].includes(tool) && <div className="studio-placement-ghost" aria-hidden="true">{renderElement(makeElement(tool as ElementType,pointer,{id:'placement-ghost',text:tool==='text'?'文字':'',...(tool==='shape'?{kind:shapeKind}:{}),...(tool==='sticker'?{text:getBoardSticker(sticker)?.label,data:{stickerIconId:sticker}}:{})}))}</div>}
+        {!reading && selectionBounds && selection.length>0 && (selected?.type!=='arrow'||annotating||selected.locked) && (annotating || tool==='select' && !spacePan && gesture?.kind!=='pan') && (!editing || selected?.id===editing.id && ['text','note'].includes(selected.type)) && <SelectionChrome bounds={selectionElement&&selectionElement.rotation?{x:selectionElement.x,y:selectionElement.y,w:selectionElement.w,h:selectionElement.h}:selectionBounds} rotation={selectionElement?.rotation??0} zoom={viewport.zoom} outsideResize={!!selected && (selected.type === 'document' || selected.type === 'todo' || isHtmlEmbed(selected))} locked={annotating || !canEdit || selectedElements.some(element=>element.locked)} resizable={selectedElements.some(element=>!['arrow','link'].includes(element.type))} rotatable={selectedElements.every(element=>element.type==='arrow'||ROTATABLE_TYPES.has(element.type))} edges={selected?.type==='text'?['w','e']:selectedElements.some(element=>element.type==='image')||selected?.type==='sticker'||selection.length>1&&selectedElements.some(element=>element.rotation)?[]:undefined} onResize={resizeBegin} onRotate={rotateBegin}/>}
         {!reading && selected && canEdit && !annotating && tool==='select' && !spacePan && !editing && !gesture && canShowConnectionPorts(selected,viewport.zoom) && <ConnectionPorts element={selected} zoom={viewport.zoom} onBegin={connectBegin}/>}
         {!reading && selected?.type==='arrow' && canEdit && !selected.locked && !annotating && tool==='select' && !spacePan && !editing && (()=>{const points=arrowGeometry(selected,renderedElements).points;return points.map((point,index)=><button type="button" key={`arrow-handle-${index}`} className="studio-arrow-handle" aria-label={index===0?'连接线起点位置':index===points.length-1?'连接线终点位置':`连接线折点 ${index}`} style={{left:point.x,top:point.y,width:10/viewport.zoom,height:10/viewport.zoom,borderWidth:1.5/viewport.zoom}} onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();event.stopPropagation();viewportElement.current?.setPointerCapture(event.pointerId);updateGesture({kind:'arrow-point',start:boardPoint(event.clientX,event.clientY),element:selected,end:index===0?'from':index===points.length-1?'to':'bends',bendIndex:index-1,points,operations:[]});}}/>);})()}
         {annotationHoverBounds && <div className="studio-annotation-hover" data-annotation-hover={annotationHover!.id} aria-hidden="true" style={{ left: annotationHoverBounds.x, top: annotationHoverBounds.y, width: annotationHoverBounds.w, height: annotationHoverBounds.h, borderWidth: 2 / viewport.zoom, transform: annotationHover!.type !== 'stroke' && annotationHover!.rotation ? `rotate(${annotationHover!.rotation}deg)` : undefined }} />}
@@ -1438,22 +1583,24 @@ export default function WhiteboardCanvas({ board, client, actor, onChanged, onAn
     <div className="studio-canvas-toolbar" hidden={Boolean(reading)} role="toolbar" aria-label="白板工具" data-native-interactive="true">
       {TOOL_OPTIONS.map(({ tool: choice, label, key, icon: Icon }) => <button type="button" key={choice} aria-label={label} aria-keyshortcuts={key} title={`${label}（${key}）`} aria-pressed={!annotating && (choice === tool || choice === 'stroke' && tool === 'arrow' || choice === 'shape' && tool === 'table')} className={!annotating && (choice === tool || choice === 'stroke' && tool === 'arrow' || choice === 'shape' && tool === 'table') ? 'is-active' : ''} onClick={() => { void chooseTool(choice==='stroke'?lastDrawTool:choice==='shape'?lastShapeTool:choice, ['shape', 'sticker'].includes(choice) && toolMenu!==choice ? choice as 'shape' | 'sticker' : null); }} disabled={!canEdit && !['select', 'pan'].includes(choice)}>{choice==='stroke'&&lastDrawTool==='arrow'?<ArrowUpRight size={20}/>:choice==='shape'&&lastShapeTool==='table'?<Table2 size={20}/>:choice==='shape'?<span className="studio-tool-shape-glyph"><Shape element={makeElement('shape',{x:0,y:0},{w:24,h:20,kind:shapeKind,fill:'transparent',stroke:viewStyle.ink})}/></span>:<Icon size={20}/>} {['shape', 'stroke'].includes(choice) && <ChevronDown size={9} className="studio-tool-caret" />}</button>)}
     </div>
-    {toolMenu === 'shape' && canEdit && <div className="studio-shape-options studio-insert-menu" data-native-interactive="true"><div className="studio-shape-grid">{SHAPES.map(([kind,label])=><button type="button" key={kind} aria-label={`形状 ${label}`} title={label} aria-pressed={shapeKind===kind && tool==='shape'} onClick={()=>{setShapeKind(kind);void chooseTool('shape','shape');}}><Shape element={makeElement('shape',{x:0,y:0},{w:64,h:48,kind,fill:'transparent',stroke:viewStyle.ink})}/></button>)}</div><button type="button" onClick={()=>{void chooseTool('table');}}><Table2 size={17}/>表格</button><button type="button" onClick={()=>{setDialog({type:'link'});setToolMenu(null);}}><Link size={17}/>链接</button><button type="button" onClick={()=>{void openHtmlEditor();setToolMenu(null);}}><Braces size={17}/>HTML 图解</button><button type="button" aria-label="添加文档区域" onClick={() => { void addDocument(); }}><FileText size={17}/>文档区域</button></div>}
+    {toolMenu === 'shape' && canEdit && <div className="studio-shape-options studio-insert-menu" data-native-interactive="true"><div className="studio-shape-grid">{SHAPES.map(([kind,label])=><button type="button" key={kind} aria-label={`形状 ${label}`} title={label} aria-pressed={shapeKind===kind && tool==='shape'} onClick={()=>{setShapeKind(kind);void chooseTool('shape','shape');}}><Shape element={makeElement('shape',{x:0,y:0},{w:64,h:48,kind,fill:'transparent',stroke:viewStyle.ink})}/></button>)}</div><button type="button" onClick={()=>{void chooseTool('table');}}><Table2 size={17}/>表格</button><button type="button" onClick={()=>{setDialog({type:'link'});setToolMenu(null);}}><Link size={17}/>链接</button><button type="button" onClick={()=>{void openHtmlEditor();setToolMenu(null);}}><Braces size={17}/>HTML 图解</button><button type="button" aria-label="添加文档区域" onClick={() => { void addDocument(); }}><FileText size={17}/>文档区域</button><button type="button" aria-label="添加任务清单" onClick={() => { void chooseTool('todo'); }}><ListTodo size={17}/>任务清单</button></div>}
     {!annotating && (tool==='stroke'||tool==='arrow') && canEdit && <div className="studio-shape-options studio-pen-menu" role="toolbar" aria-label="绘图选项" data-native-interactive="true"><div className="studio-pen-choices"><button type="button" aria-label="画笔模式" title="画笔（6）" aria-pressed={tool==='stroke'} onClick={()=>{void chooseTool('stroke');}}><PenLine size={18}/></button><button type="button" aria-label="箭头模式" title="箭头" aria-pressed={tool==='arrow'} onClick={()=>{void chooseTool('arrow');}}><ArrowUpRight size={18}/></button></div><span className="studio-tool-divider"/><ColorPalette presetOnly theme={viewTheme} value={penColor} onChange={setPenColor}/></div>}
     {toolMenu === 'sticker' && canEdit && <StickerPalette selectedId={sticker} onSelect={choice => { setSticker(choice.id); void chooseTool('sticker'); }} onUpload={() => { fileInput.current?.click(); setToolMenu(null); }} />}
     {!reading && !zoomMenu && selectedElements.length > 0 && selectionBounds && !annotating && tool==='select' && !spacePan && gesture?.kind!=='pan' && <CanvasFormatToolbar
       key={selection.join(',')} elements={selectedElements}
-      style={{ left: viewport.x + (selectionBounds.x + selectionBounds.w / 2) * viewport.zoom, top: clamp(viewport.y + selectionBounds.y * viewport.zoom - (selected && showHtmlCaption(selected, viewport.zoom) ? 82 : 58), 12, Math.max(12, (viewportElement.current?.clientHeight || 600) - 145)) }}
+      selectionBounds={selectionBounds} viewport={viewport} titles={titleCandidates} editingTitle={editing?.id}
       formatState={editing||selected?.type==='table'&&propertyEditingIds.includes(selected.id)?formatState:undefined} requestLink={linkRequest} customColors={customColors} onCustomColorsChange={saveCustomColors}
       theme={viewTheme} canEdit={canEdit} canAnnotate={canAnnotate} saving={queue.tasks.some(task=>task.state!=='failed'&&task.keys.some(id=>selection.includes(id)))}
       onChange={(changes, colors) => { void updateSelected(changes, '调整元素', colors); }} onEditText={() => { if (selected) beginEditing(selected); }} onTextFormat={formatText} onAnnotate={annotateSelected}
       onReadSelection={() => { void readSelection(); }} onEditHtml={selected && isHtmlEmbed(selected) ? () => { void openHtmlEditor(selected); } : undefined}
       onCrop={selected?.type==='image'&&selected.src&&!selected.video?()=>setCropDialog(selected):undefined} onAlign={edge=>{void apply(alignSelection(boardRef.current.elements,selectionRef.current,edge),'对齐元素');}} onMore={openMenu} />}
-    {menu && <CanvasActionsMenu point={menu} canEdit={canEdit} selected={selection.length} locked={selectedElements.some(element=>element.locked)} hasClipboard={Boolean(navigator.clipboard?.readText)} onCommand={command} onClose={()=>setMenu(null)}/>}
+    {menu && <CanvasActionsMenu point={menu} canEdit={canEdit} selected={selection.length} locked={selectedElements.some(element=>element.locked)} hasClipboard={Boolean(navigator.clipboard?.readText)} onCommand={command} onRenameSection={selected?.type === 'container' && canEdit && !annotating && tool === 'select' ? editSelected : undefined} onClose={()=>setMenu(null)}/>}
     <div aria-label="草稿与保存提示" style={{position:'absolute',bottom:87,left:18,maxWidth:'min(620px, calc(100% - 36px))',maxHeight:'45%',overflowY:'auto',display:'flex',flexDirection:'column',gap:8,zIndex:60}}>
     {(toolNotice || previewStatus) && <div role="status" style={{padding:'8px 12px',border:'1px solid var(--canvas-ui-border)',borderRadius:7,background:'var(--canvas-ui)',color:'var(--canvas-ui-text)'}}>{toolNotice || previewStatus}</div>}
     {previewError && <div role="alert" className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto'}}>{previewError}</div>}
-    {(error || queue.tasks.some(task => task.state === 'failed')) && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert"><span>{error || '有尚未保存的草稿，请比较内容或重试。'}</span>{(emptyTextBlocked || failedEmptyTextDelete) && <button type="button" aria-label="取消本次文字编辑" onClick={cancelEmptyTextEdit}>取消本次文字编辑</button>}{queue.tasks.filter(task => task.state === 'failed').map(task => <span key={task.id}><button type="button" onClick={() => {setComparisonBoard(boardRef.current);setComparison(task.id);}}>比较双方内容</button><button type="button" disabled={!canEdit} onClick={() => queue.retry(task.id)}>重试原操作</button></span>)}<button type="button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={16} /></button></div>}
+     {historyError && <div role="alert" className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}}><span>{historyError}</span><button type="button" aria-label="关闭撤销或重做提示" onClick={() => setHistoryError('')}><X size={16} /></button></div>}
+     {unconfirmedHistory && <div role="alert" className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}}><span>「{unconfirmedHistory.summary}」的结果待确认。</span><button type="button" disabled={!canEdit} onClick={() => void queue.retry(unconfirmedHistory.id)}>重试确认原结果</button></div>}
+     {(error || failedDrafts.length > 0) && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert"><span>{error || '有尚未保存的草稿，请比较内容或重试。'}</span>{(emptyTextBlocked || failedEmptyTextDelete) && <button type="button" aria-label="取消本次文字编辑" onClick={cancelEmptyTextEdit}>取消本次文字编辑</button>}{failedDrafts.map(task => <span key={task.id}><button type="button" onClick={() => {setComparisonBoard(boardRef.current);setComparison(task.id);}}>比较双方内容</button><button type="button" disabled={!canEdit} onClick={() => queue.retry(task.id)}>重试原操作</button></span>)}<button type="button" aria-label="关闭错误提示" onClick={() => setError('')}><X size={16} /></button></div>}
     {!preview && recovered && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="status"><span>此白板有上次未保存的本机草稿。</span><button type="button" onClick={() => { setEditing(recovered.text ?? null); setPropertyDrafts(recovered.properties ?? {}); setTableDrafts(recovered.tables ?? {}); queue.restore(recovered.tasks ?? []); setDraftGeneration(value => value + 1); setRecovered(null); }}>恢复上次草稿</button><button type="button" onClick={() => void copyPlainText(JSON.stringify(recovered, null, 2)).catch(failure => setError(errorText(failure)))}>复制草稿</button><button type="button" onClick={() => void downloadStudioBlob(client, new Blob([JSON.stringify(recovered, null, 2)], { type: 'application/json' }), 'whiteboard-draft.json').catch(failure => setError(errorText(failure)))}>下载草稿副本</button><button type="button" onClick={() => { localStorage.removeItem(draftStorageKey); setRecovered(null); }}>放弃上次草稿</button></div>}
     {!preview && editing?.base && !board.elements.some(element => element.id === editing.id && element.type === editing.base?.type) && <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert"><span>正在编辑的对象已被删除，文字草稿仍可恢复。</span><button type="button" onClick={() => inspectDetached(editing.base!, { [editing.base!.type === 'arrow' ? 'label' : 'text']: editing.text })}>查看并恢复文字草稿</button></div>}
     {!preview && Object.entries(tableDrafts).filter(([id]) => !board.elements.some(element => element.id === id && element.type === 'table')).map(([id, draft]) => <div className="studio-canvas-error" style={{position:'relative',bottom:'auto',left:'auto',maxWidth:'none',flexWrap:'wrap'}} role="alert" key={id}><span>正在编辑的表格已被删除，草稿仍可恢复。</span><button type="button" onClick={() => inspectDetached(draft.base, draft.changes)}>查看并恢复表格草稿</button></div>)}

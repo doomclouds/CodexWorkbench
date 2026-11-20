@@ -82,7 +82,10 @@ describe('Studio work and content persistence', () => {
   it('records preview/diff and restores as a new revision without truncating history', async () => {
     const original = await create();
     const first = await apply(original, [{ op: 'add', element: { id: 'a', type: 'text', text: '一' } }], agent, { ...await agentTask(original), summary: '生成图解' });
-    const second = await apply(first.board, [{ op: 'update', id: 'a', changes: { text: '二' } }], editor);
+    expect(first).not.toHaveProperty('board');
+    const saved = await service.execute('artifact_read', { artifactId: original.artifact.id, mode: 'board' }, LOCAL_ACTOR) as Board;
+    expect(saved.artifact.revision).toBe(first.historyEntry.revision);
+    const second = await apply(saved, [{ op: 'update', id: 'a', changes: { text: '二' } }], editor);
     const preview = await service.execute('artifact_read', { artifactId: original.artifact.id, mode: 'version', versionId: first.historyEntry.id });
     expect(preview.board.elements[0].text).toBe('一');
     const diff = await service.execute('artifact_read', { artifactId: original.artifact.id, mode: 'diff', fromVersionId: first.historyEntry.id });
@@ -112,9 +115,11 @@ describe('HTML feedback, sharing and scope', () => {
     ({ board } = await apply(board, [{ op: 'update', id: 'html-a', changes: { x: 600, w: 1000 } }]));
     expect(board.elements[0]!.sourceRevision).toBe(revision);
     const created = await service.execute('artifact_feedback', { action: 'create', artifactId: board.artifact.id, type: 'request', text: '把标题调小', anchor: { regionId: 'html-a', targetIds: ['heading'], sourceRevision: revision, quote: '原始标题', excerpt: '<h1>原始标题</h1>' } }, commenter);
-    board = await service.execute('artifact_read', { artifactId: board.artifact.id });
-    ({ board } = await apply(board, [{ op: 'update', id: 'html-a', changes: { html: '<h2>改过的标题</h2>' } }], agent, await agentTask(board)));
-    expect(board.elements[0]!.sourceRevision).toBe(Number(revision) + 1);
+    board = await service.execute('artifact_read', { artifactId: board.artifact.id, mode: 'board' }, LOCAL_ACTOR);
+    const edited = await apply(board, [{ op: 'update', id: 'html-a', changes: { html: '<h2>改过的标题</h2>' } }], agent, await agentTask(board));
+    expect(edited).not.toHaveProperty('board');
+    const verified = await service.execute('artifact_read', { artifactId: board.artifact.id, mode: 'objects', ids: ['html-a'] }, agent);
+    expect(verified.elements[0].sourceRevision).toBe(Number(revision) + 1);
     const frozen = await service.execute('artifact_read', { mode: 'source', artifactId: board.artifact.id, feedbackId: created.contextId, regionId: 'html-a' });
     expect(frozen.html).toContain('原始标题'); expect(frozen.sourceRevision).toBe(revision);
     const live = await service.execute('artifact_read', { mode: 'source', artifactId: board.artifact.id, regionId: 'html-a' }); expect(live.html).toContain('改过的标题');

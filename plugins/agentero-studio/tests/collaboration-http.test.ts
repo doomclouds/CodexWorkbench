@@ -73,7 +73,11 @@ it('keeps an actual pending human save protected from Agent writes without calli
   const args = { artifactId, ...binding, operationId: 'agent-after-human-save', expectedVersions: { item: 1 }, operations: [{ op: 'update', id: 'item', changes: { text: 'Agent result' } }] };
   await expect(host.service.execute('artifact_apply', args, agent)).rejects.toMatchObject({ code: 'EDIT_IN_PROGRESS' });
   await host.service.updatePresence(artifactId, { peerId: 'human-saving', context: { artifactId, viewId: 'human-saving', selectedIds: [], editingIds: [], movingIds: [], savingIds: [] } }, host.service.owner);
-  expect((await host.service.execute('artifact_apply', args, agent)).board.elements[0].text).toBe('Agent result');
+  const saved = await host.service.execute('artifact_apply', args, agent);
+  expect(saved).toMatchObject({ historyEntry: { changedIds: ['item'] } });
+  expect(saved).not.toHaveProperty('board');
+  const verified = await host.service.execute('artifact_read', { artifactId, mode: 'objects', ids: ['item'] }, agent);
+  expect(verified.elements).toMatchObject([{ id: 'item', text: 'Agent result', version: 2 }]);
   await host.service.execute('artifact_activity', { artifactId, action: 'end', ...binding, outcome: 'completed' }, agent);
 });
 

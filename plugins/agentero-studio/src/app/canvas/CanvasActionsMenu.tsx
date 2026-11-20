@@ -7,11 +7,12 @@ const rows: { id: CanvasCommand; label: string; shortcut?: string; edit?: boolea
   { id: 'group', label: '组合', edit: true, selection: true, geometry: true }, { id: 'ungroup', label: '取消组合', edit: true, selection: true, geometry: true }, { id: 'tidy', label: '整理', edit: true, selection: true, geometry: true }, { id: 'lock', label: '锁定位置与尺寸', shortcut: 'Ctrl/⌘ Shift L', edit: true, selection: true }, { id: 'delete', label: '删除', shortcut: 'Delete', edit: true, selection: true, geometry: true }, { id: 'select-all', label: '全选' }, { id: 'fit', label: '适应白板', shortcut: 'Shift 1' },
   { id: 'fit-selection', label: '适应选区', shortcut: 'Shift 2', selection: true },
 ];
-export default function CanvasActionsMenu({ point, canEdit, selected, locked, hasClipboard, onCommand, onClose }: { point: { x: number; y: number }; canEdit: boolean; selected: number; locked: boolean; hasClipboard: boolean; onCommand: (command: CanvasCommand) => void; onClose: () => void }) {
+export default function CanvasActionsMenu({ point, canEdit, selected, locked, hasClipboard, onCommand, onRenameSection, onClose }: { point: { x: number; y: number }; canEdit: boolean; selected: number; locked: boolean; hasClipboard: boolean; onCommand: (command: CanvasCommand) => void; onRenameSection?: () => void; onClose: () => void }) {
   const anchor = useRef<HTMLSpanElement>(null);
   const [ready, setReady] = useState(false);
   useLayoutEffect(() => { setReady(true); }, []);
   return <><span ref={anchor} aria-hidden="true" style={{ position: 'absolute', left: point.x, top: point.y, width: 0, height: 0, pointerEvents: 'none' }} />{ready && <LibraryMenu anchorRef={anchor} label="白板操作" className="studio-canvas-actions-menu" atPoint onClose={onClose}>
+    {canEdit && selected === 1 && onRenameSection && <button type="button" role="menuitem" onClick={() => { onClose(); onRenameSection(); }}><span>重命名分区</span><small>F2</small></button>}
     {rows.filter(row => selected > 0 || !row.selection).map(row => <button type="button" role="menuitem" key={row.id} disabled={row.edit && !canEdit || row.selection && !selected || row.geometry && locked || row.id === 'paste' && !hasClipboard || row.id === 'group' && selected < 2 || row.id === 'tidy' && selected < 2} onClick={() => { onCommand(row.id); onClose(); }}><span>{row.id === 'lock' && locked ? '解锁位置与尺寸' : row.label}</span><small>{row.shortcut}</small></button>)}
   </LibraryMenu>}</>;
 }

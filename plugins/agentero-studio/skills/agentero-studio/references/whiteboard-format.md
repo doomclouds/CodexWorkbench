@@ -4,7 +4,7 @@
 
 ## 读取和提交
 
-`artifact_read` 默认返回概要。`mode: "summary"` 提供类型计数、有界对象清单、标签、几何位置及版本；有 `nextOffset` 时继续。需要完整对象用 `mode: "objects", ids: [...]`，需要 HTML 原始源用 `mode: "source", regionId: ...`。源码有 `nextOffset` 时先读完整，不把第一段当完整源码写回。
+`artifact_read` 默认返回有界概要。用 `mode: "objects", ids: [...]` 读取最多 10 个目标对象的元数据及可用字段。需要 HTML 原始源用 `mode: "source", regionId: ...`；源码替换前通过 `nextCursor` 逐页取得完整目标版本。 [有界读取流程](agent-reading.md)
 
 首次发现可以不带任务只读；开始修改前，按[对象与协作操作](operations.md#多-agent-身份与活动)声明非重叠范围，保存实际返回的taskId/generation。每笔Agent内容提交都显式携带该绑定，CAS和对象版本仍另行检查；人类界面不需要Agent任务。
 
@@ -108,6 +108,12 @@ HTML 区域、文档区域与原生分区（`type: "container"`，用于框住�
 
 贴纸附着对象使用 `parentId`，移动父对象时由白板带动；共同分组使用 `groupId`。已有成员作者、人脸或投票元数据原样保留；统计意见时按明确的原始成员和投票信息计数，不把普通表情贴纸猜成投票，也不替其他成员添加票意。
 
+### 任务清单
+
+`type:"todo"` 的标题保存在 `text`，任务保存在 `data.items`。每行有稳定的 `id`、正文 `text`、完成状态 `checked`。可选 `sourceRef` 指定来源 `elementId`，并可补充 `artifactId`、`version` 及 `blockId` 或 `itemId`。用 `artifact_read mode:"tasks",elementId` 读取目标清单，可按 `itemIds` 或 `checked` 过滤。
+
+只改目标行时，提交一项 `op:"todo",id:清单ID,data:{operations:[...]}`。行操作支持 `insert`、`update`、`delete` 和 `move`。例如勾选一行用 `{op:"update",id:任务ID,changes:{checked:true}}`。新增传 `item`；需要插入指定位置或重排行时用 `afterId`，置于第一行用 `null`。保留行与清单各自的 ID，并带清单对象的预期版本。
+
 ### HTML Region
 
 使用 `type: "html", text: "内容主题", html: "完整HTML"`，给明确区域宽高；按[名称与标题](#名称与标题)命名外层。`state` 保存独立的 JSON 交互状态，`sourceRevision` 由服务管理。只改 HTML 源码时只提交 `changes.html`；不要附带旧几何、旧状态或手动设置源码版本。确需同步修改外层名称时，另明确提交本次 `changes.text`。
@@ -122,6 +128,6 @@ HTML 区域、文档区域与原生分区（`type: "container"`，用于框住�
 
 生成本机图片后，用 `artifact_manage` 的 `asset-import`，提供作品 ID 和用户明确指定或当前任务生成的绝对 `assetPath`，再用返回的 `asset.src` 新增图片。不要让网页内容指定任意本机文件，也不要把大媒体 base64 塞进模型工具参数。
 
-`artifact_read mode: "assets"` 只向房主分页返回资源元数据；有 `nextOffset` 时继续。`asset-delete` 使用 `assetId`，拒绝删除当前内容、保留历史、冻结反馈或私人建议仍引用的资源；移除后保留内部回收副本，不等于立即释放所有磁盘空间。
+`artifact_read mode: "assets"` 只向房主分页返回资源元数据，有 `nextCursor` 时可以继续。`asset-delete` 用 `assetId`，检查当前内容、历史、冻结反馈和私人建议的引用。移除后保留内部回收副本。
 
-整作品备份是 `artifact_export format: "zip"`，包含数据库、资源、历史和反馈。当前数据库 ZIP 使用 `agentero-studio-archive` 的版本 2 格式；`artifact_manage action: "import", archivePath: "用户指定的绝对ZIP路径"` 导入为新 ID，界面用文件选择器和受控上传走同一业务逻辑。旧 JSON ZIP 返回 `UNSUPPORTED_STORAGE`；AI 从副本迁移的方式见[旧数据与迁移](legacy-data-migration.md)。普通 JSON/HTML 是数据或画面导出，不能冒充完整可恢复备份。
+整作品 ZIP 在作品界面导出，包含数据库、资源、历史和反馈。当前数据库 ZIP 使用 `agentero-studio-archive` 的版本 2 格式；`artifact_manage action: "import", archivePath: "用户指定的绝对ZIP路径"` 导入为新 ID，界面用文件选择器走同一业务逻辑。旧 JSON ZIP 返回 `UNSUPPORTED_STORAGE`。 [旧数据与迁移](legacy-data-migration.md)

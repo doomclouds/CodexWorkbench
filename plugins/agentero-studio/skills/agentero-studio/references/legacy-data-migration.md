@@ -50,7 +50,7 @@
 
 ## 数据库便携归档
 
-受支持的完整归档由 `artifact_export format:"zip"` 生成。ZIP 内的 `manifest.json` 使用 `format:"agentero-studio-archive"`、`version:2` 和 `database:"artifact.sqlite"`，并包含归档声明的资源。导入复用 `artifact_manage action:"import"` 与用户指定的绝对 `archivePath`，界面文件导入走同一业务入口。
+受支持的完整归档从作品界面导出 ZIP。ZIP 内的 `manifest.json` 使用 `format:"agentero-studio-archive"`、`version:2` 和 `database:"artifact.sqlite"`，并包含归档声明的资源。导入复用 `artifact_manage action:"import"` 与用户指定的绝对 `archivePath`，界面文件导入走同一业务入口。
 
 使用导出生成的一致性归档搬运作品。不要在数据库仍被写入时，仅复制一个数据库文件并宣称完成备份。导入会创建新作品 ID 并重映射资源引用，分享凭据和实时会话由目标环境重新建立。遇到未知归档版本或数据库 schema，保留原备份并按当前版本支持情况处理，不通过改文件名或替换 manifest 版本号强行导入。
 

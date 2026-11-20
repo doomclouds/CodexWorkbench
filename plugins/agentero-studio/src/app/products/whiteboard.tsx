@@ -151,7 +151,7 @@ function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedId
       if (!queue) throw new Error('白板编辑器尚未就绪，请稍后保存。');
       let operations = pendingSave.current.operations;
       const targetId = source.regionId ?? source.newRegionId ?? operations[0]?.element?.id;
-      const failed = queue.tasks.find(task => task.state === 'failed' && (JSON.stringify(task.operations) === JSON.stringify(operations) || !!targetId && task.keys.includes(targetId)));
+      const failed = queue.drafts.find(task => task.state === 'failed' && (JSON.stringify(task.operations) === JSON.stringify(operations) || !!targetId && task.keys.includes(targetId)));
       let result = failed ? await queue.retry(failed.id) : null;
       if (failed && !result) { showSourceConflict({ ...failed, operations, sources: source.base ? [source.base] : failed.sources }); throw failed.failure ?? new Error(failed.error); }
       if (!failed || JSON.stringify(failed.operations) !== JSON.stringify(operations)) {
@@ -159,7 +159,7 @@ function WhiteboardToolbar({ document: opaqueDocument, client, actor, selectedId
         if (!source.regionId && created) { operations = [{ op: 'update', id: created.id, changes: { html: source.html, text: source.title } }]; const next = { ...source, regionId: created.id, version: created.version, base: created }; setSource(next); pendingSave.current = { fingerprint: JSON.stringify(next), operations }; }
         result = await queue.enqueue(result?.board ?? current, operations, source.regionId || created ? '保存 HTML 源码' : '添加 HTML 图解', created ? [created] : source.base ? [source.base] : current.elements);
       }
-      if (!result) { const failed = queue.tasks.find(task => task.state === 'failed' && task.operations.some(operation => operation.id === source.regionId || operation.element?.id === operations[0]?.element?.id)); if (failed && /CONFLICT|冲突|其他人|被删除/.test(failed.error ?? '')) showSourceConflict(failed); throw failed?.failure ?? new Error('HTML 草稿尚未保存，请比较双方内容或重试原操作。'); }
+      if (!result) { const failed = queue.drafts.find(task => task.state === 'failed' && task.operations.some(operation => operation.id === source.regionId || operation.element?.id === operations[0]?.element?.id)); if (failed && /CONFLICT|冲突|其他人|被删除/.test(failed.error ?? '')) showSourceConflict(failed); throw failed?.failure ?? new Error('HTML 草稿尚未保存，请比较双方内容或重试原操作。'); }
       if (mounted.current && boardRef.current.artifact.id === current.artifact.id) { onChanged(result.board); if (!source.regionId && targetId) onInserted(targetId); pendingSave.current = null; setSourceConflict(null); setSource(null); onNotice(source.regionId ? 'HTML 源码已保存。' : 'HTML 图解已加入白板。'); }
     } catch (error) { if (mounted.current && boardRef.current.artifact.id === current.artifact.id) setSourceError(error instanceof Error ? error.message : String(error)); onError(error); } finally { if (mounted.current) { setBusy(false); setSaving(false); } }
   }

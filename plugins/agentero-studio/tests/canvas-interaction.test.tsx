@@ -3,10 +3,11 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import WhiteboardCanvas, { type NativeAnnotation, type WhiteboardCanvasProps } from '../src/app/canvas/WhiteboardCanvas.js';
 import { anchorBounds, arrowGeometry, makeElement, relativeElementPoint } from '../src/app/canvas/canvas-model.js';
+import type { ContentReceipt } from '../src/app/canvas/content-queue.js';
 import { DEFAULT_STYLE, LOCAL_ACTOR, type Board, type BoardElement, type Feedback, type Json, type Operation, type Presence, type RoomMessage, type StudioClient, type ToolName } from '../src/contracts/studio.js';
 import { encodeGestureFrame, NativeGestureReceiver } from '../src/app/shared/useNativeGestureSync.js';
 import { StudioService } from '../src/core/service.js';
@@ -358,6 +359,23 @@ describe('whiteboard direct interaction', () => {
     await key(query('编辑文字'), '2'); expect(query('选择').getAttribute('aria-pressed')).toBe('true');
     expect(query('编辑文字').textContent).toBe('123456789');
   });
+  it('renames one editable section from its existing actions menu', async () => {
+    const section = element('section', { type: 'container', text: '数据架构' });
+    const shape = element('shape', { x: 400 });
+    const call = await editable([section, shape]);
+    await select('section');
+    await click('更多操作');
+    const rename = [...host.querySelectorAll('[role="menuitem"]')].find(item => item.textContent === '重命名分区F2');
+    expect(rename).toBeDefined();
+    await event(rename!, 'click');
+    expect(document.activeElement).toBe(query('编辑文字'));
+    expect(query('编辑文字').textContent).toBe('数据架构');
+    expect(call).not.toHaveBeenCalled();
+    await key(query('编辑文字'), 'Enter');
+    await select('shape');
+    await click('更多操作');
+    expect([...host.querySelectorAll('[role="menuitem"]')].some(item => item.textContent?.includes('重命名分区'))).toBe(false);
+  });
   it('routes keyboard editing to the existing HTML source and table cell editors', async () => {
     const onEditHtml = vi.fn(); await editable([element('html', { type: 'html', html: '<p>Hello</p>' }), element('table', { type: 'table', data: { rows: [['header'],['value']] } })], { onEditHtml });
     await select('html'); await key(query('白板画布'), 'F2'); expect(onEditHtml).toHaveBeenCalledWith(expect.objectContaining({ id: 'html' }));
@@ -372,13 +390,14 @@ describe('whiteboard direct interaction', () => {
       if(this.classList.contains('studio-selection-toolbar'))return rect(400,662,650,42);
       return rect(0,0,1400,1000);
     });
-    const call = await editable([element('table', { type:'table',data:{rows:[['Header'],['Value']]} })], { externalViewport:{x:0,y:0,zoom:.48} });
+    const call = await editable([element('table', { type:'table', w: 730, h: 334, data:{rows:[['Header'],['Value']]} })], { externalViewport:{x:0,y:0,zoom:.48} });
     await select('table');
     const controls = query('表格操作') as HTMLElement;
     expect(controls.parentElement).toBe(host.querySelector('.studio-whiteboard'));
     expect(controls.closest('.studio-canvas-world')).toBeNull(); expect(controls.style.top).toBe('620px');
     expect(Number.parseFloat((query('调整第1列宽度') as HTMLElement).style.width)*.48).toBeCloseTo(8);
-    await event(host.querySelector('[data-cell="1:0"]')!, 'dblclick'); await input(query('表格第2行第1列') as HTMLTextAreaElement,'QA cell 123456789');
+    await event(host.querySelector('[data-cell="1:0"]')!, 'dblclick');
+    await input(query('表格第2行第1列') as HTMLTextAreaElement,'QA cell 123456789');
     await event(query('添加表格行'),'pointerdown'); await click('添加表格行');
     expect(call.mock.lastCall![1].operations[0]!.changes?.data?.rows).toEqual([['Header'],['QA cell 123456789'],['']]);
   });
@@ -691,6 +710,142 @@ describe('whiteboard direct interaction', () => {
     await click('重做'); expect(call.mock.calls[2]![1].operations).toEqual([{ op: 'update', id: 'one', changes: { bold: true } }]);
     expect(query('调整元素大小')).toBeNull();
   });
+  describe('canvas history command queue', () => {
+    let folder: string, service: StudioService, current: Board;
+    let writes: Record<string, unknown>[];
+    let beforeReply: (args: Record<string, unknown>, receipt: ContentReceipt) => Promise<void | ContentReceipt>;
+    const keyZ = (shiftKey = false) => key(query('白板画布'), 'z', { ctrlKey: true, shiftKey });
+    const until = (check: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise(done => setTimeout(done, 5)); }); check(); });
+    const changed = (id: string) => Boolean(current.elements.find(item => item.id === id)?.bold);
+    const bold = async (id: string) => { await select(id); await click('加粗'); };
+
+    beforeEach(async () => {
+      folder = await mkdtemp(join(tmpdir(), 'studio-canvas-history-'));
+      service = new StudioService({ dataRoot: folder });
+      const fixture = await service.execute('artifact_manage', { action: 'create', title: 'History command queue', elements: [
+        element('first', { text: '首个便签', color: '#D97757' }), element('second', { x: 400, text: '第二便签' }),
+      ] }, LOCAL_ACTOR) as { board: Board };
+      current = fixture.board; writes = []; beforeReply = async () => {};
+      const client: StudioClient = { embedded: true, async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
+        if (name === 'artifact_apply') writes.push(args);
+        const result = await service.execute(name, args, LOCAL_ACTOR);
+        const reply = name === 'artifact_apply' ? await beforeReply(args, result) : undefined;
+        return (reply ?? result) as T;
+      } };
+      function Harness() {
+        const [value, setValue] = useState(fixture.board);
+        return <WhiteboardCanvas board={value} client={client} actor={LOCAL_ACTOR} onChanged={next => { current = next; setValue(next); }} onAnnotate={() => {}} externalViewport={initialViewport} />;
+      }
+      await act(async () => root.render(<Harness />));
+    });
+
+    afterEach(async () => {
+      await act(async () => root.render(null)); await service.close();
+      const target = resolve(folder);
+      if (!target.startsWith(resolve(tmpdir()) + sep)) throw new Error('Unexpected test folder');
+      await rm(target, { recursive: true, force: true });
+    });
+
+    it('waits for a pending edit and uses distinct persisted versions for quick undo and redo presses', async () => {
+      await bold('first'); await until(() => expect(changed('first')).toBe(true));
+      let release!: () => void;
+      const pause = new Promise<void>(done => { release = done; });
+      beforeReply = async args => { if ((args.operations as Operation[])[0]?.id === 'second') await pause; };
+      try {
+        await bold('second'); await keyZ(); await keyZ();
+        expect(writes).toHaveLength(2);
+      } finally { release(); }
+      await until(() => { expect(writes).toHaveLength(4); expect([changed('first'), changed('second')]).toEqual([false, false]); });
+      const restored = (i: number) => (writes[i].operations as Operation[])[0].versionId;
+      expect(restored(2)).toBeTruthy(); expect(restored(3)).not.toBe(restored(2));
+      await keyZ(true); await keyZ(true);
+      await until(() => { expect(writes).toHaveLength(6); expect([changed('first'), changed('second')]).toEqual([true, true]); });
+      expect(restored(5)).not.toBe(restored(4));
+    });
+
+    it('uses commit order when independent edit receipts arrive in reverse order', async () => {
+      let release!: () => void, committed!: () => void;
+      const pause = new Promise<void>(done => { release = done; });
+      const firstCommitted = new Promise<void>(done => { committed = done; });
+      let secondVersion: string | undefined;
+      beforeReply = async (args, receipt) => {
+        const target = (args.operations as Operation[])[0]?.id;
+        if (target === 'first') { committed(); await pause; }
+        if (target === 'second') secondVersion = receipt.historyEntry?.id;
+      };
+      try {
+        await bold('first'); await act(async () => firstCommitted);
+        await bold('second'); await until(() => expect(changed('second')).toBe(true));
+        await keyZ();
+        expect(writes).toHaveLength(2);
+      } finally { await act(async () => release()); }
+      await until(() => expect([changed('first'), changed('second')]).toEqual([true, false]));
+      expect(secondVersion).toBeTruthy();
+      expect((writes[2].operations as Operation[])[0].versionId).toBe(secondVersion);
+    });
+
+    it('shows a command-specific collaboration conflict and keeps ordinary saves working', async () => {
+      await select('first'); await click('文字颜色'); await click('墨色 紫色');
+      await until(() => expect(current.elements[0].color).toBe('#7C5CBF'));
+      await click('文字颜色');
+      await act(async () => service.execute('artifact_apply', {
+        artifactId: current.artifact.id, operationId: 'peer-change', expectedRevision: current.artifact.revision,
+        operations: [{ op: 'update', id: 'first', changes: { color: '#385CF0' } }],
+      }, { ...LOCAL_ACTOR, id: 'peer', name: 'Peer', role: 'editor' }));
+      await act(async () => (query('白板画布') as HTMLElement).focus());
+      await keyZ();
+      await until(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('涉及「首个便签」'));
+      expect(host.textContent).not.toContain('比较双方内容');
+      expect(host.textContent).not.toContain('重试原操作');
+      await bold('second'); await until(() => expect(changed('second')).toBe(true));
+      expect(current.elements[0].color).toBe('#385CF0');
+    });
+
+    it.each(['undo', 'redo'])('replays the exact %s receipt without putting it above a later edit', async direction => {
+      await bold('first'); await until(() => expect(changed('first')).toBe(true));
+      if (direction === 'redo') { await keyZ(); await until(() => expect(changed('first')).toBe(false)); }
+      const sentAt = writes.length;
+      beforeReply = async () => { beforeReply = async () => {}; throw new Error('Reply lost after commit'); };
+      await keyZ(direction === 'redo');
+      await until(() => expect(host.querySelector('[role="alert"]')?.textContent).toContain('的结果待确认'));
+      await bold('second'); await until(() => expect(changed('second')).toBe(true));
+      beforeReply = async (args, receipt) => {
+        if (args.operationId === writes[sentAt].operationId) return { ...receipt, board: current };
+      };
+      const retry = [...host.querySelectorAll('button')].find(button => button.textContent === '重试确认原结果')!;
+      await event(retry, 'click');
+      await until(() => expect(host.textContent).not.toContain('的结果待确认'));
+      expect(writes[sentAt + 2]).toEqual(writes[sentAt]);
+      expect([changed('first'), changed('second')]).toEqual([direction === 'redo', true]);
+      await click('缩放菜单');
+      expect((query('重做') as HTMLButtonElement).disabled).toBe(true);
+      await click('缩放菜单');
+      await keyZ(); await until(() => expect(changed('second')).toBe(false));
+      expect(changed('first')).toBe(direction === 'redo');
+      if (direction === 'redo') { await keyZ(); await until(() => expect(changed('first')).toBe(false)); }
+    });
+
+    it('recovers real local drafts without recovering legacy global undo commands', async () => {
+      const storageKey = `studio-draft:embedded:${LOCAL_ACTOR.id}:${current.artifact.id}`;
+      const oldUndo = {
+        id: 'legacy-undo', keys: ['$board'], before: current, sources: [], summary: '撤销：删除元素',
+        remember: false, state: 'failed', operations: [{ op: 'restore', versionId: 'obsolete-version', data: { mode: 'undo' } }],
+      };
+      const edit = {
+        id: 'retained-edit', keys: ['first'], before: current, sources: [current.elements[0]], summary: '编辑文字',
+        remember: true, state: 'failed', operations: [{ op: 'update', id: 'first', changes: { text: '应保留的文字草稿' } }],
+      };
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ tasks: [oldUndo, edit] }));
+        await act(async () => root.render(null));
+        await mount(current.elements, { board: current });
+        const restore = [...host.querySelectorAll('button')].find(button => button.textContent === '恢复上次草稿')!;
+        await event(restore, 'click');
+        expect(JSON.parse(localStorage.getItem(storageKey)!).tasks).toMatchObject([edit]);
+        expect(host.textContent).toContain('应保留的文字草稿');
+      } finally { localStorage.removeItem(storageKey); }
+    });
+  });
   it('ignores canvas delete, undo and tool shortcuts from buttons inside an external dialog', async () => {
     const call = await editable([element('one')]); await select('one'); await click('加粗');
     const dialog = document.createElement('section'); dialog.setAttribute('role', 'dialog');
@@ -729,9 +884,12 @@ describe('whiteboard direct interaction', () => {
   it.each(['note', 'shape'] as const)('keeps the measured %s toolbar inside desktop and narrow canvas bounds without dropping controls', async type => {
     const layout = { width: 1280, height: 720, barWidth: type === 'shape' ? 600 : 450, barHeight: 42 };
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const width = this.classList.contains('studio-selection-toolbar') ? layout.barWidth : this.classList.contains('studio-format-popover') ? 220 : layout.width;
-      const height = this.classList.contains('studio-selection-toolbar') ? layout.barHeight : layout.height;
-      return { x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON() {} };
+      if (this.classList.contains('studio-whiteboard') || this.classList.contains('studio-canvas-viewport')) return new DOMRect(0, 0, layout.width, layout.height);
+      if (this.classList.contains('studio-selection-toolbar')) return new DOMRect(0, 0, layout.barWidth, layout.barHeight);
+      if (this.classList.contains('studio-format-popover')) return new DOMRect(0, 0, 220, 120);
+      if (this.classList.contains('studio-canvas-top-tools')) return new DOMRect(layout.width - 140, 12, 126, 38);
+      if (this.classList.contains('studio-canvas-toolbar')) return new DOMRect(20, layout.height - 62, Math.min(400, layout.width - 40), 42);
+      return new DOMRect();
     });
     await mount([element('one', { type, x: 3300, y: 1600 })], { externalViewport: { x: 0, y: 0, zoom: .33 }, externalSelectedIds: ['one'] });
     const toolbar = query('选区格式') as HTMLElement;

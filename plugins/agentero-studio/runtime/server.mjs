@@ -121,7 +121,7 @@ var init_common = __esm({
 function isCommentPin(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const pin = value;
-  if (pin.coordinateSpace !== "board" && pin.coordinateSpace !== "document") return false;
+  if (pin.coordinateSpace !== "board" && pin.coordinateSpace !== "document" && pin.coordinateSpace !== "todo") return false;
   return [pin.x, pin.y].every((coordinate2) => typeof coordinate2 === "number" && Number.isFinite(coordinate2) && (pin.coordinateSpace === "board" ? Math.abs(coordinate2) <= 1e7 : coordinate2 >= 0 && coordinate2 <= 1));
 }
 var AGENT_TASK_LEASE_MS, AGENT_TASK_STALE_MS, AGENT_TASK_FADE_MS, TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
@@ -151,7 +151,7 @@ var PLUGIN_VERSION;
 var init_version = __esm({
   "src/contracts/version.ts"() {
     "use strict";
-    PLUGIN_VERSION = "0.2.19";
+    PLUGIN_VERSION = "0.2.20";
   }
 });
 
@@ -5232,8 +5232,8 @@ var require_multipleOf = __commonJS({
         const { gen, data, schemaCode, it } = cxt;
         const prec = it.opts.multipleOfPrecision;
         const res = gen.let("res");
-        const invalid3 = prec ? (0, codegen_1._)`Math.abs(Math.round(${res}) - ${res}) > 1e-${prec}` : (0, codegen_1._)`${res} !== parseInt(${res})`;
-        cxt.fail$data((0, codegen_1._)`(${schemaCode} === 0 || (${res} = ${data}/${schemaCode}, ${invalid3}))`);
+        const invalid5 = prec ? (0, codegen_1._)`Math.abs(Math.round(${res}) - ${res}) > 1e-${prec}` : (0, codegen_1._)`${res} !== parseInt(${res})`;
+        cxt.fail$data((0, codegen_1._)`(${schemaCode} === 0 || (${res} = ${data}/${schemaCode}, ${invalid5}))`);
       }
     };
     exports.default = def;
@@ -7377,6 +7377,265 @@ var require_dist = __commonJS({
   }
 });
 
+// src/core/shared/model-read.ts
+import { createHash as createHash2 } from "node:crypto";
+function invalid(message) {
+  throw new StudioError("INVALID_ARGUMENT", message);
+}
+function exceeds(message) {
+  throw new StudioError("LIMIT_EXCEEDED", message);
+}
+function hasId(value) {
+  return typeof value === "string" && value.length <= 200 && value.trim().length > 0;
+}
+function requireTarget(value, label) {
+  if (!hasId(value)) invalid(`\u8BF7\u63D0\u4F9B${label}\u3002`);
+}
+function idsWithinLimit(value, label, optional2 = false) {
+  if (optional2 && value === void 0) return;
+  if (!Array.isArray(value) || !value.length || !value.every(hasId)) invalid(`\u8BF7\u63D0\u4F9B${label}\u3002`);
+  if (value.length > MODEL_MAX_IDS) exceeds(`${label}\u4E00\u6B21\u6700\u591A ${MODEL_MAX_IDS} \u4E2A\u3002`);
+}
+function requireRect(value) {
+  if (!object2(value) || !["x", "y", "w", "h"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key]) && Math.abs(Number(value[key])) <= 1e7) || Number(value.w) <= 0 || Number(value.h) <= 0) invalid("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u767D\u677F\u4E16\u754C\u5750\u6807\u8303\u56F4\u3002");
+}
+function pageBounds(args, max2 = MODEL_MAX_ITEMS) {
+  if (args.limit !== void 0 && (!Number.isSafeInteger(args.limit) || Number(args.limit) < 1)) invalid("limit \u5FC5\u987B\u662F\u6B63\u6574\u6570\u3002");
+  if (args.limit !== void 0 && Number(args.limit) > max2) exceeds(`\u6B64\u8BFB\u53D6\u65B9\u5F0F\u5355\u9875\u6700\u591A ${max2}\u3002\u8BF7\u51CF\u5C11 limit \u5E76\u6309\u6E38\u6807\u7EE7\u7EED\u3002`);
+  if (args.offset !== void 0 && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0)) invalid("offset \u5FC5\u987B\u662F\u975E\u8D1F\u6574\u6570\u3002");
+  if (args.cursor !== void 0 && (typeof args.cursor !== "string" || args.cursor.length > 256 || args.offset !== void 0)) invalid("\u8BF7\u5355\u72EC\u4F7F\u7528\u4E0A\u9875\u8FD4\u56DE\u7684 nextCursor\u3002");
+  return { ...args, limit: args.limit ?? (max2 === MODEL_MAX_BYTES ? SOURCE_DEFAULT : 10) };
+}
+function boundedModelRequest(name, args) {
+  if (name === "artifact_list") return pageBounds(args);
+  if (name === "artifact_export") {
+    const format = typeof args.format === "string" ? args.format.toLowerCase() : "json";
+    if (format === "zip") throw new StudioError("APP_ONLY", "\u5B8C\u6574\u5907\u4EFD\u8BF7\u901A\u8FC7\u4F5C\u54C1\u754C\u9762\u5BFC\u51FA\u3002");
+    if (args.viewId !== void 0) throw new StudioError("LIVE_CAPTURE_REQUIRED", "\u5B9E\u65F6\u89C6\u56FE\u8BF7\u4F7F\u7528\u5DF2\u6253\u5F00\u767D\u677F\u7684\u5BBF\u4E3B\u622A\u56FE\u5165\u53E3\uFF1B\u5C40\u90E8\u5BFC\u51FA\u6E32\u67D3\u5DF2\u4FDD\u5B58\u7248\u672C\u3002");
+    const targets = [args.ids, args.regionId, args.rect].filter((value) => value !== void 0);
+    if (targets.length !== 1) invalid("\u8BF7\u4E3A\u5C40\u90E8\u5BFC\u51FA\u6307\u5B9A ids\u3001regionId \u6216 rect \u4E2D\u7684\u4E00\u9879\u3002");
+    idsWithinLimit(args.ids, "\u5BFC\u51FA\u5BF9\u8C61 ID", true);
+    if (args.regionId !== void 0) requireTarget(args.regionId, "\u5BFC\u51FA\u533A\u57DF ID");
+    if (args.rect !== void 0) {
+      requireRect(args.rect);
+      if (format !== "png") invalid("\u77E9\u5F62\u8303\u56F4\u9002\u7528\u4E8E\u5C40\u90E8 PNG\u3002\u5176\u4ED6\u683C\u5F0F\u8BF7\u6307\u5B9A\u5BF9\u8C61 ID\u3002");
+    }
+    if (args.options !== void 0 || args.elementId !== void 0) invalid("\u8BF7\u4F7F\u7528\u663E\u5F0F\u5BFC\u51FA\u8303\u56F4\u3002");
+    return { ...args, format };
+  }
+  if (name === "artifact_feedback") {
+    const action = args.action ?? "list";
+    if (action === "preview") throw new StudioError("APP_ONLY", "\u63D0\u6848\u7684\u6574\u5F20\u767D\u677F\u9884\u89C8\u8BF7\u901A\u8FC7\u754C\u9762\u67E5\u770B\u3002");
+    if (action === "get") requireTarget(args.feedbackId, "\u53CD\u9988 ID");
+    if (action === "list") return pageBounds({ ...args, action });
+  }
+  if (name !== "artifact_read") return args;
+  const mode = args.mode ?? "summary";
+  const request = { ...args, mode };
+  if (mode === "document" || mode === "board" || mode === "version") throw new StudioError("APP_ONLY", "\u6574\u5F20\u767D\u677F\u8BF7\u5728\u754C\u9762\u67E5\u770B\uFF1BAgent \u53EF\u7528 summary\u3001history \u6216\u6307\u5B9A IDs \u9010\u6B65\u5B9A\u4F4D\u3002");
+  if (mode === "objects" || mode === "units" || mode === "diff") idsWithinLimit(args.ids, "\u5BF9\u8C61 ID");
+  if (mode === "diff") {
+    if (args.adjacent === true) requireTarget(args.versionId, "\u76F8\u90BB\u5DEE\u5F02\u7684\u7248\u672C ID");
+    else {
+      requireTarget(args.fromVersionId, "\u5DEE\u5F02\u7684\u8D77\u59CB\u7248\u672C ID");
+      requireTarget(args.toVersionId, "\u5DEE\u5F02\u7684\u7ED3\u675F\u7248\u672C ID");
+    }
+  }
+  if (mode === "source" || mode === "blocks" || mode === "tasks") {
+    requireTarget(mode === "tasks" ? args.elementId : args.elementId ?? args.regionId, "\u8981\u8BFB\u53D6\u7684\u5BF9\u8C61\u6216\u533A\u57DF ID");
+    if (args.elementId !== void 0 && args.regionId !== void 0 && args.elementId !== args.regionId) invalid("\u8BF7\u6307\u5B9A\u4E00\u4E2A\u8BFB\u53D6\u76EE\u6807\u3002");
+    idsWithinLimit(args.blockIds, "\u6BB5\u843D ID", true);
+    idsWithinLimit(args.itemIds, "\u4EFB\u52A1 ID", true);
+  }
+  if (mode === "context") requireTarget(args.feedbackId ?? args.contextId ?? args.viewId, "\u5177\u4F53\u53CD\u9988\u3001\u4E0A\u4E0B\u6587\u6216\u89C6\u56FE ID");
+  if (mode === "region") requireRect(args.rect);
+  if (mode === "search" && (typeof args.query !== "string" || !args.query.trim())) invalid("\u8BF7\u8F93\u5165\u677F\u5185\u67E5\u627E\u5173\u952E\u8BCD\u3002");
+  if (mode === "search" || mode === "region") idsWithinLimit(args.ids, "\u8FC7\u6EE4\u5BF9\u8C61 ID", true);
+  if (mode === "source") return pageBounds(request, MODEL_MAX_BYTES);
+  if (["summary", "history", "blocks", "tasks", "assets", "search", "region", "context"].includes(String(mode))) return pageBounds(request);
+  return request;
+}
+function modelDataBudget(name, args) {
+  if (name === "artifact_list" || name === "artifact_read" && args.mode === "search") return 8 * 1024;
+  if (name === "artifact_read" && ["summary", "region", "history", "assets"].includes(String(args.mode))) return 16 * 1024;
+  return MODEL_MAX_BYTES;
+}
+function modelDataFits(data, bytes) {
+  return Buffer.byteLength(JSON.stringify({ ok: true, data }), "utf8") <= bytes;
+}
+function modelPage(args, artifactId, revision) {
+  const fields = CURSOR_FIELDS.flatMap((key) => args[key] === void 0 ? [] : [[key, args[key]]]);
+  const scope = createHash2("sha256").update(JSON.stringify([artifactId, fields])).digest("base64url");
+  let offset = Number(args.offset) || 0;
+  if (args.cursor !== void 0) {
+    let decoded;
+    try {
+      decoded = JSON.parse(Buffer.from(String(args.cursor), "base64url").toString("utf8"));
+    } catch {
+      invalid("\u5206\u9875\u6E38\u6807\u65E0\u6548\u3002\u8BF7\u4ECE\u7B2C\u4E00\u9875\u91CD\u65B0\u8BFB\u53D6\u3002");
+    }
+    if (!object2(decoded) || decoded.scope !== scope || !Number.isSafeInteger(decoded.offset) || Number(decoded.offset) < 0) invalid("\u5206\u9875\u6E38\u6807\u4E0E\u5F53\u524D\u8BFB\u53D6\u8303\u56F4\u4E0D\u5339\u914D\u3002");
+    if (decoded.revision !== revision) throw new StudioError("CURSOR_STALE", "\u4F5C\u54C1\u5DF2\u53D8\u5316\uFF0C\u8BF7\u4ECE\u7B2C\u4E00\u9875\u91CD\u65B0\u8BFB\u53D6\u3002", { revision });
+    offset = Number(decoded.offset);
+  }
+  return { offset, limit: Number(args.limit) || 10, cursorFor: (nextOffset) => Buffer.from(JSON.stringify({ scope, revision, offset: nextOffset })).toString("base64url") };
+}
+function modelPageResult(args, page, data, listKey, name = "artifact_read") {
+  const { nextOffset: rawNext, nextCursor: _cursor, ...metadata } = data;
+  const rows = Array.isArray(metadata[listKey]) ? metadata[listKey] : [];
+  let count = Math.min(rows.length, page.limit);
+  const bytes = modelDataBudget(name, args);
+  while (count >= 0) {
+    const nextOffset = count < rows.length ? page.offset + count : rawNext;
+    const next = typeof nextOffset === "number" ? { nextOffset, nextCursor: page.cursorFor(nextOffset) } : {};
+    const value = { ...metadata, offset: page.offset, [listKey]: rows.slice(0, count), ...next };
+    if ((count > 0 || !rows.length) && modelDataFits(value, bytes)) return value;
+    count--;
+  }
+  exceeds("\u8FD9\u4E00\u9875\u5305\u542B\u8D85\u51FA\u54CD\u5E94\u9884\u7B97\u7684\u5927\u5BF9\u8C61\u3002\u8BF7\u6307\u5B9A\u66F4\u5C0F\u7684\u8303\u56F4\uFF0C\u6216\u6309\u6E90\u7801\u5206\u6BB5\u8BFB\u53D6\u3002");
+}
+function modelElement(value) {
+  if (!object2(value) || typeof value.id !== "string" || typeof value.type !== "string") return value;
+  const { html: html2, document, ...fields } = value;
+  const { data, src, video, state, points, text: text2 } = fields;
+  const clipped = (input2) => input2 !== void 0 && !modelDataFits(input2, 8 * 1024);
+  const discarded = Object.entries({ data, src, video, state, points, text: text2 }).filter(([name, content]) => name === "data" && value.type === "todo" || clipped(content));
+  for (const [name] of discarded) delete fields[name];
+  return {
+    ...fields,
+    ...typeof html2 === "string" ? { htmlLength: html2.length, readWith: "artifact_read source + regionId + sourceRevision" } : {},
+    ...document ? { documentSchemaVersion: 1, readWith: "artifact_read blocks + elementId" } : {},
+    ...value.type === "todo" ? { readWith: "artifact_read tasks + elementId" } : {},
+    ...discarded.length && value.type !== "todo" ? { omittedFields: discarded.map(([name]) => name), ...!html2 && !document ? { readWith: "artifact_read source + elementId" } : {} } : {}
+  };
+}
+function unitValue(id2, value) {
+  if (id2 === "$order" && object2(value) && Array.isArray(value.ids)) {
+    const totalCount = Math.max(value.ids.length, Number(value.totalCount) || 0);
+    return { version: value.version, ids: value.ids.slice(0, MODEL_MAX_ITEMS), ...totalCount > MODEL_MAX_ITEMS ? { totalCount } : {} };
+  }
+  return modelElement(value);
+}
+function modelUnit(value) {
+  if (!object2(value)) return value;
+  return { ...value, ...Object.fromEntries(["before", "after", "value"].filter((key) => Object.hasOwn(value, key)).map((key) => [key, unitValue(value.id, value[key])])) };
+}
+function modelSource(value) {
+  if (!object2(value)) return {};
+  const { html: html2, document, sources: _sources, element, ...metadata } = value;
+  const frozen = object2(element) ? element : void 0;
+  const sourceHtml = typeof html2 === "string" ? html2 : frozen?.html;
+  return {
+    ...metadata,
+    ...frozen ? { element: modelElement(frozen) } : {},
+    ...document || frozen?.document ? { documentSchemaVersion: 1, readWith: "artifact_read blocks + elementId\uFF0C\u6216 source \u5206\u9875\u8BFB\u53D6 JSON" } : {},
+    ...typeof sourceHtml === "string" ? { htmlLength: sourceHtml.length, readWith: "artifact_read source + regionId" } : {}
+  };
+}
+function modelSourcePage(result, page) {
+  const { html: html2, document, json: json3, text: plainText, ...rest } = result;
+  const metadata = modelSource(rest);
+  const body2 = typeof html2 === "string" ? html2 : typeof json3 === "string" ? json3 : object2(document) ? JSON.stringify(document) : void 0;
+  if (body2 === void 0) return plainText === void 0 ? metadata : { ...metadata, text: plainText };
+  let offset = Math.min(page.offset, body2.length);
+  if (offset > 0 && /[\uDC00-\uDFFF]/.test(body2[offset] ?? "") && /[\uD800-\uDBFF]/.test(body2[offset - 1])) offset--;
+  const key = typeof html2 === "string" ? "html" : "json";
+  let span = Math.min(page.limit, body2.length - offset);
+  while (span >= 0) {
+    let end = offset + span;
+    if (end > offset && /[\uD800-\uDBFF]/.test(body2[end - 1]) && /[\uDC00-\uDFFF]/.test(body2[end] ?? "")) end += span === 1 ? 1 : -1;
+    const next = end < body2.length ? { nextOffset: end, nextCursor: page.cursorFor(end) } : {};
+    const value = { ...metadata, [key]: body2.slice(offset, end), offset, totalLength: body2.length, ...next, complete: end === body2.length };
+    if ((end > offset || end === body2.length) && modelDataFits(value, MODEL_MAX_BYTES)) return value;
+    span = span <= 1 ? -1 : Math.floor(span / 2);
+  }
+  return exceeds("\u6E90\u7801\u6458\u8981\u8D85\u8FC7\u54CD\u5E94\u9884\u7B97\u3002\u8BF7\u8BFB\u53D6\u8F83\u5C0F\u7684\u533A\u57DF\u6216\u6309\u6BB5\u843D ID \u67E5\u8BE2\u3002");
+}
+function modelFeedbackItem(value) {
+  const item = object2(value) ? value : {};
+  const replies = Array.isArray(item.replies) ? item.replies : [];
+  const proposal = object2(item.proposal) ? item.proposal : void 0;
+  return {
+    ...item,
+    replies: replies.slice(-5).map((reply) => object2(reply) && typeof reply.text === "string" && !modelDataFits(reply.text, 2 * 1024) ? { ...reply, text: Array.from(reply.text).slice(0, 500).join(""), textLength: reply.text.length } : reply),
+    ...typeof item.text === "string" && !modelDataFits(item.text, 4 * 1024) ? { text: Array.from(item.text).slice(0, 1e3).join(""), textLength: item.text.length } : {},
+    ...replies.length > 5 ? { replyCount: replies.length, repliesTruncated: true } : {},
+    ...proposal && Array.isArray(proposal.options) ? { proposal: {
+      audience: proposal.audience,
+      expiresAt: proposal.expiresAt,
+      compact: true,
+      options: proposal.options.map((value2) => {
+        const option2 = object2(value2) ? value2 : {};
+        return { id: option2.id, label: option2.label, description: option2.description, active: option2.active, targetIds: Array.isArray(option2.targetIds) ? option2.targetIds.slice(0, MODEL_MAX_IDS) : void 0 };
+      })
+    } } : {}
+  };
+}
+function projectedModelData(name, args, result) {
+  if (name === "artifact_list" && Array.isArray(result.artifacts)) return {
+    ...result,
+    artifacts: result.artifacts.slice(0, Number(args.limit)).map((item) => {
+      if (!object2(item)) return item;
+      const { thumbnail: _thumbnail, ...metadata } = item;
+      return metadata;
+    })
+  };
+  if (name === "artifact_apply" || name === "artifact_manage") {
+    const snapshot = object2(result.document) ? result.document : object2(result.board) ? result.board : void 0;
+    const artifact = result.artifact ?? snapshot?.artifact;
+    if (artifact) return { artifact, ...result.historyEntry ? { historyEntry: result.historyEntry } : {} };
+  }
+  if (name === "artifact_read") {
+    if (args.mode === "source") {
+      if (typeof result.complete === "boolean" && typeof result.offset === "number") return result;
+      const revision = typeof result.version === "number" ? result.version : 0;
+      return modelSourcePage(result, modelPage(args, String(args.artifactId), revision));
+    }
+    if (args.mode === "context" && Array.isArray(result.sources)) return { ...result, sources: result.sources.slice(0, Number(args.limit)).map(modelSource), ...result.feedback ? { feedback: modelFeedbackItem(result.feedback) } : {} };
+    if (args.mode === "objects") return { ...result, ...Array.isArray(result.elements) ? { elements: result.elements.map(modelElement) } : {}, ...Array.isArray(result.units) ? { units: result.units.map(modelUnit) } : {} };
+    if ((args.mode === "units" || args.mode === "diff") && Array.isArray(result.units)) {
+      const { changes: _changes, order: _order, style: _style, ...metadata } = result;
+      return { ...metadata, units: result.units.map(modelUnit) };
+    }
+  }
+  if (name === "artifact_feedback" && Array.isArray(result.feedback)) {
+    const id2 = args.feedbackId || result.contextId;
+    const selected = id2 ? result.feedback.filter((item) => object2(item) && item.id === id2) : args.action === "list" ? result.feedback.slice(0, Number(args.limit)) : result.feedback.slice(-1);
+    const { feedback: _feedback, board: _board, document: _document, ...metadata } = result;
+    return { ...metadata, feedback: selected.map(modelFeedbackItem) };
+  }
+  return result;
+}
+function boundedModelResult(name, args, value) {
+  const result = object2(value) ? projectedModelData(name, args, value) : value;
+  if (modelDataFits(result, modelDataBudget(name, args))) return result;
+  if (name === "artifact_read" || name === "artifact_list" || name === "artifact_feedback" && ["list", "get"].includes(String(args.action))) exceeds("\u8FD9\u6B21\u8BFB\u53D6\u8D85\u8FC7 UTF\u20118 \u54CD\u5E94\u9884\u7B97\u3002\u8BF7\u51CF\u5C11\u76EE\u6807\u6570\u3001\u5206\u9875\uFF0C\u6216\u6309\u6E90\u7801\u5206\u6BB5\u8BFB\u53D6\u3002");
+  const data = object2(result) ? result : {};
+  const { artifact, contextId, exportId } = data;
+  const historyEntry = object2(data.historyEntry) ? { id: data.historyEntry.id, revision: data.historyEntry.revision } : void 0;
+  return { artifact, contextId, exportId, historyEntry, truncated: true, hint: "\u64CD\u4F5C\u5DF2\u8FD4\u56DE\uFF0C\u8BF7\u6309\u5BF9\u8C61 ID \u6216\u7248\u672C\u5206\u6BB5\u6838\u5BF9\u3002" };
+}
+function modelResponseParts(name, args, value) {
+  if (name !== "artifact_export" || args.format !== "png" || !object2(value) || !Object.hasOwn(value, "image")) return { data: value };
+  const { image, ...data } = value;
+  if (args.includeImage === false) return { data };
+  if (!object2(image) || image.mimeType !== "image/png" || typeof image.data !== "string" || Buffer.byteLength(image.data, "base64") > MODEL_MAX_IMAGE_BYTES) exceeds("\u5C40\u90E8\u56FE\u50CF\u8D85\u8FC7\u54CD\u5E94\u9884\u7B97\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u3002");
+  return { data, image: { data: image.data, mimeType: "image/png" } };
+}
+var MODEL_MAX_ITEMS, MODEL_MAX_IDS, MODEL_MAX_BYTES, MODEL_MAX_IMAGE_BYTES, SOURCE_DEFAULT, CURSOR_FIELDS;
+var init_model_read = __esm({
+  "src/core/shared/model-read.ts"() {
+    "use strict";
+    init_common();
+    MODEL_MAX_ITEMS = 20;
+    MODEL_MAX_IDS = 10;
+    MODEL_MAX_BYTES = 32 * 1024;
+    MODEL_MAX_IMAGE_BYTES = 1024 * 1024;
+    SOURCE_DEFAULT = 8 * 1024;
+    CURSOR_FIELDS = ["mode", "query", "type", "parentId", "rect", "ids", "elementId", "regionId", "blockIds", "itemIds", "checked", "feedbackId", "contextId", "sourceRevision", "atRevision", "action", "status", "trashed", "pinned"];
+  }
+});
+
 // src/core/shared/products.ts
 var ProductRegistry;
 var init_products = __esm({
@@ -7710,6 +7969,97 @@ var init_whiteboard_geometry = __esm({
   }
 });
 
+// src/contracts/todo.ts
+function normalizeSource(value) {
+  if (!record2(value)) throw invalid2("\u4EFB\u52A1\u6765\u6E90\u9700\u8981\u4F5C\u54C1\u5BF9\u8C61\u5F15\u7528\u3002");
+  const { artifactId, elementId, blockId, itemId, version: version3 } = value;
+  if (!isTodoId(elementId) || artifactId !== void 0 && !isTodoId(artifactId) || blockId !== void 0 && !isTodoId(blockId) || itemId !== void 0 && !isTodoId(itemId) || blockId !== void 0 && itemId !== void 0 || version3 !== void 0 && (typeof version3 !== "number" || !Number.isSafeInteger(version3) || version3 < 1)) {
+    throw invalid2("\u4EFB\u52A1\u6765\u6E90\u5BF9\u8C61\u3001\u5185\u5BB9\u5B9A\u4F4D\u6216\u7248\u672C\u65E0\u6548\u3002");
+  }
+  return {
+    ...artifactId !== void 0 ? { artifactId } : {},
+    elementId,
+    ...blockId !== void 0 ? { blockId } : {},
+    ...itemId !== void 0 ? { itemId } : {},
+    ...version3 !== void 0 ? { version: version3 } : {}
+  };
+}
+function normalizeItem(value) {
+  if (!record2(value)) throw invalid2("\u4EFB\u52A1\u884C\u65E0\u6548\u3002");
+  const { id: id2, text: text2, checked, sourceRef } = value;
+  if (!isTodoId(id2)) throw invalid2("\u4EFB\u52A1\u884C ID \u65E0\u6548\u3002");
+  if (typeof text2 !== "string" || text2.length > TODO_TEXT_BYTES || encoder2.encode(text2).byteLength > TODO_TEXT_BYTES) throw invalid2("\u4EFB\u52A1\u6587\u5B57\u987B\u5728 2,000 UTF-8 \u5B57\u8282\u4EE5\u5185\u3002");
+  if (checked !== void 0 && typeof checked !== "boolean") throw invalid2("\u4EFB\u52A1\u5B8C\u6210\u72B6\u6001\u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
+  return { id: id2, text: text2, checked: checked ?? false, ...sourceRef !== void 0 ? { sourceRef: normalizeSource(sourceRef) } : {} };
+}
+function normalizeTodoItems(value) {
+  if (value === void 0) return [];
+  if (!Array.isArray(value) || value.length > TODO_ITEM_LIMIT) throw invalid2("\u4EFB\u52A1\u6E05\u5355\u987B\u4E3A\u6700\u591A 200 \u884C\u7684\u6570\u7EC4\u3002");
+  const items = Array.from(value, normalizeItem);
+  if (new Set(items.map((item) => item.id)).size !== items.length) throw invalid2("\u4EFB\u52A1\u6E05\u5355\u7684\u884C ID \u5FC5\u987B\u552F\u4E00\u3002");
+  return items;
+}
+function insertionIndex(items, afterId) {
+  if (afterId === void 0) return items.length;
+  if (afterId === null) return 0;
+  if (!isTodoId(afterId)) throw invalid2("\u4EFB\u52A1\u884C\u7684\u4F4D\u7F6E\u951A\u70B9\u65E0\u6548\u3002");
+  const index = items.findIndex((item) => item.id === afterId);
+  if (index < 0) throw conflict("\u4F4D\u7F6E\u5BF9\u5E94\u7684\u4EFB\u52A1\u884C\u5DF2\u4E0D\u5B58\u5728\u3002");
+  return index + 1;
+}
+function applyTodoOperations(items, operations) {
+  const next = normalizeTodoItems(items);
+  if (!Array.isArray(operations) || !operations.length || operations.length > TODO_ITEM_LIMIT) throw invalid2("\u4E00\u6B21\u63D0\u4EA4\u9700\u8981 1 \u81F3 200 \u4E2A\u4EFB\u52A1\u884C\u64CD\u4F5C\u3002");
+  const assignedIds = new Set(next.map((item) => item.id));
+  for (const operation2 of operations) {
+    if (!record2(operation2)) throw invalid2("\u4EFB\u52A1\u884C\u64CD\u4F5C\u65E0\u6548\u3002");
+    if (operation2.op === "insert") {
+      const item2 = normalizeItem(operation2.item);
+      if (assignedIds.has(item2.id)) throw conflict("\u4EFB\u52A1\u884C ID \u5DF2\u5B58\u5728\u6216\u5DF2\u5728\u672C\u6B21\u63D0\u4EA4\u4F7F\u7528\u3002");
+      if (next.length >= TODO_ITEM_LIMIT) throw invalid2("\u6E05\u5355\u6700\u591A\u53EF\u4FDD\u5B58 200 \u884C\u3002");
+      next.splice(insertionIndex(next, operation2.afterId), 0, item2);
+      assignedIds.add(item2.id);
+      continue;
+    }
+    if (!isTodoId(operation2.id)) throw invalid2("\u4EFB\u52A1\u884C ID \u65E0\u6548\u3002");
+    const index = next.findIndex((item2) => item2.id === operation2.id);
+    const item = next[index];
+    if (!item) throw conflict("\u8981\u4FEE\u6539\u7684\u4EFB\u52A1\u884C\u5DF2\u4E0D\u5B58\u5728\u3002");
+    switch (operation2.op) {
+      case "update": {
+        if (!record2(operation2.changes) || Object.keys(operation2.changes).some((key) => !["text", "checked", "sourceRef"].includes(key))) throw invalid2("\u4EFB\u52A1\u884C\u53EA\u652F\u6301\u66F4\u65B0\u6B63\u6587\u3001\u5B8C\u6210\u72B6\u6001\u548C\u6765\u6E90\u3002");
+        const { text: text2 = item.text, checked = item.checked, sourceRef = item.sourceRef } = operation2.changes;
+        next[index] = normalizeItem({ id: item.id, text: text2, checked, sourceRef: sourceRef === null ? void 0 : sourceRef });
+        break;
+      }
+      case "delete":
+        next.splice(index, 1);
+        break;
+      case "move":
+        if (operation2.afterId === void 0 || operation2.afterId === item.id) throw invalid2("\u79FB\u52A8\u4EFB\u52A1\u884C\u9700\u8981\u5176\u4ED6\u884C\u7684 ID \u6216 null\u3002");
+        next.splice(index, 1);
+        next.splice(insertionIndex(next, operation2.afterId), 0, item);
+        break;
+      default:
+        throw invalid2("\u4E0D\u652F\u6301\u7684\u4EFB\u52A1\u884C\u64CD\u4F5C\u3002");
+    }
+  }
+  return next;
+}
+var TODO_ITEM_LIMIT, TODO_TEXT_BYTES, encoder2, record2, invalid2, conflict, isTodoId;
+var init_todo = __esm({
+  "src/contracts/todo.ts"() {
+    "use strict";
+    TODO_ITEM_LIMIT = 200;
+    TODO_TEXT_BYTES = 2e3;
+    encoder2 = new TextEncoder();
+    record2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    invalid2 = (message) => Object.assign(new Error(message), { code: "INVALID_ARGUMENT" });
+    conflict = (message) => Object.assign(new Error(message), { code: "CONFLICT" });
+    isTodoId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value);
+  }
+});
+
 // src/core/theme.ts
 function parseColor(input2) {
   const value = (NAMED[input2.toLowerCase()] ?? input2).trim();
@@ -7789,7 +8139,7 @@ function boardStickerMarkup(id2) {
   if (!value) return void 0;
   return `<g stroke-linecap="round" stroke-linejoin="round"><g stroke="#ffffff" stroke-width="4">${value.body}</g><g stroke="#273443" stroke-width="1.3">${value.body}</g></g>`;
 }
-var yellow, orange, red, blue, green, pink, purple, path, circle, rect, sticker, BOARD_STICKERS, byId;
+var yellow, orange, red, blue, green, pink, purple, path, circle, rect2, sticker, BOARD_STICKERS, byId;
 var init_whiteboard_stickers = __esm({
   "src/core/products/whiteboard-stickers.ts"() {
     "use strict";
@@ -7802,7 +8152,7 @@ var init_whiteboard_stickers = __esm({
     purple = "#bab0da";
     path = (d, fill = "none") => `<path d="${d}" fill="${fill}"/>`;
     circle = (cx, cy, r, fill) => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}"/>`;
-    rect = (x2, y, w, h, fill, rx = 1) => `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}"/>`;
+    rect2 = (x2, y, w, h, fill, rx = 1) => `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="${fill}"/>`;
     sticker = (id2, label, keywords, body2) => ({ id: id2, label, keywords, body: body2 });
     BOARD_STICKERS = [
       sticker("smile", "\u7B11\u8138", "smile happy \u5F00\u5FC3 \u8868\u60C5", circle(12, 12, 9, yellow) + path("M7 10q1-3 3 0m4 0q1-3 3 0M7 13h10q-1 6-5 6t-5-6Z", "#fff1be")),
@@ -7817,7 +8167,7 @@ var init_whiteboard_stickers = __esm({
       sticker("bulb", "\u60F3\u6CD5", "lightbulb idea insight \u7075\u611F \u70B9\u5B50", path("M8 16c0-3-4-4-3-8 1-7 13-7 14 0 1 4-3 5-3 8ZM8 17h8v4H8Z", "#f8dda0") + path("m10 15-1-6 3 2 3-2-1 6M9 19h6")),
       sticker("question", "\u95EE\u9898", "question help why \u7591\u95EE \u5E2E\u52A9", circle(12, 12, 9, purple) + path("M9 8q0-4 4-3 5 2 0 6-2 1-1 4m0 3h.1")),
       sticker("alert", "\u63D0\u9192", "alert warning caution \u6CE8\u610F \u98CE\u9669 \u8B66\u544A", path("M12 3 22 21H2Z", yellow) + path("M12 8v6") + circle(12, 17.5, 0.65, "#273443")),
-      sticker("check", "\u5B8C\u6210", "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE", rect(4, 4, 16, 16, green, 2) + path("m7 11 4 4L22 5")),
+      sticker("check", "\u5B8C\u6210", "check done yes success \u6210\u529F \u901A\u8FC7 \u5BF9\u52FE", rect2(4, 4, 16, 16, green, 2) + path("m7 11 4 4L22 5")),
       sticker("cross", "\u53D6\u6D88", "cross no cancel stop \u62D2\u7EDD \u9519\u8BEF \u5173\u95ED", circle(12, 12, 9, red) + path("m8 8 8 8m0-8-8 8")),
       sticker("flag", "\u65D7\u5E1C", "flag milestone mark \u91CC\u7A0B\u7891 \u6807\u8BB0", path("M5 21V3m1 1h15l-4 6 4 5H6Z", red) + circle(5, 3, 1.5, "#f7eee7")),
       sticker("bolt", "\u95EA\u7535", "bolt lightning zap fast \u5FEB\u901F \u80FD\u91CF", path("m14 2-11 12h7l-1 8L22 9h-8Z", yellow)),
@@ -7827,9 +8177,9 @@ var init_whiteboard_stickers = __esm({
       sticker("party", "\u5E86\u795D", "party celebrate confetti \u5F69\u5E26 \u795D\u8D3A", path("M4 21 7 7l10 10Z", pink) + path("m11 5 2-3m4 7 4-1m-7 5 5-6m1 9 3 2M7 3l1 1") + circle(18, 3, 1, yellow) + circle(22, 12, 1, blue)),
       sticker("trophy", "\u5956\u676F", "trophy win award \u51A0\u519B \u5956\u52B1", path("M7 3h10v9q-1 5-5 5t-5-5Zm3 14h4v3h-4ZM7 21h10M7 5H3q0 8 5 7M17 5h4q0 8-5 7", yellow)),
       sticker("crown", "\u7687\u51A0", "crown royal best \u7B2C\u4E00 \u4F18\u79C0", path("M5 20 3 7l6 5 3-9 3 9 6-5-2 13Z", yellow) + circle(3, 6, 1.4, "#f8e1aa") + circle(12, 3, 1.4, "#f8e1aa") + circle(21, 6, 1.4, "#f8e1aa")),
-      sticker("gift", "\u793C\u7269", "gift present thanks \u8D60\u793C \u60CA\u559C", rect(4, 10, 16, 11, red) + rect(3, 7, 18, 4, "#f2a79b") + path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")),
+      sticker("gift", "\u793C\u7269", "gift present thanks \u8D60\u793C \u60CA\u559C", rect2(4, 10, 16, 11, red) + rect2(3, 7, 18, 4, "#f2a79b") + path("M12 7v14M12 7C3 8 4 1 8 3l4 4Zm0 0c9 1 8-6 4-4Z", "#f1b1bd")),
       sticker("clock", "\u65F6\u949F", "clock time deadline \u65F6\u95F4 \u622A\u6B62", circle(12, 12, 9, blue) + path("M12 6v7h5")),
-      sticker("calendar", "\u65E5\u5386", "calendar date plan \u65E5\u671F \u8BA1\u5212", rect(3, 5, 18, 16, red, 2) + path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")),
+      sticker("calendar", "\u65E5\u5386", "calendar date plan \u65E5\u671F \u8BA1\u5212", rect2(3, 5, 18, 16, red, 2) + path("M3 10h18M8 3v5m8-5v5M8 10v11m8-11v11M3 15h18")),
       sticker("hourglass", "\u6C99\u6F0F", "hourglass wait patience \u7B49\u5F85 \u5012\u8BA1\u65F6", path("M5 3h14c0 6-2 6-5 9 3 3 5 3 5 9H5c0-6 2-6 5-9-3-3-5-3-5-9Z", "#f9e8ba") + path("M6 6h12l-6 5Zm0 13 6-6 6 6Z", yellow) + path("M4 2h16M4 22h16")),
       sticker("messages", "\u8BA8\u8BBA", "messages chat discuss \u5BF9\u8BDD \u6C9F\u901A", path("M14 17H7l-4 3v-7a7 7 0 1 1 11 4Z", blue) + path("M14 10q8-2 8 5v7l-4-2q-7 1-8-5Z", "#aecbe5")),
       sticker("megaphone", "\u516C\u544A", "megaphone announce broadcast \u5BA3\u5E03 \u901A\u77E5", path("m3 10 13-6v16L3 14Zm3 5 2 6h4l-2-7Z", orange) + path("M18 8q4 4 0 8m2-10q6 6 0 12")),
@@ -7976,39 +8326,39 @@ function safeUrl(value, image = false) {
   }
 }
 function normalizeDocument(value) {
-  if (!record3(value) || value.schemaVersion !== 1 || !Array.isArray(value.blocks)) throw invalid("\u6587\u6863\u987B\u4F7F\u7528 schemaVersion:1 \u4E0E blocks JSON\u3002");
+  if (!record3(value) || value.schemaVersion !== 1 || !Array.isArray(value.blocks)) throw invalid3("\u6587\u6863\u987B\u4F7F\u7528 schemaVersion:1 \u4E0E blocks JSON\u3002");
   const encoded = JSON.stringify(value);
-  if (new TextEncoder().encode(encoded).byteLength > 2 * 1024 * 1024) throw invalid("\u5355\u4E2A\u6587\u6863\u4E0D\u80FD\u8D85\u8FC7 2 MB\u3002");
+  if (new TextEncoder().encode(encoded).byteLength > 2 * 1024 * 1024) throw invalid3("\u5355\u4E2A\u6587\u6863\u4E0D\u80FD\u8D85\u8FC7 2 MB\u3002");
   const ids = /* @__PURE__ */ new Set();
   let count = 0;
   function json3(input2, depth) {
-    if (depth > 24) throw invalid("\u6587\u6863\u5185\u5BB9\u5D4C\u5957\u8FC7\u6DF1\u3002");
+    if (depth > 24) throw invalid3("\u6587\u6863\u5185\u5BB9\u5D4C\u5957\u8FC7\u6DF1\u3002");
     if (input2 === null || typeof input2 === "boolean" || typeof input2 === "string") return input2;
     if (typeof input2 === "number" && Number.isFinite(input2)) return input2;
     if (Array.isArray(input2)) return input2.map((item) => item === void 0 ? null : json3(item, depth + 1));
-    if (!record3(input2)) throw invalid("\u6587\u6863\u53EA\u5141\u8BB8 JSON \u5185\u5BB9\u3002");
+    if (!record3(input2)) throw invalid3("\u6587\u6863\u53EA\u5141\u8BB8 JSON \u5185\u5BB9\u3002");
     const result = {};
     for (const [key, child] of Object.entries(input2)) {
-      if (["__proto__", "constructor", "prototype", "html", "innerHTML"].includes(key)) throw invalid("\u6587\u6863\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u5185\u5BB9\u5B57\u6BB5\u3002");
+      if (["__proto__", "constructor", "prototype", "html", "innerHTML"].includes(key)) throw invalid3("\u6587\u6863\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u5185\u5BB9\u5B57\u6BB5\u3002");
       if (child === void 0) continue;
-      if (key === "href" && (typeof child !== "string" || !safeUrl(child)) || key === "url" && (typeof child !== "string" || !safeUrl(child, true))) throw invalid("\u6587\u6863\u94FE\u63A5\u6216\u56FE\u7247\u5730\u5740\u4E0D\u53D7\u652F\u6301\u3002");
+      if (key === "href" && (typeof child !== "string" || !safeUrl(child)) || key === "url" && (typeof child !== "string" || !safeUrl(child, true))) throw invalid3("\u6587\u6863\u94FE\u63A5\u6216\u56FE\u7247\u5730\u5740\u4E0D\u53D7\u652F\u6301\u3002");
       result[key] = json3(child, depth + 1);
     }
     return result;
   }
   function block(input2, depth) {
-    if (depth > 12 || ++count > 2e3) throw invalid("\u6587\u6863\u5C42\u7EA7\u6216\u6BB5\u843D\u6570\u91CF\u8D85\u8FC7\u5F53\u524D\u8303\u56F4\u3002");
-    if (!record3(input2) || !validId(input2.id) || ids.has(input2.id) || !DOCUMENT_BLOCK_TYPES.includes(input2.type)) throw invalid("\u6587\u6863\u5757 ID \u5FC5\u987B\u552F\u4E00\u4E14\u7C7B\u578B\u53D7\u652F\u6301\u3002");
+    if (depth > 12 || ++count > 2e3) throw invalid3("\u6587\u6863\u5C42\u7EA7\u6216\u6BB5\u843D\u6570\u91CF\u8D85\u8FC7\u5F53\u524D\u8303\u56F4\u3002");
+    if (!record3(input2) || !validId(input2.id) || ids.has(input2.id) || !DOCUMENT_BLOCK_TYPES.includes(input2.type)) throw invalid3("\u6587\u6863\u5757 ID \u5FC5\u987B\u552F\u4E00\u4E14\u7C7B\u578B\u53D7\u652F\u6301\u3002");
     ids.add(input2.id);
-    if (input2.props !== void 0 && !record3(input2.props) || input2.children !== void 0 && !Array.isArray(input2.children)) throw invalid("\u6587\u6863\u5757\u5C5E\u6027\u6216\u5B50\u5757\u683C\u5F0F\u65E0\u6548\u3002");
+    if (input2.props !== void 0 && !record3(input2.props) || input2.children !== void 0 && !Array.isArray(input2.children)) throw invalid3("\u6587\u6863\u5757\u5C5E\u6027\u6216\u5B50\u5757\u683C\u5F0F\u65E0\u6548\u3002");
     const props = json3(input2.props ?? {}, 0);
-    if (props.textAlignment !== void 0 && !["left", "center", "right", "justify"].includes(String(props.textAlignment))) throw invalid("\u6587\u6863\u5BF9\u9F50\u65B9\u5F0F\u65E0\u6548\u3002");
-    if (input2.type === "heading" && props.level !== void 0 && (typeof props.level !== "number" || ![1, 2, 3, 4, 5, 6].includes(props.level))) throw invalid("\u6587\u6863\u6807\u9898\u7EA7\u522B\u65E0\u6548\u3002");
-    if (input2.type === "checkListItem" && props.checked !== void 0 && typeof props.checked !== "boolean") throw invalid("\u4EFB\u52A1\u9879\u72B6\u6001\u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
+    if (props.textAlignment !== void 0 && !["left", "center", "right", "justify"].includes(String(props.textAlignment))) throw invalid3("\u6587\u6863\u5BF9\u9F50\u65B9\u5F0F\u65E0\u6548\u3002");
+    if (input2.type === "heading" && props.level !== void 0 && (typeof props.level !== "number" || ![1, 2, 3, 4, 5, 6].includes(props.level))) throw invalid3("\u6587\u6863\u6807\u9898\u7EA7\u522B\u65E0\u6548\u3002");
+    if (input2.type === "checkListItem" && props.checked !== void 0 && typeof props.checked !== "boolean") throw invalid3("\u4EFB\u52A1\u9879\u72B6\u6001\u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
     const inline2 = (value2) => typeof value2 === "string" || Array.isArray(value2) && value2.every((item) => record3(item) && (item.type === "text" && typeof item.text === "string" || item.type === "link" && typeof item.href === "string" && inline2(item.content)));
     if (input2.type === "table") {
-      if (!record3(input2.content) || input2.content.type !== "tableContent" || !Array.isArray(input2.content.rows) || input2.content.rows.some((row) => !record3(row) || !Array.isArray(row.cells) || row.cells.some((cell) => !(record3(cell) && cell.type === "tableCell" ? inline2(cell.content) : inline2(cell))))) throw invalid("\u6587\u6863\u8868\u683C\u9700\u8981\u6709\u6548\u7684 tableContent \u884C\u4E0E\u5355\u5143\u683C\u3002");
-    } else if (!["image", "divider"].includes(String(input2.type)) && input2.content !== void 0 && !inline2(input2.content)) throw invalid("\u6587\u6863\u6587\u5B57\u5185\u5BB9\u987B\u4F7F\u7528\u6587\u672C\u6216\u94FE\u63A5\u7247\u6BB5\u3002");
+      if (!record3(input2.content) || input2.content.type !== "tableContent" || !Array.isArray(input2.content.rows) || input2.content.rows.some((row) => !record3(row) || !Array.isArray(row.cells) || row.cells.some((cell) => !(record3(cell) && cell.type === "tableCell" ? inline2(cell.content) : inline2(cell))))) throw invalid3("\u6587\u6863\u8868\u683C\u9700\u8981\u6709\u6548\u7684 tableContent \u884C\u4E0E\u5355\u5143\u683C\u3002");
+    } else if (!["image", "divider"].includes(String(input2.type)) && input2.content !== void 0 && !inline2(input2.content)) throw invalid3("\u6587\u6863\u6587\u5B57\u5185\u5BB9\u987B\u4F7F\u7528\u6587\u672C\u6216\u94FE\u63A5\u7247\u6BB5\u3002");
     return { id: input2.id, type: input2.type, props, ...input2.content !== void 0 ? { content: json3(input2.content, 0) } : {}, children: (input2.children ?? []).map((child) => block(child, depth + 1)) };
   }
   return { schemaVersion: 1, blocks: value.blocks.map((item) => block(item, 0)) };
@@ -8021,45 +8371,45 @@ function locate(blocks, id2) {
   }
 }
 function applyDocumentOperation(next, operation2) {
-  if (!record3(operation2)) throw invalid("\u6587\u6863\u5757\u64CD\u4F5C\u65E0\u6548\u3002");
+  if (!record3(operation2)) throw invalid3("\u6587\u6863\u5757\u64CD\u4F5C\u65E0\u6548\u3002");
   if (operation2.op === "update") {
     const target = locate(next.blocks, operation2.id);
-    if (!target) throw conflict("\u8981\u7F16\u8F91\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
-    if (!record3(operation2.changes) || Object.keys(operation2.changes).some((key) => !["type", "props", "content"].includes(key))) throw invalid("\u5757\u66F4\u65B0\u53EA\u5141\u8BB8 type\u3001props \u4E0E content\u3002");
+    if (!target) throw conflict2("\u8981\u7F16\u8F91\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    if (!record3(operation2.changes) || Object.keys(operation2.changes).some((key) => !["type", "props", "content"].includes(key))) throw invalid3("\u5757\u66F4\u65B0\u53EA\u5141\u8BB8 type\u3001props \u4E0E content\u3002");
     target.list[target.index] = { ...target.block, ...structuredClone(operation2.changes), id: target.block.id, children: target.block.children };
   } else if (operation2.op === "delete") {
     const target = locate(next.blocks, operation2.id);
-    if (!target) throw conflict("\u8981\u5220\u9664\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    if (!target) throw conflict2("\u8981\u5220\u9664\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
     target.list.splice(target.index, 1);
   } else if (operation2.op === "insert" || operation2.op === "move") {
-    if (operation2.parentId !== void 0 && operation2.parentId !== null && !validId(operation2.parentId) || operation2.afterId !== void 0 && operation2.afterId !== null && !validId(operation2.afterId)) throw invalid("\u6BB5\u843D\u4F4D\u7F6E\u9700\u8981\u6709\u6548\u7684 parentId/afterId \u6216 null\u3002");
+    if (operation2.parentId !== void 0 && operation2.parentId !== null && !validId(operation2.parentId) || operation2.afterId !== void 0 && operation2.afterId !== null && !validId(operation2.afterId)) throw invalid3("\u6BB5\u843D\u4F4D\u7F6E\u9700\u8981\u6709\u6548\u7684 parentId/afterId \u6216 null\u3002");
     const target = operation2.op === "move" ? locate(next.blocks, operation2.id) : void 0;
-    if (operation2.op === "move" && !target) throw conflict("\u8981\u79FB\u52A8\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    if (operation2.op === "move" && !target) throw conflict2("\u8981\u79FB\u52A8\u7684\u6587\u6863\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
     const moving = target ? target.block : normalizeDocument({ schemaVersion: 1, blocks: operation2.op === "insert" ? [operation2.block] : [] }).blocks[0];
-    if (!target && flattenDocumentBlocks([moving]).some((block) => locate(next.blocks, block.id))) throw conflict("\u65B0\u589E\u6587\u6863\u5757 ID \u5DF2\u5B58\u5728\u3002");
-    if (operation2.parentId && flattenDocumentBlocks([moving]).some((block) => block.id === operation2.parentId)) throw invalid("\u4E0D\u80FD\u628A\u6BB5\u843D\u79FB\u52A8\u5230\u81EA\u8EAB\u5185\u90E8\u3002");
+    if (!target && flattenDocumentBlocks([moving]).some((block) => locate(next.blocks, block.id))) throw conflict2("\u65B0\u589E\u6587\u6863\u5757 ID \u5DF2\u5B58\u5728\u3002");
+    if (operation2.parentId && flattenDocumentBlocks([moving]).some((block) => block.id === operation2.parentId)) throw invalid3("\u4E0D\u80FD\u628A\u6BB5\u843D\u79FB\u52A8\u5230\u81EA\u8EAB\u5185\u90E8\u3002");
     const parent = operation2.parentId ? locate(next.blocks, operation2.parentId) : void 0;
-    if (operation2.parentId && !parent) throw conflict("\u76EE\u6807\u7236\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    if (operation2.parentId && !parent) throw conflict2("\u76EE\u6807\u7236\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
     const list = parent ? parent.block.children ?? (parent.block.children = []) : next.blocks;
     if (target) target.list.splice(target.index, 1);
     const after = operation2.afterId === void 0 ? list.length - 1 : operation2.afterId === null ? -1 : list.findIndex((block) => block.id === operation2.afterId);
-    if (operation2.afterId !== void 0 && operation2.afterId !== null && after < 0) throw conflict("\u63D2\u5165\u4F4D\u7F6E\u7684\u76F8\u90BB\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
+    if (operation2.afterId !== void 0 && operation2.afterId !== null && after < 0) throw conflict2("\u63D2\u5165\u4F4D\u7F6E\u7684\u76F8\u90BB\u6BB5\u843D\u5DF2\u4E0D\u5B58\u5728\u3002");
     list.splice(after + 1, 0, moving);
-  } else throw invalid("\u4E0D\u652F\u6301\u7684\u6587\u6863\u5757\u64CD\u4F5C\u3002");
+  } else throw invalid3("\u4E0D\u652F\u6301\u7684\u6587\u6863\u5757\u64CD\u4F5C\u3002");
 }
 function applyDocumentOperations(document, operations) {
   const next = normalizeDocument(document);
-  if (!Array.isArray(operations) || !operations.length || operations.length > 6e3) throw invalid("\u6587\u6863\u63D0\u4EA4\u9700\u8981 1 \u81F3 6000 \u4E2A\u5757\u64CD\u4F5C\u3002");
+  if (!Array.isArray(operations) || !operations.length || operations.length > 6e3) throw invalid3("\u6587\u6863\u63D0\u4EA4\u9700\u8981 1 \u81F3 6000 \u4E2A\u5757\u64CD\u4F5C\u3002");
   for (const operation2 of operations) applyDocumentOperation(next, operation2);
   return normalizeDocument(next);
 }
-var DOCUMENT_BLOCK_TYPES, invalid, conflict, record3, validId;
+var DOCUMENT_BLOCK_TYPES, invalid3, conflict2, record3, validId;
 var init_document = __esm({
   "src/contracts/document.ts"() {
     "use strict";
     DOCUMENT_BLOCK_TYPES = ["paragraph", "heading", "bulletListItem", "numberedListItem", "checkListItem", "quote", "codeBlock", "table", "image", "divider"];
-    invalid = (message) => Object.assign(new Error(message), { code: "INVALID_ARGUMENT" });
-    conflict = (message) => Object.assign(new Error(message), { code: "CONFLICT" });
+    invalid3 = (message) => Object.assign(new Error(message), { code: "INVALID_ARGUMENT" });
+    conflict2 = (message) => Object.assign(new Error(message), { code: "CONFLICT" });
     record3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
     validId = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value);
   }
@@ -8434,24 +8784,51 @@ function shapeSvg(e, fill, stroke) {
   if (path2) return `<path transform="translate(${x2} ${y})" d="${path2}" ${common}/>`;
   return `<rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="${e.kind === "pill" ? h / 2 : e.kind === "rect" || e.kind === "queue" ? 0 : 7}" ${common}/>` + (e.kind === "queue" ? `<path d="M${x2 + 14},${y}V${y + h} M${x2 + w - 14},${y}V${y + h}" fill="none" stroke="${escapeXml(stroke)}"/>` : "");
 }
+function todoSourceAttribute(item) {
+  return item.sourceRef ? ` data-source-ref="${escapeXml(JSON.stringify(item.sourceRef))}"` : "";
+}
+function todoSvg(e, board) {
+  const surface = documentSurface(e, board.style), items = normalizeTodoItems(e.data?.items);
+  const count = items.filter((item) => item.checked).length;
+  const { x: x2, y, w, h } = e;
+  const clipId = `studio-todo-${[...e.id].map((c) => c.codePointAt(0).toString(16)).join("_")}`;
+  const paper = escapeXml(surface.paper), ink = escapeXml(surface.ink), muted = escapeXml(surface.muted);
+  const line = escapeXml(surface.rule), accent = escapeXml(surface.link);
+  const title = `<svg x="${x2 + 12}" y="${y}" width="${Math.max(1, w - 72)}" height="40" overflow="hidden"><text y="26" fill="${ink}" font-size="17" font-weight="600">${escapeXml(e.text || "\u4EFB\u52A1\u6E05\u5355")}</text></svg>`;
+  const progress = `<text x="${x2 + w - 12}" y="${y + 25}" fill="${muted}" font-size="12" text-anchor="end">${count}/${items.length}</text>`;
+  const rows = items.map((item, index) => {
+    const rowY = y + 40 + index * 32, bx = x2 + 14, by = rowY + 9;
+    const check2 = item.checked ? `<path d="M${bx + 3} ${by + 7}l3 3l5 -6" fill="none" stroke="${paper}" stroke-width="1.5"/>` : "";
+    return `<g data-studio-task-id="${escapeXml(item.id)}" data-checked="${item.checked}"${todoSourceAttribute(item)}>
+      <path d="M${x2} ${rowY}H${x2 + w}" stroke="${line}"/>
+      <rect x="${bx}" y="${by}" width="14" height="14" rx="3" fill="${item.checked ? accent : paper}" stroke="${item.checked ? accent : line}"/>${check2}
+      <text x="${x2 + 38}" y="${rowY + 21}" fill="${item.checked ? muted : ink}" font-size="14">${escapeXml(item.text.replace(/\s+/g, " "))}</text>
+    </g>`;
+  }).join("");
+  return `<defs><clipPath id="${clipId}"><rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="7"/></clipPath></defs>
+    <rect x="${x2}" y="${y}" width="${w}" height="${h}" rx="7" fill="${paper}" stroke="${line}"/>
+    <g clip-path="url(#${clipId})" font-family="${escapeXml(e.fontFamily ?? board.style.fontFamily)}">${title}${progress}${rows}</g>`;
+}
 function endpoint(value, elements) {
   if (Array.isArray(value)) return value;
   const target = elements.find((e) => e.id === value);
   if (!target) throw new ExportError("INVALID_ARROW", "\u4E00\u6761\u8FDE\u7EBF\u5F15\u7528\u7684\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\uFF0C\u8BF7\u4FEE\u590D\u540E\u5BFC\u51FA\u3002");
   return [target.x + target.w / 2, target.y + target.h / 2];
 }
-function headSvg(kind, tip, inside, color) {
+function headSvg(kind, tip, inside2, color) {
   if (kind === "none") return "";
   if (kind === "circle") return `<circle cx="${tip.x}" cy="${tip.y}" r="4.5" fill="${escapeXml(color)}"/>`;
-  const length = Math.hypot(inside.x - tip.x, inside.y - tip.y) || 1;
-  const dx = (inside.x - tip.x) / length, dy = (inside.y - tip.y) / length;
+  const length = Math.hypot(inside2.x - tip.x, inside2.y - tip.y) || 1;
+  const dx = (inside2.x - tip.x) / length, dy = (inside2.y - tip.y) / length;
   return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color)}"/>`;
 }
 function elementSvg(e, board, options = {}, surfaces = nativeSurfaces(selectedElements(board, options), board.style)) {
   const style = board.style;
   const ink = semanticColor(e.stroke, style, style.muted);
   let markup = "";
-  if (e.type === "document" && e.document) {
+  if (e.type === "todo") {
+    markup = todoSvg(e, board);
+  } else if (e.type === "document" && e.document) {
     const surface = documentSurface(e, style);
     const preview = { ...e, text: `${e.text || "\u6587\u6863"}
 ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
@@ -8523,11 +8900,11 @@ ${documentPlainText(e.document).slice(0, 200)}`, fontSize: 15 };
   }
   return `<g data-studio-id="${escapeXml(e.id)}"${e.rotation ? ` transform="rotate(${e.rotation} ${e.x + e.w / 2} ${e.y + e.h / 2})"` : ""}>${markup}</g>`;
 }
-function buildBoardSvg(board, options = {}) {
+function buildBoardSvg(board, options = {}, viewport) {
   const elements = selectedElements(board, options);
-  const bounds2 = boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
+  const bounds2 = viewport?.bounds ?? boardBounds(elements, Math.max(0, Math.min(500, scalar(options.padding, 32))), board.elements);
   const surfaces = nativeSurfaces(elements, board.style);
-  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${bounds2.width}" height="${bounds2.height}" viewBox="${bounds2.x} ${bounds2.y} ${bounds2.width} ${bounds2.height}" role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds2.x}" y="${bounds2.y}" width="${bounds2.width}" height="${bounds2.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options, surfaces)).join("")}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${viewport?.width ?? bounds2.width}" height="${viewport?.height ?? bounds2.height}" viewBox="${bounds2.x} ${bounds2.y} ${bounds2.width} ${bounds2.height}"${viewport ? ' preserveAspectRatio="none"' : ""} role="img" aria-labelledby="studio-export-title studio-export-description"><title id="studio-export-title">${escapeXml(board.artifact.title)}</title><desc id="studio-export-description">\u767D\u677F\u7248\u672C ${board.artifact.revision}\uFF0C\u5305\u542B ${elements.length} \u4E2A\u5BF9\u8C61\u3002</desc><defs><marker id="studio-export-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs><rect x="${bounds2.x}" y="${bounds2.y}" width="${bounds2.width}" height="${bounds2.height}" fill="${escapeXml(board.style.paper)}"/>${elements.map((e) => elementSvg(e, board, options, surfaces)).join("")}</svg>`;
 }
 function offlineEmbedState(initial) {
   let state = JSON.parse(JSON.stringify(initial));
@@ -8580,6 +8957,15 @@ function buildBoardHtml(board, options = {}) {
   const bounds2 = boardBounds(elements, 32, board.elements);
   const surfaces = nativeSurfaces(elements, board.style);
   const layers = elements.map((e) => {
+    if (e.type === "todo") {
+      const surface = documentSurface(e, board.style), items = normalizeTodoItems(e.data?.items);
+      const count = items.filter((item) => item.checked).length;
+      const design = `background:${surface.paper};color:${surface.ink};border-color:${surface.rule};--todo-rule:${surface.rule};--todo-muted:${surface.muted};--todo-accent:${surface.link};`;
+      const rows = items.map((item) => `<li data-studio-task-id="${escapeXml(item.id)}"${todoSourceAttribute(item)}><label><input disabled type="checkbox"${item.checked ? " checked" : ""}><span>${escapeXml(item.text)}</span></label></li>`).join("");
+      return `<section data-studio-id="${escapeXml(e.id)}" class="studio-export-todo" aria-label="${escapeXml(e.text || "\u4EFB\u52A1\u6E05\u5355")}" style="${escapeXml(design)}position:absolute;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;transform:rotate(${scalar(e.rotation, 0)}deg)">
+        <header><h1>${escapeXml(e.text || "\u4EFB\u52A1\u6E05\u5355")}</h1><span>${count}/${items.length} \u5B8C\u6210</span></header><ul>${rows}</ul>
+      </section>`;
+    }
     if (e.type === "document" && e.document) {
       const surface = documentSurface(e, board.style);
       return `<section data-studio-id="${escapeXml(e.id)}" class="studio-document" aria-label="${escapeXml(e.text || "\u6587\u6863")}" style="${escapeXml(documentSurfaceCss(surface))}position:absolute;left:${e.x - bounds2.x}px;top:${e.y - bounds2.y}px;width:${e.w}px;height:${e.h}px;overflow:auto;transform:rotate(${scalar(e.rotation, 0)}deg)"><h1>${escapeXml(e.text || "\u6587\u6863")}</h1>${blocksHtml(e.document.blocks, surface.scheme)}</section>`;
@@ -8593,14 +8979,16 @@ function buildBoardHtml(board, options = {}) {
     const markerId = `arrow_${e.id.replace(/[^\w-]/g, "_")}`;
     return `<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;left:${box.x - bounds2.x}px;top:${box.y - bounds2.y}px" width="${box.width}" height="${box.height}" viewBox="${box.x} ${box.y} ${box.width} ${box.height}"><defs><marker id="${markerId}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${escapeXml(board.style.muted)}"/></marker></defs>${elementSvg(e, board, { ...options, markerId }, surfaces)}</svg>`;
   }).join("");
+  const todoCss = elements.some((element) => element.type === "todo") ? TODO_EXPORT_CSS : "";
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds2.width}px;height:${bounds2.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none';script-src 'unsafe-inline';style-src 'unsafe-inline';img-src data: blob:;font-src data:;media-src data: blob:;frame-src 'self' data: blob:;connect-src 'none';object-src 'none';base-uri 'none';form-action 'none'"><title>${escapeXml(board.artifact.title)}</title><style>body{margin:0;background:${escapeXml(board.style.paper)};color:${escapeXml(board.style.ink)}}main{position:relative;width:${bounds2.width}px;height:${bounds2.height}px;margin:auto}svg,video{display:block}iframe{background:transparent}${DOCUMENT_EXPORT_CSS}${todoCss}@media print{main{margin:0}}</style></head><body><main aria-label="${escapeXml(board.artifact.title)}">${layers}</main></body></html>
 `;
 }
-var ExportError, isHtmlRegionElement;
+var ExportError, isHtmlRegionElement, TODO_EXPORT_CSS;
 var init_serialization = __esm({
   "src/core/serialization.ts"() {
     "use strict";
+    init_todo();
     init_theme();
     init_whiteboard_geometry();
     init_whiteboard_stickers();
@@ -8618,6 +9006,16 @@ var init_serialization = __esm({
       code;
     };
     isHtmlRegionElement = (element) => element.type === "html" || element.type === "diagram" && typeof element.html === "string";
+    TODO_EXPORT_CSS = `.studio-export-todo{box-sizing:border-box;overflow:auto;border:1px solid;border-radius:7px;font:14px/1.5 system-ui,sans-serif}
+.studio-export-todo header{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:8px 12px;position:sticky;top:0;background:inherit}
+.studio-export-todo h1{margin:0;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.studio-export-todo header span{color:var(--todo-muted);white-space:nowrap}
+.studio-export-todo ul{margin:0;padding:0;list-style:none}
+.studio-export-todo li{border-top:1px solid var(--todo-rule)}
+.studio-export-todo label{display:flex;align-items:flex-start;gap:8px;padding:6px 12px}
+.studio-export-todo input{margin:3px 0 0;accent-color:var(--todo-accent)}
+.studio-export-todo li span{white-space:pre-wrap;overflow-wrap:anywhere}
+.studio-export-todo li:has(input:checked) span{color:var(--todo-muted)}`;
   }
 });
 
@@ -9211,7 +9609,8 @@ __export(export_exports, {
   buildBoardHtml: () => buildBoardHtml,
   buildBoardSvg: () => buildBoardSvg,
   exportArtifact: () => exportArtifact,
-  extractRegionSvg: () => extractRegionSvg
+  extractRegionSvg: () => extractRegionSvg,
+  renderSvgPng: () => renderSvgPng
 });
 import { readFile as readFile2 } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -9253,7 +9652,7 @@ async function systemFontBuffers() {
   })();
   return await fonts;
 }
-async function png(svg, options) {
+async function renderSvgPng(svg, options = {}, maxPixels = 32e6) {
   if (/<foreignObject\b/i.test(svg)) throw new ExportError("EXPORT_BROWSER_REQUIRED", "\u5B8C\u6574 HTML \u5E03\u5C40\u9700\u8981\u6D4F\u89C8\u5668\u6E32\u67D3\uFF0C\u8BF7\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA PNG\uFF1B\u4E5F\u53EF\u4EE5\u5355\u72EC\u5BFC\u51FA\u533A\u57DF\u5185\u7684 SVG \u56FE\u89E3\u3002");
   if (/(?:href|xlink:href)\s*=\s*["'](?!#|data:image\/)/i.test(svg)) throw new ExportError("ASSET_NOT_EMBEDDED", "PNG \u5BFC\u51FA\u5305\u542B\u5C1A\u672A\u5D4C\u5165\u7684\u5916\u90E8\u8D44\u6E90\uFF0C\u65E0\u6CD5\u79BB\u7EBF\u5B8C\u6574\u6E32\u67D3\u3002");
   await initializeRenderer();
@@ -9265,10 +9664,11 @@ async function png(svg, options) {
   try {
     const width = Math.ceil(renderer.width * scale);
     const height = Math.ceil(renderer.height * scale);
-    if (width > 16384 || height > 16384 || width * height > 32e6) throw new ExportError("EXPORT_TOO_LARGE", "PNG \u8D85\u8FC7 3200 \u4E07\u50CF\u7D20\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u6216\u964D\u4F4E\u5BFC\u51FA\u500D\u6570\u3002");
+    if (width > 16384 || height > 16384 || width * height > maxPixels) throw new ExportError("EXPORT_TOO_LARGE", "PNG \u8D85\u8FC7\u50CF\u7D20\u4E0A\u9650\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u6216\u964D\u4F4E\u5BFC\u51FA\u500D\u6570\u3002");
     const image = renderer.render();
     try {
-      return Buffer.from(image.asPng()).toString("base64");
+      if (image.width * image.height > maxPixels) throw new ExportError("EXPORT_TOO_LARGE", "PNG \u8D85\u8FC7\u50CF\u7D20\u4E0A\u9650\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u6216\u964D\u4F4E\u5BFC\u51FA\u500D\u6570\u3002");
+      return { bytes: Buffer.from(image.asPng()), width: image.width, height: image.height };
     } finally {
       image.free();
     }
@@ -9294,7 +9694,8 @@ async function exportArtifact(board, format, options = {}) {
     }
     if (format === "svg") return { mimeType: "image/svg+xml", filename: filenameFor(title, "svg"), encoding: "utf8", data: `${svg}
 ` };
-    return { mimeType: "image/png", filename: filenameFor(title, "png"), encoding: "base64", data: await png(svg, options) };
+    const { bytes } = await renderSvgPng(svg, options);
+    return { mimeType: "image/png", filename: filenameFor(title, "png"), encoding: "base64", data: bytes.toString("base64") };
   }
   throw new ExportError("UNSUPPORTED_EXPORT", "\u652F\u6301\u5BFC\u51FA HTML\u3001SVG\u3001PNG \u548C\u767D\u677F JSON\u3002");
 }
@@ -9355,7 +9756,13 @@ function normalizeElement(input2, id2) {
     result.document = normalizeDocument(input2.document ?? defaultDocument());
     if (result.html !== void 0) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u4F7F\u7528\u5757 JSON \u4FDD\u5B58\uFF0C\u4E0D\u80FD\u540C\u65F6\u5305\u542B HTML \u6E90\u3002");
   }
+  if (result.type === "todo") result.data = todoData(result);
   return result;
+}
+function todoData(element) {
+  if (element.data !== void 0 && !object2(element.data) || element.html !== void 0 || element.document !== void 0) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u6E05\u5355\u987B\u4F7F\u7528 data.items \u4FDD\u5B58\u4EFB\u52A1\u884C\u3002");
+  if (element.text !== void 0 && (typeof element.text !== "string" || Buffer.byteLength(element.text) > TODO_TEXT_BYTES)) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u6E05\u5355\u6807\u9898\u65E0\u6548\u6216\u8FC7\u957F\u3002");
+  return { ...element.data, items: normalizeTodoItems(element.data?.items) };
 }
 function tableIdentity(id2, value) {
   const data = object2(value) ? copy(value) : {}, rows = data.rows;
@@ -9382,6 +9789,23 @@ function safeElementMerge(base, local, current) {
     const bd = b.data, ld = l.data, cd = c.data;
     if (jsonEqual(bd.rowIds, ld.rowIds) && jsonEqual(bd.rowIds, cd.rowIds) && jsonEqual(bd.columnIds, ld.columnIds) && jsonEqual(bd.columnIds, cd.columnIds)) matrices.push("data.rows");
     else if (!jsonEqual(bd.rows, ld.rows) && !jsonEqual(bd.rows, cd.rows)) return { result: c, conflicts: ["data.rows", "data.rowIds", "data.columnIds"] };
+  }
+  if (base.type === "todo" && local.type === "todo" && current.type === "todo") {
+    const original = normalizeTodoItems(base.data?.items), incoming = normalizeTodoItems(local.data?.items), saved = normalizeTodoItems(current.data?.items);
+    if (original.length === incoming.length && original.length === saved.length && original.every((item, index) => item.id === incoming[index].id && item.id === saved[index].id)) {
+      const conflicts = [];
+      const items = original.map((item, index) => {
+        const next = incoming[index], existing = saved[index];
+        if (jsonEqual(item, next)) return existing;
+        if (jsonEqual(item, existing) || jsonEqual(next, existing)) return next;
+        conflicts.push("data.items." + item.id);
+        return existing;
+      });
+      if (conflicts.length) return { result: c, conflicts };
+      b.data = { ...base.data, items };
+      l.data = { ...local.data, items };
+      c.data = { ...current.data, items };
+    }
   }
   return mergeJson(b, l, c, matrices);
 }
@@ -9475,7 +9899,8 @@ var init_whiteboard = __esm({
     init_whiteboard_geometry();
     init_serialization();
     init_document();
-    TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "document", "table", "link", "note", "sticker", "diagram", "chart"]);
+    init_todo();
+    TYPES = /* @__PURE__ */ new Set(["shape", "container", "text", "stroke", "arrow", "image", "html", "document", "table", "link", "note", "sticker", "diagram", "chart", "todo"]);
     LOCKED_GEOMETRY = ["type", "x", "y", "w", "h", "rotation", "parentId", "groupId", "from", "to", "fromSide", "toSide", "points", "bends", "labelOffset", "labelSize", "crop"];
     whiteboardAdapter = {
       type: "whiteboard",
@@ -9488,6 +9913,7 @@ var init_whiteboard = __esm({
           normalizeDocument(element.document);
           if (element.html !== void 0) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u4E0D\u80FD\u540C\u65F6\u4FDD\u5B58 HTML \u6E90\u3002");
         }
+        for (const element of content.elements) if (element.type === "todo") todoData(element);
       },
       versionOf: (content, id2) => id2 === "$order" ? content.orderVersion ?? 0 : content.elements.find((item) => item.id === id2)?.version ?? 0,
       syncVersions: syncElementVersions,
@@ -9514,7 +9940,7 @@ var init_whiteboard = __esm({
           return ["front", "back", "forward", "backward"].includes(operation2.preset ?? "") ? [...ids, "$order"] : ids;
         }
         if (operation2.op === "delete") return [.../* @__PURE__ */ new Set([...operation2.ids ?? [safeId(operation2.id, "\u5143\u7D20 ID")], ...deletedIds(content, operation2)])];
-        if (operation2.op === "update" || operation2.op === "document") return [safeId(operation2.id, "\u5143\u7D20 ID")];
+        if (operation2.op === "update" || operation2.op === "document" || operation2.op === "todo") return [safeId(operation2.id, "\u5143\u7D20 ID")];
         return [];
       },
       apply(content, operation2, baseline = content) {
@@ -9534,6 +9960,13 @@ var init_whiteboard = __esm({
           if (Object.hasOwn(operation2.changes, "locked") && typeof operation2.changes.locked !== "boolean") throw new StudioError("INVALID_ARGUMENT", "locked \u5FC5\u987B\u662F\u5E03\u5C14\u503C\u3002");
           if (current.locked && operation2.changes.locked === false && Object.keys(operation2.changes).length !== 1) throw new StudioError("LOCKED", "\u8BF7\u901A\u8FC7\u5355\u72EC\u7684\u9501\u5B9A\u64CD\u4F5C\u660E\u786E\u89E3\u9501\u3002", { elementId: id2 });
           const { id: _id, version: _version, ...changes } = copy(operation2.changes);
+          if (changes.type !== void 0 && changes.type !== current.type && (current.type === "todo" || changes.type === "todo")) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u5355\u72EC\u521B\u5EFA\u4EFB\u52A1\u6E05\u5355\uFF0C\u4E0D\u80FD\u76F4\u63A5\u8F6C\u6362\u5DF2\u6709\u5BF9\u8C61\u7684\u7C7B\u578B\u3002");
+          if (current.type === "todo" && Object.hasOwn(changes, "data")) {
+            if (!object2(changes.data)) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u6E05\u5355\u5C5E\u6027\u65E0\u6548\u3002");
+            const items = normalizeTodoItems(current.data?.items);
+            if (Object.hasOwn(changes.data, "items") && !jsonEqual(normalizeTodoItems(changes.data.items), items)) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u5185\u5BB9\u8BF7\u4F7F\u7528 todo \u9010\u884C\u4FEE\u6539\u3002");
+            changes.data = { ...current.data, ...changes.data, items };
+          }
           if (current.type === "arrow" && [...["from", "to", "fromSide", "toSide", "bends"], ...!current.locked ? ["label"] : []].some((key) => Object.hasOwn(changes, key) && !same(changes[key], current[key]))) {
             if (!Object.hasOwn(changes, "labelOffset")) changes.labelOffset = void 0;
             if (!Object.hasOwn(changes, "labelSize")) changes.labelSize = void 0;
@@ -9555,6 +9988,16 @@ var init_whiteboard = __esm({
           const document = applyDocumentOperations(current.document, operation2.data?.operations);
           if (same(document, current.document)) return [];
           current.document = document;
+          current.version++;
+          return [id2];
+        }
+        if (operation2.op === "todo") {
+          const id2 = safeId(operation2.id, "\u4EFB\u52A1\u6E05\u5355 ID"), current = content.elements.find((item) => item.id === id2);
+          if (!current || current.type !== "todo") throw new StudioError("NOT_FOUND", "\u4EFB\u52A1\u6E05\u5355\u4E0D\u5B58\u5728\u3002");
+          const before = normalizeTodoItems(current.data?.items);
+          const items = applyTodoOperations(before, operation2.data?.operations);
+          if (same(items, before)) return [];
+          current.data = { ...current.data, items };
           current.version++;
           return [id2];
         }
@@ -9613,10 +10056,13 @@ var init_whiteboard = __esm({
       readUnit(content, id2) {
         return id2 === "$style" ? content.style : id2 === "$motion" ? content.motion : id2 === "$order" ? orderUnit(content) : content.elements.find((item) => item.id === id2) ?? null;
       },
-      undoUnit(content, change, history = []) {
-        const current = this.readUnit(content, change.id);
+      undoUnit(content, change, history, { current, changesWereReversed }) {
         if (change.id === "$order" || !object2(change.before) || !object2(change.after) || !object2(current)) {
-          if (!jsonEqual(current, change.after)) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, ["."]) });
+          if (!jsonEqual(current, change.after)) {
+            const sameValue = object2(current) && object2(change.after) && (change.id === "$order" ? jsonEqual(current.ids, change.after.ids) : jsonEqual(mergeFields(current), mergeFields(change.after)));
+            const unitVersion2 = (value) => object2(value) ? value.version : void 0;
+            if (!sameValue || !changesWereReversed((before, after2) => unitVersion2(before) !== unitVersion2(after2))) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: change.id, ...mergeConflictDetails(change.after, change.before, current, ["."]) });
+          }
           this.restoreUnit(content, change, history);
           return;
         }
@@ -9696,9 +10142,9 @@ var init_whiteboard = __esm({
       },
       snapshotFeedback(artifactId, feedbackId, snapshots, value, versions, clocks) {
         const anchor3 = object2(value) ? copy(value) : {};
-        if (anchor3.pin !== void 0 && (!isCommentPin(anchor3.pin) || anchor3.pin.coordinateSpace === "document" && anchor3.coordinateSpace !== "document")) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6C14\u6CE1\u4F4D\u7F6E\u65E0\u6548\u3002");
+        if (anchor3.pin !== void 0 && (!isCommentPin(anchor3.pin) || anchor3.pin.coordinateSpace !== "board" && anchor3.pin.coordinateSpace !== anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6C14\u6CE1\u4F4D\u7F6E\u65E0\u6548\u3002");
         if (anchor3.elementIds !== void 0 && (!Array.isArray(anchor3.elementIds) || anchor3.elementIds.some((id2) => typeof id2 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5143\u7D20\u5B9A\u4F4D\u65E0\u6548\u3002");
-        if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html", "document"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
+        if (anchor3.coordinateSpace !== void 0 && !["board", "element", "html", "document", "todo"].includes(anchor3.coordinateSpace)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u5750\u6807\u7A7A\u95F4\u65E0\u6548\u3002");
         for (const key of ["x", "y", "w", "h"]) if (anchor3[key] !== void 0) finite(anchor3[key], 0);
         if ((anchor3.w ?? 0) < 0 || (anchor3.h ?? 0) < 0) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u8303\u56F4\u5C3A\u5BF8\u4E0D\u80FD\u4E3A\u8D1F\u6570\u3002");
         if (anchor3.coordinateSpace === "element" && (!anchor3.elementIds?.length || [anchor3.x, anchor3.y].some((value2) => value2 !== void 0 && (value2 < 0 || value2 > 1)))) throw new StudioError("INVALID_ARGUMENT", "\u5BF9\u8C61\u5907\u6CE8\u9700\u8981\u5B9A\u4F4D\u5BF9\u8C61\uFF0C\u4E14\u76F8\u5BF9\u5750\u6807\u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
@@ -9708,6 +10154,12 @@ var init_whiteboard = __esm({
           if (anchor3.sourceVersion !== void 0 && (!Number.isSafeInteger(anchor3.sourceVersion) || anchor3.sourceVersion < 1)) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u6765\u6E90\u7248\u672C\u65E0\u6548\u3002");
           if (!versions && anchor3.sourceVersion !== void 0) versions = { [anchor3.elementIds[0]]: anchor3.sourceVersion };
           if (versions && anchor3.sourceVersion !== void 0 && versions[anchor3.elementIds[0]] !== anchor3.sourceVersion) throw new StudioError("INVALID_ARGUMENT", "\u6587\u6863\u6765\u6E90\u7248\u672C\u4E0E\u9009\u533A\u7248\u672C\u4E0D\u4E00\u81F4\u3002");
+        }
+        if (anchor3.coordinateSpace === "todo") {
+          if (anchor3.elementIds?.length !== 1 || anchor3.regionId !== void 0 || !isTodoId(anchor3.itemId) || [anchor3.x, anchor3.y].some((value2) => value2 !== void 0 && (value2 < 0 || value2 > 1))) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u5907\u6CE8\u9700\u8981\u4E00\u4E2A\u6E05\u5355\u548C\u5B9E\u9645\u4EFB\u52A1\u884C ID\uFF0C\u884C\u5185\u5750\u6807\u987B\u5728 0 \u5230 1 \u4E4B\u95F4\u3002");
+          if (!Number.isSafeInteger(anchor3.sourceVersion) || anchor3.sourceVersion < 1) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u884C\u5907\u6CE8\u9700\u8981\u6709\u6548\u7684\u6765\u6E90\u7248\u672C\u3002");
+          if (!versions) versions = { [anchor3.elementIds[0]]: anchor3.sourceVersion };
+          if (versions[anchor3.elementIds[0]] !== anchor3.sourceVersion) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u884C\u6765\u6E90\u7248\u672C\u4E0E\u9009\u533A\u7248\u672C\u4E0D\u4E00\u81F4\u3002");
         }
         if (anchor3.sourceRevision !== void 0 && (!Number.isInteger(anchor3.sourceRevision) || anchor3.sourceRevision < 1 || !anchor3.regionId)) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u6E90\u7801\u7248\u672C\u65E0\u6548\u3002");
         if (anchor3.targetIds !== void 0 && (!Array.isArray(anchor3.targetIds) || anchor3.targetIds.length > 100 || anchor3.targetIds.some((id2) => typeof id2 !== "string" || id2.length > 160 || /[\u0000-\u001f]/.test(id2)))) throw new StudioError("INVALID_ARGUMENT", "HTML \u5907\u6CE8\u76EE\u6807\u65E0\u6548\u3002");
@@ -9730,19 +10182,27 @@ var init_whiteboard = __esm({
           if (!selected || ambiguous) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u7684\u5BF9\u8C61\u7248\u672C\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: id2, version: versions[id2] });
           return selected;
         });
+        const normalizeQuote = (value2) => value2.replace(/\s+/g, " ").trim();
         if (anchor3.coordinateSpace === "document") {
           const element = elements[0];
           if (element.type !== "document" || !element.document) throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u76EE\u6807\u4E0D\u662F\u6587\u6863\u533A\u57DF\u3002");
           const blocks = flattenDocumentBlocks(element.document.blocks), selected = anchor3.blockIds.map((id2) => blocks.find((block) => block.id === id2));
           if (selected.some((block) => !block)) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u7684\u6BB5\u843D\u5DF2\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u3002");
-          const normalize = (value2) => value2.replace(/\s+/g, " ").trim();
-          if (anchor3.quote && !normalize(selected.map((block) => documentBlockText(block)).join("\n")).includes(normalize(anchor3.quote))) throw new StudioError("CONFLICT", "\u9009\u4E2D\u6587\u5B57\u4E0D\u5C5E\u4E8E\u6240\u63D0\u4F9B\u7684\u6587\u6863\u6BB5\u843D\u7248\u672C\u3002");
+          if (anchor3.quote && !normalizeQuote(selected.map((block) => documentBlockText(block)).join("\n")).includes(normalizeQuote(anchor3.quote))) throw new StudioError("CONFLICT", "\u9009\u4E2D\u6587\u5B57\u4E0D\u5C5E\u4E8E\u6240\u63D0\u4F9B\u7684\u6587\u6863\u6BB5\u843D\u7248\u672C\u3002");
           anchor3.sourceVersion = element.version;
         }
-        if (anchor3.coordinateSpace === "element" || anchor3.coordinateSpace === "document") {
+        let todoItem;
+        if (anchor3.coordinateSpace === "todo") {
+          const element = elements[0];
+          if (element.type !== "todo") throw new StudioError("INVALID_ARGUMENT", "\u5907\u6CE8\u76EE\u6807\u4E0D\u662F\u4EFB\u52A1\u6E05\u5355\u3002");
+          todoItem = normalizeTodoItems(element.data?.items).find((item) => item.id === anchor3.itemId);
+          if (!todoItem || anchor3.quote && !normalizeQuote(todoItem.text).includes(normalizeQuote(anchor3.quote))) throw new StudioError("CONFLICT", "\u9009\u4E2D\u7684\u4EFB\u52A1\u884C\u6216\u539F\u6587\u5B57\u4E0D\u5C5E\u4E8E\u6240\u63D0\u4F9B\u7684\u6765\u6E90\u7248\u672C\u3002");
+          anchor3.sourceVersion = element.version;
+        }
+        if (anchor3.coordinateSpace === "element" || anchor3.coordinateSpace === "document" || anchor3.coordinateSpace === "todo") {
           for (const element of elements) if (element.version < (clocks?.[element.id]?.incarnationStart ?? 1)) throw new StudioError("CONFLICT", "\u539F\u9009\u533A\u5C5E\u4E8E\u5DF2\u5220\u9664\u7684\u5BF9\u8C61\uFF0C\u8BF7\u91CD\u65B0\u9009\u62E9\u76EE\u6807\u540E\u4FDD\u5B58\u5907\u6CE8\u3002", { elementId: element.id, version: element.version });
         }
-        const sources = elements.map((element) => typeof element.html === "string" ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) } : { artifactId, feedbackId, elementId: element.id, element: copy(element), version: element.version });
+        const sources = elements.map((element) => typeof element.html === "string" ? { artifactId, feedbackId, element: copy(element), html: element.html, regionId: element.id, sourceRevision: Number(element.sourceRevision ?? 1), version: Number(element.sourceRevision ?? 1) } : { artifactId, feedbackId, elementId: element.id, element: todoItem ? { ...copy(element), data: { items: [todoItem] } } : copy(element), version: element.version });
         return { anchor: anchor3, versions: Object.fromEntries(elements.map((element) => [element.id, element.version])), sources };
       }
     };
@@ -9766,6 +10226,30 @@ var init_whiteboard = __esm({
         if (mode === "objects") {
           const ids = Array.isArray(args.ids) ? args.ids : Array.isArray(args.elementIds) ? args.elementIds : void 0;
           return { artifact: state.artifact, orderVersion: state.content.orderVersion ?? 0, elements: state.content.elements.filter((item) => !ids || ids.includes(item.id)), ...ids?.includes("$order") ? { units: [{ id: "$order", value: orderUnit(state.content) }] } : {} };
+        }
+        if (mode === "tasks") {
+          const elementId = safeId(args.elementId, "\u4EFB\u52A1\u6E05\u5355 ID");
+          const element = args.feedbackId === void 0 ? state.content.elements.find((item) => item.id === elementId) : state.sources[safeId(args.feedbackId, "\u53CD\u9988 ID")]?.find((source) => source.element?.id === elementId)?.element;
+          if (!element || element.type !== "todo") throw new StudioError("NOT_FOUND", "\u4EFB\u52A1\u6E05\u5355\u4E0D\u5B58\u5728\u3002");
+          const ids = args.itemIds;
+          if (ids !== void 0 && (!Array.isArray(ids) || !ids.length || ids.length > TODO_ITEM_LIMIT || !ids.every(isTodoId))) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u884C ID \u5217\u8868\u65E0\u6548\u3002");
+          if (args.checked !== void 0 && typeof args.checked !== "boolean") throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u5B8C\u6210\u7B5B\u9009\u987B\u4E3A\u5E03\u5C14\u503C\u3002");
+          if (args.offset !== void 0 && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0) || args.limit !== void 0 && (!Number.isSafeInteger(args.limit) || Number(args.limit) < 1 || Number(args.limit) > 20)) throw new StudioError("INVALID_ARGUMENT", "\u4EFB\u52A1\u884C\u5206\u9875\u65E0\u6548\uFF0C\u6BCF\u9875\u6700\u591A 20 \u884C\u3002");
+          const all = normalizeTodoItems(element.data?.items);
+          const selected = all.filter((item) => (!ids || ids.includes(item.id)) && (args.checked === void 0 || item.checked === args.checked));
+          const offset = Number(args.offset ?? 0), limit = Number(args.limit ?? 10), next = offset + limit;
+          return {
+            artifactId: state.artifact.id,
+            elementId,
+            version: element.version,
+            title: element.text ?? "\u4EFB\u52A1\u6E05\u5355",
+            items: selected.slice(offset, next),
+            totalCount: selected.length,
+            totalItems: all.length,
+            completedCount: all.filter((item) => item.checked).length,
+            offset,
+            ...next < selected.length ? { nextOffset: next } : {}
+          };
         }
         if (mode === "blocks") {
           const elementId = safeId(args.elementId ?? args.regionId, "\u6587\u6863 ID");
@@ -11419,7 +11903,7 @@ var require_proper_lockfile = __commonJS({
 });
 
 // src/core/shared/sqlite-artifact.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 function freezeArtifactValue(value) {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -11496,7 +11980,7 @@ var init_sqlite_artifact = __esm({
         return row;
       }
       hash(json3) {
-        return createHash2("sha256").update(json3).digest("hex");
+        return createHash3("sha256").update(json3).digest("hex");
       }
       putBlob(json3) {
         const hash2 = this.hash(json3);
@@ -12130,7 +12614,7 @@ var init_store = __esm({
 });
 
 // src/core/shared/history.ts
-import { createHash as createHash3, randomUUID as randomUUID6 } from "node:crypto";
+import { createHash as createHash4, randomUUID as randomUUID6 } from "node:crypto";
 function initializeVersionClocks(state, adapter) {
   if (!adapter.syncVersions) return;
   if (state.unitClocks === void 0) {
@@ -12174,14 +12658,36 @@ function mutationTargets(content, operation2, adapter) {
   if (operation2.op === "restore" && !restoreUnitIds(operation2)) return;
   return adapter.targets(content, operation2);
 }
-function makeHistory(state, actor, summary, changedIds, restoredFrom) {
+function isUndo(operation2) {
+  return operation2.op === "restore" && (operation2.data?.mode === "undo" || operation2.data?.undo === true || operation2.preset === "undo");
+}
+function makeHistory(state, actor, summary, changedIds, restore = {}) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   state.artifact.revision++;
   state.artifact.updatedAt = now;
-  const entry = { id: randomUUID6(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restoredFrom ? { restoredFrom } : {} };
+  const entry = { id: randomUUID6(), revision: state.artifact.revision, createdAt: now, actor: copy(actor), summary: summary.slice(0, 500), changedIds: [...new Set(changedIds)], ...restore };
   state.history.push({ entry, artifact: copy(state.artifact), content: copy(state.content) });
   if (state.history.length > 200) state.history.splice(0, state.history.length - 200);
   return entry;
+}
+function ownChangesWereReversed(history, target, currentRevision, actor, read, current, didChange) {
+  const pending = [];
+  let previous = read(history[target].content);
+  let revision = history[target].entry.revision;
+  let reversed = false;
+  for (const { entry, content } of history.slice(target + 1)) {
+    if (entry.revision !== ++revision) return false;
+    const value = read(content);
+    if (didChange(previous, value)) {
+      const candidate = pending.at(-1);
+      if (candidate && entry.restoreMode === "undo" && entry.restoredFrom === candidate.id && isAuthor(entry, actor) && isAuthor(candidate, actor)) {
+        pending.pop();
+        reversed = true;
+      } else pending.push(entry);
+    }
+    previous = value;
+  }
+  return reversed && !pending.length && currentRevision === revision && !didChange(previous, current);
 }
 function restoreVersion(state, saved, actor, adapter, undo = false, ids, baseline = state.content) {
   const current = state.content, history = state.history.map((item) => item.content);
@@ -12206,14 +12712,19 @@ function restoreVersion(state, saved, actor, adapter, undo = false, ids, baselin
     state.artifact.title = saved.artifact.title;
     return changedIds;
   }
-  const before = state.history[state.history.indexOf(saved) - 1];
-  if (saved.entry.actor.id !== actor.id || !before) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u64A4\u56DE\u81EA\u5DF1\u63D0\u4EA4\u7684\u5185\u5BB9\u4FEE\u6539\u3002");
+  const index = state.history.indexOf(saved), before = state.history[index - 1];
+  if (!isAuthor(saved.entry, actor)) throw new StudioError("FORBIDDEN", "\u53EA\u80FD\u64A4\u56DE\u81EA\u5DF1\u63D0\u4EA4\u7684\u5185\u5BB9\u4FEE\u6539\u3002");
+  if (!before || before.entry.revision !== saved.entry.revision - 1) throw new StudioError("NOT_FOUND", "\u6B64\u64CD\u4F5C\u7684\u539F\u59CB\u7248\u672C\u5DF2\u8D85\u51FA\u53EF\u64A4\u9500\u8303\u56F4\u3002");
   const differences = adapter.diff(before.content, saved.content);
   const restored = copy(current);
   for (const difference of differences) {
-    const clock = state.unitClocks?.[difference.id], savedAfter = object2(difference.after) ? difference.after.version : void 0, savedBefore = object2(difference.before) ? difference.before.version : void 0;
-    if (clock && (typeof savedAfter === "number" && savedAfter < clock.incarnationStart || difference.after == null && typeof savedBefore === "number" && savedBefore < clock.version)) throw new StudioError("CONFLICT", "\u6B64\u5BF9\u8C61\u5DF2\u5220\u9664\u5E76\u91CD\u5EFA\uFF0C\u4E0D\u80FD\u64A4\u56DE\u65E7\u5BF9\u8C61\u7684\u4E8B\u52A1\u3002", { elementId: difference.id, currentVersion: adapter.versionOf(current, difference.id) });
-    if (adapter.undoUnit) adapter.undoUnit(restored, difference, history);
+    const readUnit = (content) => adapter.readUnit(content, difference.id);
+    const currentUnit = readUnit(current);
+    const changesWereReversed = (didChange) => ownChangesWereReversed(state.history, index, state.artifact.revision, actor, readUnit, currentUnit, didChange);
+    const clock = state.unitClocks?.[difference.id], savedAfter = unitVersion(difference.after), savedBefore = unitVersion(difference.before);
+    const changedIncarnation = clock && (typeof savedAfter === "number" && savedAfter < clock.incarnationStart || difference.after == null && typeof savedBefore === "number" && savedBefore < clock.version);
+    if (changedIncarnation && !changesWereReversed((a, b) => unitVersion(a) !== unitVersion(b))) throw new StudioError("CONFLICT", "\u6B64\u5BF9\u8C61\u5DF2\u5220\u9664\u5E76\u91CD\u5EFA\uFF0C\u4E0D\u80FD\u64A4\u56DE\u65E7\u5BF9\u8C61\u7684\u4E8B\u52A1\u3002", { elementId: difference.id, currentVersion: adapter.versionOf(current, difference.id) });
+    if (adapter.undoUnit) adapter.undoUnit(restored, difference, history, { current: currentUnit, changesWereReversed });
     else {
       if (!same(adapter.readUnit(restored, difference.id), difference.after)) throw new StudioError("CONFLICT", "\u540E\u6765\u6709\u4EBA\u4FEE\u6539\u4E86\u8FD9\u9879\u5185\u5BB9\uFF0C\u4E0D\u80FD\u76F4\u63A5\u64A4\u56DE\u3002", { elementId: difference.id });
       adapter.restoreUnit(restored, difference, history);
@@ -12236,7 +12747,9 @@ function applyWorkingMutation(state, args, actor, adapter) {
   const operationId = safeId(args.operationId ?? randomUUID6(), "\u64CD\u4F5C ID"), operations = args.operations;
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) throw new StudioError("INVALID_ARGUMENT", "\u6BCF\u6B21\u63D0\u4EA4\u5E94\u5305\u542B 1 \u81F3 200 \u4E2A\u64CD\u4F5C\u3002");
   if (operations.some((operation2) => !object2(operation2))) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-  const fingerprint = createHash3("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
+  const first = operations[0];
+  const standaloneUndo = operations.length === 1 && isUndo(first) && first.id === void 0 && first.ids === void 0;
+  const fingerprint = createHash4("sha256").update(JSON.stringify({ operations, actor: actor.id, summary: args.summary })).digest("hex");
   const duplicate = state.operations.find((item) => item.id === operationId);
   if (duplicate) {
     if (duplicate.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u4FEE\u6539\u3002");
@@ -12254,12 +12767,17 @@ function applyWorkingMutation(state, args, actor, adapter) {
     }
   }
   if (args.expectedRevision !== void 0 && args.expectedRevision !== state.artifact.revision) {
-    if (!expected || !Object.keys(expected).length) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
-    for (const operation2 of operations) {
-      if (!object2(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
-      const targets = mutationTargets(state.content, operation2, adapter);
-      if (!targets) throw new StudioError("CONFLICT", "\u6574\u4F53\u64CD\u4F5C\u9700\u8981\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
-      if (targets.some((id2) => typeof id2 !== "string" || !Object.hasOwn(expected, id2))) throw new StudioError("CONFLICT", "\u8FC7\u671F\u63D0\u4EA4\u5FC5\u987B\u6838\u5BF9\u6240\u6709\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002", { revision: state.artifact.revision });
+    if (standaloneUndo) {
+      const target = version2(state, first.versionId);
+      if (Number(args.expectedRevision) < target.entry.revision || Number(args.expectedRevision) > state.artifact.revision) throw new StudioError("CONFLICT", "\u8BF7\u8BFB\u53D6\u5305\u542B\u6240\u9009\u64CD\u4F5C\u7684\u4F5C\u54C1\u7248\u672C\u540E\u518D\u64A4\u9500\u3002", { revision: state.artifact.revision });
+    } else {
+      if (!expected || !Object.keys(expected).length) throw new StudioError("CONFLICT", "\u4F5C\u54C1\u5DF2\u88AB\u4FEE\u6539\uFF0C\u8BF7\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
+      for (const operation2 of operations) {
+        if (!object2(operation2)) throw new StudioError("INVALID_ARGUMENT", "\u4F5C\u54C1\u64CD\u4F5C\u65E0\u6548\u3002");
+        const targets = mutationTargets(state.content, operation2, adapter);
+        if (!targets) throw new StudioError("CONFLICT", "\u6574\u4F53\u64CD\u4F5C\u9700\u8981\u8BFB\u53D6\u6700\u65B0\u7248\u672C\u540E\u91CD\u8BD5\u3002", { revision: state.artifact.revision });
+        if (targets.some((id2) => typeof id2 !== "string" || !Object.hasOwn(expected, id2))) throw new StudioError("CONFLICT", "\u8FC7\u671F\u63D0\u4EA4\u5FC5\u987B\u6838\u5BF9\u6240\u6709\u76EE\u6807\u5BF9\u8C61\u7684\u7248\u672C\u3002", { revision: state.artifact.revision });
+      }
     }
   }
   const bases = /* @__PURE__ */ new Map();
@@ -12294,22 +12812,25 @@ function applyWorkingMutation(state, args, actor, adapter) {
     }
     if (operation2.op === "restore") {
       const saved = version2(state, operation2.versionId);
-      changedIds.push(...restoreVersion(state, saved, actor, adapter, operation2.data?.mode === "undo" || operation2.data?.undo === true || operation2.preset === "undo", restoreUnitIds(operation2), baseline));
+      changedIds.push(...restoreVersion(state, saved, actor, adapter, isUndo(operation2), restoreUnitIds(operation2), baseline));
       restoredFrom = saved.entry.id;
     } else changedIds.push(...adapter.apply(state.content, operation2, baseline));
     if (adapter.syncVersions) adapter.syncVersions(state.content, previous, state.unitClocks);
   }
   adapter.validate(state.content);
-  const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? "\u6062\u590D\u4F5C\u54C1\u5185\u5BB9" : "\u4FEE\u6539\u4F5C\u54C1", 500), changedIds, restoredFrom);
+  const historyEntry = makeHistory(state, actor, text(args.summary, restoredFrom ? "\u6062\u590D\u4F5C\u54C1\u5185\u5BB9" : "\u4FEE\u6539\u4F5C\u54C1", 500), changedIds, { ...restoredFrom ? { restoredFrom } : {}, ...standaloneUndo ? { restoreMode: "undo" } : {} });
   state.operations.push({ id: operationId, fingerprint, historyId: historyEntry.id });
   state.operations = state.operations.filter((item) => state.history.some((saved) => saved.entry.id === item.historyId)).slice(-500);
   return { snapshot: copy({ artifact: state.artifact, content: state.content }), historyEntry: copy(historyEntry), changed: true };
 }
+var isAuthor, unitVersion;
 var init_history = __esm({
   "src/core/shared/history.ts"() {
     "use strict";
     init_common();
     init_safe_merge();
+    isAuthor = (entry, actor) => entry.actor.id === actor.id && entry.actor.kind === actor.kind;
+    unitVersion = (unit2) => object2(unit2) ? unit2.version : void 0;
   }
 });
 
@@ -12479,7 +13000,7 @@ var init_artifacts = __esm({
 });
 
 // src/core/shared/proposals.ts
-import { createHash as createHash4, randomUUID as randomUUID8 } from "node:crypto";
+import { createHash as createHash5, randomUUID as randomUUID8 } from "node:crypto";
 function proposalExpired(item, now = Date.now()) {
   return !!item.proposal && Date.parse(item.proposal.expiresAt) <= now;
 }
@@ -12647,13 +13168,13 @@ var init_proposals = __esm({
     init_common();
     init_history();
     LIFETIME = 30 * 60 * 1e3;
-    digest = (value) => createHash4("sha256").update(JSON.stringify(value)).digest("hex");
+    digest = (value) => createHash5("sha256").update(JSON.stringify(value)).digest("hex");
     unit = (adapter, content, id2) => copy(adapter.readUnit(content, id2) ?? null);
   }
 });
 
 // src/core/shared/feedback.ts
-import { createHash as createHash5, randomUUID as randomUUID9 } from "node:crypto";
+import { createHash as createHash6, randomUUID as randomUUID9 } from "node:crypto";
 function updateFeedback(state, args, actor, adapter) {
   requireRole(actor, ["owner", "editor", "commenter"]);
   assertAlive(state.artifact);
@@ -12668,7 +13189,7 @@ function updateFeedback(state, args, actor, adapter) {
     const versions = args.versions === void 0 ? void 0 : copy(args.versions);
     if (versions && Buffer.byteLength(JSON.stringify(versions)) > 32 * 1024) throw new StudioError("TOO_LARGE", "\u5907\u6CE8\u9009\u533A\u7684\u7248\u672C\u4FE1\u606F\u8FC7\u5927\u3002");
     const operationId = args.operationId === void 0 ? void 0 : safeId(args.operationId, "\u64CD\u4F5C ID");
-    const fingerprint = createHash5("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
+    const fingerprint = createHash6("sha256").update(JSON.stringify({ actor: actor.id, type: args.type === "request" ? "request" : "comment", text: content, anchor: anchor3, versions })).digest("hex");
     const deleted = operationId && state.deletedFeedbackReceipts?.find((receipt) => receipt.operationId === operationId);
     if (deleted) {
       if (deleted.fingerprint !== fingerprint) throw new StudioError("OPERATION_REUSED", "\u540C\u4E00\u4E2A\u64CD\u4F5C ID \u4E0D\u80FD\u63D0\u4EA4\u4E0D\u540C\u7684\u5907\u6CE8\u3002");
@@ -12723,7 +13244,7 @@ function updateFeedback(state, args, actor, adapter) {
       item.status = action === "resolve" ? "resolved" : "open";
       delete item.processingBy;
     } else if (action === "send") {
-      const contentKey = createHash5("sha256").update(JSON.stringify({ text: item.text, replies: item.replies, anchor: item.anchor, versions: item.versions })).digest("hex");
+      const contentKey = createHash6("sha256").update(JSON.stringify({ text: item.text, replies: item.replies, anchor: item.anchor, versions: item.versions })).digest("hex");
       if (item.attachment?.contentKey === contentKey) return { feedback: visibleFeedback(state.feedback, actor), contextId: item.id };
       item.attachment = { requestId: randomUUID9(), contentKey, state: "pending", requestedAt: now, requestedBy: copy(actor) };
       if (item.status === "open") item.status = "pending";
@@ -12760,7 +13281,7 @@ var init_feedback = __esm({
 });
 
 // src/core/shared/sharing.ts
-import { createHash as createHash6, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash as createHash7, randomBytes, timingSafeEqual } from "node:crypto";
 function retireTokens(sharing, roles, reason) {
   sharing.retiredTokens ??= {};
   for (const role of roles) if (sharing.tokens[role]) sharing.retiredTokens[tokenKey(sharing.tokens[role])] = reason;
@@ -12955,7 +13476,7 @@ var init_sharing = __esm({
     newToken = () => randomBytes(24).toString("base64url");
     roleOn = (sharing, role) => sharing.roleEnabled?.[role] !== false;
     sharingAccess = (sharing) => sharing.enabled ? sharing.access ?? "lan" : "local";
-    tokenKey = (token) => createHash6("sha256").update(token).digest("hex");
+    tokenKey = (token) => createHash7("sha256").update(token).digest("hex");
     canonicalName = (name) => name.normalize("NFKC").trim();
   }
 });
@@ -13142,7 +13663,7 @@ var init_room_timers = __esm({
 });
 
 // src/core/shared/collaboration.ts
-import { createHash as createHash7, randomUUID as randomUUID11 } from "node:crypto";
+import { createHash as createHash8, randomUUID as randomUUID11 } from "node:crypto";
 var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, MAX_CLOSED_TASKS, StudioCollaboration;
 var init_collaboration = __esm({
   "src/core/shared/collaboration.ts"() {
@@ -13528,13 +14049,13 @@ var init_collaboration = __esm({
         let scope;
         if (input2.scope !== void 0) {
           if (!object2(input2.scope)) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u65E0\u6548\u3002");
-          const ids = input2.scope.ids, rect2 = input2.scope.rect;
+          const ids = input2.scope.ids, rect3 = input2.scope.rect;
           if (ids !== void 0 && (!Array.isArray(ids) || ids.length > 200 || !ids.every((id2) => typeof id2 === "string" && id2.length > 0 && id2.length <= 200))) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5BF9\u8C61\u65E0\u6548\u6216\u8D85\u8FC7 200 \u4E2A\u3002");
           scope = {};
           if (Array.isArray(ids) && ids.length) scope.ids = [...new Set(ids)];
-          if (rect2 !== void 0) {
-            if (!object2(rect2) || !["x", "y", "w", "h"].every((field) => typeof rect2[field] === "number")) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5750\u6807\u65E0\u6548\u3002");
-            const box = { x: finite(rect2.x, 0), y: finite(rect2.y, 0), w: finite(rect2.w, 0), h: finite(rect2.h, 0) };
+          if (rect3 !== void 0) {
+            if (!object2(rect3) || !["x", "y", "w", "h"].every((field) => typeof rect3[field] === "number")) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5750\u6807\u65E0\u6548\u3002");
+            const box = { x: finite(rect3.x, 0), y: finite(rect3.y, 0), w: finite(rect3.w, 0), h: finite(rect3.h, 0) };
             if (box.w <= 0 || box.h <= 0 || Math.abs(box.x + box.w) > 1e7 || Math.abs(box.y + box.h) > 1e7) throw new StudioError("INVALID_ARGUMENT", "\u5DE5\u4F5C\u533A\u57DF\u5C3A\u5BF8\u65E0\u6548\u3002");
             scope.rect = box;
           }
@@ -13571,7 +14092,7 @@ var init_collaboration = __esm({
         const key = `${artifactId}:${actor.id}`, live = [...this.agentTasks.get(key)?.tasks.values() ?? []];
         const entries = [...this.activities.get(key)?.values() ?? []].filter((entry) => !entry.binding || live.some((task) => task.taskId === entry.binding.taskId && task.generation === entry.binding.generation));
         const terminal = [...this.terminalTasks.values()].filter((item) => item.artifactId === artifactId && item.actor.id === actor.id && item.task.endedAt + AGENT_TASK_FADE_MS > Date.now()).map((item) => item.task), tasks = [...live, ...terminal];
-        const peers = this.group(artifactId), peerId = `agent-${createHash7("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
+        const peers = this.group(artifactId), peerId = `agent-${createHash8("sha256").update(actor.id).digest("hex").slice(0, 24)}`;
         let peer = peers.get(peerId);
         if (!entries.length && !tasks.length) {
           if (!peer?.value) return;
@@ -15106,7 +15627,7 @@ async function readArchiveInput(args) {
     const encoded = args.archiveBase64;
     if (typeof encoded !== "string" || !encoded.length || encoded.length > Math.ceil(MAX_ARCHIVE_BYTES / 3) * 4) throw tooLarge();
     const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
-    if (encoded.length % 4 || /[^A-Za-z0-9+/]/.test(encoded.slice(0, encoded.length - padding))) throw invalid2("\u5907\u4EFD\u5185\u5BB9\u4E0D\u662F\u6709\u6548\u7684 Base64\u3002");
+    if (encoded.length % 4 || /[^A-Za-z0-9+/]/.test(encoded.slice(0, encoded.length - padding))) throw invalid4("\u5907\u4EFD\u5185\u5BB9\u4E0D\u662F\u6709\u6548\u7684 Base64\u3002");
     const data = Buffer.from(encoded, "base64");
     if (data.length > MAX_ARCHIVE_BYTES) throw tooLarge();
     return data;
@@ -15116,7 +15637,7 @@ async function readArchiveInput(args) {
   const file2 = await open6(path2, "r");
   try {
     const info = await file2.stat();
-    if (!info.isFile()) throw invalid2("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
+    if (!info.isFile()) throw invalid4("\u5907\u4EFD\u8DEF\u5F84\u5FC5\u987B\u6307\u5411\u6587\u4EF6\u3002");
     if (info.size > MAX_ARCHIVE_BYTES) throw tooLarge();
     const chunks = [];
     let size = 0;
@@ -15138,17 +15659,17 @@ function entryLimit(name) {
   if (name === "artifact.sqlite") return MAX_SNAPSHOT_BYTES;
   if (name === "assets/") return 0;
   if (/^assets\/[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(name) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name.slice(7))) return MAX_ASSET_BYTES2;
-  throw invalid2("\u5907\u4EFD\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u6587\u4EF6\u8DEF\u5F84\u3002");
+  throw invalid4("\u5907\u4EFD\u5305\u542B\u4E0D\u5141\u8BB8\u7684\u6587\u4EF6\u8DEF\u5F84\u3002");
 }
 function extract(data) {
-  if (!data.length) throw invalid2();
+  if (!data.length) throw invalid4();
   if (data.length > MAX_ARCHIVE_BYTES) throw tooLarge();
   const declared = /* @__PURE__ */ new Map(), names = /* @__PURE__ */ new Set(), files = /* @__PURE__ */ new Map();
   let declaredSize = 0, actualSize = 0;
   try {
     unzipSync(data, { filter(info) {
       const limit = entryLimit(info.name);
-      if (names.has(info.name.toLowerCase())) throw invalid2("\u5907\u4EFD\u5305\u542B\u91CD\u590D\u6587\u4EF6\u3002");
+      if (names.has(info.name.toLowerCase())) throw invalid4("\u5907\u4EFD\u5305\u542B\u91CD\u590D\u6587\u4EF6\u3002");
       if (declared.size >= MAX_ENTRIES || info.originalSize > limit || info.size > MAX_ARCHIVE_BYTES || ![0, 8].includes(info.compression)) throw tooLarge();
       declaredSize += info.originalSize;
       if (declaredSize > MAX_EXPANDED_BYTES) throw tooLarge();
@@ -15156,12 +15677,12 @@ function extract(data) {
       names.add(info.name.toLowerCase());
       return false;
     } });
-    if (!declared.has("manifest.json") || !declared.has("artifact.sqlite")) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u6570\u636E\u5E93\u6216\u683C\u5F0F\u8BF4\u660E\u3002");
+    if (!declared.has("manifest.json") || !declared.has("artifact.sqlite")) throw invalid4("\u5907\u4EFD\u7F3A\u5C11\u6570\u636E\u5E93\u6216\u683C\u5F0F\u8BF4\u660E\u3002");
     const seen = /* @__PURE__ */ new Set(), completed = /* @__PURE__ */ new Set();
     const unzipper = new Unzip((file2) => {
       const limit = entryLimit(file2.name), info = declared.get(file2.name);
-      if (!info || seen.has(file2.name)) throw invalid2("\u5907\u4EFD\u6587\u4EF6\u76EE\u5F55\u4E0D\u4E00\u81F4\u6216\u5B58\u5728\u91CD\u590D\u6587\u4EF6\u3002");
-      if (file2.compression !== info.compression || file2.originalSize !== void 0 && file2.originalSize !== info.originalSize || file2.size !== void 0 && file2.size !== info.size) throw invalid2();
+      if (!info || seen.has(file2.name)) throw invalid4("\u5907\u4EFD\u6587\u4EF6\u76EE\u5F55\u4E0D\u4E00\u81F4\u6216\u5B58\u5728\u91CD\u590D\u6587\u4EF6\u3002");
+      if (file2.compression !== info.compression || file2.originalSize !== void 0 && file2.originalSize !== info.originalSize || file2.size !== void 0 && file2.size !== info.size) throw invalid4();
       seen.add(file2.name);
       const chunks = [];
       let size = 0;
@@ -15175,7 +15696,7 @@ function extract(data) {
         }
         chunks.push(chunk);
         if (final) {
-          if (size !== info.originalSize) throw invalid2();
+          if (size !== info.originalSize) throw invalid4();
           files.set(file2.name, Buffer.concat(chunks, size));
           completed.add(file2.name);
         }
@@ -15184,107 +15705,115 @@ function extract(data) {
     });
     unzipper.register(UnzipInflate);
     for (let offset = 0; offset < data.length; offset += 1024) unzipper.push(data.subarray(offset, offset + 1024), offset + 1024 >= data.length);
-    if (completed.size !== declared.size) throw invalid2();
+    if (completed.size !== declared.size) throw invalid4();
     return files;
   } catch (error62) {
     if (error62 instanceof StudioError) throw error62;
-    throw invalid2();
+    throw invalid4();
   }
 }
 function validDate(value) {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 function validateMetadata(value, expectedId, expectedType) {
-  if (!object2(value)) throw invalid2();
+  if (!object2(value)) throw invalid4();
   safeId(value.id);
   safeId(value.type, "\u4F5C\u54C1\u7C7B\u578B");
-  if (expectedId !== void 0 && value.id !== expectedId || expectedType !== void 0 && value.type !== expectedType || typeof value.title !== "string" || !value.title.trim() || value.title.length > 200 || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !validDate(value.createdAt) || !validDate(value.updatedAt) || typeof value.pinned !== "boolean") throw invalid2("\u5907\u4EFD\u4F5C\u54C1\u4FE1\u606F\u65E0\u6548\u3002");
+  if (expectedId !== void 0 && value.id !== expectedId || expectedType !== void 0 && value.type !== expectedType || typeof value.title !== "string" || !value.title.trim() || value.title.length > 200 || !Number.isSafeInteger(value.revision) || Number(value.revision) < 0 || !validDate(value.createdAt) || !validDate(value.updatedAt) || typeof value.pinned !== "boolean") throw invalid4("\u5907\u4EFD\u4F5C\u54C1\u4FE1\u606F\u65E0\u6548\u3002");
 }
 function validateActor(value) {
-  if (!object2(value) || typeof value.id !== "string" || typeof value.name !== "string" || !["human", "agent"].includes(String(value.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(value.role))) throw invalid2("\u5907\u4EFD\u4F5C\u8005\u4FE1\u606F\u65E0\u6548\u3002");
+  if (!object2(value) || typeof value.id !== "string" || typeof value.name !== "string" || !["human", "agent"].includes(String(value.kind)) || !["owner", "editor", "commenter", "viewer"].includes(String(value.role))) throw invalid4("\u5907\u4EFD\u4F5C\u8005\u4FE1\u606F\u65E0\u6548\u3002");
 }
 function validateState(value, products) {
   const state = products.decode(value);
-  if (!object2(state) || state.schemaVersion !== 2 || !("content" in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object2(state.sources) || !object2(state.assets)) throw invalid2();
+  if (!object2(state) || state.schemaVersion !== 2 || !("content" in state) || !Array.isArray(state.history) || !state.history.length || !Array.isArray(state.feedback) || !object2(state.sources) || !object2(state.assets)) throw invalid4();
   validateMetadata(state.artifact);
   const { id: id2, type, revision } = state.artifact, product = products.get(type);
   product.adapter.validate(state.content);
   if (state.unitClocks !== void 0) {
-    if (!object2(state.unitClocks)) throw invalid2("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+    if (!object2(state.unitClocks)) throw invalid4("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
     for (const [unitId, clock] of Object.entries(state.unitClocks)) {
       safeId(unitId.startsWith("$") ? unitId.slice(1) : unitId, "\u5185\u5BB9\u5355\u5143 ID");
-      if (!object2(clock) || !Number.isSafeInteger(clock.version) || Number(clock.version) < 1 || !Number.isSafeInteger(clock.incarnationStart) || Number(clock.incarnationStart) < 1 || Number(clock.incarnationStart) > Number(clock.version) || clock.sourceRevision !== void 0 && (!Number.isSafeInteger(clock.sourceRevision) || Number(clock.sourceRevision) < 1)) throw invalid2("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
+      if (!object2(clock) || !Number.isSafeInteger(clock.version) || Number(clock.version) < 1 || !Number.isSafeInteger(clock.incarnationStart) || Number(clock.incarnationStart) < 1 || Number(clock.incarnationStart) > Number(clock.version) || clock.sourceRevision !== void 0 && (!Number.isSafeInteger(clock.sourceRevision) || Number(clock.sourceRevision) < 1)) throw invalid4("\u5907\u4EFD\u5BF9\u8C61\u7248\u672C\u65F6\u949F\u65E0\u6548\u3002");
     }
   }
   const historyIds = /* @__PURE__ */ new Set(), revisions = /* @__PURE__ */ new Set();
   for (const saved of state.history) {
-    if (!object2(saved) || !object2(saved.entry)) throw invalid2("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
+    if (!object2(saved) || !object2(saved.entry)) throw invalid4("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
     validateMetadata(saved.artifact, id2, type);
     product.adapter.validate(saved.content);
     const entry = saved.entry;
     safeId(entry.id, "\u5386\u53F2 ID");
     validateActor(entry.actor);
-    if (historyIds.has(entry.id) || revisions.has(entry.revision) || entry.revision !== saved.artifact.revision || entry.revision > revision || !validDate(entry.createdAt) || typeof entry.summary !== "string" || !Array.isArray(entry.changedIds) || entry.changedIds.some((changed) => typeof changed !== "string")) throw invalid2("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
+    if (historyIds.has(entry.id) || revisions.has(entry.revision) || entry.revision !== saved.artifact.revision || entry.revision > revision || !validDate(entry.createdAt) || typeof entry.summary !== "string" || !Array.isArray(entry.changedIds) || entry.changedIds.some((changed) => typeof changed !== "string")) throw invalid4("\u5907\u4EFD\u5386\u53F2\u8BB0\u5F55\u65E0\u6548\u3002");
     historyIds.add(entry.id);
     revisions.add(entry.revision);
   }
   const feedbackIds = /* @__PURE__ */ new Set();
   for (const feedback of state.feedback) {
-    if (!object2(feedback)) throw invalid2();
+    if (!object2(feedback)) throw invalid4();
     safeId(feedback.id, "\u53CD\u9988 ID");
     validateActor(feedback.author);
-    if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object2(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid2("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
+    if (feedbackIds.has(feedback.id) || feedback.artifactId !== id2 || !["comment", "request"].includes(feedback.type) || !["open", "pending", "processing", "resolved"].includes(feedback.status) || typeof feedback.text !== "string" || !object2(feedback.anchor) || !validDate(feedback.createdAt) || !validDate(feedback.updatedAt) || !Array.isArray(feedback.replies)) throw invalid4("\u5907\u4EFD\u53CD\u9988\u4FE1\u606F\u65E0\u6548\u3002");
     if (feedback.anchor.pin !== void 0) {
       const pin = feedback.anchor.pin;
-      if (!isCommentPin(pin)) throw invalid2("\u5907\u4EFD\u5907\u6CE8\u6C14\u6CE1\u4F4D\u7F6E\u65E0\u6548\u3002");
-      if (pin.coordinateSpace === "document" && (feedback.anchor.coordinateSpace !== "document" || !Array.isArray(feedback.anchor.elementIds) || feedback.anchor.elementIds.length !== 1 || typeof feedback.anchor.elementIds[0] !== "string" || !Array.isArray(feedback.anchor.blockIds) || !feedback.anchor.blockIds.length || feedback.anchor.blockIds.length > 100 || feedback.anchor.blockIds.some((id3) => typeof id3 !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id3)))) throw invalid2("\u5907\u4EFD\u6587\u6863\u6C14\u6CE1\u7F3A\u5C11\u6709\u6548\u6BB5\u843D\u5B9A\u4F4D\u3002");
+      if (!isCommentPin(pin)) throw invalid4("\u5907\u4EFD\u5907\u6CE8\u6C14\u6CE1\u4F4D\u7F6E\u65E0\u6548\u3002");
+      if (pin.coordinateSpace === "document" && (feedback.anchor.coordinateSpace !== "document" || !Array.isArray(feedback.anchor.elementIds) || feedback.anchor.elementIds.length !== 1 || typeof feedback.anchor.elementIds[0] !== "string" || !Array.isArray(feedback.anchor.blockIds) || !feedback.anchor.blockIds.length || feedback.anchor.blockIds.length > 100 || feedback.anchor.blockIds.some((id3) => typeof id3 !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(id3)))) throw invalid4("\u5907\u4EFD\u6587\u6863\u6C14\u6CE1\u7F3A\u5C11\u6709\u6548\u6BB5\u843D\u5B9A\u4F4D\u3002");
+      if (pin.coordinateSpace === "todo" && feedback.anchor.coordinateSpace !== "todo") throw invalid4("\u5907\u4EFD\u4EFB\u52A1\u6C14\u6CE1\u7F3A\u5C11\u4EFB\u52A1\u884C\u5B9A\u4F4D\u3002");
+    }
+    if (feedback.anchor.coordinateSpace === "todo") {
+      const { elementIds, itemId, sourceVersion } = feedback.anchor;
+      if (!Array.isArray(elementIds) || elementIds.length !== 1 || !isTodoId(elementIds[0]) || !isTodoId(itemId) || !Number.isSafeInteger(sourceVersion) || Number(sourceVersion) < 1) throw invalid4("\u5907\u4EFD\u4EFB\u52A1\u884C\u6765\u6E90\u65E0\u6548\u3002");
     }
     feedbackIds.add(feedback.id);
     for (const reply of feedback.replies) {
-      if (!object2(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid2();
+      if (!object2(reply) || typeof reply.text !== "string" || !validDate(reply.createdAt)) throw invalid4();
       safeId(reply.id, "\u56DE\u590D ID");
       validateActor(reply.author);
     }
     if (feedback.attachment !== void 0) {
       const attachment = feedback.attachment;
-      if (!object2(attachment) || typeof attachment.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(attachment.requestId) || typeof attachment.contentKey !== "string" || !/^[a-f0-9]{64}$/.test(attachment.contentKey) || !["pending", "attached"].includes(String(attachment.state)) || !validDate(attachment.requestedAt)) throw invalid2("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u8BB0\u5F55\u65E0\u6548\u3002");
+      if (!object2(attachment) || typeof attachment.requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(attachment.requestId) || typeof attachment.contentKey !== "string" || !/^[a-f0-9]{64}$/.test(attachment.contentKey) || !["pending", "attached"].includes(String(attachment.state)) || !validDate(attachment.requestedAt)) throw invalid4("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u8BB0\u5F55\u65E0\u6548\u3002");
       validateActor(attachment.requestedBy);
       if (attachment.state === "attached") {
-        if (!validDate(attachment.attachedAt)) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u5907\u6CE8\u9644\u52A0\u6210\u529F\u65F6\u95F4\u3002");
+        if (!validDate(attachment.attachedAt)) throw invalid4("\u5907\u4EFD\u7F3A\u5C11\u5907\u6CE8\u9644\u52A0\u6210\u529F\u65F6\u95F4\u3002");
         validateActor(attachment.attachedBy);
-        if (attachment.attachedBy.kind !== "human" || attachment.attachedBy.role !== "owner") throw invalid2("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u56DE\u6267\u7684\u8EAB\u4EFD\u65E0\u6548\u3002");
+        if (attachment.attachedBy.kind !== "human" || attachment.attachedBy.role !== "owner") throw invalid4("\u5907\u4EFD\u5907\u6CE8\u9644\u52A0\u56DE\u6267\u7684\u8EAB\u4EFD\u65E0\u6548\u3002");
       }
     }
     if (feedback.proposal) {
       const proposal = feedback.proposal;
-      if (!object2(proposal) || proposal.audience !== "owner" || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== "string" || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid2("\u5907\u4EFD\u5EFA\u8BAE\u8BB0\u5F55\u65E0\u6548\u3002");
+      if (!object2(proposal) || proposal.audience !== "owner" || !validDate(proposal.expiresAt) || typeof proposal.fingerprint !== "string" || !Array.isArray(proposal.options) || !Array.isArray(proposal.receipts)) throw invalid4("\u5907\u4EFD\u5EFA\u8BAE\u8BB0\u5F55\u65E0\u6548\u3002");
       const optionIds = /* @__PURE__ */ new Set();
       for (const option2 of proposal.options) {
-        if (!object2(option2)) throw invalid2();
+        if (!object2(option2)) throw invalid4();
         safeId(option2.id, "\u65B9\u6848 ID");
-        if (optionIds.has(option2.id) || typeof option2.label !== "string" || !Array.isArray(option2.operations) || option2.operations.some((op) => !object2(op) || typeof op.op !== "string") || !Number.isSafeInteger(option2.baselineRevision) || option2.baselineRevision < 0 || !object2(option2.baseline) || !object2(option2.versions) || Object.values(option2.versions).some((value2) => !Number.isSafeInteger(value2) || value2 < 0) || !Array.isArray(option2.targetIds) || option2.targetIds.some((value2) => typeof value2 !== "string") || typeof option2.wholeContent !== "boolean" || typeof option2.active !== "boolean") throw invalid2("\u5907\u4EFD\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
+        if (optionIds.has(option2.id) || typeof option2.label !== "string" || !Array.isArray(option2.operations) || option2.operations.some((op) => !object2(op) || typeof op.op !== "string") || !Number.isSafeInteger(option2.baselineRevision) || option2.baselineRevision < 0 || !object2(option2.baseline) || !object2(option2.versions) || Object.values(option2.versions).some((value2) => !Number.isSafeInteger(value2) || value2 < 0) || !Array.isArray(option2.targetIds) || option2.targetIds.some((value2) => typeof value2 !== "string") || typeof option2.wholeContent !== "boolean" || typeof option2.active !== "boolean") throw invalid4("\u5907\u4EFD\u5EFA\u8BAE\u65B9\u6848\u65E0\u6548\u3002");
         optionIds.add(option2.id);
-        if (option2.active && !option2.application) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u5DF2\u5E94\u7528\u65B9\u6848\u7684\u53D8\u66F4\u8BB0\u5F55\u3002");
+        if (option2.active && !option2.application) throw invalid4("\u5907\u4EFD\u7F3A\u5C11\u5DF2\u5E94\u7528\u65B9\u6848\u7684\u53D8\u66F4\u8BB0\u5F55\u3002");
         if (option2.application) {
           const application = option2.application;
-          if (!object2(application) || !Number.isSafeInteger(application.revision) || application.revision < 0 || !Array.isArray(application.changes) || application.changes.some((change) => !object2(change) || typeof change.id !== "string")) throw invalid2();
+          if (!object2(application) || !Number.isSafeInteger(application.revision) || application.revision < 0 || !Array.isArray(application.changes) || application.changes.some((change) => !object2(change) || typeof change.id !== "string")) throw invalid4();
           safeId(application.historyId, "\u5386\u53F2 ID");
         }
       }
       for (const receipt of proposal.receipts) {
-        if (!object2(receipt) || typeof receipt.fingerprint !== "string") throw invalid2();
+        if (!object2(receipt) || typeof receipt.fingerprint !== "string") throw invalid4();
         safeId(receipt.id, "\u64CD\u4F5C ID");
         if (receipt.historyId !== void 0) safeId(receipt.historyId, "\u5386\u53F2 ID");
       }
     }
   }
   for (const [feedbackId, sources] of Object.entries(state.sources)) {
-    if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid2("\u5907\u4EFD\u6765\u6E90\u8BB0\u5F55\u65E0\u6548\u3002");
-    for (const source of sources) if (object2(source) && object2(source.element) && source.element.type === "document") normalizeDocument(source.element.document);
+    if (!feedbackIds.has(feedbackId) || !Array.isArray(sources)) throw invalid4("\u5907\u4EFD\u6765\u6E90\u8BB0\u5F55\u65E0\u6548\u3002");
+    for (const source of sources) if (object2(source) && object2(source.element)) {
+      if (source.element.type === "document") normalizeDocument(source.element.document);
+      if (source.element.type === "todo") normalizeTodoItems(object2(source.element.data) ? source.element.data.items : void 0);
+    }
   }
   for (const [assetId, asset] of Object.entries(state.assets)) {
     safeId(assetId, "\u8D44\u6E90 ID");
-    if (!object2(asset) || asset.id !== assetId || typeof asset.filename !== "string" || typeof asset.mimeType !== "string" || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES2) throw invalid2("\u5907\u4EFD\u8D44\u6E90\u4FE1\u606F\u65E0\u6548\u3002");
+    if (!object2(asset) || asset.id !== assetId || typeof asset.filename !== "string" || typeof asset.mimeType !== "string" || !Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > MAX_ASSET_BYTES2) throw invalid4("\u5907\u4EFD\u8D44\u6E90\u4FE1\u606F\u65E0\u6548\u3002");
     product.validateAsset(asset.mimeType);
   }
   return state;
@@ -15293,7 +15822,7 @@ function walk(value, visit2) {
   const queue = [{ value, depth: 0 }];
   while (queue.length) {
     const next = queue.pop();
-    if (next.depth > 64) throw invalid2("\u5907\u4EFD\u6570\u636E\u5D4C\u5957\u8FC7\u6DF1\u3002");
+    if (next.depth > 64) throw invalid4("\u5907\u4EFD\u6570\u636E\u5D4C\u5957\u8FC7\u6DF1\u3002");
     if (!next.value || typeof next.value !== "object") continue;
     for (const [key, child] of Object.entries(next.value)) {
       visit2?.(next.value, key, child);
@@ -15317,7 +15846,7 @@ function manifest(files) {
   try {
     value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(files.get("manifest.json")));
   } catch {
-    throw invalid2("\u5907\u4EFD\u683C\u5F0F\u8BF4\u660E\u65E0\u6548\u3002");
+    throw invalid4("\u5907\u4EFD\u683C\u5F0F\u8BF4\u660E\u65E0\u6548\u3002");
   }
   if (!object2(value) || value.format !== "agentero-studio-archive" || value.version !== 2 || value.database !== "artifact.sqlite") throw unsupported();
   safeId(value.artifactId, "\u4F5C\u54C1 ID");
@@ -15346,7 +15875,7 @@ async function databaseBytes(root2, state) {
 }
 async function readDatabase(root2, files, metadata) {
   const bytes = files.get(metadata.database);
-  if (!Buffer.from(bytes.subarray(0, 16)).equals(Buffer.from("SQLite format 3\0"))) throw invalid2("\u5907\u4EFD\u6570\u636E\u5E93\u65E0\u6548\u3002");
+  if (!Buffer.from(bytes.subarray(0, 16)).equals(Buffer.from("SQLite format 3\0"))) throw invalid4("\u5907\u4EFD\u6570\u636E\u5E93\u65E0\u6548\u3002");
   await mkdir5(join8(root2, "staging"), { recursive: true });
   const temporary = await mkdtemp(join8(root2, "staging", "read-"));
   let database;
@@ -15356,11 +15885,11 @@ async function readDatabase(root2, files, metadata) {
     try {
       database = new SqliteArtifactRepository(file2);
       const state = structuredClone(database.readState({ maxExpandedBytes: MAX_SNAPSHOT_BYTES }));
-      if (state.artifact.id !== metadata.artifactId) throw invalid2("\u5907\u4EFD\u4F5C\u54C1\u6807\u8BC6\u4E0E\u6570\u636E\u5E93\u4E0D\u4E00\u81F4\u3002");
+      if (state.artifact.id !== metadata.artifactId) throw invalid4("\u5907\u4EFD\u4F5C\u54C1\u6807\u8BC6\u4E0E\u6570\u636E\u5E93\u4E0D\u4E00\u81F4\u3002");
       return state;
     } catch (error62) {
       if (error62 instanceof StudioError && ["UNSUPPORTED_STORAGE", "TOO_LARGE"].includes(error62.code)) throw error62;
-      throw invalid2("\u5907\u4EFD\u6570\u636E\u5E93\u65E0\u6CD5\u8BFB\u53D6\u6216\u5185\u5BB9\u4E0D\u5B8C\u6574\u3002");
+      throw invalid4("\u5907\u4EFD\u6570\u636E\u5E93\u65E0\u6CD5\u8BFB\u53D6\u6216\u5185\u5BB9\u4E0D\u5B8C\u6574\u3002");
     }
   } finally {
     database?.close();
@@ -15377,7 +15906,7 @@ async function exportArchive(store, state, actor) {
   for (const [id2, asset] of Object.entries(snapshot.assets)) {
     safeId(id2, "\u8D44\u6E90 ID");
     const bytes2 = await readFile4(join8(store.folder(state.artifact.id), "assets", id2));
-    if (bytes2.length !== asset.size) throw invalid2("\u4F5C\u54C1\u8D44\u6E90\u4E0D\u5B8C\u6574\uFF0C\u672A\u751F\u6210\u5907\u4EFD\u3002");
+    if (bytes2.length !== asset.size) throw invalid4("\u4F5C\u54C1\u8D44\u6E90\u4E0D\u5B8C\u6574\uFF0C\u672A\u751F\u6210\u5907\u4EFD\u3002");
     size += bytes2.length;
     if (bytes2.length > MAX_ASSET_BYTES2 || size > MAX_EXPANDED_BYTES) throw tooLarge();
     entries[`assets/${id2}`] = [bytes2, { level: 0 }];
@@ -15397,14 +15926,14 @@ async function importArchive(store, products, data, actor, title) {
     original = validateState(raw, products);
   } catch (error62) {
     if (error62 instanceof StudioError) throw error62;
-    throw invalid2();
+    throw invalid4();
   }
   const state = portable(original);
   for (const [id3, asset] of Object.entries(state.assets)) {
     const bytes = files.get(`assets/${id3}`);
-    if (!bytes || bytes.length !== asset.size) throw invalid2("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
+    if (!bytes || bytes.length !== asset.size) throw invalid4("\u5907\u4EFD\u7F3A\u5C11\u8D44\u6E90\u6216\u8D44\u6E90\u4F53\u79EF\u4E0D\u7B26\u3002");
   }
-  if ([...files.keys()].some((name) => name !== "manifest.json" && name !== "artifact.sqlite" && name !== "assets/" && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid2("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
+  if ([...files.keys()].some((name) => name !== "manifest.json" && name !== "artifact.sqlite" && name !== "assets/" && !Object.hasOwn(state.assets, name.slice(7)))) throw invalid4("\u5907\u4EFD\u5305\u542B\u672A\u767B\u8BB0\u8D44\u6E90\u3002");
   const previous = copy(state.artifact), id2 = randomUUID13(), now = (/* @__PURE__ */ new Date()).toISOString();
   walk(state, (record5, key, value) => {
     if (typeof value === "string") record5[key] = key === "artifactId" && value === previous.id ? id2 : value.replaceAll(`/assets/${previous.id}/`, `/assets/${id2}/`);
@@ -15435,13 +15964,14 @@ async function importArchive(store, products, data, actor, title) {
   }
   return state;
 }
-var MAX_ARCHIVE_BYTES, MAX_EXPANDED_BYTES, MAX_SNAPSHOT_BYTES, MAX_MANIFEST_BYTES, MAX_ASSET_BYTES2, MAX_ENTRIES, invalid2, tooLarge, unsupported;
+var MAX_ARCHIVE_BYTES, MAX_EXPANDED_BYTES, MAX_SNAPSHOT_BYTES, MAX_MANIFEST_BYTES, MAX_ASSET_BYTES2, MAX_ENTRIES, invalid4, tooLarge, unsupported;
 var init_archive = __esm({
   "src/core/shared/archive.ts"() {
     "use strict";
     init_esm();
     init_studio();
     init_document();
+    init_todo();
     init_common();
     init_sqlite_artifact();
     MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
@@ -15450,14 +15980,296 @@ var init_archive = __esm({
     MAX_MANIFEST_BYTES = 4096;
     MAX_ASSET_BYTES2 = 20 * 1024 * 1024;
     MAX_ENTRIES = 5e3;
-    invalid2 = (message = "\u5907\u4EFD\u6587\u4EF6\u65E0\u6548\u6216\u4E0D\u5B8C\u6574\u3002") => new StudioError("INVALID_ARCHIVE", message);
+    invalid4 = (message = "\u5907\u4EFD\u6587\u4EF6\u65E0\u6548\u6216\u4E0D\u5B8C\u6574\u3002") => new StudioError("INVALID_ARCHIVE", message);
     tooLarge = () => new StudioError("TOO_LARGE", "\u5907\u4EFD\u8D85\u8FC7\u5BB9\u91CF\u9650\u5236\uFF1AZIP 128 MB\uFF0C\u5C55\u5F00\u540E 256 MB\uFF0C\u5355\u4E2A\u8D44\u6E90 20 MB\u3002");
     unsupported = () => new StudioError("UNSUPPORTED_STORAGE", "\u6B64\u5907\u4EFD\u4F7F\u7528\u4E0D\u53D7\u652F\u6301\u7684\u65E7\u7248\u5B58\u50A8\u683C\u5F0F\uFF0C\u8BF7\u7531 AI \u6309\u8FC1\u79FB\u8BF4\u660E\u91CD\u5EFA\u4F5C\u54C1\u3002");
   }
 });
 
+// src/core/products/whiteboard-query.ts
+import { Buffer as Buffer2 } from "node:buffer";
+function decodeEntities(text2) {
+  return text2.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|apos|quot|nbsp);/gi, (match, raw) => {
+    const name = raw.toLowerCase();
+    if (!name.startsWith("#")) return ENTITIES[name] ?? match;
+    const code = name.startsWith("#x") ? Number.parseInt(name.slice(2), 16) : Number(name.slice(1));
+    return code > 0 && code <= 1114111 && (code < 55296 || code > 57343) ? String.fromCodePoint(code) : "\uFFFD";
+  });
+}
+function htmlText(source) {
+  const parts = [];
+  const hidden = [];
+  const tokens = /<!--[\s\S]*?(?:-->|$)|<![^>]*(?:>|$)|<\/?([a-z][a-z0-9:-]*)(?=[\s/>]|$)(?:[^"'<>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*(?:>|$)/gi;
+  let position = 0;
+  for (const match of source.matchAll(tokens)) {
+    const name = match[1]?.toLowerCase();
+    const closing = match[0].startsWith("</");
+    const active = hidden.at(-1);
+    if (!active) parts.push(decodeEntities(source.slice(position, match.index)));
+    position = match.index + match[0].length;
+    if (!name) continue;
+    if (active && RAW_TAGS.has(active)) {
+      if (closing && name === active) hidden.pop();
+      continue;
+    }
+    if (HIDDEN_TAGS.has(name)) {
+      if (!closing) hidden.push(name);
+      else if (active === name) hidden.pop();
+    } else if (!active && BREAK_TAGS.has(name)) parts.push(" ");
+  }
+  if (!hidden.length) parts.push(decodeEntities(source.slice(position)));
+  return parts.join("");
+}
+function excerpt(text2, maxBytes) {
+  if (textBytes(text2) <= maxBytes) return text2;
+  const ellipsis = "\u2026";
+  let size = textBytes(ellipsis);
+  let end = 0;
+  for (const character of text2) {
+    size += textBytes(character);
+    if (size > maxBytes) break;
+    end += character.length;
+  }
+  return text2.slice(0, end).trimEnd() + ellipsis;
+}
+function matchExcerpt(raw, query) {
+  const text2 = normalizeText(raw);
+  const index = text2.toLowerCase().indexOf(query);
+  if (index < 0) return void 0;
+  let start = Math.max(0, index - 30);
+  const code = text2.charCodeAt(start);
+  if (start && code >= 56320 && code <= 57343) start--;
+  return excerpt((start ? "\u2026" : "") + text2.slice(start), MAX_SNIPPET_BYTES);
+}
+function labelOf(element) {
+  const text2 = element.type === "arrow" ? element.label : element.text;
+  return typeof text2 === "string" ? visibleText(text2) : "";
+}
+function* contentSources(element) {
+  if (element.document) {
+    for (const block of flattenDocumentBlocks(element.document.blocks)) yield { text: documentBlockText(block), blockId: block.id };
+  }
+  if (element.type === "table") {
+    const { rows, rowIds, columnIds } = element.data ?? {};
+    if (Array.isArray(rows)) {
+      for (const [r, row] of rows.entries()) {
+        if (!Array.isArray(row)) continue;
+        const rowId = Array.isArray(rowIds) ? rowIds[r] : void 0;
+        for (const [c, value] of row.entries()) {
+          if (!["string", "number", "boolean"].includes(typeof value)) continue;
+          const columnId = Array.isArray(columnIds) ? columnIds[c] : void 0;
+          yield { text: visibleText(String(value)), ...typeof rowId === "string" && typeof columnId === "string" ? { rowId, columnId } : {} };
+        }
+      }
+    }
+  }
+  if (element.type === "todo" && Array.isArray(element.data?.items)) {
+    for (const item of element.data.items) {
+      if (object2(item) && typeof item.id === "string" && typeof item.text === "string") yield { text: item.text, itemId: item.id };
+    }
+  }
+  if ((element.type === "html" || element.type === "diagram") && typeof element.html === "string") yield { text: htmlText(element.html) };
+}
+function* matchingItems(elements, options) {
+  const query = normalizeText(options.query ?? "").toLowerCase();
+  const ids = options.ids ? new Set(options.ids) : void 0;
+  const parent = options.parentId ? elements.find((element) => element.id === options.parentId) : void 0;
+  if (options.parentId && !parent) throw new StudioError("NOT_FOUND", "\u6307\u5B9A\u7684\u767D\u677F\u5206\u533A\u6216\u7236\u5BF9\u8C61\u4E0D\u5B58\u5728\u3002");
+  const area = parent?.type === "container" ? workspaceElementBounds(parent, elements) : void 0;
+  for (const element of elements) {
+    if (ids && !ids.has(element.id) || options.type && element.type !== options.type || element.id === parent?.id) continue;
+    const explicitChild = parent && element.parentId === parent.id;
+    if (parent && !explicitChild && (!area || element.parentId)) continue;
+    let bounds2;
+    const getBounds = () => bounds2 ??= workspaceElementBounds(element, elements);
+    if (options.rect && !intersects(getBounds(), options.rect)) continue;
+    if (area && !explicitChild && !inside(getBounds(), area)) continue;
+    const label = normalizeText(labelOf(element));
+    const item = () => ({
+      id: element.id,
+      type: element.type,
+      version: element.version,
+      bounds: getBounds(),
+      ...label ? { label: excerpt(label, MAX_LABEL_BYTES) } : {},
+      ...Number.isSafeInteger(element.sourceRevision) ? { sourceRevision: element.sourceRevision } : {}
+    });
+    if (!query) {
+      yield item();
+      continue;
+    }
+    const inTitle = matchExcerpt(label, query);
+    if (inTitle) yield { ...item(), snippet: inTitle };
+    let unanchored = Boolean(inTitle);
+    for (const { text: text2, ...location } of contentSources(element)) {
+      const anchored = location.blockId || location.rowId || location.itemId;
+      if (!anchored && unanchored) continue;
+      const snippet = matchExcerpt(text2, query);
+      if (snippet) {
+        yield { ...item(), ...location, snippet };
+        if (!anchored) unanchored = true;
+      }
+    }
+  }
+}
+function queryWhiteboard(board, options) {
+  const { id: id2, title, revision } = board.artifact;
+  const offset = options.offset ?? 0;
+  const limit = Math.min(MAX_ITEMS, options.limit ?? 10);
+  const maxBytes = Math.min(normalizeText(options.query ?? "") ? 8 * 1024 : 16 * 1024, options.maxBytes ?? Infinity);
+  if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit <= 0 || !Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new StudioError("INVALID_ARGUMENT", "\u67E5\u8BE2\u5206\u9875\u8303\u56F4\u65E0\u6548\u3002");
+  }
+  const rect3 = options.rect;
+  if (rect3 && (![rect3.x, rect3.y, rect3.w, rect3.h].every(Number.isFinite) || rect3.w <= 0 || rect3.h <= 0)) {
+    throw new StudioError("INVALID_ARGUMENT", "\u67E5\u8BE2\u533A\u57DF\u5750\u6807\u6216\u5C3A\u5BF8\u65E0\u6548\u3002");
+  }
+  const page = { artifact: { id: id2, title: excerpt(title, MAX_LABEL_BYTES), revision }, items: [], offset };
+  let bytes = jsonBytes({ ...page, nextOffset: Number.MAX_SAFE_INTEGER });
+  if (bytes > maxBytes) throw new StudioError("RESULT_TOO_LARGE", "\u67E5\u8BE2\u7684\u5B57\u8282\u9884\u7B97\u4E0D\u8DB3\u3002");
+  let seen = 0;
+  for (const item of matchingItems(board.elements, options)) {
+    if (seen++ < offset) continue;
+    const size = jsonBytes(item) + (page.items.length ? 1 : 0);
+    if (page.items.length >= limit || bytes + size > maxBytes) {
+      if (!page.items.length) throw new StudioError("RESULT_TOO_LARGE", "\u67E5\u8BE2\u7684\u5B57\u8282\u9884\u7B97\u4E0D\u8DB3\u4EE5\u8FD4\u56DE\u4E00\u9879\u3002");
+      page.nextOffset = offset + page.items.length;
+      break;
+    }
+    bytes += size;
+    page.items.push(item);
+  }
+  return page;
+}
+var MAX_ITEMS, MAX_LABEL_BYTES, MAX_SNIPPET_BYTES, RAW_TAGS, HIDDEN_TAGS, BREAK_TAGS, ENTITIES, normalizeText, textBytes, jsonBytes, visibleText, inside, intersects;
+var init_whiteboard_query = __esm({
+  "src/core/products/whiteboard-query.ts"() {
+    "use strict";
+    init_document();
+    init_agent_workspaces();
+    init_common();
+    init_rich_text();
+    MAX_ITEMS = 20;
+    MAX_LABEL_BYTES = 160;
+    MAX_SNIPPET_BYTES = 240;
+    RAW_TAGS = /* @__PURE__ */ new Set(["script", "style", "iframe", "noscript", "textarea", "xmp", "title"]);
+    HIDDEN_TAGS = /* @__PURE__ */ new Set([...RAW_TAGS, "head", "template", "object"]);
+    BREAK_TAGS = /* @__PURE__ */ new Set(["br", "div", "p", "li", "td", "th", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "article", "text"]);
+    ENTITIES = { amp: "&", lt: "<", gt: ">", apos: "'", quot: '"', nbsp: " " };
+    normalizeText = (text2) => text2.normalize("NFC").replace(/\s+/g, " ").trim();
+    textBytes = (text2) => Buffer2.byteLength(text2, "utf8");
+    jsonBytes = (value) => textBytes(JSON.stringify(value));
+    visibleText = (text2) => parseRichText(text2).map((line) => line.segments.map((segment) => segment.text).join("")).join("\n");
+    inside = (bounds2, parent) => bounds2.x >= parent.x && bounds2.y >= parent.y && bounds2.x + bounds2.w <= parent.x + parent.w && bounds2.y + bounds2.h <= parent.y + parent.h;
+    intersects = (left, right) => left.x <= right.x + right.w && left.x + left.w >= right.x && left.y <= right.y + right.h && left.y + left.h >= right.y;
+  }
+});
+
+// src/core/products/scoped-capture.ts
+var scoped_capture_exports = {};
+__export(scoped_capture_exports, {
+  captureSavedRegion: () => captureSavedRegion
+});
+function captureRegion(board, target) {
+  if (target.ids === void 0 === (target.rect === void 0)) {
+    throw new ExportError("INVALID_ARGUMENT", "\u5C40\u90E8\u56FE\u50CF\u9700\u8981\u6307\u5B9A\u5BF9\u8C61 ID \u6216\u4E16\u754C\u5750\u6807\u8303\u56F4\uFF0C\u4E24\u8005\u62E9\u4E00\u3002");
+  }
+  if (target.ids !== void 0) {
+    if (!Array.isArray(target.ids) || !target.ids.length || target.ids.length > 10 || new Set(target.ids).size !== target.ids.length) {
+      throw new ExportError("INVALID_ARGUMENT", "\u8BF7\u6307\u5B9A 1 \u81F3 10 \u4E2A\u4E0D\u91CD\u590D\u7684\u5BF9\u8C61 ID\u3002");
+    }
+    const elements2 = selectedElements(board, { ids: target.ids.map((id2) => safeId(id2, "\u5BF9\u8C61 ID")) });
+    const { x: x2, y, width, height } = boardBounds(elements2, 8, board.elements);
+    return { elements: elements2, bounds: { x: x2, y, w: width, h: height } };
+  }
+  const rect3 = target.rect;
+  if (!rect3 || ![rect3.x, rect3.y, rect3.w, rect3.h, rect3.x + rect3.w, rect3.y + rect3.h, rect3.w * rect3.h].every(Number.isFinite) || rect3.w <= 0 || rect3.h <= 0 || rect3.x + rect3.w <= rect3.x || rect3.y + rect3.h <= rect3.y) {
+    throw new ExportError("INVALID_ARGUMENT", "\u5C40\u90E8\u56FE\u50CF\u8303\u56F4\u987B\u4F7F\u7528\u6709\u9650\u5750\u6807\u548C\u6B63\u5BBD\u9AD8\u3002");
+  }
+  const elements = [];
+  for (const element of board.elements) {
+    const box = workspaceElementBounds(element, board.elements);
+    if (box.x >= rect3.x + rect3.w || box.x + box.w <= rect3.x || box.y >= rect3.y + rect3.h || box.y + box.h <= rect3.y) continue;
+    elements.push(element);
+    if (elements.length > MAX_RECT_ELEMENTS) throw new ExportError("CAPTURE_TOO_MANY_ELEMENTS", "\u5C40\u90E8\u56FE\u50CF\u8303\u56F4\u6700\u591A\u5305\u542B 20 \u4E2A\u5BF9\u8C61\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u3002");
+  }
+  if (!elements.length) throw new ExportError("EMPTY_CAPTURE", "\u6307\u5B9A\u8303\u56F4\u5185\u6CA1\u6709\u53EF\u7ED8\u5236\u7684\u767D\u677F\u5BF9\u8C61\u3002");
+  return { elements, bounds: { x: rect3.x, y: rect3.y, w: rect3.w, h: rect3.h } };
+}
+async function captureImages(board, elements, resolveLocalAsset) {
+  const images = /* @__PURE__ */ new Map();
+  let bytes = 0;
+  const assetPrefix = `/assets/${board.artifact.id}/`;
+  for (const element of elements) {
+    if (element.type !== "image" || typeof element.src !== "string") continue;
+    const source = element.src;
+    let embedded = images.get(source);
+    if (embedded === void 0) {
+      if (source.startsWith(assetPrefix)) {
+        safeId(source.slice(assetPrefix.length), "\u8D44\u6E90 ID");
+        embedded = await resolveLocalAsset(source);
+      } else {
+        embedded = source;
+      }
+      if (!/^data:image\//i.test(embedded)) {
+        throw new ExportError("ASSET_NOT_EMBEDDED", "\u540E\u53F0\u5C40\u90E8\u56FE\u50CF\u4EC5\u4F7F\u7528\u5F53\u524D\u767D\u677F\u5DF2\u4FDD\u5B58\u7684\u56FE\u7247\u3002");
+      }
+      images.set(source, embedded);
+    }
+    bytes += Buffer.byteLength(embedded);
+    if (bytes > MAX_RENDER_SOURCE_BYTES) throw new ExportError("EXPORT_TOO_LARGE", "\u5C40\u90E8\u56FE\u50CF\u7684\u56FE\u7247\u6E90\u8D85\u8FC7\u4E0A\u9650\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u3002");
+  }
+  return Object.fromEntries(images);
+}
+async function captureSavedRegion(board, target, resolveLocalAsset) {
+  const { elements, bounds: bounds2 } = captureRegion(board, target);
+  if (elements.some(isHtmlRegionElement)) {
+    throw new ExportError("EXPORT_BROWSER_REQUIRED", "\u533A\u57DF\u5305\u542B\u9700\u8981\u6D4F\u89C8\u5668\u6392\u7248\u7684 HTML\u3002\u8BF7\u5728\u5DF2\u6253\u5F00\u7684\u767D\u677F\u67E5\u770B\uFF0C\u6216\u6307\u5B9A\u5176\u4ED6\u5BF9\u8C61\u8303\u56F4\u3002");
+  }
+  const ids = elements.map((element) => element.id);
+  const assets = await captureImages(board, elements, resolveLocalAsset);
+  const render = (maxPixels) => {
+    const scale = Math.min(1, MAX_SIDE / Math.max(bounds2.w, bounds2.h), Math.sqrt(maxPixels / (bounds2.w * bounds2.h)));
+    const width = Math.max(1, Math.floor(bounds2.w * scale)), height = Math.max(1, Math.floor(bounds2.h * scale));
+    const svg = buildBoardSvg(board, { ids, assets }, { width, height, bounds: { x: bounds2.x, y: bounds2.y, width: bounds2.w, height: bounds2.h } }).replace(/<a\b[^>]*>/gi, (tag) => tag.replace(/\shref="[^"]*"/i, ""));
+    if (Buffer.byteLength(svg) > MAX_RENDER_SOURCE_BYTES) throw new ExportError("EXPORT_TOO_LARGE", "\u5C40\u90E8\u56FE\u50CF\u7684\u6E32\u67D3\u6E90\u8D85\u8FC7\u4E0A\u9650\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u3002");
+    return renderSvgPng(svg, {}, maxPixels);
+  };
+  let image = await render(MAX_PIXELS);
+  if (image.bytes.length > MAX_BYTES2 && image.width * image.height > 24e4) image = await render(24e4);
+  if (image.bytes.length > MAX_BYTES2) throw new ExportError("EXPORT_TOO_LARGE", "\u5C40\u90E8 PNG \u8D85\u8FC7 1 MiB\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u3002");
+  return {
+    mimeType: "image/png",
+    filename: filenameFor(`${board.artifact.title} - \u5C40\u90E8`, "png"),
+    data: image.bytes.toString("base64"),
+    encoding: "base64",
+    source: "saved-render",
+    artifactId: board.artifact.id,
+    revision: board.artifact.revision,
+    bounds: bounds2,
+    width: image.width,
+    height: image.height,
+    ids
+  };
+}
+var MAX_PIXELS, MAX_BYTES2, MAX_SIDE, MAX_RENDER_SOURCE_BYTES, MAX_RECT_ELEMENTS;
+var init_scoped_capture = __esm({
+  "src/core/products/scoped-capture.ts"() {
+    "use strict";
+    init_export();
+    init_serialization();
+    init_agent_workspaces();
+    init_common();
+    MAX_PIXELS = 1e6;
+    MAX_BYTES2 = 1024 * 1024;
+    MAX_SIDE = 4096;
+    MAX_RENDER_SOURCE_BYTES = 16 * 1024 * 1024;
+    MAX_RECT_ELEMENTS = 20;
+  }
+});
+
 // src/core/service.ts
 import { userInfo } from "node:os";
+import { createHash as createHash9 } from "node:crypto";
 function ownerActor(name) {
   if (name === void 0) {
     try {
@@ -15488,6 +16300,8 @@ var init_service = __esm({
     init_thumbnails();
     init_archive();
     init_safe_merge();
+    init_model_read();
+    init_whiteboard_query();
     init_store2();
     authorizationState = (state) => ({ artifact: state.artifact, sharing: state.sharing, guestNames: state.guestNames });
     StudioService = class {
@@ -15565,10 +16379,15 @@ var init_service = __esm({
         if (this.closing) throw new StudioError("CLOSED", "Studio \u670D\u52A1\u5DF2\u7ECF\u5173\u95ED\u3002");
         if (!TOOL_NAMES.includes(name)) throw new StudioError("UNKNOWN_TOOL", "\u4E0D\u652F\u6301\u7684 Studio \u64CD\u4F5C\u3002");
         if (!object2(args)) throw new StudioError("INVALID_ARGUMENT", "\u64CD\u4F5C\u53C2\u6570\u5FC5\u987B\u662F\u5BF9\u8C61\u3002");
-        const task = this.perform(name, args, copy(actor), authority);
+        const request = actor.kind === "agent" ? boundedModelRequest(name, args) : args;
+        const task = this.perform(name, request, copy(actor), authority);
         this.tasks.add(task);
         try {
-          return await task;
+          const result = await task;
+          if (actor.kind !== "agent") return result;
+          const { data, image } = modelResponseParts(name, request, result);
+          const response = boundedModelResult(name, request, data);
+          return image && object2(response) ? { ...response, image } : response;
         } finally {
           this.tasks.delete(task);
         }
@@ -15604,6 +16423,7 @@ var init_service = __esm({
                 for (const item of result[key]) if (object2(item) && typeof item.id === "string") targetIds.add(item.id);
               }
               if (typeof result.regionId === "string") targetIds.add(result.regionId);
+              if (typeof result.elementId === "string") targetIds.add(result.elementId);
               if (object2(result.element) && typeof result.element.id === "string") targetIds.add(result.element.id);
             }
             const current = await this.store.readProjection(safeId(args.artifactId), (state) => ({ authorization: authorizationState(state), type: state.artifact.type, content: state.content }));
@@ -15629,7 +16449,14 @@ var init_service = __esm({
           return { view: args.view ?? (args.artifactId ? "editor" : "library"), products: this.products.catalog(), ...args.artifactId ? { artifactId: args.artifactId } : {} };
         }
         if (name === "artifact_list") {
-          const result = listArtifacts(await this.store.catalog(), args, actor);
+          const catalog = await this.store.catalog();
+          if (actor.kind === "agent") {
+            const stamp = createHash9("sha256").update(JSON.stringify(catalog.map((artifact) => [artifact.id, artifact.revision, artifact.updatedAt, artifact.trashedAt, artifact.pinned]))).digest("base64url");
+            const page = modelPage(args, "catalog", stamp);
+            const { artifacts, nextCursor } = listArtifacts(catalog, { ...args, cursor: String(page.offset) }, actor);
+            return modelPageResult(args, page, { artifacts, nextOffset: nextCursor === void 0 ? void 0 : Number(nextCursor) }, "artifacts", name);
+          }
+          const result = listArtifacts(catalog, args, actor);
           return { ...result, artifacts: result.artifacts.map((artifact) => artifact.storageStatus === "unsupported" ? artifact : { ...artifact, thumbnail: `/api/thumbnails/${artifact.id}?revision=${artifact.revision}` }) };
         }
         if (name === "artifact_manage") return this.manage(args, actor, authority);
@@ -15737,6 +16564,7 @@ var init_service = __esm({
       }
       async read(id2, args, actor, authority) {
         const mode = text(args.mode, "document");
+        const model = actor.kind === "agent";
         if (mode === "layout-preview" || mode === "layout-cancel") throw new StudioError("INVALID_ARGUMENT", "\u81EA\u52A8\u5E03\u5C40\u529F\u80FD\u5DF2\u79FB\u9664\u3002");
         if (mode === "units") return this.store.readProjection(id2, (current) => {
           this.authorizedActor(current, actor, authority);
@@ -15745,7 +16573,8 @@ var init_service = __esm({
           const snapshot = current.artifact.revision === args.atRevision ? current : current.history.find((saved) => saved.artifact.revision === args.atRevision);
           if (!snapshot) throw new StudioError("VERSION_NOT_FOUND", "\u8BE5\u540C\u6B65\u7248\u672C\u5DF2\u4E0D\u5728\u4FDD\u7559\u5386\u53F2\u4E2D\uFF0C\u8BF7\u91CD\u65B0\u8BFB\u53D6\u4F5C\u54C1\u3002");
           const adapter = this.products.get(current.artifact.type).adapter;
-          return { artifact: copy(snapshot.artifact), units: [...new Set(args.ids)].map((unitId) => ({ id: unitId, after: copy(adapter.readUnit(snapshot.content, unitId) ?? null) })) };
+          const units = [...new Set(args.ids)].map((unitId) => ({ id: unitId, after: copy(adapter.readUnit(snapshot.content, unitId) ?? null) }));
+          return { artifact: copy(snapshot.artifact), units: model ? units.map(modelUnit) : units };
         });
         if (mode === "source" && args.contextId !== void 0 && args.feedbackId === void 0) args = { ...args, feedbackId: safeId(args.contextId, "\u53CD\u9988 ID") };
         if (mode === "assets") requireRole(actor, ["owner"]);
@@ -15755,25 +16584,57 @@ var init_service = __esm({
             const feedbackId = safeId(args.feedbackId ?? args.contextId, "\u53CD\u9988 ID"), found = state.feedback.find((item) => item.id === feedbackId && feedbackVisible(item, currentActor));
             if (!found) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
             const { creationReceipt: _receipt, ...feedback } = found;
-            return { contextId: feedbackId, artifact: state.artifact, feedback, sources: state.sources[feedbackId] ?? [], timer: this.getTimer(id2) };
+            const sources = state.sources[feedbackId] ?? [];
+            const metadata = { contextId: feedbackId, artifact: state.artifact, feedback, timer: this.getTimer(id2) };
+            if (!model) return { ...metadata, sources };
+            const page = modelPage(args, id2, state.artifact.revision), end = page.offset + page.limit;
+            return modelPageResult(args, page, { ...metadata, feedback: modelFeedbackItem(feedback), sources: sources.slice(page.offset, end).map(modelSource), totalCount: sources.length, ...end < sources.length ? { nextOffset: end } : {} }, "sources");
           }
           const peers = this.getPresence(id2).filter((peer) => !args.viewId || peer.context?.viewId === args.viewId);
           const pending = state.feedback.filter((item) => item.status === "pending" && feedbackVisible(item, currentActor)).map(({ creationReceipt: _receipt, ...feedback }) => feedback);
-          return { artifactId: id2, contexts: peers.flatMap((peer) => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []), pending, timer: this.getTimer(id2) };
+          const contexts = peers.flatMap((peer) => peer.context ? [{ ...peer.context, actor: peer.actor, updatedAt: peer.updatedAt }] : []);
+          if (model) return { artifactId: id2, contexts: contexts.slice(0, MODEL_MAX_ITEMS).map((context) => ({ artifactId: context.artifactId, viewId: context.viewId, actor: context.actor, updatedAt: context.updatedAt, viewport: context.viewport, selectedIds: context.selectedIds.slice(0, MODEL_MAX_IDS), selectedCount: context.selectedIds.length })), pendingCount: pending.length, timer: this.getTimer(id2) };
+          return { artifactId: id2, contexts, pending, timer: this.getTimer(id2) };
         });
         return this.store.readProjection(id2, (current) => {
           const product = this.products.get(current.artifact.type);
           const currentActor = this.authorizedActor(current, actor, authority);
-          if (mode === "assets") return listAssets(current, args, currentActor);
+          if (mode === "assets") {
+            if (!model) return listAssets(current, args, currentActor);
+            const stamp = createHash9("sha256").update(JSON.stringify([current.artifact.revision, Object.keys(current.assets)])).digest("base64url");
+            const page = modelPage(args, id2, stamp);
+            return modelPageResult(args, page, listAssets(current, { ...args, offset: page.offset }, currentActor), "assets");
+          }
           const hidden = current.feedback.filter((item) => !feedbackVisible(item, currentActor));
           if (hidden.some((item) => item.id === args.feedbackId || item.id === args.contextId)) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0A\u4E0B\u6587\u4E0D\u5B58\u5728\u3002");
           const sources = { ...current.sources };
           for (const item of hidden) delete sources[item.id];
-          const state = { ...current, sources, feedback: visibleFeedback(current.feedback, currentActor) };
+          const scoped = { ...current, sources, feedback: visibleFeedback(current.feedback, currentActor) };
+          const pinned = model && args.atRevision !== void 0 && ["summary", "objects", "blocks", "tasks", "source", "search", "region"].includes(mode);
+          const snapshot = pinned ? current.artifact.revision === args.atRevision ? current : current.history.find((saved) => saved.artifact.revision === args.atRevision) : void 0;
+          if (pinned && !snapshot) throw new StudioError("VERSION_NOT_FOUND", "\u8BE5\u8BFB\u53D6\u4FEE\u8BA2\u5DF2\u4E0D\u5728\u4FDD\u7559\u5386\u53F2\u4E2D\uFF0C\u8BF7\u6307\u5B9A\u53EF\u7528\u7248\u672C\u3002");
+          const state = snapshot ? {
+            ...scoped,
+            artifact: snapshot.artifact,
+            content: snapshot.content,
+            ...mode === "source" ? { history: scoped.history.filter((saved) => saved.artifact.revision <= snapshot.artifact.revision) } : {}
+          } : scoped;
           if (mode === "document" || mode === "board") return product.project(state);
           if (mode === "history") {
-            const history = state.history.map((item) => item.entry);
-            return { history, batches: historyBatches(history) };
+            if (!model) {
+              const history2 = state.history.map((item) => item.entry);
+              return { history: history2, batches: historyBatches(history2) };
+            }
+            const page = modelPage(args, id2, state.artifact.revision);
+            const end = Math.max(0, state.history.length - page.offset), start = Math.max(0, end - page.limit);
+            const selection = state.history.slice(start, end).reverse().map(({ entry }) => ({
+              ...entry,
+              ...entry.changedIds.length > MODEL_MAX_IDS ? { changedIds: entry.changedIds.slice(0, MODEL_MAX_IDS), changedCount: entry.changedIds.length } : {}
+            }));
+            const result = modelPageResult(args, page, { artifact: state.artifact, history: selection, totalCount: state.history.length, ...start > 0 ? { nextOffset: page.offset + selection.length } : {} }, "history");
+            const history = selection.slice(0, result.history.length).reverse();
+            const grouped = { ...result, history, batches: historyBatches(history) };
+            return modelDataFits(grouped, modelDataBudget("artifact_read", args)) ? grouped : { ...result, history };
           }
           if (mode === "version") return product.result(version2(state, args.versionId ?? args.revision));
           if (mode === "diff") {
@@ -15783,8 +16644,48 @@ var init_service = __esm({
             const after = selected ?? (args.toVersionId !== void 0 || args.to !== void 0 ? version2(state, args.toVersionId ?? args.to) : state);
             if (args.ids !== void 0 && (!Array.isArray(args.ids) || args.ids.length > 200 || args.ids.some((id3) => typeof id3 !== "string"))) throw new StudioError("INVALID_ARGUMENT", "\u5DEE\u5F02\u5185\u5BB9\u5355\u5143 ID \u5217\u8868\u65E0\u6548\u3002");
             const requestedIds = args.ids;
+            if (model && requestedIds) {
+              const units2 = [...new Set(requestedIds)].flatMap((unitId) => {
+                const previous = before ? product.adapter.readUnit(before.content, unitId) ?? null : null;
+                const currentValue = product.adapter.readUnit(after.content, unitId) ?? null;
+                return jsonEqual(previous, currentValue) ? [] : [modelUnit({ id: unitId, before: previous, after: currentValue })];
+              });
+              return { units: units2, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
+            }
             const units = before ? product.adapter.diff(before.content, after.content) : product.initialIds(after.content).map((id3) => ({ id: id3, before: null, after: product.adapter.readUnit(after.content, id3) }));
             return { ...before ? product.diff(before, after) : { changes: units }, units: requestedIds ? units.filter((unit2) => requestedIds.includes(unit2.id)) : units, fromRevision: before?.artifact.revision ?? null, toRevision: after.artifact.revision };
+          }
+          if (!model) return product.read(state, mode, args);
+          if (mode === "source") {
+            const page = modelPage(args, id2, state.artifact.revision);
+            const element = state.artifact.type === "whiteboard" && !args.feedbackId && state.content.elements.find((item) => item.id === (args.elementId ?? args.regionId));
+            const result = element && element.type !== "document" && typeof element.html !== "string" ? { artifactId: id2, elementId: element.id, version: element.version, json: JSON.stringify(element) } : product.read(state, mode, args);
+            return modelSourcePage(result, page);
+          }
+          if (mode === "objects") {
+            const result = product.read(state, mode, args);
+            return { ...result, elements: Array.isArray(result.elements) ? result.elements.map(modelElement) : [], ...Array.isArray(result.units) ? { units: result.units.map(modelUnit) } : {} };
+          }
+          if (mode === "search" || mode === "region") {
+            if (state.artifact.type !== "whiteboard") throw new StudioError("INVALID_ARGUMENT", "\u5F53\u524D\u4F5C\u54C1\u4E0D\u652F\u6301\u767D\u677F\u8303\u56F4\u67E5\u8BE2\u3002");
+            const page = modelPage(args, id2, state.artifact.revision);
+            const { query, rect: rect3, type, parentId, ids } = args;
+            const result = queryWhiteboard({ artifact: state.artifact, elements: state.content.elements }, {
+              query: mode === "search" ? query : void 0,
+              rect: rect3,
+              type,
+              parentId,
+              ids,
+              offset: page.offset,
+              limit: page.limit,
+              maxBytes: modelDataBudget("artifact_read", args) - 512
+            });
+            return modelPageResult(args, page, { ...result }, "items");
+          }
+          if (mode === "summary" || mode === "blocks" || mode === "tasks") {
+            const page = modelPage(args, id2, state.artifact.revision);
+            const result = product.read(state, mode, { ...args, offset: page.offset });
+            return modelPageResult(args, page, result, mode === "blocks" ? "blocks" : "items");
           }
           return product.read(state, mode, args);
         });
@@ -15846,6 +16747,11 @@ var init_service = __esm({
           });
           const feedback = visibleFeedback(state.feedback, actor).filter((item) => (args.status === void 0 || item.status === args.status) && (args.feedbackId === void 0 || item.id === args.feedbackId));
           if (action === "get" && !feedback.length) throw new StudioError("NOT_FOUND", "\u53CD\u9988\u4E0D\u5B58\u5728\u3002");
+          if (actor.kind === "agent" && action === "list") {
+            const stamp = createHash9("sha256").update(JSON.stringify([state.artifact.revision, feedback.map((item) => [item.id, item.updatedAt, item.status])])).digest("base64url");
+            const page = modelPage(args, id2, stamp), end = page.offset + page.limit;
+            return modelPageResult(args, page, { feedback: feedback.slice(page.offset, end).map(modelFeedbackItem), totalCount: feedback.length, ...end < feedback.length ? { nextOffset: end } : {} }, "feedback", "artifact_feedback");
+          }
           return { feedback };
         }
         if (["suggest", "choose", "withdraw"].includes(action)) {
@@ -16065,6 +16971,7 @@ var init_service = __esm({
       async export(id2, args, actor, authority) {
         const format = text(args.format, "json", 20).toLowerCase();
         let result;
+        let capture;
         const { artifactId: _artifactId, format: _format, options: nestedOptions, ...flatOptions } = args;
         const options = { ...object2(nestedOptions) ? nestedOptions : {}, ...flatOptions };
         const resources = exportResources(this.store, id2);
@@ -16078,18 +16985,33 @@ var init_service = __esm({
             const snapshot = await this.store.readProjection(id2, (state) => {
               actor = this.authorizedActor(state, actor, authority);
               assertAlive(state.artifact);
-              return { artifact: state.artifact, content: state.content };
+              if (args.atRevision === void 0 || args.atRevision === state.artifact.revision) return { artifact: state.artifact, content: state.content };
+              if (!Number.isSafeInteger(args.atRevision) || Number(args.atRevision) < 0) throw new StudioError("INVALID_ARGUMENT", "\u8BF7\u6307\u5B9A\u6709\u6548\u7684\u4F5C\u54C1\u4FEE\u8BA2\u3002");
+              const saved = state.history.find((item) => item.artifact.revision === args.atRevision);
+              if (!saved) throw new StudioError("VERSION_NOT_FOUND", "\u8BE5\u5BFC\u51FA\u4FEE\u8BA2\u5DF2\u4E0D\u5728\u4FDD\u7559\u5386\u53F2\u4E2D\uFF0C\u8BF7\u6307\u5B9A\u53EF\u7528\u7248\u672C\u3002");
+              return { artifact: saved.artifact, content: saved.content };
             });
-            result = await this.products.get(snapshot.artifact.type).export(snapshot, format, options, resources);
+            if (actor.kind === "agent" && args.rect !== void 0 && snapshot.artifact.type !== "whiteboard") throw new StudioError("INVALID_ARGUMENT", "\u5F53\u524D\u4F5C\u54C1\u4E0D\u652F\u6301\u77E9\u5F62\u8303\u56F4\u5BFC\u51FA\u3002");
+            if (actor.kind === "agent" && format === "png" && snapshot.artifact.type === "whiteboard") {
+              const { captureSavedRegion: captureSavedRegion2 } = await Promise.resolve().then(() => (init_scoped_capture(), scoped_capture_exports));
+              const board = { artifact: snapshot.artifact, ...snapshot.content };
+              const target = object2(args.rect) ? { rect: args.rect } : { ids: args.ids ?? [args.regionId] };
+              capture = await captureSavedRegion2(board, target, resources.assetDataUri);
+              result = capture;
+            } else result = await this.products.get(snapshot.artifact.type).export(snapshot, format, options, resources);
+            if (actor.kind === "agent" && Buffer.byteLength(result.data, result.encoding === "base64" ? "base64" : "utf8") > 1024 * 1024) throw new StudioError("LIMIT_EXCEEDED", "\u5C40\u90E8\u5BFC\u51FA\u8D85\u8FC7 1 MiB\uFF0C\u8BF7\u7F29\u5C0F\u8303\u56F4\u6216\u4ECE\u4F5C\u54C1\u754C\u9762\u5BFC\u51FA\u3002");
           }
         } catch (error62) {
           if (error62 instanceof Error && "code" in error62 && typeof error62.code === "string") throw new StudioError(error62.code, error62.message);
           throw error62;
         }
-        return this.store.withProjectionLock(id2, authorizationState, (current) => {
+        return this.store.withProjectionLock(id2, authorizationState, async (current) => {
           this.authorizedActor(current, actor, authority);
           assertAlive(current.artifact);
-          return saveExport(this.dataRoot, id2, result);
+          const saved = await saveExport(this.dataRoot, id2, result);
+          if (!capture) return saved;
+          const { source, revision, bounds: bounds2, width, height, ids } = capture;
+          return { ...saved, source, revision, bounds: bounds2, width, height, ids, ...args.includeImage === false ? {} : { image: { mimeType: capture.mimeType, data: capture.data } } };
         });
       }
       async getExport(exportId) {
@@ -16106,7 +17028,7 @@ var init_service = __esm({
 });
 
 // src/server/guest-session.ts
-import { createHash as createHash8, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { createHash as createHash10, createHmac, randomBytes as randomBytes2, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { mkdir as mkdir6, readFile as readFile5 } from "node:fs/promises";
 import { join as join9 } from "node:path";
 async function createGuestSessions(dataRoot) {
@@ -16139,7 +17061,7 @@ async function createGuestSessions(dataRoot) {
   } finally {
     if (!compromised) await release();
   }
-  const cookieName = `studio-guest-${createHash8("sha256").update(secret).digest("hex").slice(0, 24)}`;
+  const cookieName = `studio-guest-${createHash10("sha256").update(secret).digest("hex").slice(0, 24)}`;
   const sign = (id2) => createHmac("sha256", secret).update(id2).digest("base64url");
   const read = (request) => {
     const value = request.headers.cookie?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
@@ -46696,20 +47618,24 @@ var STUDIO_ICON = {
 // src/server/protocol.ts
 init_version();
 init_studio();
+init_model_read();
 var id = external_exports.string().min(1).max(200);
 var participant = external_exports.object({ id: external_exports.string().trim().min(1).max(120), name: external_exports.string().trim().min(1).max(60), appearanceKey: external_exports.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i).optional().describe("\u672C\u804A\u5929\u9996\u6B21\u751F\u6210\u5E76\u5728\u6BCF\u6B21\u8C03\u7528\u4E2D\u590D\u7528\u7684\u968F\u673A UUIDv4\uFF1B\u5404 Agent \u643A\u5E26\u540C\u4E00\u804A\u5929 key \u548C\u5404\u81EA\u56FA\u5B9A id\uFF0C\u4EE5\u4FDD\u6301\u91CD\u8FDE\u540E\u7684\u5934\u50CF\u3002\u540C\u4E00\u8FDE\u63A5\u627F\u8F7D\u4E0D\u540C\u804A\u5929\u65F6\uFF0C\u5404\u804A\u5929\u4F7F\u7528\u4E0D\u540C key\u3002\u670D\u52A1\u53EA\u516C\u5E03\u6D3E\u751F\u5448\u73B0\u6807\u8BC6\uFF1Bkey \u4E0D\u6062\u590D\u8DE8\u8FDE\u63A5\u4F5C\u8005\u6743\u9650\u6216\u4EFB\u52A1\u6388\u6743\u3002") }).optional().describe("\u4EC5\u6240\u6709\u8005\u7684 MCP \u8C03\u7528\u53EF\u63D0\u4F9B\uFF1A\u540C\u4E00\u8FDE\u63A5\u4E2D\u591A\u4E2A Agent \u4F7F\u7528\u7A33\u5B9A id/name \u533A\u5206\u534F\u4F5C\u8EAB\u4EFD\uFF1B\u4E0D\u5E26 appearanceKey \u65F6\uFF0C\u663E\u5F0F main \u4E0E\u7701\u7565 participant \u4F7F\u7528\u540C\u4E00\u4E3B\u8EAB\u4EFD\u3002id \u662F\u4E0D\u900F\u660E\u6807\u8BC6\uFF0C\u53EF\u4EE5\u4F7F\u7528 Agent \u7684\u4EFB\u52A1\u8DEF\u5F84\uFF0C\u4E0D\u4F5C\u6587\u4EF6\u8DEF\u5F84\u89E3\u91CA\u3002\u540C\u4E00\u4E3B\u4EE3\u7406\u8DE8\u8F6E\u6B21\u3001\u5207\u6362\u4EFB\u52A1\u548C\u91CD\u5F00\u9762\u677F\u65F6\u590D\u7528\u539F id/name/appearanceKey\u3002\u8EAB\u4EFD\u7531\u670D\u52A1\u7AEF\u6309\u8FDE\u63A5\u547D\u540D\u7A7A\u95F4\u6D3E\u751F\uFF0C\u4E0D\u80FD\u7528\u4E8E\u8BBF\u5BA2\u63D0\u6743\u3002");
 var coordinate = external_exports.number().min(-1e7).max(1e7);
+var rect = external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) });
+var pagination = { cursor: external_exports.string().max(256).optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() };
 var taskBinding = {
   taskId: id.optional().describe("\u4E0E generation \u6210\u5BF9\u643A\u5E26\u7684\u672C\u6B21 Agent \u5DE5\u4F5C\u4EFB\u52A1 ID\uFF0C\u4E0D\u4ECE\u4E0A\u6B21\u4EFB\u52A1\u63A8\u65AD\u3002"),
   generation: external_exports.string().min(1).max(120).optional().describe("artifact_activity \u8FD4\u56DE\u7684\u539F\u6837\u4EFB\u52A1\u4EE3\u6B21\uFF1B\u4E0E taskId \u6210\u5BF9\uFF0C\u4E0D\u80FD\u7528\u65E7\u4EE3\u7EED\u5199\u3001\u6362\u53F7\u76F2\u91CD\u8BD5\u6216\u7ED5\u8FC7\u4EBA\u5DE5\u7ED3\u675F\u3002")
 };
 var anchor2 = external_exports.object({
-  coordinateSpace: external_exports.enum(["board", "element", "html", "document"]).optional().describe("board \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement \u4E3A\u9996\u4E2A\u5BF9\u8C61\u5185\u7684\u76F8\u5BF9\u5750\u6807\uFF1Bhtml \u4E3A\u533A\u57DF CSS \u50CF\u7D20\uFF1Bdocument \u4EE5 elementIds[0]\u3001blockIds \u4E0E sourceVersion \u51BB\u7ED3\u6587\u6863\u9009\u4E2D\u6587\u5B57\u3002"),
+  coordinateSpace: external_exports.enum(["board", "element", "html", "document", "todo"]).optional().describe("board \u4E3A\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Belement \u4E3A\u5BF9\u8C61\u76F8\u5BF9\u5750\u6807\uFF1Bhtml \u4E3A\u533A\u57DF CSS \u50CF\u7D20\uFF1Bdocument \u7528 blockIds\uFF0Ctodo \u7528 itemId \u5B9A\u4F4D\u540C\u4E00\u6765\u6E90\u7248\u672C\u7684\u5185\u5BB9\u3002"),
   elementIds: external_exports.array(id).optional().describe("\u5DF2\u5B58\u5728\u5BF9\u8C61\u7684\u7A33\u5B9A ID\uFF1Belement \u5750\u6807\u4EE5\u9996\u4E2A\u5BF9\u8C61\u4E3A\u57FA\u51C6\u3002"),
   regionId: id.optional().describe("HTML \u533A\u57DF ID\uFF1Bhtml \u5750\u6807\u7A7A\u95F4\u5FC5\u586B\u3002"),
   targetIds: external_exports.array(external_exports.string().max(160)).max(100).optional(),
   blockIds: external_exports.array(id).min(1).max(100).optional().describe("document \u5907\u6CE8\u9009\u4E2D\u7684\u5B9E\u9645\u7A33\u5B9A\u6BB5\u843D ID\u3002"),
-  sourceVersion: external_exports.number().int().positive().optional().describe("\u6587\u6863\u9009\u533A\u6765\u6E90\u7684 element.version\uFF1B\u5199\u5165\u4ECD\u4F7F\u7528\u5F53\u524D expectedVersions\u3002"),
+  itemId: external_exports.string().min(1).max(120).optional().describe("todo \u5907\u6CE8\u5BF9\u5E94\u7684\u7A33\u5B9A\u4EFB\u52A1\u884C ID\u3002"),
+  sourceVersion: external_exports.number().int().positive().optional().describe("\u6587\u6863\u6216\u4EFB\u52A1\u884C\u6765\u6E90\u7684 element.version\uFF1B\u5199\u5165\u4ECD\u4F7F\u7528\u5F53\u524D expectedVersions\u3002"),
   sourceRevision: external_exports.number().int().positive().optional().describe("HTML \u539F\u59CB\u9009\u533A\u7684\u6E90\u7801\u7248\u672C\uFF0C\u9700\u8981 regionId\uFF1B\u4E0D\u80FD\u7528\u4F5C\u5BF9\u8C61 CAS \u7248\u672C\u3002"),
   quote: external_exports.string().max(4e3).optional(),
   excerpt: external_exports.string().max(16e3).optional(),
@@ -46720,8 +47646,9 @@ var anchor2 = external_exports.object({
   h: coordinate.min(0).optional(),
   pin: external_exports.discriminatedUnion("coordinateSpace", [
     external_exports.object({ coordinateSpace: external_exports.literal("board"), x: coordinate, y: coordinate }),
-    external_exports.object({ coordinateSpace: external_exports.literal("document"), x: external_exports.number().min(0).max(1), y: external_exports.number().min(0).max(1) })
-  ]).optional().describe("\u5907\u6CE8\u6C14\u6CE1\u5C16\u5934\u7684\u72EC\u7ACB\u663E\u793A\u4F4D\u7F6E\u3002board \u4F7F\u7528\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Bdocument \u4F7F\u7528\u9996\u4E2A blockIds \u5BF9\u5E94\u6BB5\u843D\u7684\u5F52\u4E00\u5316\u76F8\u5BF9\u70B9\uFF0C\u53EA\u80FD\u7528\u4E8E document \u5907\u6CE8\u3002\u539F anchor \u7684\u8303\u56F4\u548C\u6765\u6E90\u5B57\u6BB5\u7EE7\u7EED\u5B9A\u4F4D\u53CD\u9988\u5185\u5BB9\u3002")
+    external_exports.object({ coordinateSpace: external_exports.literal("document"), x: external_exports.number().min(0).max(1), y: external_exports.number().min(0).max(1) }),
+    external_exports.object({ coordinateSpace: external_exports.literal("todo"), x: external_exports.number().min(0).max(1), y: external_exports.number().min(0).max(1) })
+  ]).optional().describe("\u5907\u6CE8\u6C14\u6CE1\u5C16\u5934\u7684\u72EC\u7ACB\u663E\u793A\u4F4D\u7F6E\u3002board \u4F7F\u7528\u767D\u677F\u4E16\u754C\u5750\u6807\uFF1Bdocument \u6216 todo \u5206\u522B\u4F7F\u7528\u76EE\u6807\u6BB5\u843D\u6216\u4EFB\u52A1\u884C\u5185\u7684\u5F52\u4E00\u5316\u76F8\u5BF9\u70B9\u3002")
 }).passthrough();
 var elementPatch = external_exports.object({
   locked: external_exports.boolean().optional().describe("\u4EC5\u9501\u5B9A\u4F4D\u7F6E\u3001\u5C3A\u5BF8\u3001\u65CB\u8F6C\u3001\u8FDE\u63A5\u51E0\u4F55\u548C\u88C1\u526A\u3002\u9501\u540E\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u4ECD\u53EF\u66F4\u65B0\u3002\u89E3\u9501\u987B\u5355\u72EC\u63D0\u4EA4 changes:{locked:false}\uFF0C\u4E14\u4E0D\u80FD\u5728\u540C\u4E00\u4E8B\u52A1\u5185\u7EE7\u7EED\u79FB\u52A8\u6216\u5220\u9664\u3002")
@@ -46736,89 +47663,50 @@ var operation = external_exports.object({
 }).passthrough();
 var schemas = {
   studio_open: external_exports.object({ view: external_exports.enum(["library", "editor", "board", "trash"]).optional(), artifactId: id.optional() }),
-  artifact_list: external_exports.object({ query: external_exports.string().optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), limit: external_exports.number().int().min(1).max(100).optional(), cursor: external_exports.string().optional(), sort: external_exports.string().optional() }),
+  artifact_list: external_exports.object({ ...pagination, query: external_exports.string().max(512).optional(), trashed: external_exports.boolean().optional(), pinned: external_exports.boolean().optional(), sort: external_exports.string().optional() }),
   artifact_manage: external_exports.object({ action: external_exports.enum(["create", "rename", "pin", "trash", "restore", "purge", "duplicate", "import", "asset-import", "asset-delete"]), artifactId: id.optional(), artifactIds: external_exports.array(id).min(1).max(100).optional().describe("purge \u6279\u91CF\u6C38\u4E45\u5220\u9664\u7684\u4F5C\u54C1 ID\uFF0C1..100 \u4E2A\u3002\u4E0E\u5355\u4E2A artifactId \u4E8C\u9009\u4E00\uFF1B\u53EA\u5141\u8BB8\u623F\u4E3B\u5220\u9664\u56DE\u6536\u7AD9\u5185\u4F5C\u54C1\uFF0C\u8FD4\u56DE deletedIds \u548C\u9010\u9879 failures\u3002"), type: id.optional(), title: external_exports.string().max(200).optional(), pinned: external_exports.boolean().optional(), archivePath: external_exports.string().max(4096).optional(), assetPath: external_exports.string().max(4096).optional(), assetId: id.optional() }),
-  artifact_read: external_exports.object({ artifactId: id, ...taskBinding, mode: external_exports.string().min(1).max(64).optional(), ids: external_exports.array(id).optional(), atRevision: external_exports.number().int().nonnegative().optional().describe("units \u540C\u6B65\u8865\u8BFB\u5FC5\u987B\u6307\u5B9A\u7CBE\u786E\u4F5C\u54C1\u7248\u672C\uFF0C\u914D\u5408 1..200 \u4E2A ids\u3002\u8FD4\u56DE\u8BE5\u7248\u672C\u7684 artifact \u548C\u5B8C\u6574 units\uFF1B\u5386\u53F2\u5DF2\u6E05\u7406\u5219 VERSION_NOT_FOUND\uFF0C\u4E0D\u4EE5\u6700\u65B0\u7248\u672C\u66FF\u4EE3\u3002"), regionId: id.optional(), elementId: id.optional(), feedbackId: id.optional(), contextId: id.optional(), sourceRevision: external_exports.number().int().positive().optional(), versionId: id.optional(), fromVersionId: id.optional(), toVersionId: id.optional(), adjacent: external_exports.boolean().optional().describe("diff \u65F6\u8BFB\u53D6 versionId \u7684\u76F4\u63A5\u524D\u540E\u5DEE\u5F02\uFF1B\u9996\u7248\u7684 before \u4E3A null\u3002\u6307\u5B9A ids \u53EF\u7B5B\u9009\u8FD4\u56DE\u7684 units\u3002"), viewId: id.optional(), offset: external_exports.number().int().nonnegative().optional(), limit: external_exports.number().int().min(1).max(2e5).optional() }).passthrough(),
+  artifact_read: external_exports.object({
+    artifactId: id,
+    ...taskBinding,
+    ...pagination,
+    mode: external_exports.string().min(1).max(64).optional(),
+    ids: external_exports.array(id).optional(),
+    atRevision: external_exports.number().int().nonnegative().optional().describe("units \u540C\u6B65\u8865\u8BFB\u5FC5\u987B\u6307\u5B9A\u7CBE\u786E\u4F5C\u54C1\u7248\u672C\uFF0C\u914D\u5408 1 \u5230 10 \u4E2A ids\uFF1B\u7248\u672C\u5DF2\u6E05\u7406\u65F6\u62A5\u9519\u3002"),
+    regionId: id.optional(),
+    elementId: id.optional(),
+    feedbackId: id.optional(),
+    contextId: id.optional(),
+    sourceRevision: external_exports.number().int().positive().optional(),
+    versionId: id.optional(),
+    fromVersionId: id.optional(),
+    toVersionId: id.optional(),
+    adjacent: external_exports.boolean().optional().describe("diff + versionId + adjacent \u8BFB\u53D6\u6307\u5B9A\u7248\u7684\u76F8\u90BB\u5DEE\u5F02\u3002\u4EC5\u8FD4\u56DE\u6307\u5B9A ids\u3002"),
+    viewId: id.optional(),
+    query: external_exports.string().max(512).optional(),
+    rect: rect.optional(),
+    type: id.optional(),
+    parentId: id.optional(),
+    blockIds: external_exports.array(id).optional(),
+    itemIds: external_exports.array(id).optional(),
+    checked: external_exports.boolean().optional()
+  }).passthrough(),
   artifact_apply: external_exports.object({ artifactId: id, ...taskBinding, operationId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), merge: external_exports.literal("safe").optional().describe("\u5B89\u5168\u5408\u5E76\u8FC7\u671F update\uFF1A\u4ECE\u670D\u52A1\u5668\u4FDD\u7559\u5386\u53F2\u53D6\u53EF\u4FE1\u57FA\u7EBF\uFF0C\u4EC5\u5408\u5E76\u4E0D\u51B2\u7A81\u5B57\u6BB5/\u6587\u672C\u884C\uFF1B\u540C\u5B57\u6BB5\u51B2\u7A81\u4FDD\u7559\u539F\u5185\u5BB9\u5E76\u8FD4\u56DE CONFLICT\uFF0C\u4E0D\u9759\u9ED8\u8986\u76D6\u3002\u7F3A\u7701\u4FDD\u6301\u4E25\u683C\u7248\u672C\u68C0\u67E5\u3002"), operations: external_exports.array(operation).min(1).max(200), summary: external_exports.string().max(500).optional() }),
-  artifact_feedback: external_exports.object({ artifactId: id, ...taskBinding, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "attached", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), requestId: id.optional().describe("attached \u65F6\u5FC5\u987B\u63D0\u4F9B send \u8FD4\u56DE\u7684 attachment.requestId\uFF1B\u4EC5\u623F\u4E3B\u754C\u9762\u5728\u5BBF\u4E3B\u786E\u8BA4\u9644\u52A0\u6210\u529F\u540E\u56DE\u5199\uFF0C\u5E42\u7B49\u4E14\u4E0D\u89E3\u51B3\u5907\u6CE8\u3002"), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }),
+  artifact_feedback: external_exports.object({ artifactId: id, ...taskBinding, action: external_exports.enum(["list", "get", "create", "reply", "edit", "delete", "resolve", "reopen", "send", "attached", "processing", "suggest", "preview", "choose", "withdraw"]), feedbackId: id.optional(), replyId: id.optional().describe("reply \u65F6\u53EF\u4F20\u7A33\u5B9A\u56DE\u590D ID\uFF0C\u5931\u8D25\u91CD\u8BD5\u540C ID \u548C\u5185\u5BB9\u4E0D\u4F1A\u8FFD\u52A0\u7B2C\u4E8C\u6761\uFF1Bedit \u65F6\u6307\u5B9A\u56DE\u590D ID\uFF0C\u7701\u7565\u5219\u7F16\u8F91\u9996\u6D88\u606F\u3002\u53EA\u80FD\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\uFF0Cdelete \u5220\u9664\u6574\u4E2A\u8BA8\u8BBA\u4E14\u4EC5\u6240\u6709\u8005\u6216\u9996\u4F5C\u8005\u53EF\u7528\u3002"), expectedText: external_exports.string().max(2e4).optional().describe("edit \u65F6\u4F20\u6253\u5F00\u7F16\u8F91\u5668\u65F6\u7684\u539F\u59CB\u6587\u5B57\uFF1B\u5DF2\u88AB\u540C\u8EAB\u4EFD\u53E6\u4E00\u89C6\u56FE\u4FEE\u6539\u5219 CONFLICT\uFF0C\u4FDD\u7559\u53CC\u65B9\u5185\u5BB9\uFF0C\u4E0D\u76F2\u76EE\u8986\u76D6\u3002"), type: external_exports.enum(["comment", "request"]).optional(), text: external_exports.string().max(2e4).optional(), anchor: anchor2.optional(), versions: external_exports.record(id, external_exports.number().int().positive()).optional().describe("create \u65F6\u63D0\u4F9B\u5168\u90E8\u951A\u70B9\u5BF9\u8C61\u5728\u9009\u53D6\u65F6\u7684 element.version\uFF1B\u6309\u8BE5\u7248\u672C\u51BB\u7ED3\u539F\u59CB\u5BF9\u8C61/HTML\u3002\u7F3A\u5931\u3001\u6B67\u4E49\u6216\u8FC7\u671F\u7248\u672C\u4F1A\u62D2\u7EDD\uFF1B\u7701\u7565\u65F6\u517C\u5BB9\u4FDD\u5B58\u65F6\u5FEB\u7167\u3002\u4E0D\u540C\u4E8E\u4FEE\u6539\u7528 expectedVersions\u3002"), targetViewId: id.optional(), requestId: id.optional().describe("attached \u65F6\u5FC5\u987B\u63D0\u4F9B send \u8FD4\u56DE\u7684 attachment.requestId\uFF1B\u4EC5\u623F\u4E3B\u754C\u9762\u5728\u5BBF\u4E3B\u786E\u8BA4\u9644\u52A0\u6210\u529F\u540E\u56DE\u5199\uFF0C\u5E42\u7B49\u4E14\u4E0D\u89E3\u51B3\u5907\u6CE8\u3002"), operationId: id.optional().describe("create/choose \u7684\u7A33\u5B9A\u64CD\u4F5C ID\uFF1B\u91CD\u8BD5\u4FDD\u7559\u540C\u4E00 ID \u4E0E\u5185\u5BB9\u3002create \u8FD4\u56DE\u539F contextId\uFF0C\u4E0D\u91CD\u590D\u521B\u5EFA\uFF1B\u6539\u53D8\u5185\u5BB9\u6216\u9009\u533A\u7248\u672C\u987B\u4F7F\u7528\u65B0 ID\u3002"), optionId: id.optional(), expectedRevision: external_exports.number().int().optional(), expectedVersions: external_exports.record(external_exports.string(), external_exports.number().int()).optional(), options: external_exports.array(external_exports.object({ id: id.optional(), label: external_exports.string().max(60), description: external_exports.string().max(160).optional(), operations: external_exports.array(operation).max(60) })).min(2).max(4).optional() }).extend({ ...pagination, status: external_exports.string().max(32).optional() }),
   artifact_share: external_exports.object({ artifactId: id, action: external_exports.enum(["status", "start", "stop", "reset", "link", "role", "remove", "restore", "forget"]), access: external_exports.enum(["local", "lan"]).optional().describe("start \u7684\u8BBF\u95EE\u8303\u56F4\uFF1Alocal \u53EA\u5141\u8BB8\u672C\u673A\u89D2\u8272\u9080\u8BF7\uFF0Clan \u5141\u8BB8\u5C40\u57DF\u7F51\u3002\u7701\u7565\u4FDD\u6301 lan\u3002\u5207\u6362\u8303\u56F4\u4FDD\u7559\u89D2\u8272\u9080\u8BF7\u4E0E\u6210\u5458\uFF1Bstop \u624D\u64A4\u9500\u5168\u90E8\u9080\u8BF7\u3002"), role: external_exports.enum(["editor", "commenter", "viewer"]).optional().describe("role/restore \u5FC5\u586B\uFF1Brestore \u7684\u76EE\u6807\u89D2\u8272\u94FE\u63A5\u5FC5\u987B\u5DF2\u542F\u7528\u3002"), on: external_exports.boolean().optional().describe("link \u64CD\u4F5C\u542F\u7528\u6216\u5173\u95ED\u6307\u5B9A\u89D2\u8272\u94FE\u63A5\u3002"), memberId: id.optional().describe("role/remove \u7BA1\u7406\u5DF2\u52A0\u5165\u6210\u5458\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u8BBF\u95EE\u3002forget \u53EA\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u53CA\u6B64\u677F\u59D3\u540D\u767B\u8BB0\uFF1B\u4FDD\u7559\u5386\u53F2\u4F5C\u8005\u548C\u5176\u4ED6\u767D\u677F\uFF0C\u4E4B\u540E\u51ED\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u5165\u59D3\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u4F1A\u6062\u590D\u79FB\u9664\u524D\u6392\u961F\u8BF7\u6C42\u3002") }),
-  artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), scale: external_exports.number().min(0.1).max(4).optional() }),
+  artifact_export: external_exports.object({ artifactId: id, format: external_exports.enum(["json", "html", "svg", "png", "zip"]), regionId: id.optional(), ids: external_exports.array(id).optional(), rect: rect.optional(), atRevision: external_exports.number().int().nonnegative().optional(), viewId: id.optional(), includeImage: external_exports.boolean().optional().describe("\u5C40\u90E8 PNG \u9ED8\u8BA4\u8FD4\u56DE\u4E00\u5F20\u6709\u5927\u5C0F\u4E0A\u9650\u7684\u56FE\u50CF\uFF1B\u53EA\u9700\u5BFC\u51FA\u5F15\u7528\u65F6\u7528 false\u3002"), scale: external_exports.number().min(0.1).max(4).optional() }),
   artifact_activity: external_exports.object({ artifactId: id, action: external_exports.enum(["begin", "update", "end", "status", "release"]), ...taskBinding, taskId: id.optional().describe("begin \u6307\u5B9A\u903B\u8F91\u4EFB\u52A1\uFF1Bstatus \u53EF\u7701\u7565\u4EE5\u5217\u51FA\u81EA\u5DF1\u7684\u4EFB\u52A1\uFF0C\u6216\u53EA\u7ED9 taskId \u67E5\u8BE2\u672C\u4EFB\u52A1\uFF1Bupdate/end/release \u540C\u65F6\u9700\u8981 generation\u3002"), phase: external_exports.enum(["preparing", "writing", "verifying"]).optional(), outcome: external_exports.enum(["completed", "failed", "cancelled"]).optional(), targetActorId: id.optional().describe("\u623F\u4E3B\u754C\u9762 release \u7684\u76EE\u6807 Agent actor.id\uFF0C\u4E0D\u662F participant.id\uFF1B\u4E0D\u80FD\u4EE5\u76EE\u6807\u8EAB\u4EFD\u5192\u5145\u8C03\u7528\u8005\u3002"), scope: external_exports.object({ ids: external_exports.array(id).min(1).max(200).optional(), rect: external_exports.object({ x: coordinate, y: coordinate, w: external_exports.number().positive().max(1e7), h: external_exports.number().positive().max(1e7) }).optional() }).optional(), label: external_exports.string().trim().min(1).max(80).optional() })
 };
 var descriptions = {
   studio_open: "Agentero \u521B\u4F5C\u7684\u804A\u5929\u6807\u7B7E\u9875\u5165\u53E3\u3002\u7531\u7528\u6237\u6253\u5F00\u4F5C\u54C1\u4E2D\u5FC3\u6216\u6307\u5B9A\u767D\u677F\uFF0C\u4EC5\u5BFC\u822A\uFF0C\u4E0D\u9690\u5F0F\u521B\u5EFA\u3002",
-  artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\uFF1B\u5206\u9875\u8FD4\u56DE\u6458\u8981\u3002",
+  artifact_list: "\u6309\u540D\u79F0\u3001\u56FA\u5B9A\u6216\u56DE\u6536\u72B6\u6001\u67E5\u627E\u4F5C\u54C1\u3002\u9ED8\u8BA4\u8FD4\u56DE 10 \u6761\u6458\u8981\uFF0C\u6BCF\u9875\u6700\u591A 20 \u6761\uFF1B\u4F7F\u7528 nextCursor \u7EED\u8BFB\u3002",
   artifact_manage: "\u521B\u5EFA\u3001\u91CD\u547D\u540D\u3001\u56FA\u5B9A\u3001\u56DE\u6536\u3001\u6062\u590D\u6216\u590D\u5236\u6570\u636E\u5E93\u4F5C\u54C1\u3002\u65E7\u7248 JSON \u4F5C\u54C1\u663E\u793A storageStatus:unsupported\uFF0C\u4EC5\u652F\u6301\u79FB\u5165\u56DE\u6536\u7AD9\u4E0E purge\uFF0C\u65E0\u6CD5\u6253\u5F00\u3001\u6062\u590D\u3001\u590D\u5236\u6216\u7F16\u8F91\u3002purge \u7531\u623F\u4E3B\u6C38\u4E45\u5220\u9664\u5DF2\u5728\u56DE\u6536\u7AD9\u7684\u4F5C\u54C1\uFF0CartifactId \u6216 1..100 \u4E2A artifactIds \u4E8C\u9009\u4E00\uFF1B\u5148\u6821\u9A8C\u5168\u90E8\u53C2\u6570\uFF0C\u518D\u9010\u9879\u8FD4\u56DE deletedIds/failures\uFF0C\u4E0D\u5220\u9664\u6D3B\u8DC3\u4F5C\u54C1\u3002import \u5BFC\u5165\u7528\u6237\u6307\u5B9A\u7684\u672C\u673A\u6570\u636E\u5E93\u5907\u4EFD ZIP\uFF1Basset-import \u5BFC\u5165\u7528\u6237\u660E\u786E\u6307\u5B9A\u6216\u5F53\u524D\u4EFB\u52A1\u751F\u6210\u7684\u672C\u673A\u5A92\u4F53\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u8FD4\u56DE\u7A33\u5B9A\u8D44\u6E90\u5F15\u7528\uFF1Basset-delete \u4EC5\u79FB\u9664\u672A\u88AB\u5185\u5BB9\u3001\u5386\u53F2\u6216\u53CD\u9988\u5F15\u7528\u7684\u8D44\u6E90\u5E76\u4FDD\u7559\u5185\u90E8\u56DE\u6536\u526F\u672C\u3002",
-  artifact_read: "\u8BFB\u53D6\u4F5C\u54C1\u6982\u8981\u3001\u5BF9\u8C61\u3001HTML \u539F\u59CB\u6E90\u7801\u3001\u51BB\u7ED3\u53CD\u9988\u3001\u8D44\u4EA7\u5143\u6570\u636E\u6216\u5386\u53F2\u3002\u9ED8\u8BA4 summary\uFF1Bcontext+feedbackId/contextId \u8FD4\u56DE\u51BB\u7ED3\u539F\u751F element \u4E0E\u7248\u672C\u3001HTML \u6765\u6E90\u5F15\u7528\uFF1Bsource+feedbackId+elementId/regionId \u8BFB\u53D6\u5BF9\u5E94\u51BB\u7ED3\u5BF9\u8C61/\u6E90\u7801\u3002HTML \u6309 offset/limit \u5206\u6BB5\uFF0C\u6709 nextOffset \u65F6\u7EE7\u7EED\uFF1B\u5F53\u524D\u5BF9\u8C61 CAS \u7248\u672C\u4ECE objects \u8BFB\u53D6\u3002\u9996\u6B21\u53D1\u73B0\u53EF\u4E0D\u5E26\u4EFB\u52A1\u53EA\u8BFB\u4E14\u4E0D\u7EED\u671F\uFF1BtaskId/generation\u6210\u5BF9\u643A\u5E26\uFF0C\u6210\u529F\u8BFB\u53D6\u786E\u5B9E\u547D\u4E2D\u672C\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\uFF0C\u4E0D\u5236\u9020\u5199\u5165\u8FDB\u5EA6\u3002assets \u4EC5\u623F\u4E3B\u67E5\u8BE2\u3002\u6587\u6863\u7528 blocks+elementId \u8BFB\u53D6\u7A33\u5B9A\u5757\uFF08\u53EF\u9644 feedbackId \u8BFB\u51BB\u7ED3\u5757\uFF09\uFF0Csource \u8FD4\u56DE\u53EF\u5206\u9875 JSON\u3002\u4E0D\u8981\u628A DOM \u6458\u5F55\u5F53\u539F\u59CB\u6E90\u7801\u3002",
-  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u6587\u6863\u533A\u57DF\u7528 document \u64CD\u4F5C\uFF1Aid \u6307\u5B9A\u533A\u57DF\uFF0Cdata.operations \u4E3A insert/update/delete/move \u5757\u64CD\u4F5C\uFF08insert \u542B block\uFF0Cupdate \u542B id/changes\uFF0Cmove \u542B id/parentId/afterId\uFF09\uFF1B\u6CBF\u7528\u533A\u57DF expectedVersions\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
+  artifact_read: "\u5148\u67E5\u6982\u8981\uFF0C\u518D\u6309\u76EE\u6807\u8BFB\u53D6\u3002\u9ED8\u8BA4 summary\uFF1Bsearch \u6309\u677F\u5185 query \u67E5\u627E\uFF0Cregion \u4EE5\u767D\u677F\u5750\u6807 rect \u67E5\u8BE2\u3002\u5E38\u89C4\u9875\u9ED8\u8BA4 10 \u6761\u3001\u6700\u591A 20 \u6761\uFF0C\u4F7F\u7528 nextCursor \u7EED\u9875\uFF0C\u4F5C\u54C1\u53D8\u5316\u540E\u4ECE\u9996\u9875\u5B9A\u4F4D\u3002objects/units/diff \u5FC5\u987B\u6307\u5B9A 1 \u5230 10 \u4E2A ids\uFF1Bhistory \u53EA\u8FD4\u56DE\u63D0\u4EA4\u6458\u8981\u3002\u6587\u6863\u6B63\u6587\u7528 blocks+elementId\uFF0CTodo \u7528 tasks+elementId\uFF0C\u53EF\u7528 blockIds/itemIds/checked \u7F29\u5C0F\u76EE\u6807\u3002source \u9009\u62E9\u5177\u4F53 elementId \u6216 regionId\uFF0C\u6E90\u7801\u6309 UTF-8 \u9884\u7B97\u5206\u6BB5\u3002context \u6307\u5B9A viewId\u3001feedbackId \u6216 contextId\uFF0C\u51BB\u7ED3\u6E90\u7801\u518D\u7528 source \u8BFB\u53D6\u3002taskId/generation \u6210\u5BF9\u643A\u5E26\uFF0C\u53EA\u6709\u8BFB\u53D6\u547D\u4E2D\u4EFB\u52A1\u8303\u56F4\u624D\u7EED\u6D3B\u52A8\u3002\u6574\u677F\u5FEB\u7167\u901A\u8FC7\u4F5C\u54C1\u754C\u9762\u67E5\u770B\u3002",
+  artifact_apply: "\u4EE5\u7A33\u5B9A\u5BF9\u8C61 ID \u6279\u91CF\u5C40\u90E8\u4FEE\u6539\u767D\u677F\u3002Agent\u771F\u5B9E\u5185\u5BB9\u5199\u5165\u5FC5\u987B\u643A\u5E26\u6709\u6548taskId/generation\u5E76\u5728\u58F0\u660E\u8303\u56F4\u5185\uFF1B\u4EBA\u7C7B\u754C\u9762\u4E0D\u9700\u8981Agent\u4EFB\u52A1\u3002\u6587\u6863\u533A\u57DF\u7528 document \u64CD\u4F5C\uFF1Aid \u6307\u5B9A\u533A\u57DF\uFF0Cdata.operations \u4E3A insert/update/delete/move \u5757\u64CD\u4F5C\uFF08insert \u542B block\uFF0Cupdate \u542B id/changes\uFF0Cmove \u542B id/parentId/afterId\uFF09\uFF1B\u6CBF\u7528\u533A\u57DF expectedVersions\u3002\u4EFB\u52A1\u6E05\u5355\u7528 todo \u64CD\u4F5C\uFF1Aid \u6307\u5B9A\u6E05\u5355\uFF0Cdata.operations \u9010\u884C insert/update/delete/move\uFF0Cinsert \u643A\u5E26 item\uFF0Cupdate \u643A\u5E26 id/changes\uFF0Cmove \u4F7F\u7528 id/afterId\uFF1B\u7528 expectedVersions \u68C0\u67E5\u6E05\u5355\u7248\u672C\u3002\u66F4\u6539 HTML \u4F7F\u7528 update.changes.html \u5E76\u63D0\u4F9B expectedVersions\uFF1B\u51B2\u7A81\u540E\u91CD\u8BFB\uFF0C\u4E0D\u8986\u76D6\u3002locked \u4EC5\u9501\u5B9A\u51E0\u4F55\uFF0C\u5141\u8BB8\u6587\u5B57\u3001\u6837\u5F0F\u3001HTML \u548C state \u66F4\u65B0\uFF1B\u79FB\u52A8\u3001\u88C1\u526A\u3001\u5220\u9664\u53CA\u6539\u53D8\u5173\u8054\u9501\u7EBF\u524D\u987B\u72EC\u7ACB\u660E\u786E\u89E3\u9501\uFF0C\u540C\u6279\u89E3\u9501\u7ED5\u8FC7\u4F1A\u62D2\u7EDD\u3002layout preset=front/back/forward/backward \u6309 ids \u8C03\u6574\u5BF9\u8C61\u5C42\u7EA7\u3002restore \u6307\u5B9A versionId \u5E76\u5F62\u6210\u65B0\u7248\u672C\uFF1B\u9644 id \u6216 ids \u65F6\u53EA\u6062\u590D\u6240\u9009\u5185\u5BB9\u5355\u5143\uFF0C\u4FDD\u7559\u672A\u9009\u62E9\u7684\u5185\u5BB9\u3001\u6837\u5F0F\u4E0E\u5F53\u524D\u6807\u9898\uFF1B\u4ECD\u987B\u6838\u5BF9\u5F53\u524D revision \u6216\u5168\u90E8\u76EE\u6807\u7248\u672C\uFF0C\u6062\u590D\u4E0D\u80FD\u7ED5\u8FC7\u9501\u3002data.mode=undo \u5B89\u5168\u64A4\u56DE\u6240\u9009\u4E8B\u52A1\u3002",
   artifact_feedback: "\u521B\u5EFA\u6216\u8BFB\u53D6\u5E26\u539F\u751F\u5BF9\u8C61\u3001\u767D\u677F\u533A\u57DF\u6216 HTML \u5185\u90E8\u951A\u70B9\u7684\u5907\u6CE8\uFF0C\u652F\u6301\u56DE\u590D\u3001\u7F16\u8F91\u81EA\u5DF1\u7684\u6D88\u606F\u3001\u5220\u9664\u6574\u8BA8\u8BBA\u3001\u89E3\u51B3\u53CA\u79C1\u4EBA\u5EFA\u8BAE\u3002\u56DE\u590D\u5DF2\u89E3\u51B3\u8BA8\u8BBA\u4F1A\u91CD\u65B0\u6253\u5F00\uFF1B\u5220\u9664\u540C\u65F6\u79FB\u9664\u51BB\u7ED3\u6765\u6E90\uFF0C\u5386\u53F2\u7248\u672C\u4FDD\u7559\u3002create \u7528 versions \u51BB\u7ED3\u9009\u53D6\u65F6\u7684\u539F\u59CB\u5BF9\u8C61/HTML\uFF0C\u7A33\u5B9A operationId \u4FDD\u8BC1\u91CD\u8BD5\u4E0D\u91CD\u590D\uFF1BcontextId \u7528\u4E8E\u8BFB\u53D6\u51BB\u7ED3\u6765\u6E90\u3002Agent\u9009\u62E9\u6216\u64A4\u56DE\u5DF2\u5E94\u7528\u65B9\u6848\u4EA7\u751F\u5185\u5BB9\u53D8\u5316\u65F6\u4E5F\u9700\u6709\u6548taskId/generation\u3002send \u8BF7\u6C42\u623F\u4E3B\u9644\u52A0\u5230\u5BF9\u8BDD\uFF1B\u540C\u4E00\u5185\u5BB9\u91CD\u8BD5\u8FD4\u56DE\u539F attachment.requestId\uFF0C\u5185\u5BB9\u53D8\u5316\u540E\u751F\u6210\u65B0\u8BF7\u6C42\u3002attached \u4EC5\u623F\u4E3B\u754C\u9762\u5728\u5BBF\u4E3B\u6210\u529F\u540E\u6309\u8BE5\u8BF7\u6C42\u56DE\u5199\uFF1B\u4E0E\u5907\u6CE8\u89E3\u51B3\u548C Agent \u5904\u7406\u72B6\u6001\u72EC\u7ACB\u3002\u666E\u901A\u5907\u6CE8\u4E0D\u81EA\u52A8\u6388\u6743\u4FEE\u6539\u3002",
   artifact_share: "\u67E5\u8BE2\u6216\u7BA1\u7406\u5206\u4EAB\u53CA\u89D2\u8272\u94FE\u63A5\u3002start \u9ED8\u8BA4\u5C40\u57DF\u7F51\uFF0Caccess:local \u53EA\u542F\u7528\u672C\u673A\u9080\u8BF7\uFF1B\u5207\u6362\u8303\u56F4\u4FDD\u7559\u6210\u5458\uFF0Cstop \u64A4\u9500\u5168\u90E8\u6388\u6743\uFF1Blink \u5F00\u5173\u89D2\u8272\u9080\u8BF7\uFF0Creset \u4F7F\u65E7\u94FE\u63A5\u548C\u5BF9\u5E94\u6388\u6743\u5931\u6548\uFF1Brole/remove \u7BA1\u7406\u6210\u5458\u5E76\u64A4\u9500\u539F\u8FDE\u63A5\u3002restore \u6309\u5DF2\u542F\u7528\u89D2\u8272\u6062\u590D\u539F\u6D4F\u89C8\u5668\u3002forget \u4EC5\u5220\u9664\u5DF2\u79FB\u9664\u6210\u5458\u548C\u8BE5\u677F\u59D3\u540D\u767B\u8BB0\uFF0C\u65E7\u8BC4\u8BBA\u5386\u53F2\u4E0D\u53D8\uFF1B\u4E4B\u540E\u9700\u6709\u6548\u9080\u8BF7\u91CD\u65B0\u8F93\u540D\uFF0C\u65B0\u6388\u6743\u4E0D\u590D\u6D3B\u79FB\u9664\u524D\u6392\u961F\u8BF7\u6C42\u3002\u4EC5\u6240\u6709\u8005\u53EF\u7BA1\u7406\u3002",
-  artifact_export: "\u6309\u8303\u56F4\u5BFC\u51FA JSON\u3001HTML\u3001SVG \u6216 PNG\uFF0C\u6216\u7531\u623F\u4E3B\u5BFC\u51FA\u5305\u542B\u8D44\u6E90\u3001\u5386\u53F2\u548C\u53CD\u9988\u7684 ZIP \u5907\u4EFD\uFF1B\u8FD4\u56DE\u4E0B\u8F7D\u8D44\u6E90\u5F15\u7528\u3002\u5BCC HTML PNG \u53EF\u80FD\u9700\u8981\u5728\u767D\u677F\u754C\u9762\u5BFC\u51FA\u3002",
+  artifact_export: "\u5C40\u90E8\u5BFC\u51FA\u987B\u6307\u5B9A\u81F3\u591A 10 \u4E2A ids \u6216\u4E00\u4E2A regionId\uFF0CPNG \u4E5F\u53EF\u6309\u4E16\u754C\u5750\u6807 rect \u53D6\u56FE\u3002atRevision \u53EF\u6307\u5B9A\u4FDD\u7559\u7684\u4F5C\u54C1\u4FEE\u8BA2\u3002\u56FE\u50CF\u6807\u660E\u6E32\u67D3\u6765\u6E90\u3001\u8303\u56F4\u548C\u7248\u6B21\u3002\u5BCC HTML PNG \u4E0E\u6574\u677F\u5907\u4EFD\u8BF7\u4F7F\u7528\u4F5C\u54C1\u754C\u9762\u3002",
   artifact_activity: "Agent\u58F0\u660E\u975E\u91CD\u53E0\u767D\u677F\u4EFB\u52A1\uFF0C\u4E0D\u9501\u4F4F\u4EBA\u7C7B\u7F16\u8F91\u3002begin\u6307\u5B9A\u7A33\u5B9Aparticipant/taskId\u3001scope.ids\u6216\u7A7A\u5730rect\uFF0C\u8FD4\u56DEgeneration\uFF1B\u6D3B\u8DC3\u540C\u8303\u56F4\u5E42\u7B49\uFF0C\u81EA\u884C\u7ED3\u675F\u6216\u8FC7\u671F\u540E\u987B\u5E26\u4E0A\u4E00\u4EE3\u660E\u786E\u91CD\u65B0\u7533\u8BF7\uFF0C\u4E0D\u81EA\u52A8\u7EED\u5199\u3002update/end\u5E26\u56DE\u540C\u4EE3\u7ED1\u5B9A\uFF0Cphase\u4E3Apreparing/writing/verifying\uFF0Cend\u53EF\u6807completed/failed/cancelled\u3002status\u67E5\u8BE2\u81EA\u5DF1\u7684active\u53CA\u6709\u754C\u7ED3\u675F\u8BB0\u5F55\uFF0C\u4E0D\u7EED\u79DF\uFF0C\u53EF\u53EA\u7ED9taskId\u6062\u590D\u4E22\u5931\u56DE\u6267\u3002\u6D3B\u52A8\u79DF\u7EA610\u5206\u949F\uFF0C2\u5206\u949F\u65E0\u5B9E\u8D28\u8FDB\u5C55\u53D8\u7070\u4FDD\u7559\uFF1B\u91CD\u590D\u5FC3\u8DF3\u4E0D\u4F2A\u9020\u8FDB\u5EA6\u3002release\u4EC5\u623F\u4E3B\u754C\u9762\u6309targetActorId/taskId/generation\u7ED3\u675F\u5177\u4F53\u4EFB\u52A1\uFF0CAgent\u4E0D\u80FD\u62A2\u91CA\u653E\u522B\u4EBA\u6216\u91CD\u65B0\u7533\u8BF7\u8BE5\u88AB\u91CA\u653E\u4EFB\u52A1\u3002\u8303\u56F4\u4E0D\u6388\u4E88\u989D\u5916\u6743\u9650\uFF0C\u4E0D\u7ED5\u8FC7CAS\u3001\u9501\u6216\u6B63\u5728\u7F16\u8F91\u68C0\u67E5\u3002"
 };
-function record2(value) {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
-}
-function modelSource(value) {
-  const source = record2(value) || {}, { html: html2, element, ...metadata } = source, frozen = record2(element);
-  const { html: nestedHtml, document, ...elementMetadata } = frozen || {};
-  const sourceHtml = typeof html2 === "string" ? html2 : typeof nestedHtml === "string" ? nestedHtml : void 0;
-  return { ...metadata, ...frozen ? { element: elementMetadata } : {}, ...document ? { documentSchemaVersion: 1, readWith: "artifact_read blocks + feedbackId + elementId\uFF0C\u6216 source \u5206\u9875\u8BFB\u53D6 JSON" } : {}, ...sourceHtml !== void 0 ? { htmlLength: sourceHtml.length, readWith: "artifact_read source + feedbackId + regionId" } : {} };
-}
-function modelResult(name, args, value) {
-  const result = record2(value);
-  if (!result) return value;
-  if (name === "artifact_list" && Array.isArray(result.artifacts)) return { ...result, artifacts: result.artifacts.map((item) => {
-    const { thumbnail: _thumbnail, ...metadata } = record2(item) || {};
-    return metadata;
-  }) };
-  if (name === "artifact_apply" || name === "artifact_manage") {
-    const snapshot = record2(result.document) || record2(result.board);
-    const artifact = result.artifact || snapshot?.artifact;
-    if (artifact) return { artifact, ...result.historyEntry ? { historyEntry: result.historyEntry } : {} };
-  }
-  if (name === "artifact_read") {
-    if (args.mode === "source" && record2(result.document)) {
-      const json3 = JSON.stringify(result.document);
-      let offset = Math.max(0, Math.min(json3.length, Math.floor(Number(args.offset) || 0)));
-      if (offset > 0 && /[\uDC00-\uDFFF]/.test(json3[offset] ?? "") && /[\uD800-\uDBFF]/.test(json3[offset - 1])) offset--;
-      let end = Math.min(json3.length, offset + Math.min(2e5, Math.max(1, Math.floor(Number(args.limit) || 64e3))));
-      if (end < json3.length && /[\uD800-\uDBFF]/.test(json3[end - 1]) && /[\uDC00-\uDFFF]/.test(json3[end])) end += end - offset === 1 ? 1 : -1;
-      const { document: _document, text: _text, sources: _sources, ...metadata } = result;
-      return { ...modelSource(metadata), json: json3.slice(offset, end), offset, totalLength: json3.length, ...end < json3.length ? { nextOffset: end } : {}, complete: end === json3.length };
-    }
-    if (args.mode === "source" && typeof result.html === "string") {
-      let offset = Math.max(0, Math.min(result.html.length, Math.floor(Number(args.offset) || 0)));
-      if (offset > 0 && /[\uDC00-\uDFFF]/.test(result.html[offset] ?? "") && /[\uD800-\uDBFF]/.test(result.html[offset - 1])) offset--;
-      let end = Math.min(result.html.length, offset + Math.min(2e5, Math.max(1, Math.floor(Number(args.limit) || 64e3))));
-      if (end < result.html.length && /[\uD800-\uDBFF]/.test(result.html[end - 1]) && /[\uDC00-\uDFFF]/.test(result.html[end])) end += end - offset === 1 ? 1 : -1;
-      const { sources: _sources, html: html2, ...metadata } = result;
-      return { ...modelSource(metadata), html: html2.slice(offset, end), offset, totalLength: html2.length, ...end < html2.length ? { nextOffset: end } : {}, complete: end === html2.length };
-    }
-    if (args.mode === "source") {
-      const { sources: _sources, ...source } = result;
-      return modelSource(source);
-    }
-    if (args.mode === "context" && Array.isArray(result.sources)) return { ...result, sources: result.sources.map(modelSource) };
-  }
-  if (name === "artifact_feedback" && Array.isArray(result.feedback)) {
-    const id2 = args.feedbackId || result.contextId;
-    const selected = id2 ? result.feedback.filter((item) => record2(item)?.id === id2) : args.action === "list" ? result.feedback.slice(0, 50) : result.feedback.slice(-1);
-    const feedback = selected.map((value2) => {
-      const item = record2(value2) || {};
-      const replies = Array.isArray(item.replies) ? item.replies : [];
-      const proposal = record2(item.proposal);
-      return { ...item, replies: replies.slice(-5), ...replies.length > 5 ? { replyCount: replies.length, repliesTruncated: true } : {}, ...proposal && Array.isArray(proposal.options) ? { proposal: { audience: proposal.audience, expiresAt: proposal.expiresAt, compact: true, options: proposal.options.map((value3) => {
-        const option2 = record2(value3) || {};
-        return { id: option2.id, label: option2.label, description: option2.description, active: option2.active, targetIds: option2.targetIds };
-      }) } } : {} };
-    });
-    const compact = { feedback, ...result.contextId ? { contextId: result.contextId } : {}, ...result.historyEntry ? { historyEntry: result.historyEntry } : {}, ...args.action === "list" && result.feedback.length > 50 ? { totalCount: result.feedback.length, truncated: true, hint: "\u6309\u53CD\u9988 ID \u8BFB\u53D6\uFF0C\u6216\u4F7F\u7528\u4F5C\u54C1\u754C\u9762\u67E5\u770B\u5176\u4F59\u53CD\u9988\u3002" } : {} };
-    return JSON.stringify(compact).length <= 24e4 ? compact : { feedback: feedback.map((item) => ({ id: item.id, status: item.status, text: typeof item.text === "string" ? item.text.slice(0, 500) : "" })), truncated: true, hint: "\u8BF7\u6309\u53CD\u9988 ID \u5206\u522B\u8BFB\u53D6\uFF1B\u5B8C\u6574\u8BA8\u8BBA\u4FDD\u7559\u5728\u4F5C\u54C1\u754C\u9762\u3002" };
-  }
-  if (JSON.stringify(result).length > 24e4) return { artifact: result.artifact || record2(result.board)?.artifact || record2(result.document)?.artifact, tooLarge: true, hint: "\u7ED3\u679C\u8D85\u8FC7\u6A21\u578B\u8F7D\u8377\u9884\u7B97\u3002\u8BF7\u7528 summary \u67E5\u770B\u6982\u8981\uFF0C\u518D\u6309\u5BF9\u8C61 IDs \u6216 source \u7684 offset/limit \u5206\u6BB5\u8BFB\u53D6\u3002" };
-  return result;
-}
 function createStudioServer(executor, html2) {
   const server = new McpServer({ name: "agentero-studio", title: "Agentero \u521B\u4F5C", version: PLUGIN_VERSION, icons: [STUDIO_ICON] });
   const uri = "ui://agentero-studio/app";
@@ -46832,14 +47720,15 @@ function createStudioServer(executor, html2) {
       ...name === "studio_open" ? { _meta: { ui: { resourceUri: uri, visibility: ["app"] }, "openai/ui": { entrypoints: [{ type: "thread" }] } } } : {}
     }, async (input2) => {
       try {
-        const args = input2;
-        const request = name === "artifact_read" && !args.mode ? { ...args, mode: "summary" } : args;
-        const transformed = modelResult(name, request, await executor.execute(name, request, { clientInfo: server.server.getClientVersion() }));
-        const data = JSON.stringify(transformed).length <= 24e4 ? transformed : { artifactId: request.artifactId, tooLarge: true, hint: "\u8BF7\u6309 summary \u9875\u3001\u5BF9\u8C61 ID \u6216 source \u7684 offset/limit \u7F29\u5C0F\u8BFB\u53D6\u8303\u56F4\uFF1B\u672A\u8FD4\u56DE\u5B8C\u6574\u5185\u5BB9\u3002" };
-        return { content: [], structuredContent: { ok: true, data }, ...name === "studio_open" ? { _meta: { connection: await executor.connection() } } : {} };
+        const request = boundedModelRequest(name, input2);
+        const response = await executor.execute(name, request, { clientInfo: server.server.getClientVersion() });
+        const { data, image } = modelResponseParts(name, request, response);
+        return { content: image ? [{ type: "image", ...image }] : [], structuredContent: { ok: true, data: boundedModelResult(name, request, data) }, ...name === "studio_open" ? { _meta: { connection: await executor.connection() } } : {} };
       } catch (error62) {
         const failure4 = error62;
-        return { isError: true, content: [{ type: "text", text: failure4.message }], structuredContent: { ok: false, error: { code: failure4.code || "STUDIO_ERROR", message: failure4.message, ...failure4.details ? { details: failure4.details } : {} } } };
+        const message = Array.from(failure4.message || "Studio \u64CD\u4F5C\u5931\u8D25").slice(0, 512).join("");
+        const details = failure4.details && modelDataFits(failure4.details, 8 * 1024) ? { details: failure4.details } : {};
+        return { isError: true, content: [{ type: "text", text: message }], structuredContent: { ok: false, error: { code: failure4.code || "STUDIO_ERROR", message, ...details } } };
       }
     });
   }

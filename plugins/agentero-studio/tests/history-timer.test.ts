@@ -191,6 +191,34 @@ describe('native layer ordering', () => {
     await expect(apply(returned.board, [{ op: 'restore', versionId: original.historyEntry.id, data: { mode: 'undo' } }])).rejects.toMatchObject({ code: 'CONFLICT', details: { elementId: '$order' } });
   });
 
+  it('round trips consecutive layer edits through their own inverse records after reopening the store', async () => {
+    const initial = await create(['a', 'b', 'c'].map(id => ({ id, type: 'text', text: id })));
+    const artifactId = initial.artifact.id;
+    const first = await apply(initial, [{ op: 'layout', preset: 'front', ids: ['a'] }]);
+    const second = await apply(first.board, [{ op: 'layout', preset: 'front', ids: ['b'] }]);
+    const operation = (versionId: string): Operation => ({ op: 'restore', versionId, data: { mode: 'undo' } });
+    const undoSecond = await apply(second.board, [operation(second.historyEntry.id)]);
+    const reopened = new StudioService({ dataRoot: directory });
+    try {
+      const reverse = async (board: Board, versionId: string) => reopened.execute('artifact_apply', { artifactId, expectedRevision: board.artifact.revision, operations: [operation(versionId)] });
+      const undoFirst = await reverse(undoSecond.board, first.historyEntry.id);
+      expect(undoFirst.board.orderVersion).toBe(4);
+      expect(undoFirst.board.elements.map((element: { id: string }) => element.id)).toEqual(['a', 'b', 'c']);
+      const redoFirst = await reverse(undoFirst.board, undoFirst.historyEntry.id);
+      const redoSecond = await reverse(redoFirst.board, undoSecond.historyEntry.id);
+      expect(redoSecond.board.orderVersion).toBe(6);
+      expect(redoSecond.board.elements.map((element: { id: string }) => element.id)).toEqual(['c', 'a', 'b']);
+    } finally { await reopened.close(); }
+  });
+
+  it('checks a mixed transaction against the live order before reversing membership and layers', async () => {
+    const initial = await create(['a', 'b', 'c'].map(id => ({ id, type: 'text', text: id })));
+    const mixed = await apply(initial, [{ op: 'delete', id: 'b' }, { op: 'layout', preset: 'front', ids: ['a'] }, { op: 'add', element: { id: 'x', type: 'text', text: 'X', x: 0, y: 0, w: 220, h: 120, version: 0 } }]);
+    const undo = await apply(mixed.board, [{ op: 'restore', versionId: mixed.historyEntry.id, data: { mode: 'undo' } }]);
+    expect(undo.board.elements.map((element: { id: string }) => element.id)).toEqual(['a', 'b', 'c']);
+    expect(undo.board.orderVersion).toBeGreaterThan(mixed.board.orderVersion);
+  });
+
   it('requires the real order clock for stale layer CAS and reads it without changing other units', async () => {
     const initial = await create(['a', 'b', 'c'].map(id => ({ id, type: 'text', text: id }))), artifactId = initial.artifact.id;
     const reordered = await apply(initial, [{ op: 'layout', preset: 'front', ids: ['a'] }]);

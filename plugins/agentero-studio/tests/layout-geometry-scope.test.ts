@@ -36,7 +36,9 @@ it.each(changes)('rejects a label outside a rect workspace without persisting an
 it.each(changes)('keeps independent label fields valid when the whole visible arrow fits the declared rect: %j', async patch => {
   const board = await create(), task = await begin(board, 'wide-enough', { rect: { x: -500, y: -500, w: 1600, h: 1600 } });
   const saved = await service.execute('artifact_apply', { artifactId: board.artifact.id, taskId: task.taskId, generation: task.generation, operationId: 'inside-label', expectedVersions: { edge: 1 }, operations: [{ op: 'update', id: 'edge', changes: patch }] }, first);
-  expect(saved.board.elements.find((element: BoardElement) => element.id === 'edge')).toMatchObject(patch);
+  expect(saved).not.toHaveProperty('board');
+  const verified = await service.execute('artifact_read', { artifactId: board.artifact.id, mode: 'objects', ids: ['edge'] }, first);
+  expect(verified.elements).toMatchObject([{ id: 'edge', ...patch }]);
 });
 
 it('rejects a label entering another reserved area even when the writer owns the arrow by explicit ID', async () => {
@@ -50,8 +52,10 @@ it('rejects a label entering another reserved area even when the writer owns the
 it('preserves explicit ID ownership without inventing endpoint ownership or a rect constraint', async () => {
   const board = await create(), own = await begin(board, 'id-only', { ids: ['edge'] });
   const saved = await service.execute('artifact_apply', { artifactId: board.artifact.id, taskId: own.taskId, generation: own.generation, operationId: 'move-owned-label', expectedVersions: { edge: 1 }, operations: [{ op: 'update', id: 'edge', changes: changes[0] }] }, first);
-  expect(saved.board.elements.find((element: BoardElement) => element.id === 'edge')).toMatchObject(changes[0]);
-  expect(saved.board.elements.filter((element: BoardElement) => element.type !== 'arrow')).toEqual(board.elements.filter(element => element.type !== 'arrow'));
+  expect(saved).not.toHaveProperty('board');
+  const verified = await service.execute('artifact_read', { artifactId: board.artifact.id, mode: 'objects', ids: ['edge', 'a', 'b'] }, first);
+  expect(verified.elements.find((element: BoardElement) => element.id === 'edge')).toMatchObject(changes[0]);
+  expect(verified.elements.filter((element: BoardElement) => element.type !== 'arrow')).toEqual(board.elements.filter(element => element.type !== 'arrow'));
 });
 
 it('includes the same measured label box in native selection, element bounds and both fit inputs', () => {

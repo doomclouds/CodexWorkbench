@@ -23,6 +23,10 @@ export interface ArtifactState<Content, Anchor = unknown, Source = unknown> exte
   assets: Record<string, AssetRecord>;
 }
 export interface ContentChange { id: string; before: unknown; after: unknown }
+export interface UndoUnitContext {
+  current: unknown;
+  changesWereReversed(didChange: (before: unknown, after: unknown) => boolean): boolean;
+}
 export interface ContentOperation { op: string; id?: string; ids?: string[]; versionId?: string; preset?: string; data?: Record<string, unknown> }
 export interface FeedbackSnapshot<Anchor, Source> { anchor: Anchor; versions: Record<string, number>; sources: Source[] }
 /** No whiteboard concepts belong to this contract: IDs can be paragraphs, cells, etc. */
@@ -41,7 +45,7 @@ export interface ProductAdapter<Content, Operation extends ContentOperation, Anc
   diff(before: Content, after: Content): ContentChange[];
   readUnit(content: Content, id: string): unknown;
   restoreUnit(content: Content, change: ContentChange, history?: readonly Content[]): void;
-  undoUnit?(content: Content, change: ContentChange, history?: readonly Content[]): void;
+  undoUnit?(content: Content, change: ContentChange, history: readonly Content[], context: UndoUnitContext): void;
   restore(current: Content, saved: Content, history?: readonly Content[]): Content;
   /** Product constraints also apply when historical content replaces current units. */
   validateRestore?(current: Content, restored: Content, baseline: Content, mode?: 'undo'): void;

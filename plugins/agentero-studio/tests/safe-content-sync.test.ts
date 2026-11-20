@@ -164,6 +164,80 @@ describe('persistent ABA clocks and guarded undo', () => {
     apply(s, [{ op: 'restore', versionId: undo.historyEntry.id, data: { mode: 'undo' } }]);
     expect(s.content.elements[0]).toMatchObject({ text: 'own', x: 90, version: 5 });
   });
+  it.each(['edit', 'delete'] as const)('undoes and redoes an addition after reversing the later %s of that object', action => {
+    const s = state();
+    const added = apply(s, [{ op: 'add', element: { id: 'b', type: 'text', text: 'new' } }]);
+    const later = apply(s, action === 'edit' ? [{ op: 'update', id: 'b', changes: { text: 'edited' } }] : [{ op: 'delete', id: 'b' }]);
+    const reverse = (versionId: string) => apply(s, [{ op: 'restore', versionId, data: { mode: 'undo' } }]);
+    const undoneLater = reverse(later.historyEntry.id);
+    expect(undoneLater.historyEntry).toMatchObject({ restoredFrom: later.historyEntry.id, restoreMode: 'undo' });
+    expect(s.content.elements[1]).toMatchObject({ text: 'new' });
+    const restoredVersion = s.content.elements[1]!.version;
+    if (action === 'delete') expect(() => apply(s, [{ op: 'update', id: 'b', changes: { x: 20 } }], { expectedVersions: { b: 1 }, merge: 'safe' })).toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
+    const undoneAdd = reverse(added.historyEntry.id);
+    expect(s.content.elements.map(element => element.id)).toEqual(['a']);
+    reverse(undoneAdd.historyEntry.id);
+    expect(s.content.elements[1]).toMatchObject({ text: 'new' });
+    expect(s.content.elements[1]!.version).toBeGreaterThan(restoredVersion);
+    reverse(undoneLater.historyEntry.id);
+    expect(s.content.elements.find(element => element.id === 'b')?.text).toBe(action === 'edit' ? 'edited' : undefined);
+  });
+  it('requires explicit own inverse lineage to cross a restored incarnation', () => {
+    for (const mode of ['normal restore', 'legacy inverse'] as const) {
+      const s = state();
+      const added = apply(s, [{ op: 'add', element: { id: 'b', type: 'text', text: 'new' } }]);
+      const deleted = apply(s, [{ op: 'delete', id: 'b' }]);
+      if (mode === 'normal restore') {
+        const restored = apply(s, [{ op: 'restore', versionId: added.historyEntry.id, id: 'b' }]);
+        expect(restored.historyEntry).not.toHaveProperty('restoreMode');
+      } else {
+        apply(s, [{ op: 'restore', versionId: deleted.historyEntry.id, data: { mode: 'undo' } }]);
+        delete s.history.at(-1)!.entry.restoreMode;
+      }
+      const before = structuredClone(s);
+      expect(() => apply(s, [{ op: 'restore', versionId: added.historyEntry.id, data: { mode: 'undo' } }])).toThrowError(expect.objectContaining({ code: 'CONFLICT', details: expect.objectContaining({ elementId: 'b' }) }));
+      expect(s).toEqual(before);
+    }
+  });
+  it('rejects undo across a collaborator replacing the same ID within one transaction', () => {
+    const s = state([{ id: 'a', type: 'text', text: 'original' }]);
+    const own = apply(s, [{ op: 'update', id: 'a', changes: { text: 'mine' } }]);
+    apply(s, [{ op: 'delete', id: 'a' }, { op: 'add', element: { id: 'a', type: 'text', text: 'mine' } }], {}, colleague);
+    const deleted = apply(s, [{ op: 'delete', id: 'a' }]);
+    apply(s, [{ op: 'restore', versionId: deleted.historyEntry.id, data: { mode: 'undo' } }]);
+    const before = structuredClone(s);
+    expect(s.content.elements[0]).toMatchObject({ id: 'a', text: 'mine' });
+    expect(() => apply(s, [{ op: 'restore', versionId: own.historyEntry.id, data: { mode: 'undo' } }])).toThrowError(expect.objectContaining({ code: 'CONFLICT', details: expect.objectContaining({ elementId: 'a' }) }));
+    expect(s).toEqual(before);
+  });
+  it('allows a stale board revision only for the same eligible undo and preserves idempotency', () => {
+    const s = state([{ id: 'a', type: 'text', text: 'first' }, { id: 'b', type: 'text', text: 'second' }]);
+    const own = apply(s, [{ op: 'update', id: 'a', changes: { text: 'own' } }]);
+    apply(s, [{ op: 'update', id: 'a', changes: { x: 30 } }, { op: 'update', id: 'b', changes: { text: 'remote' } }], {}, colleague);
+    const revision = own.historyEntry.revision;
+    const undo: Operation = { op: 'restore', versionId: own.historyEntry.id, data: { mode: 'undo' } };
+    const before = structuredClone(s);
+    for (const invalid of [
+      { operations: [undo], expectedRevision: revision - 1, code: 'CONFLICT' },
+      { operations: [undo], expectedRevision: s.artifact.revision + 1, code: 'CONFLICT' },
+      { operations: [undo], expectedRevision: undefined, code: 'VERSION_REQUIRED' },
+      { operations: [{ op: 'restore', versionId: own.historyEntry.id } as Operation], expectedRevision: revision, code: 'CONFLICT' },
+      { operations: [undo, { op: 'update', id: 'b', changes: { text: 'mixed' } } as Operation], expectedRevision: revision, code: 'CONFLICT' },
+    ]) expect(() => apply(s, invalid.operations, { expectedRevision: invalid.expectedRevision })).toThrowError(expect.objectContaining({ code: invalid.code }));
+    expect(() => apply(s, [undo], { expectedRevision: revision }, colleague)).toThrowError(expect.objectContaining({ code: 'FORBIDDEN' }));
+    expect(s).toEqual(before);
+    const operationId = randomUUID(), result = apply(s, [undo], { expectedRevision: revision, operationId });
+    expect(result.snapshot.content.elements).toMatchObject([{ text: 'first', x: 30 }, { text: 'remote' }]);
+    expect(apply(s, [undo], { expectedRevision: revision, operationId })).toEqual({ ...result, changed: false });
+  });
+  it('rejects a stale inverse atomically when any targeted field changed', () => {
+    const s = state([{ id: 'a', type: 'text', text: 'A' }, { id: 'b', type: 'text', text: 'B' }]);
+    const own = apply(s, [{ op: 'update', id: 'a', changes: { text: 'one' } }, { op: 'update', id: 'b', changes: { text: 'two' } }]);
+    apply(s, [{ op: 'update', id: 'b', changes: { text: 'remote' } }], {}, colleague);
+    const before = structuredClone(s);
+    expect(() => apply(s, [{ op: 'restore', versionId: own.historyEntry.id, data: { mode: 'undo' } }], { expectedRevision: own.historyEntry.revision })).toThrowError(expect.objectContaining({ code: 'CONFLICT', details: expect.objectContaining({ elementId: 'b' }) }));
+    expect(s).toEqual(before);
+  });
   it('refuses undo after later same-field edits or ID reincarnation', () => {
     const s = state(), own = apply(s, [{ op: 'update', id: 'a', changes: { text: 'own' } }]);
     apply(s, [{ op: 'update', id: 'a', changes: { text: 'later' } }], {}, colleague);

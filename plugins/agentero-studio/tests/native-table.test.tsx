@@ -78,6 +78,57 @@ it('gives explicit structured rows precedence over legacy TSV content', async ()
   expect(cell(0, 0).textContent).toBe('A');
   expect(host.textContent).not.toContain('忽略');
 });
+
+it('shows only the original header and first two rows in a table preview while retaining their cell targets', async () => {
+  const value = table({
+    data: {
+      rows: [['[名称](https://example.com)\n第二行', '说明'], ['项目 A', '一'], ['项目 B', '二'], ['项目 C', '三']],
+      columnWidths: [120, 280],
+    },
+  });
+  await mount(value, { detail: 'preview', viewport: { x: 0, y: 0, zoom: .5 } });
+  const frame = host.querySelector<HTMLElement>('.studio-native-table')!;
+  expect(frame.dataset.tableDetail).toBe('preview');
+  expect(frame.style.width).toBe('400px');
+  expect([...frame.querySelectorAll('col')].map(col => col.style.width)).toEqual(['120px', '280px']);
+  expect(frame.querySelectorAll('tr')).toHaveLength(3);
+  expect(cell(0, 0).textContent).toBe('名称');
+  expect(frame.querySelector('a')).toBeNull();
+  expect(frame.querySelector('.studio-table-column-handle')).toBeNull();
+  expect(button('添加表格行')).toBeTruthy();
+  await mount(value, { detail: 'preview', viewport: { x: 0, y: 0, zoom: .28 } });
+  expect(cell(0, 0).querySelector('.studio-table-preview-bar')).toBeTruthy();
+  expect(cell(0, 0).textContent).toBe('');
+  await event(cell(2, 1), 'dblclick');
+  expect(frame.dataset.tableDetail).toBe('full');
+  expect(editor().getAttribute('aria-label')).toBe('表格第3行第2列');
+  expect(cell(3, 0).textContent).toBe('项目 C');
+});
+
+it('opens an outline through the table edit request and keeps its active editor when the zoom changes', async () => {
+  const value = table({ data: { rows: [['标题', '说明'], ['正文', '样例']], columnWidths: [140, 260] } });
+  const onSave = vi.fn(async (changes: Partial<BoardElement>, base: BoardElement) => ({ ...base, ...changes, version: base.version + 1 }));
+  await mount(value, { detail: 'outline', onSave, viewport: { x: 0, y: 0, zoom: .1 } });
+  const frame = host.querySelector<HTMLElement>('.studio-native-table')!;
+  expect(frame.dataset.tableDetail).toBe('outline');
+  expect(frame.querySelector('.studio-table-outline-header')).toBeTruthy();
+  expect(frame.querySelector('table')).toBeNull();
+  await mount(value, { detail: 'outline', editRequest: 1, onSave, viewport: { x: 0, y: 0, zoom: .1 } });
+  const originalEditor = editor();
+  expect(originalEditor.getAttribute('aria-label')).toBe('表格第1行第1列');
+  await type('正在编辑');
+  await mount(value, { detail: 'preview', editRequest: 1, onSave, viewport: { x: 30, y: 20, zoom: .28 } });
+  expect(frame.dataset.tableDetail).toBe('full');
+  expect(editor()).toBe(originalEditor);
+  expect(document.activeElement).toBe(originalEditor);
+  expect(originalEditor.textContent).toBe('正在编辑');
+  expect(onSave).not.toHaveBeenCalled();
+  await key(originalEditor, 'Escape');
+  await waitUntil(() => frame.dataset.tableDetail === 'preview');
+  expect(onSave).toHaveBeenCalledTimes(1);
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ rows: [['正在编辑', '说明'], ['正文', '样例']], columnWidths: [140, 260] }) }), value);
+});
+
 async function editable(value = table(), version = (base: BoardElement) => base.version + 1) {
   let latest = value;
   const save = vi.fn(async (changes: Partial<BoardElement>, base: BoardElement): Promise<BoardElement | false> => {

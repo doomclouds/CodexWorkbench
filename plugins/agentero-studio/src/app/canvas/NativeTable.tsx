@@ -7,13 +7,16 @@ import InlineTextEditor, { type InlineTextEditorHandle, type InlineTextFormat, t
 import { newClientId } from '../shared/client-id.js';
 import { applyContentIntent } from './content-queue.js';
 import { mergeJson } from '../../core/shared/safe-merge.js';
+import { parseRichText } from '../../core/shared/rich-text.js';
 import { isEscapeActive } from '../shared/escape.js';
+import './native-table-overview.css';
 
 interface Cell { row: number; col: number }
 interface Draft { base: BoardElement; rows: string[][]; rowIds: string[]; columnIds: string[]; widths: number[]; head: boolean; width: number; dirty: boolean }
 export interface NativeTableDraft { base: BoardElement; changes: Partial<BoardElement> }
 interface Props {
   element: BoardElement; selected: boolean; canEdit: boolean;
+  detail?: 'full' | 'preview' | 'outline';
   onSave: (changes: Partial<BoardElement>, base: BoardElement) => Promise<BoardElement | false>;
   onEditingChange: (active: boolean) => void;
   onRequestLink?: (url: string) => void;
@@ -42,7 +45,7 @@ function changeDraft(draft: Draft, changes: Partial<Pick<Draft, 'rows' | 'rowIds
 function draftChanges(draft: Draft): Partial<BoardElement> { return { data: { ...draft.base.data, rows: draft.rows, rowIds: draft.rowIds, columnIds: draft.columnIds, columnWidths: draft.widths, head: draft.head }, ...(draft.width !== draft.base.w ? { w: draft.width } : {}) }; }
 function restoreDraft(draft?: NativeTableDraft): Draft | null { return draft ? { ...makeDraft({ ...draft.base, ...draft.changes }), base: draft.base, dirty: true } : null; }
 
-export default function NativeTable({ element, selected, canEdit, onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint, editRequest, viewport }: Props) {
+export default function NativeTable({ element, selected, canEdit, detail = 'full', onSave, onEditingChange, onRequestLink, onFormatStateChange, initialDraft, onDraftChange, bodyPaint, headerPaint, editRequest, viewport }: Props) {
   const [active, setActive] = useState<Cell | null>(null), [draft, setDraft] = useState<Draft | null>(() => restoreDraft(initialDraft));
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [resizing, setResizing] = useState(false);
   const [menu, setMenu] = useState<{ cell: Cell; x: number; y: number } | null>(null);
@@ -61,6 +64,13 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
   const drag = useRef<{ col: number; x: number; scale: number; initial: Draft; next: Draft } | null>(null);
   const current = draft ? { ...makeDraft(applyContentIntent(draft.base, { ...draft.base, ...draftChanges(draft) }, element) as BoardElement), base: draft.base, dirty: draft.dirty } : makeDraft(element), { rows, widths, head } = current;
   const editing = Boolean(active || draft?.dirty || busy || resizing);
+  const visibleDetail = editing || menu || error ? 'full' : detail;
+  const preview = visibleDetail === 'preview';
+  const visibleRows = preview ? rows.slice(0, head ? 3 : 2) : rows;
+  const zoom = viewport?.zoom ?? 1;
+  const readablePreviewText = (element.fontSize ?? 17) * zoom >= 8;
+  const previewRowHeight = element.h / rows.length;
+  const headerStyle = headerPaint ?? { background: element.fill };
   useLayoutEffect(() => { setOverlayHost(root.current?.closest<HTMLElement>('.studio-whiteboard') ?? null); }, []);
   useLayoutEffect(() => {
     if (!overlayHost || !selected || !canEdit) return;
@@ -206,15 +216,20 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
       {error && <><span role="alert">{error}</span><button type="button" aria-label="重试保存表格" onClick={() => void save(ensureDraft(), !active)} disabled={busy}>重试保存</button><button type="button" aria-label="放弃表格草稿" onClick={() => { stage(null); setActive(null); setError(''); }}>放弃草稿</button></>}
     </div>;
   let edge = 0;
-  return <div ref={root} className="studio-native-table" style={{ position: 'relative', width: current.width, height: '100%' }} onDoubleClick={event => event.stopPropagation()} onPointerDownCapture={event => { if (menu && !(event.target as Element).closest('.studio-table-cell-menu')) setMenu(null); }}>
-    <table className="studio-board-table" style={{ width: current.width, ...bodyPaint }}><colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup><tbody>{rows.map((row, r) => <tr key={r}>{row.map((cell, c) => {
+  return <div ref={root} className="studio-native-table" data-table-detail={visibleDetail} style={{ position: 'relative', width: current.width, height: '100%' }} onDoubleClick={event => {
+    event.stopPropagation();
+    if (visibleDetail !== 'full' && event.button === 0) start(0, 0);
+  }} onPointerDownCapture={event => { if (menu && !(event.target as Element).closest('.studio-table-cell-menu')) setMenu(null); }}>
+    <div className="studio-table-content" style={visibleDetail === 'full' ? undefined : bodyPaint}>
+    {visibleDetail === 'outline' ? head && <div className="studio-table-outline-header" aria-hidden="true" style={{ ...headerStyle, height: Math.min(element.h, Math.max(previewRowHeight, 2 / zoom)) }} />
+      : <table className="studio-board-table" style={{ width: current.width, ...bodyPaint }}><colgroup>{widths.map((width, index) => <col key={index} style={{ width }} />)}</colgroup><tbody>{visibleRows.map((row, r) => <tr key={r} style={preview ? { height: previewRowHeight } : undefined}>{row.map((cell, c) => {
       const Cell = r === 0 && head ? 'th' : 'td', editing = active?.row === r && active.col === c;
       return <Cell key={c} data-cell={`${r}:${c}`} onPointerDown={event => { if (event.button === 0 && active && !editing && canEdit && !busyRef.current) { event.preventDefault(); event.stopPropagation(); void navigate({ row: r, col: c }); } }} onDoubleClick={event => { if (event.button !== 0) return; event.stopPropagation(); start(r, c); }} onContextMenu={event => {
         if (!canEdit) return;
         event.preventDefault(); event.stopPropagation(); start(r, c);
         const rect = root.current!.getBoundingClientRect(), scale = rect.width / current.width || 1;
         setMenu({ cell: { row: r, col: c }, x: (event.clientX - rect.left) / scale, y: (event.clientY - rect.top) / scale });
-      }} style={r === 0 && head ? headerPaint ?? { background: element.fill } : undefined}>{editing ? <InlineTextEditor ref={input} className="studio-table-cell-editor" ariaLabel={`表格第${r + 1}行第${c + 1}列`} disabled={!canEdit} value={cell} onRequestLink={onRequestLink} onFormatStateChange={onFormatStateChange} onChange={value => {
+      }} style={r === 0 && head ? headerStyle : undefined}>{editing ? <InlineTextEditor ref={input} className="studio-table-cell-editor" ariaLabel={`表格第${r + 1}行第${c + 1}列`} disabled={!canEdit} value={cell} onRequestLink={onRequestLink} onFormatStateChange={onFormatStateChange} onChange={value => {
         const base = ensureDraft(); stage(changeDraft(base, { rows: base.rows.map((line, index) => index === r ? line.map((text, col) => col === c ? value : text) : line) }));
       }} onCommit={() => { if (!busyRef.current) void save(ensureDraft()); }} onBlur={event => {
         const target = event.relatedTarget as HTMLElement | null;
@@ -232,11 +247,15 @@ export default function NativeTable({ element, selected, canEdit, onSave, onEdit
           const base = ensureDraft(), next = index >= rows.length * row.length ? changeDraft(base, { rows: [...base.rows, row.map(() => '')], rowIds: [...base.rowIds, newClientId('row')] }) : base;
           void navigate({ row: Math.floor(index / row.length), col: index % row.length }, next);
         }
-      }} /> : <RichText text={cell} />}</Cell>;
-    })}</tr>)}</tbody></table>
-    {selected && canEdit && !element.locked && widths.map((width, col) => {
+      }} /> : preview ? readablePreviewText
+        ? <span className="studio-table-preview-text">{parseRichText(cell.split(/\r?\n/, 1)[0] ?? '')[0]?.segments.map(segment => segment.text).join('')}</span>
+        : cell.trim() && <span className="studio-table-preview-bar" aria-hidden="true" />
+        : <RichText text={cell} />}</Cell>;
+    })}</tr>)}</tbody></table>}
+    </div>
+    {selected && canEdit && !element.locked && (detail === 'full' || resizing) && widths.map((width, col) => {
       edge += width;
-      return <div key={col} className="studio-table-column-handle" data-native-interactive="true" role="separator" aria-label={`调整第${col + 1}列宽度`} aria-orientation="vertical" style={{ position: 'absolute', left: edge, top: 0, bottom: 0, width: 8/(viewport?.zoom ?? 1), marginLeft: -4/(viewport?.zoom ?? 1), cursor: 'col-resize', touchAction: 'none', zIndex: 4 }} onPointerDown={event => beginColumn(event, col)} onPointerMove={moveColumn} onPointerUp={event => endColumn(event)} onPointerCancel={event => endColumn(event, true)} onLostPointerCapture={event => endColumn(event, true)} />;
+      return <div key={col} className="studio-table-column-handle" data-native-interactive="true" role="separator" aria-label={`调整第${col + 1}列宽度`} aria-orientation="vertical" style={{ position: 'absolute', left: edge, top: 0, bottom: 0, width: 8/zoom, marginLeft: -4/zoom, cursor: 'col-resize', touchAction: 'none', zIndex: 4 }} onPointerDown={event => beginColumn(event, col)} onPointerMove={moveColumn} onPointerUp={event => endColumn(event)} onPointerCancel={event => endColumn(event, true)} onLostPointerCapture={event => endColumn(event, true)} />;
     })}
     {overlayHost ? createPortal(controls,overlayHost) : controls}
     {menu && <div className="studio-table-cell-menu" role="menu" data-native-interactive="true" style={{ position: 'absolute', left: menu.x, top: menu.y, zIndex: 8 }} onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') { event.preventDefault(); setMenu(null); } }}>

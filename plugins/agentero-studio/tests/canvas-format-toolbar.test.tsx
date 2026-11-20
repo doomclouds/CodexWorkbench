@@ -11,6 +11,7 @@ type Props = ComponentProps<typeof CanvasFormatToolbar>;
 let host: HTMLDivElement, root: Root, sheet: HTMLStyleElement;
 const element = (type: BoardElement['type'], extra: Partial<BoardElement> = {}): BoardElement => ({ id: type, type, x: 0, y: 0, w: 200, h: 100, version: 1, ...extra });
 const query = <T extends HTMLElement = HTMLElement>(label: string) => host.querySelector<T>(`[aria-label="${label}"]`)!;
+const selectionAt = (center: number, toolbarTop: number) => ({ x: center - 50, y: toolbarTop + 50, w: 100, h: 80 });
 async function click(label: string) { await act(async () => query<HTMLButtonElement>(label).click()); }
 async function choose(label: string, value: string) {
   await act(async () => { const select = query<HTMLSelectElement>(label); select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -19,7 +20,7 @@ async function mount(elements: BoardElement[], props: Partial<Props> = {}, withV
   const changed = vi.fn();
   function Harness() {
     const [values, setValues] = useState(elements);
-    return <>{withViewControls && <div className="studio-canvas-top-tools" />}<CanvasFormatToolbar elements={values} style={{ left: 200, top: 12 }} canEdit canAnnotate saving={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onMore={() => {}} onAlign={() => {}} onChange={changes => { changed(changes); setValues(previous => previous.map(value => ({ ...value, ...changes }))); }} {...props} /></>;
+    return <>{withViewControls && <div className="studio-canvas-top-tools" />}<CanvasFormatToolbar elements={values} selectionBounds={selectionAt(200, 12)} viewport={{ x: 0, y: 0, zoom: 1 }} canEdit canAnnotate saving={false} theme="light" onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onMore={() => {}} onAlign={() => {}} onChange={changes => { changed(changes); setValues(previous => previous.map(value => ({ ...value, ...changes }))); }} {...props} /></>;
   }
   await act(async () => root.render(<Harness />));
   return changed;
@@ -39,7 +40,7 @@ it.each([800, 300])('measures the real view controls and keeps selection actions
     if (this.classList.contains('studio-selection-toolbar')) return rect(0, 0, 264, 42);
     return rect(0, 0, 0, 0);
   });
-  await mount([element('document')], { style: { left: 1600, top: 12 } }, true);
+  await mount([element('document')], { selectionBounds: { x: 1550, y: -80, w: 100, h: 10 } }, true);
   const toolbar = query('选区格式'), left = parseFloat(toolbar.style.left) - 132, top = parseFloat(toolbar.style.top);
   expect(left + 264 <= width - 148 || top >= 58).toBe(true);
   expect(left).toBeGreaterThanOrEqual(12); expect(left + 264).toBeLessThanOrEqual(width - 12);
@@ -132,7 +133,7 @@ function measurePanels(layout: PanelLayout) {
 
 it.each(['文字对齐', '文字颜色', '文字链接', '填充颜色', '边框与线条', '对齐对象'])('anchors the %s panel at its actual trigger rather than the toolbar origin', async name => {
   measurePanels({ canvasWidth: 900, canvasHeight: 600, toolbarWidth: 660, panelWidth: 220, panelHeight: 90, triggerOffset: 365 });
-  await mount(name === '对齐对象' ? [element('shape'), element('shape', { id: 'second' })] : [element('shape')], { style: { left: 450, top: 120 } });
+  await mount(name === '对齐对象' ? [element('shape'), element('shape', { id: 'second' })] : [element('shape')], { selectionBounds: selectionAt(450, 120) });
   const trigger = query<HTMLButtonElement>(name);
   await click(name);
   const panel = host.querySelector<HTMLElement>('.studio-format-popover')!;
@@ -149,7 +150,7 @@ it.each(['文字对齐', '文字颜色', '文字链接', '填充颜色', '边框
 
 it('flips a panel above a low toolbar and clamps it within the right canvas edge', async () => {
   measurePanels({ canvasWidth: 600, canvasHeight: 330, toolbarWidth: 540, panelWidth: 220, panelHeight: 130, triggerOffset: 490 });
-  await mount([element('shape')], { style: { left: 500, top: 265 } });
+  await mount([element('shape')], { selectionBounds: selectionAt(500, 265) });
   await click('填充颜色');
   const panel = host.querySelector<HTMLElement>('.studio-format-popover')!, bounds = panel.getBoundingClientRect(), bar = query('选区格式').getBoundingClientRect();
   expect(panel.dataset.placement).toBe('above');
@@ -162,7 +163,7 @@ it('flips a panel above a low toolbar and clamps it within the right canvas edge
 it('constrains a tall panel and closes it when its trigger scrolls out of the toolbar', async () => {
   const layout = { canvasWidth: 320, canvasHeight: 260, toolbarWidth: 296, panelWidth: 420, panelHeight: 600, triggerOffset: 150 };
   measurePanels(layout);
-  await mount([element('shape')], { style: { left: 160, top: 110 } });
+  await mount([element('shape')], { selectionBounds: selectionAt(160, 110) });
   await click('文字颜色');
   const panel = host.querySelector<HTMLElement>('.studio-format-popover')!, bounds = panel.getBoundingClientRect();
   expect(parseFloat(panel.style.maxWidth)).toBe(296);
@@ -179,7 +180,7 @@ it('constrains a tall panel and closes it when its trigger scrolls out of the to
 it('repositions an open panel after toolbar scrolling and after its content grows', async () => {
   const layout = { canvasWidth: 900, canvasHeight: 480, toolbarWidth: 660, panelWidth: 220, panelHeight: 70, triggerOffset: 365 };
   measurePanels(layout);
-  await mount([element('shape')], { style: { left: 450, top: 240 } });
+  await mount([element('shape')], { selectionBounds: selectionAt(450, 240) });
   await click('文字颜色');
   const panel = host.querySelector<HTMLElement>('.studio-format-popover')!;
   const before = panel.getBoundingClientRect();
@@ -231,9 +232,67 @@ it('focuses the link field and restores the invoking button after applying', asy
 
 it('anchors a keyboard-requested link at its link button and focuses the existing address', async () => {
   measurePanels({ canvasWidth: 900, canvasHeight: 600, toolbarWidth: 660, panelWidth: 220, panelHeight: 90, triggerOffset: 365 });
-  await mount([element('text')], { style: { left: 450, top: 120 }, requestLink: { key: 'link-request', value: 'https://example.com' } });
+  await mount([element('text')], { selectionBounds: selectionAt(450, 120), requestLink: { key: 'link-request', value: 'https://example.com' } });
   const input = query<HTMLInputElement>('文字链接地址');
   expect(document.activeElement).toBe(input);
   expect(input.value).toBe('https://example.com');
   expect(host.querySelector('.studio-format-popover')!.getBoundingClientRect().left).toBe(query('文字链接').getBoundingClientRect().left);
+});
+
+it('avoids actual section text and its focused editor while measuring only neighboring candidates', async () => {
+  const section = element('container', { id: 'section', x: 220, y: 250, w: 260, text: '数据架构', fontSize: 32 });
+  const neighbor = element('container', { id: 'neighbor', x: 390, y: 200, w: 120, text: '推进计划', fontSize: 32 });
+  const unrelated = element('container', { id: 'unrelated', x: 652, y: 380, w: 120, text: '其它', fontSize: 17 });
+  const titles = [section, neighbor, unrelated];
+  const measured = new Set<string>();
+  let cameraY = 0;
+  const barRect = () => {
+    const toolbar = query('选区格式');
+    const w = Math.min(420, parseFloat(toolbar?.style.maxWidth || '420'));
+    return new DOMRect(parseFloat(toolbar?.style.left || '350') - w / 2, parseFloat(toolbar?.style.top || '100'), w, 42);
+  };
+  if (!globalThis.CSS?.escape) vi.stubGlobal('CSS', { escape: (id: string) => id });
+  const createRange = document.createRange.bind(document);
+  vi.spyOn(document, 'createRange').mockImplementation(() => {
+    const range = createRange();
+    range.getBoundingClientRect = () => (range.commonAncestorContainer as Element).querySelector('span')!.getBoundingClientRect();
+    return range;
+  });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return new DOMRect(0, 0, 800, 600);
+    if (this.classList.contains('studio-selection-toolbar')) return barRect();
+    if (this.classList.contains('studio-selection-toolbar-scroll')) return barRect();
+    if (this.parentElement?.classList.contains('studio-selection-toolbar-scroll')) return new DOMRect(barRect().left + 110, barRect().top + 5, 29, 30);
+    if (this.classList.contains('studio-format-popover')) return new DOMRect(barRect().left + parseFloat(this.style.left || '0'), barRect().top + parseFloat(this.style.top || '0'), 220, Math.min(130, parseFloat(this.style.maxHeight || '130')));
+    const object = this.closest<HTMLElement>('[data-element-id]');
+    if (!object) return new DOMRect();
+    const id = object.dataset.elementId!;
+    measured.add(id);
+    if (id === neighbor.id) return new DOMRect(390, 150 + cameraY, 120, 40);
+    if (id === unrelated.id) return new DOMRect(652, 347 + cameraY, 80, 22);
+    if (this.getAttribute('contenteditable') === 'true') return new DOMRect(220, 145 + cameraY, 260, 69);
+    if (this.matches('span')) return new DOMRect(220, 200 + cameraY, 130, 32);
+    return new DOMRect(220, 200 + cameraY, 260, 40);
+  });
+  function Scene({ editing }: { editing: boolean }) {
+    return <>{titles.map(title => <div key={title.id} data-element-id={title.id}><div data-canvas-external-title="">{editing && title.id === section.id ? <div contentEditable suppressContentEditableWarning aria-label="编辑标题">{title.text}</div> : <span>{title.text}</span>}</div></div>)}
+      <CanvasFormatToolbar elements={[section]} selectionBounds={section} viewport={{ x: 0, y: cameraY, zoom: 1 }} titles={titles} editingTitle={editing ? section.id : undefined} canEdit canAnnotate saving={false} theme="light" onChange={() => {}} onEditText={() => {}} onTextFormat={() => {}} onAnnotate={() => {}} onMore={() => {}} onAlign={() => {}} />
+    </>;
+  }
+  await act(async () => root.render(<Scene editing={false} />));
+  expect(barRect().top).toBe(358);
+  expect(measured).toEqual(new Set(['section', 'neighbor']));
+  await act(async () => root.render(<Scene editing />));
+  const editor = query('编辑标题'); editor.focus();
+  expect(barRect().bottom).toBeLessThan(editor.getBoundingClientRect().top);
+  cameraY = 24;
+  await act(async () => root.render(<Scene editing />));
+  expect(document.activeElement).toBe(editor);
+  expect(barRect().bottom).toBe(editor.getBoundingClientRect().top - 8);
+  await click('文字链接');
+  const dialog = host.querySelector<HTMLElement>('.studio-format-popover')!;
+  expect(dialog.dataset.placement).toBe('above');
+  expect(dialog.getBoundingClientRect().bottom).toBeLessThan(editor.getBoundingClientRect().top);
+  await act(async () => query('文字链接地址').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(editor);
 });
