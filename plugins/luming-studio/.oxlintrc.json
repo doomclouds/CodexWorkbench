@@ -1,0 +1,36 @@
+{
+  "plugins": ["typescript", "react"],
+  "options": {
+    "typeAware": true,
+    "maxWarnings": 0
+  },
+  "categories": {
+    "correctness": "off"
+  },
+  "rules": {
+    "eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "caughtErrors": "all", "ignoreRestSiblings": true }
+    ],
+    "typescript/no-floating-promises": ["error", { "ignoreVoid": false }],
+    "typescript/no-misused-promises": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/return-await": ["error", "error-handling-correctness-only"],
+    "typescript/no-deprecated": "error",
+    "react/no-unsafe": ["error", { "checkAliases": true }]
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/app/transport/bridge.ts",
+        "src/app/transport/tool-response.ts",
+        "src/app/features/whiteboard/canvas/sync/canvas-drafts.ts",
+        "src/contracts/board-shape.ts"
+      ],
+      "rules": {
+        "typescript/no-unsafe-assignment": "error",
+        "typescript/no-unsafe-type-assertion": "error"
+      }
+    }
+  ]
+}
