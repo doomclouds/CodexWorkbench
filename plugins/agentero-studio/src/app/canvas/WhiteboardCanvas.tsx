@@ -1636,7 +1636,7 @@ function CanvasSession({
     queueDrafts,
   );
   const hadLocalDraft = useRef(draftRecovery.discardEmpty);
-  const storageFailed = useRef(false);
+  const [draftStorageError, setDraftStorageError] = useState('');
   useEffect(() => {
     if (preview) {
       return;
@@ -1650,20 +1650,30 @@ function CanvasSession({
       queueDrafts,
     );
 
-    if (!currentDraft && !hadLocalDraft.current) {
-      return;
+    let warning = '';
+    try {
+      if (currentDraft || hadLocalDraft.current) {
+        storeCanvasDraft(draftStorageKey, currentDraft, draftRecovery);
+        hadLocalDraft.current = Boolean(currentDraft);
+      }
+    } catch (failure) {
+      const message = currentDraft
+        ? '本机草稿保存失败，请复制草稿或下载副本后再关闭。'
+        : '无法清理本机草稿，重新打开时可能仍会显示旧草稿。';
+
+      warning = message + errorText(failure);
     }
 
-    try {
-      storeCanvasDraft(draftStorageKey, currentDraft, draftRecovery);
-      hadLocalDraft.current = Boolean(currentDraft);
-      storageFailed.current = false;
-    } catch (failure) {
-      if (!storageFailed.current) {
-        storageFailed.current = true;
-        setError(`本机草稿保存失败，请复制草稿或下载副本后再关闭。${errorText(failure)}`);
+    let current = true;
+    queueMicrotask(() => {
+      if (current) {
+        setDraftStorageError(warning);
       }
-    }
+    });
+
+    return () => {
+      current = false;
+    };
   }, [
     draftRecovery,
     draftStorageKey,
@@ -1671,7 +1681,6 @@ function CanvasSession({
     preview,
     propertyDrafts,
     queueDrafts,
-    setError,
     tableDrafts,
     textDirty,
   ]);
@@ -7155,6 +7164,7 @@ function CanvasSession({
           />
         )}
         {renderFailedDraftNotices()}
+        {renderDraftStorageNotice()}
         {renderRecoveredDraftNotice()}
         {renderRemovedTextNotice()}
         {!preview && (
@@ -7210,6 +7220,51 @@ function CanvasSession({
     });
   }
 
+  function renderDraftExportActions(readDraft: () => string) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => void copyPlainText(readDraft()).catch(reportCanvasFailure)}
+        >
+          复制草稿
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            void downloadStudioBlob(
+              client,
+              new Blob([readDraft()], { type: 'application/json' }),
+              'whiteboard-draft.json',
+            ).catch(reportCanvasFailure)
+          }
+        >
+          下载草稿副本
+        </button>
+      </>
+    );
+  }
+
+  function renderDraftStorageNotice() {
+    if (preview || !draftStorageError) {
+      return null;
+    }
+
+    return (
+      <OperationNotice
+        source="本机草稿"
+        message={draftStorageError}
+        closeLabel="关闭本机草稿提示"
+        onClose={() => setDraftStorageError('')}
+        fallbackClass="studio-canvas-error"
+        fallbackStyle={inlineCanvasNotice}
+        actions={
+          activeDraft && renderDraftExportActions(() => JSON.stringify(activeDraft, null, 2))
+        }
+      />
+    );
+  }
+
   function renderRecoveredDraftNotice() {
     const retainedDrafts = draftRecovery.retainedDrafts ?? [];
     const visibleDraft = recovered || unreadableDraft !== undefined;
@@ -7226,7 +7281,6 @@ function CanvasSession({
   }
 
   function renderVisibleDraftRecovery() {
-    const copiedDraft = unreadableDraft ?? JSON.stringify(recovered, null, 2);
     const handleRecoverLocalDraft = () => {
       if (!recovered) {
         return;
@@ -7269,24 +7323,7 @@ function CanvasSession({
             恢复上次草稿
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => void copyPlainText(copiedDraft).catch(reportCanvasFailure)}
-        >
-          复制草稿
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            void downloadStudioBlob(
-              client,
-              new Blob([copiedDraft], { type: 'application/json' }),
-              'whiteboard-draft.json',
-            ).catch(reportCanvasFailure)
-          }
-        >
-          下载草稿副本
-        </button>
+        {renderDraftExportActions(() => unreadableDraft ?? JSON.stringify(recovered, null, 2))}
         <button type="button" onClick={handleDiscardLocalDraft}>
           放弃上次草稿
         </button>

@@ -464,6 +464,64 @@ describe('bounded collaboration replay and peer ordering', () => {
     expect(collaboration.getPresence('board-a')).toEqual([]);
   });
 
+  it('retains all selected, moving and saving IDs when one view repeats a large selection', async () => {
+    const collaboration = create();
+    const ids = Array.from({ length: 87 }, (_, index) => `architecture-fixture-${index}`);
+    const context = {
+      artifactId: 'board-a',
+      viewId: 'bulk-page',
+      selectedIds: ids,
+      movingIds: ids,
+      savingIds: ids,
+      issues: [{ type: 'saving', message: '等待保存确认。', ids }],
+    };
+
+    expect(Buffer.byteLength(JSON.stringify(context))).toBeGreaterThan(8 * 1024);
+
+    const result = await collaboration.update('board-a', { peerId: 'bulk-page', context }, editor);
+    expect(result.peers[0]?.context).toEqual(context);
+    expect(collaboration.getPresence('board-a')[0]?.context).toEqual(context);
+  });
+
+  it('rejects excess distinct context data and oversized repeated requests without replacing presence', async () => {
+    const collaboration = create();
+    const context = { artifactId: 'board-a', viewId: 'bulk-page', selectedIds: ['original'] };
+    await collaboration.update('board-a', { peerId: 'bulk-page', context }, editor);
+
+    const distinctIds = Array.from({ length: 87 }, (_, index) => `unit-${index}-${'a'.repeat(80)}`);
+    await expect(
+      collaboration.update(
+        'board-a',
+        { peerId: 'bulk-page', context: { ...context, movingIds: distinctIds } },
+        editor,
+      ),
+    ).rejects.toMatchObject({ code: 'TOO_LARGE', message: '视图上下文超过 6 KiB。' });
+
+    const repeatedIds = Array.from({ length: 87 }, (_, index) => `architecture-fixture-${index}`);
+    await expect(
+      collaboration.update(
+        'board-a',
+        {
+          peerId: 'bulk-page',
+          context: {
+            ...context,
+            selectedIds: repeatedIds,
+            movingIds: repeatedIds,
+            savingIds: repeatedIds,
+            issues: Array.from({ length: 5 }, () => ({
+              type: 'saving',
+              message: '等待保存确认。',
+              ids: repeatedIds,
+            })),
+          },
+        },
+        editor,
+      ),
+    ).rejects.toMatchObject({ code: 'TOO_LARGE', message: '在线状态过大。' });
+
+    expect(collaboration.getPresence('board-a')[0]?.context).toEqual(context);
+  });
+
   it('gives disconnected streams a grace period, renews RPC leases and rejects old-epoch leave', async () => {
     vi.useFakeTimers();
     const collaboration = create();

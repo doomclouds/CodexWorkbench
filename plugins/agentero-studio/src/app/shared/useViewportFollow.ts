@@ -11,12 +11,8 @@ import type { CollaborationRoom, Presence } from '../../contracts/studio';
 import { jsonEqual } from '../../core/shared/safe-merge';
 import type { StudioDocument, Viewport } from '../products';
 import { ParticipantActivity, participantIdentity } from './presence-members';
-import {
-  activeAgentTasks,
-  agentPeerBounds,
-  documentElements,
-  type ActivityBounds,
-} from './agent-activity';
+import { activeAgentTasks, agentPeerBounds, documentElements } from './agent-activity';
+import { agentFollowFrame, type AgentFollowFrame } from './agent-follow-viewport';
 
 export function fitFollowViewport(
   viewport: Viewport,
@@ -35,20 +31,6 @@ export function fitFollowViewport(
   const y = -viewport.y / viewport.zoom + height / 2;
   const zoom = Math.max(0.1, Math.min(4, local.w / width, local.h / height));
   return { x: local.w / 2 - x * zoom, y: local.h / 2 - y * zoom, zoom };
-}
-
-export function fitAgentArea(bounds: ActivityBounds, local: { w: number; h: number }): Viewport {
-  const margin = Math.min(48, local.w / 6, local.h / 6);
-  const zoom = Math.max(
-    0.1,
-    Math.min(1, (local.w - margin * 2) / bounds.w, (local.h - margin * 2) / bounds.h),
-  );
-
-  return {
-    x: local.w / 2 - (bounds.x + bounds.w / 2) * zoom,
-    y: local.h / 2 - (bounds.y + bounds.h / 2) * zoom,
-    zoom,
-  };
 }
 
 interface FollowSnapshot {
@@ -122,7 +104,11 @@ function createFollowMotion(updateView: (changes: Partial<FollowSnapshot>) => vo
     target = undefined;
     render(undefined);
   }
-  function moveTo(next: Viewport, currentViewport: () => Viewport | undefined) {
+  function moveTo(next: Viewport | undefined, currentViewport: () => Viewport | undefined) {
+    if (!next) {
+      return;
+    }
+
     const inMotion = animation !== undefined || sameViewport(rendered, next);
     if (sameViewport(target, next) && inMotion) {
       return;
@@ -158,6 +144,7 @@ function followedPage(
   following: string,
   elements: ReturnType<typeof documentElements>,
   clockOffsetMs: number,
+  previousPeerId: string | undefined,
 ) {
   const localNow = Date.now();
   const now = localNow + clockOffsetMs;
@@ -165,13 +152,19 @@ function followedPage(
     .read(peers, actorId, localNow)
     .find((item) => participantIdentity(item.actor) === following);
   const agent = member?.actor.kind === 'agent';
-  const peer = member?.peers.find((page) => {
+  function canFollowPage(page: Presence) {
     if (page.visible === false) {
       return false;
     }
 
     return agent ? !!agentPeerBounds(page, elements, now) : !!page.context?.viewport;
-  });
+  }
+
+  const currentAgent = agent
+    ? member.peers.find((page) => page.peerId === previousPeerId)
+    : undefined;
+  const peer =
+    currentAgent && canFollowPage(currentAgent) ? currentAgent : member?.peers.find(canFollowPage);
   const expiry = agent
     ? Math.min(
         ...member.peers.flatMap((page) =>
@@ -183,20 +176,7 @@ function followedPage(
   return { peer, agent, expiry, now };
 }
 
-function remoteViewport(
-  peer: Presence,
-  bounds: ActivityBounds | undefined,
-  area: HTMLElement | null,
-) {
-  const local = {
-    w: area?.clientWidth || window.innerWidth,
-    h: area?.clientHeight || window.innerHeight,
-  };
-
-  if (bounds) {
-    return fitAgentArea(bounds, local);
-  }
-
+function remoteViewport(peer: Presence, local: { w: number; h: number }) {
   const surface = peer.context?.surface as { w?: number; h?: number } | undefined;
   const viewport = peer.context?.viewport;
   if (viewport) {
@@ -206,6 +186,29 @@ function remoteViewport(
       local,
     );
   }
+}
+
+function nextFollowViewport(
+  peer: Presence,
+  elements: ReturnType<typeof documentElements>,
+  now: number,
+  area: HTMLElement | null,
+  currentViewport: () => Viewport | undefined,
+  previous: RefObject<AgentFollowFrame | undefined>,
+) {
+  const local = {
+    w: area?.clientWidth || window.innerWidth,
+    h: area?.clientHeight || window.innerHeight,
+  };
+
+  if (peer.actor.kind === 'agent') {
+    const frame = agentFollowFrame(peer, elements, now, local, currentViewport(), previous.current);
+    previous.current = frame;
+    return frame?.viewport;
+  }
+
+  previous.current = undefined;
+  return remoteViewport(peer, local);
 }
 
 function followsOwnPage(peer: Presence, peers: Presence[], actorId: string, peerId: string) {
@@ -258,6 +261,7 @@ export function useViewportFollow({
   }, [currentViewport]);
   const deadline = useRef<number | undefined>(undefined);
   const lastPeer = useRef<Presence | undefined>(undefined);
+  const agentFrame = useRef<AgentFollowFrame | undefined>(undefined);
   const agentEnded = useRef(false);
   const reported = useRef<
     { room: CollaborationRoom; peerId: string; targetId: string | null } | undefined
@@ -297,6 +301,7 @@ export function useViewportFollow({
     began.current = Date.now();
     deadline.current = undefined;
     agentEnded.current = false;
+    agentFrame.current = undefined;
   }, [following]);
   useEffect(() => () => motion.cancel(), [motion]);
   useEffect(() => {
@@ -320,6 +325,7 @@ export function useViewportFollow({
       following,
       elements,
       clockOffsetMs,
+      lastPeer.current?.peerId,
     );
     reportTarget(room, peerId, peer?.peerId ?? null);
     const last = lastPeer.current;
@@ -360,11 +366,9 @@ export function useViewportFollow({
       motion.cancel();
       return cleanup;
     }
-    const bounds = agent ? agentPeerBounds(peer, elements, now) : undefined;
-    const next = remoteViewport(peer, bounds, area.current);
-    if (next) {
-      motion.moveTo(next, () => getCurrentViewport?.() ?? ownView.current);
-    }
+    const current = () => getCurrentViewport?.() ?? ownView.current;
+    const next = nextFollowViewport(peer, elements, now, area.current, current, agentFrame);
+    motion.moveTo(next, current);
     return cleanup;
   }, [
     following,

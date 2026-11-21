@@ -17822,7 +17822,7 @@ function invalidPresenceObject(value) {
   return value !== void 0 && value !== null && !object2(value);
 }
 function assertPresenceFields(input2) {
-  if (Buffer.byteLength(JSON.stringify(input2)) > 16 * 1024) {
+  if (Buffer.byteLength(JSON.stringify(input2)) > MAX_PRESENCE_UPDATE_BYTES) {
     throw new StudioError("TOO_LARGE", "\u5728\u7EBF\u72B6\u6001\u8FC7\u5927\u3002");
   }
   const invalidFollowing = input2.following !== void 0 && input2.following !== null && typeof input2.following !== "string";
@@ -17857,6 +17857,22 @@ function normalizeContextIssues(issues) {
     };
   });
 }
+function presenceContextBytes(context, idLists) {
+  let bytes = Buffer.byteLength(JSON.stringify(context));
+  if (bytes <= MAX_VIEW_CONTEXT_BYTES) {
+    return bytes;
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const ids of idLists) {
+    for (const id2 of ids) {
+      if (seen.has(id2)) {
+        bytes -= Buffer.byteLength(JSON.stringify(id2).slice(1, -1));
+      }
+      seen.add(id2);
+    }
+  }
+  return bytes;
+}
 function presenceContext(artifactId, value, previous, actor) {
   if (value === null) {
     return;
@@ -17871,18 +17887,26 @@ function presenceContext(artifactId, value, previous, actor) {
   if (context.viewId.length > 120 || !validIds(context.selectedIds)) {
     throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
   }
+  const idLists = [context.selectedIds];
   for (const field of editableContextFields) {
-    if (context[field] !== void 0 && !validIds(context[field])) {
+    const ids = context[field];
+    if (ids === void 0) {
+      continue;
+    }
+    if (!validIds(ids)) {
       throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
     }
+    idLists.push(ids);
   }
   if (context.dirty !== void 0 && typeof context.dirty !== "boolean") {
     throw new StudioError("INVALID_ARGUMENT", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u65E0\u6548\u3002");
   }
   if (context.issues !== void 0) {
-    context.issues = normalizeContextIssues(context.issues);
+    const issues = normalizeContextIssues(context.issues);
+    context.issues = issues;
+    idLists.push(...issues.map(({ ids }) => ids));
   }
-  if (Buffer.byteLength(JSON.stringify(context)) > 6144) {
+  if (presenceContextBytes(context, idLists) > MAX_VIEW_CONTEXT_BYTES) {
     throw new StudioError("TOO_LARGE", "\u89C6\u56FE\u4E0A\u4E0B\u6587\u8D85\u8FC7 6 KiB\u3002");
   }
   if (!["owner", "editor"].includes(actor.role)) {
@@ -18096,7 +18120,7 @@ function agentActivity(entries, live) {
   }
   return live.length ? "working" : "idle";
 }
-var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, MAX_CLOSED_TASKS, debug2, editableContextFields, StudioCollaboration;
+var LEASE_MS, DISCONNECT_MS, AGENT_IDLE_MS, MAX_AGENT_TASKS, MAX_BOARD_TASKS, MAX_CLOSED_TASKS, MAX_PRESENCE_UPDATE_BYTES, MAX_VIEW_CONTEXT_BYTES, debug2, editableContextFields, StudioCollaboration;
 var init_collaboration = __esm({
   "src/core/shared/collaboration.ts"() {
     "use strict";
@@ -18112,6 +18136,8 @@ var init_collaboration = __esm({
     MAX_AGENT_TASKS = 8;
     MAX_BOARD_TASKS = 64;
     MAX_CLOSED_TASKS = 512;
+    MAX_PRESENCE_UPDATE_BYTES = 16 * 1024;
+    MAX_VIEW_CONTEXT_BYTES = 6 * 1024;
     debug2 = debuglog2("agentero-studio");
     editableContextFields = ["editingIds", "savingIds", "movingIds"];
     StudioCollaboration = class {

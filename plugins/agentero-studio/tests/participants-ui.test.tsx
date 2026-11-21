@@ -6,9 +6,11 @@ import {
   DEFAULT_STYLE,
   type AgentTask,
   type Board,
+  type BoardElement,
   type CollaborationRoom,
   type Presence,
 } from '../src/contracts/studio';
+import { agentFollowFrame } from '../src/app/shared/agent-follow-viewport';
 import { OnlineParticipants } from '../src/app/shared/OnlineParticipants';
 import { useNativeGestureSync, type NativeGesture } from '../src/app/shared/useNativeGestureSync';
 import { claimParticipantColor, participantColor } from '../src/app/shared/presence-members';
@@ -20,6 +22,80 @@ const taskMeta = (at = Date.now()) => ({
   startedAt: at,
   lastActivityAt: at,
   lastProgressAt: at,
+});
+
+function workingAgent(scope: AgentTask['scope']): Presence {
+  return {
+    actor: { ...LOCAL_ACTOR, id: 'builder', kind: 'agent' },
+    peerId: 'builder-peer',
+    context: {
+      viewId: 'builder-peer',
+      artifactId: 'board',
+      selectedIds: [],
+      agentTasks: [{ ...taskMeta(1000), taskId: 'work', scope, expiresAt: 60_000 }],
+    },
+    updatedAt: new Date(1000).toISOString(),
+  };
+}
+
+it('locates an oversized Agent rectangle at the current zoom and keeps the visible area', () => {
+  const peer = workingAgent({ rect: { x: 4000, y: 2000, w: 16_000, h: 12_000 } });
+  const local = { w: 1200, h: 800 };
+  const outside = { x: 0, y: 0, zoom: 0.5 };
+  expect(agentFollowFrame(peer, [], 1000, local, outside)?.viewport).toEqual({
+    x: -2000,
+    y: -1000,
+    zoom: 0.5,
+  });
+
+  const inside = { x: -2100, y: -1100, zoom: 0.5 };
+  expect(agentFollowFrame(peer, [], 1000, local, inside)?.viewport).toEqual(inside);
+
+  const onePixelOverlap = { x: -801, y: -201, zoom: 0.5 };
+  expect(agentFollowFrame(peer, [], 1000, local, onePixelOverlap)?.viewport).toEqual({
+    x: -2000,
+    y: -1000,
+    zoom: 0.5,
+  });
+});
+
+it('prefers a real editing target inside an oversized Agent rectangle', () => {
+  const local = { w: 1200, h: 800 };
+  const peer = workingAgent({ rect: { x: 0, y: 0, w: 16_000, h: 12_000 } });
+  const editing = { ...peer, context: { ...peer.context!, editingIds: ['outside', 'inside'] } };
+  const elements: BoardElement[] = [
+    { id: 'outside', type: 'shape', x: -250, y: 0, w: 200, h: 120, version: 1 },
+    { id: 'inside', type: 'shape', x: 14_000, y: 7000, w: 200, h: 120, version: 1 },
+  ];
+  const focused = agentFollowFrame(editing, elements, 1000, local);
+  expect(focused?.viewport).toEqual({ x: -13_500, y: -6660, zoom: 1 });
+  expect(agentFollowFrame(peer, elements, 1001, local, undefined, focused)?.viewport).toEqual(
+    focused?.viewport,
+  );
+});
+
+it('anchors distant Agent work to a real object and keeps it across presence updates', () => {
+  const local = { w: 1200, h: 800 };
+  const peer = workingAgent({ ids: ['left', 'right'] });
+  const elements: BoardElement[] = [
+    { id: 'left', type: 'shape', x: 0, y: 0, w: 200, h: 120, version: 1 },
+    { id: 'right', type: 'shape', x: 10_000, y: 0, w: 200, h: 120, version: 1 },
+  ];
+  const initial = agentFollowFrame(peer, elements, 1000, local);
+  expect(initial?.viewport).toEqual({ x: 500, y: 340, zoom: 1 });
+
+  const editingPeer = { ...peer, context: { ...peer.context!, editingIds: ['right'] } };
+  const editing = agentFollowFrame(editingPeer, elements, 1001, local, undefined, initial);
+  expect(editing?.viewport).toEqual({ x: -9500, y: 340, zoom: 1 });
+
+  const heartbeat = {
+    ...peer,
+    context: { ...peer.context!, selectedIds: ['left'] },
+    updatedAt: new Date(1020).toISOString(),
+  };
+  expect(
+    agentFollowFrame(heartbeat, elements.toReversed(), 1020, local, undefined, editing),
+  ).toEqual(editing);
 });
 
 it.each(['human', 'agent'] as const)(
@@ -1208,9 +1284,16 @@ it('continues following the stable presentation when a chat reconnects under a n
     );
   }
 
-  await act(async () => root.render(<Fixture peers={[peer('first-connection', 0)]} />));
+  const first = peer('first-connection', 0);
+  await act(async () => root.render(<Fixture peers={[first]} />));
   expect(container.querySelector('output')!.textContent).toBe('first-connection');
-  await act(async () => root.render(<Fixture peers={[peer('next-connection', 300)]} />));
+
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  const next = peer('next-connection', 300);
+  await act(async () => root.render(<Fixture peers={[next, first]} />));
+  expect(container.querySelector('output')!.textContent).toBe('first-connection');
+
+  await act(async () => root.render(<Fixture peers={[next]} />));
   expect(container.querySelector('output')!.textContent).toBe('next-connection');
   expect(onStop).not.toHaveBeenCalled();
 });

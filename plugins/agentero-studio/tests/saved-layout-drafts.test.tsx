@@ -7,7 +7,13 @@ import {
   type Board,
   type BoardElement,
 } from '../src/contracts/studio.js';
-import { NativeContentQueue, type ContentTask } from '../src/app/canvas/content-queue.js';
+import {
+  NativeContentQueue,
+  type ContentReceipt,
+  type ContentTask,
+} from '../src/app/canvas/content-queue.js';
+import { decodeCanvasDraft } from '../src/app/canvas/canvas-drafts.js';
+import * as clipboard from '../src/app/clipboard.js';
 import WhiteboardCanvas from '../src/app/canvas/WhiteboardCanvas.js';
 import ContentConflictDialog from '../src/app/canvas/ContentConflictDialog.js';
 
@@ -129,6 +135,62 @@ it('does not execute restored drafts automatically and retains their exact stric
     }),
   );
   expect(send.mock.calls[0][0]).not.toHaveProperty('merge');
+});
+
+it('clears the local-storage warning once the actual save is confirmed', async () => {
+  const copy = vi.spyOn(clipboard, 'copyPlainText').mockResolvedValue(undefined);
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new DOMException('Draft quota reached', 'QuotaExceededError');
+  });
+  let accept!: (receipt: ContentReceipt) => void;
+  const pending = new Promise<ContentReceipt>((resolve) => {
+    accept = resolve;
+  });
+  const failed = vi.fn();
+  const queue = new NativeContentQueue({
+    send: () => pending,
+    changed: () => {},
+    accepted: () => {},
+  });
+  await act(async () =>
+    root.render(
+      <WhiteboardCanvas
+        board={board}
+        actor={LOCAL_ACTOR}
+        client={{ embedded: true, call: vi.fn() }}
+        contentQueue={queue}
+        onChanged={() => {}}
+        onAnnotate={() => {}}
+      />,
+    ),
+  );
+  await act(async () => {
+    queue
+      .enqueue(board, [{ op: 'update', id: node.id, changes: { x: 30 } }], '移动元素')
+      .catch(failed);
+  });
+
+  expect(session.textContent).toContain('本机草稿保存失败');
+  expect(button('复制草稿')).toBeDefined();
+  expect(button('下载草稿副本')).toBeDefined();
+  await click('复制草稿');
+
+  const copyRecovery = decodeCanvasDraft(copy.mock.calls[0]![0], board.artifact.id);
+  expect(copyRecovery.draft?.tasks).toEqual(queue.drafts);
+
+  await act(async () => {
+    accept({
+      board: {
+        ...board,
+        artifact: { ...board.artifact, revision: 2 },
+        elements: [{ ...node, x: 30, version: 2 }],
+      },
+    });
+  });
+
+  expect(session.textContent).not.toContain('本机草稿保存失败');
+  expect(button('下载草稿副本')).toBeUndefined();
+  expect(failed).not.toHaveBeenCalled();
 });
 
 it('portals a saved-draft comparison, blocks tool shortcuts and discards only that old task', async () => {

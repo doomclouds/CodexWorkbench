@@ -35,6 +35,13 @@ type JsonRecord = Record<string, unknown>;
 type FieldValidator = (value: unknown) => boolean;
 type DraftEntry = { base: BoardElement; changes: Partial<BoardElement> };
 
+const packedDraftPrefix = 'studio-canvas-draft:1\n';
+const htmlReference = '\0';
+const escapedReferenceLength = JSON.stringify(htmlReference).length - 2;
+const minimumSharedHtml = 1024;
+const maximumSharedHtml = 16 * 1024 * 1024;
+const maximumExpandedHtml = 64 * 1024 * 1024;
+
 const draftKinds: ReadonlySet<string> = new Set<Operation['op']>([
   'add',
   'update',
@@ -236,9 +243,136 @@ function unreadableDraft(raw: string): CanvasDraftRecovery {
   return { draft: null, unreadableDraft: raw, error: '', discardEmpty: false };
 }
 
+function sharedIndex(indexes: Map<string, number>, value: string): number {
+  const existing = indexes.get(value);
+  if (existing !== undefined) {
+    return existing;
+  }
+
+  const index = indexes.size;
+  indexes.set(value, index);
+
+  return index;
+}
+
+function packDraft(value: JsonRecord): string {
+  const htmlIndexes = new Map<string, number>();
+  const lineIndexes = new Map<string, number>();
+  let originalLengthDelta = 0;
+  const payload = JSON.stringify(value, (key: string, item: unknown) => {
+    if (!text(item)) {
+      return item;
+    }
+
+    if (key === 'html' && item.length >= minimumSharedHtml && item.length <= maximumSharedHtml) {
+      const index = String(sharedIndex(htmlIndexes, item));
+      originalLengthDelta += item.length - index.length - escapedReferenceLength;
+
+      return htmlReference + index;
+    }
+    if (!item.startsWith(htmlReference)) {
+      return item;
+    }
+
+    originalLengthDelta -= escapedReferenceLength;
+
+    return htmlReference + item;
+  });
+
+  const sources = [...htmlIndexes.keys()];
+  if (!sources.length && !originalLengthDelta) {
+    return payload;
+  }
+
+  const expandedLength = sources.reduce((length, source) => length + source.length, 0);
+  if (!sources.length || expandedLength > maximumExpandedHtml) {
+    return JSON.stringify(value);
+  }
+
+  const html = sources.map((source) =>
+    source
+      .split('\n')
+      .map((line) => (line.length >= minimumSharedHtml ? sharedIndex(lineIndexes, line) : line)),
+  );
+
+  const packed =
+    packedDraftPrefix + JSON.stringify({ payload, html, lines: [...lineIndexes.keys()] });
+  const originalLengthFloor = payload.length + originalLengthDelta;
+
+  return packed.length < originalLengthFloor ? packed : JSON.stringify(value);
+}
+
+function sharedValue(values: string[], index: unknown): string {
+  if (!revision(index) || index >= values.length) {
+    throw new SyntaxError('本机草稿的共享内容引用无效。');
+  }
+
+  return values[index]!;
+}
+
+function unpackHtml(value: unknown, lines: string[], remaining: number): string {
+  if (!Array.isArray(value)) {
+    throw new SyntaxError('本机草稿的 HTML 内容无效。');
+  }
+
+  const limit = Math.min(maximumSharedHtml, remaining);
+  let length = 0;
+  const fragments = value.map((part: unknown) => {
+    const line = text(part) ? part : sharedValue(lines, part);
+    length += line.length + 1;
+    if (length > limit + 1) {
+      throw new RangeError('本机草稿的 HTML 超出可恢复范围。');
+    }
+
+    return line;
+  });
+
+  return fragments.join('\n');
+}
+
+function parseDraft(raw: string): unknown {
+  if (!raw.startsWith(packedDraftPrefix)) {
+    return JSON.parse(raw);
+  }
+
+  const packed: unknown = JSON.parse(raw.slice(packedDraftPrefix.length));
+  if (!record(packed)) {
+    throw new SyntaxError('本机草稿的共享内容格式无效。');
+  }
+
+  const { payload, html, lines } = packed;
+  if (!text(payload) || !arrayOf(lines, text) || !Array.isArray(html)) {
+    throw new SyntaxError('本机草稿的共享内容格式无效。');
+  }
+
+  let remaining = maximumExpandedHtml;
+  const sources = html.map((source: unknown) => {
+    const restored = unpackHtml(source, lines, remaining);
+    remaining -= restored.length;
+
+    return restored;
+  });
+
+  return JSON.parse(payload, (key: string, value: unknown) => {
+    if (!text(value) || !value.startsWith(htmlReference)) {
+      return value;
+    }
+
+    const token = value.slice(htmlReference.length);
+    if (token.startsWith(htmlReference)) {
+      return token;
+    }
+    if (key !== 'html' || !/^\d+$/.test(token)) {
+      throw new SyntaxError('本机草稿的 HTML 引用无效。');
+    }
+
+    return sharedValue(sources, Number(token));
+  });
+}
+
 export function decodeCanvasDraft(raw: string, artifactId: string): CanvasDraftRecovery {
   try {
-    const decoded: unknown = JSON.parse(raw);
+    const decoded = parseDraft(raw);
     if (!record(decoded)) {
       return unreadableDraft(raw);
     }
@@ -323,12 +457,12 @@ export function encodeCanvasDraft(
 ): string | null {
   const { draft, unreadableDraft, retainedDrafts = [] } = recovery;
   const contents = active ?? draft;
-  const backups = active && draft ? [JSON.stringify(draft), ...retainedDrafts] : retainedDrafts;
+  const backups = active && draft ? [packDraft({ ...draft }), ...retainedDrafts] : retainedDrafts;
   if (!contents && unreadableDraft === undefined && !backups.length) {
     return null;
   }
 
-  return JSON.stringify({
+  return packDraft({
     ...contents,
     unreadableDraft,
     retainedDrafts: backups.length ? backups : undefined,

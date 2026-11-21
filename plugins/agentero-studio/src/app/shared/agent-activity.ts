@@ -83,7 +83,7 @@ export function documentElements(document?: StudioDocument | null): BoardElement
   return document && 'elements' in document ? (document.elements as BoardElement[]) : [];
 }
 
-function union(boxes: ActivityBounds[]): ActivityBounds | undefined {
+export function combineActivityBounds(boxes: ActivityBounds[]): ActivityBounds | undefined {
   if (!boxes.length) {
     return;
   }
@@ -98,6 +98,32 @@ function union(boxes: ActivityBounds[]): ActivityBounds | undefined {
   };
 }
 
+export function agentElementBounds(
+  element: BoardElement,
+  elements: BoardElement[],
+): ActivityBounds {
+  const box = elementBounds(element, elements);
+  const angle = element.type === 'arrow' ? 0 : ((element.rotation ?? 0) * Math.PI) / 180;
+  const w = Math.abs(box.w * Math.cos(angle)) + Math.abs(box.h * Math.sin(angle));
+  const h = Math.abs(box.w * Math.sin(angle)) + Math.abs(box.h * Math.cos(angle));
+
+  return {
+    x: box.x + (box.w - w) / 2,
+    y: box.y + (box.h - h) / 2,
+    w,
+    h,
+  };
+}
+
+export function padActivityBounds(box: ActivityBounds, padding: number): ActivityBounds {
+  return {
+    x: box.x - padding,
+    y: box.y - padding,
+    w: Math.max(1, box.w) + padding * 2,
+    h: Math.max(1, box.h) + padding * 2,
+  };
+}
+
 export function agentTaskBounds(
   task: AgentTask,
   elements: BoardElement[],
@@ -105,23 +131,12 @@ export function agentTaskBounds(
   const wanted = new Set(task.scope.ids ?? []);
   const boxes = elements
     .filter((element) => wanted.has(element.id))
-    .map((element) => {
-      const box = elementBounds(element, elements);
-      const angle = element.type === 'arrow' ? 0 : ((element.rotation ?? 0) * Math.PI) / 180;
-      const w = Math.abs(box.w * Math.cos(angle)) + Math.abs(box.h * Math.sin(angle));
-      const h = Math.abs(box.w * Math.sin(angle)) + Math.abs(box.h * Math.cos(angle));
-      return {
-        x: box.x + (box.w - w) / 2 - 12,
-        y: box.y + (box.h - h) / 2 - 12,
-        w: Math.max(1, w) + 24,
-        h: Math.max(1, h) + 24,
-      };
-    });
+    .map((element) => padActivityBounds(agentElementBounds(element, elements), 12));
 
   if (task.scope.rect) {
     boxes.push(task.scope.rect);
   }
-  return union(boxes);
+  return combineActivityBounds(boxes);
 }
 
 export function agentPeerBounds(
@@ -129,7 +144,7 @@ export function agentPeerBounds(
   elements: BoardElement[],
   now: number,
 ): ActivityBounds | undefined {
-  return union(
+  return combineActivityBounds(
     activeAgentTasks(peer, now).flatMap((task) => agentTaskBounds(task, elements) ?? []),
   );
 }

@@ -75,6 +75,8 @@ const AGENT_IDLE_MS = 20_000;
 const MAX_AGENT_TASKS = 8;
 const MAX_BOARD_TASKS = 64;
 const MAX_CLOSED_TASKS = 512;
+const MAX_PRESENCE_UPDATE_BYTES = 16 * 1024;
+const MAX_VIEW_CONTEXT_BYTES = 6 * 1024;
 
 const debug = debuglog('agentero-studio');
 
@@ -123,7 +125,7 @@ function invalidPresenceObject(value: unknown): boolean {
 }
 
 function assertPresenceFields(input: Record<string, unknown>): void {
-  if (Buffer.byteLength(JSON.stringify(input)) > 16 * 1024) {
+  if (Buffer.byteLength(JSON.stringify(input)) > MAX_PRESENCE_UPDATE_BYTES) {
     throw new StudioError('TOO_LARGE', '在线状态过大。');
   }
 
@@ -178,6 +180,26 @@ function normalizeContextIssues(issues: unknown) {
   });
 }
 
+function presenceContextBytes(context: Record<string, unknown>, idLists: readonly string[][]) {
+  let bytes = Buffer.byteLength(JSON.stringify(context));
+  if (bytes <= MAX_VIEW_CONTEXT_BYTES) {
+    return bytes;
+  }
+
+  const seen = new Set<string>();
+  for (const ids of idLists) {
+    for (const id of ids) {
+      if (seen.has(id)) {
+        bytes -= Buffer.byteLength(JSON.stringify(id).slice(1, -1));
+      }
+
+      seen.add(id);
+    }
+  }
+
+  return bytes;
+}
+
 function presenceContext(
   artifactId: string,
   value: unknown,
@@ -199,10 +221,17 @@ function presenceContext(
     throw new StudioError('INVALID_ARGUMENT', '视图上下文无效。');
   }
 
+  const idLists = [context.selectedIds];
   for (const field of editableContextFields) {
-    if (context[field] !== undefined && !validIds(context[field])) {
+    const ids = context[field];
+    if (ids === undefined) {
+      continue;
+    }
+    if (!validIds(ids)) {
       throw new StudioError('INVALID_ARGUMENT', '视图上下文无效。');
     }
+
+    idLists.push(ids);
   }
 
   if (context.dirty !== undefined && typeof context.dirty !== 'boolean') {
@@ -210,9 +239,11 @@ function presenceContext(
   }
 
   if (context.issues !== undefined) {
-    context.issues = normalizeContextIssues(context.issues);
+    const issues = normalizeContextIssues(context.issues);
+    context.issues = issues;
+    idLists.push(...issues.map(({ ids }) => ids));
   }
-  if (Buffer.byteLength(JSON.stringify(context)) > 6144) {
+  if (presenceContextBytes(context, idLists) > MAX_VIEW_CONTEXT_BYTES) {
     throw new StudioError('TOO_LARGE', '视图上下文超过 6 KiB。');
   }
 

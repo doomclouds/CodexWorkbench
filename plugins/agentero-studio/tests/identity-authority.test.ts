@@ -1198,14 +1198,27 @@ describe('real MCP connection and explicit participant identity', () => {
     );
   });
 
-  it('protects human editing without letting the agent viewId hide it or the agent activity block itself', async () => {
+  it('protects a human save outside the model selection sample without blocking the agent on its own activity', async () => {
+    const otherIds = Array.from({ length: 86 }, (_, index) => `architecture-fixture-${index}`);
+    const selectedIds = [...otherIds, 'node'];
+    await host.service.execute('artifact_apply', {
+      artifactId,
+      operations: otherIds.map((id) => ({ op: 'add', element: { id, type: 'text', text: id } })),
+    });
+
     const a = await agentConnection('Editing guard');
     const binding = await claimNode(a);
     await host.service.updatePresence(
       artifactId,
       {
         peerId: 'human-view',
-        context: { artifactId, viewId: 'human-view', selectedIds: ['node'], editingIds: ['node'] },
+        context: {
+          artifactId,
+          viewId: 'human-view',
+          selectedIds,
+          movingIds: otherIds,
+          savingIds: selectedIds,
+        },
       },
       host.service.owner,
     );
@@ -1214,6 +1227,8 @@ describe('real MCP connection and explicit participant identity', () => {
     expect(contexts.value.data.contexts[0]).toMatchObject({
       viewId: 'human-view',
       actor: { id: host.service.owner.id, kind: 'human' },
+      selectedCount: 87,
+      selectedIds: selectedIds.slice(0, 10),
     });
     const blocked = await a.call('artifact_apply', {
       ...binding,

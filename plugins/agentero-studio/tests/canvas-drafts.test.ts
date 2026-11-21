@@ -1,11 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_STYLE, type Board, type BoardElement } from '../src/contracts/studio.js';
 import {
   decodeCanvasDraft,
   encodeCanvasDraft,
   promoteCanvasDraft,
 } from '../src/app/canvas/canvas-drafts.js';
-import type { ContentTask } from '../src/app/canvas/content-queue.js';
+import {
+  NativeContentQueue,
+  overlayContent,
+  type ContentReceipt,
+  type ContentTask,
+} from '../src/app/canvas/content-queue.js';
 
 const text: BoardElement = {
   id: 'text',
@@ -43,6 +49,28 @@ function task(overrides: Partial<ContentTask> = {}): ContentTask {
     remember: true,
     state: 'failed',
     ...overrides,
+  };
+}
+
+function diagramBoard(): Board {
+  const font = Buffer.concat(
+    Array.from({ length: 1752 }, (_, index) => createHash('sha256').update(String(index)).digest()),
+  ).toString('base64');
+
+  return {
+    ...board,
+    elements: Array.from({ length: 87 }, (_, index) => {
+      const element = { ...text, id: `element-${index}` };
+      if (index >= 71) {
+        return element;
+      }
+
+      return {
+        ...element,
+        type: 'html',
+        html: `<style>\n@font-face{font-family:fixture;src:url(data:font/woff2;base64,${font})}\n</style>\n<main id="element-${index}">方案 ${index}</main>`,
+      };
+    }),
   };
 }
 
@@ -157,6 +185,95 @@ describe('Canvas draft recovery', () => {
       draft: null,
       unreadableDraft: raw,
       discardEmpty: false,
+    });
+  });
+
+  it('keeps ordinary JSON when sharing HTML would increase the draft size', () => {
+    const unique = { ...text, type: 'html' as const, html: '<p>' + 'x'.repeat(4096) + '</p>' };
+    const active = { properties: { [unique.id]: { base: unique, changes: { x: 20 } } } };
+    const raw = encodeCanvasDraft(active, { draft: null, error: '', discardEmpty: false });
+
+    expect(raw).toBe(JSON.stringify(active));
+  });
+
+  it.each(['move', 'lock'] as const)(
+    'keeps a large in-flight %s draft compact and restores full sources and the original request',
+    async (kind) => {
+      const richBoard = diagramBoard();
+      const edits = kind === 'lock' ? { locked: true } : { x: 25, y: 45 };
+      const operations = richBoard.elements.map(({ id }) => ({
+        op: 'update' as const,
+        id,
+        changes: edits,
+      }));
+      let accept!: (receipt: ContentReceipt) => void;
+      const receipt = new Promise<ContentReceipt>((resolve) => {
+        accept = resolve;
+      });
+      const send = vi.fn(() => receipt);
+      const queue = new NativeContentQueue({ send, changed: () => {}, accepted: () => {} });
+      const save = queue.enqueue(richBoard, operations, kind);
+
+      const original = queue.drafts[0]!;
+      const properties =
+        kind === 'lock'
+          ? Object.fromEntries(
+              richBoard.elements.map((base) => [base.id, { base, changes: edits }]),
+            )
+          : {};
+      const active = { text: { id: text.id, text: '\0literal' }, properties, tasks: [original] };
+      const persisted = encodeCanvasDraft(active, { draft: null, error: '', discardEmpty: false })!;
+
+      expect(original.state).toBe('inflight');
+      expect(original.appliedSources).toHaveLength(87);
+      expect(JSON.stringify(active).length).toBeGreaterThan(10 * 1024 * 1024);
+      expect(persisted.length).toBeLessThan(256 * 1024);
+
+      const recovered = decodeCanvasDraft(persisted, board.artifact.id);
+      const restored = recovered.draft?.tasks?.[0];
+      const html = (elements: readonly BoardElement[] | undefined) =>
+        elements?.map((item) => item.html);
+
+      expect(recovered.unreadableDraft).toBeUndefined();
+      expect(recovered.draft?.text?.text).toBe('\0literal');
+      expect(html(restored?.sources)).toEqual(html(original.sources));
+      expect(html(restored?.appliedSources)).toEqual(html(original.appliedSources));
+      expect(
+        html(Object.values(recovered.draft?.properties ?? {}).map(({ base }) => base)),
+      ).toEqual(html(Object.values(properties).map(({ base }) => base)));
+
+      const changed = { ...richBoard.elements[0]!, html: '<p>另一个人修改的内容</p>', version: 3 };
+      const elements = [changed, ...richBoard.elements.slice(1)];
+      const sendRetry = vi.fn().mockResolvedValue({ board: { ...richBoard, elements } });
+      const reopened = new NativeContentQueue({
+        send: sendRetry,
+        changed: () => {},
+        accepted: () => {},
+      });
+      reopened.restore(recovered.draft?.tasks ?? []);
+
+      expect(sendRetry).not.toHaveBeenCalled();
+      expect(overlayContent(elements, reopened.drafts)[0]).toMatchObject({ ...changed, ...edits });
+      await reopened.retry(original.id);
+      expect(sendRetry).toHaveBeenCalledExactlyOnceWith(original.args);
+      expect(JSON.stringify(sendRetry.mock.calls[0]![0])).toBe(JSON.stringify(original.args));
+      accept({ board: richBoard });
+      await save;
+    },
+  );
+
+  it('retains the original record when its packed HTML reference is malformed', () => {
+    const original =
+      'studio-canvas-draft:1\n' +
+      JSON.stringify({
+        html: [[91]],
+        lines: ['another source'],
+        payload: '{}',
+      });
+
+    expect(decodeCanvasDraft(original, board.artifact.id)).toMatchObject({
+      draft: null,
+      unreadableDraft: original,
     });
   });
 });

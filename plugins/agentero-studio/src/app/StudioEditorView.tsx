@@ -263,7 +263,10 @@ export function StudioEditorView({
       {following && (
         <div className="studio-follow-banner">
           <Users size={14} />
-          <span>正在跟随 {followedPeer?.actor.name || '协作者'} 的视角</span>
+          <span>
+            正在跟随 {followedPeer?.actor.name || '协作者'} 的
+            {followedPeer?.actor.kind === 'agent' ? '工作区' : '视角'}
+          </span>
           <button className="studio-link-button" onClick={stopFollowing}>
             停止跟随
           </button>
