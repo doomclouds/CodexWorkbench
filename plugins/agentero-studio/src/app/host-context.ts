@@ -1,4 +1,5 @@
 import type { ViewContext } from '../contracts/studio';
+import { reportStudioWarning } from './transport';
 
 export interface HostViewContext {
   appId: 'agentero-studio';
@@ -11,7 +12,17 @@ export interface HostViewContext {
 }
 
 function summarize(context: ViewContext | null): HostViewContext {
-  if (!context) return { appId: 'agentero-studio', panelOpen: true, artifactId: null, viewId: null, selectedIds: [], selectedCount: 0 };
+  if (!context) {
+    return {
+      appId: 'agentero-studio',
+      panelOpen: true,
+      artifactId: null,
+      viewId: null,
+      selectedIds: [],
+      selectedCount: 0,
+    };
+  }
+
   const selectedIds = [...new Set(context.selectedIds)];
   const snapshot: HostViewContext = {
     appId: 'agentero-studio',
@@ -22,13 +33,16 @@ function summarize(context: ViewContext | null): HostViewContext {
     selectedCount: selectedIds.length,
   };
   const viewport = context.viewport;
-  if (viewport && [viewport.x, viewport.y, viewport.zoom].every(Number.isFinite) && viewport.zoom > 0) {
+  if (
+    viewport &&
+    [viewport.x, viewport.y, viewport.zoom].every(Number.isFinite) &&
+    viewport.zoom > 0
+  ) {
     snapshot.viewport = { x: viewport.x, y: viewport.y, zoom: viewport.zoom };
   }
   return snapshot;
 }
 
-/** Replaces this App's background context; explicit feedback drafts use a separate path. */
 export function createHostContextUpdater(send: (context: HostViewContext) => Promise<unknown>) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let pending: HostViewContext | undefined;
@@ -39,21 +53,34 @@ export function createHostContextUpdater(send: (context: HostViewContext) => Pro
   const close = () => {
     stopped = true;
     pending = undefined;
-    if (timer !== undefined) clearTimeout(timer);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
     timer = undefined;
   };
   const schedule = () => {
-    if (stopped || sending || timer !== undefined || !pending) return;
-    timer = setTimeout(() => { timer = undefined; void flush(); }, 150);
+    const updateInProgress = sending || timer !== undefined;
+    if (stopped || updateInProgress || !pending) {
+      return;
+    }
+
+    timer = setTimeout(() => {
+      timer = undefined;
+      flush().catch(close);
+    }, 150);
   };
   const flush = async () => {
-    if (stopped || !pending) return;
+    if (stopped || !pending) {
+      return;
+    }
+
     const next = pending;
     pending = undefined;
     sending = true;
-    try { await send(next); }
-    catch {
-      // Older hosts may reject ui/update-model-context. Feedback attachment remains available.
+    try {
+      await send(next);
+    } catch (error) {
+      reportStudioWarning('Studio stopped publishing host context.', error);
       close();
     } finally {
       sending = false;
@@ -63,10 +90,16 @@ export function createHostContextUpdater(send: (context: HostViewContext) => Pro
 
   return {
     update(context: ViewContext | null) {
-      if (stopped) return;
+      if (stopped) {
+        return;
+      }
+
       const next = summarize(context);
       const serialized = JSON.stringify(next);
-      if (serialized === lastSnapshot) return;
+      if (serialized === lastSnapshot) {
+        return;
+      }
+
       lastSnapshot = serialized;
       pending = next;
       schedule();

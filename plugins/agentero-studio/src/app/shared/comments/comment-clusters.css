@@ -1,4 +1,3 @@
-/* Keep the original dimensions so overlap can still be measured while a pin is grouped. */
 .studio-feedback-pin[data-comment-clustered]{visibility:hidden;pointer-events:none}
 .studio-comment-clusters{position:absolute;inset:0;z-index:61;pointer-events:none}
 .studio-comment-cluster-marker{position:absolute;max-width:100%;left:0;top:0;translate:0 -100%;pointer-events:none}

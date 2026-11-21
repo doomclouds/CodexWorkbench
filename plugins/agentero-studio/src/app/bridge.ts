@@ -1,17 +1,48 @@
-import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
+import {
+  App,
+  PostMessageTransport,
+  applyDocumentTheme,
+  applyHostStyleVariables,
+} from '@modelcontextprotocol/ext-apps';
 import { OpenAIExtensions } from '@openai/mcp-extensions/app';
-import type { Actor, ArtifactView, Connection, Feedback, StudioClient, ToolName, ToolResponse, ViewContext } from '../contracts/studio';
+import type {
+  Actor,
+  ArtifactView,
+  Connection,
+  Feedback,
+  StudioClient,
+  ViewContext,
+} from '../contracts/studio';
 import { createHostContextUpdater } from './host-context';
 import { createRpcTransport } from './rpc-transport';
 import { feedbackDraft } from './feedback-draft';
+
 export { feedbackDraft } from './feedback-draft';
 import { STUDIO_ICON } from '../contracts/brand-icon';
 import { PLUGIN_VERSION } from '../contracts/version';
-import { APP_MAX_BYTES } from '../contracts/transport';
+import { APP_TOOL_NAME, APP_MAX_BYTES } from '../contracts/transport';
 import { createWebNavigation } from './web-navigation';
-import { loadPanelReadingView, restorePanelView, storePanelReadingView, type RestoredPanelView } from './panel-view-state';
+import {
+  assertHostToolSuccess,
+  createStudioToolCall,
+  decodeAppTransportResult,
+  decodeOpeningRoute,
+  decodeStudioConnection,
+} from './tool-response';
+import { reportStudioWarning } from './transport';
+import {
+  loadPanelReadingView,
+  restorePanelView,
+  storePanelReadingView,
+  type RestoredPanelView,
+} from './panel-view-state';
 
-declare global { interface Window { __STUDIO_BOOT__?: Connection } }
+declare global {
+  interface Window {
+    __STUDIO_BOOT__?: Connection;
+  }
+}
+
 export interface StudioBridge {
   client: StudioClient;
   actor: Actor;
@@ -23,101 +54,310 @@ export interface StudioBridge {
   updateContext?: (context: ViewContext | null) => void;
   close(): Promise<void>;
 }
-function unwrap<T>(result: ToolResponse<T>, status?: number): T {
-  if (!result.ok) throw Object.assign(new Error(result.error?.message || '操作未完成'), { code: result.error?.code, details: result.error?.details, status });
-  return result.data as T;
-}
-export async function createStudioBridge(onNavigate: (artifactId?: string, view?: string) => void): Promise<StudioBridge> {
-  if (window.parent === window) {
-    const boot = window.__STUDIO_BOOT__;
-    if (!boot) throw new Error('请从 Codex 插件或有效的作品分享链接打开 Agentero 创作。');
-    const client: StudioClient = {
-      embedded: false, baseUrl: boot.baseUrl || location.origin, token: boot.token,
-      async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
-        const response = await fetch(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
-        return unwrap(await response.json() as ToolResponse<T>, response.status);
-      },
-    };
-    let standalone: StudioBridge;
-    const navigation = createWebNavigation(window, boot, (artifactId, view) => { standalone.artifactId = artifactId; standalone.view = view; onNavigate(artifactId, view); });
-    standalone = { client, actor: boot.actor, artifactId: navigation.route.artifactId, view: navigation.route.view, navigate: navigation.navigate, close: async () => navigation.close() };
-    return standalone;
+
+function createStandaloneBridge(
+  onNavigate: (artifactId?: string, view?: string) => void,
+): StudioBridge {
+  const boot = decodeStudioConnection(window.__STUDIO_BOOT__, window.location.origin);
+  if (!boot) {
+    throw new Error('请从 Codex 插件或有效的作品分享链接打开 Agentero 创作。');
   }
-  const app = new App({ name: 'Agentero Studio', title: 'Agentero 创作', version: PLUGIN_VERSION, icons: [STUDIO_ICON] }, {}, { autoResize: false });
+
+  const client: StudioClient = {
+    embedded: false,
+    baseUrl: boot.baseUrl,
+    token: boot.token,
+    call: createStudioToolCall(async (name, args, read) => {
+      const response = await fetch(`${client.baseUrl}/api/tools/${name}`, {
+        method: 'POST',
+        headers: {
+          ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(args),
+      });
+
+      return read(response);
+    }),
+  };
+  const navigation = createWebNavigation(window, boot, (artifactId, view) => {
+    standalone.artifactId = artifactId;
+    standalone.view = view;
+    onNavigate(artifactId, view);
+  });
+  const standalone: StudioBridge = {
+    client,
+    actor: boot.actor,
+    artifactId: navigation.route.artifactId,
+    view: navigation.route.view,
+    navigate: navigation.navigate,
+    close: async () => navigation.close(),
+  };
+
+  return standalone;
+}
+
+function hostRoute(args: Record<string, unknown>) {
+  const artifactId =
+    typeof args.artifactId === 'string' && args.artifactId ? args.artifactId : undefined;
+
+  if (artifactId) {
+    return { artifactId, view: args.view === 'board' ? 'board' : 'editor' };
+  }
+
+  return { artifactId, view: args.view === 'trash' ? 'trash' : 'library' };
+}
+
+function applyHostAppearance(context: ReturnType<App['getHostContext']>) {
+  if (context?.styles?.variables) {
+    applyHostStyleVariables(context.styles.variables);
+  }
+  if (context?.theme) {
+    applyDocumentTheme(context.theme);
+    document.documentElement.dataset.theme = context.theme;
+  }
+}
+
+async function connectEmbeddedApp(
+  app: App,
+  currentConnection: () => Connection | undefined,
+  signal: AbortSignal,
+): Promise<Connection> {
+  await app.connect(new PostMessageTransport(window.parent, window.parent), { timeout: 15_000 });
+  signal.throwIfAborted();
+  let connection = currentConnection();
+  if (!connection) {
+    const opened = await app.callServerTool(
+      { name: APP_TOOL_NAME, arguments: { action: 'connect' } },
+      { signal },
+    );
+    assertHostToolSuccess(opened.structuredContent, opened.isError, '本机作品服务连接失败。');
+
+    connection = currentConnection() ?? decodeStudioConnection(opened._meta?.connection);
+  }
+  signal.throwIfAborted();
+  if (!connection) {
+    throw new Error('本机作品服务没有返回有效连接。');
+  }
+
+  return connection;
+}
+
+function connectEmbeddedTransport(app: App, connection: Connection) {
+  const transport = createRpcTransport(connection.baseUrl, async (args, signal) => {
+    const result = await app.callServerTool(
+      { name: APP_TOOL_NAME, arguments: args },
+      { timeout: 120_000, signal },
+    );
+    assertHostToolSuccess(result.structuredContent, result.isError, '作品服务请求失败。');
+
+    return decodeAppTransportResult(args.action, result._meta?.response);
+  });
+  const client: StudioClient = {
+    request: transport.request,
+    assetUrl: transport.assetUrl,
+    subscribeAssets: transport.subscribeAssets,
+    assetState: transport.assetState,
+    embedded: true,
+    baseUrl: connection.baseUrl,
+    token: connection.token,
+    async downloadFile(blob, filename) {
+      if (!app.getHostCapabilities()?.downloadFile) {
+        throw new Error('当前宿主不支持文件下载，请更新宿主或在浏览器中导出。');
+      }
+      if (blob.size > APP_MAX_BYTES) {
+        throw new Error('导出文件超过作品传输的 128 MB 预算，请缩小导出范围。');
+      }
+
+      const invalidLength = !filename || filename.length > 255;
+      const dotSegment = filename === '.' || filename === '..';
+      if (invalidLength || dotSegment || /[\\/\u0000-\u001f\u007f]/.test(filename)) {
+        throw new Error('导出文件名无效。');
+      }
+
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += 8192) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+      }
+      const result = await app.downloadFile({
+        contents: [
+          {
+            type: 'resource',
+            resource: {
+              uri: `file:///${encodeURIComponent(filename)}`,
+              mimeType: blob.type || 'application/octet-stream',
+              blob: btoa(binary),
+            },
+          },
+        ],
+      });
+
+      if (result.isError) {
+        throw new Error('宿主未完成文件下载，可能已取消或被拒绝；请重试。');
+      }
+    },
+    call: createStudioToolCall(async (name, args, read) => {
+      const result = await transport.request(`${client.baseUrl}/api/tools/${name}`, {
+        method: 'POST',
+        headers: {
+          ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(args),
+      });
+
+      return read(result);
+    }),
+  };
+
+  return { client, close: transport.close };
+}
+
+function connectContextPublisher(app: App, restoredView?: RestoredPanelView) {
+  const formats = app.getHostCapabilities()?.updateModelContext;
+  if (!formats?.text && !formats?.structuredContent) {
+    return;
+  }
+
+  let priorViewId = restoredView?.viewId;
+  const updater = createHostContextUpdater(async (snapshot) => {
+    await app.updateModelContext(
+      formats.structuredContent
+        ? { structuredContent: { ...snapshot } }
+        : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] },
+    );
+
+    if (!priorViewId || !snapshot.viewId || snapshot.viewId === priorViewId) {
+      return;
+    }
+    if (snapshot.artifactId !== restoredView?.artifactId) {
+      return;
+    }
+
+    if (loadPanelReadingView(snapshot.viewId, snapshot.artifactId)) {
+      storePanelReadingView(priorViewId, null);
+      priorViewId = undefined;
+    }
+  });
+
+  if (!restoredView) {
+    updater.update(null);
+  }
+  return updater;
+}
+
+export async function createStudioBridge(
+  onNavigate: (artifactId?: string, view?: string) => void,
+): Promise<StudioBridge> {
+  if (window.parent === window) {
+    return createStandaloneBridge(onNavigate);
+  }
+
+  const app = new App(
+    {
+      name: 'Agentero Studio',
+      title: 'Agentero 创作',
+      version: PLUGIN_VERSION,
+      icons: [STUDIO_ICON],
+    },
+    {},
+    { autoResize: false },
+  );
   const extensions = new OpenAIExtensions(app);
-  let connection: Connection | undefined;
+  let openingConnection: Connection | undefined;
   let initialArtifactId: string | undefined;
   let initialView = 'library';
   let hostOpeningRoute: { artifactId?: string; view: string } | undefined;
   let hostCallId: string | number | undefined;
   let localRoute = false;
-  let bridge: StudioBridge | undefined;
-  let contextUpdater: ReturnType<typeof createHostContextUpdater> | undefined;
+  const session: {
+    bridge?: StudioBridge;
+    closeTransport?: () => void;
+    contextUpdater?: ReturnType<typeof createHostContextUpdater>;
+  } = {};
   let tornDown = false;
   const bootstrapAbort = new AbortController();
-  let bridgeTransportClose: (() => void) | undefined;
   const selectRoute = (artifactId: string | undefined, view: string) => {
-    if (initialArtifactId === artifactId && initialView === view) return;
+    if (initialArtifactId === artifactId && initialView === view) {
+      return;
+    }
+
     initialArtifactId = artifactId;
     initialView = view;
-    if (bridge) { bridge.artifactId = artifactId; bridge.view = view; }
+    if (session.bridge) {
+      session.bridge.artifactId = artifactId;
+      session.bridge.view = view;
+    }
     onNavigate(artifactId, view);
   };
   const navigate = (args: Record<string, unknown>, fromInput = false) => {
-    if (tornDown) return;
-    const artifactId = typeof args.artifactId === 'string' && args.artifactId ? args.artifactId : undefined;
-    const view = args.view === 'trash' && !artifactId ? 'trash' : artifactId ? args.view === 'board' ? 'board' : 'editor' : 'library';
+    if (tornDown) {
+      return;
+    }
+
+    const { artifactId, view } = hostRoute(args);
     const nextCallId = app.getHostContext()?.toolInfo?.id;
-    const newCall = nextCallId !== undefined && hostCallId !== undefined && nextCallId !== hostCallId;
-    const replay = !hostOpeningRoute || hostOpeningRoute.artifactId === artifactId && hostOpeningRoute.view === view;
+    const newCall =
+      nextCallId !== undefined && hostCallId !== undefined && nextCallId !== hostCallId;
+    const replay =
+      !hostOpeningRoute ||
+      (hostOpeningRoute.artifactId === artifactId && hostOpeningRoute.view === view);
     const explicitLibrary = fromInput && args.view === 'library' && newCall;
-    if (localRoute && (view === 'library' ? !explicitLibrary : !newCall && replay)) {
+    const keepLocal = view === 'library' ? !explicitLibrary : !newCall && replay;
+    if (localRoute && keepLocal) {
       hostOpeningRoute ??= { artifactId, view };
       return;
     }
-    // JSON-RPC ids only distinguish invocations in this instance; they are not storage keys.
-    if (nextCallId !== undefined) hostCallId = nextCallId;
+
+    if (nextCallId !== undefined) {
+      hostCallId = nextCallId;
+    }
     hostOpeningRoute = { artifactId, view };
-    if (newCall) localRoute = false;
+    if (newCall) {
+      localRoute = false;
+    }
     selectRoute(artifactId, view);
   };
-  app.onhostcontextchanged = context => {
-    if (context.styles?.variables) applyHostStyleVariables(context.styles.variables);
-    if (context.theme) { applyDocumentTheme(context.theme); document.documentElement.dataset.theme = context.theme; }
-  };
-  app.ontoolinput = ({ arguments: args }) => { if (args) navigate(args, true); };
-  app.ontoolresult = result => {
-    const payload = result.structuredContent as ToolResponse<{ artifactId?: string; view?: string }> | undefined;
-    if (payload?.ok) {
-      if (result._meta?.connection) connection = result._meta.connection as Connection;
-      if (payload.data && (typeof payload.data.view === 'string' || typeof payload.data.artifactId === 'string')) navigate(payload.data);
+  app.addEventListener('hostcontextchanged', applyHostAppearance);
+  app.addEventListener('toolinput', ({ arguments: args }) => {
+    if (args) {
+      navigate(args, true);
     }
-  };
+  });
+  app.addEventListener('toolresult', (result) => {
+    const payload = decodeOpeningRoute(result.structuredContent);
+    if (result.isError || !payload) {
+      return;
+    }
+
+    openingConnection = decodeStudioConnection(result._meta?.connection) ?? openingConnection;
+    const data = payload.data;
+    if (data && (typeof data.view === 'string' || typeof data.artifactId === 'string')) {
+      navigate(data);
+    }
+  });
   app.onteardown = async () => {
     tornDown = true;
     bootstrapAbort.abort(new Error('作品页面已关闭。'));
-    contextUpdater?.close();
-    bridgeTransportClose?.();
-    // Keep the transport open until the SDK sends the teardown acknowledgement.
+    session.contextUpdater?.close();
+    session.closeTransport?.();
+
     return {};
   };
-  try {
-    await app.connect(new PostMessageTransport(window.parent, window.parent), { timeout: 15_000 });
-    bootstrapAbort.signal.throwIfAborted();
-    if (!connection) {
-      // Connecting an existing view must not invoke the tool that opens a new App.
-      const opened = await app.callServerTool({ name: 'studio_app_request', arguments: { action: 'connect' } }, { signal: bootstrapAbort.signal });
-      const payload = opened.structuredContent as ToolResponse | undefined;
-      if (opened.isError || payload?.ok === false) throw Object.assign(new Error(payload?.error?.message || '本机作品服务连接失败。'), { code: payload?.error?.code, details: payload?.error?.details });
-      // Bootstrap supplies only the UI connection; its default route must not replace host input.
-      connection ??= opened._meta?.connection as Connection | undefined;
+  const connection = await connectEmbeddedApp(
+    app,
+    () => openingConnection,
+    bootstrapAbort.signal,
+  ).catch(async (error) => {
+    if (!tornDown) {
+      await app.close().catch((cleanupError) => {
+        reportStudioWarning('Studio connection cleanup failed.', cleanupError);
+      });
     }
-    bootstrapAbort.signal.throwIfAborted();
-    if (!connection?.baseUrl || typeof connection.token !== 'string') throw new Error('本机作品服务没有返回有效连接。');
-  } catch (error) {
-    if (!tornDown) await app.close().catch(() => {});
     throw error;
-  }
+  });
+  bootstrapAbort.signal.throwIfAborted();
   const context = app.getHostContext();
   hostCallId ??= context?.toolInfo?.id;
   const restoredView = restorePanelView(extensions.modelContext?.getCurrent());
@@ -126,71 +366,44 @@ export async function createStudioBridge(onNavigate: (artifactId?: string, view?
     initialArtifactId = restoredView.artifactId;
     initialView = 'editor';
   }
-  if (context?.styles?.variables) applyHostStyleVariables(context.styles.variables);
-  if (context?.theme) { applyDocumentTheme(context.theme); document.documentElement.dataset.theme = context.theme; }
-  const transport = createRpcTransport(connection.baseUrl, async (args, signal) => {
-    const result = await app.callServerTool({ name: 'studio_app_request', arguments: args }, { timeout: 120_000, signal });
-    const status = result.structuredContent as ToolResponse | undefined;
-    if (result.isError || status?.ok === false) throw Object.assign(new Error(status?.error?.message || '作品服务请求失败。'), { code: status?.error?.code, details: status?.error?.details });
-    if (!result._meta?.response) throw new Error('作品服务没有返回界面响应，请更新插件后重新打开。');
-    return result._meta.response;
-  });
-  bridgeTransportClose = transport.close;
-  const client: StudioClient = {
-    request: transport.request, assetUrl: transport.assetUrl, subscribeAssets: transport.subscribeAssets, assetState: transport.assetState,
-    embedded: true, baseUrl: connection.baseUrl, token: connection.token,
-    async downloadFile(blob, filename) {
-      if (!app.getHostCapabilities()?.downloadFile) throw new Error('当前宿主不支持文件下载，请更新宿主或在浏览器中导出。');
-      if (blob.size > APP_MAX_BYTES) throw new Error('导出文件超过作品传输的 128 MB 预算，请缩小导出范围。');
-      if (!filename || filename.length > 255 || /[\\/\u0000-\u001f\u007f]/.test(filename) || filename === '.' || filename === '..') throw new Error('导出文件名无效。');
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      let binary = '';
-      for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
-      const result = await app.downloadFile({ contents: [{ type: 'resource', resource: { uri: `file:///${encodeURIComponent(filename)}`, mimeType: blob.type || 'application/octet-stream', blob: btoa(binary) } }] });
-      if (result.isError) throw new Error('宿主未完成文件下载，可能已取消或被拒绝；请重试。');
-    },
-    async call<T>(name: ToolName, args: Record<string, unknown> = {}) {
-      const result = await transport.request(`${client.baseUrl}/api/tools/${name}`, { method: 'POST', headers: { ...(client.token ? { Authorization: `Bearer ${client.token}` } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
-      return unwrap(await result.json() as ToolResponse<T>, result.status);
-    },
-  };
-  bridge = {
-    client, actor: connection.actor, artifactId: initialArtifactId, view: initialView, restoredView,
+  applyHostAppearance(context);
+  const transport = connectEmbeddedTransport(app, connection);
+  session.closeTransport = transport.close;
+  const bridge: StudioBridge = {
+    client: transport.client,
+    actor: connection.actor,
+    artifactId: initialArtifactId,
+    view: initialView,
+    restoredView,
     navigate(artifactId, view) {
       localRoute = true;
-      // The editor already performed its own navigation. Keep the bridge's current route for re-entry.
+
       initialArtifactId = artifactId;
       initialView = view ?? (artifactId ? 'editor' : 'library');
-      bridge!.artifactId = initialArtifactId;
-      bridge!.view = initialView;
+      bridge.artifactId = initialArtifactId;
+      bridge.view = initialView;
     },
     async close() {
       transport.close();
-      contextUpdater?.close();
-      if (!tornDown) { tornDown = true; await app.close(); }
+      session.contextUpdater?.close();
+      if (!tornDown) {
+        tornDown = true;
+        await app.close();
+      }
     },
   };
-  if (extensions.message && app.getHostCapabilities()?.message) bridge.attachContext = async (feedback, document) => {
-    const response = await extensions.message!.send(feedbackDraft(feedback, document));
-    if (response.isError) throw new Error('宿主没有确认附加备注，请检查对话输入框后重试。');
-  };
-  const formats = app.getHostCapabilities()?.updateModelContext;
-  if (formats?.text || formats?.structuredContent) {
-    let priorViewId = restoredView?.viewId;
-    contextUpdater = createHostContextUpdater(async snapshot => {
-      await app.updateModelContext(formats.structuredContent
-        ? { structuredContent: { ...snapshot } }
-        : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] });
-      // Keep the old record until its replacement is present and the host accepts the new view identity.
-      if (priorViewId && snapshot.viewId && snapshot.viewId !== priorViewId && snapshot.artifactId === restoredView?.artifactId &&
-        loadPanelReadingView(snapshot.viewId, snapshot.artifactId)) {
-        storePanelReadingView(priorViewId, null);
-        priorViewId = undefined;
+  session.bridge = bridge;
+  if (extensions.message && app.getHostCapabilities()?.message) {
+    bridge.attachContext = async (feedback, document) => {
+      const response = await extensions.message!.send(feedbackDraft(feedback, document));
+      if (response.isError) {
+        throw new Error('宿主没有确认附加备注，请检查对话输入框后重试。');
       }
-    });
-    bridge.updateContext = contextUpdater.update;
-    // The library is an open App too, even before a work or selection exists.
-    if (!restoredView) contextUpdater.update(null);
+    };
+  }
+  session.contextUpdater = connectContextPublisher(app, restoredView);
+  if (session.contextUpdater) {
+    bridge.updateContext = session.contextUpdater.update;
   }
   return bridge;
 }

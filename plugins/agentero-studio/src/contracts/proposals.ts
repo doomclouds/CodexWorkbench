@@ -1,6 +1,12 @@
-/** Product-neutral operations; product adapters validate their own fields. */
-export interface ProposalOperation { op: string; [key: string]: unknown }
-export interface ProposalChange { id: string; before: unknown; after: unknown }
+export interface ProposalOperation {
+  op: string;
+  [key: string]: unknown;
+}
+export interface ProposalChange {
+  id: string;
+  before: unknown;
+  after: unknown;
+}
 export interface ProposalOption {
   id: string;
   label: string;

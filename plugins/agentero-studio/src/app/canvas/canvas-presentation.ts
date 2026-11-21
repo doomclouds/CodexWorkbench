@@ -2,6 +2,7 @@ import type { BoardElement } from '../../contracts/studio.js';
 import { contains } from './canvas-model.js';
 
 type Size = { w: number; h: number };
+type Bounds = Size & { x: number; y: number };
 export type TableDetail = 'full' | 'preview' | 'outline';
 type SectionTitleDetail = { mode: 'full' } | { mode: 'overview'; width: number };
 
@@ -16,44 +17,105 @@ export function canReadCanvasText(size: Size, fontSize: number, zoom: number): b
 }
 
 export function showHtmlCaption(element: BoardElement, zoom: number): boolean {
-  return element.type === 'html' && zoom >= .5 && element.w * zoom >= 96;
+  return element.type === 'html' && zoom >= 0.5 && element.w * zoom >= 96;
 }
 
-export function sectionTitleDetails(elements: readonly BoardElement[], zoom: number): Map<string, SectionTitleDetail> {
+function overviewObstacles(elements: readonly BoardElement[], zoom: number) {
+  if (zoom >= 1) {
+    return [];
+  }
+
+  return elements
+    .filter((element) =>
+      ['container', 'html', 'diagram', 'document', 'todo'].includes(element.type),
+    )
+    .map((element) =>
+      showHtmlCaption(element, zoom)
+        ? { ...element, y: element.y - 28, h: element.h + 28 }
+        : element,
+    );
+}
+
+function overlapsBounds(left: Bounds, right: Bounds) {
+  return (
+    left.x < right.x + right.w &&
+    left.x + left.w > right.x &&
+    left.y < right.y + right.h &&
+    left.y + left.h > right.y
+  );
+}
+
+function availableCaptionWidth(
+  section: BoardElement,
+  occupied: readonly BoardElement[],
+  zoom: number,
+  minimumWidth: number,
+) {
+  const { height, gap } = overviewSectionTitle;
+  const caption = {
+    x: section.x,
+    y: section.y - (height + gap) / zoom,
+    w: section.w,
+    h: height / zoom,
+  };
+
+  for (const region of occupied) {
+    const enclosingContainer =
+      region.type === 'container' && contains(region, section) && contains(region, caption);
+
+    if (region.id === section.id || !overlapsBounds(region, caption) || enclosingContainer) {
+      continue;
+    }
+
+    caption.w = Math.max(0, region.x - section.x - gap / zoom);
+    if (caption.w * zoom < minimumWidth) {
+      break;
+    }
+  }
+
+  return caption.w;
+}
+
+export function sectionTitleDetails(
+  elements: readonly BoardElement[],
+  zoom: number,
+): Map<string, SectionTitleDetail> {
   const details = new Map<string, SectionTitleDetail>();
-  const sections = elements.filter(element => element.type === 'container');
-  const { fontSize: minimumFont, height, gap } = overviewSectionTitle;
+  const sections = elements.filter((element) => element.type === 'container');
+  const { fontSize: minimumFont } = overviewSectionTitle;
   const minimumWidth = minimumFont * 2.5;
-  // Include the visible HTML caption line and its gap above the region at overview zooms.
-  const occupied = zoom < 1 ? elements.filter(element => ['container', 'html', 'diagram', 'document', 'todo'].includes(element.type))
-    .map(element => showHtmlCaption(element, zoom) ? { ...element, y: element.y - 28, h: element.h + 28 } : element) : [];
+
+  const occupied = overviewObstacles(elements, zoom);
   for (const section of sections) {
-    const size = projectedSize(section, zoom), fontSize = section.fontSize ?? 17;
+    const size = projectedSize(section, zoom);
+    const fontSize = section.fontSize ?? 17;
     if (canReadCanvasText(size, fontSize, zoom) && (zoom >= 1 || fontSize * zoom >= minimumFont)) {
       details.set(section.id, { mode: 'full' });
       continue;
     }
-    if (zoom >= 1 || size.w < minimumWidth || size.h < 12 || !section.text?.trim()) continue;
-    const caption = { x: section.x, y: section.y - (height + gap) / zoom, w: section.w, h: height / zoom };
-    // A compact heading needs an external lane. A containing section's background can
-    // host a nested heading. A region on the right shortens the available lane.
-    for (const region of occupied) {
-      // Snapped neighbors can touch the lane edge without occupying any of it.
-      const overlaps = region.x < caption.x + caption.w && region.x + region.w > caption.x
-        && region.y < caption.y + caption.h && region.y + region.h > caption.y;
-      if (region.id === section.id || !overlaps
-        || (region.type === 'container' && contains(region, section) && contains(region, caption))) continue;
-      caption.w = Math.max(0, region.x - section.x - gap / zoom);
-      if (caption.w * zoom < minimumWidth) break;
+
+    const tooSmallForCaption = size.w < minimumWidth || size.h < 12;
+    if (zoom >= 1 || tooSmallForCaption || !section.text?.trim()) {
+      continue;
     }
-    if (caption.w * zoom >= minimumWidth) details.set(section.id, { mode: 'overview', width: caption.w });
+
+    const width = availableCaptionWidth(section, occupied, zoom, minimumWidth);
+    if (width * zoom >= minimumWidth) {
+      details.set(section.id, { mode: 'overview', width });
+    }
   }
+
   return details;
 }
 
 export function tableDetail(size: Size, fontSize: number, zoom: number): TableDetail {
-  if (size.w < 96 || size.h < 44) return 'outline';
-  if (size.w < 240 || size.h < 96 || fontSize * zoom < 8) return 'preview';
+  if (size.w < 96 || size.h < 44) {
+    return 'outline';
+  }
+  if (size.w < 240 || size.h < 96 || fontSize * zoom < 8) {
+    return 'preview';
+  }
+
   return 'full';
 }
 
@@ -62,10 +124,11 @@ export function mediaControlsFit(size: Size): boolean {
 }
 
 export function overviewStrokeWidth(width: number, zoom: number): number {
-  return zoom < .5 ? Math.max(width, .7 / zoom) : width;
+  return zoom < 0.5 ? Math.max(width, 0.7 / zoom) : width;
 }
 
 export function canvasGridSpacing(zoom: number): number {
   const spacing = 24 * zoom;
+
   return spacing >= 8 ? spacing : spacing * 2 ** Math.ceil(Math.log2(8 / spacing));
 }

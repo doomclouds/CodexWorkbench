@@ -114,6 +114,20 @@ Agent首次查找作品和空地可不带任务只读；正式工作先用`artif
 
 ## 开发与交付
 
+### 代码检查与排版
+
+开发环境使用 Node 24.11 或更高的 Node 24 版本。`pnpm --filter @codexworkbench/agentero-studio lint` 默认扫描 `src` 和 `tests` 的 TypeScript、JavaScript、CSS 和 HTML 源文件。可传入相对于插件目录的路径，例如 `pnpm --filter @codexworkbench/agentero-studio lint src/app/canvas`。
+
+[ESLint 配置](eslint.config.mjs) 使用 React 官方 `recommended` 规则，并检查命名、控制流、异常处理、代码布局和导入边界。作品中心和编辑视图由 Studio 外壳组合，画布代码使用结构比较判断值是否相等。[Oxlint 配置](.oxlintrc.json) 检查 Promise、联合类型分支、未用符号、过时用法和不安全的 React 生命周期，也检查草稿与工具响应入口的危险赋值和类型断言。[Oxfmt 配置](.oxfmtrc.json) 检查同一批文件的排版。`pnpm check` 和 Studio 构建都执行 Lint 与 TypeScript 检查。构建通过这些检查后才写入运行资源。
+
+源码注释一律报错，CSS 和 HTML 中的注释也会阻断构建。版权署名与许可文本见 [NOTICE](NOTICE.md)。
+
+- 代码使用 2 空格、LF、100 列目标行宽、单引号和分号。导入组、顶层类型和函数、连续守卫后的主流程之间留一行。连续守卫成组。
+- Props 依次组织输入数据、能力和状态、事件回调。共享协议类型放在 `contracts`。模块内部类型放在主要使用处附近。导入纯类型使用 `import type` 或内联 `type`。样式和初始化导入维持原有执行顺序。
+- 圈复杂度最多 20，语句块和类型表达式嵌套最多 3 层。单个判断最多两个 `&&` 或 `||`。当一个函数处理多项职责时按业务步骤拆分，在 JSX 中使用具名事件处理函数。
+- 捕获异常时处理已知情况、报告失败或上抛。包装错误使用 `cause` 保留原始原因，Promise 的拒绝走同样的处理路径。
+- Studio 工具名从 `STUDIO_TOOLS` 和 `APP_TOOL_NAME` 引用。测试可以用协议字面值核对对外约定。
+
 ### 产品与公共层
 
 `runtime/server.mjs` 是 [tooling/build-agentero-studio.mjs](../../tooling/build-agentero-studio.mjs) 从 `src/server/index.ts` 自动生成的 esbuild 分发文件，包含后端运行依赖；其长度包含打包代码，不能视为业务单体。前端由同一脚本经 Vite 生成 `runtime/app.html`，PNG 渲染另随附 `runtime/resvg.wasm`。业务修改维护下列源码，再统一构建运行资源，不手工修改生成文件。
