@@ -20,6 +20,7 @@ import { arrowGeometry } from '../../shared/whiteboard-geometry.js';
 import { htmlSource, snapshotFeedback } from './whiteboard-feedback.js';
 import { advanceChildIncarnations, documentInsertedIds } from './child-incarnations.js';
 import { rebaseNativeContent } from './native-content-merge.js';
+import { whiteboardThumbnail } from './whiteboard-thumbnail.js';
 
 export { htmlSource } from './whiteboard-feedback.js';
 import { inlineExportAssets } from '../../shared/serialization.js';
@@ -1839,21 +1840,10 @@ export const whiteboardProduct: ProductDefinition<
   },
   validateAsset: validateWhiteboardAsset,
   createArchiveContentValidator,
-  async thumbnail(snapshot, resources) {
-    try {
-      return await whiteboardProduct.export(
-        snapshot,
-        'svg',
-        { padding: 16, svgRegions: true },
-        resources,
-      );
-    } catch (error) {
-      if ((error as { code?: string }).code !== 'EXPORT_BROWSER_REQUIRED') {
-        throw error;
-      }
-
-      return whiteboardProduct.export(snapshot, 'svg', { padding: 16 }, resources);
-    }
+  thumbnail(snapshot, resources) {
+    return whiteboardThumbnail(boardView(snapshot), (options) =>
+      whiteboardProduct.export(snapshot, 'svg', options, resources),
+    );
   },
   async export(snapshot, format, options, resources) {
     const { exportArtifact } = await import('../export.js');

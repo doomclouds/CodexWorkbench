@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type {
-  Actor,
-  Board,
-  BoardElement,
-  CollaborationRoom,
-  CollaborationStateEvent,
-  Json,
-  RoomMessage,
+import {
+  ELEMENT_TYPES,
+  type Actor,
+  type Board,
+  type BoardElement,
+  type CollaborationRoom,
+  type CollaborationStateEvent,
+  type Json,
+  type RoomMessage,
 } from '../../contracts/studio';
 import { newClientId } from './client-id';
 
@@ -36,6 +37,7 @@ export interface PeerGesture extends NativeGesture {
 }
 
 const KINDS = ['move', 'resize', 'turn', 'ink', 'shape', 'arrow', 'upload'];
+const elementTypes = new Set<string>(ELEMENT_TYPES);
 const FIELDS = [
   'id',
   'type',
@@ -70,7 +72,15 @@ const finite = (value: unknown): value is number =>
 const identifier = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 160;
 
+const geometryOnlyType = (type: BoardElement['type']) => type === 'document' || type === 'todo';
+
 function project(element: BoardElement, compact = false): Record<string, Json> {
+  if (geometryOnlyType(element.type)) {
+    const { id, type, version, x, y, w, h, rotation } = element;
+
+    return { id, type, version, x, y, w, h, ...(finite(rotation) ? { rotation } : {}) };
+  }
+
   const next: Record<string, Json> = {};
   for (const field of FIELDS) {
     const value = element[field];
@@ -108,24 +118,7 @@ function decodeElement(value: unknown): BoardElement | undefined {
   if (!object(value) || !identifier(value.id)) {
     return;
   }
-  if (
-    typeof value.type !== 'string' ||
-    ![
-      'shape',
-      'container',
-      'text',
-      'stroke',
-      'arrow',
-      'image',
-      'html',
-      'table',
-      'link',
-      'note',
-      'sticker',
-      'diagram',
-      'chart',
-    ].includes(value.type)
-  ) {
+  if (typeof value.type !== 'string' || !elementTypes.has(value.type)) {
     return;
   }
   if (
@@ -268,20 +261,18 @@ export function encodeGestureFrame(
     throw new Error('实时预览的对象数量或标识超过预算。');
   }
 
-  const sourceCoordinates = gesture.elements.reduce(
-    (sum, element) => sum + (element.points?.length ?? 0),
-    0,
-  );
-  let pointLimit = Math.max(
-    1,
-    ...gesture.elements.map((element) => (element.points?.length ?? 0) / 2),
-  );
+  const sources = gesture.elements.map((element) => ({
+    element,
+    points: geometryOnlyType(element.type) ? undefined : element.points,
+  }));
+  const sourceCoordinates = sources.reduce((sum, { points }) => sum + (points?.length ?? 0), 0);
+  let pointLimit = Math.max(1, ...sources.map(({ points }) => (points?.length ?? 0) / 2));
   let compact = false;
   while (true) {
     const pairs = pointLimit;
-    const projected = gesture.elements.map((element) => ({
+    const projected = sources.map(({ element, points }) => ({
       element,
-      points: element.points ? samplePoints(element.points, pairs) : undefined,
+      points: points ? samplePoints(points, pairs) : undefined,
     }));
     const previewCoordinates = projected.reduce((sum, item) => sum + (item.points?.length ?? 0), 0);
     const sampled = compact || previewCoordinates < sourceCoordinates;
@@ -377,6 +368,10 @@ type GesturePacket = NonNullable<ReturnType<typeof readGesturePacket>>;
 
 function applyStrokeAtom(point: Record<string, unknown>, elements: Map<string, BoardElement>) {
   const element = typeof point.id === 'string' ? elements.get(point.id) : undefined;
+  if (element && geometryOnlyType(element.type)) {
+    return false;
+  }
+
   const { offset, values } = point;
   if (!element || !isCounter(offset) || offset !== (element.points?.length ?? 0)) {
     return false;
@@ -395,6 +390,8 @@ function applyStrokeAtom(point: Record<string, unknown>, elements: Map<string, B
 
 function assembleFrame(entry: Assembly, origin: Assembly['origin']) {
   const elements = new Map<string, BoardElement>();
+  const existingGeometry =
+    origin === 'existing' && (entry.kind === 'move' || entry.kind === 'resize');
   const atoms = Array.from(
     { length: entry.total },
     (_, index) => entry.parts.get(index)?.atoms || [],
@@ -406,7 +403,7 @@ function assembleFrame(entry: Assembly, origin: Assembly['origin']) {
     }
 
     const element = decodeElement(atom.element);
-    if (!element) {
+    if (!element || (geometryOnlyType(element.type) && !existingGeometry)) {
       continue;
     }
 
@@ -826,7 +823,14 @@ export class NativeGestureReceiver {
         this.retire(key);
       } else {
         entry.gesture = { ...gesture, elements: retained };
-        next.push(entry.gesture);
+        const visible = retained.filter(
+          (preview) =>
+            !geometryOnlyType(preview.type) || elements.get(preview.id)?.type === preview.type,
+        );
+
+        if (visible.length) {
+          next.push({ ...entry.gesture, elements: visible });
+        }
       }
     }
     return next;

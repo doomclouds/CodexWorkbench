@@ -140,9 +140,17 @@ function applyOnlyClient(apply: CanvasApply): StudioClient {
   return { embedded: true, call };
 }
 
-async function editable(elements: BoardElement[] = [], props: Partial<WhiteboardCanvasProps> = {}) {
+async function editable(
+  elements: BoardElement[] = [],
+  props: Partial<WhiteboardCanvasProps> = {},
+  beforeApply?: () => Promise<void>,
+) {
   let current = board(elements);
   const call = vi.fn(async (_name: typeof STUDIO_TOOLS.apply, args: CanvasApplyRequest) => {
+    if (beforeApply) {
+      await beforeApply();
+    }
+
     for (const operation of args.operations) {
       if (operation.op === 'add') {
         current = {
@@ -507,6 +515,27 @@ async function pointer(x: number, y: number, end = { x, y }) {
   }
 
   await event(query('白板画布'), 'pointerup', end.x, end.y);
+}
+
+async function placeShapeWithPendingReceipt(
+  props: Partial<WhiteboardCanvasProps> = {},
+  elements: BoardElement[] = [element('other')],
+) {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const call = await editable(elements, props, () => pending);
+  await click('形状');
+  await pointer(460, 320, { x: 580, y: 405 });
+  const operation = call.mock.calls[0]![1].operations[0]!;
+  expect(operation).toMatchObject({ op: 'add', element: { type: 'shape' } });
+
+  return {
+    call,
+    id: operation.element!.id!,
+    confirm: () => act(async () => release()),
+  };
 }
 
 async function select(id: string) {
@@ -1397,6 +1426,91 @@ describe('whiteboard direct interaction', () => {
     expect(call).toHaveBeenCalledTimes(3);
     expect(call.mock.calls[2]![1].operations[0]).toMatchObject({ op: 'delete' });
   });
+  it('selects the optimistic shape and returns to select on release before its save is confirmed', async () => {
+    const activity = vi.fn();
+    const { call, id, confirm } = await placeShapeWithPendingReceipt(
+      { onActivityChange: activity },
+      [],
+    );
+
+    try {
+      expect(call).toHaveBeenCalledOnce();
+      expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
+      expect(host.querySelector(`[data-element-id="${id}"].is-selected`)).not.toBeNull();
+      expect(host.querySelector('.studio-canvas-empty')).toBeNull();
+      expect(activity.mock.lastCall?.[0]).toMatchObject({ saving: true, saveError: '' });
+    } finally {
+      await confirm();
+    }
+
+    expect(activity.mock.lastCall?.[0]).toMatchObject({ saving: false, saveError: '' });
+  });
+
+  it('does not place another shape on an independent blank click while the first save is pending', async () => {
+    const { call, id, confirm } = await placeShapeWithPendingReceipt();
+    try {
+      await pointer(820, 620);
+      await event(query('白板画布'), 'click', 820, 620);
+      expect(call).toHaveBeenCalledOnce();
+      expect(host.querySelector(`[data-element-id="${id}"].is-selected`)).toBeNull();
+    } finally {
+      await confirm();
+    }
+
+    expect(call).toHaveBeenCalledOnce();
+    expect(host.querySelector(`[data-element-id="${id}"].is-selected`)).toBeNull();
+  });
+
+  it('keeps the later selection and tool when the original placement receipt arrives', async () => {
+    const selection = vi.fn();
+    const { call, id, confirm } = await placeShapeWithPendingReceipt({
+      onSelectionChange: selection,
+    });
+
+    try {
+      await click('选择');
+      await select('other');
+      await click('平移');
+      expect(selection.mock.lastCall?.[0]).toEqual(['other']);
+      expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('pan');
+    } finally {
+      await confirm();
+    }
+
+    expect({
+      selection: selection.mock.lastCall?.[0],
+      tool: host.querySelector('.studio-whiteboard')!.getAttribute('data-tool'),
+    }).toEqual({ selection: ['other'], tool: 'pan' });
+    expect(host.querySelector(`[data-element-id="${id}"]`)).not.toBeNull();
+    expect(call).toHaveBeenCalledOnce();
+  });
+
+  it('queues a resize for a pending placement and saves its bounds against the confirmed object version', async () => {
+    const { call, id, confirm } = await placeShapeWithPendingReceipt();
+
+    try {
+      await event(query('调整元素大小 se'), 'pointerdown', 580, 405);
+      await event(query('白板画布'), 'pointermove', 660, 480);
+      await event(query('白板画布'), 'pointerup', 660, 480);
+      expect(call).toHaveBeenCalledOnce();
+    } finally {
+      await confirm();
+    }
+
+    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2));
+    expect(call.mock.calls[1]![1]).toMatchObject({
+      expectedVersions: { [id]: 1 },
+      operations: [{ op: 'update', id, changes: { x: 460, y: 320, w: 200, h: 160 } }],
+    });
+    const resized = host.querySelector<HTMLElement>(`[data-element-id="${id}"]`)!;
+    expect(resized.style).toMatchObject({
+      left: '460px',
+      top: '320px',
+      width: '200px',
+      height: '160px',
+    });
+  });
+
   it('previews a document from the insert menu without mounting or saving it before placement', async () => {
     const call = await editable([element('existing')]);
     await click('形状');

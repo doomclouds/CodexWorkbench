@@ -426,19 +426,27 @@ function useCanvasAnnotationState(
 
 function useCanvasBoardReconciliation(
   board: Board,
+  contentElements: readonly BoardElement[],
   selection: string[],
   setSelection: (selection: string[]) => void,
   editing: TextDraft | null,
   setEditing: (draft: TextDraft | null) => void,
   queueTasks: ContentTask[],
 ) {
-  const [observedBoard, setObservedBoard] = useState(board);
-  if (observedBoard !== board) {
-    setObservedBoard(board);
-    const remaining = selection.filter((id) => board.elements.some((element) => element.id === id));
+  const [observed, setObserved] = useState({ board, queueTasks });
+  const boardChanged = observed.board !== board;
+  if (boardChanged || observed.queueTasks !== queueTasks) {
+    setObserved({ board, queueTasks });
+    const remaining = selection.filter((id) =>
+      contentElements.some((element) => element.id === id),
+    );
+
     if (selection.length !== remaining.length) {
       setSelection(remaining);
     }
+  }
+
+  if (boardChanged) {
     const refreshedDraft = refreshTextDraft(editing, board.elements, queueTasks);
     if (refreshedDraft !== editing) {
       setEditing(refreshedDraft);
@@ -1176,7 +1184,15 @@ function CanvasSession({
       viewportCallback.current?.(viewport);
     }
   }, [openingViewportReady, viewport, viewportCallback]);
-  useCanvasBoardReconciliation(board, selection, setSelection, editing, setEditing, queueTasks);
+  useCanvasBoardReconciliation(
+    board,
+    contentElements,
+    selection,
+    setSelection,
+    editing,
+    setEditing,
+    queueTasks,
+  );
   useEffect(restoreOpeningReadingView, [restoreOpeningReadingView]);
   useEffect(() => {
     if (!readingRef.current && externalSelectedIds) {
@@ -1215,24 +1231,24 @@ function CanvasSession({
       sourceElements?: BoardElement[],
       remember = true,
       operationId?: string,
+      onQueued?: () => void,
     ): Promise<Board | null> => {
       if (!canEditRef.current || preview || !operations.length) {
         return null;
       }
 
-      return (
-        (
-          await queue.enqueue(
-            boardRef.current,
-            operations,
-            summary,
-            sourceElements,
-            remember,
-            summary,
-            operationId,
-          )
-        )?.board ?? null
+      const completion = queue.enqueue(
+        boardRef.current,
+        operations,
+        summary,
+        sourceElements,
+        remember,
+        summary,
+        operationId,
       );
+      onQueued?.();
+
+      return (await completion)?.board ?? null;
     },
     [queue, preview, canEditRef],
   );
@@ -1327,27 +1343,47 @@ function CanvasSession({
   const addElements = async (
     elements: BoardElement[],
     summary: string,
-    options: { edit?: boolean; operationId?: string } = {},
+    options: { edit?: boolean; operationId?: string; selectOnQueue?: boolean } = {},
   ) => {
+    const scope = currentScope.current;
+    let queuedIntent: number | undefined;
+    const selectAdded = () => {
+      selectIds(elements.map((element) => element.id));
+      setTool('select');
+      setToolMenu(null);
+      setMenu(null);
+    };
+    const onQueued = options.selectOnQueue
+      ? () => {
+          selectAdded();
+          queuedIntent = interactionIntent.current;
+        }
+      : undefined;
     const saved = await apply(
       elements.map((element) => ({ op: 'add', id: element.id, element })),
       summary,
       undefined,
       true,
       options.operationId,
+      onQueued,
     );
 
-    if (saved) {
-      selectIds(elements.map((element) => element.id));
-      setTool('select');
-      setToolMenu(null);
-      setMenu(null);
-      textEditing.rememberCreatedText(elements);
-      if (options.edit) {
-        const next = saved.elements.find((element) => element.id === elements[0]?.id);
-        if (next) {
-          beginEditing(next);
-        }
+    if (!saved || currentScope.current !== scope) {
+      return saved;
+    }
+
+    if (!options.selectOnQueue) {
+      selectAdded();
+    }
+
+    textEditing.rememberCreatedText(elements);
+    const placementStillCurrent =
+      queuedIntent === undefined || queuedIntent === interactionIntent.current;
+
+    if (options.edit && placementStillCurrent) {
+      const next = saved.elements.find((element) => element.id === elements[0]?.id);
+      if (next) {
+        beginEditing(next);
       }
     }
     return saved;
@@ -2206,6 +2242,7 @@ function CanvasSession({
     event.stopPropagation();
     event.preventDefault();
     viewportElement.current?.setPointerCapture(event.pointerId);
+    interactionIntent.current++;
     updateGesture({ ...prepared, start: boardPoint(event.clientX, event.clientY) });
   };
   const handleResizeStart = (event: ReactPointerEvent, handle: ResizeHandle) =>
@@ -2332,7 +2369,8 @@ function CanvasSession({
           fail: failGesture,
         },
         write: {
-          add: addElements,
+          add: (elements, summary, options) =>
+            addElements(elements, summary, { ...options, selectOnQueue: true }),
           apply: (operations, summary, sources, operationId) =>
             apply(operations, summary, sources, true, operationId),
           reportFailure: reportCanvasFailure,
@@ -3825,7 +3863,7 @@ function CanvasSession({
           onSelect={onFeedbackSelect}
         />
         <CanvasEmptyState
-          empty={board.elements.length === 0}
+          empty={contentElements.length === 0}
           interacting={Boolean(gesture)}
           canEdit={canEdit}
           addDocument={addDocumentFromControls}

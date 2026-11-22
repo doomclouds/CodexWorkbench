@@ -385,14 +385,14 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-async function until(check: () => void) {
+async function until(check: () => void | Promise<void>) {
   await vi.waitFor(async () => {
     await act(async () => {
       await new Promise((resolve) => {
         setTimeout(resolve, 5);
       });
     });
-    check();
+    await check();
   });
 }
 
@@ -603,16 +603,16 @@ it('keeps unrelated edit, pan, resize, rotate and creation available during an a
     ).toBe(true),
   );
   expect(query('编辑文字')).toBeNull();
-  const edited = (await service.execute('artifact_read', {
-    artifactId: board.artifact.id,
-  })) as Board;
-  expect(edited.elements.find((element) => element.id === 'one')).toMatchObject({
-    bold: true,
-    w: 250,
+  await until(async () => {
+    const edited = (await service.execute('artifact_read', {
+      artifactId: board.artifact.id,
+    })) as Board;
+    const note = edited.elements.find((element) => element.id === 'one');
+    expect(note).toMatchObject({ bold: true, w: 250 });
+    expect(typeof note?.rotation).toBe('number');
+    expect(note?.rotation).not.toBe(0);
+    expect(edited.elements.filter((element) => element.type === 'shape')).toHaveLength(1);
   });
-  expect(typeof edited.elements.find((element) => element.id === 'one')!.rotation).toBe('number');
-  expect(edited.elements.find((element) => element.id === 'one')!.rotation).not.toBe(0);
-  expect(edited.elements.filter((element) => element.type === 'shape')).toHaveLength(1);
   await act(async () => asset.resolve(Response.json({ src: '/assets/clip.mp4' })));
   await until(() => expect(host.querySelector('[data-upload-phase="queued"]')).not.toBeNull());
   expect(saveStatus()).toBe('saving');

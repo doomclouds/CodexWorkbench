@@ -67,7 +67,7 @@ function isCommentPin(value) {
     return false;
   }
   return [pin.x, pin.y].every(
-    (coordinate2) => typeof coordinate2 === "number" && Number.isFinite(coordinate2) && (pin.coordinateSpace === "board" ? Math.abs(coordinate2) <= 1e7 : coordinate2 >= 0 && coordinate2 <= 1)
+    (coordinate3) => typeof coordinate3 === "number" && Number.isFinite(coordinate3) && (pin.coordinateSpace === "board" ? Math.abs(coordinate3) <= 1e7 : coordinate3 >= 0 && coordinate3 <= 1)
   );
 }
 var ELEMENT_TYPES, AGENT_TASK_LEASE_MS, AGENT_TASK_STALE_MS, AGENT_TASK_FADE_MS, STUDIO_TOOLS, TOOL_NAMES, DEFAULT_STYLE, LOCAL_ACTOR;
@@ -21688,8 +21688,8 @@ function offsetBendPoints(offsets, firstHorizontal, start, end) {
   const to = anchorWithBend(end, lastOther, !nextHorizontal);
   const points = [from];
   let cursor = from;
-  coordinates.forEach((coordinate2, index) => {
-    cursor = firstHorizontal === (index % 2 === 0) ? { x: coordinate2, y: cursor.y } : { x: cursor.x, y: coordinate2 };
+  coordinates.forEach((coordinate3, index) => {
+    cursor = firstHorizontal === (index % 2 === 0) ? { x: coordinate3, y: cursor.y } : { x: cursor.x, y: coordinate3 };
     points.push(cursor);
   });
   points.push(nextHorizontal ? { x: to.x, y: cursor.y } : { x: cursor.x, y: to.y }, to);
@@ -22825,11 +22825,11 @@ var init_native_content_merge = __esm({
 
 // src/shared/theme.ts
 function parseColor(input2) {
-  const color = tryParseColor(input2);
-  if (!color) {
+  const color2 = tryParseColor(input2);
+  if (!color2) {
     throw new Error(`\u4E0D\u652F\u6301\u7684\u989C\u8272\uFF1A${input2}`);
   }
-  return color;
+  return color2;
 }
 function tryParseColor(input2) {
   if (typeof input2 !== "string") {
@@ -22864,8 +22864,8 @@ function composite(foreground, background) {
     (i2) => (foreground[i2] * foreground[3] + background[i2] * background[3] * (1 - foreground[3])) / alpha
   ).concat(alpha);
 }
-function luminance(color) {
-  return color.slice(0, 3).map((v) => v / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4).reduce((sum, v, i2) => sum + v * [0.2126, 0.7152, 0.0722][i2], 0);
+function luminance(color2) {
+  return color2.slice(0, 3).map((v) => v / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4).reduce((sum, v, i2) => sum + v * [0.2126, 0.7152, 0.0722][i2], 0);
 }
 function contrastRatio(foreground, background, underneath = "#ffffff") {
   return colorContrast(parseColor(background), parseColor(underneath), parseColor(foreground));
@@ -23422,8 +23422,8 @@ function documentInlineColor(value, kind, scheme = "light") {
   return paint(value, LIGHT_THEME, "") || void 0;
 }
 function paint(value, style2, fallback) {
-  const color = semanticColor(value, style2, fallback);
-  const parsed = tryParseColor(color === "none" ? "transparent" : color);
+  const color2 = semanticColor(value, style2, fallback);
+  const parsed = tryParseColor(color2 === "none" ? "transparent" : color2);
   if (!parsed || !parsed.every(Number.isFinite)) {
     return fallback;
   }
@@ -23440,7 +23440,7 @@ function documentSurface(element2, style2 = LIGHT_THEME) {
   const automaticInk = readableText(paper, backdrop);
   const scheme = automaticInk === "#111111" ? "light" : "dark";
   const ink = element2.color === "ink" ? automaticInk : paint(element2.color, style2, automaticInk);
-  const readable = (color) => contrastRatio(color, paper, backdrop) >= 4.5 ? color : automaticInk;
+  const readable = (color2) => contrastRatio(color2, paper, backdrop) >= 4.5 ? color2 : automaticInk;
   return {
     backdrop,
     paper,
@@ -23520,9 +23520,9 @@ function inline2(value, scheme) {
       text3 = `<${tag}>${text3}</${tag}>`;
     }
   }
-  const color = documentInlineColor(styles.textColor, "text", scheme);
+  const color2 = documentInlineColor(styles.textColor, "text", scheme);
   const background = documentInlineColor(styles.backgroundColor, "background", scheme);
-  return color || background ? `<span style="${color ? `color:${color};` : ""}${background ? `background-color:${background};` : ""}">${text3}</span>` : text3;
+  return color2 || background ? `<span style="${color2 ? `color:${color2};` : ""}${background ? `background-color:${background};` : ""}">${text3}</span>` : text3;
 }
 function table(content, scheme) {
   const rows = record4(content) && Array.isArray(content.rows) ? content.rows : [];
@@ -23616,8 +23616,8 @@ function nativeFill(element2, style2, value = element2.fill) {
     return "transparent";
   }
   const fallback = defaultFill(element2.type, style2);
-  const color = semanticColor(value, style2, fallback);
-  return color === "none" ? "transparent" : color;
+  const color2 = semanticColor(value, style2, fallback);
+  return color2 === "none" ? "transparent" : color2;
 }
 function defaultFill(type, style2) {
   if (type === "note") {
@@ -23680,8 +23680,8 @@ function nativeBackdrop(element2, scene, fill) {
     return paper;
   }
   if (fill !== "transparent") {
-    const color = tryParseColor(fill);
-    if (!color || color[3] === 1) {
+    const color2 = tryParseColor(fill);
+    if (!color2 || color2[3] === 1) {
       return paper;
     }
   }
@@ -23986,7 +23986,7 @@ function textAlignment(element2, center) {
   }
   return { x: element2.x + (center ? 12 : 0), anchor: "start" };
 }
-function textSvg(e, board2, color, center = false) {
+function textSvg(e, board2, color2, center = false) {
   const size = Math.max(12, scalar(e.fontSize, e.type === "text" ? 20 : 16));
   const lines = wrap(String(e.text ?? ""), Math.max(size, e.w - (center ? 24 : 4)), size);
   const { x: x2, anchor: anchor3 } = textAlignment(e, center);
@@ -23995,7 +23995,7 @@ function textSvg(e, board2, color, center = false) {
     const span = `<tspan${part.type === "bold" || part.bold ? ' font-weight="700"' : ""}${part.type === "italic" || part.italic ? ' font-style="italic"' : ""}${part.type === "code" || part.code ? ` font-family="${escapeXml(board2.style.monoFont)}"` : ""}>${escapeXml(part.text)}</tspan>`;
     return part.type === "link" && part.href ? `<a href="${escapeXml(part.href)}" fill="${escapeXml(board2.style.link)}">${span}</a>` : span;
   };
-  return `<text fill="${escapeXml(color)}" font-family="${escapeXml(e.fontFamily ?? board2.style.fontFamily)}" font-size="${size}" font-weight="${e.bold ? 700 : 400}" font-style="${e.italic ? "italic" : "normal"}" text-anchor="${anchor3}">${lines.map((line, i2) => `<tspan x="${x2}" y="${y + i2 * size * 1.45}">${line.map(segment).join("")}</tspan>`).join("")}</text>`;
+  return `<text fill="${escapeXml(color2)}" font-family="${escapeXml(e.fontFamily ?? board2.style.fontFamily)}" font-size="${size}" font-weight="${e.bold ? 700 : 400}" font-style="${e.italic ? "italic" : "normal"}" text-anchor="${anchor3}">${lines.map((line, i2) => `<tspan x="${x2}" y="${y + i2 * size * 1.45}">${line.map(segment).join("")}</tspan>`).join("")}</text>`;
 }
 function shapeSvg(e, fill, stroke) {
   const common = `fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}"${e.dash ? ' stroke-dasharray="6 5"' : ""}`;
@@ -24056,17 +24056,17 @@ function endpoint(value, elements) {
   }
   return [target.x + target.w / 2, target.y + target.h / 2];
 }
-function headSvg(kind, tip, inside2, color) {
+function headSvg(kind, tip, inside2, color2) {
   if (kind === "none") {
     return "";
   }
   if (kind === "circle") {
-    return `<circle cx="${tip.x}" cy="${tip.y}" r="4.5" fill="${escapeXml(color)}"/>`;
+    return `<circle cx="${tip.x}" cy="${tip.y}" r="4.5" fill="${escapeXml(color2)}"/>`;
   }
   const length = Math.hypot(inside2.x - tip.x, inside2.y - tip.y) || 1;
   const dx = (inside2.x - tip.x) / length;
   const dy = (inside2.y - tip.y) / length;
-  return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color)}"/>`;
+  return `<polygon points="${tip.x},${tip.y} ${tip.x + dx * 10 - dy * 4},${tip.y + dy * 10 + dx * 4} ${tip.x + dx * 10 + dy * 4},${tip.y + dy * 10 - dx * 4}" fill="${escapeXml(color2)}"/>`;
 }
 function documentPreviewSvg(e, document, board2) {
   const style2 = board2.style;
@@ -24109,8 +24109,8 @@ function arrowSvg(e, board2) {
   endpoint(e.to, board2.elements);
   const route = arrowGeometry(e, board2.elements);
   const heads = arrowHeads(e);
-  const color = semanticColor(e.stroke ?? e.color, style2, style2.muted);
-  let markup = `<path d="${route.path}" fill="none" stroke="${escapeXml(color)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}" stroke-linejoin="round" ${e.dash ? 'stroke-dasharray="5 4"' : ""}/>` + headSvg(heads[0], route.points[0], route.points[1] ?? route.points[0], color) + headSvg(heads[1], route.points.at(-1), route.points.at(-2) ?? route.points.at(-1), color);
+  const color2 = semanticColor(e.stroke ?? e.color, style2, style2.muted);
+  let markup = `<path d="${route.path}" fill="none" stroke="${escapeXml(color2)}" stroke-width="${scalar(e.strokeWidth ?? e.width, 1.5)}" stroke-linejoin="round" ${e.dash ? 'stroke-dasharray="5 4"' : ""}/>` + headSvg(heads[0], route.points[0], route.points[1] ?? route.points[0], color2) + headSvg(heads[1], route.points.at(-1), route.points.at(-2) ?? route.points.at(-1), color2);
   if (e.label) {
     const box = arrowLabelBox(e, route.label);
     markup += `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="${escapeXml(style2.paper)}"/>` + textSvg(
@@ -24362,6 +24362,189 @@ var init_serialization = __esm({
 .studio-export-todo input{margin:3px 0 0;accent-color:var(--todo-accent)}
 .studio-export-todo li span{white-space:pre-wrap;overflow-wrap:anywhere}
 .studio-export-todo li:has(input:checked) span{color:var(--todo-muted)}`;
+  }
+});
+
+// src/core/shared/thumbnails.ts
+var MAX_THUMBNAIL_BYTES, ThumbnailCache;
+var init_thumbnails = __esm({
+  "src/core/shared/thumbnails.ts"() {
+    "use strict";
+    init_common();
+    MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
+    ThumbnailCache = class {
+      entries = /* @__PURE__ */ new Map();
+      get(id2, revision2, render) {
+        const existing = this.entries.get(id2);
+        if (existing?.revision === revision2) {
+          return existing.promise;
+        }
+        const promise2 = render().then((result) => {
+          if (!/^image\/(?:png|jpeg|webp|svg\+xml)$/.test(result.mimeType)) {
+            throw new StudioError("NO_PREVIEW", "\u6B64\u4EA7\u54C1\u6CA1\u6709\u56FE\u50CF\u9884\u89C8\u3002");
+          }
+          const data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
+          if (data.byteLength > MAX_THUMBNAIL_BYTES) {
+            throw new StudioError("NO_PREVIEW", "\u9884\u89C8\u8D85\u8FC7\u7F13\u5B58\u9884\u7B97\uFF0C\u8BF7\u6253\u5F00\u4F5C\u54C1\u67E5\u770B\u3002");
+          }
+          return { mimeType: result.mimeType, data };
+        }).catch((error62) => {
+          if (this.entries.get(id2)?.promise === promise2) {
+            this.entries.delete(id2);
+          }
+          throw error62;
+        });
+        this.entries.set(id2, { revision: revision2, promise: promise2 });
+        while (this.entries.size > 24) {
+          this.entries.delete(this.entries.keys().next().value);
+        }
+        return promise2;
+      }
+      delete(id2) {
+        this.entries.delete(id2);
+      }
+      clear() {
+        this.entries.clear();
+      }
+    };
+  }
+});
+
+// src/core/products/whiteboard-thumbnail.ts
+function embeddedSourceExceedsBudget(board2) {
+  let bytes = 0;
+  for (const element2 of board2.elements) {
+    if (isHtmlRegionElement(element2) && typeof element2.html === "string") {
+      bytes += Buffer.byteLength(element2.html);
+    }
+    if (typeof element2.src === "string" && element2.src.startsWith("data:")) {
+      bytes += Buffer.byteLength(element2.src);
+    }
+    if (bytes > MAX_THUMBNAIL_BYTES) {
+      return true;
+    }
+  }
+  return false;
+}
+function coordinate(value, minimum, fallback) {
+  return Number.isFinite(value) ? Math.min(MAX_WORLD_COORDINATE, Math.max(minimum, value)) : fallback;
+}
+function overviewGeometry(element2, index) {
+  return {
+    id: `preview-${index}`,
+    type: "shape",
+    version: element2.version,
+    x: coordinate(element2.x, -MAX_WORLD_COORDINATE, 0),
+    y: coordinate(element2.y, -MAX_WORLD_COORDINATE, 0),
+    w: coordinate(element2.w, 1, 220),
+    h: coordinate(element2.h, 1, 120),
+    ...Number.isFinite(element2.rotation) ? { rotation: element2.rotation % 360 } : {}
+  };
+}
+function color(value, fallback) {
+  return value && /^#[0-9a-f]{3,8}$/i.test(value) ? value : fallback;
+}
+function overviewLabel(element2, width, height) {
+  if (width < 64 || height < 26) {
+    return;
+  }
+  const snippet = typeof element2.html === "string" ? element2.html.slice(0, 2048) : "";
+  const heading = snippet.match(/<(?:title|h1)\b[^>]*>([^]*?)<\/(?:title|h1)>/i)?.[1];
+  const text3 = typeof element2.text === "string" ? element2.text : void 0;
+  const value = text3 || heading?.replace(/<[^>]*>/g, "") || REGION_LABELS[element2.type];
+  return value?.slice(0, MAX_LABEL_LENGTH).replaceAll("[", "").replaceAll("]", "").replace(/\s+/g, " ").trim();
+}
+function overviewElements(board2, style2) {
+  const geometry = board2.elements.map(overviewGeometry);
+  const bounds2 = boardBounds(geometry, 0);
+  const scale = Math.min(
+    (WIDTH - PADDING * 2) / bounds2.width,
+    (HEIGHT - PADDING * 2) / bounds2.height
+  );
+  const offsetX = (WIDTH - bounds2.width * scale) / 2;
+  const offsetY = (HEIGHT - bounds2.height * scale) / 2;
+  const count = Math.min(MAX_OVERVIEW_OBJECTS, geometry.length);
+  return Array.from({ length: count }, (_, slot) => {
+    const index = Math.floor(slot * geometry.length / count);
+    const frame = geometry[index];
+    const source = board2.elements[index];
+    const w = Math.max(1, frame.w * scale);
+    const h = Math.max(1, frame.h * scale);
+    return {
+      ...frame,
+      x: offsetX + (frame.x - bounds2.x) * scale,
+      y: offsetY + (frame.y - bounds2.y) * scale,
+      w,
+      h,
+      kind: "roundrect",
+      fill: color(source.fill, style2.paper),
+      stroke: color(source.stroke, style2.muted),
+      strokeWidth: 1,
+      color: style2.ink,
+      fontSize: 12,
+      text: overviewLabel(source, w, h)
+    };
+  });
+}
+function overview(board2) {
+  const style2 = {
+    ...DEFAULT_STYLE,
+    paper: color(board2.style.paper, DEFAULT_STYLE.paper),
+    ink: color(board2.style.ink, DEFAULT_STYLE.ink),
+    muted: color(board2.style.muted, DEFAULT_STYLE.muted)
+  };
+  const viewport = {
+    width: WIDTH,
+    height: HEIGHT,
+    bounds: { x: 0, y: 0, width: WIDTH, height: HEIGHT }
+  };
+  const artifact2 = { ...board2.artifact, title: board2.artifact.title.slice(0, MAX_LABEL_LENGTH) };
+  const projected = { artifact: artifact2, style: style2, elements: overviewElements(board2, style2) };
+  return {
+    filename: filenameFor(board2.artifact.title, "svg"),
+    mimeType: "image/svg+xml",
+    encoding: "utf8",
+    data: buildBoardSvg(projected, {}, viewport)
+  };
+}
+async function renderDetailed(render) {
+  try {
+    return await render({ padding: PADDING, svgRegions: true });
+  } catch (error62) {
+    if (!(error62 instanceof ExportError) || error62.code !== "EXPORT_BROWSER_REQUIRED") {
+      throw error62;
+    }
+    return render({ padding: PADDING });
+  }
+}
+async function whiteboardThumbnail(board2, render) {
+  if (embeddedSourceExceedsBudget(board2)) {
+    return overview(board2);
+  }
+  const detailed = await renderDetailed(render);
+  return Buffer.byteLength(detailed.data) > MAX_THUMBNAIL_BYTES ? overview(board2) : detailed;
+}
+var WIDTH, HEIGHT, PADDING, MAX_OVERVIEW_OBJECTS, MAX_WORLD_COORDINATE, MAX_LABEL_LENGTH, REGION_LABELS;
+var init_whiteboard_thumbnail = __esm({
+  "src/core/products/whiteboard-thumbnail.ts"() {
+    "use strict";
+    init_studio();
+    init_serialization();
+    init_thumbnails();
+    WIDTH = 560;
+    HEIGHT = 320;
+    PADDING = 16;
+    MAX_OVERVIEW_OBJECTS = 160;
+    MAX_WORLD_COORDINATE = 1e6;
+    MAX_LABEL_LENGTH = 60;
+    REGION_LABELS = {
+      html: "HTML \u533A\u57DF",
+      diagram: "\u56FE\u89E3",
+      document: "\u6587\u6863",
+      todo: "\u4EFB\u52A1\u6E05\u5355",
+      image: "\u56FE\u7247",
+      table: "\u8868\u683C"
+    };
   }
 });
 
@@ -25392,6 +25575,7 @@ var init_whiteboard = __esm({
     init_whiteboard_feedback();
     init_child_incarnations();
     init_native_content_merge();
+    init_whiteboard_thumbnail();
     init_whiteboard_feedback();
     init_serialization();
     init_document();
@@ -25806,20 +25990,11 @@ var init_whiteboard = __esm({
       },
       validateAsset: validateWhiteboardAsset,
       createArchiveContentValidator,
-      async thumbnail(snapshot, resources) {
-        try {
-          return await whiteboardProduct.export(
-            snapshot,
-            "svg",
-            { padding: 16, svgRegions: true },
-            resources
-          );
-        } catch (error62) {
-          if (error62.code !== "EXPORT_BROWSER_REQUIRED") {
-            throw error62;
-          }
-          return whiteboardProduct.export(snapshot, "svg", { padding: 16 }, resources);
-        }
+      thumbnail(snapshot, resources) {
+        return whiteboardThumbnail(
+          boardView(snapshot),
+          (options) => whiteboardProduct.export(snapshot, "svg", options, resources)
+        );
       },
       async export(snapshot, format, options, resources) {
         const { exportArtifact: exportArtifact2 } = await Promise.resolve().then(() => (init_export(), export_exports));
@@ -29686,50 +29861,6 @@ var init_files = __esm({
   }
 });
 
-// src/core/shared/thumbnails.ts
-var ThumbnailCache;
-var init_thumbnails = __esm({
-  "src/core/shared/thumbnails.ts"() {
-    "use strict";
-    init_common();
-    ThumbnailCache = class {
-      entries = /* @__PURE__ */ new Map();
-      get(id2, revision2, render) {
-        const existing = this.entries.get(id2);
-        if (existing?.revision === revision2) {
-          return existing.promise;
-        }
-        const promise2 = render().then((result) => {
-          if (!/^image\/(?:png|jpeg|webp|svg\+xml)$/.test(result.mimeType)) {
-            throw new StudioError("NO_PREVIEW", "\u6B64\u4EA7\u54C1\u6CA1\u6709\u56FE\u50CF\u9884\u89C8\u3002");
-          }
-          const data = Buffer.from(result.data, result.encoding === "base64" ? "base64" : "utf8");
-          if (data.byteLength > 2 * 1024 * 1024) {
-            throw new StudioError("NO_PREVIEW", "\u9884\u89C8\u8D85\u8FC7\u7F13\u5B58\u9884\u7B97\uFF0C\u8BF7\u6253\u5F00\u4F5C\u54C1\u67E5\u770B\u3002");
-          }
-          return { mimeType: result.mimeType, data };
-        }).catch((error62) => {
-          if (this.entries.get(id2)?.promise === promise2) {
-            this.entries.delete(id2);
-          }
-          throw error62;
-        });
-        this.entries.set(id2, { revision: revision2, promise: promise2 });
-        while (this.entries.size > 24) {
-          this.entries.delete(this.entries.keys().next().value);
-        }
-        return promise2;
-      }
-      delete(id2) {
-        this.entries.delete(id2);
-      }
-      clear() {
-        this.entries.clear();
-      }
-    };
-  }
-});
-
 // src/contracts/archive.ts
 var MAX_ARCHIVE_BYTES, MAX_ARCHIVE_ASSET_BYTES;
 var init_archive = __esm({
@@ -30218,8 +30349,8 @@ function requireRect(value) {
     invalid3("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u767D\u677F\u4E16\u754C\u5750\u6807\u8303\u56F4\u3002");
   }
   const bounded2 = ["x", "y", "w", "h"].every((key) => {
-    const coordinate2 = value[key];
-    return typeof coordinate2 === "number" && Number.isFinite(coordinate2) && Math.abs(coordinate2) <= 1e7;
+    const coordinate3 = value[key];
+    return typeof coordinate3 === "number" && Number.isFinite(coordinate3) && Math.abs(coordinate3) <= 1e7;
   });
   if (!bounded2 || Number(value.w) <= 0 || Number(value.h) <= 0) {
     invalid3("\u8BF7\u63D0\u4F9B\u6709\u6548\u7684\u767D\u677F\u4E16\u754C\u5750\u6807\u8303\u56F4\u3002");
@@ -60184,7 +60315,7 @@ function createStudioServer(executor, html2, createSpool) {
   };
   return server;
 }
-var id, participant, coordinate, rect2, pagination, taskBinding2, anchor2, elementPatch, operation, mutationOperations, schemas, descriptions;
+var id, participant, coordinate2, rect2, pagination, taskBinding2, anchor2, elementPatch, operation, mutationOperations, schemas, descriptions;
 var init_protocol2 = __esm({
   "src/server/protocol.ts"() {
     "use strict";
@@ -60208,10 +60339,10 @@ var init_protocol2 = __esm({
     }).optional().describe(
       "\u4EC5\u6240\u6709\u8005\u7684 MCP \u8C03\u7528\u53EF\u63D0\u4F9B\uFF1A\u540C\u4E00\u8FDE\u63A5\u4E2D\u591A\u4E2A Agent \u4F7F\u7528\u7A33\u5B9A id/name \u533A\u5206\u534F\u4F5C\u8EAB\u4EFD\uFF1B\u4E0D\u5E26 appearanceKey \u65F6\uFF0C\u663E\u5F0F main \u4E0E\u7701\u7565 participant \u4F7F\u7528\u540C\u4E00\u4E3B\u8EAB\u4EFD\u3002id \u662F\u4E0D\u900F\u660E\u6807\u8BC6\uFF0C\u53EF\u4EE5\u4F7F\u7528 Agent \u7684\u4EFB\u52A1\u8DEF\u5F84\uFF0C\u4E0D\u4F5C\u6587\u4EF6\u8DEF\u5F84\u89E3\u91CA\u3002\u540C\u4E00\u4E3B\u4EE3\u7406\u8DE8\u8F6E\u6B21\u3001\u5207\u6362\u4EFB\u52A1\u548C\u91CD\u5F00\u9762\u677F\u65F6\u590D\u7528\u539F id/name/appearanceKey\u3002\u8EAB\u4EFD\u7531\u670D\u52A1\u7AEF\u6309\u8FDE\u63A5\u547D\u540D\u7A7A\u95F4\u6D3E\u751F\uFF0C\u4E0D\u80FD\u7528\u4E8E\u8BBF\u5BA2\u63D0\u6743\u3002"
     );
-    coordinate = external_exports.number().min(-1e7).max(1e7);
+    coordinate2 = external_exports.number().min(-1e7).max(1e7);
     rect2 = external_exports.object({
-      x: coordinate,
-      y: coordinate,
+      x: coordinate2,
+      y: coordinate2,
       w: external_exports.number().positive().max(1e7),
       h: external_exports.number().positive().max(1e7)
     });
@@ -60240,12 +60371,12 @@ var init_protocol2 = __esm({
       quote: external_exports.string().max(4e3).optional(),
       excerpt: external_exports.string().max(16e3).optional(),
       selector: external_exports.string().max(1200).optional(),
-      x: coordinate.optional(),
-      y: coordinate.optional(),
-      w: coordinate.min(0).optional(),
-      h: coordinate.min(0).optional(),
+      x: coordinate2.optional(),
+      y: coordinate2.optional(),
+      w: coordinate2.min(0).optional(),
+      h: coordinate2.min(0).optional(),
       pin: external_exports.discriminatedUnion("coordinateSpace", [
-        external_exports.object({ coordinateSpace: external_exports.literal("board"), x: coordinate, y: coordinate }),
+        external_exports.object({ coordinateSpace: external_exports.literal("board"), x: coordinate2, y: coordinate2 }),
         external_exports.object({
           coordinateSpace: external_exports.literal("document"),
           x: external_exports.number().min(0).max(1),
@@ -60453,8 +60584,8 @@ var init_protocol2 = __esm({
         scope: external_exports.object({
           ids: external_exports.array(id).min(1).max(200).optional(),
           rect: external_exports.object({
-            x: coordinate,
-            y: coordinate,
+            x: coordinate2,
+            y: coordinate2,
             w: external_exports.number().positive().max(1e7),
             h: external_exports.number().positive().max(1e7)
           }).optional()

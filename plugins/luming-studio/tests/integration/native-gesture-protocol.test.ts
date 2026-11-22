@@ -72,7 +72,111 @@ function receive(receiver: NativeGestureReceiver, values: Record<string, any>[])
   values.forEach((value) => receiver.receive(message(value as Json)));
 }
 
+function richObject(type: 'document' | 'todo'): BoardElement {
+  return {
+    id: type,
+    type,
+    version: 2,
+    x: 20,
+    y: 30,
+    w: 180,
+    h: 90,
+    text: 'Do not transmit this title',
+    ...(type === 'document'
+      ? { document: { schemaVersion: 1, blocks: [] } }
+      : { data: { items: [{ id: 'item', text: 'Keep this task local', checked: false }] } }),
+  };
+}
+
+function encodeAndReceive(
+  receiver: NativeGestureReceiver,
+  elements: BoardElement[],
+  kind: NativeGesture['kind'],
+  origin: NativeGesture['origin'] = 'existing',
+) {
+  let seq = 0;
+  const encoded = encodeGestureFrame(
+    { id: 'geometry', kind, origin, baseRevision: 5, elements },
+    1,
+    () => ++seq,
+  );
+  encoded.forEach((packet) => receiver.receive(message(packet)));
+
+  return encoded;
+}
+
 describe('bounded native gesture encoding', () => {
+  it.each([
+    ['document', 'resize'],
+    ['todo', 'resize'],
+    ['document', 'move'],
+    ['todo', 'move'],
+  ] as const)('decodes %s %s geometry without sending its content', (type, kind) => {
+    const original = richObject(type);
+    const dimensions = kind === 'resize' ? { w: 260, h: 130 } : { x: 120, y: 160 };
+    const geometry = {
+      id: original.id,
+      type,
+      version: original.version,
+      x: original.x,
+      y: original.y,
+      w: original.w,
+      h: original.h,
+      ...dimensions,
+    };
+    const receiver = new NativeGestureReceiver();
+    const encoded = encodeAndReceive(receiver, [{ ...original, ...dimensions }], kind);
+    const atoms = encoded.flatMap((packet) => (packet as { atoms: unknown[] }).atoms);
+
+    expect(receiver.read(board([original], 5))[0]?.elements).toEqual([geometry]);
+    expect(atoms).toEqual([{ element: geometry }]);
+  });
+
+  it('displays rich geometry in a mixed frame only when the corresponding objects match', () => {
+    const doc = richObject('document');
+    const todo = richObject('todo');
+    const shape: BoardElement = {
+      id: 'shape',
+      type: 'shape',
+      version: 1,
+      x: 0,
+      y: 0,
+      w: 20,
+      h: 20,
+    };
+    const resized = [doc, todo, shape].map((element) => ({ ...element, w: 260, h: 130 }));
+    const receiver = new NativeGestureReceiver();
+    encodeAndReceive(receiver, resized, 'resize');
+
+    const partialBoard = board([{ ...doc, type: 'html' }, shape], 5);
+    expect(receiver.read(partialBoard)[0]?.elements.map((element) => element.id)).toEqual([
+      shape.id,
+    ]);
+
+    const matching = receiver.read(board([doc, todo, shape], 5))[0]?.elements;
+    expect(matching?.map(({ id, w, h }) => ({ id, w, h }))).toEqual(
+      resized.map(({ id, w, h }) => ({ id, w, h })),
+    );
+  });
+
+  it('keeps placement frames limited to objects that can be created by a transient preview', () => {
+    const doc = richObject('document');
+    const todo = richObject('todo');
+    const shape: BoardElement = {
+      id: 'shape',
+      type: 'shape',
+      version: 1,
+      x: 0,
+      y: 0,
+      w: 20,
+      h: 20,
+    };
+    const receiver = new NativeGestureReceiver();
+    encodeAndReceive(receiver, [doc, todo, shape], 'shape', 'create');
+
+    expect(receiver.read(board([], 5))[0]?.elements).toEqual([shape]);
+  });
+
   it('forwards fractional coordinates by actual UTF-8 bytes and keeps pair offsets intact', () => {
     const source = stroke(200, true);
     const encoded = packets(source);
