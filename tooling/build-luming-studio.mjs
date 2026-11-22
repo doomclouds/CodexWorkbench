@@ -17,6 +17,12 @@ typecheckStudio();
 
 const root = fileURLToPath(new URL('../plugins/luming-studio/', import.meta.url));
 const requirePlugin = createRequire(`${root}package.json`);
+const { version } = requirePlugin('./plugin.json');
+assert.equal(
+  requirePlugin('./package.json').version,
+  version,
+  'Studio package version must match its plugin manifest',
+);
 const { build, transform } = await import(pathToFileURL(requirePlugin.resolve('esbuild')).href);
 const { build: viteBuild } = await import(pathToFileURL(requirePlugin.resolve('vite')).href);
 const { viteSingleFile } = await import(
@@ -32,29 +38,43 @@ async function verifyPackagedStudio() {
   const { Client } = requirePlugin('@modelcontextprotocol/sdk/client/index.js');
   const { StdioClientTransport } = requirePlugin('@modelcontextprotocol/sdk/client/stdio.js');
   try {
-    await runTemporaryServer(await fingerprintRuntime(runtime), scratch, async ({ tool }) => {
-      const list = await tool('artifact_list', {});
-      assert.deepEqual(list.artifacts, []);
+    await runTemporaryServer(
+      await fingerprintRuntime(runtime),
+      scratch,
+      async ({ tool, session }) => {
+        assert.equal(
+          session.pluginVersion,
+          version,
+          'Studio HTTP version must match its plugin manifest',
+        );
+        const list = await tool('artifact_list', {});
+        assert.deepEqual(list.artifacts, []);
 
-      const client = new Client({ name: 'luming-packaged-check', version: '1.0.0' });
-      try {
-        await client.connect(
-          new StdioClientTransport({
-            command: process.execPath,
-            args: [join(runtime, 'server.mjs'), '--data-root', scratch],
-            cwd: runtime,
-            stderr: 'pipe',
-          }),
-        );
-        assert.equal(client.getServerVersion()?.name, 'luming-studio');
-        assert.notEqual(
-          (await client.callTool({ name: 'artifact_list', arguments: {} })).isError,
-          true,
-        );
-      } finally {
-        await client.close();
-      }
-    });
+        const client = new Client({ name: 'luming-packaged-check', version: '1.0.0' });
+        try {
+          await client.connect(
+            new StdioClientTransport({
+              command: process.execPath,
+              args: [join(runtime, 'server.mjs'), '--data-root', scratch],
+              cwd: runtime,
+              stderr: 'pipe',
+            }),
+          );
+          assert.equal(client.getServerVersion()?.name, 'luming-studio');
+          assert.equal(
+            client.getServerVersion()?.version,
+            version,
+            'Studio MCP version must match its plugin manifest',
+          );
+          assert.notEqual(
+            (await client.callTool({ name: 'artifact_list', arguments: {} })).isError,
+            true,
+          );
+        } finally {
+          await client.close();
+        }
+      },
+    );
   } finally {
     const owned = await realpath(scratch);
     assert.equal(dirname(owned), tempRoot);

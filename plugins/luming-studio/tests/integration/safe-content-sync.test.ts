@@ -387,10 +387,10 @@ describe('trusted-base content transactions', () => {
   });
   it('serializes safe updates from separate stores without weakening strict CAS', async () => {
     const directory = await createFixtureDirectory('studio-safe-stores-');
+    const one = new ArtifactStore(directory);
+    const two = new ArtifactStore(directory);
     try {
       const s = state();
-      const one = new ArtifactStore(directory);
-      const two = new ArtifactStore(directory);
       await one.write(s);
       const results = await Promise.all(
         [one, two].map((store, index) =>
@@ -417,6 +417,7 @@ describe('trusted-base content transactions', () => {
       ).rejects.toMatchObject({ code: 'CONFLICT' });
       expect((await one.read(s.artifact.id)).artifact.revision).toBe(2);
     } finally {
+      await Promise.all([one.drainBackground(), two.drainBackground()]);
       await rm(directory, { recursive: true, force: true });
     }
   });

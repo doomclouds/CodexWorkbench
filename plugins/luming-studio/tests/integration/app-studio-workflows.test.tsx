@@ -1602,14 +1602,13 @@ describe('Studio real management workflows', () => {
     ).toHaveLength(1);
     await click(button('删除'));
     await waitUntil(() => !container.querySelector('.studio-comment-popover'));
-    expect(
-      (
-        await service.execute('artifact_feedback', {
-          action: 'list',
-          artifactId: fixture.board.artifact.id,
-        })
-      ).feedback,
-    ).toHaveLength(0);
+    await vi.waitFor(async () => {
+      const result = await service.execute('artifact_feedback', {
+        action: 'list',
+        artifactId: fixture.board.artifact.id,
+      });
+      expect(result.feedback).toHaveLength(0);
+    });
     expect(
       call.mock.calls.find(
         ([name, args]) => name === 'artifact_feedback' && args.action === 'delete',

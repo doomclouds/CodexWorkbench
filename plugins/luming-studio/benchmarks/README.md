@@ -6,6 +6,8 @@
 
 从仓库根目录运行。先将通过第 3 阶段全量检查的运行包冻结，再对该目录的三个发布文件提取 SHA‑256 和长度。记录构建对应的源码版本及台账。以下变量使用绝对路径。
 
+旧容量边界和同库回退探针使用支持 SQLite v1 的冻结 `0.3.0` 包。归档往返与 v2 保存对照探针接受 `0.3.x` 补丁包，并按输入指纹核实实际运行文件。
+
 ```powershell
 node plugins/luming-studio/benchmarks/runtime-fingerprint.mjs $replayRuntime |
   Set-Content -Encoding utf8 -LiteralPath $frozenInventory

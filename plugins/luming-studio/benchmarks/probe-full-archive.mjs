@@ -632,7 +632,7 @@ async function recoverSource(tool, previous) {
 
 async function verifyRoundtrip({ tool, request, session }, replay) {
   evidence.packagedVersion = session.pluginVersion;
-  assert.equal(session.pluginVersion, '0.3.0');
+  assert.match(session.pluginVersion, /^0\.3\.\d+$/u);
   const source = replay
     ? await recoverSource(tool, replay.previous)
     : await createSource(tool, request);
