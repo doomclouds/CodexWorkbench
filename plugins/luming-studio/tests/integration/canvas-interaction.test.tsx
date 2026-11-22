@@ -3154,7 +3154,7 @@ describe('whiteboard direct interaction', () => {
       expect(query('编辑 HTML 源码')).not.toBeNull();
     },
   );
-  it('saves real layer commands and restores their persisted order through undo and redo', async () => {
+  it('saves commands from the layer order menu and restores their persisted order through undo and redo', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'studio-canvas-layers-'));
     const service = createStudioService({ dataRoot: folder });
     try {
@@ -3186,13 +3186,21 @@ describe('whiteboard direct interaction', () => {
       }
 
       await act(async () => root.render(<Harness />));
-      await click('更多操作');
-      await event(
-        [...host.querySelectorAll('[role=menuitem]')].find(
-          (button) => button.textContent === '置于顶层',
-        )!,
-        'click',
-      );
+      const layerOrder = query('图层顺序');
+      expect(layerOrder.previousElementSibling).toBe(query('锁定元素'));
+      expect(layerOrder.nextElementSibling).toBe(query('更多操作'));
+      const menu = () => host.querySelector('[role="menu"][aria-label="图层顺序"]');
+      await click('图层顺序');
+      expect(layerOrder.getAttribute('aria-expanded')).toBe('true');
+      expect(
+        [...menu()!.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent),
+      ).toEqual(['上移一层', '下移一层', '置于顶层', '置于底层']);
+      expect(document.activeElement?.textContent).toBe('上移一层');
+      await key(document.activeElement!, 'Escape');
+      expect(menu()).toBeNull();
+      expect(document.activeElement).toBe(layerOrder);
+      await click('图层顺序');
+      await event(menu()!.querySelectorAll('[role="menuitem"]')[2]!, 'click');
       const order = () =>
         [...host.querySelectorAll('[data-element-id]')].map((node) =>
           node.getAttribute('data-element-id'),

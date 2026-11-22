@@ -99,7 +99,7 @@ import {
 import { createDraftWorkspace, type DraftWorkspace } from '../draft-workspace.js';
 import { DraftRecoveryPicker } from '../DraftRecoveryPicker.js';
 import CanvasDialog, { type CanvasDialogSpec } from './controls/CanvasDialog.js';
-import type { CanvasCommand } from './controls/CanvasActionsMenu.js';
+import type { CanvasActionMenuAnchor, CanvasCommand } from './controls/CanvasActionsMenu.js';
 import {
   CanvasEditingControls,
   CanvasEmptyState,
@@ -724,7 +724,9 @@ function CanvasSession({
   const [tableDrafts, setTableDrafts] = useState<Record<string, NativeTableDraft>>({});
   const [issues, setIssues] = useState<NativeIssue[]>([]);
   const activityCallback = useCommittedRef(onActivityChange);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ anchor: CanvasActionMenuAnchor; selection?: string[] } | null>(
+    null,
+  );
   const [singleKeys, setSingleKeys] = useState(true);
   const [guides, setGuides] = useState<AlignmentGuide[]>([]);
   const [pointer, setPointer] = useState<Point | null>(null);
@@ -744,6 +746,7 @@ function CanvasSession({
   const [spacePan, setSpacePan] = useState(false);
   const [objectEditRequest, setObjectEditRequest] = useState<{ id: string; sequence: number }>();
   const canEdit = !readOnly && !preview && ['owner', 'editor'].includes(actor.role);
+  const layerOrderOpen = isLayerOrderMenuOpen();
   const canEditRef = useCommittedRef(canEdit);
   const {
     gestures: peerGestures,
@@ -1168,8 +1171,11 @@ function CanvasSession({
 
   const selectIds = useCallback(
     (ids: string[], recordIntent = true) => {
-      if (recordIntent && !sameContentValue(ids, selectionRef.current)) {
-        interactionIntent.current++;
+      if (!sameContentValue(ids, selectionRef.current)) {
+        if (recordIntent) {
+          interactionIntent.current++;
+        }
+        setMenu((current) => (current?.anchor.kind === 'layer-order' ? null : current));
       }
       setSelection(ids);
       selectionRef.current = ids;
@@ -1791,7 +1797,14 @@ function CanvasSession({
     }
   };
 
-  const handleOpenActionsMenu = async (point: Point) => {
+  const handleOpenActionsMenu = async (anchor: CanvasActionMenuAnchor) => {
+    if (anchor.kind === 'layer-order' && layerOrderOpen) {
+      setMenu(null);
+      anchor.button.current?.focus({ preventScroll: true });
+      return;
+    }
+
+    const requestedSelection = selectionRef.current;
     if (editing && !(await commitEditing())) {
       return;
     }
@@ -1799,8 +1812,24 @@ function CanvasSession({
       return;
     }
 
+    if (anchor.kind === 'layer-order') {
+      if (
+        canEditRef.current &&
+        anchor.button.current?.isConnected &&
+        sameContentValue(requestedSelection, selectionRef.current)
+      ) {
+        setMenu({ anchor, selection: requestedSelection });
+      }
+      return;
+    }
+
     const rect = viewportElement.current?.getBoundingClientRect();
-    setMenu({ x: point.x - (rect?.left ?? 0), y: point.y - (rect?.top ?? 0) });
+    setMenu({
+      anchor: {
+        kind: 'point',
+        point: { x: anchor.point.x - (rect?.left ?? 0), y: anchor.point.y - (rect?.top ?? 0) },
+      },
+    });
   };
   const chooseTool = async (
     choice: Tool,
@@ -3318,7 +3347,9 @@ function CanvasSession({
     if (id && !selectionRef.current.includes(id)) {
       selectIds([id]);
     }
-    handleOpenActionsMenu({ x: event.clientX, y: event.clientY }).catch(reportCanvasFailure);
+    handleOpenActionsMenu({ kind: 'point', point: { x: event.clientX, y: event.clientY } }).catch(
+      reportCanvasFailure,
+    );
   };
   const handleViewportDragOver: NonNullable<ComponentProps<'div'>['onDragOver']> = (event) => {
     if (!reading && canEdit && event.dataTransfer.types.includes('Files')) {
@@ -3398,6 +3429,7 @@ function CanvasSession({
         theme: viewTheme,
         canEdit,
         canAnnotate,
+        layerOrderOpen,
         saving: queue.tasks.some(
           (task) => task.state !== 'failed' && task.keys.some((id) => selection.includes(id)),
         ),
@@ -3410,15 +3442,23 @@ function CanvasSession({
   function actionMenuView(): CanvasActionMenuView | null {
     const usingSelectionTool = !annotating && tool === 'select';
     const canRenameSection = selected?.type === 'container' && canEdit && usingSelectionTool;
+    if (!menu || (menu.anchor.kind === 'layer-order' && !layerOrderOpen)) {
+      return null;
+    }
+
+    return {
+      anchor: menu.anchor,
+      canEdit,
+      selected: selection.length,
+      locked: selectedElements.some((element) => element.locked),
+      hasClipboard: Boolean(navigator.clipboard?.readText),
+      canRenameSection,
+    };
+  }
+
+  function isLayerOrderMenuOpen() {
     return (
-      menu && {
-        point: menu,
-        canEdit,
-        selected: selection.length,
-        locked: selectedElements.some((element) => element.locked),
-        hasClipboard: Boolean(navigator.clipboard?.readText),
-        canRenameSection,
-      }
+      canEdit && menu?.anchor.kind === 'layer-order' && sameContentValue(menu.selection, selection)
     );
   }
 
@@ -3924,7 +3964,10 @@ function CanvasSession({
             ).catch(reportCanvasFailure);
           },
           onMore(point) {
-            handleOpenActionsMenu(point).catch(reportCanvasFailure);
+            handleOpenActionsMenu({ kind: 'point', point }).catch(reportCanvasFailure);
+          },
+          onLayerOrder(anchor) {
+            handleOpenActionsMenu(anchor).catch(reportCanvasFailure);
           },
         }}
         actionMenu={actionMenuView()}

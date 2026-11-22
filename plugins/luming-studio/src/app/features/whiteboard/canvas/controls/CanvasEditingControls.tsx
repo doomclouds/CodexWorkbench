@@ -92,6 +92,7 @@ type CanvasFormatActions = Pick<
   | 'onCrop'
   | 'onAlign'
   | 'onMore'
+  | 'onLayerOrder'
   | 'onCustomColorsChange'
 >;
 type CanvasActionMenuActions = Pick<ActionMenuProps, 'onCommand' | 'onRenameSection' | 'onClose'>;

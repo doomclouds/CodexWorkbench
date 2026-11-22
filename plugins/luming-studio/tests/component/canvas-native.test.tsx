@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { createDraftWorkspace } from '../../src/app/features/whiteboard/draft-workspace.js';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -329,6 +331,68 @@ describe('native canvas parity', () => {
       expect(value.color).toBe('#303645');
     },
   );
+  it('keeps transparent section borders and titles interactive while passing through their interiors', async () => {
+    const stylesheet = document.createElement('style');
+    stylesheet.textContent = readFileSync(
+      resolve('src/app/features/whiteboard/canvas/canvas.css'),
+      'utf8',
+    );
+    document.head.append(stylesheet);
+    try {
+      const inner = element('inner-section', {
+        type: 'container',
+        parentId: 'outer-section',
+        fill: 'transparent',
+        text: '内层分区',
+      });
+      const outer = element('outer-section', {
+        type: 'container',
+        x: 0,
+        y: 0,
+        w: 440,
+        h: 260,
+        fill: '#00000000',
+        text: '外层分区',
+      });
+      const filled = element('filled-section', {
+        type: 'container',
+        x: 480,
+        fill: 'rgba(0,0,0,0.1)',
+      });
+      await mount(board([inner, outer, filled]));
+
+      const innerFrame = host.querySelector('[data-element-id="inner-section"]')!;
+      const outerFrame = host.querySelector('[data-element-id="outer-section"]')!;
+      const filledFrame = host.querySelector('[data-element-id="filled-section"]')!;
+      const title = outerFrame.querySelector('[data-canvas-external-title]')!;
+      const edges = [...outerFrame.querySelectorAll('[data-section-hit-edge]')];
+      expect(getComputedStyle(innerFrame).pointerEvents).toBe('none');
+      expect(getComputedStyle(outerFrame).pointerEvents).toBe('none');
+      expect(getComputedStyle(filledFrame).pointerEvents).toBe('auto');
+      expect(getComputedStyle(title).pointerEvents).toBe('auto');
+      expect(edges.map((edge) => edge.getAttribute('data-section-hit-edge'))).toEqual([
+        'top',
+        'right',
+        'bottom',
+        'left',
+      ]);
+      expect(edges.map((edge) => getComputedStyle(edge).pointerEvents)).toEqual([
+        'auto',
+        'auto',
+        'auto',
+        'auto',
+      ]);
+      expect(filledFrame.querySelector('[data-section-hit-edge]')).toBeNull();
+
+      await event(edges[0]!, 'pointerdown');
+      await event(edges[0]!, 'pointerup');
+      expect(outerFrame.classList.contains('is-selected')).toBe(true);
+      await event(outerFrame.querySelector('[data-canvas-external-title]')!, 'dblclick');
+      expect(outerFrame.querySelector('[aria-label="编辑文字"]')).not.toBeNull();
+    } finally {
+      stylesheet.remove();
+    }
+  });
   it('renders the supported inline text and list format safely while keeping editable source markers', async () => {
     const text =
       '**重点**与*说明* `safe()` [资料](https://example.com)\n- 第一点\n2. 第二点\n<img src=x onerror=alert(1)> [危险](javascript:alert)';
