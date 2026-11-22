@@ -15,7 +15,7 @@ import {
   nativeTextInk,
   type NativeSurfaceScene,
 } from '../../../../../shared/native-surface.js';
-import { semanticColor } from '../../../../../shared/theme.js';
+import { semanticColor, tryParseColor } from '../../../../../shared/theme.js';
 import type { ArrowElementIndex } from '../../../../../shared/whiteboard-geometry.js';
 import {
   canReadCanvasText,
@@ -236,6 +236,30 @@ interface CanvasObjectFrameProps extends CanvasObjectProps {
   dash?: string;
 }
 
+const sectionHitEdges = ['top', 'right', 'bottom', 'left'];
+
+function hasTransparentSectionFill(element: BoardElement, fill: string): boolean {
+  const hasFill = Boolean(element.fill || element.hollow);
+
+  return element.type === 'container' && hasFill && tryParseColor(fill)?.[3] === 0;
+}
+
+function CanvasSectionHitRegion({ zoom, strokeWidth = 1 }: { zoom: number; strokeWidth?: number }) {
+  const width = overviewStrokeWidth(strokeWidth, zoom);
+
+  return (
+    <div
+      className="studio-section-hit-region"
+      aria-hidden="true"
+      style={{ '--canvas-section-border-width': `${width}px` } as CSSProperties}
+    >
+      {sectionHitEdges.map((edge) => (
+        <span key={edge} className="studio-section-hit-edge" data-section-hit-edge={edge} />
+      ))}
+    </div>
+  );
+}
+
 function CanvasObjectFrame({
   element,
   scene,
@@ -255,6 +279,7 @@ function CanvasObjectFrame({
   const showText = expanded || isEditing || canReadCanvasText(size, fontSize, presentationZoom);
   const showMediaControls = expanded || mediaControlsFit(size);
   const fill = nativeFill(element, viewStyle, nativePaint(element.fill, theme));
+  const transparentSection = hasTransparentSectionFill(element, fill);
   const color = nativePaint(element.color, theme);
   const backdrop = nativeBackdrop(element, surfaces, fill);
   const ink = elementInk(element, color, viewStyle, fill, backdrop);
@@ -276,12 +301,16 @@ function CanvasObjectFrame({
       ref={onRetain ? retain : undefined}
       className={`studio-board-element studio-element-${element.type}${picked ? ' is-selected' : ''}${element.locked ? ' is-locked' : ''}${isEditing ? ' is-editing' : ''}`}
       data-element-id={element.id}
+      data-transparent-section={transparentSection || undefined}
       title={!textIsVisible && element.text ? element.text.slice(0, 160) : undefined}
       style={canvasObjectStyle(element, scene, view, { fontSize, ink, fill, lineColor, dash })}
       onClickCapture={actions.clickCapture}
       onPointerDown={(event) => actions.pointerDown(event, element)}
       onDoubleClick={(event) => actions.doubleClick(event, element)}
     >
+      {transparentSection && (
+        <CanvasSectionHitRegion zoom={zoom} strokeWidth={element.strokeWidth} />
+      )}
       {region?.({ size, fontSize, fill, ink, headerInk }) ?? (
         <CanvasObjectContent
           element={element}

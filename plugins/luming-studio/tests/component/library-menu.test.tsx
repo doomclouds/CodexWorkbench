@@ -125,7 +125,7 @@ it.each(['light', 'dark'] as const)(
         <div className="studio" data-studio-theme={theme}>
           <section className="studio-whiteboard" style={{ overflow: 'hidden' }}>
             <CanvasActionsMenu
-              point={{ x: 380, y: 560 }}
+              anchor={{ kind: 'point', point: { x: 380, y: 560 } }}
               canEdit
               selected={1}
               locked={false}

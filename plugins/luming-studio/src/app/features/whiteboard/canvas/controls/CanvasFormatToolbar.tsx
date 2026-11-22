@@ -19,6 +19,7 @@ import {
   Crop,
   Maximize,
   Italic,
+  Layers,
   Link,
   List,
   Lock,
@@ -31,6 +32,7 @@ import { getBoardSticker } from '../../../../../shared/whiteboard-stickers.js';
 import { arrowHeads, type Rect, type Viewport } from '../scene/canvas-model.js';
 import { useCanvasFormatToolbarPosition } from './useCanvasFormatToolbarPosition.js';
 import type { InlineTextFormatState } from './InlineTextEditor.js';
+import type { CanvasLayerOrderAnchor } from './CanvasActionsMenu.js';
 import ColorPalette from './ColorPalette.js';
 import { registerEscapeLayer } from '../../../../shared/escape.js';
 
@@ -56,6 +58,8 @@ interface Props {
   customColors?: string[];
   onCustomColorsChange?: (colors: string[]) => void;
   onMore: (point: { x: number; y: number }) => void;
+  onLayerOrder?: (anchor: CanvasLayerOrderAnchor) => void;
+  layerOrderOpen?: boolean;
   onAlign: (edge: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => void;
 }
 
@@ -133,6 +137,8 @@ export default function CanvasFormatToolbar({
   onEditHtml,
   onCrop,
   onMore,
+  onLayerOrder,
+  layerOrderOpen,
   onAlign,
   requestLink,
   formatState,
@@ -142,6 +148,8 @@ export default function CanvasFormatToolbar({
   const [popover, setPopover] = useState<string | null>(null);
   const [link, setLink] = useState('');
   const popoverId = useId();
+  const layerOrderMenuId = useId();
+  const layerOrderButton = useRef<HTMLButtonElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const linkButton = useRef<HTMLButtonElement>(null);
   const linkInput = useRef<HTMLInputElement>(null);
@@ -270,6 +278,32 @@ export default function CanvasFormatToolbar({
   function handleMore(event: MouseEvent<HTMLButtonElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
     onMore({ x: rect.left, y: rect.bottom + 6 });
+  }
+
+  function handleLayerOrder() {
+    closePopover();
+    onLayerOrder?.({ kind: 'layer-order', button: layerOrderButton, menuId: layerOrderMenuId });
+  }
+
+  function renderLayerOrderButton() {
+    return (
+      canEdit &&
+      onLayerOrder && (
+        <button
+          ref={layerOrderButton}
+          type="button"
+          aria-label="图层顺序"
+          title="图层顺序"
+          aria-haspopup="menu"
+          aria-expanded={Boolean(layerOrderOpen)}
+          aria-controls={layerOrderOpen ? layerOrderMenuId : undefined}
+          disabled={elements.some((element) => element.locked)}
+          onClick={handleLayerOrder}
+        >
+          <Layers size={18} />
+        </button>
+      )
+    );
   }
 
   function handleFill(fill: string) {
@@ -720,6 +754,7 @@ export default function CanvasFormatToolbar({
             {allLocked ? <Unlock size={18} /> : <Lock size={18} />}
           </button>
         )}
+        {renderLayerOrderButton()}
         <button type="button" aria-label="更多操作" title="更多操作" onClick={handleMore}>
           <MoreHorizontal size={19} />
         </button>
