@@ -4,7 +4,7 @@ import { normalizeDocument } from '../../contracts/document.js';
 import { isCommentPin, type Actor } from '../../contracts/studio.js';
 import { isTodoId, normalizeTodoItems } from '../../contracts/todo.js';
 import { invalidArchive as invalid } from '../../shared/studio-error.js';
-import type { ArchiveSnapshot, ArchiveStorage } from '../ports/archive-storage.js';
+import type { ArchiveInput, ArchiveSnapshot, ArchiveStorage } from '../ports/archive-storage.js';
 import { copy, object, requireRole, safeId, StudioError, text } from './common.js';
 import type { ArtifactMetadata, ArtifactState } from './model.js';
 import type { ProductRegistry } from './products.js';
@@ -454,8 +454,8 @@ function walk(
   }
 }
 
-function portable(state: ArtifactState<unknown>): ArtifactState<unknown> {
-  const snapshot = copy<ArtifactState<unknown>>({
+function portable(state: ArtifactState<unknown>, detach: boolean): ArtifactState<unknown> {
+  const data: ArtifactState<unknown> = {
     schemaVersion: 2,
     artifact: { ...state.artifact, sharing: false },
     content: state.content,
@@ -469,7 +469,8 @@ function portable(state: ArtifactState<unknown>): ArtifactState<unknown> {
     operations: [],
     sharing: { enabled: false, generation: 0, tokens: {} },
     ...(state.unitClocks ? { unitClocks: state.unitClocks } : {}),
-  });
+  };
+  const snapshot = detach ? copy(data) : data;
 
   for (const feedback of snapshot.feedback) {
     delete feedback.targetViewId;
@@ -488,18 +489,34 @@ export async function captureArchive(
 ): Promise<ArchiveSnapshot> {
   requireRole(actor, ['owner']);
 
-  return storage.captureSnapshot(portable(state));
+  return storage.captureSnapshot(portable(state, true));
 }
 
 export async function importArchive(
   storage: ArchiveStorage,
   products: ProductRegistry,
-  data: Uint8Array,
+  data: ArchiveInput,
   actor: Actor,
   title?: unknown,
 ): Promise<ArtifactState<unknown>> {
   requireRole(actor, ['owner']);
-  const { state: raw, assets } = await storage.readArchive(data);
+  const snapshot = await storage.readArchive(data);
+  try {
+    const state = prepareImport(snapshot, products, title);
+    await storage.publishImported(state, snapshot);
+
+    return state;
+  } catch (error) {
+    await snapshot.dispose();
+    throw error;
+  }
+}
+
+function prepareImport(
+  { state: raw, assets }: ArchiveSnapshot,
+  products: ProductRegistry,
+  title: unknown,
+): ArtifactState<unknown> {
   walk(raw);
   let original: ArtifactState<unknown>;
   try {
@@ -512,13 +529,13 @@ export async function importArchive(
     throw invalid(undefined, { cause: error });
   }
 
-  const state = portable(original);
+  const state = portable(original, false);
   for (const clock of Object.values(state.unitClocks ?? {})) {
     delete clock.children;
   }
   for (const [id, asset] of Object.entries(state.assets)) {
-    const bytes = assets.get(id);
-    if (!bytes || bytes.length !== asset.size) {
+    const file = assets.get(id);
+    if (!file || file.size !== asset.size) {
       throw invalid('备份缺少资源或资源体积不符。');
     }
   }
@@ -565,8 +582,6 @@ export async function importArchive(
 
   products.validate(state);
   products.get(state.artifact.type).result(state);
-
-  await storage.publishImported(state, assets);
 
   return state;
 }

@@ -1,43 +1,81 @@
 import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { lstat, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type {
   ExportBytes,
   ExportCopyStore,
   ExportRecord,
+  ExportStream,
+  StagedArchiveFile,
 } from '../core/ports/export-copy-store.js';
 import { safeId, StudioError } from '../shared/studio-error.js';
 import { atomicWrite } from './filesystem/atomic-write.js';
 import { regularFile, resourceScope, samePath } from './filesystem/owned-file.js';
 
+async function* exportChunks(result: StagedArchiveFile): AsyncIterable<Uint8Array> {
+  let size = 0;
+  for await (const chunk of result.chunks()) {
+    size += chunk.length;
+    if (size > result.size) {
+      throw new StudioError('CORRUPT_EXPORT', '导出文件体积不符。');
+    }
+
+    yield chunk;
+  }
+
+  if (size !== result.size) {
+    throw new StudioError('CORRUPT_EXPORT', '导出文件体积不符。');
+  }
+}
+
 export class FileExportCopyStore implements ExportCopyStore {
   constructor(private readonly root: string) {}
 
-  async save(artifactId: string, result: ExportBytes): Promise<ExportRecord> {
+  async save(artifactId: string, result: ExportBytes | StagedArchiveFile): Promise<ExportRecord> {
     const exportId = randomUUID();
-    const data = Buffer.from(result.data, result.encoding === 'base64' ? 'base64' : 'utf8');
+    let data: Uint8Array | AsyncIterable<Uint8Array>;
+    let size: number;
+    if ('data' in result) {
+      data = Buffer.from(result.data, result.encoding === 'base64' ? 'base64' : 'utf8');
+      size = data.length;
+    } else {
+      data = exportChunks(result);
+      size = result.size;
+    }
+
     const record: ExportRecord = {
       exportId,
       artifactId,
       filename: basename(result.filename),
       mimeType: result.mimeType,
-      size: data.length,
+      size,
       downloadPath: `/api/exports/${exportId}?artifactId=${encodeURIComponent(artifactId)}`,
     };
-    await atomicWrite(join(this.root, 'exports', exportId), data);
-    await atomicWrite(join(this.root, 'exports', `${exportId}.json`), JSON.stringify(record));
+    const file = join(this.root, 'exports', exportId);
+    await atomicWrite(file, data);
+    try {
+      await atomicWrite(join(this.root, 'exports', `${exportId}.json`), JSON.stringify(record));
+    } catch (error) {
+      await rm(file, { force: true });
+      throw error;
+    }
 
     return record;
   }
 
-  async read(exportId: string): Promise<ExportRecord & { data: Uint8Array }> {
+  private async record(exportId: string): Promise<ExportRecord> {
     safeId(exportId, '导出 ID');
     try {
-      const record = JSON.parse(
-        await readFile(join(this.root, 'exports', `${exportId}.json`), 'utf8'),
-      ) as ExportRecord;
+      const metadata = join(this.root, 'exports', `${exportId}.json`);
+      await regularFile(metadata);
+      const record = JSON.parse(await readFile(metadata, 'utf8')) as ExportRecord;
+      const file = await regularFile(join(this.root, 'exports', exportId));
+      if (record.exportId !== exportId || record.size !== file.size) {
+        throw new StudioError('CORRUPT_EXPORT', '导出记录与文件不一致。');
+      }
 
-      return { ...record, data: await readFile(join(this.root, 'exports', exportId)) };
+      return record;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         throw new StudioError('NOT_FOUND', '导出文件不存在。', undefined, { cause: error });
@@ -45,6 +83,19 @@ export class FileExportCopyStore implements ExportCopyStore {
 
       throw error;
     }
+  }
+
+  async read(exportId: string): Promise<ExportRecord & { data: Uint8Array }> {
+    const record = await this.record(exportId);
+
+    return { ...record, data: await readFile(join(this.root, 'exports', exportId)) };
+  }
+
+  async open(exportId: string): Promise<ExportStream> {
+    const record = await this.record(exportId);
+    const file = join(this.root, 'exports', exportId);
+
+    return { ...record, chunks: () => createReadStream(file) };
   }
 
   async purge(artifactId: string): Promise<void> {

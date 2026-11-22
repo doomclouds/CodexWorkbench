@@ -1,3 +1,8 @@
+import {
+  BOARD_OPEN_CHECK,
+  BOARD_SCENE_CHECK,
+  type BoardOpenKnown,
+} from '../../contracts/board-open.js';
 import type { StudioClient } from '../../contracts/studio';
 import { studioRequest } from './client';
 
@@ -57,6 +62,35 @@ export function requestCollaborationRevision(
   const endpoint = new URL('/api/sync', client.baseUrl);
   endpoint.searchParams.set('artifactId', artifactId);
   endpoint.searchParams.set('check', 'revision');
+
+  return studioRequest(client, endpoint, init);
+}
+
+export function requestCollaborationBoard(
+  client: StudioClient,
+  artifactId: string,
+  known: BoardOpenKnown | undefined,
+  init: RequestInit,
+): Promise<Response> {
+  const endpoint = new URL('/api/sync', client.baseUrl);
+  endpoint.searchParams.set('artifactId', artifactId);
+  endpoint.searchParams.set('check', BOARD_OPEN_CHECK);
+  if (known) {
+    endpoint.searchParams.set('knownRevision', String(known.revision));
+    endpoint.searchParams.set('knownEpoch', known.epoch);
+  }
+
+  return studioRequest(client, endpoint, init);
+}
+
+export function requestCollaborationScene(
+  client: StudioClient,
+  artifactId: string,
+  init: RequestInit,
+) {
+  const endpoint = new URL('/api/sync', client.baseUrl);
+  endpoint.searchParams.set('artifactId', artifactId);
+  endpoint.searchParams.set('check', BOARD_SCENE_CHECK);
 
   return studioRequest(client, endpoint, init);
 }

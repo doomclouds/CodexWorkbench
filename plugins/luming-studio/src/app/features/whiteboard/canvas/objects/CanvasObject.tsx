@@ -1,4 +1,12 @@
-import type { CSSProperties, MouseEvent, PointerEvent, ReactNode } from 'react';
+import {
+  memo,
+  useCallback,
+  useMemo,
+  type CSSProperties,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 import type { BoardElement, StyleProfile } from '../../../../../contracts/studio.js';
 import {
   nativeBackdrop,
@@ -17,6 +25,7 @@ import {
   showHtmlCaption,
 } from '../scene/canvas-presentation.js';
 import { nativePaint } from '../scene/native-palette.js';
+import { useCommittedRef } from '../useCommittedRef.js';
 import CanvasArrow from './CanvasArrow.js';
 import {
   CanvasObjectContent,
@@ -30,6 +39,14 @@ export function isHtmlEmbed(element: BoardElement): boolean {
   );
 }
 
+export function hasCanvasRegion(element: BoardElement): boolean {
+  return isHtmlEmbed(element) || ['document', 'todo', 'table'].includes(element.type);
+}
+
+export function keepsCanvasObjectMounted(element: BoardElement): boolean {
+  return hasCanvasRegion(element) || Boolean(element.video);
+}
+
 export interface CanvasObjectScene {
   zoom: number;
   presentationZoom: number;
@@ -38,6 +55,7 @@ export interface CanvasObjectScene {
   surfaces: NativeSurfaceScene;
   arrows: ArrowElementIndex;
   assets: CanvasObjectAssets;
+  assetRevision: number;
 }
 
 export interface CanvasObjectView {
@@ -73,6 +91,21 @@ interface CanvasObjectProps {
   actions: CanvasObjectActions;
   editor?: ReactNode;
   region?: (view: CanvasRegionView) => ReactNode;
+  onRetain?: (id: string) => void;
+}
+
+export function useCanvasObjectActions(actions: CanvasObjectActions): CanvasObjectActions {
+  const current = useCommittedRef(actions);
+  return useMemo<CanvasObjectActions>(
+    () => ({
+      clickCapture: (event) => current.current.clickCapture(event),
+      pointerDown: (event, element) => current.current.pointerDown(event, element),
+      doubleClick: (event, element) => current.current.doubleClick(event, element),
+      arrowDoubleClick: (event, element) => current.current.arrowDoubleClick(event, element),
+      moveRegion: (event, element) => current.current.moveRegion(event, element),
+    }),
+    [current],
+  );
 }
 
 function elementInk(
@@ -92,7 +125,15 @@ function elementInk(
   return nativeTextInk(color, style, element.type === 'container' ? 'transparent' : fill, backdrop);
 }
 
-export function CanvasObject({ element, scene, view, actions, editor, region }: CanvasObjectProps) {
+function CanvasObjectViewImpl({
+  element,
+  scene,
+  view,
+  actions,
+  editor,
+  region,
+  onRetain,
+}: CanvasObjectProps) {
   const { zoom, presentationZoom, theme, style: viewStyle, arrows } = scene;
   const dash = element.dash && presentationZoom * 5 >= 1 ? '6 5' : undefined;
   const lineColor = semanticColor(
@@ -133,10 +174,61 @@ export function CanvasObject({ element, scene, view, actions, editor, region }: 
       actions={actions}
       editor={editor}
       region={region}
+      onRetain={onRetain}
       lineColor={lineColor}
       dash={dash}
     />
   );
+}
+
+function unchangedView(previous: CanvasObjectView, next: CanvasObjectView) {
+  const selection =
+    previous.picked === next.picked && previous.inlineSelected === next.inlineSelected;
+  const reading = previous.expanded === next.expanded && previous.hidden === next.hidden;
+  const annotation = previous.annotationHovered === next.annotationHovered;
+
+  return (
+    selection &&
+    reading &&
+    annotation &&
+    previous.htmlMovable === next.htmlMovable &&
+    previous.sectionTitle === next.sectionTitle
+  );
+}
+
+export const CanvasObject = memo(CanvasObjectViewImpl, (previous, next) => {
+  const object =
+    previous.element === next.element && unchangedScene(previous.scene, next.scene, next.element);
+  const controls = previous.actions === next.actions && previous.onRetain === next.onRetain;
+  const content = previous.editor === next.editor && previous.region === next.region;
+
+  return object && controls && content && unchangedView(previous.view, next.view);
+});
+
+function unchangedScene(
+  previous: CanvasObjectScene,
+  next: CanvasObjectScene,
+  element: BoardElement,
+) {
+  if (previous === next) {
+    return true;
+  }
+
+  const liveZoom =
+    hasCanvasRegion(element) || ['arrow', 'stroke', 'container'].includes(element.type);
+
+  if (liveZoom && previous.zoom !== next.zoom) {
+    return false;
+  }
+
+  const palette = previous.style === next.style && previous.theme === next.theme;
+  const appearance =
+    previous.presentationZoom === next.presentationZoom && previous.surfaces === next.surfaces;
+  const media = previous.assets === next.assets || element.type !== 'image';
+  const references = previous.arrows === next.arrows || element.type !== 'arrow';
+  const mediaRevision = previous.assetRevision === next.assetRevision || element.type !== 'image';
+
+  return palette && appearance && media && references && mediaRevision;
 }
 
 interface CanvasObjectFrameProps extends CanvasObjectProps {
@@ -151,6 +243,7 @@ function CanvasObjectFrame({
   actions,
   editor,
   region,
+  onRetain,
   lineColor,
   dash,
 }: CanvasObjectFrameProps) {
@@ -168,10 +261,19 @@ function CanvasObjectFrame({
   const headerInk = element.type === 'table' ? nativeTableInk(color, viewStyle, fill) : ink;
   const textIsVisible =
     element.type === 'container' ? expanded || isEditing || Boolean(sectionTitle) : showText;
+  const retain = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node) {
+        onRetain?.(element.id);
+      }
+    },
+    [onRetain, element.id],
+  );
 
   return (
     <div
       key={element.id}
+      ref={onRetain ? retain : undefined}
       className={`studio-board-element studio-element-${element.type}${picked ? ' is-selected' : ''}${element.locked ? ' is-locked' : ''}${isEditing ? ' is-editing' : ''}`}
       data-element-id={element.id}
       title={!textIsVisible && element.text ? element.text.slice(0, 160) : undefined}

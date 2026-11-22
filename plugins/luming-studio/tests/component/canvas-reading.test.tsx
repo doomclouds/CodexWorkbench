@@ -5,7 +5,9 @@ import WhiteboardCanvas, {
   type WhiteboardCanvasProps,
 } from '../../src/app/features/whiteboard/canvas/WhiteboardCanvas.js';
 import { fitViewport } from '../../src/app/features/whiteboard/canvas/scene/canvas-model.js';
+import { CanvasOpeningScene } from '../../src/app/features/whiteboard/whiteboard.js';
 import { storePanelReadingView } from '../../src/app/panel-view-state.js';
+import type { BoardOpenScene } from '../../src/contracts/board-open.js';
 import {
   DEFAULT_STYLE,
   LOCAL_ACTOR,
@@ -136,6 +138,34 @@ afterEach(async () => {
   host.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it('fits the ordered opening geometry without mounting interactive or rich content', async () => {
+  const shape = element('shape', { type: 'shape', kind: 'diamond' });
+  const rich = { id: 'html', type: 'html', version: 4, x: 3_000, y: 400, w: 200, h: 120 } as const;
+  const documentObject = element('document', { type: 'document', x: 100, y: 800 });
+  const scene: BoardOpenScene = {
+    artifact: board([]).artifact,
+    style: DEFAULT_STYLE,
+    units: [
+      { state: 'complete', element: shape },
+      { state: 'unloaded', geometry: rich },
+      { state: 'complete', element: documentObject },
+    ],
+  };
+  const fitted = fitViewport([shape, rich, documentObject], 1_000, 650);
+  await act(async () => root.render(<CanvasOpeningScene scene={scene} />));
+
+  expect(world().style.transform).toBe(
+    `translate(${fitted.x}px,${fitted.y}px) scale(${fitted.zoom})`,
+  );
+  const renderedIds = Array.from(host.querySelectorAll('[data-element-id]'), (item) =>
+    item.getAttribute('data-element-id'),
+  );
+  expect(renderedIds).toEqual(['shape', 'html', 'document']);
+  expect(host.querySelector('[data-element-id="shape"] path')).not.toBeNull();
+  expect(host.querySelector('[aria-busy="true"]')).not.toBeNull();
+  expect(host.querySelector('iframe, button, textarea, [contenteditable]')).toBeNull();
 });
 
 it('fits using the actual host dimensions before mounting rich content and its first level of detail', async () => {

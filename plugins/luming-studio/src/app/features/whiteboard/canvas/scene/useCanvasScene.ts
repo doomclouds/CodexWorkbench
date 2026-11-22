@@ -230,15 +230,20 @@ export function useCanvasScene({
     () => sectionTitleDetails(renderedElements, presentationZoom),
     [renderedElements, presentationZoom],
   );
+  const titleElements = useMemo(
+    () =>
+      renderedElements.filter((element) => element.type === 'html' || element.type === 'container'),
+    [renderedElements],
+  );
   const titleCandidates = useMemo(
     () =>
-      renderedElements.filter(
+      titleElements.filter(
         (element) =>
           showHtmlCaption(element, zoom) ||
           (element.type === 'container' &&
             (element.id === editingId || sectionTitles.has(element.id))),
       ),
-    [renderedElements, zoom, sectionTitles, editingId],
+    [titleElements, zoom, sectionTitles, editingId],
   );
   const surfaceScene = useMemo(
     () =>

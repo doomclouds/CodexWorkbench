@@ -18,6 +18,7 @@ import {
   type StudioClient,
   type ViewContext,
 } from '../../contracts/studio';
+import type { BoardOpenScene, BoardSceneResponse } from '../../contracts/board-open.js';
 import {
   StudioLibraryView,
   StudioUnsupportedArtifact,
@@ -196,6 +197,7 @@ function useStudioApp({
   });
   const [board, setBoard] = useState<StudioDocument | null>(null);
   const boardRef = useRef<StudioDocument | null>(null);
+  const [openingScene, setOpeningScene] = useState<BoardOpenScene | null>(null);
   const { layout, handleLayoutChange, setTheme, resolvedTheme } = useStudioPreferences();
   const [panel, setPanel] = useState<Panel>(null);
   const [error, setError] = useState('');
@@ -379,7 +381,20 @@ function useStudioApp({
 
     boardRef.current = next;
     setBoard(next);
+    setOpeningScene(null);
     setSync('saved');
+  }, []);
+
+  const acceptOpeningScene = useCallback((next: BoardSceneResponse | undefined) => {
+    if (!next) {
+      setOpeningScene(null);
+      return;
+    }
+    if (!mounted.current || boardRef.current || next.artifactId !== activeRef.current) {
+      return;
+    }
+
+    setOpeningScene(next.scene);
   }, []);
 
   const { collaboration, timer, releaseAgentWorkspace } = useEditorCollaboration(
@@ -388,10 +403,12 @@ function useStudioApp({
       client,
       polling: !!transportClient.request,
       artifactId: activeId,
+      authorityKey: JSON.stringify([session.actor.id, session.actor.role, session.access]),
       peerId,
       enabled: !!activeId && !accessPending && unsupportedId !== activeId,
       getDocument: () => boardRef.current,
       onDocument: acceptBoard,
+      onScene: acceptOpeningScene,
       onFeedback: (next) => feedbackPage.receiveFeedback(next),
       onCursorClear: () => {
         presenceRef.current.cursor = null;
@@ -664,6 +681,7 @@ function useStudioApp({
       return;
     }
 
+    collaboration.rememberBoard();
     libraryPage.rememberDocument(boardRef.current);
     clearReadingRestore();
     setUnsupportedId('');
@@ -684,6 +702,7 @@ function useStudioApp({
     clearShare();
     setActiveId(id);
     setBoard(null);
+    setOpeningScene(null);
     feedbackPage.receiveFeedback([]);
     resetHistory();
     setPanel(null);
@@ -700,6 +719,7 @@ function useStudioApp({
   function goHome(
     view: 'library' | 'trash' = libraryPage.view.data.filter === 'trash' ? 'trash' : 'library',
   ): void {
+    collaboration.rememberBoard();
     libraryPage.rememberDocument(boardRef.current);
     clearReadingRestore();
     setUnsupportedId('');
@@ -720,6 +740,7 @@ function useStudioApp({
     clearShare();
     setActiveId('');
     setBoard(null);
+    setOpeningScene(null);
     resetHistory();
     setPanel(null);
     setSelectedIds([]);
@@ -869,6 +890,7 @@ function useStudioApp({
       activeId,
       actor,
       board,
+      openingScene: openingScene ?? undefined,
       client,
       busy,
       canComment,

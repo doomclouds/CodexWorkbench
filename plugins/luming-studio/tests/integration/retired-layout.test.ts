@@ -50,6 +50,7 @@ it.each(['layout-preview', 'layout-cancel'])(
         },
       ],
     });
+    await service.store.waitForBackground();
     const before = await readFile(service.store.file(artifact.id));
     await expect(
       service.execute('artifact_read', {

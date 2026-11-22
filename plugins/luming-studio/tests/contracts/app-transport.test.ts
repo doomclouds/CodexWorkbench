@@ -3,6 +3,7 @@ import {
   APP_CHUNK_BYTES,
   APP_MAX_BYTES,
   type AppResponse,
+  type AppTransferSpoolFactory,
   type AppUploadResult,
   type AppDownloadResult,
   type UiRequester,
@@ -10,16 +11,16 @@ import {
 import { createAppTransport, validateUiRequest } from '../../src/server/app-transport.js';
 
 const transports: ReturnType<typeof createAppTransport>[] = [];
-afterEach(() => {
-  for (const transport of transports.splice(0)) {
-    transport.close();
-  }
-
+afterEach(async () => {
+  await Promise.all(transports.splice(0).map((transport) => transport.close()));
   vi.useRealTimers();
 });
 
-function transport(run: UiRequester = async () => new Response('{}')) {
-  const value = createAppTransport(run);
+function transport(
+  run: UiRequester = async () => new Response('{}'),
+  spool?: AppTransferSpoolFactory,
+) {
+  const value = createAppTransport(run, spool);
   transports.push(value);
 
   return value;
@@ -188,6 +189,60 @@ describe('App-only backend transport', () => {
     ).rejects.toMatchObject({ code: 'TRANSFER_EXPIRED' });
   });
 
+  it('cancels and clears a partial ZIP spool while waiting for the next response chunk', async () => {
+    const append = vi.fn(async () => undefined);
+    const dispose = vi.fn(async () => undefined);
+    const cancel = vi.fn();
+    const controller = new AbortController();
+    const app = transport(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(stream) {
+              stream.enqueue(Buffer.alloc(9 * APP_CHUNK_BYTES));
+            },
+            cancel,
+          }),
+          { headers: { 'content-type': 'application/zip' } },
+        ),
+      async () => ({
+        append,
+        read: async () => new Uint8Array(),
+        blob: async () => new Blob(),
+        dispose,
+      }),
+    );
+    const pending = app.execute(
+      { action: 'request', path: '/api/exports/one', method: 'GET' },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(append).toHaveBeenCalledTimes(1));
+    controller.abort(new Error('Stopped ZIP transfer'));
+    await expect(pending).rejects.toThrow('Stopped ZIP transfer');
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('disposes an idle partial upload when it expires and closes another pending spool once', async () => {
+    vi.useFakeTimers();
+    const dispose = vi.fn(async () => undefined);
+    const app = transport(undefined, async () => ({
+      append: async () => undefined,
+      read: async () => new Uint8Array(),
+      blob: async () => new Blob(),
+      dispose,
+    }));
+    const input = { action: 'upload', size: 9 * APP_CHUNK_BYTES, offset: 0, data: 'YQ==' } as const;
+    const first = (await app.execute(input)) as AppUploadResult;
+    vi.advanceTimersByTime(120_001);
+    await expect(app.execute({ action: 'release', transferId: first.transferId })).resolves.toEqual(
+      { released: false },
+    );
+    await app.execute(input);
+    await Promise.all([app.close(), app.close()]);
+    expect(dispose).toHaveBeenCalledTimes(2);
+  });
+
   it('bounds idle transfers, inline bodies and declared response sizes', async () => {
     const app = transport();
     for (let index = 0; index < 8; index++) {
@@ -227,7 +282,7 @@ describe('App-only backend transport', () => {
     expect(resolvers).toHaveLength(5);
     resolvers[4]!(new Response('queued'));
     await Promise.all(pending);
-    app.close();
+    await app.close();
     await expect(app.execute(request())).rejects.toMatchObject({ code: 'CLOSED' });
   });
 

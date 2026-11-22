@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   connectStudio,
   dataDirectory,
@@ -11,7 +10,6 @@ import {
   readRecord,
   writeRecord,
 } from './client.js';
-import { createStudioServer } from './protocol.js';
 
 const option = (key: string) => {
   const index = process.argv.indexOf(key);
@@ -29,8 +27,24 @@ function exitAfterClose(close: () => Promise<void>): void {
 }
 
 const root = dataDirectory(option('--data-root'));
+const rollbackArtifact = option('--rollback-copy');
 const html = await readFile(new URL('./app.html', import.meta.url), 'utf8');
-if (process.argv.includes('--serve')) {
+if (process.argv.includes('--rollback-copy')) {
+  if (!rollbackArtifact || !option('--data-root')) {
+    throw new Error('Supply --rollback-copy <artifactId> and --data-root <directory>.');
+  }
+
+  const { createStudioService } = await import('./studio-composition.js');
+  const service = createStudioService({ dataRoot: root });
+  try {
+    const rollbackRoot = await service.store.createLegacyRollback(rollbackArtifact);
+    process.stdout.write(
+      JSON.stringify({ artifactId: rollbackArtifact, dataRoot: rollbackRoot }) + '\n',
+    );
+  } finally {
+    await service.close();
+  }
+} else if (process.argv.includes('--serve')) {
   const { startStudioHost } = await import('./http.js');
   const host = await startStudioHost({ dataRoot: root, html, port: Number(option('--port') || 0) });
   await writeRecord(root, {
@@ -75,8 +89,11 @@ if (process.argv.includes('--serve')) {
   }
   process.stderr.write(`${STUDIO_HOME_TITLE}: ${host.origin}\n`);
 } else {
+  const { createStudioServer } = await import('./protocol.js');
+  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+  const { createAppTransferSpool } = await import('./studio-composition.js');
   const client = await connectStudio(root, fileURLToPath(import.meta.url));
-  const server = createStudioServer(client, html);
+  const server = createStudioServer(client, html, createAppTransferSpool);
   let closing: Promise<void> | undefined;
   const close = () =>
     (closing ??= (async () => {

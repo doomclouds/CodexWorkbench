@@ -1,8 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  BOARD_OPEN_CHECK,
+  BOARD_SCENE_CHECK,
+  parseBoardOpenKnown,
+} from '../contracts/board-open.js';
+import {
   APP_CHUNK_BYTES,
   APP_MAX_BYTES,
+  type AppTransferSpool,
+  type AppTransferSpoolFactory,
   type AppTransportInput,
   type AppTransportResult,
   type UiHttpRequest,
@@ -54,16 +61,27 @@ const MAX_CONCURRENT = 4;
 const MAX_QUEUED = 64;
 const MAX_SYNC_WAITERS = 64;
 const MAX_BUDGET = APP_MAX_BYTES * 2;
+const SPOOL_THRESHOLD = 1024 * 1024;
+
+type PendingSpool = Promise<AppTransferSpool>;
+type TransferBody =
+  | { size: number; bytes: Buffer; spool?: never }
+  | { size: number; bytes?: never; spool: PendingSpool };
 
 interface Transfer {
   kind: 'upload' | 'download';
-  bytes: Buffer;
+  body: TransferBody;
   offset: number;
   expiresAt: number;
+  busy: boolean;
 }
 interface RequestSlots {
   active: number;
   queue: Array<() => void>;
+}
+interface ResponseSpooling {
+  create(): PendingSpool;
+  dispose(spool: PendingSpool): Promise<void>;
 }
 
 function failure(code: string, message: string) {
@@ -131,12 +149,19 @@ function validateSyncParameter(key: string, value: string): void {
 function validateQuery(url: URL, method: UiHttpRequest['method']): void {
   const thumbnail = method === 'GET' && /^\/api\/thumbnails\/[^/]+$/.test(url.pathname);
   const sync = url.pathname === '/api/sync';
+  const check = sync ? url.searchParams.get('check') : null;
   let allowedKeys = ['artifactId'];
   if (thumbnail) {
     allowedKeys = ['revision'];
   }
   if (sync) {
     allowedKeys = ['artifactId', 'after', 'wait', 'peerId', 'peerEpoch'];
+  }
+  if (check === BOARD_SCENE_CHECK) {
+    allowedKeys = ['artifactId', 'check'];
+  }
+  if (check === BOARD_OPEN_CHECK) {
+    allowedKeys = ['artifactId', 'check', 'knownRevision', 'knownEpoch'];
   }
   const seen = new Set<string>();
   for (const [key, value] of url.searchParams) {
@@ -154,6 +179,27 @@ function validateQuery(url: URL, method: UiHttpRequest['method']): void {
       validateSyncParameter(key, value);
     }
     seen.add(key);
+  }
+  if (
+    check === BOARD_OPEN_CHECK &&
+    parseBoardOpenKnown(
+      url.searchParams.get('knownRevision'),
+      url.searchParams.get('knownEpoch'),
+    ) === null
+  ) {
+    throw failure('INVALID_ARGUMENT', '白板读取版次或服务代次无效。');
+  }
+}
+
+function validateBody({ method, body, bodyBlob }: UiHttpRequest): void {
+  if (body !== undefined && bodyBlob !== undefined) {
+    throw failure('INVALID_ARGUMENT', '作品请求不能重复指定内容。');
+  }
+  if (method === 'GET' && (body !== undefined || bodyBlob !== undefined)) {
+    throw failure('INVALID_ARGUMENT', '读取请求不能包含内容。');
+  }
+  if ((body?.byteLength ?? bodyBlob?.size ?? 0) > APP_MAX_BYTES) {
+    throw failure('TOO_LARGE', '作品请求超过 128 MB。');
   }
 }
 
@@ -180,42 +226,60 @@ export function validateUiRequest(request: UiHttpRequest): UiHttpRequest {
 
     headers[lower] = value;
   }
-  if (method === 'GET' && request.body !== undefined) {
-    throw failure('INVALID_ARGUMENT', '读取请求不能包含内容。');
-  }
-  if (request.body && request.body.byteLength > APP_MAX_BYTES) {
-    throw failure('TOO_LARGE', '作品请求超过 128 MB。');
-  }
+  validateBody(request);
+  const { body, bodyBlob } = request;
 
   return {
     path: url.pathname + url.search,
     method,
     headers,
-    ...(request.body !== undefined ? { body: request.body } : {}),
+    ...(body !== undefined ? { body } : {}),
+    ...(bodyBlob !== undefined ? { bodyBlob } : {}),
   };
+}
+
+async function flushResponseChunks(spool: PendingSpool, chunks: Buffer[]): Promise<void> {
+  const file = await spool;
+  for (const chunk of chunks) {
+    await file.append(chunk);
+  }
+
+  chunks.length = 0;
 }
 
 async function readResponse(
   response: Response,
   signal: AbortSignal,
   reserveChunk: (size: number) => void,
-): Promise<Buffer> {
+  spooling?: ResponseSpooling,
+): Promise<TransferBody> {
   const declaredSize = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredSize) && declaredSize > APP_MAX_BYTES) {
     await response.body?.cancel();
     throw failure('TOO_LARGE', '作品响应超过 128 MB。');
   }
   if (!response.body) {
-    return Buffer.alloc(0);
+    return { size: 0, bytes: Buffer.alloc(0) };
   }
 
   const chunks: Buffer[] = [];
   let size = 0;
+  let spool: PendingSpool | undefined;
   const reader = response.body.getReader();
+  const reportCancelFailure = (error: unknown) => {
+    if (!signal.aborted) {
+      console.error('Studio 作品响应流未能取消。', error);
+    }
+  };
+  const abort = () => {
+    reader.cancel(signal.reason).catch(reportCancelFailure);
+  };
+  signal.addEventListener('abort', abort, { once: true });
   try {
     while (true) {
       signal.throwIfAborted();
       const next = await reader.read();
+      signal.throwIfAborted();
       if (next.done) {
         break;
       }
@@ -227,18 +291,29 @@ async function readResponse(
 
       reserveChunk(length);
       size += length;
-      chunks.push(Buffer.from(next.value));
-    }
-  } finally {
-    await reader.cancel().catch((error: unknown) => {
-      if (!signal.aborted) {
-        console.error('Studio 作品响应流未能取消。', error);
+      if (!spool && spooling && size > SPOOL_THRESHOLD) {
+        spool = spooling.create();
+        await flushResponseChunks(spool, chunks);
       }
-    });
+      if (spool) {
+        await (await spool).append(next.value);
+      } else {
+        chunks.push(Buffer.from(next.value));
+      }
+    }
+
+    return spool ? { size, spool } : { size, bytes: Buffer.concat(chunks, size) };
+  } catch (error) {
+    if (spool && spooling) {
+      await spooling.dispose(spool);
+    }
+
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', abort);
+    await reader.cancel().catch(reportCancelFailure);
     reader.releaseLock();
   }
-
-  return Buffer.concat(chunks, size);
 }
 
 function decode(value: string) {
@@ -257,10 +332,12 @@ function decode(value: string) {
   return bytes;
 }
 
-export function createAppTransport(requestUi: UiRequester) {
+export function createAppTransport(requestUi: UiRequester, createSpool?: AppTransferSpoolFactory) {
   const transfers = new Map<string, Transfer>();
+  const spools = new Map<PendingSpool, Promise<void> | undefined>();
   let budget = 0;
   let closed = false;
+  let closing: Promise<void> | undefined;
   const requests: RequestSlots = { active: 0, queue: [] };
   const waits: RequestSlots = { active: 0, queue: [] };
   const lifetime = new AbortController();
@@ -313,21 +390,49 @@ export function createAppTransport(requestUi: UiRequester) {
 
     budget += size;
   }
-  function remove(id: string) {
-    const value = transfers.get(id);
-    if (value) {
-      transfers.delete(id);
-      budget -= value.bytes.length;
-    }
-    return !!value;
+  function startSpool() {
+    const pending = createSpool!();
+    spools.set(pending, undefined);
+    return pending;
   }
-  function sweep() {
+  async function discardSpool(spool?: PendingSpool) {
+    if (!spool || !spools.has(spool)) {
+      return;
+    }
+
+    const cleaning =
+      spools.get(spool) ??
+      spool
+        .then((file) => file.dispose())
+        .catch((error: unknown) => {
+          console.error('Studio 作品传输临时文件未能清理。', error);
+        })
+        .finally(() => {
+          spools.delete(spool);
+        });
+    spools.set(spool, cleaning);
+    await cleaning;
+  }
+  async function remove(id: string) {
+    const value = transfers.get(id);
+    if (!value) {
+      return false;
+    }
+
+    transfers.delete(id);
+    await discardSpool(value.body.spool);
+    budget -= value.body.size;
+    return true;
+  }
+  async function sweep() {
     const now = Date.now();
+    const expired: Promise<boolean>[] = [];
     for (const [id, value] of transfers) {
-      if (value.expiresAt <= now) {
-        remove(id);
+      if (!value.busy && value.expiresAt <= now) {
+        expired.push(remove(id));
       }
     }
+    await Promise.all(expired);
   }
   function get(id: string, kind: Transfer['kind']) {
     const value = transfers.get(id);
@@ -338,16 +443,37 @@ export function createAppTransport(requestUi: UiRequester) {
     value.expiresAt = Date.now() + TTL_MS;
     return value;
   }
-  function add(kind: Transfer['kind'], bytes: Buffer, offset = 0) {
+  function transferSlot() {
     if (transfers.size >= MAX_TRANSFERS) {
       throw failure('BUSY', '同时进行的作品传输过多，请稍后重试。');
     }
+  }
+  function add(kind: Transfer['kind'], body: TransferBody) {
+    transferSlot();
 
     const id = randomUUID();
-    transfers.set(id, { kind, bytes, offset, expiresAt: Date.now() + TTL_MS });
+    transfers.set(id, { kind, body, offset: 0, busy: false, expiresAt: Date.now() + TTL_MS });
     return id;
   }
-  function appendUpload(input: Extract<AppTransportInput, { action: 'upload' }>) {
+  function startUpload(size: number) {
+    transferSlot();
+    reserve(size);
+    try {
+      return add(
+        'upload',
+        createSpool && size > SPOOL_THRESHOLD
+          ? { size, spool: startSpool() }
+          : { size, bytes: Buffer.alloc(size) },
+      );
+    } catch (error) {
+      budget -= size;
+      throw error;
+    }
+  }
+  async function appendUpload(
+    input: Extract<AppTransportInput, { action: 'upload' }>,
+    signal: AbortSignal,
+  ) {
     const bytes = decode(input.data);
     if (!bytes.length || input.offset + bytes.length > input.size) {
       throw failure('INVALID_ARGUMENT', '作品上传分块大小无效。');
@@ -358,37 +484,67 @@ export function createAppTransport(requestUi: UiRequester) {
       if (input.offset !== 0) {
         throw failure('INVALID_ARGUMENT', '作品上传必须从第一个分块开始。');
       }
-      if (transfers.size >= MAX_TRANSFERS) {
-        throw failure('BUSY', '同时进行的作品传输过多，请稍后重试。');
-      }
 
-      reserve(input.size);
-      try {
-        id = add('upload', Buffer.alloc(input.size));
-      } catch (error) {
-        budget -= input.size;
-        throw error;
-      }
+      id = startUpload(input.size);
     }
     const upload = get(id, 'upload');
-    if (upload.bytes.length !== input.size || upload.offset !== input.offset) {
+    if (upload.busy || upload.body.size !== input.size || upload.offset !== input.offset) {
       throw failure('INVALID_ARGUMENT', '作品上传分块顺序或总长度不匹配。');
     }
 
-    bytes.copy(upload.bytes, input.offset);
-    upload.offset += bytes.length;
-    return { transferId: id, nextOffset: upload.offset };
+    upload.busy = true;
+    try {
+      if (upload.body.spool) {
+        await (await upload.body.spool).append(bytes);
+        signal.throwIfAborted();
+        get(id, 'upload');
+      } else {
+        bytes.copy(upload.body.bytes, input.offset);
+      }
+      upload.offset += bytes.length;
+      return { transferId: id, nextOffset: upload.offset };
+    } catch (error) {
+      await remove(id);
+      throw error;
+    } finally {
+      upload.busy = false;
+    }
   }
-  function readDownload(input: Extract<AppTransportInput, { action: 'download' }>) {
+  async function readDownload(
+    input: Extract<AppTransportInput, { action: 'download' }>,
+    signal: AbortSignal,
+  ) {
     const download = get(input.transferId, 'download');
-    if (input.offset !== download.offset) {
+    if (download.busy || input.offset !== download.offset) {
       throw failure('INVALID_ARGUMENT', '作品下载分块顺序不匹配。');
     }
 
-    const end = Math.min(download.bytes.length, input.offset + APP_CHUNK_BYTES);
-    const data = download.bytes.subarray(input.offset, end).toString('base64');
-    download.offset = end;
-    return { data, nextOffset: end, done: end === download.bytes.length };
+    download.busy = true;
+    try {
+      const body = download.body;
+      const end = Math.min(body.size, input.offset + APP_CHUNK_BYTES);
+      const data = body.spool
+        ? Buffer.from(await (await body.spool).read(input.offset, end - input.offset))
+        : body.bytes.subarray(input.offset, end);
+      signal.throwIfAborted();
+      get(input.transferId, 'download');
+      download.offset = end;
+      return { data: data.toString('base64'), nextOffset: end, done: end === body.size };
+    } finally {
+      download.busy = false;
+    }
+  }
+  function takeUpload(id: string, method: UiHttpRequest['method']) {
+    const upload = get(id, 'upload');
+    if (upload.busy || upload.offset !== upload.body.size) {
+      throw failure('INVALID_ARGUMENT', '作品上传尚未完成。');
+    }
+    if (method !== 'POST') {
+      throw failure('INVALID_ARGUMENT', '读取请求不能包含上传内容。');
+    }
+
+    transfers.delete(id);
+    return upload.body;
   }
   async function sendRequest(
     input: Extract<AppTransportInput, { action: 'request' }>,
@@ -398,7 +554,8 @@ export function createAppTransport(requestUi: UiRequester) {
       throw failure('INVALID_ARGUMENT', '作品请求不能重复指定内容。');
     }
 
-    let uploaded: Transfer | undefined;
+    let uploaded: TransferBody | undefined;
+    let downloaded: TransferBody | undefined;
     let responseBytes = 0;
     const bytes = input.body === undefined ? undefined : decode(input.body);
     const request = validateUiRequest({
@@ -417,46 +574,53 @@ export function createAppTransport(requestUi: UiRequester) {
     try {
       requestSignal.throwIfAborted();
       if (input.uploadId) {
-        const upload = get(input.uploadId, 'upload');
-        if (upload.offset !== upload.bytes.length) {
-          throw failure('INVALID_ARGUMENT', '作品上传尚未完成。');
+        uploaded = takeUpload(input.uploadId, request.method);
+        if (uploaded.spool) {
+          request.bodyBlob = await (await uploaded.spool).blob();
+          requestSignal.throwIfAborted();
+        } else {
+          request.body = uploaded.bytes;
         }
-        if (request.method !== 'POST') {
-          throw failure('INVALID_ARGUMENT', '读取请求不能包含上传内容。');
-        }
-
-        uploaded = upload;
-        transfers.delete(input.uploadId);
-        request.body = uploaded.bytes;
       }
       const response = await requestUi(request, requestSignal);
-      const body = await readResponse(response, requestSignal, (size) => {
-        reserve(size);
-        responseBytes += size;
-      });
+      const isZip =
+        response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ===
+        'application/zip';
+      downloaded = await readResponse(
+        response,
+        requestSignal,
+        (size) => {
+          reserve(size);
+          responseBytes += size;
+        },
+        createSpool && isZip ? { create: startSpool, dispose: discardSpool } : undefined,
+      );
       const headers: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         if (RESPONSE_HEADERS.has(key)) {
           headers[key] = value;
         }
       });
-      const result = { status: response.status, headers, size: body.length };
-      if (body.length <= APP_CHUNK_BYTES) {
-        return { ...result, body: body.toString('base64') };
+      const result = { status: response.status, headers, size: downloaded.size };
+      if (downloaded.bytes && downloaded.size <= APP_CHUNK_BYTES) {
+        return { ...result, body: downloaded.bytes.toString('base64') };
       }
 
-      const downloadId = add('download', body);
+      const downloadId = add('download', downloaded);
+      downloaded = undefined;
       responseBytes = 0;
       return { ...result, downloadId };
     } finally {
       unlock();
-      budget -= responseBytes;
-      if (uploaded) {
-        budget -= uploaded.bytes.length;
-      }
+      await Promise.all([discardSpool(downloaded?.spool), discardSpool(uploaded?.spool)]);
+      budget -= responseBytes + (uploaded?.size ?? 0);
     }
   }
-  const timer = setInterval(sweep, TTL_MS);
+  const timer = setInterval(() => {
+    sweep().catch((error: unknown) => {
+      console.error('Studio 作品传输过期清理失败。', error);
+    });
+  }, TTL_MS);
   timer.unref();
   return {
     async execute(value: AppTransportInput, signal?: AbortSignal): Promise<AppTransportResult> {
@@ -465,29 +629,31 @@ export function createAppTransport(requestUi: UiRequester) {
       }
 
       const input = appTransportSchema.parse(value);
-      sweep();
+      await sweep();
       const requestSignal = signal ? AbortSignal.any([lifetime.signal, signal]) : lifetime.signal;
       requestSignal.throwIfAborted();
       switch (input.action) {
         case 'release':
-          return { released: remove(input.transferId) };
+          return { released: await remove(input.transferId) };
         case 'upload':
-          return appendUpload(input);
+          return appendUpload(input, requestSignal);
         case 'download':
-          return readDownload(input);
+          return readDownload(input, requestSignal);
         case 'request':
           return sendRequest(input, requestSignal);
       }
     },
     close() {
-      if (!closed) {
+      if (!closing) {
         closed = true;
         lifetime.abort(failure('CLOSED', '作品连接已关闭。'));
         clearInterval(timer);
-        for (const id of transfers.keys()) {
-          remove(id);
-        }
+        closing = Promise.all([
+          ...Array.from(transfers.keys(), remove),
+          ...Array.from(spools.keys(), discardSpool),
+        ]).then(() => undefined);
       }
+      return closing;
     },
   };
 }

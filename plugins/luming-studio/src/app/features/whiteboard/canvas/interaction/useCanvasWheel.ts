@@ -33,7 +33,9 @@ export function useCanvasWheel({
     const wheel = (event: WheelEvent) => {
       const readingIds = readingRef.current?.ids;
       const focusedId = readingIds?.length === 1 ? readingIds[0] : undefined;
-      const focusedElement = boardRef.current.elements.find((element) => element.id === focusedId);
+      const focusedElement = focusedId
+        ? boardRef.current.elements.find((element) => element.id === focusedId)
+        : undefined;
       const zoomRequest = event.ctrlKey || event.metaKey;
       if (focusedElement?.type === 'document' && zoomRequest) {
         event.preventDefault();

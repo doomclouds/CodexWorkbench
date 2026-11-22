@@ -12,13 +12,18 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { unzipSync } from 'fflate';
 import { capacityProfiles, makeCapacityFixture } from './capacity-fixtures.mjs';
 import { runTemporaryServer, sha256, verifyRuntime } from './runtime-fingerprint.mjs';
+import { summarizeTiming } from './timing-samples.mjs';
 
-const [runtimeDirectory, fingerprintPath, tier, previousWitness, timeoutArgument] =
-  process.argv.slice(2);
+const argv = process.argv.slice(2);
+const compareStorage = argv[0] === '--storage-comparison';
+const schema = compareStorage ? argv[1] : undefined;
+const [runtimeDirectory, fingerprintPath, tier, previousWitness, timeoutArgument, sampleArgument] =
+  argv.slice(compareStorage ? 2 : 0);
 const regularTimeoutMs = 60_000;
 const maxRequestBytes = 9 * 1024 * 1024;
 const maxOperations = 200;
@@ -43,15 +48,29 @@ if (previousWitness) {
 
 const fixture = makeCapacityFixture(tier);
 const saveCount = tier === 'small' ? 4 : fixture.profile.history;
-const prefix = 'luming-full-archive-' + tier + (previousWitness ? '-replay-' : '-');
+const measuredSaves = Number(sampleArgument ?? 30);
+if (compareStorage) {
+  assert(schema === 'v1' || schema === 'v2', 'Choose v1 or v2 for the storage comparison');
+  assert(tier !== 'small' && previousWitness, 'Supply a near or expanded v1 synthetic witness');
+  assert(
+    Number.isSafeInteger(measuredSaves) && measuredSaves >= 30,
+    'At least 30 timed saves are required',
+  );
+}
+const replaySuffix = previousWitness ? '-replay-' : '-';
+const operation = compareStorage ? '-comparison-' : replaySuffix;
+const prefix = 'luming-full-archive-' + tier + operation;
 const output = await mkdtemp(join(tmpdir(), prefix));
 const coordinates = { dataRoot: join(output, 'data'), packagedCopy: join(output, 'runtime') };
 const samples = [];
+const sourceScope = previousWitness
+  ? 'Frozen product package, direct local HTTP restore of a prior archive and source copy'
+  : 'Frozen product package, local HTTP, synthetic mixed board and real committed history';
 const evidence = {
   kind: 'full-history-archive-roundtrip',
-  scope: previousWitness
-    ? 'Frozen product package, direct local HTTP restore of a prior archive and source copy'
-    : 'Frozen product package, local HTTP, synthetic mixed board and real committed history',
+  scope: compareStorage
+    ? 'Frozen product package, local HTTP comparison from a shared v1 synthetic board'
+    : sourceScope,
   tier,
   expectedSaves: saveCount,
   fixture: { seedVersion: fixture.seedVersion, sha256: fixture.digest, profile: fixture.profile },
@@ -60,6 +79,15 @@ const evidence = {
   samples,
   archiveVerified: false,
 };
+
+if (compareStorage) {
+  evidence.storageComparison = {
+    schema,
+    prefillSaves: saveCount,
+    requestedSamples: measuredSaves,
+    releaseEligible: false,
+  };
+}
 
 function failure(error) {
   if (!(error instanceof Error)) {
@@ -292,6 +320,135 @@ async function saveVersions(tool, source) {
   return ledger;
 }
 
+function checkStorageReceipt(data, args, version) {
+  const { id, changes } = args.operations[0];
+  assert.equal(data.receiptFormat, 'units-v1');
+  assert.equal(data.operationId, args.operationId);
+  assert.equal(data.baseRevision, args.expectedRevision);
+  assert.equal(data.artifact.id, args.artifactId);
+  assert.equal(data.artifact.revision, args.expectedRevision + 1);
+  assert.equal(data.historyEntry.revision, data.artifact.revision);
+  assert.equal(data.units.length, 1);
+  assert.equal(data.units[0].id, id);
+  assert.equal(data.units[0].after.id, id);
+  assert.equal(data.units[0].after.version, version + 1);
+  assert.equal(data.units[0].after.text, changes.text);
+}
+
+async function saveStorageUnit(request, state, marker, index) {
+  const args = {
+    artifactId: state.artifactId,
+    expectedRevision: state.revision,
+    expectedVersions: { [marker.id]: marker.version },
+    operationId: 'storage-comparison-' + index,
+    receiptFormat: 'units-v1',
+    operations: [
+      { op: 'update', id: marker.id, changes: { text: 'Storage comparison #' + index } },
+    ],
+  };
+  const body = JSON.stringify(args);
+  const details = {
+    index,
+    timed: index > saveCount,
+    requestBytes: Buffer.byteLength(body),
+    expectedRevision: state.revision,
+    operationId: args.operationId,
+  };
+  await measure(
+    'storage-save',
+    async () => {
+      const response = await request('/api/tools/artifact_apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      const raw = await response.text();
+      details.responseBytes = Buffer.byteLength(raw);
+      const receipt = JSON.parse(raw);
+      assert.equal(receipt.ok, true);
+      checkStorageReceipt(receipt.data, args, marker.version);
+      state.revision = receipt.data.artifact.revision;
+      state.requestNumber++;
+      marker.version = receipt.data.units[0].after.version;
+      details.savedRevision = state.revision;
+    },
+    details,
+  );
+
+  return args;
+}
+
+async function checkFirstStorageCommit(tool, artifactId, previous, legacyVersion) {
+  const { history } = await read(tool, artifactId, 'history');
+  const revisions = history.map(({ revision }) => revision).sort((left, right) => left - right);
+  assert.equal(revisions.at(-1), previous + 1);
+  const loadOldVersion = () => read(tool, artifactId, 'version', { versionId: legacyVersion.id });
+  if (schema === 'v1') {
+    assert.equal(revisions.length, saveCount);
+    assert(revisions[0] < previous, 'Baseline did not retain the old history');
+    const old = await loadOldVersion();
+    assert.equal(old.board.artifact.revision, legacyVersion.revision);
+    assert.equal(contentFingerprint(old.board, artifactId), legacyVersion.sha256);
+  } else {
+    assert(revisions[0] >= previous, 'New storage exposed history before the old latest version');
+    assert(revisions.length <= 2, 'New storage did not start from the old latest version');
+    await assert.rejects(loadOldVersion, { code: 'NOT_FOUND' });
+  }
+  evidence.storageComparison.historyAfterFirstSave = revisions;
+}
+
+async function exerciseStorageWrites({ tool, request }, source, previous) {
+  const { state } = source;
+  const { artifactId } = state;
+  const board = await measure('storage-first-board-read', () => read(tool, artifactId, 'board'));
+  assert.equal(board.artifact.revision, previous.original.revision);
+  assert.equal(contentFingerprint(board, artifactId), previous.original.sha256);
+  const seededMarker = fixture.content.elements.at(-1).id;
+  const target = board.elements.find((element) => element.id === seededMarker);
+  assert.equal(target?.type, 'text');
+  assert(Number.isSafeInteger(target.version));
+  const marker = { id: target.id, version: target.version };
+  const first = state.revision;
+  const legacyVersion = previous.verifiedHistory.find(({ revision }) => revision === first - 1);
+  assert(legacyVersion, 'The v1 source witness must include the penultimate version');
+  await saveStorageUnit(request, state, marker, 1);
+  await checkFirstStorageCommit(tool, artifactId, first, legacyVersion);
+  assert.equal(
+    contentFingerprint(await read(tool, artifactId, 'board'), artifactId),
+    contentFingerprint(
+      {
+        ...board,
+        elements: board.elements.map((element) =>
+          element.id === marker.id
+            ? { ...element, version: marker.version, text: 'Storage comparison #1' }
+            : element,
+        ),
+      },
+      artifactId,
+    ),
+    'The first new write changed unrelated migrated data',
+  );
+
+  let last;
+  for (let index = 2; index <= saveCount + measuredSaves; index++) {
+    last = await saveStorageUnit(request, state, marker, index);
+  }
+  assert.equal(state.revision, first + saveCount + measuredSaves);
+  const { operationId, operations } = last;
+  const recovered = await measure('storage-read-only-receipt', () =>
+    read(tool, artifactId, 'operation-receipt', { operationId, operations }),
+  );
+  assert.equal(recovered.operationId, operationId);
+  assert.equal(recovered.historyEntry.revision, state.revision);
+  assert.equal(recovered.board.artifact.revision, state.revision);
+  assert.equal(
+    recovered.board.elements.find((element) => element.id === marker.id).version,
+    marker.version,
+  );
+  evidence.storageComparison.receiptSha256 = contentFingerprint(recovered.board, artifactId);
+  evidence.storageComparison.finalRevision = state.revision;
+}
+
 async function verifyAsset(request, url, name) {
   const bytes = await measure('download-' + name + '-asset', async () =>
     Buffer.from(await (await request(url)).arrayBuffer()),
@@ -479,13 +636,26 @@ async function verifyRoundtrip({ tool, request, session }, replay) {
   const source = replay
     ? await recoverSource(tool, replay.previous)
     : await createSource(tool, request);
+  evidence.source = source.state;
+
+  if (compareStorage) {
+    await exerciseStorageWrites({ tool, request }, source, replay.previous);
+  }
   const ledger = replay ? new Map() : await saveVersions(tool, source);
   const original = await checkOriginal(tool, request, source, ledger);
-  if (replay) {
+  if (replay && !compareStorage) {
     assert.equal(original.currentSha256, replay.previous.original.sha256);
     assert.equal(original.revision, replay.previous.original.revision);
     assert.equal(original.history.length, replay.previous.original.retainedVersions);
     assert.equal(evidence.original.contentBytes, replay.previous.original.contentBytes);
+  }
+  if (compareStorage) {
+    assert.equal(original.currentSha256, evidence.storageComparison.receiptSha256);
+    const revisions = original.history.map(({ revision }) => revision).sort((a, b) => a - b);
+    assert.deepEqual(
+      revisions,
+      Array.from({ length: saveCount }, (_, i) => original.revision - saveCount + 1 + i),
+    );
   }
 
   const archive = replay?.archive ?? (await exportArchive(tool, request, source.state.artifactId));
@@ -565,6 +735,15 @@ async function copyVerifiedFile(source, destination) {
   return { source, copy: destination, sha256: after, bytes: (await lstat(destination)).size };
 }
 
+function verifyLegacySeed(database) {
+  const db = new DatabaseSync(database, { readOnly: true });
+  try {
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1, 'Use a v1 seed database');
+  } finally {
+    db.close();
+  }
+}
+
 async function prepareReplay(runtime) {
   const beforeFile = await realpath(previousWitness);
   const beforeFolder = dirname(beforeFile);
@@ -577,11 +756,16 @@ async function prepareReplay(runtime) {
   assert.equal(previous.tier, tier, 'The archive witness has a different profile');
   assert.equal(previous.expectedSaves, saveCount);
   assert.deepEqual(previous.fixture, evidence.fixture);
-  assert.deepEqual(
-    previous.runtime.files,
-    runtime.files,
-    'Replay runtime differs from the prior run',
-  );
+  if (compareStorage) {
+    assert.equal(previous.archiveVerified, true, 'Use a verified synthetic archive witness');
+    assert.equal(previous.storageComparison, undefined, 'Use the original v1 synthetic witness');
+  } else {
+    assert.deepEqual(
+      previous.runtime.files,
+      runtime.files,
+      'Replay runtime differs from the prior run',
+    );
+  }
   assert.equal(previous.original.distinctMeasuredVersions, saveCount);
 
   const firstImport = previous.samples.find((sample) => sample.name === 'import-complete-archive');
@@ -605,13 +789,27 @@ async function prepareReplay(runtime) {
   assert.equal(await realpath(sourceRoot), sourceRoot);
   await assertSourceStopped(sourceRoot);
 
-  const archivePath = join(beforeFolder, tier + '-complete-history.studio.zip');
-  assert.equal(resolve(previous.archive.file), archivePath);
-  await requireRegularFile(archivePath);
-  const archive = await readFile(archivePath);
-  assert.equal(archive.length, previous.archive.bytes);
-  assert.equal(sha256(archive), previous.archive.sha256);
-  evidence.archive = { ...previous.archive, file: archivePath };
+  let archive;
+  if (!compareStorage) {
+    const archivePath = join(beforeFolder, tier + '-complete-history.studio.zip');
+    assert.equal(resolve(previous.archive.file), archivePath);
+    await requireRegularFile(archivePath);
+    archive = await readFile(archivePath);
+    assert.equal(archive.length, previous.archive.bytes);
+    assert.equal(sha256(archive), previous.archive.sha256);
+    evidence.archive = { ...previous.archive, file: archivePath };
+  }
+
+  const priorCopy = previous.replay?.sourceCopies?.database;
+  if (!previous.source) {
+    assert(compareStorage && priorCopy);
+    const artifactId = basename(dirname(priorCopy.copy));
+    assert.equal(
+      resolve(priorCopy.copy),
+      join(sourceRoot, 'artifacts', artifactId, 'artifact.sqlite'),
+    );
+    previous.source = { artifactId, revision: previous.original.revision, requestNumber: 0 };
+  }
 
   const { artifactId } = previous.source;
   const { assetId } = previous.original;
@@ -636,8 +834,42 @@ async function prepareReplay(runtime) {
     join(target, 'assets', assetId),
   );
   assert.equal(asset.sha256, previous.original.assetSha256);
+  if (priorCopy) {
+    assert.equal(database.sha256, priorCopy.sha256, 'The verified replay source changed');
+  }
+
   evidence.replay.sourceCopies = { database, asset };
+  if (compareStorage) {
+    verifyLegacySeed(database.copy);
+    evidence.storageComparison.seed = {
+      boardSha256: previous.original.sha256,
+      revision: previous.original.revision,
+      archiveRuntimeFiles: previous.runtime.files,
+    };
+  }
   return { previous, archive };
+}
+
+async function verifyStorageReopen(runtime) {
+  await measure('storage-reopen-service', () =>
+    runTemporaryServer(runtime, coordinates.dataRoot, async ({ tool }) => {
+      const { artifactId } = evidence.source;
+      for (const kind of ['cold', 'warm', 'warm']) {
+        const board = await measure('storage-reopened-' + kind + '-read', () =>
+          read(tool, artifactId, 'board'),
+        );
+        assert.equal(board.artifact.revision, evidence.original.revision);
+        assert.equal(contentFingerprint(board, artifactId), evidence.original.sha256);
+      }
+    }),
+  );
+  const { database, asset } = evidence.replay.sourceCopies;
+  assert.equal(
+    await fileDigest(database.source),
+    database.sha256,
+    'Original source database changed',
+  );
+  assert.equal(await fileDigest(asset.source), asset.sha256, 'Original source asset changed');
 }
 
 try {
@@ -648,16 +880,38 @@ try {
   await measure('complete-archive-product-probe', () =>
     runTemporaryServer(runtime, coordinates.dataRoot, (api) => verifyRoundtrip(api, replay)),
   );
+
+  if (compareStorage) {
+    await verifyStorageReopen(runtime);
+  }
   await measure('recheck-frozen-runtime-after-exit', () =>
     verifyRuntime(coordinates.packagedCopy, fingerprintPath),
   );
+
+  if (compareStorage) {
+    await verifyRuntime(runtimeDirectory, fingerprintPath);
+  }
   evidence.archiveVerified = true;
 } catch (error) {
   evidence.failure = failure(error);
   process.exitCode = 2;
 } finally {
+  if (compareStorage) {
+    const timings = samples.filter((sample) => sample.name === 'storage-save' && sample.timed);
+    evidence.storageComparison.timing = summarizeTiming(
+      timings.map((sample) => {
+        if (sample.code === 'OK') {
+          return { status: 'ok', ms: sample.durationMs };
+        }
+
+        const code = sample.error?.code;
+        const status = code === 23 || code === 'TimeoutError' ? 'timeout' : 'failure';
+        return { status };
+      }),
+    );
+  }
   const attempt = samples.find((sample) => sample.name === 'import-complete-archive');
-  if (evidence.replay && attempt) {
+  if (evidence.replay && attempt && !compareStorage) {
     const { durationMs } = attempt;
     evidence.replay.wallClockComparison = {
       durationMs,

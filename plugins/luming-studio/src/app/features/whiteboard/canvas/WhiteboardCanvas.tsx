@@ -60,6 +60,7 @@ import {
 } from './scene/canvas-model.js';
 import { canvasGridSpacing, tableDetail } from './scene/canvas-presentation.js';
 import { useCanvasScene } from './scene/useCanvasScene.js';
+import { useCanvasVisibility, type CanvasViewportExtent } from './scene/useCanvasVisibility.js';
 import { ImageCropDialog } from './objects/NativeMedia.js';
 import { measureNativeIssues, type NativeIssue } from './scene/native-issues.js';
 import { getBoardSticker } from '../../../../shared/whiteboard-stickers.js';
@@ -67,7 +68,10 @@ import { COMMENT_CURSOR } from '../../../shared/comments/cursor.js';
 import { useCanvasReading, useCanvasReadingLayout } from './controls/reading/useCanvasReading.js';
 import {
   CanvasObject,
+  hasCanvasRegion,
   isHtmlEmbed,
+  keepsCanvasObjectMounted,
+  useCanvasObjectActions,
   type CanvasObjectScene,
   type CanvasObjectView,
   type CanvasRegionView,
@@ -579,8 +583,11 @@ function CanvasSession({
     element: HTMLDivElement;
     portalRoot: HTMLElement | null;
   } | null>(null);
+  const [viewportExtent, setViewportExtent] = useState<CanvasViewportExtent | null>(null);
+  const [focusedCanvasObjectId, setFocusedCanvasObjectId] = useState<string>();
   const bindViewport = useCallback((element: HTMLDivElement | null) => {
     viewportElement.current = element;
+    setViewportExtent(element && { width: element.clientWidth, height: element.clientHeight });
     setViewportHost(
       element
         ? {
@@ -605,7 +612,10 @@ function CanvasSession({
   const [tool, setTool] = useState<Tool>('select');
   const {
     viewport,
+    visibilityViewport,
     setViewport,
+    scheduleViewport,
+    flushViewport,
     presentationZoom,
     openingViewportReady,
     viewportRef,
@@ -737,7 +747,7 @@ function CanvasSession({
   } = useNativeGestureSync({ room, document: board, selfPeerId, readOnly: !canEdit, preview });
   const publishedGesture = useRef<NativeGesture | undefined>(undefined);
   const viewportInteract = useCommittedRef(onViewportInteract);
-  const [, renderAssets] = useState(0);
+  const [assetRevision, renderAssets] = useState(0);
   useEffect(() => client.subscribeAssets?.(() => renderAssets((value) => value + 1)), [client]);
   const [regionFailures, setRegionFailures] = useState(() => new Map<string, string>());
   const queueScope = `${board.artifact.id}:${actor.id}`;
@@ -992,7 +1002,13 @@ function CanvasSession({
 
     const observer =
       typeof ResizeObserver === 'function'
-        ? new ResizeObserver(() => scheduleNativeIssues(host))
+        ? new ResizeObserver(() => {
+            const { clientWidth: width, clientHeight: height } = host;
+            setViewportExtent((current) =>
+              current?.width === width && current.height === height ? current : { width, height },
+            );
+            scheduleNativeIssues(host);
+          })
         : undefined;
     observer?.observe(host);
     return () => {
@@ -1399,7 +1415,7 @@ function CanvasSession({
       );
 
       if (point) {
-        setViewport((current) =>
+        scheduleViewport((current) =>
           zoomAt(
             current,
             { x: current.x + point.x * current.zoom, y: current.y + point.y * current.zoom },
@@ -1431,13 +1447,20 @@ function CanvasSession({
     }
 
     if (input.phase !== 'cancel') {
-      setViewport({
+      const next = {
         ...current.viewport,
         x: current.viewport.x + input.screenX - current.start.x,
         y: current.viewport.y + input.screenY - current.start.y,
-      });
+      };
+
+      if (input.phase === 'end') {
+        setViewport(next);
+      } else {
+        scheduleViewport(next);
+      }
     }
     if (input.phase === 'end' || input.phase === 'cancel') {
+      flushViewport();
       updateGesture(null);
     }
   };
@@ -1925,7 +1948,7 @@ function CanvasSession({
     readingRef,
     documentFocusSurface,
     viewportInteract,
-    setViewport,
+    setViewport: scheduleViewport,
   });
 
   const handleNavigationCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2238,7 +2261,7 @@ function CanvasSession({
     const frame = projectPointerFrame(
       current,
       {
-        point: boardPoint(screen.x, screen.y),
+        point: hovering,
         screen,
         zoom: viewportRef.current.zoom,
         modifiers: event,
@@ -2249,7 +2272,7 @@ function CanvasSession({
     applyPointerFrame(frame, {
       surface,
       capture: () => viewportElement.current?.setPointerCapture(event.pointerId),
-      setViewport,
+      setViewport: scheduleViewport,
       setGuides,
       updateGesture,
       onDrawingLimit(message) {
@@ -2260,6 +2283,7 @@ function CanvasSession({
   };
 
   const handlePointerUp = (event: ReactPointerEvent) => {
+    flushViewport();
     const screen = { x: event.clientX, y: event.clientY };
     const release = preparePointerRelease(
       gestureRef.current,
@@ -2351,6 +2375,39 @@ function CanvasSession({
     viewStyle,
     viewTheme,
     currentMoveElements,
+  });
+  const protectedCanvasIds = useMemo(() => {
+    const anchorIds = [annotationTarget, localAnnotationTarget].flatMap((anchor) => [
+      ...(anchor?.elementIds ?? []),
+      ...(anchor?.regionId ? [anchor.regionId] : []),
+    ]);
+
+    return new Set([
+      ...selection,
+      ...movingIds,
+      ...editingIds,
+      ...(reading?.ids ?? []),
+      ...anchorIds,
+      ...(focusedCanvasObjectId ? [focusedCanvasObjectId] : []),
+      ...queueTasks.flatMap((task) => task.keys),
+    ]);
+  }, [
+    selection,
+    movingIds,
+    editingIds,
+    reading,
+    annotationTarget,
+    localAnnotationTarget,
+    focusedCanvasObjectId,
+    queueTasks,
+  ]);
+  const { mounted: mountedElements, retain: retainCanvasObject } = useCanvasVisibility({
+    elements: renderedElements,
+    viewport: visibilityViewport,
+    extent: viewportExtent,
+    ready: openingViewportReady,
+    stableGeometry: renderedElements === contentElements,
+    protectedIds: protectedCanvasIds,
   });
   const publishGesturePreview = useEffectEvent((gesture: Gesture | null, enabled: boolean) => {
     const view = enabled && gesture ? describeGesturePreview(gesture) : null;
@@ -2835,28 +2892,45 @@ function CanvasSession({
     }
   }
 
-  const objectScene: CanvasObjectScene = {
-    zoom: viewport.zoom,
-    presentationZoom,
-    theme: viewTheme,
-    style: viewStyle,
-    surfaces: surfaceScene,
-    arrows: arrowElementIndex,
-    assets: {
+  const objectAssets = useMemo<CanvasObjectScene['assets']>(
+    () => ({
       resolve: (source) => assetDisplayUrl(source, client),
       state: (source) => client.assetState?.(source),
-    },
-  };
+    }),
+    [client],
+  );
+  const objectScene = useMemo<CanvasObjectScene>(
+    () => ({
+      zoom: viewport.zoom,
+      presentationZoom,
+      theme: viewTheme,
+      style: viewStyle,
+      surfaces: surfaceScene,
+      arrows: arrowElementIndex,
+      assets: objectAssets,
+      assetRevision,
+    }),
+    [
+      viewport.zoom,
+      presentationZoom,
+      viewTheme,
+      viewStyle,
+      surfaceScene,
+      arrowElementIndex,
+      objectAssets,
+      assetRevision,
+    ],
+  );
 
-  const objectActions = {
+  const objectActions = useCanvasObjectActions({
     clickCapture: handleAnnotationClickCapture,
     pointerDown: begin,
     doubleClick: handleElementDoubleClick,
     arrowDoubleClick: handleArrowLabelDoubleClick,
     moveRegion,
-  };
+  });
 
-  function renderElement(element: BoardElement) {
+  function renderElement(element: BoardElement, retain?: (id: string) => void) {
     if (!openingViewportReady) {
       return null;
     }
@@ -2882,7 +2956,12 @@ function CanvasSession({
         scene={objectScene}
         actions={objectActions}
         editor={editing?.id === element.id ? renderTextEditor(element) : undefined}
-        region={(region) => renderObjectRegion(element, view, region)}
+        region={
+          hasCanvasRegion(element)
+            ? (region) => renderObjectRegion(element, view, region)
+            : undefined
+        }
+        onRetain={keepsCanvasObjectMounted(element) ? retain : undefined}
       />
     );
   }
@@ -3167,6 +3246,14 @@ function CanvasSession({
     setAnnotationHoverId(null);
     onCursorMove?.(null);
   };
+
+  function updateCanvasFocus(target: EventTarget | null) {
+    const id =
+      target instanceof Element
+        ? target.closest<HTMLElement>('[data-element-id]')?.dataset.elementId
+        : undefined;
+    setFocusedCanvasObjectId(id);
+  }
   const handleViewportLostPointerCapture: NonNullable<
     ComponentProps<'div'>['onLostPointerCapture']
   > = () => {
@@ -3649,11 +3736,13 @@ function CanvasSession({
         {renderReadingMarker(queueScope, spacePan || gesture?.kind === 'pan')}
         <div
           className="studio-canvas-world"
+          onFocusCapture={(event) => updateCanvasFocus(event.target)}
+          onBlurCapture={(event) => updateCanvasFocus(event.relatedTarget)}
           style={{
             transform: `translate(${viewport.x}px,${viewport.y}px) scale(${viewport.zoom})`,
           }}
         >
-          {renderedElements.map(renderElement)}
+          {mountedElements.map((element) => renderElement(element, retainCanvasObject))}
           <CanvasMediaPlaceholders
             batch={mediaUpload}
             zoom={viewport.zoom}

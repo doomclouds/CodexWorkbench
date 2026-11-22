@@ -831,6 +831,7 @@ describe('fresh authority at the artifact transaction', () => {
   });
 
   it('commits a room timer under fresh artifact authorization without rewriting the artifact database', async () => {
+    await host.service.store.waitForBackground();
     const before = await readFile(host.service.store.file(artifactId));
     const write = vi
       .spyOn(host.service.store, 'transaction')

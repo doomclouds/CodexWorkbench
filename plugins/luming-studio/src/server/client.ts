@@ -453,7 +453,8 @@ export async function connectStudio(
           Authorization: `Bearer ${target.token}`,
           'X-Studio-Actor': 'human',
         },
-        ...(request.body !== undefined ? { body: Buffer.from(request.body) } : {}),
+        body:
+          request.bodyBlob ?? (request.body !== undefined ? Buffer.from(request.body) : undefined),
         redirect: 'error',
         signal: signal
           ? AbortSignal.any([signal, AbortSignal.timeout(90_000)])

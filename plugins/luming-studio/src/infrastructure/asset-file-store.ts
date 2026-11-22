@@ -11,7 +11,9 @@ import { safeId, StudioError } from '../shared/studio-error.js';
 import { atomicWrite } from './filesystem/atomic-write.js';
 import { regularFile, resourceScope, samePath } from './filesystem/owned-file.js';
 
-type ArtifactPaths = Pick<StudioRepository, 'root' | 'folder'>;
+interface ArtifactPaths extends Pick<StudioRepository, 'root' | 'folder'> {
+  activeAssetFolder?(artifactId: string): Promise<string>;
+}
 type AssetDirectory = 'assets' | 'recycle-assets';
 
 function isMissingFile(error: unknown): boolean {
@@ -70,14 +72,25 @@ async function assertRecyclingAvailable(path: string): Promise<void> {
 export class FileAssetStore implements AssetFileStore {
   constructor(private readonly paths: ArtifactPaths) {}
 
+  private async artifactFolder(artifactId: string): Promise<string> {
+    const id = safeId(artifactId);
+    if (this.paths.activeAssetFolder) {
+      return this.paths.activeAssetFolder(id);
+    }
+    if (!samePath(resolve(this.paths.folder(id)), resolve(this.paths.root, 'artifacts', id))) {
+      throw resourceScope();
+    }
+
+    return join(await realpath(this.paths.root), 'artifacts', id);
+  }
+
   private async assetDirectory(
     artifactId: string,
     directory: AssetDirectory,
     create = false,
   ): Promise<string> {
-    const root = await realpath(this.paths.root);
-    const folder = await realpath(this.paths.folder(artifactId));
-    if (!samePath(folder, join(root, 'artifacts', safeId(artifactId)))) {
+    const folder = await this.artifactFolder(artifactId);
+    if (!samePath(await realpath(folder), folder)) {
       throw resourceScope();
     }
 
@@ -154,15 +167,24 @@ export class FileAssetStore implements AssetFileStore {
     active: string,
     recycled: string,
   ): Promise<void> {
-    await this.assetDirectory(artifactId, 'assets');
-    await this.assetDirectory(artifactId, 'recycle-assets');
+    const activeFolder = await this.assetDirectory(artifactId, 'assets');
+    const recycledFolder = await this.assetDirectory(artifactId, 'recycle-assets');
+    if (!samePath(active, join(activeFolder, basename(active)))) {
+      throw resourceScope();
+    }
+    if (!samePath(recycled, join(recycledFolder, basename(recycled)))) {
+      throw resourceScope();
+    }
+
     await regularFile(recycled);
     await rename(recycled, active);
   }
 
   async duplicate(from: string, to: string): Promise<void> {
     try {
-      await cp(join(this.paths.folder(from), 'assets'), join(this.paths.folder(to), 'assets'), {
+      const source = await this.assetDirectory(from, 'assets');
+      const destination = await this.artifactFolder(to);
+      await cp(source, join(destination, 'assets'), {
         recursive: true,
       });
     } catch (error) {

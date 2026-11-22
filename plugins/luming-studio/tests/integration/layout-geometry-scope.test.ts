@@ -100,6 +100,7 @@ it.each(changes)(
   async (patch) => {
     const board = await create();
     const task = await begin(board, 'bounded', { rect: { x: 0, y: 0, w: 400, h: 120 } });
+    await service.store.waitForBackground();
     const before = await readFile(service.store.file(board.artifact.id));
     await expect(
       service.execute(
@@ -152,6 +153,7 @@ it('rejects a label entering another reserved area even when the writer owns the
   const board = await create();
   const own = await begin(board, 'own-arrow', { ids: ['edge'] });
   await begin(board, 'reserved-area', { rect: { x: 80, y: 300, w: 200, h: 100 } }, second);
+  await service.store.waitForBackground();
   const before = await readFile(service.store.file(board.artifact.id));
   await expect(
     service.execute(

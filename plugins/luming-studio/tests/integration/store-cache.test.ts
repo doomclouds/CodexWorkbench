@@ -227,7 +227,8 @@ describe('portable transactional artifact database', () => {
     const state = createState(fixture().artifact, content, LOCAL_ACTOR, 'create', ['html']);
     const first = new ArtifactStore<typeof state.content>(folder);
     await first.write(state);
-    for (let index = 0; index < 205; index++) {
+    await first.drainBackground();
+    for (let index = 0; index < 224; index++) {
       await first.transaction(state.artifact.id, (current) => {
         if (index === 0) {
           current.sources.kept = [{ html: current.content.elements[0]!.html }];
@@ -239,14 +240,30 @@ describe('portable transactional artifact database', () => {
       });
     }
 
+    function maintain() {
+      const maximumMaintenanceBatches = 64;
+      const repository = new SqliteArtifactRepository(first.file(state.artifact.id), true);
+      try {
+        for (let batch = 0; repository.needsMaintenance; batch++) {
+          expect(batch).toBeLessThan(maximumMaintenanceBatches);
+          repository.database.exec('BEGIN IMMEDIATE');
+          repository.maintainStorage();
+          repository.database.exec('COMMIT');
+        }
+      } finally {
+        repository.close();
+      }
+    }
+
+    maintain();
     let database = new DatabaseSync(first.file(state.artifact.id), { readOnly: true });
     try {
       expect(database.prepare('SELECT count(*) AS total FROM history_versions').get()!.total).toBe(
         200,
       );
       expect(
-        database.prepare('SELECT count(*) AS total FROM content_manifests').get()!.total,
-      ).toBeLessThanOrEqual(201);
+        database.prepare('SELECT count(*) AS total FROM history_checkpoint_units').get()!.total,
+      ).toBeLessThanOrEqual(11);
       expect(
         database
           .prepare('SELECT count(*) AS total FROM payload_blobs WHERE json=?')
@@ -259,6 +276,7 @@ describe('portable transactional artifact database', () => {
     await first.transaction(state.artifact.id, (current) => {
       delete current.sources.kept;
     });
+    maintain();
     database = new DatabaseSync(first.file(state.artifact.id), { readOnly: true });
     try {
       expect(

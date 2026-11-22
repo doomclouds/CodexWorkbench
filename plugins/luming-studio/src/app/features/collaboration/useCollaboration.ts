@@ -13,25 +13,34 @@ import {
   type StudioEvent,
   type SyncBatch,
 } from '../../../contracts/studio';
+import type { BoardSceneResponse } from '../../../contracts/board-open.js';
 import type { StudioDocument } from '../../product-contract';
-import { createStudioToolCall } from '../../transport/tool-response';
+import {
+  createStudioToolCall,
+  decodeBoardOpenResponse,
+  decodeBoardSceneResponse,
+} from '../../transport/tool-response';
 import { studioRequest } from '../../transport/client';
 import {
   openCollaborationStream,
   requestCollaborationPoll,
   requestCollaborationReplay,
   requestCollaborationRevision,
+  requestCollaborationBoard,
+  requestCollaborationScene,
 } from '../../transport/collaboration-channel';
 import { reportStudioWarning } from '../../shared/studio-warning';
 import { newClientId } from '../../shared/client-id';
 import type { StudioViewRequests } from '../../shared/studio-view-scope';
 import { isRecord } from '../../../shared/is-record';
 import { missedRevisions } from './revision-recovery';
+import { BoardOpenCache, materializeBoardOpen } from './board-open-cache.js';
 
 interface Callbacks {
   getDocument: () => StudioDocument | null;
   applyRemoteEvent: (document: StudioDocument, event: StudioEvent) => StudioDocument | undefined;
   onDocument: (document: StudioDocument) => void;
+  onScene?: (scene: BoardSceneResponse | undefined) => void;
   onFeedback: (feedback: Feedback[]) => void;
   onPresence: (peers: Presence[], timer: RoomTimer | null) => void;
   onEvent: (event: StudioEvent) => void;
@@ -52,6 +61,8 @@ interface Options extends Callbacks {
   artifactId: string;
   peerId: string;
   identity?: PageIdentity;
+  authorityKey?: string;
+  boardOpenCache?: BoardOpenCache;
   isCurrent?: () => boolean;
 }
 
@@ -111,7 +122,10 @@ function validRecovery(result: ArtifactUnits, artifactId: string, revision: numb
 }
 
 export function createCollaboration(options: Options) {
-  const { client, artifactId, peerId } = options;
+  const { client, artifactId, peerId, authorityKey, boardOpenCache } = options;
+  const boardScope = { client, artifactId, authorityKey };
+  let boardOpenAvailable = Boolean(client.baseUrl && client.boardOpen);
+  let boardEpoch: string | undefined;
   const isCurrent = options.isCurrent ?? (() => true);
   const identity = options.identity || { epoch: newClientId('epoch'), presence: 0, room: 0 };
   const peerEpoch = identity.epoch;
@@ -197,6 +211,12 @@ export function createCollaboration(options: Options) {
       documentCursor = next;
     }
   }
+  function rememberDocument() {
+    if (boardEpoch && !closed && isCurrent()) {
+      boardOpenCache?.remember(boardScope, boardEpoch, options.getDocument());
+    }
+  }
+
   function documentState(message?: StudioEvent, appliedRevision = 0) {
     const document = options.getDocument();
     if (!document || document.artifact.id !== artifactId) {
@@ -220,6 +240,7 @@ export function createCollaboration(options: Options) {
       advanceDocumentCursor(receiptCursor);
     }
 
+    rememberDocument();
     const watermark = receiptCursor || receivedCursor;
     const epoch = position(watermark).epoch;
     localState({
@@ -353,7 +374,110 @@ export function createCollaboration(options: Options) {
   function requestFeedback(serial: number) {
     runInConnection(readFeedback(serial), serial);
   }
-  async function snapshot(serial = generation) {
+  function authorizedBoard(value: unknown, cached: ReturnType<BoardOpenCache['get']>) {
+    try {
+      const opened = decodeBoardOpenResponse(value, artifactId);
+      if (opened) {
+        return { document: materializeBoardOpen(opened, cached), epoch: opened.epoch };
+      }
+    } catch (error) {
+      reportStudioWarning('白板复用响应不匹配，将重新读取完整作品。', error);
+    }
+  }
+
+  async function readBoardSnapshot(
+    serial: number,
+    reuse: boolean,
+  ): Promise<{ document: StudioDocument; epoch?: string } | undefined> {
+    if (!boardOpenAvailable) {
+      return { document: await queryClient.call(STUDIO_TOOLS.read, { artifactId, mode: 'board' }) };
+    }
+
+    const cached = reuse ? boardOpenCache?.get(boardScope) : undefined;
+    const known = cached && { revision: cached.board.artifact.revision, epoch: cached.epoch };
+    const abort = new AbortController();
+    reads.add(abort);
+    try {
+      const response = await requestCollaborationBoard(client, artifactId, known, {
+        headers: headers(),
+        signal: abort.signal,
+      });
+      const value = await json(response);
+      if (!alive(serial)) {
+        return;
+      }
+
+      const opened = authorizedBoard(value, cached);
+      if (opened) {
+        return opened;
+      }
+
+      boardOpenCache?.forget(boardScope);
+      boardOpenAvailable = false;
+      return { document: await queryClient.call(STUDIO_TOOLS.read, { artifactId, mode: 'board' }) };
+    } finally {
+      reads.delete(abort);
+    }
+  }
+
+  async function readInitialScene(serial: number) {
+    const sendScene = options.onScene;
+    if (!boardOpenAvailable || !sendScene || options.getDocument()) {
+      return;
+    }
+    if (boardOpenCache?.get(boardScope)) {
+      return;
+    }
+
+    const abort = new AbortController();
+    reads.add(abort);
+    try {
+      const response = await requestCollaborationScene(client, artifactId, {
+        headers: headers(),
+        signal: abort.signal,
+      });
+      const value = await json(response);
+      if (!alive(serial) || options.getDocument()) {
+        return;
+      }
+
+      const scene = decodeBoardSceneResponse(value, artifactId);
+      if (scene) {
+        sendScene(scene);
+      }
+    } catch (error) {
+      if (!alive(serial)) {
+        return;
+      }
+
+      if (deniedResponse(error)) {
+        revokeBoardAccess(error);
+        return;
+      }
+
+      reportStudioWarning('白板首屏预览读取失败，将继续读取完整作品。', error);
+    } finally {
+      reads.delete(abort);
+    }
+  }
+
+  function acceptBoardSnapshot(next: StudioDocument, barrier: string, authorityEpoch?: string) {
+    const current = options.getDocument();
+    if (current && next.artifact.revision < current.artifact.revision) {
+      return;
+    }
+
+    boardEpoch = authorityEpoch;
+    advanceDocumentCursor(barrier);
+    if (next !== current) {
+      options.onDocument(next);
+    }
+
+    options.onScene?.(undefined);
+    documentState(undefined, next.artifact.revision);
+  }
+
+  async function snapshot(serial = generation, reuse = false) {
     if (!alive(serial)) {
       return;
     }
@@ -369,26 +493,26 @@ export function createCollaboration(options: Options) {
       do {
         snapshotAgain = false;
         const barrier = cursor;
-        const next = await queryClient.call(STUDIO_TOOLS.read, {
-          artifactId,
-          mode: 'board',
-        });
-
-        if (!alive(serial) || epoch !== position(receivedCursor).epoch) {
+        const result = await readBoardSnapshot(serial, reuse);
+        if (!result || !alive(serial) || epoch !== position(receivedCursor).epoch) {
           return;
         }
+
+        const { document: next, epoch: authorityEpoch } = result;
         if (next.artifact.id !== artifactId) {
           throw new Error('作品快照对应了其他白板。');
         }
 
-        const current = options.getDocument();
-        if (!current || next.artifact.revision >= current.artifact.revision) {
-          advanceDocumentCursor(barrier);
-          options.onDocument(next);
-          documentState(undefined, next.artifact.revision);
-        }
+        acceptBoardSnapshot(next, barrier, authorityEpoch);
         requestFeedback(serial);
       } while (snapshotAgain && alive(serial));
+    } catch (error) {
+      if (alive(serial) && deniedResponse(error)) {
+        revokeBoardAccess(error);
+        return;
+      }
+
+      throw error;
     } finally {
       if (ticket === snapshotTicket) {
         snapshotReading = false;
@@ -535,16 +659,26 @@ export function createCollaboration(options: Options) {
     }
   }
 
+  function deniedResponse(error: unknown): error is Record<string, unknown> {
+    return isRecord(error) && (error.status === 401 || error.status === 403);
+  }
+
+  function revokeBoardAccess(error: Record<string, unknown>) {
+    boardOpenCache?.forget(boardScope);
+    boardEpoch = undefined;
+    options.onScene?.(undefined);
+    const reason = isRecord(error.details) ? error.details.reason : undefined;
+    options.onEvent({ type: 'access-revoked', artifactId, reason });
+    pause(false);
+  }
+
   function reportRevisionFailure(error: unknown, serial: number) {
     if (!alive(serial)) {
       return;
     }
 
-    const denied = isRecord(error) && (error.status === 401 || error.status === 403);
-    if (denied) {
-      const reason = isRecord(error.details) ? error.details.reason : undefined;
-      options.onEvent({ type: 'access-revoked', artifactId, reason });
-      pause(false);
+    if (deniedResponse(error)) {
+      revokeBoardAccess(error);
       return;
     }
 
@@ -635,8 +769,9 @@ export function createCollaboration(options: Options) {
     }
 
     if (result.reset) {
+      const opening = !cursor;
       cursor = result.cursor || '';
-      await snapshot(serial);
+      await snapshot(serial, opening);
     }
     if (!alive(serial) || !inReceivedEpoch(result.cursor)) {
       return;
@@ -739,6 +874,8 @@ export function createCollaboration(options: Options) {
         : result.events?.find((message) => message.type === 'access-revoked');
 
     if (revocation) {
+      boardOpenCache?.forget(boardScope);
+      boardEpoch = undefined;
       options.onEvent(revocation);
       pause(false);
       return Promise.resolve();
@@ -869,6 +1006,7 @@ export function createCollaboration(options: Options) {
 
       return;
     }
+    runInConnection(readInitialScene(serial), serial);
     const nextStream = options.polling ? undefined : connectStream(serial);
     if (nextStream) {
       stream = nextStream;
@@ -968,6 +1106,7 @@ export function createCollaboration(options: Options) {
     peers = [];
     if (isCurrent()) {
       options.onPresence(peers, timer);
+      options.onScene?.(undefined);
       localState({ type: 'reset', reason });
       if (leave) {
         options.onCursorClear?.();
@@ -1228,6 +1367,7 @@ export function createCollaboration(options: Options) {
     room,
     presence,
     refresh,
+    rememberDocument,
     refreshFeedback: () => requestFeedback(generation),
     timer(data: Record<string, unknown>): Promise<void> {
       if (!connected) {
@@ -1266,7 +1406,9 @@ export function createCollaboration(options: Options) {
 export function useCollaboration(
   options: Options & { enabled: boolean; scope?: StudioViewRequests },
 ) {
-  const { artifactId, client, enabled, peerId, polling, scope } = options;
+  const { artifactId, client, enabled, peerId, polling, scope, authorityKey } = options;
+  const [boardOpenCache] = useState(() => new BoardOpenCache());
+  const initialScene = Boolean(options.onScene);
   const callbacks = useRef(options);
   useLayoutEffect(() => {
     callbacks.current = options;
@@ -1322,16 +1464,19 @@ export function useCollaboration(
       peerId,
       polling,
       identity: identity.current,
+      authorityKey,
+      boardOpenCache,
       isCurrent: () => {
         const next = callbacks.current;
         const sameScope = next.client === client && next.artifactId === artifactId && next.enabled;
         const sameView = !scope || (view !== undefined && scope.isCurrent(view));
 
-        return sameScope && sameView;
+        return sameScope && sameView && next.authorityKey === authorityKey;
       },
       getDocument: () => callbacks.current.getDocument(),
       applyRemoteEvent: (current, event) => callbacks.current.applyRemoteEvent(current, event),
       onDocument: (value) => callbacks.current.onDocument(value),
+      ...(initialScene ? { onScene: (value) => callbacks.current.onScene?.(value) } : {}),
       onFeedback: (value) => callbacks.current.onFeedback(value),
       onPresence: (peers, timer) => callbacks.current.onPresence(peers, timer),
       onEvent: (event) => callbacks.current.onEvent(event),
@@ -1362,13 +1507,24 @@ export function useCollaboration(
       active.close();
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [artifactId, client, enabled, peerId, polling, scope]);
+  }, [
+    artifactId,
+    client,
+    enabled,
+    peerId,
+    polling,
+    scope,
+    authorityKey,
+    boardOpenCache,
+    initialScene,
+  ]);
 
   return useMemo(
     () => ({
       room,
       presence: (patch: PresencePatch) => controller.current?.transport.presence(patch),
       refresh: () => controller.current?.transport.refresh() || Promise.resolve(),
+      rememberBoard: () => controller.current?.transport.rememberDocument(),
       refreshFeedback: () => controller.current?.transport.refreshFeedback(),
       timer: (data: Record<string, unknown>) =>
         controller.current?.transport.timer(data) ||

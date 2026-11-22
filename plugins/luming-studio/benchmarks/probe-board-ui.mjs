@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { availableParallelism, release, tmpdir, totalmem } from 'node:os';
 import { join } from 'node:path';
+import { seedExpandedBoard } from './board-ui-seed.mjs';
 import { makeCapacityFixture } from './capacity-fixtures.mjs';
 import { runTemporaryServer, sha256, verifyRuntime } from './runtime-fingerprint.mjs';
 import { frameIntervals, summarizeTiming } from './timing-samples.mjs';
@@ -11,13 +12,15 @@ const require = createRequire(import.meta.url);
 const [runtimeDirectory, witness, profile = 'near', rawRounds = '1', browserModule = 'playwright'] =
   process.argv.slice(2);
 const rounds = Number(rawRounds);
-assert(['small', 'near'].includes(profile), 'Choose small or near');
+assert(['small', 'near', 'expanded'].includes(profile), 'Choose small, near, or expanded');
 assert(Number.isInteger(rounds) && rounds >= 1 && rounds <= 30, 'Choose 1 to 30 rounds');
 
 const title = 'Studio UI synthetic ' + profile;
 const viewport = { width: 1440, height: 960 };
 const timeoutMs = 8_000;
 const steps = 12;
+const minimumZoom = 0.05;
+const zoomWheelStep = 25;
 const scenarios = ['fresh-open', 'fresh-drag', 'warm-open', 'warm-drag', 'pan', 'zoom'];
 const directory = await mkdtemp(join(tmpdir(), 'luming-studio-ui-'));
 const reportPath = join(directory, 'board-ui.json');
@@ -66,17 +69,20 @@ async function seed(tool) {
     image.src = 'data:image/png;base64,' + fixture.resourceData.toString('base64');
   }
 
-  const { artifact } = await tool('artifact_manage', {
-    action: 'create',
-    type: 'whiteboard',
-    title,
-    elements,
-  });
+  const { artifact, seedRequests } =
+    profile === 'expanded'
+      ? await seedExpandedBoard(tool, title, elements)
+      : await tool('artifact_manage', { action: 'create', type: 'whiteboard', title, elements });
   const board = await tool('artifact_read', { artifactId: artifact.id, mode: 'board' });
   assert.equal(board.elements.length, elements.length, 'Packaged board seed lost elements');
   assert(
     board.elements.some((element) => element.id === probe.id),
     'Probe object is absent',
+  );
+  assert.deepEqual(
+    board.elements.map((element) => element.id),
+    elements.map((element) => element.id),
+    'Packaged board seed changed object order',
   );
   const content = JSON.stringify(board.elements);
   report.fixture = {
@@ -88,6 +94,7 @@ async function seed(tool) {
     initialRevision: board.artifact.revision,
     probeId: probe.id,
     inlineSyntheticImages: true,
+    ...(seedRequests && { seedRequests }),
   };
 
   return { artifactId: artifact.id, probeId: probe.id };
@@ -190,6 +197,13 @@ async function receiveSaveReceipt(page, releasedAt) {
   return receipt.jsonValue();
 }
 
+function cameraTransform(page) {
+  return page.locator('[aria-label="白板画布"] .studio-canvas-world').evaluate((element) => {
+    const matrix = new DOMMatrix(getComputedStyle(element).transform);
+    return [matrix.e, matrix.f, matrix.a];
+  });
+}
+
 async function openAndDrag(page, tool, board, round, temperature, direction) {
   const opening = { name: temperature + '-open', round };
   const drag = { name: temperature + '-drag', round };
@@ -206,9 +220,18 @@ async function openAndDrag(page, tool, board, round, temperature, direction) {
       );
     });
     await open.click();
-    const item = page.locator(`[data-element-id="${board.probeId}"]`);
-    await item.click();
-    await page.locator(`[data-element-id="${board.probeId}"].is-selected`).waitFor();
+    const item = page.locator(`.studio-board-element[data-element-id="${board.probeId}"]`);
+    await item.waitFor();
+    const [, , openingZoom] = await cameraTransform(page);
+    const selectOnPointerDown = openingZoom <= minimumZoom;
+    drag.selectionGesture = selectOnPointerDown ? 'select-and-move' : 'preselect-and-move';
+    if (!selectOnPointerDown) {
+      await item.click();
+      await page
+        .locator(`.studio-board-element[data-element-id="${board.probeId}"].is-selected`)
+        .waitFor();
+    }
+
     const at = await point(item);
     await recorded(page, drag, async () => {
       const previous = await item.evaluate((element) => {
@@ -217,8 +240,16 @@ async function openAndDrag(page, tool, board, round, temperature, direction) {
         capture.target = { element, left, top };
         window.addEventListener(
           'pointerdown',
-          () => {
+          (event) => {
             capture.inputAt = performance.now();
+            const hit = event.target;
+            if (hit instanceof Element) {
+              capture.hit = {
+                objectId: hit.closest('[data-element-id]')?.getAttribute('data-element-id'),
+                label: hit.getAttribute('aria-label'),
+                className: hit.getAttribute('class'),
+              };
+            }
           },
           { capture: true, once: true },
         );
@@ -234,11 +265,18 @@ async function openAndDrag(page, tool, board, round, temperature, direction) {
       });
       const motion = await dragMouse(page, at, 'left', direction, () =>
         page.evaluate(() => {
-          const { inputAt, movedAt } = window.__studioDiagnosticFrames;
-          return { openAt: window.__studioDiagnosticOpen, inputAt, movedAt };
+          const { inputAt, movedAt, hit, target } = window.__studioDiagnosticFrames;
+          return {
+            openAt: window.__studioDiagnosticOpen,
+            inputAt,
+            movedAt,
+            hit,
+            selected: target.element.classList.contains('is-selected'),
+          };
         }),
       );
       drag.motion = motion;
+      assert(motion.selected, 'The move did not select the probe object');
       assert(
         Number.isFinite(motion.movedAt) &&
           Number.isFinite(motion.inputAt) &&
@@ -292,19 +330,21 @@ async function openAndDrag(page, tool, board, round, temperature, direction) {
 async function cameraGesture(page, round, name, interact, index) {
   const sample = { name, round };
   report.samples.push(sample);
-  const world = page.locator('.studio-canvas-world');
-  const camera = () =>
-    world.evaluate((element) => {
-      const matrix = new DOMMatrix(getComputedStyle(element).transform);
-      return [matrix.e, matrix.f, matrix.a];
-    });
   await recorded(page, sample, async () => {
-    const before = await camera();
-    await interact();
+    const before = await cameraTransform(page);
+    sample.before = before;
+    await interact(before, sample);
     await nextFrame(page);
-    const after = await camera();
+    const after = await cameraTransform(page);
+    sample.after = after;
     assert.notEqual(after[index], before[index], 'The viewport transform did not change');
-    return { before, after };
+    if (sample.wheelDeltaY) {
+      assert.equal(
+        Math.sign(after[index] - before[index]),
+        -Math.sign(sample.wheelDeltaY),
+        'The viewport scale moved opposite to the issued wheel input',
+      );
+    }
   });
 }
 
@@ -329,7 +369,7 @@ async function exercise(browser, connection, board, round) {
     await openAndDrag(page, connection.tool, board, round, 'fresh', 1);
     await page.getByRole('button', { name: /^返回 .+Studio/ }).click();
     await openAndDrag(page, connection.tool, board, round, 'warm', -1);
-    const canvas = page.locator('.studio-canvas-viewport');
+    const canvas = page.locator('[aria-label="白板画布"]');
     await cameraGesture(
       page,
       round,
@@ -343,13 +383,15 @@ async function exercise(browser, connection, board, round) {
       page,
       round,
       'zoom',
-      async () => {
+      async ([, , scale], sample) => {
         const at = await point(canvas, 0.7, 0.43);
+        const deltaY = scale <= minimumZoom ? -zoomWheelStep : zoomWheelStep;
+        sample.wheelDeltaY = deltaY;
         await page.mouse.move(at.x, at.y);
         await page.keyboard.down('Control');
         try {
           for (let step = 0; step < steps; step++) {
-            await page.mouse.wheel(0, 25);
+            await page.mouse.wheel(0, deltaY);
             await nextFrame(page);
           }
         } finally {

@@ -582,6 +582,9 @@ it('leaves selected document wheel and scrollbar gestures with the document with
   const inside = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 });
   await act(async () => {
     content.dispatchEvent(inside);
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
   });
   expect(inside.defaultPrevented).toBe(false);
   expect(world()).toBe(before);
@@ -593,6 +596,9 @@ it('leaves selected document wheel and scrollbar gestures with the document with
   const outside = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 });
   await act(async () => {
     query('白板画布').dispatchEvent(outside);
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
   });
   expect(outside.defaultPrevented).toBe(true);
   expect(world()).not.toBe(before);

@@ -1,9 +1,12 @@
 import { expect, it } from 'vitest';
+import { Readable } from 'node:stream';
 import type { Actor, BoardElement } from '../../src/contracts/studio.js';
 import type { ArtifactState } from '../../src/core/ports/studio-repository.js';
 import {
   decodeArchiveState,
+  decodeDeltaArchiveState,
   encodeArchiveState,
+  encodeDeltaArchiveState,
   MAX_ARCHIVE_STATE_BYTES,
 } from '../../src/infrastructure/archive-state-codec.js';
 
@@ -124,6 +127,37 @@ function packed(payload: unknown, texts: unknown[] = []): Buffer {
     }),
   );
 }
+
+it('encodes a baseline followed by ordered deltas and reads them from segmented input', async () => {
+  const state = changedHistory(64, mebibyte);
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of encodeDeltaArchiveState(state)) {
+    chunks.push(chunk);
+  }
+
+  const first = chunks[0]!;
+  const decoded = (await decodeDeltaArchiveState(
+    Readable.from([first.subarray(0, 2), first.subarray(2), ...chunks.slice(1)]),
+  )) as ArtifactState<TestContent>;
+  const lines = Buffer.concat(chunks).toString().split('\n').filter(Boolean);
+  const deltas = lines.filter((line) => line.startsWith('{"base":'));
+  expect(deltas).toHaveLength(retainedVersions - 1);
+  expect(Buffer.concat(chunks).byteLength).toBeLessThan(encodeArchiveState(state).byteLength);
+  expect(decoded.content).toEqual(state.content);
+  expect(
+    decoded.history.map(({ entry, content }) => [entry.revision, content.elements[0]!.y]),
+  ).toEqual(state.history.map(({ entry, content }) => [entry.revision, content.elements[0]!.y]));
+  expect(decoded.history[0]!.content.elements[1]).toBe(decoded.content.elements[1]);
+
+  const firstDelta = lines.indexOf(deltas[0]!);
+  const badDelta = JSON.parse(lines[firstDelta]!);
+  badDelta.base = retainedVersions - 1;
+  lines[firstDelta] = JSON.stringify(badDelta);
+  const broken = Readable.from([Buffer.from(lines.join('\n') + '\n')]);
+  await expect(decodeDeltaArchiveState(broken)).rejects.toMatchObject({
+    code: 'INVALID_ARCHIVE',
+  });
+});
 
 it('preserves arbitrary JSON field names, lists and escaped unicode', () => {
   const content = Object.fromEntries([

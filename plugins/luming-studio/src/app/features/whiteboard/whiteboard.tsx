@@ -54,6 +54,8 @@ import {
   type LibraryPreviewFrame,
 } from '../../library-preview';
 
+export { CanvasOpeningScene } from './canvas/CanvasOpeningScene.js';
+
 function downloadableUrl(client: StudioClient, path: string): string {
   const url = new URL(path, client.baseUrl || window.location.href);
   if (client.token && client.baseUrl && url.origin === new URL(client.baseUrl).origin) {

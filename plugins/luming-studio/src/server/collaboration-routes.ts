@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Actor, StudioEvent } from '../contracts/studio.js';
 import type { StudioAuthority, StudioService } from '../core/service.js';
+import {
+  BOARD_OPEN_CHECK,
+  BOARD_SCENE_CHECK,
+  parseBoardOpenKnown,
+} from '../contracts/board-open.js';
 import { StudioError } from '../shared/studio-error.js';
 
 interface Auth {
@@ -144,6 +149,35 @@ export function createCollaborationRoutes({
       }
     } finally {
       disposeRequest();
+    }
+  }
+
+  async function openingBoard(
+    response: ServerResponse,
+    artifactId: string,
+    auth: Auth,
+    url: URL,
+    scene: boolean,
+  ): Promise<void> {
+    if (!artifactId) {
+      throw new StudioError('INVALID_ARGUMENT', '打开白板需要作品 ID。');
+    }
+
+    const known = parseBoardOpenKnown(
+      url.searchParams.get('knownRevision'),
+      url.searchParams.get('knownEpoch'),
+    );
+
+    if (known === null || (known && scene)) {
+      throw new StudioError('INVALID_ARGUMENT', '白板读取版次或服务代次无效。');
+    }
+
+    const result = scene
+      ? await service.openBoardScene(artifactId, auth.actor, auth.authority)
+      : await service.openBoard(artifactId, known, auth.actor, auth.authority);
+
+    if (!response.destroyed) {
+      json(response, 200, result);
     }
   }
 
@@ -320,7 +354,12 @@ export function createCollaborationRoutes({
       const auth = await authorize(request, response, url, artifactId || undefined);
       scope(auth, artifactId || undefined);
 
-      if (path === '/api/sync' && url.searchParams.get('check') === 'revision') {
+      const check = path === '/api/sync' ? url.searchParams.get('check') : null;
+      if (check === BOARD_OPEN_CHECK || check === BOARD_SCENE_CHECK) {
+        await openingBoard(response, artifactId, auth, url, check === BOARD_SCENE_CHECK);
+        return true;
+      }
+      if (check === 'revision') {
         const head = await service.collaborationRevision(artifactId, auth.actor, auth.authority);
         if (!response.destroyed) {
           json(response, 200, head);

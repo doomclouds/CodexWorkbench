@@ -67,6 +67,7 @@ function createStandaloneBridge(
 
   const client: StudioClient = {
     embedded: false,
+    boardOpen: true,
     baseUrl: boot.baseUrl,
     token: boot.token,
     call: createStudioToolCall(async (name, args, read) => {
@@ -178,6 +179,7 @@ function connectEmbeddedTransport(app: App, connection: Connection) {
     subscribeAssets: transport.subscribeAssets,
     assetState: transport.assetState,
     embedded: true,
+    boardOpen: true,
     baseUrl: connection.baseUrl,
     token: connection.token,
     async downloadFile(blob, filename) {

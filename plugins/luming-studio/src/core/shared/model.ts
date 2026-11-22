@@ -67,7 +67,7 @@ export interface ArtifactState<
   schemaVersion: 2;
   feedback: FeedbackRecord<Anchor>[];
   history: SavedVersion<Content>[];
-  operations: { id: string; fingerprint: string; historyId: string }[];
+  operations: { id: string; fingerprint: string; historyId: string; receiptUnavailable?: true }[];
   unitClocks?: Record<string, UnitClock>;
   deletedFeedbackReceipts?: { operationId: string; fingerprint: string; contextId: string }[];
   guestNames?: Record<string, { name: string; key: string }>;

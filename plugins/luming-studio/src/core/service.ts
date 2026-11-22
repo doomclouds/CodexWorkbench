@@ -13,12 +13,19 @@ import {
   type ToolName,
   type UnitSaveReceipt,
 } from '../contracts/studio.js';
-import type { ArchiveStorage } from './ports/archive-storage.js';
+import {
+  BOARD_OPEN_FORMAT,
+  BOARD_SCENE_FORMAT,
+  type BoardOpenKnown,
+  type BoardOpenResponse,
+  type BoardSceneResponse,
+} from '../contracts/board-open.js';
+import type { ArchiveInput, ArchiveStorage } from './ports/archive-storage.js';
 import type { AssetFileStore } from './ports/asset-file-store.js';
-import type { ExportCopyStore } from './ports/export-copy-store.js';
+import type { ExportBytes, ExportCopyStore, StagedArchiveFile } from './ports/export-copy-store.js';
 import type { SvgPngRenderer } from './ports/png-renderer.js';
 import type { RoomTimerStore } from './ports/room-timer-store.js';
-import type { StudioRepository } from './ports/studio-repository.js';
+import type { LocalUnitWritePlan, StudioRepository } from './ports/studio-repository.js';
 import {
   assertAlive,
   copy,
@@ -36,9 +43,15 @@ import {
 import {
   MAX_WHITEBOARD_BYTES,
   MAX_WHITEBOARD_ELEMENTS,
+  boardView,
   whiteboardAdapter,
   type WhiteboardContent,
 } from './products/whiteboard.js';
+import {
+  applyLocalWhiteboardCommand,
+  localWhiteboardCommand,
+} from './products/whiteboard-local-save.js';
+import { whiteboardScene } from '../shared/whiteboard-scene.js';
 import { createArtifact, listArtifacts, manageArtifact } from './shared/artifacts.js';
 import {
   applyMutation,
@@ -90,7 +103,7 @@ import { ThumbnailCache } from './shared/thumbnails.js';
 import { captureArchive, importArchive as importArtifactArchive } from './shared/archive.js';
 import { debuglog } from 'node:util';
 import { jsonEqual } from '../shared/safe-merge.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   boundedModelRequest,
   boundedModelResult,
@@ -123,6 +136,16 @@ export interface StudioAuthority {
 type AuthorizationState = Pick<ArtifactState<unknown>, 'artifact' | 'sharing' | 'guestNames'>;
 type ReadProduct = ReturnType<ProductRegistry['get']>;
 
+interface ApplyTransactionResult {
+  response: Snapshot<unknown> | UnitSaveReceipt;
+  changed: boolean;
+  historyEntry: HistoryEntry;
+  binding?: AgentTaskBinding;
+  actor: Actor;
+  eventOperationId?: string;
+  eventUnits: StudioUnitEvent[];
+}
+
 const debug = debuglog('luming-studio');
 const authorizationState = (state: Readonly<ArtifactState<unknown>>): AuthorizationState => ({
   artifact: state.artifact,
@@ -132,6 +155,21 @@ const authorizationState = (state: Readonly<ArtifactState<unknown>>): Authorizat
 
 function requestedUnitIds(input: unknown): input is string[] {
   return Array.isArray(input) && input.length <= 200 && input.every((id) => typeof id === 'string');
+}
+
+const SHAREABLE_CONTENT_OPERATIONS = new Set(['update', 'document', 'todo']);
+
+function canShareContentUnits(operations: unknown): boolean {
+  if (!Array.isArray(operations) || !operations.length) {
+    return false;
+  }
+
+  return operations.every(
+    (operation: unknown) =>
+      object(operation) &&
+      typeof operation.op === 'string' &&
+      SHAREABLE_CONTENT_OPERATIONS.has(operation.op),
+  );
 }
 
 function unitReadResult(
@@ -255,6 +293,7 @@ function activityReadTargets(result: unknown): string[] {
 
 export class StudioService<Store extends StudioRepository = StudioRepository> {
   private readonly thumbnails = new ThumbnailCache();
+  private readonly boardOpenEpoch = randomUUID();
   readonly store: Store;
   readonly owner: Actor;
   private readonly products: ProductRegistry;
@@ -955,7 +994,7 @@ export class StudioService<Store extends StudioRepository = StudioRepository> {
       throw new StudioError('FORBIDDEN', '仅本机房主可以回收不受支持的旧版作品。');
     }
   }
-  async importArchive(data: Uint8Array, actor: Actor = this.owner, title?: unknown) {
+  async importArchive(data: ArchiveInput, actor: Actor = this.owner, title?: unknown) {
     if (this.closing) {
       throw new StudioError('CLOSED', 'Studio 服务已经关闭。');
     }
@@ -1109,47 +1148,143 @@ export class StudioService<Store extends StudioRepository = StudioRepository> {
       });
     }
 
-    return this.store.readProjection(id, (current) => {
-      const product = this.products.get(current.artifact.type);
-      const currentActor = this.authorizedActor(current, actor, authority);
-      if (mode === 'assets') {
-        if (!model) {
-          return listAssets(current, args, currentActor);
+    const currentOnly = mode === 'board' || mode === 'document' || mode === 'assets';
+    return this.store.readProjection(
+      id,
+      (current) => {
+        const product = this.products.get(current.artifact.type);
+        const currentActor = this.authorizedActor(current, actor, authority);
+        if (mode === 'assets') {
+          if (!model) {
+            return listAssets(current, args, currentActor);
+          }
+
+          const stamp = createHash('sha256')
+            .update(JSON.stringify([current.artifact.revision, Object.keys(current.assets)]))
+            .digest('base64url');
+          const page = modelPage(args, id, stamp);
+
+          return modelPageResult(
+            args,
+            page,
+            listAssets(current, { ...args, offset: page.offset }, currentActor),
+            'assets',
+          );
         }
 
-        const stamp = createHash('sha256')
-          .update(JSON.stringify([current.artifact.revision, Object.keys(current.assets)]))
-          .digest('base64url');
-        const page = modelPage(args, id, stamp);
+        const state = this.readableArtifact(current, currentActor, args, mode, model);
+        if (mode === 'document' || mode === 'board') {
+          this.scheduleOpenUpgrade(id, currentActor, authority);
+          return product.project(state);
+        }
+        if (mode === 'history') {
+          return this.readHistory(state, id, args, model);
+        }
+        if (mode === 'version') {
+          return product.result(version(state, args.versionId ?? args.revision));
+        }
+        if (mode === 'diff') {
+          return this.readDiff(state, product, args, model);
+        }
+        if (!model) {
+          return product.read(state, mode, args);
+        }
 
-        return modelPageResult(
-          args,
-          page,
-          listAssets(current, { ...args, offset: page.offset }, currentActor),
-          'assets',
-        );
-      }
-
-      const state = this.readableArtifact(current, currentActor, args, mode, model);
-      if (mode === 'document' || mode === 'board') {
-        return product.project(state);
-      }
-      if (mode === 'history') {
-        return this.readHistory(state, id, args, model);
-      }
-      if (mode === 'version') {
-        return product.result(version(state, args.versionId ?? args.revision));
-      }
-      if (mode === 'diff') {
-        return this.readDiff(state, product, args, model);
-      }
-      if (!model) {
-        return product.read(state, mode, args);
-      }
-
-      return this.readModelContent(id, state, product, mode, args);
-    });
+        return this.readModelContent(id, state, product, mode, args);
+      },
+      { currentOnly },
+    );
   }
+  private scheduleOpenUpgrade(artifactId: string, actor: Actor, authority?: StudioAuthority): void {
+    if (actor.role === 'owner' && !authority?.viaLan) {
+      this.store.scheduleUpgrade?.(artifactId);
+    }
+  }
+
+  private projectOpenedBoard<Result>(
+    artifactId: string,
+    actor: Actor,
+    authority: StudioAuthority | undefined,
+    project: (board: Board) => Result,
+  ): Promise<Result> {
+    return this.store.readProjection(
+      artifactId,
+      (state) => {
+        const currentActor = this.authorizedActor(state, actor, authority);
+        if (state.artifact.type !== 'whiteboard') {
+          throw new StudioError('UNSUPPORTED_PRODUCT', '此作品不支持白板投影。');
+        }
+
+        this.scheduleOpenUpgrade(artifactId, currentActor, authority);
+
+        return project(boardView(state as Snapshot<WhiteboardContent>));
+      },
+      { currentOnly: true },
+    );
+  }
+
+  async openBoard(
+    artifactId: string,
+    known: BoardOpenKnown | undefined,
+    actor: Actor,
+    authority?: StudioAuthority,
+  ): Promise<BoardOpenResponse> {
+    if (known?.epoch === this.boardOpenEpoch) {
+      const current = await this.store.readAuthorization(artifactId);
+      const currentActor = this.authorizedActor(current, actor, authority);
+      if (current.artifact.type === 'whiteboard' && current.artifact.revision === known.revision) {
+        this.scheduleOpenUpgrade(artifactId, currentActor, authority);
+
+        return {
+          format: BOARD_OPEN_FORMAT,
+          artifactId,
+          revision: current.artifact.revision,
+          epoch: this.boardOpenEpoch,
+          unchanged: true,
+          artifact: { ...current.artifact, type: 'whiteboard' },
+        };
+      }
+    }
+
+    return this.projectOpenedBoard(artifactId, actor, authority, (board) => ({
+      format: BOARD_OPEN_FORMAT,
+      artifactId,
+      revision: board.artifact.revision,
+      epoch: this.boardOpenEpoch,
+      unchanged: false,
+      board,
+    }));
+  }
+
+  async openBoardScene(
+    artifactId: string,
+    actor: Actor,
+    authority?: StudioAuthority,
+  ): Promise<BoardSceneResponse> {
+    const scene = await this.store.readBoardScene?.(artifactId, (authorization) => {
+      const currentActor = this.authorizedActor(authorization, actor, authority);
+      this.scheduleOpenUpgrade(artifactId, currentActor, authority);
+    });
+
+    if (scene) {
+      return {
+        format: BOARD_SCENE_FORMAT,
+        artifactId,
+        revision: scene.artifact.revision,
+        epoch: this.boardOpenEpoch,
+        scene,
+      };
+    }
+
+    return this.projectOpenedBoard(artifactId, actor, authority, (board) => ({
+      format: BOARD_SCENE_FORMAT,
+      artifactId,
+      revision: board.artifact.revision,
+      epoch: this.boardOpenEpoch,
+      scene: whiteboardScene(board),
+    }));
+  }
+
   private async readUnits(
     id: string,
     args: Record<string, unknown>,
@@ -1430,6 +1565,51 @@ export class StudioService<Store extends StudioRepository = StudioRepository> {
 
     return product.read(state, mode, args);
   }
+  private planLocalApply(
+    args: Record<string, unknown>,
+    actor: Actor,
+    authority?: StudioAuthority,
+  ): LocalUnitWritePlan<ApplyTransactionResult> | undefined {
+    const command = localWhiteboardCommand(args, actor);
+    if (!command) {
+      return;
+    }
+
+    return {
+      request: command.request,
+      plan: (basis) => {
+        const currentActor = this.authorizedActor(basis.authorization, actor, authority);
+        const adapter = this.products.get(basis.authorization.artifact.type).adapter;
+        if (adapter !== whiteboardAdapter) {
+          return;
+        }
+
+        const applied = applyLocalWhiteboardCommand(basis, command, currentActor);
+        if (!applied) {
+          return;
+        }
+
+        const { before, after, write } = applied;
+        const response = this.unitSaveReceipt(after, write.entry, args, currentActor);
+        if (!response) {
+          return;
+        }
+
+        return {
+          write,
+          result: {
+            response,
+            changed: true,
+            historyEntry: write.entry,
+            actor: currentActor,
+            eventOperationId: write.operation.id,
+            eventUnits: this.boardUnits(after, write.entry.changedIds, before),
+          },
+        };
+      },
+    };
+  }
+
   private async apply(
     id: string,
     args: Record<string, unknown>,
@@ -1474,64 +1654,70 @@ export class StudioService<Store extends StudioRepository = StudioRepository> {
       }
     }
 
-    const result = await this.store.transaction(id, (state) => {
-      const currentActor = this.authorizedActor(state, actor, authority);
-      const adapter = this.products.get(state.artifact.type).adapter;
-      const duplicate = state.operations.some((operation) => operation.id === args.operationId);
-      const binding =
-        currentActor.kind === 'agent' && state.artifact.type === 'whiteboard' && !duplicate
-          ? taskBinding(args, true)!
-          : undefined;
-      const task = binding && this.collaboration.assertTask(id, currentActor, binding);
-      if (currentActor.kind === 'agent' && !duplicate && Array.isArray(args.operations)) {
-        this.assertNoEditsInProgress(id, currentActor, state.content, args.operations, adapter);
-      }
+    const shareContentUnits = canShareContentUnits(args.operations);
+    const result = await this.store.transaction<ApplyTransactionResult>(
+      id,
+      (state) => {
+        const currentActor = this.authorizedActor(state, actor, authority);
+        const adapter = this.products.get(state.artifact.type).adapter;
+        const duplicate = state.operations.some((operation) => operation.id === args.operationId);
+        const binding =
+          currentActor.kind === 'agent' && state.artifact.type === 'whiteboard' && !duplicate
+            ? taskBinding(args, true)!
+            : undefined;
+        const task = binding && this.collaboration.assertTask(id, currentActor, binding);
+        if (currentActor.kind === 'agent' && !duplicate && Array.isArray(args.operations)) {
+          this.assertNoEditsInProgress(id, currentActor, state.content, args.operations, adapter);
+        }
 
-      const before = state.content;
-      const mutation = applyMutation(
-        state,
-        {
-          operationId: args.operationId,
-          operations: args.operations as ContentOperation[],
-          expectedRevision: args.expectedRevision,
-          expectedVersions: args.expectedVersions,
-          summary: args.summary,
-          merge: args.merge,
-        },
-        currentActor,
-        adapter,
-      );
-
-      if (mutation.changed && task && binding) {
-        this.collaboration.assertTask(id, currentActor, binding);
-        assertWorkspaceMutation(
-          before as WhiteboardContent,
-          state.content as WhiteboardContent,
-          args.operations as Record<string, unknown>[],
-          task,
-          currentActor.id,
-          this.collaboration.workspaces(id, { actorId: currentActor.id, binding }),
+        const before = state.content;
+        const mutation = applyMutation(
+          state,
+          {
+            operationId: args.operationId,
+            operations: args.operations as ContentOperation[],
+            expectedRevision: args.expectedRevision,
+            expectedVersions: args.expectedVersions,
+            summary: args.summary,
+            merge: args.merge,
+          },
+          currentActor,
+          adapter,
+          { transactionSnapshot: true, shareContentUnits },
         );
-      }
 
-      const response =
-        this.unitSaveReceipt(mutation.snapshot, mutation.historyEntry, args, currentActor) ??
-        mutation.snapshot;
+        if (mutation.changed && task && binding) {
+          this.collaboration.assertTask(id, currentActor, binding);
+          assertWorkspaceMutation(
+            before as WhiteboardContent,
+            state.content as WhiteboardContent,
+            args.operations as Record<string, unknown>[],
+            task,
+            currentActor.id,
+            this.collaboration.workspaces(id, { actorId: currentActor.id, binding }),
+          );
+        }
 
-      return {
-        response,
-        changed: mutation.changed,
-        historyEntry: mutation.historyEntry,
-        binding,
-        actor: currentActor,
-        eventOperationId: state.operations.find(
-          (operation) => operation.historyId === mutation.historyEntry.id,
-        )?.id,
-        eventUnits: mutation.changed
-          ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before)
-          : [],
-      };
-    });
+        const response =
+          this.unitSaveReceipt(mutation.snapshot, mutation.historyEntry, args, currentActor) ??
+          mutation.snapshot;
+
+        return {
+          response,
+          changed: mutation.changed,
+          historyEntry: mutation.historyEntry,
+          binding,
+          actor: currentActor,
+          eventOperationId: state.operations.find(
+            (operation) => operation.historyId === mutation.historyEntry.id,
+          )?.id,
+          eventUnits: mutation.changed
+            ? this.boardUnits(mutation.snapshot, mutation.historyEntry.changedIds, before)
+            : [],
+        };
+      },
+      { shareContentUnits, localUnit: this.planLocalApply(args, actor, authority) },
+    );
 
     if (result.changed && result.binding) {
       this.collaboration.touchTask(id, result.actor, result.binding, true);
@@ -2277,7 +2463,7 @@ export class StudioService<Store extends StudioRepository = StudioRepository> {
     authority?: StudioAuthority,
   ) {
     const format = text(args.format, 'json', 20).toLowerCase();
-    let result;
+    let result: ExportBytes | StagedArchiveFile;
     let capture: SavedRegionCapture | undefined;
     const {
       artifactId: _artifactId,
@@ -2366,36 +2552,50 @@ export class StudioService<Store extends StudioRepository = StudioRepository> {
       throw error;
     }
 
-    return this.store.withProjectionLock(id, authorizationState, async (current) => {
-      this.authorizedActor(current, actor, authority);
-      assertAlive(current.artifact);
-      const saved = await this.exportCopies.save(id, result);
-      if (!capture) {
-        return saved;
+    try {
+      return await this.store.withProjectionLock(id, authorizationState, async (current) => {
+        this.authorizedActor(current, actor, authority);
+        assertAlive(current.artifact);
+        const saved = await this.exportCopies.save(id, result);
+        if (!capture) {
+          return saved;
+        }
+
+        const { source, revision, bounds, width, height, ids } = capture;
+
+        return {
+          ...saved,
+          source,
+          revision,
+          bounds,
+          width,
+          height,
+          ids,
+          ...(args.includeImage === false
+            ? {}
+            : { image: { mimeType: capture.mimeType, data: capture.data } }),
+        };
+      });
+    } finally {
+      if ('dispose' in result) {
+        await result.dispose().catch((error: unknown) => {
+          process.emitWarning(`Archive staging cleanup failed: ${String(error)}`, {
+            code: 'STUDIO_ARCHIVE_CLEANUP_FAILED',
+          });
+        });
       }
-
-      const { source, revision, bounds, width, height, ids } = capture;
-
-      return {
-        ...saved,
-        source,
-        revision,
-        bounds,
-        width,
-        height,
-        ids,
-        ...(args.includeImage === false
-          ? {}
-          : { image: { mimeType: capture.mimeType, data: capture.data } }),
-      };
-    });
+    }
   }
   async getExport(exportId: string) {
     return this.exportCopies.read(exportId);
   }
+  async openExport(exportId: string) {
+    return this.exportCopies.open(exportId);
+  }
   async close() {
     this.closing = true;
     await Promise.allSettled([...this.tasks]);
+    await this.store.drainBackground?.();
     this.collaboration.close();
     this.thumbnails.clear();
   }

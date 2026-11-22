@@ -15,6 +15,7 @@ import {
   type ToolName,
 } from '../../src/contracts/studio';
 import { startStudioHost, type StudioHost } from '../../src/server/http';
+import type { BoardOpenResponse } from '../../src/contracts/board-open.js';
 import { createCollaboration } from '../../src/app/features/collaboration/useCollaboration';
 import { whiteboardProduct } from '../../src/app/features/whiteboard/whiteboard';
 
@@ -191,6 +192,80 @@ function installHttpEventSource(cookie: string) {
 
   return connections;
 }
+
+it('reauthorizes a real workbench reopen and reuses the saved head without reading the full board', async () => {
+  const title = '热开板缓存验证';
+  const created = await host.service.execute('artifact_manage', {
+    action: 'create',
+    title,
+    elements: [{ id: 'note', type: 'note', text: '当前' }],
+  });
+  const artifactId = created.artifact.id;
+  const connection = client(host.token);
+  const request = connection.request!;
+  const openings: { url: URL; data: BoardOpenResponse }[] = [];
+  const observed: URL[] = [];
+  const appClient: StudioClient = {
+    ...connection,
+    boardOpen: true,
+    async request(input, init) {
+      const url = new URL(input);
+      observed.push(url);
+      const response = await request(input, init);
+      if (url.searchParams.get('check') === 'board' && response.ok) {
+        openings.push({ url, data: (await response.clone().json()) as BoardOpenResponse });
+      }
+      return response;
+    },
+  };
+
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(
+      <StudioApp client={appClient} actor={LOCAL_ACTOR} requestStudio={studioRequest} />,
+    ),
+  );
+  const card = () =>
+    container!.querySelector<HTMLButtonElement>(`[aria-label="打开白板：${title}"]`);
+  await until(() => Boolean(card()));
+  await act(async () => card()!.click());
+  const canvas = () => container!.querySelector('[aria-label="协作白板"]');
+  await until(() => canvas()?.getAttribute('data-revision') === '0');
+  expect(openings).toHaveLength(1);
+  expect(openings[0]?.data).toMatchObject({ unchanged: false, revision: 0 });
+
+  await act(async () => {
+    await appClient.call('artifact_apply', {
+      artifactId,
+      expectedVersions: { note: 1 },
+      operations: [{ op: 'update', id: 'note', changes: { text: '已保存' } }],
+    });
+  });
+  await until(() => canvas()?.getAttribute('data-revision') === '1');
+  const back = [...container.querySelectorAll('button')].find((button) =>
+    /^返回 .+Studio/.test(button.getAttribute('aria-label') || button.textContent || ''),
+  );
+  expect(back).toBeDefined();
+  await act(async () => back!.click());
+
+  await until(() => Boolean(card()));
+  const before = observed.length;
+  await act(async () => card()!.click());
+  await until(() => canvas()?.getAttribute('data-revision') === '1');
+
+  expect(openings).toHaveLength(2);
+  const warm = openings[1]!;
+  expect(warm.url.searchParams.get('knownRevision')).toBe('1');
+  expect(warm.url.searchParams.get('knownEpoch')).toBe(openings[0]?.data.epoch);
+  expect(warm.data).toMatchObject({ unchanged: true, artifactId, revision: 1 });
+  expect(warm.data).not.toHaveProperty('board');
+  const warmRequests = observed.slice(before);
+  expect(warmRequests.some((url) => url.pathname === '/api/session')).toBe(true);
+  expect(warmRequests.some((url) => url.searchParams.get('check') === 'scene')).toBe(false);
+  expect(warmRequests.some((url) => url.pathname === '/api/tools/artifact_read')).toBe(false);
+});
 
 it.each(['sse', 'poll'] as const)(
   'catches up an authorized viewer after the final %s commit notification is lost',

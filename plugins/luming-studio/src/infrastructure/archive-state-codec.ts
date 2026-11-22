@@ -16,6 +16,8 @@ const MAX_VALUE_NODES = 1_000_000;
 const MAX_STATE_FIELDS = 64;
 const INLINE_TEXT_LENGTH = 1024;
 const CODEC_VERSION = 1;
+const DELTA_CODEC_VERSION = 2;
+const ARCHIVE_CHUNK_BYTES = 64 * 1024;
 
 type Primitive = null | boolean | number | string;
 type EncodedValue = Primitive | EncodedArray | EncodedObject | TextReference;
@@ -40,11 +42,18 @@ interface UnitContent {
 type EncodedContent = number | UnitContent;
 type HistoryReferences = [entry: number, artifact: number, content: number];
 
+interface DeltaContent {
+  base: number;
+  fields: number;
+  length: number;
+  changes: [ordinal: number, payload: number][];
+}
+
 interface ArchiveState {
-  version: typeof CODEC_VERSION;
+  version: number;
   texts: string[];
   payloads: EncodedValue[];
-  contents: EncodedContent[];
+  contents: (EncodedContent | DeltaContent)[];
   properties: [string, number][];
   current: number;
   history: HistoryReferences[];
@@ -174,7 +183,7 @@ function indexedDigest(value: string): string {
 class ArchiveEncoder {
   readonly texts: string[] = [];
   readonly payloads: EncodedValue[] = [];
-  readonly contents: EncodedContent[] = [];
+  readonly contents: (EncodedContent | DeltaContent)[] = [];
   private readonly textIds = new Map<string, { id: number; bytes: number }>();
   private readonly payloadIds = new Map<string, number>();
   private readonly contentIds = new Map<string, number>();
@@ -182,6 +191,9 @@ class ArchiveEncoder {
   private readonly knownContents = new WeakMap<object, number>();
   private readonly sizes: ValueSize[] = [];
   private encodedBytes = 0;
+  private lastUnits: { id: number; content: UnitContent } | undefined;
+
+  constructor(private readonly deltas = false) {}
 
   private reserve(encoded: string): void {
     this.encodedBytes += Buffer.byteLength(encoded) + 1;
@@ -329,9 +341,10 @@ class ArchiveEncoder {
     const digest = indexedDigest(json);
     let id = this.contentIds.get(digest);
     if (id === undefined) {
-      this.reserve(json);
       id = this.contents.length;
-      this.contents.push(encoded);
+      const stored = this.storedContent(id, encoded, json.length);
+      this.reserve(stored === encoded ? json : JSON.stringify(stored));
+      this.contents.push(stored);
       this.contentIds.set(digest, id);
     }
     if (value && typeof value === 'object') {
@@ -340,9 +353,41 @@ class ArchiveEncoder {
 
     return id;
   }
+
+  private storedContent(
+    id: number,
+    content: EncodedContent,
+    fullSize: number,
+  ): EncodedContent | DeltaContent {
+    if (!this.deltas || typeof content === 'number') {
+      return content;
+    }
+
+    const previous = this.lastUnits;
+    this.lastUnits = { id, content };
+    if (!previous) {
+      return content;
+    }
+
+    const changes: DeltaContent['changes'] = [];
+    for (const [ordinal, payload] of content.units.entries()) {
+      if (previous.content.units[ordinal] !== payload) {
+        changes.push([ordinal, payload]);
+      }
+    }
+
+    const delta: DeltaContent = {
+      base: previous.id,
+      fields: content.fields,
+      length: content.units.length,
+      changes,
+    };
+
+    return JSON.stringify(delta).length < fullSize ? delta : content;
+  }
 }
 
-function checkJsonStructure(source: string): void {
+function checkJsonStructure(source: string): number {
   let depth = 0;
   let structure = 0;
   let inString = false;
@@ -373,6 +418,8 @@ function checkJsonStructure(source: string): void {
 
     assertLimit(structure, MAX_JSON_STRUCTURE);
   }
+
+  return structure;
 }
 
 function stateEnvelope(bytes: Uint8Array): Record<string, unknown> {
@@ -593,6 +640,10 @@ export function decodeArchiveState(bytes: Uint8Array): unknown {
     throw invalidArchive('备份状态版本无效。');
   }
 
+  return decodeEnvelope(envelope);
+}
+
+function decodeEnvelope(envelope: Record<string, unknown>): unknown {
   const history = sequence(envelope.history);
   assertLimit(history.length, MAX_HISTORY);
   const properties = sequence(envelope.properties);
@@ -621,4 +672,158 @@ export function decodeArchiveState(bytes: Uint8Array): unknown {
     content: current,
     history: versions,
   };
+}
+
+export async function* encodeDeltaArchiveState(
+  state: ArtifactState<unknown>,
+): AsyncIterable<Uint8Array> {
+  const { content, history, ...properties } = state;
+  const encoder = new ArchiveEncoder(true);
+  const versions = encoder.history(history);
+  const current = encoder.content(content);
+  const encodedProperties = encoder.properties(properties);
+  const header = {
+    version: DELTA_CODEC_VERSION,
+    properties: encodedProperties,
+    current,
+    history: versions,
+    lengths: [encoder.texts.length, encoder.payloads.length, encoder.contents.length],
+  };
+  let bytes = 0;
+  let structure = 0;
+  const sections = [[header], encoder.texts, encoder.payloads, encoder.contents];
+  for (const section of sections) {
+    for (const value of section) {
+      const line = JSON.stringify(value);
+      structure += checkJsonStructure(line) + 1;
+      assertLimit(structure, MAX_JSON_STRUCTURE);
+      const encoded = Buffer.from(line + '\n');
+      bytes += encoded.length;
+      assertLimit(bytes, MAX_ARCHIVE_STATE_BYTES);
+
+      for (let offset = 0; offset < encoded.length; offset += ARCHIVE_CHUNK_BYTES) {
+        yield encoded.subarray(offset, offset + ARCHIVE_CHUNK_BYTES);
+      }
+    }
+  }
+}
+
+async function* archiveLines(chunks: AsyncIterable<Uint8Array>): AsyncIterable<string> {
+  const utf8 = new TextDecoder('utf-8', { fatal: true });
+  let fragments: string[] = [];
+  let size = 0;
+  for await (const chunk of chunks) {
+    size += chunk.length;
+    assertLimit(size, MAX_ARCHIVE_STATE_BYTES);
+    const lines = utf8.decode(chunk, { stream: true }).split('\n');
+    for (const piece of lines.slice(0, -1)) {
+      fragments.push(piece);
+      yield fragments.join('');
+      fragments = [];
+    }
+
+    const tail = lines.at(-1);
+    if (tail) {
+      fragments.push(tail);
+    }
+  }
+
+  const remainder = utf8.decode();
+  if (remainder || fragments.length) {
+    throw invalidArchive('备份状态记录不完整。');
+  }
+}
+
+function restoreDelta(value: unknown, bases: unknown[]): unknown {
+  if (!isRecord(value) || !Object.hasOwn(value, 'base')) {
+    return value;
+  }
+  if (Object.keys(value).length !== 4) {
+    throw invalidArchive('备份状态增量无效。');
+  }
+
+  const parent = record(bases[reference(value.base, bases.length)]);
+  const base = sequence(parent.units);
+  const size = reference(value.length, MAX_UNITS + 1);
+  const changes = sequence(value.changes);
+  assertLimit(changes.length, size);
+  const units = Array.from({ length: size }, (_, ordinal) => base[ordinal]);
+  let previousOrdinal = -1;
+  for (const change of changes) {
+    const pair = sequence(change);
+    const ordinal = reference(pair[0], size);
+    if (pair.length !== 2 || previousOrdinal >= ordinal) {
+      throw invalidArchive('备份状态增量顺序无效。');
+    }
+
+    units[ordinal] = pair[1];
+    previousOrdinal = ordinal;
+  }
+
+  return { fields: value.fields, units };
+}
+
+class DeltaArchiveReader {
+  private structure = 0;
+
+  constructor(private readonly records: AsyncIterator<string>) {}
+
+  async record(): Promise<unknown> {
+    const result = await this.records.next();
+    if (result.done) {
+      throw invalidArchive('备份状态记录不完整。');
+    }
+
+    this.structure += checkJsonStructure(result.value) + 1;
+    assertLimit(this.structure, MAX_JSON_STRUCTURE);
+
+    return JSON.parse(result.value);
+  }
+
+  async section(
+    length: number,
+    transform: (value: unknown, prior: unknown[]) => unknown,
+  ): Promise<unknown[]> {
+    const result: unknown[] = [];
+    for (let index = 0; index < length; index++) {
+      result.push(transform(await this.record(), result));
+    }
+
+    return result;
+  }
+}
+
+export async function decodeDeltaArchiveState(chunks: AsyncIterable<Uint8Array>): Promise<unknown> {
+  const records = archiveLines(chunks)[Symbol.asyncIterator]();
+  const archive = new DeltaArchiveReader(records);
+  try {
+    const header = record(await archive.record());
+    const lengths = sequence(header.lengths);
+    if (header.version !== DELTA_CODEC_VERSION || lengths.length !== 3) {
+      throw invalidArchive('备份状态版本无效。');
+    }
+
+    const texts = await archive.section(
+      reference(lengths[0], MAX_JSON_STRUCTURE + 1),
+      (value) => value,
+    );
+    const payloads = await archive.section(
+      reference(lengths[1], MAX_JSON_STRUCTURE + 1),
+      (value) => value,
+    );
+    const contents = await archive.section(reference(lengths[2], MAX_HISTORY + 2), restoreDelta);
+    if (!(await records.next()).done) {
+      throw invalidArchive('备份状态包含额外记录。');
+    }
+
+    return decodeEnvelope({ ...header, texts, payloads, contents });
+  } catch (error) {
+    if (error instanceof StudioError) {
+      throw error;
+    }
+
+    throw invalidArchive('备份状态 JSON 无效。', { cause: error });
+  } finally {
+    await records.return?.();
+  }
 }

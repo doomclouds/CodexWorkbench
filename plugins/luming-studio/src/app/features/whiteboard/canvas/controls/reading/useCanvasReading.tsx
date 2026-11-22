@@ -16,6 +16,7 @@ import {
   type PanelReadingView,
 } from '../../../../../panel-view-state.js';
 import type { DocumentFocusSurface } from '../../objects/document/useDocumentFocusSurface.js';
+import { useCanvasCamera } from '../../interaction/useCanvasCamera.js';
 import {
   clamp,
   expandMoveIds,
@@ -102,7 +103,9 @@ export function useCanvasReading({
     [externalViewport],
   );
   const initialViewport = savedReading?.viewport ?? requestedViewport;
-  const [viewport, setViewport] = useState<Viewport>(() => initialViewport ?? UNMEASURED_VIEWPORT);
+  const { viewport, setViewport, scheduleViewport, flushViewport } = useCanvasCamera(
+    initialViewport ?? UNMEASURED_VIEWPORT,
+  );
   const [openingFit, setOpeningFit] = useState<boolean | null>(() =>
     initialViewport ? true : null,
   );
@@ -128,7 +131,7 @@ export function useCanvasReading({
     }
 
     setOpeningFit(measured);
-  }, [openingFit, boardRef, viewportElement]);
+  }, [openingFit, boardRef, viewportElement, setViewport]);
   useEffect(() => {
     if (openingFit !== false) {
       return;
@@ -142,7 +145,7 @@ export function useCanvasReading({
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [openingFit, boardRef, viewportElement, requestedViewportRef]);
+  }, [openingFit, boardRef, viewportElement, requestedViewportRef, setViewport]);
   const [reading, setReading] = useState<ReadingSession | null>(() =>
     savedReading
       ? { ids: savedReading.ids, viewport: savedReading.returnViewport, tool: 'select' }
@@ -170,7 +173,7 @@ export function useCanvasReading({
         ? current
         : requestedViewport,
     );
-  }, [requestedViewport, readingRef]);
+  }, [requestedViewport, readingRef, setViewport]);
   const documentFocusSurface = useRef<DocumentFocusSurface | null>(null);
   const [focusedDocumentSurface, setFocusedDocumentSurface] = useState<DocumentFocusSurface | null>(
     null,
@@ -453,8 +456,11 @@ export function useCanvasReading({
 
   return {
     viewport,
+    visibilityViewport: reading?.viewport ?? viewport,
     viewportRef,
     setViewport,
+    scheduleViewport,
+    flushViewport,
     presentationZoom,
     openingViewportReady: openingFit !== null,
     savedReadingIds: savedReading?.ids,

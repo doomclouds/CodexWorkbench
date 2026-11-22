@@ -1,12 +1,19 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { connectStudio, writeRecord } from '../../src/server/client.js';
 import { startStudioHost, type StudioHost } from '../../src/server/http.js';
 import { createAppTransport } from '../../src/server/app-transport.js';
-import type { AppResponse } from '../../src/contracts/transport.js';
+import { createAppTransferSpool } from '../../src/server/studio-composition.js';
+import { LOCAL_ACTOR } from '../../src/contracts/studio.js';
+import {
+  APP_CHUNK_BYTES,
+  type AppDownloadResult,
+  type AppResponse,
+  type AppUploadResult,
+} from '../../src/contracts/transport.js';
 
 let directory: string;
 let host: StudioHost;
@@ -25,7 +32,7 @@ beforeEach(async () => {
   transport = createAppTransport(client.requestUi);
 });
 afterEach(async () => {
-  transport?.close();
+  await transport?.close();
   await client?.close();
   await host?.close();
   if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) {
@@ -49,6 +56,91 @@ async function ui(name: string, args: Record<string, unknown>) {
 }
 
 describe('UI requests through the real connected authority', () => {
+  it('downloads and restores a ZIP across the real owner HTTP bridge using disk spools', async () => {
+    const created = await ui('artifact_manage', { action: 'create', title: 'Spool roundtrip' });
+    const media = randomBytes(9 * APP_CHUNK_BYTES);
+    Buffer.from('89504e470d0a1a0a', 'hex').copy(media);
+    const asset = await host.service.putAsset(
+      created.artifact.id,
+      media,
+      { filename: 'spool.png', mimeType: 'image/png' },
+      LOCAL_ACTOR,
+    );
+    await ui('artifact_apply', {
+      artifactId: created.artifact.id,
+      operations: [{ op: 'add', element: { id: 'image', type: 'image', src: asset.url } }],
+    });
+    const exported = await ui('artifact_export', {
+      artifactId: created.artifact.id,
+      format: 'zip',
+    });
+    const spools: ReturnType<typeof vi.spyOn>[] = [];
+    const factory = vi.fn(async () => {
+      const file = await createAppTransferSpool();
+      spools.push(vi.spyOn(file, 'dispose'));
+
+      return file;
+    });
+    await transport.close();
+    transport = createAppTransport(client.requestUi, factory);
+
+    const downloaded = (await transport.execute({
+      action: 'request',
+      path: exported.downloadPath,
+      method: 'GET',
+    })) as AppResponse;
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers['content-type']).toBe('application/zip');
+    expect(downloaded.size).toBeGreaterThan(1024 * 1024);
+    expect(downloaded.body).toBeUndefined();
+    expect(factory).toHaveBeenCalledTimes(1);
+    let uploadId: string | undefined;
+    for (let offset = 0; offset < downloaded.size;) {
+      const packet = (await transport.execute({
+        action: 'download',
+        transferId: downloaded.downloadId!,
+        offset,
+      })) as AppDownloadResult;
+      const uploaded = (await transport.execute({
+        action: 'upload',
+        transferId: uploadId,
+        size: downloaded.size,
+        offset,
+        data: packet.data,
+      })) as AppUploadResult;
+      expect(uploaded.nextOffset).toBe(packet.nextOffset);
+      expect(packet.done).toBe(packet.nextOffset === downloaded.size);
+      offset = uploaded.nextOffset;
+      uploadId = uploaded.transferId;
+    }
+    await expect(
+      transport.execute({ action: 'release', transferId: downloaded.downloadId! }),
+    ).resolves.toEqual({ released: true });
+
+    const restored = (await transport.execute({
+      action: 'request',
+      path: '/api/import',
+      method: 'POST',
+      headers: { 'content-type': 'application/zip' },
+      uploadId,
+    })) as AppResponse;
+    expect(restored.status).toBe(200);
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(spools.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+    const { data } = JSON.parse(Buffer.from(restored.body!, 'base64').toString());
+    expect(data.artifact.id).not.toBe(created.artifact.id);
+    expect(data.artifact.importedFrom.artifactId).toBe(created.artifact.id);
+    const importedAsset = await client.requestUi({
+      method: 'GET',
+      path: data.board.elements[0].src,
+      headers: {},
+    });
+    expect(Buffer.from(await importedAsset.arrayBuffer())).toEqual(media);
+    await expect(transport.execute({ action: 'release', transferId: uploadId! })).resolves.toEqual({
+      released: false,
+    });
+  });
+
   it('injects the owner token and keeps human UI authors separate from agent tools', async () => {
     const session = await client.requestUi({ path: '/api/session', method: 'GET', headers: {} });
     expect(session.status).toBe(200);

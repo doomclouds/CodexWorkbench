@@ -13,6 +13,8 @@ import { loadOrCreateGuestSecret } from '../infrastructure/guest-identity-store.
 import { FileRoomTimerStore } from '../infrastructure/room-timer-store.js';
 import { createGuestSessions } from './guest-session.js';
 
+export { createAppTransferSpool } from '../infrastructure/filesystem/app-transfer-spool.js';
+
 export type ComposedStudioService = StudioService<ArtifactStore<unknown>>;
 
 const debug = debuglog('luming-studio');

@@ -57,5 +57,14 @@ export interface UiHttpRequest {
   method: 'GET' | 'POST';
   headers: Record<string, string>;
   body?: Uint8Array;
+  bodyBlob?: Blob;
 }
 export type UiRequester = (request: UiHttpRequest, signal?: AbortSignal) => Promise<Response>;
+
+export interface AppTransferSpool {
+  append(bytes: Uint8Array): Promise<void>;
+  read(offset: number, length: number): Promise<Uint8Array>;
+  blob(): Promise<Blob>;
+  dispose(): Promise<void>;
+}
+export type AppTransferSpoolFactory = () => Promise<AppTransferSpool>;

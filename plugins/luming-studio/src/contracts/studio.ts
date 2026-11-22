@@ -448,6 +448,7 @@ interface StudioAssetState {
 }
 
 export interface StudioClient {
+  boardOpen?: true;
   call: StudioToolCall;
   request?: (input: string | URL, init?: RequestInit) => Promise<Response>;
   assetUrl?: (reference: string) => string | undefined;

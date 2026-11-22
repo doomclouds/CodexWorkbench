@@ -26,13 +26,19 @@ export async function renameWithRetry(source: string, target: string): Promise<v
 
 export async function atomicWrite(
   file: string,
-  content: string | Uint8Array,
+  content: string | Uint8Array | AsyncIterable<Uint8Array>,
 ): Promise<BigIntStats> {
   await mkdir(dirname(file), { recursive: true });
   const temporary = join(dirname(file), `.${randomUUID()}.tmp`);
   const handle = await open(temporary, 'wx');
   try {
-    await handle.writeFile(content);
+    if (typeof content === 'string' || content instanceof Uint8Array) {
+      await handle.writeFile(content);
+    } else {
+      for await (const bytes of content) {
+        await handle.writeFile(bytes);
+      }
+    }
     await renameWithRetry(temporary, file);
 
     return await handle.stat({ bigint: true });

@@ -81,7 +81,12 @@ afterEach(async () => {
 });
 const read = () =>
   service.execute('artifact_read', { artifactId, mode: 'board' }, LOCAL_ACTOR) as Promise<Board>;
-const bytes = () => readFile(service.store.file(artifactId));
+
+async function bytes() {
+  await service.store.waitForBackground();
+  return readFile(service.store.file(artifactId));
+}
+
 const binding = ({ taskId, generation }: AgentTaskBinding) => ({ taskId, generation });
 
 async function begin(

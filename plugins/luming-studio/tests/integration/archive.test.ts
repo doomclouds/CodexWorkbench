@@ -15,6 +15,7 @@ import { FileAssetStore } from '../../src/infrastructure/asset-file-store.js';
 import { SqliteArtifactRepository } from '../../src/infrastructure/sqlite-artifact.js';
 import {
   archiveState,
+  compactArchiveEntries,
   legacyArchiveEntries,
   replaceArchiveState,
 } from '../support/archive-state.js';
@@ -30,7 +31,7 @@ let directory: string;
 let service: ComposedStudioService;
 const hosts: StudioHost[] = [];
 const viewer: Actor = { id: 'guest', name: '访客', role: 'viewer', kind: 'human' };
-const compactState = 'artifact-state.json';
+const deltaState = 'artifact-deltas.ndjson';
 
 async function stagingEntries(root: string): Promise<string[]> {
   try {
@@ -136,15 +137,17 @@ describe('portable artifact archives', () => {
   });
   it('rejects legacy JSON backups without publishing or modifying any artifact', async () => {
     const source = await fixture();
-    const previous = await readFile(service.store.file(source.artifact.id));
-    const legacy = zipSync({
-      'artifact.json': strToU8(JSON.stringify(await service.store.read(source.artifact.id))),
-    });
-    await expect(service.importArchive(legacy)).rejects.toMatchObject({
-      code: 'UNSUPPORTED_STORAGE',
+    const id = source.artifact.id;
+    const file = service.store.file(id);
+    await service.store.withSnapshotLock(id, async (state) => {
+      const previous = await readFile(file);
+      const legacy = zipSync({ 'artifact.json': strToU8(JSON.stringify(state)) });
+      await expect(service.importArchive(legacy)).rejects.toMatchObject({
+        code: 'UNSUPPORTED_STORAGE',
+      });
+      expect(await readFile(file)).toEqual(previous);
     });
     expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
-    expect(await readFile(service.store.file(source.artifact.id))).toEqual(previous);
   });
 
   it('rejects unknown archive versions, conflicting entries and mismatched identities', async () => {
@@ -166,7 +169,7 @@ describe('portable artifact archives', () => {
     ).rejects.toMatchObject({ code: 'UNSUPPORTED_STORAGE' });
     const invalidEntries = [
       { ...legacy, 'artifact.sqlite': strToU8('invalid database') },
-      { ...files, [compactState]: strToU8('invalid JSON') },
+      { ...files, [deltaState]: strToU8('invalid JSON') },
       { ...files, 'artifact.sqlite': legacy['artifact.sqlite']! },
       { ...legacy, 'manifest.json': files['manifest.json']! },
       { ...files, 'manifest.json': legacy['manifest.json']! },
@@ -190,34 +193,40 @@ describe('portable artifact archives', () => {
     expect(await stagingEntries(directory)).toEqual([]);
   });
 
-  it('imports a legacy SQLite archive and re-exports its history and assets in v3', async () => {
-    const source = await fixture();
-    const files = unzipSync(source.data);
-    const state = await archiveState(files, directory);
-    const legacy = await legacyArchiveEntries(files, state, directory);
-    const imported = await service.importArchive(zipSync(legacy));
-    const id = imported.artifact.id;
-    expect(id).not.toBe(source.artifact.id);
-    expect(imported.artifact.importedFrom?.artifactId).toBe(source.artifact.id);
-    expect(imported.artifact.revision).toBe(state.artifact.revision);
-    expect(Buffer.from((await service.getAsset(id, source.asset.id)).data)).toEqual(
-      Buffer.from(files[`assets/${source.asset.id}`]!),
-    );
+  it.each(['v2', 'v3'])(
+    'imports a %s archive and re-exports its full history in v4',
+    async (version) => {
+      const source = await fixture();
+      const files = unzipSync(source.data);
+      const state = await archiveState(files, directory);
+      const legacy =
+        version === 'v2'
+          ? await legacyArchiveEntries(files, state, directory)
+          : compactArchiveEntries(files, state);
+      const imported = await service.importArchive(zipSync(legacy));
+      const id = imported.artifact.id;
+      expect(id).not.toBe(source.artifact.id);
+      expect(imported.artifact.importedFrom?.artifactId).toBe(source.artifact.id);
+      expect(imported.artifact.revision).toBe(state.artifact.revision);
+      expect(Buffer.from((await service.getAsset(id, source.asset.id)).data)).toEqual(
+        Buffer.from(files[`assets/${source.asset.id}`]!),
+      );
 
-    const exported = await service.execute('artifact_export', { artifactId: id, format: 'zip' });
-    const compact = unzipSync((await service.getExport(exported.exportId)).data);
-    expect(compact[compactState]).toBeDefined();
-    expect(compact['artifact.sqlite']).toBeUndefined();
-    const snapshot = await archiveState(compact, directory);
-    expect(snapshot.history.map((version) => version.entry)).toEqual(
-      state.history.map((version) => version.entry),
-    );
-    expect(snapshot.feedback).toHaveLength(state.feedback.length);
-    expect(Object.keys(snapshot.sources)).toEqual(Object.keys(state.sources));
-    expect(await stagingEntries(directory)).toEqual([]);
-  });
+      const exported = await service.execute('artifact_export', { artifactId: id, format: 'zip' });
+      const compact = unzipSync((await service.getExport(exported.exportId)).data);
+      expect(compact[deltaState]).toBeDefined();
+      expect(compact['artifact.sqlite']).toBeUndefined();
+      const snapshot = await archiveState(compact, directory);
+      expect(snapshot.history.map((version) => version.entry)).toEqual(
+        state.history.map((version) => version.entry),
+      );
+      expect(snapshot.feedback).toHaveLength(state.feedback.length);
+      expect(Object.keys(snapshot.sources)).toEqual(Object.keys(state.sources));
+      expect(await stagingEntries(directory)).toEqual([]);
+    },
+  );
 
-  it('retains all 200 distinct v3 histories while keeping the legacy expansion budget', async () => {
+  it('retains all 200 distinct v4 histories while keeping the legacy expansion budget', async () => {
     const source = await fixture();
     const files = unzipSync(source.data);
     const state = await archiveState(files, directory);
@@ -244,7 +253,12 @@ describe('portable artifact archives', () => {
     const storage = new FileArchiveStorage(service.store, new FileAssetStore(service.store));
     const captured = await captureArchive(storage, state, LOCAL_ACTOR);
     const result = await storage.writeSnapshot(captured);
-    const imported = await service.importArchive(Buffer.from(result.data, 'base64'));
+    let imported;
+    try {
+      imported = await service.importArchive(result.chunks());
+    } finally {
+      await result.dispose();
+    }
     const id = imported.artifact.id;
     expect(id).not.toBe(state.artifact.id);
     const restored = await service.store.readProjection(id, (saved) => {
@@ -408,9 +422,17 @@ describe('portable artifact archives', () => {
     'retries only a temporarily blocked Windows import publication and retains complete assets',
     async () => {
       const source = await fixture();
-      const original = await readFile(service.store.file(source.artifact.id));
-      const accepted = await service.importArchive(source.data);
-      const acceptedContent = await readFile(service.store.file(accepted.artifact.id));
+      const sourceId = source.artifact.id;
+      const sourceFile = service.store.file(sourceId);
+      const accepted = await service.store.withSnapshotLock(sourceId, async () => {
+        const original = await readFile(sourceFile);
+        const imported = await service.importArchive(source.data);
+        expect(await readFile(sourceFile)).toEqual(original);
+
+        return imported;
+      });
+      const acceptedId = accepted.artifact.id;
+      const acceptedFile = service.store.file(acceptedId);
       const before = (await readdir(join(directory, 'artifacts'))).sort();
       const attempts: { from: string; to: string }[] = [];
       vi.mocked(rename).mockImplementation(async (from, to) => {
@@ -426,7 +448,18 @@ describe('portable artifact archives', () => {
 
         return actualFs.rename(from, to);
       });
-      const imported = await service.importArchive(source.data);
+      const [firstId, secondId] = [sourceId, acceptedId].sort();
+      const imported = await service.store.withSnapshotLock(firstId!, () =>
+        service.store.withSnapshotLock(secondId!, async () => {
+          const original = await readFile(sourceFile);
+          const acceptedContent = await readFile(acceptedFile);
+          const imported = await service.importArchive(source.data);
+          expect(await readFile(sourceFile)).toEqual(original);
+          expect(await readFile(acceptedFile)).toEqual(acceptedContent);
+
+          return imported;
+        }),
+      );
       const id = imported.artifact.id;
       expect(attempts).toHaveLength(4);
       expect(new Set(attempts.map((value) => value.from)).size).toBe(1);
@@ -438,8 +471,6 @@ describe('portable artifact archives', () => {
       expect(Buffer.from((await service.getAsset(id, source.asset.id)).data)).toEqual(
         Buffer.from('89504e470d0a1a0a', 'hex'),
       );
-      expect(await readFile(service.store.file(source.artifact.id))).toEqual(original);
-      expect(await readFile(service.store.file(accepted.artifact.id))).toEqual(acceptedContent);
       expect(await readdir(join(directory, 'staging'))).toEqual([]);
     },
   );
@@ -448,9 +479,17 @@ describe('portable artifact archives', () => {
     'reports a persistent Windows publish failure and removes staging without changing existing work',
     async () => {
       const source = await fixture();
-      const original = await readFile(service.store.file(source.artifact.id));
-      const accepted = await service.importArchive(source.data);
-      const acceptedContent = await readFile(service.store.file(accepted.artifact.id));
+      const sourceId = source.artifact.id;
+      const sourceFile = service.store.file(sourceId);
+      const accepted = await service.store.withSnapshotLock(sourceId, async () => {
+        const original = await readFile(sourceFile);
+        const imported = await service.importArchive(source.data);
+        expect(await readFile(sourceFile)).toEqual(original);
+
+        return imported;
+      });
+      const acceptedId = accepted.artifact.id;
+      const acceptedFile = service.store.file(acceptedId);
       const before = (await readdir(join(directory, 'artifacts'))).sort();
       const error = Object.assign(new Error('Persistent Windows publication lock'), {
         code: 'EPERM',
@@ -464,12 +503,19 @@ describe('portable artifact archives', () => {
 
         return actualFs.rename(from, to);
       });
-      await expect(service.importArchive(source.data)).rejects.toBe(error);
+      const [firstId, secondId] = [sourceId, acceptedId].sort();
+      await service.store.withSnapshotLock(firstId!, () =>
+        service.store.withSnapshotLock(secondId!, async () => {
+          const original = await readFile(sourceFile);
+          const acceptedContent = await readFile(acceptedFile);
+          await expect(service.importArchive(source.data)).rejects.toBe(error);
+          expect(await readFile(sourceFile)).toEqual(original);
+          expect(await readFile(acceptedFile)).toEqual(acceptedContent);
+        }),
+      );
       expect(attempts).toBe(6);
       expect((await readdir(join(directory, 'artifacts'))).sort()).toEqual(before);
       expect(await readdir(join(directory, 'staging'))).toEqual([]);
-      expect(await readFile(service.store.file(source.artifact.id))).toEqual(original);
-      expect(await readFile(service.store.file(accepted.artifact.id))).toEqual(acceptedContent);
       expect(
         Buffer.from((await service.getAsset(source.artifact.id, source.asset.id)).data),
       ).toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
@@ -502,21 +548,26 @@ describe('portable artifact archives', () => {
 
   it('cleans the staged assets and database after the SQLite import write fails', async () => {
     const source = await fixture();
-    const original = await readFile(service.store.file(source.artifact.id));
+    const id = source.artifact.id;
+    const file = service.store.file(id);
     const error = new Error('Synthetic SQLite import write failure');
-    const write = vi.spyOn(SqliteArtifactRepository.prototype, 'writeState');
-    write.mockImplementationOnce(() => {
-      throw error;
+    await service.store.withSnapshotLock(id, async () => {
+      const original = await readFile(file);
+      const write = vi.spyOn(SqliteArtifactRepository.prototype, 'writeImportedState');
+      write.mockImplementationOnce(() => {
+        throw error;
+      });
+
+      try {
+        await expect(service.importArchive(source.data)).rejects.toBe(error);
+      } finally {
+        write.mockRestore();
+      }
+
+      expect(await readFile(file)).toEqual(original);
     });
 
-    try {
-      await expect(service.importArchive(source.data)).rejects.toBe(error);
-    } finally {
-      write.mockRestore();
-    }
-
     expect(await stagingEntries(directory)).toEqual([]);
-    expect(await readFile(service.store.file(source.artifact.id))).toEqual(original);
     expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
     const imported = await service.importArchive(source.data);
     expect(imported.artifact.id).not.toBe(source.artifact.id);
@@ -733,12 +784,12 @@ describe('portable artifact archives', () => {
     expect(packed).not.toHaveProperty('artifact.json');
     expect(JSON.parse(Buffer.from(packed['manifest.json']!).toString())).toMatchObject({
       format: 'luming-studio-archive',
-      version: 3,
-      state: compactState,
+      version: 4,
+      state: deltaState,
     });
     expect(packed['artifact.sqlite']).toBeUndefined();
     expect(JSON.stringify(snapshot)).not.toContain('private-share-secret');
-    expect(Buffer.from(packed[compactState]!).includes(Buffer.from('private-share-secret'))).toBe(
+    expect(Buffer.from(packed[deltaState]!).includes(Buffer.from('private-share-secret'))).toBe(
       false,
     );
     const target = createStudioService({ dataRoot: join(directory, 'another-machine') });
@@ -915,9 +966,9 @@ describe('portable artifact archives', () => {
       entry.push(bytes, true);
     }
 
-    const duplicate = new ZipPassThrough(compactState);
+    const duplicate = new ZipPassThrough(deltaState);
     zip.add(duplicate);
-    duplicate.push(entries[compactState]!, true);
+    duplicate.push(entries[deltaState]!, true);
     zip.end();
     await expect(service.importArchive(Buffer.concat(chunks))).rejects.toMatchObject({
       code: 'INVALID_ARCHIVE',
@@ -931,7 +982,7 @@ describe('portable artifact archives', () => {
 
     const dishonest = Buffer.from(
       zipSync({
-        [compactState]: strToU8('x'.repeat(3 * 1024 * 1024)),
+        [deltaState]: strToU8('x'.repeat(3 * 1024 * 1024)),
         'manifest.json': entries['manifest.json']!,
       }),
     );
@@ -939,6 +990,30 @@ describe('portable artifact archives', () => {
     dishonest.writeUInt32LE(1, dishonest.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + 24);
     await expect(service.importArchive(dishonest)).rejects.toMatchObject({ code: 'TOO_LARGE' });
     expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
+  });
+
+  it('rejects corrupted resource checksums and cleans interrupted archive streams', async () => {
+    const source = await fixture();
+    const damaged = Buffer.from(source.data);
+    const recordedAsset = Buffer.from(
+      (await service.getAsset(source.artifact.id, source.asset.id)).data,
+    );
+    const offset = damaged.indexOf(recordedAsset);
+    expect(offset).toBeGreaterThan(0);
+    damaged[offset] = damaged[offset]! ^ 1;
+    await expect(service.importArchive(damaged)).rejects.toMatchObject({
+      code: 'INVALID_ARCHIVE',
+    });
+
+    const interrupted = new Error('The archive upload disconnected');
+    async function* incomplete() {
+      yield damaged.subarray(0, 16);
+      throw interrupted;
+    }
+
+    await expect(service.importArchive(incomplete())).rejects.toBe(interrupted);
+    expect((await service.execute('artifact_list')).artifacts).toHaveLength(1);
+    expect(await stagingEntries(directory)).toEqual([]);
   });
 
   it('requires owner authority for ZIP creation, import, binary upload and archive download', async () => {

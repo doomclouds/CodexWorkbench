@@ -6,6 +6,7 @@ import WhiteboardCanvas, {
   type WhiteboardCanvasProps,
 } from '../../src/app/features/whiteboard/canvas/WhiteboardCanvas.js';
 import { imageCropRect } from '../../src/app/features/whiteboard/canvas/objects/NativeMedia.js';
+import * as canvasModel from '../../src/app/features/whiteboard/canvas/scene/canvas-model.js';
 import * as nativeIssues from '../../src/app/features/whiteboard/canvas/scene/native-issues.js';
 import { normalizeElement } from '../../src/core/products/whiteboard.js';
 import { parseInlineText, parseRichText } from '../../src/shared/rich-text.js';
@@ -18,6 +19,7 @@ import {
   type StudioClient,
 } from '../../src/contracts/studio.js';
 import { contrastRatio, DARK_THEME, LIGHT_THEME } from '../../src/shared/theme.js';
+import * as nativeSurfaces from '../../src/shared/native-surface.js';
 
 const ownedCanvasDraft = (artifactId = 'board') =>
   createDraftWorkspace({ embedded: true }, LOCAL_ACTOR.id, artifactId)
@@ -661,6 +663,134 @@ describe('native canvas parity', () => {
     });
     await act(async () => vi.advanceTimersByTime(500));
     expect(measure).toHaveBeenCalledTimes(5);
+  });
+  it('coalesces native wheel input and reuses the passive objects when the visible set is unchanged', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(650);
+    const renderObject = vi.spyOn(nativeSurfaces, 'nativeBackdrop');
+    const onViewportChange = vi.fn();
+    const elements = Array.from({ length: 2_000 }, (_, index) =>
+      element(`object-${index}`, {
+        x: (index % 50) * 260,
+        y: Math.floor(index / 50) * 220,
+      }),
+    );
+    await mount(board(elements), {
+      externalViewport: { x: 0, y: 0, zoom: 1 },
+      onViewportChange,
+    });
+
+    expect(host.querySelectorAll('.studio-board-element')).toHaveLength(25);
+    expect(renderObject).toHaveBeenCalledTimes(25);
+    renderObject.mockClear();
+    onViewportChange.mockClear();
+    const viewport = host.querySelector('[aria-label="白板画布"]')!;
+    await act(async () => {
+      for (const deltaX of [8, 16, 24]) {
+        viewport.dispatchEvent(
+          new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX }),
+        );
+      }
+    });
+    expect(onViewportChange).not.toHaveBeenCalled();
+
+    await act(async () => vi.advanceTimersByTime(16));
+    expect(onViewportChange).toHaveBeenCalledExactlyOnceWith({ x: -48, y: 0, zoom: 1 });
+    expect(renderObject).not.toHaveBeenCalled();
+  });
+
+  it('keeps selected geometry and a visited HTML frame alive as the visible window changes', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(650);
+    const value = board([
+      element('visible', { type: 'link', href: 'https://example.com' }),
+      element('selected', { x: -3_000 }),
+      element('rich', { type: 'html', x: 3_000, html: '<p>Rich content</p>' }),
+      element('connector', { type: 'arrow', from: [-3_000, 80], to: [3_000, 80] }),
+    ]);
+    const props = { client: client(), externalSelectedIds: ['selected'] };
+    await mount(value, { ...props, externalViewport: { x: 0, y: 0, zoom: 1 } });
+    const visible = host.querySelector('[data-element-id="visible"]');
+    expect(visible).not.toBeNull();
+    expect(host.querySelector('[data-element-id="selected"].is-selected')).not.toBeNull();
+    expect(host.querySelector('[data-element-id="connector"]')).not.toBeNull();
+    expect(host.querySelector('iframe')).toBeNull();
+    const link = visible!.querySelector('a')!;
+    await act(async () => link.focus());
+
+    await mount(value, { ...props, externalViewport: { x: -3_000, y: 0, zoom: 1 } });
+    const frame = host.querySelector('iframe');
+    expect(frame?.srcdoc).toContain('Rich content');
+    expect(host.querySelector('[data-element-id="visible"]')).toBe(visible);
+    expect(document.activeElement).toBe(link);
+    await act(async () => host.querySelector<HTMLElement>('[aria-label="白板画布"]')!.focus());
+    expect(host.querySelector('[data-element-id="visible"]')).toBeNull();
+    expect(host.querySelector('[data-element-id="selected"].is-selected')).not.toBeNull();
+
+    await mount(value, { ...props, externalViewport: { x: 0, y: 0, zoom: 1 } });
+    expect(host.querySelector('iframe')).toBe(frame);
+  });
+  it('reuses full-board visibility during overview zoom and still culls at an ordinary viewport', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1_000);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(650);
+    const intersects = vi.spyOn(canvasModel, 'intersects');
+    const value = board([element('left'), element('right', { x: 8_000, rotation: 20 })]);
+    const props = { client: client() };
+    await mount(value, { ...props, externalViewport: { x: 100, y: 80, zoom: 0.096 } });
+    expect(host.querySelectorAll('.studio-board-element')).toHaveLength(2);
+    intersects.mockClear();
+
+    await mount(value, { ...props, externalViewport: { x: 160, y: 140, zoom: 0.061 } });
+    expect(host.querySelectorAll('.studio-board-element')).toHaveLength(2);
+    expect(intersects).not.toHaveBeenCalled();
+
+    await mount(value, { ...props, externalViewport: { x: 0, y: 0, zoom: 1 } });
+    expect(host.querySelectorAll('.studio-board-element')).toHaveLength(1);
+    expect(intersects).toHaveBeenCalled();
+  });
+
+  it('keeps consecutive wheel anchors and applies an external camera after a queued local frame', async () => {
+    vi.useFakeTimers();
+    const value = board([element('one')]);
+    const initial = { x: 12, y: 30, zoom: 1 };
+    const onViewportChange = vi.fn();
+    const props = { client: client(), onViewportChange };
+    await mount(value, { ...props, externalViewport: initial });
+    onViewportChange.mockClear();
+    const viewport = host.querySelector('[aria-label="白板画布"]')!;
+    const points = [
+      { x: 120, y: 70 },
+      { x: 460, y: 240 },
+    ];
+    const deltaY = -80;
+    const zoomAtPoint = (current: typeof initial, point: (typeof points)[number]) =>
+      canvasModel.zoomAt(current, point, current.zoom * canvasModel.wheelZoomFactor(deltaY));
+    const wheel = (point: (typeof points)[number]) =>
+      viewport.dispatchEvent(
+        new WheelEvent('wheel', {
+          bubbles: true,
+          cancelable: true,
+          ctrlKey: true,
+          clientX: point.x,
+          clientY: point.y,
+          deltaY,
+        }),
+      );
+    await act(async () => {
+      for (const point of points) {
+        wheel(point);
+      }
+      vi.advanceTimersByTime(16);
+    });
+
+    expect(onViewportChange).toHaveBeenCalledExactlyOnceWith(points.reduce(zoomAtPoint, initial));
+    onViewportChange.mockClear();
+    await act(async () => wheel(points[0]!));
+    const external = { x: -200, y: 75, zoom: 0.6 };
+    await mount(value, { ...props, externalViewport: external });
+    await act(async () => vi.advanceTimersByTime(16));
+    expect(onViewportChange).toHaveBeenCalledExactlyOnceWith(external);
   });
   it('publishes live text before blur and drains newer input after an older ACK', async () => {
     vi.useFakeTimers();

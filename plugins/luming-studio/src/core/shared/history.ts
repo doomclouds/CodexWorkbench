@@ -218,6 +218,7 @@ export function makeHistory<Content>(
   summary: string,
   changedIds: string[],
   restore: Pick<HistoryEntry, 'restoredFrom' | 'restoreMode'> = {},
+  captureContent: (content: Content) => Content = copy,
 ): HistoryEntry {
   const now = new Date().toISOString();
   state.artifact.revision++;
@@ -231,7 +232,12 @@ export function makeHistory<Content>(
     changedIds: [...new Set(changedIds)],
     ...restore,
   };
-  state.history.push({ entry, artifact: copy(state.artifact), content: copy(state.content) });
+  state.history.push({
+    entry,
+    artifact: copy(state.artifact),
+    content: captureContent(state.content),
+  });
+
   if (state.history.length > 200) {
     state.history.splice(0, state.history.length - 200);
   }
@@ -417,16 +423,20 @@ export function applyMutation<C, O extends ContentOperation, A, S>(
   args: MutationArguments<O>,
   actor: Actor,
   adapter: ProductAdapter<C, O, A, S>,
+  options: { transactionSnapshot?: boolean; shareContentUnits?: boolean } = {},
 ): MutationResult<C> {
+  const sharedContent = options.shareContentUnits
+    ? adapter.snapshotMutationContent?.(state.content)
+    : undefined;
   const working = {
     ...state,
     artifact: copy(state.artifact),
-    content: copy(state.content),
+    content: sharedContent ?? copy(state.content),
     history: [...state.history],
     operations: [...state.operations],
     ...(state.unitClocks ? { unitClocks: copy(state.unitClocks) } : {}),
   };
-  const result = applyWorkingMutation(working, args, actor, adapter);
+  const result = applyWorkingMutation(working, args, actor, adapter, !!options.transactionSnapshot);
   Object.assign(state, working);
 
   return result;
@@ -472,6 +482,13 @@ function matchingOperation(
   return saved;
 }
 
+function unavailableReceipt(): StudioError {
+  return new StudioError(
+    'COMMIT_RESULT_UNKNOWN',
+    '无法确认上次保存结果，请保留草稿并比较当前内容。',
+  );
+}
+
 export function readMutationReceipt<C>(
   state: Pick<ArtifactState<C>, 'artifact' | 'history' | 'operations'>,
   args: Record<string, unknown>,
@@ -488,6 +505,11 @@ export function readMutationReceipt<C>(
     operationId,
     mutationFingerprint(operations, actor, args.summary, args.merge),
   );
+
+  if (record?.receiptUnavailable) {
+    throw unavailableReceipt();
+  }
+
   const saved = record && state.history.find((item) => item.entry.id === record.historyId);
   const matchesArtifact =
     saved &&
@@ -495,10 +517,7 @@ export function readMutationReceipt<C>(
     saved.artifact.revision === saved.entry.revision;
 
   if (!saved || !matchesArtifact || !isAuthor(saved.entry, actor)) {
-    throw new StudioError(
-      'COMMIT_RESULT_UNKNOWN',
-      '无法确认上次保存结果，请保留草稿并比较当前内容。',
-    );
+    throw unavailableReceipt();
   }
 
   return {
@@ -513,6 +532,7 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(
   args: MutationArguments<O>,
   actor: Actor,
   adapter: ProductAdapter<C, O, A, S>,
+  transactionSnapshot: boolean,
 ): MutationResult<C> {
   requireRole(actor, ['owner', 'editor']);
   assertAlive(state.artifact);
@@ -529,6 +549,11 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(
   const standaloneUndo = operations.length === 1 && isUndo(first) && !hasRestoreSelection;
   const fingerprint = mutationFingerprint(operations, actor, args.summary, args.merge);
   const duplicate = matchingOperation(state, operationId, fingerprint);
+
+  if (duplicate?.receiptUnavailable) {
+    throw unavailableReceipt();
+  }
+
   if (duplicate) {
     const saved = version(state, duplicate.historyId);
 
@@ -553,6 +578,7 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(
     expected,
   );
   adapter.validate(state.content);
+  const captureContent = transactionSnapshot ? (content: C) => content : copy;
   const historyEntry = makeHistory(
     state,
     actor,
@@ -562,14 +588,17 @@ function applyWorkingMutation<C, O extends ContentOperation, A, S>(
       ...(restoredFrom ? { restoredFrom } : {}),
       ...(standaloneUndo ? { restoreMode: 'undo' } : {}),
     },
+    captureContent,
   );
   state.operations.push({ id: operationId, fingerprint, historyId: historyEntry.id });
+  const retained = new Set(state.history.map((saved) => saved.entry.id));
   state.operations = state.operations
-    .filter((item) => state.history.some((saved) => saved.entry.id === item.historyId))
+    .filter((item) => item.receiptUnavailable || retained.has(item.historyId))
     .slice(-500);
+  const snapshot = { artifact: state.artifact, content: state.content };
 
   return {
-    snapshot: copy({ artifact: state.artifact, content: state.content }),
+    snapshot: transactionSnapshot ? snapshot : copy(snapshot),
     historyEntry: copy(historyEntry),
     changed: true,
   };

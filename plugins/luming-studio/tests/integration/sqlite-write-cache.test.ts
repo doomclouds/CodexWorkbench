@@ -192,7 +192,7 @@ it('skips current payload checks while protecting retained history, collections,
   let repository: SqliteArtifactRepository | undefined;
   const input = reclamationFixture();
   try {
-    const connection = new SqliteArtifactRepository(join(directory, 'artifact.sqlite'), true);
+    const connection = new SqliteArtifactRepository(join(directory, 'artifact.sqlite'), true, 1);
     repository = connection;
     const { database } = connection;
     database.exec('BEGIN IMMEDIATE');
@@ -318,7 +318,9 @@ it('only writes current unit rows with a changed payload or ordinal', async () =
     initial.content.elements.push({ id: 'shared', html: '<p>Unchanged</p>' });
     connection.writeState(initial);
     database.exec('CREATE TEMP TABLE observed_unit_writes(id TEXT, ordinal INTEGER)');
-    database.exec(`CREATE TEMP TRIGGER observe_unit_writes BEFORE INSERT ON current_units
+    database.exec(`CREATE TEMP TRIGGER observe_unit_writes AFTER INSERT ON current_units
+      BEGIN INSERT INTO observed_unit_writes VALUES(NEW.id, NEW.ordinal); END`);
+    database.exec(`CREATE TEMP TRIGGER observe_unit_reorder AFTER UPDATE ON current_units
       BEGIN INSERT INTO observed_unit_writes VALUES(NEW.id, NEW.ordinal); END`);
     const selectWrites = database.prepare(
       'SELECT id,ordinal FROM observed_unit_writes ORDER BY id',
@@ -329,15 +331,12 @@ it('only writes current unit rows with a changed payload or ordinal', async () =
     const edited = { ...first, html: '<p>Edited</p>' };
     state.content = { elements: [edited, second] };
     connection.writeState(state);
-    expect(selectWrites.all()).toEqual([{ id: 'region', ordinal: 0 }]);
+    expect(selectWrites.all().map(({ id }) => id)).toEqual(['region']);
 
     database.exec('DELETE FROM observed_unit_writes');
     state.content = { elements: [second, edited] };
     connection.writeState(state);
-    expect(selectWrites.all()).toEqual([
-      { id: 'region', ordinal: 1 },
-      { id: 'shared', ordinal: 0 },
-    ]);
+    expect(selectWrites.all().map(({ id }) => id)).toEqual(['shared']);
     expect(connection.readState<TestContent, unknown, unknown>().content).toEqual(state.content);
   } finally {
     repository?.close();
@@ -407,13 +406,14 @@ it('reuses shared data within a write and clears the write cache on rollback and
   }
 });
 
-it('holds the write cache through commit only when a new version reaches retained capacity', async () => {
+it('keeps the ordinary v2 write cache at retained capacity', async () => {
   const directory = await fixtureDirectory();
   const store = new ArtifactStore<TestContent>(directory);
   const initial = retainedFixture(retainedHistoryLimit - 2);
   const id = initial.artifact.id;
   try {
     await store.write(initial);
+    await store.drainBackground();
     const { events, spy } = observeSaveCommands();
     try {
       await store.transaction(id, appendVersion);
@@ -422,10 +422,8 @@ it('holds the write cache through commit only when a new version reaches retaine
       await store.transaction(id, (state) => state.artifact.revision);
       expect(events).toEqual([
         ['COMMIT', -2000],
-        ['PRAGMA cache_size = -32768', -2000],
-        ['COMMIT', -32768],
-        ['PRAGMA cache_size = -32768', -2000],
-        ['COMMIT', -32768],
+        ['COMMIT', -2000],
+        ['COMMIT', -2000],
         ['COMMIT', -2000],
       ]);
     } finally {
@@ -454,17 +452,18 @@ it('holds the write cache through commit only when a new version reaches retaine
   }
 });
 
-it('holds the cache through rollback after a late SQLite write failure', async () => {
+it('rolls back both the v2 history and receipt after a late SQLite write failure', async () => {
   const directory = await fixtureDirectory();
   const store = new ArtifactStore<TestContent>(directory);
   const initial = retainedFixture(retainedHistoryLimit);
   const id = initial.artifact.id;
   try {
     await store.write(initial);
+    await store.drainBackground();
     let revisionBeforeRollback;
     const originalExec = DatabaseSync.prototype.exec;
     const { events, spy } = observeSaveCommands((database, sql) => {
-      if (sql === 'PRAGMA cache_size = -32768') {
+      if (sql === 'BEGIN IMMEDIATE') {
         originalExec.call(
           database,
           `CREATE TEMP TRIGGER reject_operation
@@ -483,10 +482,7 @@ it('holds the cache through rollback after a late SQLite write failure', async (
       await expect(store.transaction(id, appendVersion)).rejects.toThrow(
         'Simulated late write failure',
       );
-      expect(events).toEqual([
-        ['PRAGMA cache_size = -32768', -2000],
-        ['ROLLBACK', -32768],
-      ]);
+      expect(events).toEqual([['ROLLBACK', -2000]]);
       expect(revisionBeforeRollback).toBe(retainedHistoryLimit + 1);
     } finally {
       spy.mockRestore();

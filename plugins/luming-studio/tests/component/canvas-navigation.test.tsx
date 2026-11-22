@@ -38,6 +38,22 @@ const board = (elements: BoardElement[]): Board => ({
 const world = () => host.querySelector<HTMLElement>('.studio-canvas-world')!;
 const viewport = () => host.querySelector<HTMLElement>('[aria-label="白板画布"]')!;
 
+async function cameraOnNextFrame() {
+  let transform = '';
+  await act(async () => {
+    transform = await new Promise<string>((resolve) => {
+      requestAnimationFrame(() => resolve(world().style.transform));
+    });
+  });
+
+  return transform;
+}
+
+function cameraCoordinates(transform: string) {
+  const [, x, y, zoom] = /^translate\(([^,]+)px,([^,]+)px\) scale\(([^)]+)\)$/.exec(transform)!;
+  return { x: Number(x), y: Number(y), zoom: Number(zoom) };
+}
+
 async function pointer(
   target: Element,
   type: string,
@@ -110,6 +126,8 @@ it('routes middle dragging before a native interactive child can consume it', as
   viewport().append(control);
   await pointer(control, 'pointerdown', 1, 240, 200);
   await pointer(viewport(), 'pointermove', 1, 340, 250);
+
+  expect(await cameraOnNextFrame()).toBe('translate(100px,50px) scale(1)');
   await pointer(viewport(), 'pointerup', 1, 340, 250);
   expect(world().style.transform).toBe('translate(100px,50px) scale(1)');
   expect(call).not.toHaveBeenCalled();
@@ -123,7 +141,7 @@ it('routes Ctrl wheel over an interactive child but leaves ordinary scrolling al
   const ordinary = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 });
   await act(async () => control.dispatchEvent(ordinary));
   expect(ordinary.defaultPrevented).toBe(false);
-  expect(world().style.transform).toContain('scale(1)');
+  expect(await cameraOnNextFrame()).toBe('translate(0px,0px) scale(1)');
   const zoom = new WheelEvent('wheel', {
     bubbles: true,
     cancelable: true,
@@ -134,7 +152,10 @@ it('routes Ctrl wheel over an interactive child but leaves ordinary scrolling al
   });
   await act(async () => control.dispatchEvent(zoom));
   expect(zoom.defaultPrevented).toBe(true);
-  expect(world().style.transform).not.toContain('scale(1)');
+  const next = cameraCoordinates(await cameraOnNextFrame());
+  expect(next.zoom).toBeGreaterThan(1);
+  expect((200 - next.x) / next.zoom).toBeCloseTo(200);
+  expect((150 - next.y) / next.zoom).toBeCloseTo(150);
 });
 
 it('uses middle on a resize handle for navigation and ignores right-button geometry edits', async () => {
@@ -161,12 +182,14 @@ it('supports space navigation while reading and clears navigation on blur', asyn
     ),
   );
   expect(host.querySelector('.studio-whiteboard')?.getAttribute('data-tool')).toBe('pan');
+  const before = world().style.transform;
   await pointer(viewport(), 'pointerdown', 0, 200, 160);
   await pointer(viewport(), 'pointermove', 0, 280, 180);
-  const atBlur = world().style.transform;
+  const atBlur = await cameraOnNextFrame();
+  expect(atBlur).not.toBe(before);
   await act(async () => window.dispatchEvent(new Event('blur')));
   await pointer(viewport(), 'pointermove', 0, 330, 200);
-  expect(world().style.transform).toBe(atBlur);
+  expect(await cameraOnNextFrame()).toBe(atBlur);
 });
 
 it('validates iframe navigation and pans by screen deltas without modifying content', async () => {
@@ -177,31 +200,40 @@ it('validates iframe navigation and pans by screen deltas without modifying cont
   const frame = host.querySelector('iframe')!;
   const key = await identity(frame);
   const initial = world().style.transform;
-  const send = async (data: object, source: MessageEventSource | null = frame.contentWindow) =>
-    act(async () =>
-      window.dispatchEvent(
-        new MessageEvent('message', {
-          source,
-          data: { type: 'studio-html-navigation', ...key, ...data },
-        }),
-      ),
+  const send = (data: object) =>
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source: frame.contentWindow,
+        data: { type: 'studio-html-navigation', ...key, ...data },
+      }),
     );
-  await send({
-    kind: 'pan',
-    phase: 'start',
-    pointerId: 1,
-    screenX: 100,
-    screenY: 100,
-    channel: 'stale',
+  await act(async () => {
+    send({
+      kind: 'pan',
+      phase: 'start',
+      pointerId: 1,
+      screenX: 100,
+      screenY: 100,
+      channel: 'stale',
+    });
+    send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 300, screenY: 150 });
   });
-  await send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 300, screenY: 150 });
-  expect(world().style.transform).toBe(initial);
-  await send({ kind: 'pan', phase: 'start', pointerId: 1, screenX: 100, screenY: 100 });
-  await send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 300, screenY: 150 });
-  const moved = world().style.transform;
-  expect(moved).not.toBe(initial);
-  await send({ kind: 'pan', phase: 'end', pointerId: 1, screenX: 300, screenY: 150 });
-  await send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 500, screenY: 300 });
-  expect(world().style.transform).toBe(moved);
+  expect(await cameraOnNextFrame()).toBe(initial);
+  await act(async () => {
+    send({ kind: 'pan', phase: 'start', pointerId: 1, screenX: 100, screenY: 100 });
+    send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 200, screenY: 125 });
+    send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 300, screenY: 150 });
+  });
+  const moved = await cameraOnNextFrame();
+  const before = cameraCoordinates(initial);
+  const after = cameraCoordinates(moved);
+  expect(after.x - before.x).toBeCloseTo(200);
+  expect(after.y - before.y).toBeCloseTo(50);
+  expect(after.zoom).toBe(before.zoom);
+  await act(async () => {
+    send({ kind: 'pan', phase: 'end', pointerId: 1, screenX: 300, screenY: 150 });
+    send({ kind: 'pan', phase: 'move', pointerId: 1, screenX: 500, screenY: 300 });
+  });
+  expect(await cameraOnNextFrame()).toBe(moved);
   expect(call).not.toHaveBeenCalled();
 });

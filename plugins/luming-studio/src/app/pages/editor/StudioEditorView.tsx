@@ -1,4 +1,5 @@
 import { STUDIO_HOME_TITLE } from '../../../contracts/branding.js';
+import type { BoardOpenScene } from '../../../contracts/board-open.js';
 import './editor-shell.css';
 import {
   useRef,
@@ -67,6 +68,7 @@ import {
   type VersionHistoryView,
 } from '../../features/history';
 import { SaveStatus } from '../../shared/SaveStatus';
+import { CanvasOpeningScene } from '../../features/whiteboard/whiteboard.js';
 
 export type EditorPanel = 'feedback' | 'history' | 'share';
 type SaveActivity = Pick<ProductActivity, 'dirty' | 'saving' | 'saveError'>;
@@ -77,6 +79,7 @@ interface EditorViewData {
   activeId: string;
   actor: Actor;
   board: StudioDocument | null;
+  openingScene?: BoardOpenScene;
   client: StudioClient;
   busy: string;
   canComment: boolean;
@@ -607,6 +610,7 @@ function StudioWorkspace({ state }: EditorSectionProps) {
     clockOffsetMs,
     error,
     history,
+    openingScene,
     peerId,
     readingChanged,
     refreshBoard,
@@ -614,11 +618,15 @@ function StudioWorkspace({ state }: EditorSectionProps) {
     suggestionPreview,
   } = state;
   const { preview } = history;
+  const awaitingBoard = !board && !error;
+  const activeScene =
+    state.sessionStatus === 'valid' && openingScene?.artifact.id === state.activeId;
+  const scene = awaitingBoard && activeScene && openingScene;
 
   return (
     <div className="studio-workspace">
       <div ref={handleCanvasArea} className="studio-canvas-area">
-        {board ? (
+        {board && (
           <>
             <StudioLiveEditor state={state} board={board} />
             {(preview?.board || suggestionPreview) && (
@@ -642,7 +650,9 @@ function StudioWorkspace({ state }: EditorSectionProps) {
               />
             )}
           </>
-        ) : (
+        )}
+        {scene && <CanvasOpeningScene scene={scene} viewTheme={resolvedTheme} />}
+        {!board && !scene && (
           <div className="studio-empty">
             <Loader2 size={28} className="studio-spin" />
             <p>{error ? '作品暂时无法读取' : '正在打开作品'}</p>

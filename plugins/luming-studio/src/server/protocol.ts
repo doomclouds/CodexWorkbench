@@ -5,7 +5,11 @@ import { STUDIO_ICON } from '../contracts/brand-icon.js';
 import { PLUGIN_VERSION } from '../contracts/version.js';
 import { STUDIO_TOOLS, type Connection, type ToolName } from '../contracts/studio.js';
 import { TOOL_NAMES } from '../contracts/studio.js';
-import { APP_TOOL_NAME, type UiRequester } from '../contracts/transport.js';
+import {
+  APP_TOOL_NAME,
+  type AppTransferSpoolFactory,
+  type UiRequester,
+} from '../contracts/transport.js';
 import { appTransportSchema, createAppTransport } from './app-transport.js';
 import {
   boundedModelRequest,
@@ -419,7 +423,11 @@ const descriptions: Record<ToolName, string> = {
     'Agent声明非重叠白板任务，不锁住人类编辑。begin指定稳定participant/taskId、scope.ids或空地rect，返回generation；活跃同范围幂等，自行结束或过期后须带上一代明确重新申请，不自动续写。update/end带回同代绑定，phase为preparing/writing/verifying，end可标completed/failed/cancelled。status查询自己的active及有界结束记录，不续租，可只给taskId恢复丢失回执。活动租约10分钟，2分钟无实质进展变灰保留；重复心跳不伪造进度。release仅房主界面按targetActorId/taskId/generation结束具体任务，Agent不能抢释放别人或重新申请该被释放任务。范围不授予额外权限，不绕过CAS、锁或正在编辑检查。',
 };
 
-export function createStudioServer(executor: StudioExecutor, html: string) {
+export function createStudioServer(
+  executor: StudioExecutor,
+  html: string,
+  createSpool?: AppTransferSpoolFactory,
+) {
   const server = new McpServer({
     name: 'luming-studio',
     title: STUDIO_DISPLAY_NAME,
@@ -499,7 +507,7 @@ export function createStudioServer(executor: StudioExecutor, html: string) {
     }
 
     return executor.requestUi(request, signal);
-  });
+  }, createSpool);
   server.registerTool(
     APP_TOOL_NAME,
     {
@@ -572,7 +580,7 @@ export function createStudioServer(executor: StudioExecutor, html: string) {
   );
   const originalClose = server.close.bind(server);
   server.close = async () => {
-    appTransport.close();
+    await appTransport.close();
     await originalClose();
   };
 

@@ -243,7 +243,7 @@ export function CanvasObjectContent({
             <span
               className="studio-text-preview"
               aria-hidden="true"
-              style={{ height: Math.min(2 / zoom, element.h / 3) }}
+              style={{ height: `min(calc(2px / var(--canvas-scale, 1)), ${element.h / 3}px)` }}
             />
           )
         )}

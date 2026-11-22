@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import {
+  BOARD_OPEN_FORMAT,
+  BOARD_SCENE_FORMAT,
+  BOARD_SCENE_GEOMETRY,
+  type BoardOpenResponse,
+  type BoardSceneResponse,
+  type BoardSceneUnit,
+} from '../../contracts/board-open.js';
+import {
+  isBoardElementProjection,
   studioArtifactSchema as artifact,
   studioBoardSchema as board,
   studioDocumentSchema as documentContent,
@@ -90,6 +99,28 @@ const schemas: ReadSchemas = {
     }),
   ]),
 };
+
+const boardOpenHead = z.looseObject({
+  format: z.literal(BOARD_OPEN_FORMAT),
+  artifactId: text.min(1),
+  revision,
+  epoch: text.regex(/^[A-Za-z0-9_-]{1,120}$/),
+});
+const boardOpen = z.discriminatedUnion('unchanged', [
+  boardOpenHead.extend({ unchanged: z.literal(true), artifact, board: z.never().optional() }),
+  boardOpenHead.extend({ unchanged: z.literal(false), board, artifact: z.never().optional() }),
+]);
+
+const boardScene = boardOpenHead.extend({
+  format: z.literal(BOARD_SCENE_FORMAT),
+  scene: z.looseObject({
+    artifact,
+    style: board.shape.style,
+    orderVersion: revision.optional(),
+    units: z.array(z.unknown()),
+  }),
+});
+const geometryFields = new Set<string>(BOARD_SCENE_GEOMETRY);
 
 const errorSchema = z.object({ code: text, message: text, details: z.unknown().optional() });
 const failedTool = z.looseObject({
@@ -254,6 +285,98 @@ export function createStudioToolCall(request: RequestTool): StudioToolCall {
   }
 
   return call;
+}
+
+export function decodeBoardOpenResponse(
+  value: unknown,
+  artifactId: string,
+): BoardOpenResponse | undefined {
+  if (!isRecord(value) || value.format !== BOARD_OPEN_FORMAT) {
+    return;
+  }
+
+  const parsed = boardOpen.safeParse(value);
+  if (!parsed.success) {
+    throw invalidResponse('作品服务返回了无效的权威白板元数据。', undefined, parsed.error);
+  }
+
+  const { data } = parsed;
+  const metadata = data.unchanged ? data.artifact : data.board.artifact;
+  const matchesArtifact = data.artifactId === artifactId && metadata.id === artifactId;
+  if (!matchesArtifact || metadata.revision !== data.revision) {
+    throw invalidResponse('作品服务返回的白板标识与版次不匹配。');
+  }
+
+  return data;
+}
+
+function sceneUnit(unit: unknown): BoardSceneUnit | undefined {
+  if (!isRecord(unit)) {
+    return;
+  }
+  if (unit.state === 'complete') {
+    return isBoardElementProjection(unit.element)
+      ? { state: 'complete', element: unit.element }
+      : undefined;
+  }
+
+  const { geometry } = unit;
+  if (unit.state !== 'unloaded' || !isRecord(geometry)) {
+    return;
+  }
+  if (Object.keys(geometry).some((field) => !geometryFields.has(field))) {
+    return;
+  }
+
+  return isBoardElementProjection(geometry) ? { state: 'unloaded', geometry } : undefined;
+}
+
+function decodeSceneUnits(units: unknown[]) {
+  const ids = new Set<string>();
+  const decoded: BoardSceneUnit[] = [];
+  for (const value of units) {
+    const unit = sceneUnit(value);
+    if (!unit) {
+      return;
+    }
+
+    const { id } = unit.state === 'complete' ? unit.element : unit.geometry;
+    if (ids.has(id)) {
+      return;
+    }
+
+    ids.add(id);
+    decoded.push(unit);
+  }
+
+  return decoded;
+}
+
+export function decodeBoardSceneResponse(
+  value: unknown,
+  artifactId: string,
+): BoardSceneResponse | undefined {
+  if (!isRecord(value) || value.format !== BOARD_SCENE_FORMAT) {
+    return;
+  }
+
+  const parsed = boardScene.safeParse(value);
+  if (!parsed.success) {
+    throw invalidResponse('作品服务返回了无效的首屏场景。', undefined, parsed.error);
+  }
+
+  const { data } = parsed;
+  const matchesArtifact = data.artifactId === artifactId && data.scene.artifact.id === artifactId;
+  if (!matchesArtifact || data.revision !== data.scene.artifact.revision) {
+    throw invalidResponse('作品服务返回的首屏场景不能用于当前版次。');
+  }
+
+  const units = decodeSceneUnits(data.scene.units);
+  if (!units) {
+    throw invalidResponse('作品服务返回了无效或重复的首屏对象。');
+  }
+
+  return { ...data, scene: { ...data.scene, units } };
 }
 
 export function decodeStudioConnection(

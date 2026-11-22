@@ -1,1 +1,1 @@
-export const SERVICE_PROTOCOL_VERSION = 3;
+export const SERVICE_PROTOCOL_VERSION = 4;

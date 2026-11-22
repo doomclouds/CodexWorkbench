@@ -6,6 +6,7 @@ import { ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { SyncBatch } from '../../src/contracts/studio.js';
+import type { BoardOpenResponse, BoardSceneResponse } from '../../src/contracts/board-open.js';
 import { createStudioService } from '../../src/server/studio-composition.js';
 import type { StudioCollaboration } from '../../src/core/shared/collaboration.js';
 import { startStudioHost, type StudioHost } from '../../src/server/http.js';
@@ -121,6 +122,56 @@ it('checks the authorized revision without reading content or historical snapsho
     artifactId,
     revision: committed.board.artifact.revision,
   });
+  expect(readAll).not.toHaveBeenCalled();
+});
+
+it('opens a cached exact board without reading bodies and returns full content for a stale service epoch', async () => {
+  const saved = await mutate('Cached board');
+  const viewer = await guest('viewer');
+  const path = `/api/sync?artifactId=${artifactId}&check=board`;
+  const initial = await viewer.request(path);
+  const opened: BoardOpenResponse = await initial.json();
+  expect(initial.status).toBe(200);
+  expect(opened).toMatchObject({ unchanged: false, board: saved.board });
+
+  const readAll = vi.spyOn(SqliteArtifactRepository.prototype, 'readState');
+  const known = `${path}&knownRevision=${opened.revision}&knownEpoch=${opened.epoch}`;
+  const current = await viewer.request(known);
+  expect(await current.json()).toMatchObject({
+    artifactId,
+    revision: opened.revision,
+    unchanged: true,
+    artifact: saved.board.artifact,
+  });
+  expect(readAll).not.toHaveBeenCalled();
+
+  const stale = await viewer.request(
+    `${path}&knownRevision=${opened.revision}&knownEpoch=previous-service`,
+  );
+  expect(await stale.json()).toMatchObject({ unchanged: false, board: saved.board });
+  expect(readAll).toHaveBeenCalledOnce();
+});
+
+it('reads geometry for a rich object without returning its saved source', async () => {
+  await host.service.execute('artifact_apply', {
+    artifactId,
+    operationId: randomUUID(),
+    expectedRevision: 0,
+    operations: [
+      { op: 'add', element: { id: 'rich', type: 'html', html: '<p>Rich source</p>' } },
+      { op: 'add', element: { id: 'short', type: 'text', text: 'Visible text' } },
+    ],
+  });
+  const viewer = await guest('viewer');
+  const readAll = vi.spyOn(SqliteArtifactRepository.prototype, 'readState');
+  const response = await viewer.request(`/api/sync?artifactId=${artifactId}&check=scene`);
+  const payload: BoardSceneResponse = await response.json();
+  expect(response.status).toBe(200);
+  expect(payload.scene.units).toEqual([
+    { state: 'unloaded', geometry: expect.objectContaining({ id: 'rich', type: 'html' }) },
+    { state: 'complete', element: expect.objectContaining({ id: 'short', text: 'Visible text' }) },
+  ]);
+  expect(JSON.stringify(payload)).not.toContain('Rich source');
   expect(readAll).not.toHaveBeenCalled();
 });
 

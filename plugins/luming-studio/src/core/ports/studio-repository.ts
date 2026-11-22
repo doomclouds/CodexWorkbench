@@ -1,4 +1,6 @@
-import type { ArtifactMetadata, ArtifactState, Snapshot } from '../shared/model.js';
+import type { ArtifactMetadata, ArtifactState, Snapshot, UnitClock } from '../shared/model.js';
+import type { BoardOpenScene } from '../../contracts/board-open.js';
+import type { BoardElement, HistoryEntry } from '../../contracts/studio.js';
 
 export type { ArtifactMetadata, ArtifactState, SavedVersion } from '../shared/model.js';
 
@@ -7,7 +9,40 @@ export type ArtifactAuthorization = Pick<
   'artifact' | 'sharing' | 'guestNames'
 >;
 
-type ReadOptions = { maxExpandedBytes?: number };
+type ReadOptions = { maxExpandedBytes?: number; currentOnly?: boolean };
+
+export interface LocalUnitMutationRequest {
+  id: string;
+  operationId: string;
+  maximumElements: number;
+  maximumBytes: number;
+}
+
+export interface LocalUnitMutation {
+  authorization: ArtifactAuthorization;
+  fields: Record<string, unknown>;
+  unit: BoardElement;
+  clock: UnitClock;
+  hasLockedArrow: boolean;
+}
+
+export interface LocalUnitMutationWrite {
+  artifact: ArtifactMetadata;
+  entry: HistoryEntry;
+  unit: BoardElement;
+  clock: UnitClock;
+  operation: ArtifactState<unknown>['operations'][number];
+}
+
+export interface LocalUnitWritePlan<Result> {
+  request: LocalUnitMutationRequest;
+  plan(basis: LocalUnitMutation): { result: Result; write: LocalUnitMutationWrite } | undefined;
+}
+
+export interface ArtifactWriteOptions<Result = unknown> {
+  shareContentUnits?: boolean;
+  localUnit?: LocalUnitWritePlan<Result>;
+}
 
 export interface ArtifactUnitRequest {
   revision: number;
@@ -29,7 +64,13 @@ export interface StudioRepository<Content = unknown, Anchor = unknown, Source = 
   readLegacyArtifact(id: string): Promise<ArtifactMetadata | undefined>;
   trashLegacyArtifact(id: string, expectedRevision?: unknown): Promise<ArtifactMetadata>;
   catalog(): Promise<ArtifactMetadata[]>;
+  scheduleUpgrade?(id: string): void;
+  drainBackground?(): Promise<void>;
   readAuthorization(id: string): Promise<ArtifactAuthorization>;
+  readBoardScene?(
+    id: string,
+    authorize: (authorization: ArtifactAuthorization) => void,
+  ): Promise<BoardOpenScene | undefined>;
   read(id: string, options?: ReadOptions): Promise<ArtifactState<Content, Anchor, Source>>;
   readProjection<Projection>(
     id: string,
@@ -44,6 +85,7 @@ export interface StudioRepository<Content = unknown, Anchor = unknown, Source = 
   transaction<Result>(
     id: string,
     run: (state: ArtifactState<Content, Anchor, Source>) => Promise<Result> | Result,
+    options?: ArtifactWriteOptions<Result>,
   ): Promise<Result>;
   withSnapshotLock<Result>(
     id: string,

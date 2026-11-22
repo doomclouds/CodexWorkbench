@@ -12,6 +12,7 @@ import {
 import type { StudioAuthority } from '../core/service.js';
 import { isRecord as object } from '../shared/is-record.js';
 import { StudioError, safeId, text } from '../shared/studio-error.js';
+import { pipeline } from 'node:stream/promises';
 import { MAX_ARCHIVE_BYTES } from '../contracts/archive.js';
 import { lanAddresses } from './lan-addresses.js';
 import { createCollaborationRoutes } from './collaboration-routes.js';
@@ -640,7 +641,7 @@ export async function startStudioHost(
     }
     const exported = /^\/api\/exports\/([^/]+)$/.exec(url.pathname);
     if (exported) {
-      const result = await service.getExport(decodeURIComponent(exported[1]!));
+      const result = await service.openExport(decodeURIComponent(exported[1]!));
       const auth = await authorize(request, response, url, result.artifactId);
       scope(auth, result.artifactId);
       if (result.mimeType === 'application/zip' && !auth.owner) {
@@ -654,7 +655,7 @@ export async function startStudioHost(
         'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`,
         'X-Content-Type-Options': 'nosniff',
       });
-      response.end(result.data);
+      await pipeline(result.chunks(), response);
       return true;
     }
     if (url.pathname === '/' || url.pathname === '/index.html') {
@@ -713,7 +714,12 @@ export async function startStudioHost(
         throw new StudioError('INVALID_ARGUMENT', '请上传 ZIP 备份文件。');
       }
 
-      const data = await service.importArchive(await body(request, MAX_ARCHIVE_BYTES), auth.actor);
+      const declaredBytes = Number(header(request, 'content-length'));
+      if (declaredBytes > MAX_ARCHIVE_BYTES) {
+        throw new StudioError('TOO_LARGE', '作品备份超过导入容量。');
+      }
+
+      const data = await service.importArchive(request, auth.actor);
       json(response, 200, { ok: true, data });
       return true;
     }
