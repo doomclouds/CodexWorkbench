@@ -288,7 +288,7 @@ async function save({ request }, state, write, index, samples) {
 }
 
 async function exercise(api, seed, samples, perKind) {
-  assert.equal(api.session.pluginVersion, '0.3.0');
+  assert.match(api.session.pluginVersion, /^0\.3\.\d+$/u);
   const board = await read(api.tool, seed, 'board');
   assert.equal(board.artifact.revision, seed.source.revision);
   assert.equal(board.elements.length, seed.original.elements);
