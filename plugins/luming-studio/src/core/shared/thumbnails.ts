@@ -1,6 +1,8 @@
 import type { ExportBytes } from '../ports/export-copy-store.js';
 import { StudioError } from './common.js';
 
+export const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
+
 export interface Thumbnail {
   mimeType: string;
   data: Uint8Array;
@@ -21,7 +23,7 @@ export class ThumbnailCache {
         }
 
         const data = Buffer.from(result.data, result.encoding === 'base64' ? 'base64' : 'utf8');
-        if (data.byteLength > 2 * 1024 * 1024) {
+        if (data.byteLength > MAX_THUMBNAIL_BYTES) {
           throw new StudioError('NO_PREVIEW', '预览超过缓存预算，请打开作品查看。');
         }
 
