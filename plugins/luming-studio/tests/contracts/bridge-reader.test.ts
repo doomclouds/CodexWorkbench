@@ -1,0 +1,794 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { JSDOM } from 'jsdom';
+import { createStudioBridge } from '../../src/app/transport/bridge';
+import {
+  LOCAL_ACTOR,
+  DEFAULT_STYLE,
+  type Board,
+  type StudioClient,
+} from '../../src/contracts/studio';
+import { downloadStudioBlob, downloadStudioFile } from '../../src/app/transport/client';
+import { downloadBoard } from '../../src/app/features/transfer';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { APP_MAX_BYTES } from '../../src/contracts/transport';
+
+type HostEvent = 'toolinput' | 'toolresult' | 'hostcontextchanged';
+type HostListener = (value: unknown) => void;
+
+interface HostEventEmitter {
+  emit(event: HostEvent, value: unknown): void;
+}
+
+const mocks = vi.hoisted(() => ({
+  downloadFile: vi.fn(),
+  close: vi.fn(),
+  connect: vi.fn(),
+  callServerTool: vi.fn(),
+  updateModelContext: vi.fn(),
+  capabilities: {} as Record<string, unknown>,
+  hostContext: undefined as undefined | Record<string, unknown>,
+  currentView: vi.fn(),
+}));
+vi.mock('@modelcontextprotocol/ext-apps', () => ({
+  App: class {
+    private readonly listeners = new Map<HostEvent, Set<HostListener>>();
+    connect = mocks.connect;
+    close = mocks.close;
+    downloadFile = mocks.downloadFile;
+    callServerTool = mocks.callServerTool;
+    updateModelContext = mocks.updateModelContext;
+    addEventListener(event: HostEvent, listener: HostListener) {
+      const listeners = this.listeners.get(event) ?? new Set<HostListener>();
+      listeners.add(listener);
+      this.listeners.set(event, listeners);
+    }
+    emit(event: HostEvent, value: unknown) {
+      for (const listener of this.listeners.get(event) ?? []) {
+        listener(value);
+      }
+    }
+    getHostContext() {
+      return mocks.hostContext;
+    }
+    getHostCapabilities() {
+      return mocks.capabilities;
+    }
+  },
+  PostMessageTransport: class {},
+  applyDocumentTheme: vi.fn(),
+  applyHostStyleVariables: vi.fn(),
+}));
+vi.mock('@openai/mcp-extensions/app', () => ({
+  OpenAIExtensions: class {
+    modelContext = { getCurrent: mocks.currentView };
+  },
+}));
+beforeEach(() => {
+  mocks.capabilities = {};
+  mocks.hostContext = undefined;
+  mocks.currentView.mockReset();
+  mocks.close.mockResolvedValue(undefined);
+  mocks.updateModelContext.mockResolvedValue(undefined);
+  mocks.callServerTool.mockReset().mockResolvedValue({
+    _meta: {
+      connection: {
+        baseUrl: 'http://127.0.0.1:5000',
+        token: 'owner-secret',
+        actor: { id: 'local', name: '我', kind: 'human', role: 'owner' },
+      },
+    },
+  });
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
+
+describe('host connection adaptation', () => {
+  it.each(['structuredContent', 'text'] as const)(
+    'announces an existing panel with no selected work through %s context',
+    async (format) => {
+      vi.useFakeTimers();
+      mocks.capabilities = { updateModelContext: { [format]: true } };
+      const dom = new JSDOM('<div></div>');
+      Object.defineProperty(dom.window, 'parent', { value: {} });
+      vi.stubGlobal('window', dom.window);
+      vi.stubGlobal('document', dom.window.document);
+      try {
+        const bridge = await createStudioBridge(() => {});
+        await vi.advanceTimersByTimeAsync(150);
+        const empty = {
+          appId: 'luming-studio',
+          panelOpen: true,
+          artifactId: null,
+          viewId: null,
+          selectedIds: [],
+          selectedCount: 0,
+        };
+        expect(mocks.updateModelContext).toHaveBeenCalledExactlyOnceWith(
+          format === 'structuredContent'
+            ? { structuredContent: empty }
+            : { content: [{ type: 'text', text: JSON.stringify(empty) }] },
+        );
+        expect(mocks.callServerTool.mock.calls.map((call) => call[0].name)).not.toContain(
+          'studio_open',
+        );
+
+        bridge.updateContext?.({
+          artifactId: 'selected-board',
+          viewId: 'current-view',
+          selectedIds: ['paragraph-one'],
+        });
+        await vi.advanceTimersByTimeAsync(150);
+        const selected = {
+          ...empty,
+          artifactId: 'selected-board',
+          viewId: 'current-view',
+          selectedIds: ['paragraph-one'],
+          selectedCount: 1,
+        };
+        expect(mocks.updateModelContext).toHaveBeenLastCalledWith(
+          format === 'structuredContent'
+            ? { structuredContent: selected }
+            : { content: [{ type: 'text', text: JSON.stringify(selected) }] },
+        );
+        await bridge.close();
+      } finally {
+        dom.window.close();
+      }
+    },
+  );
+
+  it('bootstraps through the app-only transport without invoking the tool that opens the UI', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    try {
+      const bridge = await createStudioBridge(() => {});
+      expect(mocks.callServerTool).toHaveBeenCalledExactlyOnceWith(
+        { name: 'studio_app_request', arguments: { action: 'connect' } },
+        { signal: expect.any(AbortSignal) },
+      );
+      await bridge.close();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('uses the connection delivered by the host without an extra bootstrap call', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    mocks.connect.mockImplementationOnce(async function (this: HostEventEmitter) {
+      this.emit('toolinput', { arguments: { artifactId: 'selected-board', view: 'editor' } });
+      this.emit('toolresult', {
+        structuredContent: { ok: true, data: {} },
+        _meta: {
+          connection: {
+            baseUrl: 'http://127.0.0.1:5000',
+            token: 'owner-secret',
+            actor: LOCAL_ACTOR,
+          },
+        },
+      });
+    });
+
+    try {
+      const bridge = await createStudioBridge(() => {});
+      expect(mocks.callServerTool).not.toHaveBeenCalled();
+      expect(bridge.artifactId).toBe('selected-board');
+      expect(bridge.view).toBe('editor');
+      await bridge.close();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('keeps local navigation through a replay of the original opening tool and honors explicit navigation', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    let app!: HostEventEmitter;
+    const navigate = vi.fn();
+    mocks.hostContext = { toolInfo: { id: 1 } };
+    mocks.connect.mockImplementationOnce(async function (this: typeof app) {
+      app = this;
+      this.emit('toolinput', { arguments: {} });
+    });
+    const bridge = await createStudioBridge(navigate);
+    try {
+      bridge.navigate?.('board-a', 'editor');
+      app.emit('toolinput', { arguments: {} });
+      app.emit('toolresult', { structuredContent: { ok: true, data: { view: 'library' } } });
+      expect(bridge.artifactId).toBe('board-a');
+      expect(navigate).not.toHaveBeenCalled();
+
+      app.emit('toolinput', { arguments: { artifactId: 'board-b', view: 'board' } });
+      expect(navigate).toHaveBeenLastCalledWith('board-b', 'board');
+      bridge.navigate?.('board-b', 'editor');
+      mocks.hostContext = { toolInfo: { id: 2 } };
+      app.emit('toolinput', { arguments: { view: 'library' } });
+      expect(navigate).toHaveBeenLastCalledWith(undefined, 'library');
+      bridge.navigate?.(undefined, 'trash');
+      app.emit('toolresult', { structuredContent: { ok: true, data: { view: 'library' } } });
+      expect(bridge.artifactId).toBeUndefined();
+      expect(bridge.view).toBe('trash');
+    } finally {
+      await bridge.close();
+      dom.window.close();
+    }
+  });
+
+  it.each(['structuredContent', 'text'] as const)(
+    'rehydrates only the instance-specific %s state without replaying the launch route',
+    async (format) => {
+      const dom = new JSDOM('<div></div>');
+      Object.defineProperty(dom.window, 'parent', { value: {} });
+      vi.stubGlobal('window', dom.window);
+      vi.stubGlobal('document', dom.window.document);
+      const snapshot = {
+        appId: 'luming-studio',
+        panelOpen: true,
+        artifactId: 'board-a',
+        viewId: 'view-a',
+        selectedIds: ['element-one'],
+        viewport: { x: 38, y: 62, zoom: 0.75 },
+      };
+      const content =
+        format === 'structuredContent'
+          ? { structuredContent: snapshot }
+          : { content: [{ type: 'text', text: JSON.stringify(snapshot) }] };
+      mocks.currentView.mockReturnValueOnce({ updateId: 'accepted-1', ...content });
+      let app!: HostEventEmitter;
+      const navigate = vi.fn();
+      mocks.connect.mockImplementationOnce(async function (this: typeof app) {
+        app = this;
+        this.emit('toolinput', { arguments: { artifactId: 'launch-board' } });
+      });
+      const bridge = await createStudioBridge(navigate);
+      try {
+        expect(bridge.artifactId).toBe('board-a');
+        expect(bridge.restoredView).toEqual({
+          viewId: 'view-a',
+          artifactId: 'board-a',
+          selectedIds: ['element-one'],
+          viewport: { x: 38, y: 62, zoom: 0.75 },
+        });
+        navigate.mockClear();
+        app.emit('toolresult', {
+          structuredContent: { ok: true, data: { artifactId: 'launch-board', view: 'editor' } },
+        });
+        expect(bridge.artifactId).toBe('board-a');
+        expect(navigate).not.toHaveBeenCalled();
+
+        const next = await createStudioBridge(() => {});
+        try {
+          expect(next.artifactId).toBeUndefined();
+          expect(next.restoredView).toBeUndefined();
+          expect(next.view).toBe('library');
+        } finally {
+          await next.close();
+        }
+      } finally {
+        await bridge.close();
+        dom.window.close();
+      }
+    },
+  );
+
+  it('does not ask a retired host view to discover or open a connection after teardown', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    mocks.connect.mockImplementationOnce(async function (this: { onteardown(): Promise<unknown> }) {
+      await this.onteardown();
+    });
+
+    try {
+      await expect(createStudioBridge(() => {})).rejects.toThrow('作品页面已关闭');
+      expect(mocks.callServerTool).not.toHaveBeenCalled();
+      expect(mocks.close).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('cancels a pending bootstrap when its host view is torn down', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    let teardown!: () => Promise<unknown>;
+    mocks.connect.mockImplementationOnce(async function (this: { onteardown(): Promise<unknown> }) {
+      teardown = () => this.onteardown();
+    });
+    mocks.callServerTool.mockImplementationOnce(
+      (_request, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), {
+            once: true,
+          });
+        }),
+    );
+
+    try {
+      const rejected = expect(createStudioBridge(() => {})).rejects.toThrow('作品页面已关闭');
+      await vi.waitFor(() => expect(mocks.callServerTool).toHaveBeenCalledOnce());
+      await teardown();
+      await rejected;
+      expect(mocks.callServerTool.mock.calls[0]![1].signal.aborted).toBe(true);
+      expect(mocks.close).not.toHaveBeenCalled();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it('preserves a backend bootstrap failure instead of replacing it with a missing-connection error', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    mocks.callServerTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: {
+        ok: false,
+        error: {
+          code: 'STUDIO_ERROR',
+          message: 'fetch failed',
+          details: { reason: 'synthetic stale endpoint' },
+        },
+      },
+    });
+
+    try {
+      await expect(createStudioBridge(() => {})).rejects.toMatchObject({
+        message: 'fetch failed',
+        code: 'STUDIO_ERROR',
+        details: { reason: 'synthetic stale endpoint' },
+      });
+      expect(mocks.callServerTool).toHaveBeenCalledOnce();
+      expect(mocks.close).toHaveBeenCalledOnce();
+    } finally {
+      dom.window.close();
+    }
+  });
+  it('preserves HTTP authentication status and reasons without conflating business permission errors', async () => {
+    const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000/' });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    dom.window.__STUDIO_BOOT__ = {
+      baseUrl: 'http://127.0.0.1:5000',
+      token: 'guest-secret',
+      actor: LOCAL_ACTOR,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          Response.json(
+            {
+              ok: false,
+              error: {
+                code: 'UNAUTHORIZED',
+                message: '访问已撤销',
+                details: { reason: 'removed' },
+              },
+            },
+            { status: 401 },
+          ),
+        )
+        .mockResolvedValueOnce(
+          Response.json(
+            { ok: false, error: { code: 'FORBIDDEN', message: '仅查看角色不能编辑' } },
+            { status: 403 },
+          ),
+        ),
+    );
+    const bridge = await createStudioBridge(() => {});
+    await expect(
+      bridge.client.call('artifact_read', { artifactId: 'board' }),
+    ).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED', details: { reason: 'removed' } });
+    await expect(
+      bridge.client.call('artifact_apply', { artifactId: 'board' }),
+    ).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' });
+    await bridge.close();
+    dom.window.close();
+  });
+
+  it('rejects invalid artifact data from the standalone bridge', async () => {
+    const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000/' });
+    dom.window.__STUDIO_BOOT__ = {
+      baseUrl: dom.window.location.origin,
+      token: '',
+      actor: LOCAL_ACTOR,
+    };
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ ok: true, data: { artifact: {} } })),
+    );
+    const bridge = await createStudioBridge(() => {});
+    try {
+      await expect(
+        bridge.client.call('artifact_read', { artifactId: 'board' }),
+      ).rejects.toMatchObject({
+        code: 'INVALID_RESPONSE',
+        status: 200,
+      });
+    } finally {
+      await bridge.close();
+      dom.window.close();
+    }
+  });
+
+  it('uses the same artifact decoder after rebuilding an embedded HTTP response', async () => {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    const bridge = await createStudioBridge(() => {});
+    const body = Buffer.from(JSON.stringify({ ok: true, data: { artifact: {} } }));
+    mocks.callServerTool.mockResolvedValueOnce({
+      structuredContent: { ok: true },
+      _meta: {
+        response: {
+          status: 200,
+          size: body.length,
+          headers: { 'Content-Type': 'application/json' },
+          body: body.toString('base64'),
+        },
+      },
+    });
+
+    try {
+      await expect(
+        bridge.client.call('artifact_read', { artifactId: 'board', mode: 'board' }),
+      ).rejects.toMatchObject({ code: 'INVALID_RESPONSE', status: 200 });
+    } finally {
+      await bridge.close();
+      dom.window.close();
+    }
+  });
+});
+
+describe('host file downloads', () => {
+  function embedded() {
+    const dom = new JSDOM('<div></div>');
+    Object.defineProperty(dom.window, 'parent', { value: {} });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+
+    return dom;
+  }
+
+  it.each([
+    { code: ErrorCode.ConnectionClosed, expected: 'NETWORK_ERROR' },
+    { code: ErrorCode.RequestTimeout, expected: 'TIMEOUT' },
+  ])('normalizes an uncertain SDK request with code $code', async ({ code, expected }) => {
+    const dom = embedded();
+    const bridge = await createStudioBridge(() => {});
+    const failure = new McpError(code, 'Missing response');
+    mocks.callServerTool.mockRejectedValueOnce(failure);
+
+    try {
+      await expect(
+        bridge.client.call('artifact_apply', { artifactId: 'board' }),
+      ).rejects.toMatchObject({
+        code: expected,
+        cause: failure,
+      });
+    } finally {
+      await bridge.close();
+      dom.window.close();
+    }
+  });
+
+  it('preserves other SDK failures and definite business rejections', async () => {
+    const dom = embedded();
+    const bridge = await createStudioBridge(() => {});
+    const sdkFailure = new McpError(ErrorCode.InvalidRequest, 'Bad request');
+    mocks.callServerTool.mockRejectedValueOnce(sdkFailure).mockResolvedValueOnce({
+      isError: true,
+      structuredContent: {
+        ok: false,
+        error: { code: 'FORBIDDEN', message: '编辑权限已失效。', details: { reason: 'viewer' } },
+      },
+    });
+
+    try {
+      const argumentsForApply = { artifactId: 'board' };
+      await expect(bridge.client.call('artifact_apply', argumentsForApply)).rejects.toBe(
+        sdkFailure,
+      );
+      await expect(bridge.client.call('artifact_apply', argumentsForApply)).rejects.toMatchObject({
+        code: 'FORBIDDEN',
+        details: { reason: 'viewer' },
+      });
+    } finally {
+      await bridge.close();
+      dom.window.close();
+    }
+  });
+
+  it('sends original UTF-8 and binary bytes through a valid SDK embedded-resource request without credentials or a DOM download', async () => {
+    const dom = embedded();
+    const click = vi.spyOn(dom.window.HTMLAnchorElement.prototype, 'click');
+    mocks.capabilities = { downloadFile: {} };
+    mocks.downloadFile.mockResolvedValue({});
+    const bridge = await createStudioBridge(() => {});
+    const text = '<!doctype html><meta charset="utf-8"><h1>中文图解 🎨</h1>';
+    await downloadStudioBlob(
+      bridge.client,
+      new Blob([text], { type: 'text/html; charset=utf-8' }),
+      '中文图解.html',
+    );
+    const actualSdk = await vi.importActual<typeof import('@modelcontextprotocol/ext-apps')>(
+      '@modelcontextprotocol/ext-apps',
+    );
+    const params = mocks.downloadFile.mock.calls[0]![0];
+    expect(() =>
+      actualSdk.McpUiDownloadFileRequestSchema.parse({ method: 'ui/download-file', params }),
+    ).not.toThrow();
+    const [appTransport, hostTransport] = InMemoryTransport.createLinkedPair();
+    let hostRequest: unknown;
+    let rejectHostReply!: (error: unknown) => void;
+    const hostFailure = new Promise<never>((_resolve, reject) => {
+      rejectHostReply = reject;
+    });
+    const reply = (response: Parameters<typeof hostTransport.send>[0]) => {
+      hostTransport.send(response).catch(rejectHostReply);
+    };
+
+    hostTransport.onmessage = (message) => {
+      if (!('method' in message) || !('id' in message)) {
+        return;
+      }
+
+      if (message.method === 'ui/initialize') {
+        reply({
+          jsonrpc: '2.0',
+          id: message.id,
+          result: {
+            protocolVersion: actualSdk.LATEST_PROTOCOL_VERSION,
+            hostInfo: { name: 'Download test host', version: '1' },
+            hostCapabilities: { downloadFile: {} },
+            hostContext: {},
+          },
+        });
+      }
+      if (message.method === 'ui/download-file') {
+        hostRequest = message.params;
+        reply({ jsonrpc: '2.0', id: message.id, result: {} });
+      }
+    };
+
+    await hostTransport.start();
+    const sdkApp = new actualSdk.App(
+      { name: 'Download contract test', version: '1' },
+      {},
+      { autoResize: false },
+    );
+
+    try {
+      await Promise.race([sdkApp.connect(appTransport), hostFailure]);
+      await expect(Promise.race([sdkApp.downloadFile(params), hostFailure])).resolves.toEqual({});
+      expect(hostRequest).toEqual(params);
+    } finally {
+      await sdkApp.close();
+      await hostTransport.close();
+    }
+
+    expect(params.contents[0].resource.uri).toBe(
+      'file:///%E4%B8%AD%E6%96%87%E5%9B%BE%E8%A7%A3.html',
+    );
+    expect(Buffer.from(params.contents[0].resource.blob, 'base64').toString('utf8')).toBe(text);
+    expect(params.contents[0].resource.mimeType).toBe('text/html; charset=utf-8');
+    expect(JSON.stringify(params)).not.toContain('owner-secret');
+    expect(JSON.stringify(params)).not.toContain('127.0.0.1');
+    const bytes = Uint8Array.from([0, 255, 1, 128, 137, 80, 78, 71]);
+    await downloadStudioBlob(bridge.client, new Blob([bytes], { type: 'image/png' }), '图解.png');
+    expect(
+      Buffer.from(mocks.downloadFile.mock.calls[1]![0].contents[0].resource.blob, 'base64'),
+    ).toEqual(Buffer.from(bytes));
+    expect(click).not.toHaveBeenCalled();
+    await bridge.close();
+    dom.window.close();
+  });
+
+  it('reports missing capability, refusal, cancellation and the explicit inline-size limit without a DOM fallback', async () => {
+    const dom = embedded();
+    const click = vi.spyOn(dom.window.HTMLAnchorElement.prototype, 'click');
+    const bridge = await createStudioBridge(() => {});
+    const blob = new Blob(['中文'], { type: 'text/plain; charset=utf-8' });
+    await expect(downloadStudioBlob(bridge.client, blob, '原图.txt')).rejects.toThrow(
+      '不支持文件下载',
+    );
+    expect(mocks.downloadFile).not.toHaveBeenCalled();
+    mocks.capabilities = { downloadFile: {} };
+    mocks.downloadFile.mockResolvedValueOnce({ isError: true });
+    await expect(downloadStudioBlob(bridge.client, blob, '原图.txt')).rejects.toThrow(
+      '未完成文件下载',
+    );
+    mocks.downloadFile.mockRejectedValueOnce(new Error('User cancelled download'));
+    await expect(downloadStudioBlob(bridge.client, blob, '原图.txt')).rejects.toThrow(
+      'User cancelled',
+    );
+    const atLimit = new Blob(['boundary sample']);
+    Object.defineProperty(atLimit, 'size', { value: APP_MAX_BYTES });
+    mocks.downloadFile.mockResolvedValueOnce({});
+    await expect(downloadStudioBlob(bridge.client, atLimit, '备份.zip')).resolves.toBeUndefined();
+    const huge = new Blob();
+    Object.defineProperty(huge, 'size', { value: APP_MAX_BYTES + 1 });
+    const readHuge = vi.spyOn(huge, 'arrayBuffer');
+    await expect(downloadStudioBlob(bridge.client, huge, '大图.zip')).rejects.toThrow(
+      '128 MB 预算',
+    );
+    expect(readHuge).not.toHaveBeenCalled();
+    await expect(downloadStudioBlob(bridge.client, blob, '../escape.txt')).rejects.toThrow(
+      '文件名无效',
+    );
+    expect(click).not.toHaveBeenCalled();
+    await bridge.close();
+    dom.window.close();
+  });
+
+  it('fetches exports over the embedded request transport and waits for host confirmation', async () => {
+    const blob = new Blob(['中文下载'], { type: 'text/html; charset=utf-8' });
+    const request = vi.fn(async () => new Response(blob));
+    let confirm!: () => void;
+    const downloadFile = vi.fn(
+      (_blob: Blob, _filename: string) =>
+        new Promise<void>((resolve) => {
+          confirm = resolve;
+        }),
+    );
+    const client: StudioClient = {
+      embedded: true,
+      baseUrl: 'http://127.0.0.1:5000',
+      token: 'owner-secret',
+      request,
+      downloadFile,
+      call: vi.fn(),
+    };
+    let saved = false;
+    const done = downloadStudioFile(client, '/api/exports/export-one', '图解.html').then(() => {
+      saved = true;
+    });
+    await vi.waitFor(() => expect(downloadFile).toHaveBeenCalledOnce());
+    expect(saved).toBe(false);
+    expect(await downloadFile.mock.calls[0]![0].text()).toBe('中文下载');
+    confirm();
+    await done;
+    expect(saved).toBe(true);
+    await expect(
+      downloadStudioBlob({ ...client, downloadFile: undefined }, blob, '图解.html'),
+    ).rejects.toThrow('未提供文件下载能力');
+  });
+
+  it('retains a normal browser Blob download with the original filename and releases its URL', async () => {
+    vi.useFakeTimers();
+    const dom = new JSDOM('<div></div>');
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    let filename = '';
+    const click = vi
+      .spyOn(dom.window.HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        filename = this.download;
+      });
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:web-download');
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    await downloadStudioBlob(
+      { embedded: false, call: vi.fn() },
+      new Blob(['中文']),
+      '网页图解.html',
+    );
+    expect(click).toHaveBeenCalledOnce();
+    expect(filename).toBe('网页图解.html');
+    expect(dom.window.document.querySelector('a')).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(revoke).toHaveBeenCalledWith('blob:web-download');
+    dom.window.close();
+  });
+
+  it.each(['html', 'svg', 'json'])(
+    'passes browser-rendered %s export bytes into the supplied host save callback',
+    async (format) => {
+      const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000' });
+      vi.stubGlobal('window', dom.window);
+      vi.stubGlobal('document', dom.window.document);
+      vi.stubGlobal('location', dom.window.location);
+      vi.stubGlobal('DOMParser', dom.window.DOMParser);
+      const board: Board = {
+        artifact: {
+          id: 'board',
+          type: 'whiteboard',
+          title: '中文白板',
+          revision: 1,
+          pinned: false,
+          createdAt: '',
+          updatedAt: '',
+        },
+        style: DEFAULT_STYLE,
+        elements: [
+          {
+            id: 'region',
+            type: 'html',
+            x: 0,
+            y: 0,
+            w: 200,
+            h: 100,
+            version: 1,
+            text: '中文图解',
+            html: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text>中文内容</text></svg>',
+          },
+        ],
+      };
+      const save = vi.fn(async (_blob: Blob, _filename: string) => {});
+      const click = vi.spyOn(dom.window.HTMLAnchorElement.prototype, 'click');
+      await downloadBoard(board, format, { regionId: 'region' }, save);
+      expect(save).toHaveBeenCalledOnce();
+      expect(save.mock.calls[0]![1]).toBe(`中文图解.${format}`);
+      expect(await save.mock.calls[0]![0].text()).toContain('中文内容');
+      expect(save.mock.calls[0]![0].type).toContain('charset=utf-8');
+      expect(click).not.toHaveBeenCalled();
+      dom.window.close();
+    },
+  );
+
+  it('routes browser-rendered PNG through the same save callback and propagates a failed host acknowledgement', async () => {
+    const dom = new JSDOM('<div></div>', { url: 'http://127.0.0.1:5000' });
+    vi.stubGlobal('window', dom.window);
+    vi.stubGlobal('document', dom.window.document);
+    vi.stubGlobal('location', dom.window.location);
+    vi.stubGlobal(
+      'Image',
+      class {
+        onload: (() => void) | null = null;
+        set src(_value: string) {
+          queueMicrotask(() => this.onload?.());
+        }
+      },
+    );
+    vi.spyOn(dom.window.HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage: vi.fn(),
+      getImageData: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    const png = new Blob([Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])], {
+      type: 'image/png',
+    });
+    vi.spyOn(dom.window.HTMLCanvasElement.prototype, 'toBlob').mockImplementation((callback) =>
+      callback(png),
+    );
+    const board: Board = {
+      artifact: {
+        id: 'board',
+        type: 'whiteboard',
+        title: '原生图形',
+        revision: 1,
+        pinned: false,
+        createdAt: '',
+        updatedAt: '',
+      },
+      style: DEFAULT_STYLE,
+      elements: [{ id: 'shape', type: 'shape', x: 0, y: 0, w: 100, h: 100, version: 1 }],
+    };
+    const save = vi.fn(async (_blob: Blob, _filename: string) => {});
+    const click = vi.spyOn(dom.window.HTMLAnchorElement.prototype, 'click');
+    await downloadBoard(board, 'png', {}, save);
+    expect(save).toHaveBeenCalledExactlyOnceWith(png, '原生图形.png');
+    expect(click).not.toHaveBeenCalled();
+    save.mockRejectedValueOnce(new Error('Host download refused'));
+    await expect(downloadBoard(board, 'png', {}, save)).rejects.toThrow('Host download refused');
+    dom.window.close();
+  });
+});

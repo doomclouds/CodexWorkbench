@@ -17,8 +17,8 @@
       "category": "Productivity"
     },
     {
-      "name": "agentero-studio",
-      "source": { "source": "local", "path": "./plugins/agentero-studio" },
+      "name": "luming-studio",
+      "source": { "source": "local", "path": "./plugins/luming-studio" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Productivity"
     }

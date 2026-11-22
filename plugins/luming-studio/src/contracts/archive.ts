@@ -1,0 +1,2 @@
+export const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024;
+export const MAX_ARCHIVE_ASSET_BYTES = 20 * 1024 * 1024;

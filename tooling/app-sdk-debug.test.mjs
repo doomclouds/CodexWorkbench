@@ -14,9 +14,22 @@ test('production protocol handling omits payload debug but still delivers messag
     console.debug('Sending message', payload);
     if (payload) console.debug('Parsed message', payload), deliver(payload);
     console.error('protocol error'); console.warn('actionable warning');`;
-  const result = await plugin.transform(input, 'C:/node_modules/@modelcontextprotocol/ext-apps/dist/src/app.js');
-  const debug = [], errors = [], warnings = [], messages = [];
-  runInNewContext(result.code, { console: { debug: (...args) => debug.push(args), error: message => errors.push(message), warn: message => warnings.push(message) }, deliver: message => messages.push(message) });
+  const result = await plugin.transform(
+    input,
+    'C:/node_modules/@modelcontextprotocol/ext-apps/dist/src/app.js',
+  );
+  const debug = [];
+  const errors = [];
+  const warnings = [];
+  const messages = [];
+  runInNewContext(result.code, {
+    console: {
+      debug: (...args) => debug.push(args),
+      error: (message) => errors.push(message),
+      warn: (message) => warnings.push(message),
+    },
+    deliver: (message) => messages.push(message),
+  });
   assert.equal(debug.length, 0);
   assert.equal(messages[0].base64, 'private-pdf-bytes');
   assert.deepEqual(errors, ['protocol error']);
@@ -24,6 +37,15 @@ test('production protocol handling omits payload debug but still delivers messag
 });
 
 test('does not rewrite application code or worker raw strings', async () => {
-  assert.equal(await plugin.transform('console.debug("app diagnostic")', 'C:/work/src/app/bridge.ts'), null);
-  assert.equal(await plugin.transform('console.debug("worker")', 'C:/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?raw'), null);
+  assert.equal(
+    await plugin.transform('console.debug("app diagnostic")', 'C:/work/src/app/bridge.ts'),
+    null,
+  );
+  assert.equal(
+    await plugin.transform(
+      'console.debug("worker")',
+      'C:/node_modules/pdfjs-dist/build/pdf.worker.min.mjs?raw',
+    ),
+    null,
+  );
 });

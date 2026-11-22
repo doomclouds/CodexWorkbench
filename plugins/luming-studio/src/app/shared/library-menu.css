@@ -1,0 +1,9 @@
+.studio .studio-library-floating-menu {
+  z-index: 100;
+  right: auto;
+  bottom: auto;
+  width: max-content;
+  min-width: 172px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

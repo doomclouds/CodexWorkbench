@@ -1,0 +1,295 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+import { connectStudio, writeRecord } from '../../src/server/client.js';
+import { startStudioHost, type StudioHost } from '../../src/server/http.js';
+import { createAppTransport } from '../../src/server/app-transport.js';
+import { createAppTransferSpool } from '../../src/server/studio-composition.js';
+import { LOCAL_ACTOR } from '../../src/contracts/studio.js';
+import {
+  APP_CHUNK_BYTES,
+  type AppDownloadResult,
+  type AppResponse,
+  type AppUploadResult,
+} from '../../src/contracts/transport.js';
+
+let directory: string;
+let host: StudioHost;
+let client: Awaited<ReturnType<typeof connectStudio>>;
+let transport: ReturnType<typeof createAppTransport>;
+beforeEach(async () => {
+  directory = await mkdtemp(join(tmpdir(), 'luming-studio-app-http-'));
+  host = await startStudioHost({ dataRoot: directory });
+  await writeRecord(directory, {
+    origin: host.origin,
+    token: host.token,
+    pid: process.pid,
+    instanceId: randomUUID(),
+  });
+  client = await connectStudio(directory);
+  transport = createAppTransport(client.requestUi);
+});
+afterEach(async () => {
+  await transport?.close();
+  await client?.close();
+  await host?.close();
+  if (!resolve(directory).startsWith(resolve(tmpdir()) + sep)) {
+    throw new Error('Unexpected test directory');
+  }
+
+  await rm(directory, { recursive: true, force: true });
+});
+
+async function ui(name: string, args: Record<string, unknown>) {
+  const reply = (await transport.execute({
+    action: 'request',
+    path: `/api/tools/${name}`,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: Buffer.from(JSON.stringify(args)).toString('base64'),
+  })) as AppResponse;
+  expect(reply.status).toBe(200);
+
+  return JSON.parse(Buffer.from(reply.body!, 'base64').toString()).data;
+}
+
+describe('UI requests through the real connected authority', () => {
+  it('downloads and restores a ZIP across the real owner HTTP bridge using disk spools', async () => {
+    const created = await ui('artifact_manage', { action: 'create', title: 'Spool roundtrip' });
+    const media = randomBytes(9 * APP_CHUNK_BYTES);
+    Buffer.from('89504e470d0a1a0a', 'hex').copy(media);
+    const asset = await host.service.putAsset(
+      created.artifact.id,
+      media,
+      { filename: 'spool.png', mimeType: 'image/png' },
+      LOCAL_ACTOR,
+    );
+    await ui('artifact_apply', {
+      artifactId: created.artifact.id,
+      operations: [{ op: 'add', element: { id: 'image', type: 'image', src: asset.url } }],
+    });
+    const exported = await ui('artifact_export', {
+      artifactId: created.artifact.id,
+      format: 'zip',
+    });
+    const spools: ReturnType<typeof vi.spyOn>[] = [];
+    const factory = vi.fn(async () => {
+      const file = await createAppTransferSpool();
+      spools.push(vi.spyOn(file, 'dispose'));
+
+      return file;
+    });
+    await transport.close();
+    transport = createAppTransport(client.requestUi, factory);
+
+    const downloaded = (await transport.execute({
+      action: 'request',
+      path: exported.downloadPath,
+      method: 'GET',
+    })) as AppResponse;
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers['content-type']).toBe('application/zip');
+    expect(downloaded.size).toBeGreaterThan(1024 * 1024);
+    expect(downloaded.body).toBeUndefined();
+    expect(factory).toHaveBeenCalledTimes(1);
+    let uploadId: string | undefined;
+    for (let offset = 0; offset < downloaded.size;) {
+      const packet = (await transport.execute({
+        action: 'download',
+        transferId: downloaded.downloadId!,
+        offset,
+      })) as AppDownloadResult;
+      const uploaded = (await transport.execute({
+        action: 'upload',
+        transferId: uploadId,
+        size: downloaded.size,
+        offset,
+        data: packet.data,
+      })) as AppUploadResult;
+      expect(uploaded.nextOffset).toBe(packet.nextOffset);
+      expect(packet.done).toBe(packet.nextOffset === downloaded.size);
+      offset = uploaded.nextOffset;
+      uploadId = uploaded.transferId;
+    }
+    await expect(
+      transport.execute({ action: 'release', transferId: downloaded.downloadId! }),
+    ).resolves.toEqual({ released: true });
+
+    const restored = (await transport.execute({
+      action: 'request',
+      path: '/api/import',
+      method: 'POST',
+      headers: { 'content-type': 'application/zip' },
+      uploadId,
+    })) as AppResponse;
+    expect(restored.status).toBe(200);
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(spools.every((dispose) => dispose.mock.calls.length === 1)).toBe(true);
+    const { data } = JSON.parse(Buffer.from(restored.body!, 'base64').toString());
+    expect(data.artifact.id).not.toBe(created.artifact.id);
+    expect(data.artifact.importedFrom.artifactId).toBe(created.artifact.id);
+    const importedAsset = await client.requestUi({
+      method: 'GET',
+      path: data.board.elements[0].src,
+      headers: {},
+    });
+    expect(Buffer.from(await importedAsset.arrayBuffer())).toEqual(media);
+    await expect(transport.execute({ action: 'release', transferId: uploadId! })).resolves.toEqual({
+      released: false,
+    });
+  });
+
+  it('injects the owner token and keeps human UI authors separate from agent tools', async () => {
+    const session = await client.requestUi({ path: '/api/session', method: 'GET', headers: {} });
+    expect(session.status).toBe(200);
+    expect(await session.json()).toMatchObject({
+      owner: true,
+      actor: { id: 'local', kind: 'human', role: 'owner' },
+    });
+    const created = await ui('artifact_manage', { action: 'create', title: 'Human-created board' });
+    const human = await ui('artifact_apply', {
+      artifactId: created.artifact.id,
+      operationId: randomUUID(),
+      operations: [
+        { op: 'add', element: { id: 'human-object', type: 'text', text: 'Human input' } },
+      ],
+    });
+    expect(human.board.elements).toHaveLength(1);
+    expect(human.historyEntry.actor).toMatchObject({ id: 'local', kind: 'human', role: 'owner' });
+    const declared = (await client.execute('artifact_activity', {
+      artifactId: created.artifact.id,
+      action: 'begin',
+      taskId: 'agent-input',
+      phase: 'writing',
+      scope: { rect: { x: 400, y: 80, w: 400, h: 200 } },
+    })) as { tasks: { generation: string }[] };
+    const binding = { taskId: 'agent-input', generation: declared.tasks[0]!.generation };
+    const agent = (await client.execute('artifact_apply', {
+      artifactId: created.artifact.id,
+      ...binding,
+      operationId: randomUUID(),
+      operations: [
+        {
+          op: 'add',
+          element: {
+            id: 'agent-object',
+            type: 'text',
+            x: 420,
+            y: 100,
+            w: 200,
+            h: 80,
+            text: 'Agent input',
+          },
+        },
+      ],
+    })) as any;
+    expect(agent.historyEntry.actor).toMatchObject({
+      id: expect.stringMatching(/^agent-/),
+      kind: 'agent',
+      role: 'owner',
+    });
+    const released = await ui('artifact_activity', {
+      artifactId: created.artifact.id,
+      action: 'release',
+      targetActorId: agent.historyEntry.actor.id,
+      ...binding,
+    });
+    expect(released.tasks).toEqual([]);
+    await expect(
+      client.execute('artifact_apply', {
+        artifactId: created.artifact.id,
+        ...binding,
+        expectedVersions: { 'agent-object': 1 },
+        operations: [{ op: 'update', id: 'agent-object', changes: { text: 'Late Agent input' } }],
+      }),
+    ).rejects.toMatchObject({ code: 'TASK_CLOSED' });
+    const continued = await ui('artifact_apply', {
+      artifactId: created.artifact.id,
+      expectedVersions: { 'agent-object': 1 },
+      operations: [
+        { op: 'update', id: 'agent-object', changes: { text: 'Human remains allowed' } },
+      ],
+    });
+    expect(continued.historyEntry.actor.kind).toBe('human');
+  });
+
+  it('rejects credential and identity injection before contacting HTTP', async () => {
+    await expect(
+      client.requestUi({
+        path: '/api/session',
+        method: 'GET',
+        headers: { Authorization: 'Bearer attacker' },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      client.requestUi({
+        path: '/api/session',
+        method: 'GET',
+        headers: { 'X-Studio-Actor': 'agent' },
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      client.requestUi({ path: 'https://example.com/api/session', method: 'GET', headers: {} }),
+    ).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    const response = await client.requestUi({ path: '/api/session', method: 'GET', headers: {} });
+    expect(response.status).toBe(200);
+  });
+
+  it('fetches a real listed thumbnail with its revision through the RPC envelope', async () => {
+    const created = await ui('artifact_manage', { action: 'create', title: 'Versioned thumbnail' });
+    await ui('artifact_apply', {
+      artifactId: created.artifact.id,
+      operationId: randomUUID(),
+      operations: [
+        { op: 'add', element: { id: 'preview-text', type: 'text', text: 'Thumbnail content' } },
+      ],
+    });
+    const listed = await ui('artifact_list', {});
+    const artifact = listed.artifacts.find(
+      (value: { id: string }) => value.id === created.artifact.id,
+    );
+    expect(artifact.thumbnail).toMatch(/\/api\/thumbnails\/[^?]+\?revision=\d+$/);
+    const direct = await client.requestUi({ path: artifact.thumbnail, method: 'GET', headers: {} });
+    expect(direct.status).toBe(200);
+    const expected = Buffer.from(await direct.arrayBuffer());
+    const reply = (await transport.execute({
+      action: 'request',
+      path: artifact.thumbnail,
+      method: 'GET',
+    })) as AppResponse;
+    expect(reply.status).toBe(200);
+    expect(reply.headers['content-type']).toBe(direct.headers.get('content-type'));
+    expect(reply.headers['content-type']).toMatch(/^image\/(?:svg\+xml|png)/);
+    expect(reply.size).toBe(expected.length);
+    expect(reply.size).toBeGreaterThan(0);
+    expect(Buffer.from(reply.body!, 'base64')).toEqual(expected);
+  });
+
+  it('does not expose the removed external HTML reader routes', async () => {
+    const paths = ['/api/region-view', '/api/region-reader/board/html', '/region/board/html'];
+    for (const path of paths) {
+      expect(
+        (
+          await fetch(`${host.origin}${path}`, {
+            headers: { Authorization: `Bearer ${host.token}` },
+          })
+        ).status,
+      ).toBe(404);
+      await expect(
+        transport.execute({ action: 'request', path, method: 'GET' }),
+      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    }
+
+    expect(
+      (
+        await fetch(`${host.origin}/api/region-view`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${host.token}`, 'Content-Type': 'application/json' },
+          body: '{}',
+        })
+      ).status,
+    ).toBe(404);
+  });
+});
