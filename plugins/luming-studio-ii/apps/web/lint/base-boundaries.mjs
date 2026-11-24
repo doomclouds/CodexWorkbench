@@ -5,6 +5,7 @@ import noBrowserIo from './browser-capabilities.mjs';
 
 const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url));
 const baseRoot = resolve(sourceRoot, 'ui/base');
+const internalRoot = resolve(baseRoot, 'internal');
 const publicEntry = resolve(baseRoot, 'index');
 const testsRoot = fileURLToPath(new URL('../tests/', import.meta.url));
 const componentTests = resolve(testsRoot, 'component');
@@ -97,6 +98,7 @@ const contractBoundary = {
     const file = context.physicalFilename;
     const fileStem = file.replace(scriptExtension, '');
     const fromBase = contains(baseRoot, file);
+    const fromInternal = contains(internalRoot, file);
     const fromSource = contains(sourceRoot, file);
     const fromTests = contains(testsRoot, file);
     const baseSuite = isBaseSuite(file);
@@ -123,6 +125,7 @@ const contractBoundary = {
       const target = resolve(dirname(file), specifier.split(/[?#]/u)[0]);
       const targetStem = target.replace(scriptExtension, '');
       const targetInBase = contains(baseRoot, target);
+      const targetInternal = contains(internalRoot, target);
       const fixture = fixtureRoots.some((directory) => contains(directory, target));
 
       if (baseSuite && !fixture && !targetInBase) {
@@ -140,6 +143,14 @@ const contractBoundary = {
 
       if (specifier.includes('?') || specifier.includes('#')) {
         context.report({ node, messageId: 'private' });
+        return;
+      }
+
+      if (fromInternal && !targetInternal) {
+        context.report({ node, messageId: 'private' });
+        return;
+      }
+      if (fromBase && targetInternal) {
         return;
       }
 

@@ -1,0 +1,25 @@
+.studio-ui-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-inline-size: 0;
+}
+
+.studio-ui-range input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 2.25rem;
+  margin: 0;
+  accent-color: var(--studio-ui-accent, Highlight);
+}
+
+.studio-ui-range input:focus-visible {
+  outline: 2px solid var(--studio-ui-focus, Highlight);
+  outline-offset: 2px;
+}
+
+.studio-ui-range__value {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}

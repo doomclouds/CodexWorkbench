@@ -1,0 +1,15 @@
+.studio-ui-anchored-popover {
+  position: fixed;
+  z-index: 1;
+  visibility: hidden;
+  max-inline-size: calc(100vw - 1rem);
+  max-block-size: calc(100dvh - 1rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.75rem;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: var(--studio-ui-radius, 0.75rem);
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+  box-shadow: 0 0.75rem 3rem var(--studio-ui-shadow, rgb(0 0 0 / 22%));
+}

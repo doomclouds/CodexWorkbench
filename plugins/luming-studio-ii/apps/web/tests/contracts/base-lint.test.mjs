@@ -80,6 +80,18 @@ const rejected = [
     boundary,
   ],
   [
+    'application imports a base internal utility',
+    'src/pages/board.ts',
+    "import { useAnchoredLayer } from '../ui/base/internal/anchored-layer.js';",
+    boundary,
+  ],
+  [
+    'base internal utility imports a public control',
+    'src/ui/base/internal/anchored-layer.ts',
+    "import { Button } from '../Button/Button.js';",
+    boundary,
+  ],
+  [
     'dependency on a Surface',
     'src/ui/base/Button/Button.tsx',
     "import { save } from '../../../surfaces/board.js';",
@@ -203,6 +215,15 @@ test('accepts a local collaborator with a browser-like name', async () => {
   const [result] = await eslint.lintText(source, {
     filePath: 'src/ui/base/Button/Button.tsx',
   });
+
+  assert.deepEqual(result.messages, []);
+});
+
+test('allows a control to use base internal utilities', async () => {
+  const [result] = await eslint.lintText(
+    "import { useAnchoredLayer } from '../internal/anchored-layer.js';",
+    { filePath: 'src/ui/base/AnchoredPopover/AnchoredPopover.tsx' },
+  );
 
   assert.deepEqual(result.messages, []);
 });
