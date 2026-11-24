@@ -50,16 +50,58 @@ const rejected = [
     boundary,
   ],
   [
+    'base fixture re-exports a Surface',
+    'tests/support/render-control.ts',
+    "export { save } from '../../src/surfaces/board.js';",
+    boundary,
+  ],
+  [
+    'base suite uses an unrelated fixture to load a Surface',
+    'tests/component/Button.test.tsx',
+    "import { save } from '../support/board.js';",
+    boundary,
+  ],
+  [
     'replacement of the tested controls',
     'tests/component/board.test.tsx',
     "vi.mock('../../src/ui/base/index.js', createMock);",
-    boundary,
+    'base/test-contract',
+  ],
+  [
+    'mock called through an alias',
+    'tests/component/Button.test.tsx',
+    "import { vi as mocker } from 'vitest';\n\nmocker.mock('../../src/ui/base/index.js', makeMock);",
+    'base/test-contract',
+  ],
+  [
+    'spy replacing a control export',
+    'tests/component/Button.test.tsx',
+    "import * as controls from '../../src/ui/base/index.js';\n\nvi.spyOn(controls, 'Button');",
+    'base/test-contract',
   ],
   [
     'skipped contract test',
     'tests/component/board.test.tsx',
     "it.skip('uses the control', check);",
-    'no-restricted-syntax',
+    'base/test-contract',
+  ],
+  [
+    'skip called through an alias',
+    'tests/component/Button.test.tsx',
+    "import { it as scenario } from 'vitest';\n\nscenario.skip('checks behavior', check);",
+    'base/test-contract',
+  ],
+  [
+    'conditionally skipped control test',
+    'tests/component/Button.test.tsx',
+    "import { it } from 'vitest';\n\nit.skipIf(true)('checks behavior', check);",
+    'base/test-contract',
+  ],
+  [
+    'conditionally excluded control test',
+    'tests/component/Button.test.tsx',
+    "import { it } from 'vitest';\n\nit.runIf(false)('checks behavior', check);",
+    'base/test-contract',
   ],
   [
     'lazy deep import',
@@ -128,6 +170,12 @@ const rejected = [
     'base/no-browser-io',
   ],
   [
+    'network through an element realm',
+    'src/ui/base/Button/Button.tsx',
+    "function load(element) { element.ownerDocument.defaultView?.fetch('/save'); }",
+    'base/no-browser-io',
+  ],
+  [
     'direct host bridge',
     'src/ui/base/Dialog/Dialog.tsx',
     'window.parent.postMessage(message);',
@@ -165,6 +213,24 @@ const rejected = [
     'src/ui/base/Button/Button.tsx',
     'export interface ButtonProps { ref: Ref<HTMLButtonElement> }',
     boundary,
+  ],
+  [
+    'control signature bypasses its declared Props',
+    'src/ui/base/Button/Button.tsx',
+    [
+      "import type { ComponentPropsWithRef } from 'react';",
+      '',
+      'export interface ButtonProps { label: string }',
+      '',
+      "export function Button(props: ComponentPropsWithRef<'button'>) { return <button>{props.children}</button>; }",
+    ].join('\n'),
+    boundary,
+  ],
+  [
+    'prop spreading onto a native element',
+    'src/ui/base/Button/Button.tsx',
+    'export function Button(props: ButtonProps) { return <button {...props} />; }',
+    'no-restricted-syntax',
   ],
   [
     'extra runtime handle',
@@ -224,6 +290,19 @@ test('allows a control to use base internal utilities', async () => {
     "import { useAnchoredLayer } from '../internal/anchored-layer.js';",
     { filePath: 'src/ui/base/AnchoredPopover/AnchoredPopover.tsx' },
   );
+
+  assert.deepEqual(result.messages, []);
+});
+
+test('accepts the package public entry and unrelated local metadata', async () => {
+  const source = [
+    "import { Button } from '@codexworkbench/luming-studio-ii-web/ui/base';",
+    '',
+    "const test = { todo: 'local metadata' };",
+    'Object.keys(test.todo);',
+    'Object.keys(Button);',
+  ].join('\n');
+  const [result] = await eslint.lintText(source, { filePath: 'tests/component/Button.test.tsx' });
 
   assert.deepEqual(result.messages, []);
 });

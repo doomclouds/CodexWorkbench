@@ -1,0 +1,23 @@
+.studio-ui-operation-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: var(--studio-ui-radius, 0.75rem);
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+}
+
+.studio-ui-operation-notice__message {
+  flex: 1 1 12rem;
+  min-inline-size: 0;
+}
+
+.studio-ui-operation-notice__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}

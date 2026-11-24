@@ -1,0 +1,26 @@
+.studio-ui-scroll-region {
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+.studio-ui-scroll-region[data-axis='vertical'] {
+  overflow-y: auto;
+}
+
+.studio-ui-scroll-region[data-axis='horizontal'] {
+  overflow-x: auto;
+}
+
+.studio-ui-scroll-region[data-axis='both'] {
+  overflow: auto;
+}
+
+.studio-ui-scroll-region[data-contain='true'] {
+  overscroll-behavior: contain;
+}
+
+.studio-ui-scroll-region:focus-visible {
+  outline: 2px solid var(--studio-ui-focus-ring, Highlight);
+  outline-offset: 2px;
+}

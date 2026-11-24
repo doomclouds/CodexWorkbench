@@ -1,3 +1,5 @@
+import { bindingOf } from './scope.mjs';
+
 export const browserCapabilities = [
   'fetch',
   'XMLHttpRequest',
@@ -18,20 +20,6 @@ const restrictedMembers = new Map([
 
 function propertyName(property, computed) {
   return computed || property.type === 'Literal' ? property.value : property.name;
-}
-
-function bindingOf(sourceCode, identifier) {
-  let scope = sourceCode.getScope(identifier);
-  while (scope) {
-    const variable = scope.set.get(identifier.name);
-    if (variable) {
-      return variable;
-    }
-
-    scope = scope.upper;
-  }
-
-  return undefined;
 }
 
 function identifierObject(sourceCode, identifier, visited) {
@@ -65,8 +53,15 @@ function browserObject(sourceCode, expression, visited = new Set()) {
   }
 
   const parent = browserObject(sourceCode, expression.object, visited);
+  const property = propertyName(expression.property, expression.computed);
   if (browserGlobals.has(parent)) {
-    return propertyName(expression.property, expression.computed);
+    return property;
+  }
+  if (property === 'ownerDocument') {
+    return 'document';
+  }
+  if (parent === 'document' && property === 'defaultView') {
+    return 'window';
   }
 
   return undefined;

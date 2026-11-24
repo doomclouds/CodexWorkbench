@@ -1,0 +1,40 @@
+.studio-ui-state-panel {
+  display: grid;
+  justify-items: start;
+  gap: 0.875rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: var(--studio-ui-radius, 0.75rem);
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+}
+
+.studio-ui-state-panel__message {
+  display: grid;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-ui-state-panel__title,
+.studio-ui-state-panel__detail {
+  margin: 0;
+}
+
+.studio-ui-state-panel__title {
+  font-weight: 600;
+}
+
+.studio-ui-state-panel[data-kind='error'] .studio-ui-state-panel__title {
+  color: var(--studio-ui-danger, color-mix(in srgb, #c22e24 74%, CanvasText));
+}
+
+.studio-ui-state-panel__detail {
+  color: var(--studio-ui-muted, CanvasText);
+}
+
+.studio-ui-state-panel__action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}

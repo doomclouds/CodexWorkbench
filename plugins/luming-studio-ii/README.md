@@ -54,9 +54,9 @@ luming-studio-ii/
 
 ## 基础控件
 
-使用 `apps/web/src/ui/base/index.ts` 公开的组件、Props 和句柄。属性和事件描述可观察的状态与操作，句柄只提供声明过的交互方法。控件之间依赖对方的公开组件和类型。网络、持久化和宿主能力通过应用层接入。
+使用 Web 包的 `@codexworkbench/luming-studio-ii-web/ui/base` 或对应的 `apps/web/src/ui/base/index.ts` 入口。属性和事件描述可观察的状态与操作，句柄只提供声明过的交互方法。控件之间依赖对方的公开组件和类型。网络、持久化和宿主能力通过应用层接入。
 
-每个公开控件在 `apps/web/tests/component/` 提供同名 `.test.tsx` 文件，从公开入口验收属性、事件和句柄。Lint 在 `src` 和 `tests` 检查通用规范及导入边界，禁止测试替换被测控件或跳过用例。
+每个公开控件在 `apps/web/tests/component/` 提供同名 `.test.tsx` 文件，从公开入口验收属性、事件和句柄。测试使用受同一边界约束的基础控件夹具。Lint 在 `src` 和 `tests` 检查通用规范及导入边界，禁止测试替换被测控件或跳过用例。
 
 ```sh
 pnpm --filter @codexworkbench/luming-studio-ii-web check

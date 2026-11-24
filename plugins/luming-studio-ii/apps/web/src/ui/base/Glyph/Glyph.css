@@ -1,0 +1,17 @@
+.studio-ui-glyph {
+  display: inline-grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  flex: none;
+  inline-size: 1em;
+  block-size: 1em;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.studio-ui-glyph > :is(svg, img) {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}

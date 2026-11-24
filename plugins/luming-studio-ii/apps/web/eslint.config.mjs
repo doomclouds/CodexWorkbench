@@ -69,22 +69,22 @@ export default defineConfig([
       'no-restricted-globals': ['error', 'require', ...baseGlobals],
       'base/no-browser-io': 'error',
       'studio/no-stringified-comparison': 'error',
+      'no-restricted-syntax': [
+        'error',
+        ...errorHandlingSyntax,
+        ...indirectImports,
+        {
+          selector: 'JSXOpeningElement[name.name=/^[a-z]/] > JSXSpreadAttribute',
+          message: 'Map the declared capabilities explicitly when rendering native elements.',
+        },
+      ],
     },
   },
   {
     files: ['tests/' + scripts],
     rules: {
       'max-nested-callbacks': ['error', 5],
-      'no-restricted-syntax': [
-        'error',
-        ...errorHandlingSyntax,
-        ...indirectImports,
-        {
-          selector:
-            'MemberExpression[object.name=/^(test|it|describe)$/][property.name=/^(only|skip|todo)$/]',
-          message: 'Run every declared contract test.',
-        },
-      ],
+      'base/test-contract': 'error',
     },
   },
 ]);

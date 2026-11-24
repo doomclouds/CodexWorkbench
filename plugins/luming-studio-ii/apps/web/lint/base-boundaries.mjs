@@ -1,26 +1,35 @@
 import { existsSync } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { basename, dirname, relative, resolve, sep } from 'node:path';
 import noBrowserIo from './browser-capabilities.mjs';
+import {
+  aliasTargets,
+  baseRoot,
+  contains,
+  publicSpecifier,
+  sourceRoot,
+  testsRoot,
+} from './project-paths.mjs';
+import testContract from './test-contract.mjs';
 
-const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url));
-const baseRoot = resolve(sourceRoot, 'ui/base');
 const internalRoot = resolve(baseRoot, 'internal');
 const publicEntry = resolve(baseRoot, 'index');
-const testsRoot = fileURLToPath(new URL('../tests/', import.meta.url));
 const componentTests = resolve(testsRoot, 'component');
-const fixtureRoots = ['support', 'fixtures'].map((name) => resolve(testsRoot, name));
+const fixtureRoots = ['support/base-ui', 'fixtures/base-ui'].map((name) =>
+  resolve(testsRoot, name),
+);
+const fixtureEntries = new Set(
+  ['render-control', 'setup'].map((name) => resolve(testsRoot, 'support', name)),
+);
 const libraries = new Set(['react', 'react-dom', 'react/jsx-runtime']);
 const testLibraries = new Set([...libraries, 'react-dom/client', 'vitest']);
 const componentName = /^[A-Z][A-Za-z0-9]*$/u;
 const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const absoluteSpecifier = /^(?:[\\/]|[a-z][a-z0-9+.-]*:\/\/|file:)/iu;
-const moduleMockMethods = new Set(['mock', 'doMock', 'importMock']);
 
-function contains(directory, file) {
-  const path = relative(directory, file);
+function baseFixture(file) {
+  const stem = file.replace(scriptExtension, '');
 
-  return path !== '..' && !path.startsWith('..' + sep) && !isAbsolute(path);
+  return fixtureEntries.has(stem) || fixtureRoots.some((directory) => contains(directory, file));
 }
 
 function entryComponent(file) {
@@ -86,11 +95,11 @@ const contractBoundary = {
       absolute: 'Use relative source imports or a public package entry.',
       export: 'Export only the named component and its explicit public types.',
       props: 'Export {{component}}Props alongside the public component.',
+      signature: 'Use the explicit {{component}}Props type in the public component signature.',
       test: 'Add tests/component/{{component}}.test.tsx to verify the public control contract.',
       ref: 'Declare public ref as Ref<{{component}}Handle> with an explicit capability handle.',
       handle: 'Expose exactly the methods declared in the public {{component}}Handle.',
       shape: 'Declare the public prop names explicitly.',
-      mock: 'Exercise real base controls from their public entry.',
     },
   },
 
@@ -100,8 +109,7 @@ const contractBoundary = {
     const fromBase = contains(baseRoot, file);
     const fromInternal = contains(internalRoot, file);
     const fromSource = contains(sourceRoot, file);
-    const fromTests = contains(testsRoot, file);
-    const baseSuite = isBaseSuite(file);
+    const baseSuite = isBaseSuite(file) || baseFixture(file);
     const isPublicEntry = fileStem === publicEntry;
     const owner = relative(baseRoot, file).split(sep)[0];
     const component = entryComponent(fileStem);
@@ -113,6 +121,18 @@ const contractBoundary = {
     const reactNamespaces = new Set();
 
     function checkPackageReference(node, specifier) {
+      if (specifier === publicSpecifier && !fromBase) {
+        return;
+      }
+
+      const aliases = aliasTargets(specifier);
+      if (aliases.length > 0) {
+        for (const path of aliases) {
+          checkRelativeReference(node, specifier, path);
+        }
+        return;
+      }
+
       if (baseSuite && !testLibraries.has(specifier)) {
         context.report({ node, messageId: 'suite' });
       }
@@ -121,12 +141,11 @@ const contractBoundary = {
       }
     }
 
-    function checkRelativeReference(node, specifier) {
-      const target = resolve(dirname(file), specifier.split(/[?#]/u)[0]);
+    function checkRelativeReference(node, specifier, target) {
       const targetStem = target.replace(scriptExtension, '');
       const targetInBase = contains(baseRoot, target);
       const targetInternal = contains(internalRoot, target);
-      const fixture = fixtureRoots.some((directory) => contains(directory, target));
+      const fixture = baseFixture(target);
 
       if (baseSuite && !fixture && !targetInBase) {
         context.report({ node, messageId: 'suite' });
@@ -174,7 +193,8 @@ const contractBoundary = {
         return;
       }
       if (specifier.startsWith('.')) {
-        checkRelativeReference(node, specifier);
+        const target = resolve(dirname(file), specifier.split(/[?#]/u)[0]);
+        checkRelativeReference(node, specifier, target);
       } else {
         checkPackageReference(node, specifier);
       }
@@ -263,6 +283,13 @@ const contractBoundary = {
       }
       if (declaration?.type !== 'FunctionDeclaration' || declaration.id?.name !== component) {
         context.report({ node, messageId: 'export' });
+        return;
+      }
+
+      const propsAnnotation = declaration.params[0]?.typeAnnotation?.typeAnnotation;
+      const propsType = propsAnnotation && context.sourceCode.getText(propsAnnotation);
+      if (declaration.params.length !== 1 || propsType !== component + 'Props') {
+        context.report({ node, messageId: 'signature', data: { component } });
       }
     }
 
@@ -285,34 +312,7 @@ const contractBoundary = {
       }
     }
 
-    function checkMock(node) {
-      const { callee } = node;
-      if (callee.object?.name !== 'vi' || !moduleMockMethods.has(callee.property?.name)) {
-        return;
-      }
-
-      const argument = node.arguments[0];
-      const source = argument?.type === 'ImportExpression' ? argument.source : argument;
-      if (typeof source?.value !== 'string') {
-        context.report({ node, messageId: 'dynamic' });
-        return;
-      }
-
-      const specifier = source.value;
-      const target = resolve(dirname(file), specifier);
-      if (
-        contains(baseRoot, target) ||
-        specifier === '@codexworkbench/luming-studio-ii-web/ui/base'
-      ) {
-        context.report({ node, messageId: 'mock' });
-      }
-    }
-
     function checkCall(node) {
-      if (fromTests) {
-        checkMock(node);
-      }
-
       const { callee } = node;
       const namespaced =
         reactNamespaces.has(callee.object?.name) && callee.property?.name === 'useImperativeHandle';
@@ -362,5 +362,9 @@ const contractBoundary = {
 
 export default {
   meta: { name: 'luming-base-ui' },
-  rules: { 'contract-boundary': contractBoundary, 'no-browser-io': noBrowserIo },
+  rules: {
+    'contract-boundary': contractBoundary,
+    'no-browser-io': noBrowserIo,
+    'test-contract': testContract,
+  },
 };

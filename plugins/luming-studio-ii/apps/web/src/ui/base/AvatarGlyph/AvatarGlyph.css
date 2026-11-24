@@ -1,0 +1,48 @@
+.studio-ui-avatar-glyph {
+  position: relative;
+  display: inline-grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  flex: none;
+  inline-size: 2rem;
+  block-size: 2rem;
+  border-radius: 50%;
+  background-color: var(--studio-ui-avatar-surface, var(--studio-ui-surface, ButtonFace));
+  color: var(--studio-ui-avatar-text, var(--studio-ui-text, ButtonText));
+  vertical-align: middle;
+}
+
+.studio-ui-avatar-glyph__face {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  place-items: center;
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  font-size: 0.875em;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.studio-ui-avatar-glyph__face > :is(svg, img, picture) {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.studio-ui-avatar-glyph__face > picture > img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.studio-ui-avatar-glyph__badge {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+  display: inline-grid;
+  place-items: center;
+}
