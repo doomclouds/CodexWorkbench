@@ -38,6 +38,18 @@ const rejected = [
     boundary,
   ],
   [
+    'base contract suite imports application state',
+    'tests/component/Button.test.tsx',
+    "import { save } from '../../src/data/save.js';",
+    boundary,
+  ],
+  [
+    'base contract suite imports server infrastructure',
+    'tests/component/Button.test.tsx',
+    "import { store } from '../../../server/src/infrastructure/adapters/sqlite.js';",
+    boundary,
+  ],
+  [
     'replacement of the tested controls',
     'tests/component/board.test.tsx',
     "vi.mock('../../src/ui/base/index.js', createMock);",
@@ -83,6 +95,12 @@ const rejected = [
     'destructured network capability',
     'src/ui/base/Button/Button.tsx',
     "const { fetch: readResource } = window; readResource('/save');",
+    'base/no-browser-io',
+  ],
+  [
+    'aliased browser global',
+    'src/ui/base/Button/Button.tsx',
+    "const browser = globalThis; browser.fetch('/save');",
     'base/no-browser-io',
   ],
   [
@@ -178,4 +196,13 @@ test('accepts explicit public exports and a consumer using the entry', async () 
     results.flat().flatMap((result) => result.messages),
     [],
   );
+});
+
+test('accepts a local collaborator with a browser-like name', async () => {
+  const source = "function notify(window) { window.postMessage('notice'); }";
+  const [result] = await eslint.lintText(source, {
+    filePath: 'src/ui/base/Button/Button.tsx',
+  });
+
+  assert.deepEqual(result.messages, []);
 });

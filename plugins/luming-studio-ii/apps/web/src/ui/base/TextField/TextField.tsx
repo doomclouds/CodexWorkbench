@@ -1,4 +1,6 @@
-import { useId, useImperativeHandle, useRef, type Ref } from 'react';
+import { useImperativeHandle, useRef, type Ref } from 'react';
+
+import { Field } from '../Field/Field.js';
 
 import './TextField.css';
 
@@ -18,7 +20,7 @@ export interface TextFieldProps {
   disabled?: boolean;
   id?: string;
   name?: string;
-  type?: 'text' | 'email' | 'url' | 'password';
+  type?: 'text' | 'email' | 'url' | 'password' | 'search';
   ref?: Ref<TextFieldHandle>;
 }
 
@@ -36,12 +38,7 @@ export function TextField({
   type = 'text',
   ref,
 }: TextFieldProps) {
-  const generatedId = useId();
   const input = useRef<HTMLInputElement>(null);
-  const fieldId = id ?? generatedId;
-  const descriptionId = description ? fieldId + '-description' : undefined;
-  const errorId = error ? fieldId + '-error' : undefined;
-  const describedBy = [descriptionId, errorId].filter(Boolean).join(' ') || undefined;
 
   useImperativeHandle(
     ref,
@@ -61,34 +58,23 @@ export function TextField({
   );
 
   return (
-    <div className="studio-text-field">
-      <label className="studio-text-field__label" htmlFor={fieldId}>
-        {label}
-      </label>
-      <input
-        ref={input}
-        className="studio-text-field__input"
-        id={fieldId}
-        name={name}
-        type={type}
-        value={value}
-        required={required}
-        readOnly={readOnly}
-        disabled={disabled}
-        aria-describedby={describedBy}
-        aria-invalid={errorId ? true : undefined}
-        onChange={(event) => onValueChange(event.currentTarget.value)}
-      />
-      {descriptionId && (
-        <div className="studio-text-field__description" id={descriptionId}>
-          {description}
-        </div>
+    <Field id={id} label={label} description={description} error={error} required={required}>
+      {(binding) => (
+        <input
+          ref={input}
+          className="studio-ui-text-field__input"
+          id={binding.id}
+          name={name}
+          type={type}
+          value={value}
+          required={binding.required}
+          readOnly={readOnly}
+          disabled={disabled}
+          aria-describedby={binding.describedBy}
+          aria-invalid={binding.invalid}
+          onChange={(event) => onValueChange(event.currentTarget.value)}
+        />
       )}
-      {errorId && (
-        <div className="studio-text-field__error" id={errorId}>
-          {error}
-        </div>
-      )}
-    </div>
+    </Field>
   );
 }

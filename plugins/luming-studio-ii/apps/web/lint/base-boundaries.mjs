@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import noBrowserIo from './browser-capabilities.mjs';
 
@@ -7,7 +7,10 @@ const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url));
 const baseRoot = resolve(sourceRoot, 'ui/base');
 const publicEntry = resolve(baseRoot, 'index');
 const testsRoot = fileURLToPath(new URL('../tests/', import.meta.url));
+const componentTests = resolve(testsRoot, 'component');
+const fixtureRoots = ['support', 'fixtures'].map((name) => resolve(testsRoot, name));
 const libraries = new Set(['react', 'react-dom', 'react/jsx-runtime']);
+const testLibraries = new Set([...libraries, 'react-dom/client', 'vitest']);
 const componentName = /^[A-Z][A-Za-z0-9]*$/u;
 const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const absoluteSpecifier = /^(?:[\\/]|[a-z][a-z0-9+.-]*:\/\/|file:)/iu;
@@ -28,6 +31,16 @@ function entryComponent(file) {
   }
 
   return undefined;
+}
+
+function isBaseSuite(file) {
+  const name = basename(file, '.test.tsx');
+
+  return (
+    contains(componentTests, file) &&
+    componentName.test(name) &&
+    existsSync(resolve(baseRoot, name, name + '.tsx'))
+  );
 }
 
 function publicType(name, component) {
@@ -67,6 +80,7 @@ const contractBoundary = {
       import: 'Base controls may import React and modules within ui/base.',
       private: 'Use the public ui/base index. Component implementation files are private.',
       tests: 'Production source cannot import test modules.',
+      suite: 'Base control tests depend on the public control API and local test fixtures.',
       dynamic: 'Use a literal module path so the UI boundary can be checked.',
       absolute: 'Use relative source imports or a public package entry.',
       export: 'Export only the named component and its explicit public types.',
@@ -85,6 +99,7 @@ const contractBoundary = {
     const fromBase = contains(baseRoot, file);
     const fromSource = contains(sourceRoot, file);
     const fromTests = contains(testsRoot, file);
+    const baseSuite = isBaseSuite(file);
     const isPublicEntry = fileStem === publicEntry;
     const owner = relative(baseRoot, file).split(sep)[0];
     const component = entryComponent(fileStem);
@@ -95,34 +110,31 @@ const contractBoundary = {
     const handleAliases = new Set();
     const reactNamespaces = new Set();
 
-    function checkReference(node, source) {
-      if (typeof source?.value !== 'string') {
-        context.report({ node, messageId: 'dynamic' });
-        return;
+    function checkPackageReference(node, specifier) {
+      if (baseSuite && !testLibraries.has(specifier)) {
+        context.report({ node, messageId: 'suite' });
       }
+      if (fromBase && !libraries.has(specifier)) {
+        context.report({ node, messageId: 'import' });
+      }
+    }
 
-      const specifier = source.value;
-      if (absoluteSpecifier.test(specifier)) {
-        context.report({ node, messageId: 'absolute' });
-        return;
-      }
-      if (!specifier.startsWith('.')) {
-        if (fromBase && !libraries.has(specifier)) {
-          context.report({ node, messageId: 'import' });
-        }
-        return;
-      }
-
+    function checkRelativeReference(node, specifier) {
       const target = resolve(dirname(file), specifier.split(/[?#]/u)[0]);
       const targetStem = target.replace(scriptExtension, '');
+      const targetInBase = contains(baseRoot, target);
+      const fixture = fixtureRoots.some((directory) => contains(directory, target));
 
+      if (baseSuite && !fixture && !targetInBase) {
+        context.report({ node, messageId: 'suite' });
+      }
       if (fromSource && contains(testsRoot, target)) {
         context.report({ node, messageId: 'tests' });
       }
-      if (fromBase && !contains(baseRoot, target)) {
+      if (fromBase && !targetInBase) {
         context.report({ node, messageId: 'import' });
       }
-      if (!contains(baseRoot, target)) {
+      if (!targetInBase) {
         return;
       }
 
@@ -136,6 +148,24 @@ const contractBoundary = {
       const siblingEntry = fromBase && entryComponent(targetStem);
       if (targetStem !== publicEntry && !sameComponent && !siblingEntry) {
         context.report({ node, messageId: 'private' });
+      }
+    }
+
+    function checkReference(node, source) {
+      if (typeof source?.value !== 'string') {
+        context.report({ node, messageId: 'dynamic' });
+        return;
+      }
+
+      const specifier = source.value;
+      if (absoluteSpecifier.test(specifier)) {
+        context.report({ node, messageId: 'absolute' });
+        return;
+      }
+      if (specifier.startsWith('.')) {
+        checkRelativeReference(node, specifier);
+      } else {
+        checkPackageReference(node, specifier);
       }
     }
 
@@ -305,7 +335,7 @@ const contractBoundary = {
           if (!publishedTypes.has(name + 'Props')) {
             context.report({ node, messageId: 'props', data: { component: name } });
           }
-          if (!existsSync(resolve(testsRoot, 'component', name + '.test.tsx'))) {
+          if (!existsSync(resolve(componentTests, name + '.test.tsx'))) {
             context.report({ node, messageId: 'test', data: { component: name } });
           }
         }

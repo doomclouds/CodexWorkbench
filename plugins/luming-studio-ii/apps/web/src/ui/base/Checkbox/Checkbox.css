@@ -1,0 +1,26 @@
+.studio-ui-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-inline-size: 0;
+  color: var(--studio-ui-text, CanvasText);
+}
+
+.studio-ui-checkbox__input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--studio-ui-accent, auto);
+}
+
+.studio-ui-checkbox__input:focus-visible {
+  outline: 2px solid var(--studio-ui-focus, Highlight);
+  outline-offset: 2px;
+}
+
+.studio-ui-checkbox__label {
+  overflow-wrap: anywhere;
+}
+
+.studio-ui-checkbox__input:disabled + .studio-ui-checkbox__label {
+  color: var(--studio-ui-muted, GrayText);
+}

@@ -20,29 +20,51 @@ function propertyName(property, computed) {
   return computed || property.type === 'Literal' ? property.value : property.name;
 }
 
-function localBinding(sourceCode, identifier) {
+function bindingOf(sourceCode, identifier) {
   let scope = sourceCode.getScope(identifier);
   while (scope) {
     const variable = scope.set.get(identifier.name);
     if (variable) {
-      return variable.defs.length > 0;
+      return variable;
     }
 
     scope = scope.upper;
   }
 
-  return false;
+  return undefined;
 }
 
-function browserObject(sourceCode, expression) {
-  if (expression?.type === 'Identifier' && !localBinding(sourceCode, expression)) {
-    return expression.name;
+function identifierObject(sourceCode, identifier, visited) {
+  const binding = bindingOf(sourceCode, identifier);
+  if (!binding?.defs.length) {
+    return identifier.name;
+  }
+
+  const definition = binding.defs[0];
+  if (visited.has(binding) || binding.defs.length !== 1) {
+    return undefined;
+  }
+  if (definition.type !== 'Variable' || definition.parent.kind !== 'const') {
+    return undefined;
+  }
+  if (definition.node.id.type !== 'Identifier') {
+    return undefined;
+  }
+
+  visited.add(binding);
+
+  return browserObject(sourceCode, definition.node.init, visited);
+}
+
+function browserObject(sourceCode, expression, visited = new Set()) {
+  if (expression?.type === 'Identifier') {
+    return identifierObject(sourceCode, expression, visited);
   }
   if (expression?.type !== 'MemberExpression') {
     return undefined;
   }
 
-  const parent = browserObject(sourceCode, expression.object);
+  const parent = browserObject(sourceCode, expression.object, visited);
   if (browserGlobals.has(parent)) {
     return propertyName(expression.property, expression.computed);
   }
