@@ -1,0 +1,41 @@
+.studio-ui-dialog {
+  inline-size: min(32rem, calc(100% - 2rem));
+  max-block-size: calc(100dvh - 2rem);
+  padding: 0;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: var(--studio-ui-radius, 0.75rem);
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+  box-shadow: 0 0.75rem 3rem var(--studio-ui-shadow, rgb(0 0 0 / 22%));
+  overscroll-behavior: contain;
+}
+
+.studio-ui-dialog::backdrop {
+  background: var(--studio-ui-backdrop, rgb(0 0 0 / 50%));
+}
+
+.studio-ui-dialog__body {
+  display: grid;
+  gap: 0.875rem;
+  padding: 1.25rem;
+}
+
+.studio-ui-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.studio-ui-dialog__title,
+.studio-ui-dialog__description {
+  margin: 0;
+}
+
+.studio-ui-dialog__title {
+  font-size: 1.125rem;
+}
+
+.studio-ui-dialog__description {
+  color: var(--studio-ui-muted, CanvasText);
+}
