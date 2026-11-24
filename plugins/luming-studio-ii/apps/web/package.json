@@ -6,13 +6,15 @@
   "description": "Luming Studio II Web frontend",
   "license": "MIT",
   "exports": {
-    "./ui/base": "./src/ui/base/index.ts"
+    "./ui/base": "./src/ui/base/index.ts",
+    "./ui/domain/canvas": "./src/ui/domain/canvas/index.ts"
   },
   "scripts": {
     "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && oxlint --deny-warnings src tests vite.config.ts vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && node ../../../../tooling/studio-lint/check-markup.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm lint && pnpm typecheck",
-    "test": "node --test tests/contracts/base-lint.test.mjs && vitest run",
+    "test": "node --test tests/contracts/base-lint.test.mjs tests/contracts/canvas-lint.test.mjs && vitest run",
+    "preview:canvas": "vite --host 127.0.0.1",
     "build": "pnpm check && pnpm test && vite build"
   },
   "dependencies": {

@@ -1,0 +1,120 @@
+:root {
+  color-scheme: light dark;
+  --fixture-background: light-dark(#f4f4f0, #141a21);
+  --fixture-panel: light-dark(#fff, #202832);
+  --fixture-text: light-dark(#172333, #f4f4ed);
+  --fixture-muted: light-dark(#4c5d72, #b0beda);
+  --fixture-border: light-dark(#cfd9e3, #455873);
+  --fixture-accent: light-dark(#285c8e, #7ab4ed);
+  --studio-ui-text: var(--fixture-text);
+  --studio-ui-border: var(--fixture-border);
+  --studio-ui-accent: var(--fixture-accent);
+  --studio-ui-surface: var(--fixture-panel);
+  --studio-ui-canvas-shape-surface: color-mix(
+    in srgb,
+    var(--fixture-accent) 12%,
+    var(--fixture-panel)
+  );
+  color: var(--fixture-text);
+  background: var(--fixture-background);
+  font:
+    15px/1.55 system-ui,
+    sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+.canvas-fixture {
+  max-width: 1100px;
+  padding: 22px clamp(12px, 4vw, 36px) 34px;
+  margin-inline: auto;
+}
+
+.canvas-fixture h1 {
+  margin: 0;
+  font-size: clamp(24px, 3.5vw, 34px);
+  line-height: 1.25;
+}
+
+.canvas-fixture header p {
+  margin: 7px 0 14px;
+  color: var(--fixture-muted);
+}
+
+.canvas-fixture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-block-end: 10px;
+}
+
+.canvas-fixture-actions > [role='toolbar'] {
+  min-inline-size: 0;
+  flex-wrap: wrap;
+}
+
+.canvas-fixture-stage {
+  overflow: hidden;
+  block-size: clamp(360px, 59vh, 560px);
+  border: 1px solid var(--fixture-border);
+  border-radius: 12px;
+  background: var(--fixture-panel);
+}
+
+.canvas-fixture-stage > [role='region'] {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.canvas-fixture-native {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  color: var(--fixture-text);
+}
+
+.canvas-fixture-native [aria-label='原生滚动区'] {
+  block-size: 128px;
+  border: 1px solid var(--fixture-border);
+  border-radius: 6px;
+  background: var(--fixture-panel);
+}
+
+.canvas-fixture-native ul {
+  margin: 0;
+  padding: 7px 10px 7px 27px;
+}
+
+.canvas-fixture-native li {
+  padding-block: 4px;
+}
+
+.canvas-fixture-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px 14px;
+  padding: 10px 0;
+  margin: 0;
+  border-block-end: 1px solid var(--fixture-border);
+}
+
+.canvas-fixture-status dt,
+.canvas-fixture-versions {
+  color: var(--fixture-muted);
+  font-size: 0.88rem;
+}
+
+.canvas-fixture-status dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.canvas-fixture-versions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-block-start: 8px;
+}

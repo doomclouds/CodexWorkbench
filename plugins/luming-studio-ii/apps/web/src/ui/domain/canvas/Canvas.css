@@ -1,0 +1,49 @@
+.studio-canvas {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 16rem;
+  background-color: var(--studio-ui-canvas, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+  user-select: none;
+}
+
+.studio-canvas:focus-visible {
+  outline: 2px solid var(--studio-ui-focus, Highlight);
+  outline-offset: -2px;
+}
+
+.studio-canvas__background,
+.studio-canvas__world {
+  position: absolute;
+  inset: 0;
+}
+
+.studio-canvas__background {
+  touch-action: none;
+  background-image: radial-gradient(
+    var(--studio-ui-canvas-grid, GrayText) 0.7px,
+    transparent 0.7px
+  );
+  background-size: 1.25rem 1.25rem;
+  opacity: 0.22;
+}
+
+.studio-canvas__world {
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+
+.studio-canvas__world [data-canvas-object] {
+  pointer-events: auto;
+}
+
+.studio-canvas[data-tool='pan'] {
+  cursor: grab;
+}
+
+.studio-canvas[data-tool='pan'] [data-canvas-object] {
+  pointer-events: none;
+}

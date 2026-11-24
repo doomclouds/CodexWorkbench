@@ -6,6 +6,7 @@ import studio from '../../../../tooling/studio-lint/script-plugin.mjs';
 import { errorHandlingSyntax, scriptRules } from '../../../../tooling/studio-lint/script-rules.mjs';
 import base from './lint/base-boundaries.mjs';
 import { browserCapabilities } from './lint/browser-capabilities.mjs';
+import canvas from './lint/canvas-boundaries.mjs';
 
 const recommended = reactHooks.configs.flat.recommended;
 const reactRules = Object.fromEntries(
@@ -27,6 +28,20 @@ const baseGlobals = browserCapabilities.map((name) => ({
   name,
   message: 'Use a Surface or platform port for I/O.',
 }));
+const canvasGlobals = [
+  ...baseGlobals,
+  'navigator',
+  'caches',
+  'cookieStore',
+  'WebTransport',
+  'BroadcastChannel',
+  'RTCPeerConnection',
+  'openai',
+].map((entry) =>
+  typeof entry === 'string'
+    ? { name: entry, message: 'Use a Surface or platform port for I/O.' }
+    : entry,
+);
 
 export default defineConfig([
   {
@@ -56,9 +71,10 @@ export default defineConfig([
   },
   {
     files: ['src/' + scripts, 'tests/' + scripts],
-    plugins: { base },
+    plugins: { base, canvas },
     rules: {
       'base/contract-boundary': 'error',
+      'canvas/contract-boundary': 'error',
       'no-restricted-globals': ['error', { globals: ['require'], checkGlobalObject: true }],
       'no-restricted-syntax': ['error', ...errorHandlingSyntax, ...indirectImports],
     },
@@ -81,10 +97,21 @@ export default defineConfig([
     },
   },
   {
+    files: ['src/ui/domain/canvas/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { globals: ['require', ...canvasGlobals], checkGlobalObject: true },
+      ],
+      'base/no-browser-io': 'error',
+    },
+  },
+  {
     files: ['tests/' + scripts],
     rules: {
       'max-nested-callbacks': ['error', 5],
       'base/test-contract': 'error',
+      'canvas/no-test-replacement': 'error',
     },
   },
 ]);

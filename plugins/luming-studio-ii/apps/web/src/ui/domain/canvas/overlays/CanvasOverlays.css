@@ -1,0 +1,67 @@
+.studio-ui-canvas-overlays {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.studio-ui-canvas-selection-outline,
+.studio-ui-canvas-marquee {
+  position: absolute;
+  outline: 1px solid var(--studio-ui-accent, Highlight);
+}
+
+.studio-ui-canvas-selection-outline {
+  transform-origin: center;
+}
+
+.studio-ui-canvas-marquee {
+  background-color: color-mix(in srgb, var(--studio-ui-accent, Highlight) 14%, transparent);
+}
+
+.studio-ui-canvas-transform-handle {
+  position: absolute;
+  box-sizing: border-box;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--studio-ui-accent, Highlight);
+  border-radius: 0.125rem;
+  appearance: none;
+  background: var(--studio-ui-surface, Canvas);
+  pointer-events: auto;
+  touch-action: none;
+  transform: translate(-50%, -50%);
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='nw'] {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='ne'] {
+  top: 0;
+  left: 100%;
+  cursor: nesw-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='sw'] {
+  top: 100%;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='se'] {
+  top: 100%;
+  left: 100%;
+  cursor: nwse-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='rotate'] {
+  top: -1.5rem;
+  left: 50%;
+  border-radius: 50%;
+  cursor: grab;
+}

@@ -1,6 +1,6 @@
 # 鹿鸣 · Luming Studio II
 
-面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 包提供基础控件，插件运行入口随第一个业务闭环接入。
+面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 包提供基础控件和 Canvas 运行时，插件运行入口随第一个业务闭环接入。
 
 ## 项目结构
 
@@ -65,6 +65,16 @@ pnpm --filter @codexworkbench/luming-studio-ii-web build
 ```
 
 构建通过 Lint、类型和测试门禁后生成 ESM 与 CSS。
+
+## Canvas 独立验收
+
+画布从 `@codexworkbench/luming-studio-ii-web/ui/domain/canvas` 使用。调用方通过场景、属性、观察事件、编辑意图和句柄与 Canvas 交互。Canvas 专用 Lint 检查公开入口、内部模块依赖、I/O 及测试边界。
+
+```sh
+pnpm --filter @codexworkbench/luming-studio-ii-web preview:canvas
+```
+
+按终端中的本地 Vite 地址打开 `/tests/fixtures/canvas/`。验收页用基础控件提供工具切换和模拟回执，可以检查预览、确认、拒绝、迟到确认及原生输入。
 
 ## 首个业务闭环
 

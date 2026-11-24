@@ -1,0 +1,20 @@
+.studio-ui-canvas-object {
+  position: absolute;
+  z-index: 0;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: var(--studio-ui-radius, 0.5rem);
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+  transform-origin: center;
+}
+
+.studio-ui-canvas-object--shape {
+  align-items: center;
+  justify-content: center;
+  background: var(--studio-ui-canvas-shape-surface, ButtonFace);
+  touch-action: none;
+}

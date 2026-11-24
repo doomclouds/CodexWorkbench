@@ -3,11 +3,13 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   build: {
+    cssCodeSplit: true,
     lib: {
-      entry: fileURLToPath(new URL('./src/ui/base/index.ts', import.meta.url)),
+      entry: {
+        'base-ui': fileURLToPath(new URL('./src/ui/base/index.ts', import.meta.url)),
+        'canvas-ui': fileURLToPath(new URL('./src/ui/domain/canvas/index.ts', import.meta.url)),
+      },
       formats: ['es'],
-      fileName: 'base-ui',
-      cssFileName: 'base-ui',
     },
     rolldownOptions: {
       external: ['react', 'react-dom', 'react/jsx-runtime'],
