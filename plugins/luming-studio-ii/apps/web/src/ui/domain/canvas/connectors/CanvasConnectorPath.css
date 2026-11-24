@@ -1,0 +1,28 @@
+.studio-ui-canvas-connector {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  color: var(--studio-ui-text, CanvasText);
+  pointer-events: none;
+}
+
+.studio-ui-canvas-connector[data-canvas-connector-preview] {
+  color: var(--studio-ui-accent, Highlight);
+  opacity: 0.72;
+}
+
+.studio-ui-canvas-connector-circle {
+  fill: var(--studio-ui-surface, Canvas);
+  stroke: currentColor;
+}
+
+.studio-ui-canvas-connector-label {
+  fill: currentColor;
+  stroke: var(--studio-ui-surface, Canvas);
+  stroke-linejoin: round;
+  stroke-width: 4px;
+  paint-order: stroke;
+  font-size: 14px;
+}

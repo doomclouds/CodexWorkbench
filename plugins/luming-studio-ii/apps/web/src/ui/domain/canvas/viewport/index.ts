@@ -4,6 +4,7 @@ export type CanvasViewportSize = Pick<CanvasRect, 'width' | 'height'>;
 
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 8;
+const MAX_PADDED_FIT_ZOOM = 1;
 const DEGREES_PER_TURN = 360;
 const RADIANS_PER_DEGREE = Math.PI / 180;
 const FLAT_ROTATION = { cos: 1, sin: 0 };
@@ -102,6 +103,7 @@ export function zoomViewport(
 export function fitViewport(
   rect: CanvasRect | undefined,
   size: CanvasViewportSize,
+  padding?: number,
 ): CanvasViewport {
   if (!rect || !isValidRect(rect)) {
     return defaultViewport;
@@ -113,9 +115,13 @@ export function fitViewport(
     return defaultViewport;
   }
 
-  const widthZoom = rect.width > 0 ? width / rect.width : Infinity;
-  const heightZoom = rect.height > 0 ? height / rect.height : Infinity;
-  const zoom = clampZoom(Math.min(widthZoom, heightZoom));
+  const inset = 2 * Math.max(0, finiteOrZero(padding ?? 0));
+  const availableWidth = padding === undefined ? width : Math.max(1, width - inset);
+  const availableHeight = padding === undefined ? height : Math.max(1, height - inset);
+  const maxZoom = padding === undefined ? MAX_ZOOM : MAX_PADDED_FIT_ZOOM;
+  const widthZoom = rect.width > 0 ? availableWidth / rect.width : Infinity;
+  const heightZoom = rect.height > 0 ? availableHeight / rect.height : Infinity;
+  const zoom = clampZoom(Math.min(widthZoom, heightZoom, maxZoom));
 
   return {
     x: (width - rect.width * zoom) / 2 - rect.x * zoom,

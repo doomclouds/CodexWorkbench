@@ -4,17 +4,82 @@
   display: flex;
   box-sizing: border-box;
   flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--studio-ui-border, GrayText);
-  border-radius: var(--studio-ui-radius, 0.5rem);
-  background: var(--studio-ui-surface, Canvas);
   color: var(--studio-ui-text, CanvasText);
   transform-origin: center;
 }
 
-.studio-ui-canvas-object--shape {
+.studio-canvas[data-tool='select']
+  > .studio-canvas__world
+  > [data-canvas-object]:not(
+    :is(
+      [data-canvas-transparent],
+      .studio-ui-canvas-object--ink,
+      .studio-ui-canvas-object--connector
+    )
+  ) {
+  pointer-events: auto;
+}
+
+.studio-canvas[data-tool='select']
+  > .studio-canvas__world
+  > [data-canvas-object]
+  > [data-canvas-section-title] {
+  pointer-events: auto;
+}
+
+.studio-canvas[data-tool='select']
+  > .studio-canvas__world
+  > [data-canvas-object][data-canvas-transparent]
+  > .studio-ui-canvas-section-hit-outline
+  > [data-canvas-section-edge] {
+  pointer-events: stroke;
+}
+
+.studio-canvas[data-tool='select']
+  > .studio-canvas__world
+  > [data-canvas-object]:is(.studio-ui-canvas-object--ink, .studio-ui-canvas-object--connector)
+  [data-canvas-geometry-hit] {
+  pointer-events: visiblePainted;
+}
+
+.studio-ui-canvas-object:has(> .studio-ui-canvas-native-content),
+.studio-ui-canvas-object--note {
+  overflow: hidden;
+  border: var(--studio-ui-canvas-object-stroke-width, 1px)
+    var(--studio-ui-canvas-object-line-style, solid)
+    var(--studio-ui-canvas-object-stroke, var(--studio-ui-border, GrayText));
+  border-radius: var(--studio-ui-radius, 0.5rem);
+  background-color: var(--studio-ui-canvas-object-fill, var(--studio-ui-surface, Canvas));
+}
+
+.studio-ui-canvas-object:is(
+  .studio-ui-canvas-object--shape,
+  .studio-ui-canvas-object--sticker,
+  .studio-ui-canvas-object--note
+) {
   align-items: center;
   justify-content: center;
-  background: var(--studio-ui-canvas-shape-surface, ButtonFace);
+}
+
+.studio-ui-canvas-object--section:not([data-canvas-transparent]) {
+  background-color: var(--studio-ui-canvas-object-fill, var(--studio-ui-surface, Canvas));
+}
+
+.studio-ui-canvas-object--section::before {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  border: var(--studio-ui-canvas-object-stroke-width, 1px)
+    var(--studio-ui-canvas-object-line-style, solid)
+    var(--studio-ui-canvas-object-stroke, var(--studio-ui-border, GrayText));
+  pointer-events: none;
+  content: '';
+}
+
+.studio-ui-canvas-object:not(:has(> .studio-ui-canvas-native-content:not([inert]))) {
   touch-action: none;
+}
+
+.studio-ui-canvas-object[data-canvas-draft] {
+  opacity: 0.58;
 }

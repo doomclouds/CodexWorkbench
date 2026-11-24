@@ -1,43 +1,48 @@
-import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef } from 'react';
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react';
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   RefObject,
 } from 'react';
+
+import { canConnectTo, connectionTarget, recordInk } from './canvas-creation.js';
+import {
+  canvasNativeId,
+  canvasSectionTitleId,
+  containerOrigin,
+  ownsEvent,
+  relativePoint,
+  wheelDelta,
+} from './canvas-events.js';
 import type { CanvasFrame, CanvasFrameController } from './canvas-frame.js';
+import { gestureFrame } from './canvas-gesture-frame.js';
+import type { PointerAction, PointerSession } from './canvas-gesture-frame.js';
 import { editableTarget, isCurrentEdit } from './canvas-model.js';
+import { connectionHandleBends } from './connectors/handles.js';
 import type {
+  CanvasConnectionEndpoint,
   CanvasObjectChange,
   CanvasPoint,
   CanvasProps,
-  CanvasRect,
   CanvasTool,
-  CanvasViewport,
 } from './contracts.js';
-import { previewTransform } from './gestures/index.js';
 import type { ResizeHandle, TransformGesture } from './gestures/index.js';
-import { queryScene } from './scene/index.js';
+import { maxInkSamples } from './ink/geometry.js';
+import { projectObject, queryScene } from './scene/index.js';
 import type { SceneIndex } from './scene/index.js';
-import { hitTest, marqueeSelection, selectObject } from './selection/index.js';
+import {
+  canvasHitBounds,
+  expandMoveIds,
+  hitTest,
+  marqueeSelection,
+  selectObject,
+} from './selection/index.js';
 import { panViewport, screenToBoard, zoomViewport } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
 type PointerSample = Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerId'>;
 type TransformHandle = ResizeHandle | 'rotate';
 type EditChanges = ReadonlyMap<string, CanvasObjectChange>;
-type PointerAction =
-  | { kind: 'pan' }
-  | { kind: 'marquee'; selection: readonly string[] }
-  | { kind: 'transform'; transform: TransformGesture };
-
-interface PointerSession {
-  pointerId: number;
-  origin: CanvasPoint;
-  start: CanvasPoint;
-  viewport: CanvasViewport;
-  tool: CanvasTool;
-  action: PointerAction;
-}
 
 interface CanvasInputOptions {
   root: RefObject<HTMLDivElement | null>;
@@ -50,99 +55,72 @@ interface CanvasInputOptions {
 
 const primaryButton = 0;
 const middleButton = 1;
-const dragThreshold = 4;
-const wheelLineSize = 16;
 const wheelZoomRate = 0.002;
 const keyboardZoomFactor = 1.2;
 
-function elementTarget(target: EventTarget | null, container: HTMLDivElement) {
-  const ElementType = container.ownerDocument.defaultView?.Element;
-  if (ElementType && target instanceof ElementType && container.contains(target)) {
-    return target;
-  }
-
-  return undefined;
+function isPrimaryPointer(event: ReactPointerEvent<HTMLElement>) {
+  return event.pointerType !== 'touch' || event.isPrimary;
 }
 
-function ownsEvent(target: EventTarget | null, container: HTMLDivElement) {
-  return elementTarget(target, container)?.closest('[data-canvas-root]') === container;
-}
+function canMove(index: SceneIndex, id: string) {
+  const object = index.get(id);
 
-export function canvasNativeId(target: EventTarget | null, container: HTMLDivElement) {
-  const element = elementTarget(target, container);
-  let native = element?.closest('[data-canvas-native]');
-  while (native && native.closest('[data-canvas-root]') !== container) {
-    native = native.parentElement?.closest('[data-canvas-native]');
-  }
-
-  return native?.closest('[data-canvas-object]')?.getAttribute('data-canvas-object') ?? undefined;
-}
-
-function relativePoint(sample: Pick<PointerEvent, 'clientX' | 'clientY'>, origin: CanvasPoint) {
-  return { x: sample.clientX - origin.x, y: sample.clientY - origin.y };
-}
-
-function containerOrigin(container: HTMLDivElement) {
-  const { left, top } = container.getBoundingClientRect();
-
-  return { x: left, y: top };
-}
-
-function deltaFrom(start: CanvasPoint, point: CanvasPoint) {
-  return { x: point.x - start.x, y: point.y - start.y };
-}
-
-function reachedThreshold(start: CanvasPoint, point: CanvasPoint) {
-  const { x, y } = deltaFrom(start, point);
-
-  return Math.hypot(x, y) >= dragThreshold;
-}
-
-function marqueeBounds(start: CanvasPoint, point: CanvasPoint): CanvasRect {
-  return {
-    x: Math.min(start.x, point.x),
-    y: Math.min(start.y, point.y),
-    width: Math.abs(start.x - point.x),
-    height: Math.abs(start.y - point.y),
-  };
-}
-
-function frameAt(session: PointerSession, screen: CanvasPoint): CanvasFrame {
-  const { start, viewport, action } = session;
-  if (action.kind === 'pan') {
-    return { viewport: panViewport(viewport, deltaFrom(start, screen)) };
-  }
-  if (!reachedThreshold(start, screen)) {
-    return { viewport };
-  }
-
-  const point = screenToBoard(screen, viewport);
-  if (action.kind === 'marquee') {
-    const startPoint = screenToBoard(start, viewport);
-
-    return { viewport, marquee: marqueeBounds(startPoint, point) };
-  }
-
-  return { viewport, preview: previewTransform(action.transform, point) };
-}
-
-function wheelDelta(event: WheelEvent, size: CanvasViewportSize): CanvasPoint {
-  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-    return { x: event.deltaX * size.width, y: event.deltaY * size.height };
-  }
-
-  const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? wheelLineSize : 1;
-
-  return { x: event.deltaX * scale, y: event.deltaY * scale };
+  return (
+    object?.kind !== 'connector' ||
+    !object.connection.start.attachment ||
+    !object.connection.end.attachment ||
+    Boolean(object.connection.bends?.length)
+  );
 }
 
 export function useCanvasInput({ root, size, index, pending, frame, props }: CanvasInputOptions) {
   const active = useRef<PointerSession | null>(null);
+  const [pointerActive, setPointerActive] = useState(false);
   const spaceHeld = useRef(false);
   const nextInteraction = useRef(0);
   const instanceId = useId();
-  const { tool, canEdit, selection, onSelectionChange, onEditIntent, viewId } = props;
-  const { read, update } = frame;
+  const {
+    tool,
+    canEdit,
+    selection,
+    penStyle,
+    onSelectionChange,
+    onToolChange,
+    onEditIntent,
+    viewId,
+  } = props;
+  const { read, update, draw } = frame;
+  const key = typeof tool === 'string' ? tool : 'place:' + tool.requestId;
+  const [activation, setActivation] = useState({ key, completed: false });
+  const settled = useRef<typeof activation | undefined>(undefined);
+  if (activation.key !== key) {
+    setActivation({ key, completed: false });
+  }
+
+  const toolAvailable = tool === 'pan' || (canEdit && !activation.completed);
+  const displayedTool = toolAvailable ? tool : 'select';
+  const toolKind = typeof displayedTool === 'string' ? displayedTool : displayedTool.kind;
+
+  function currentTool(): CanvasTool {
+    return settled.current === activation ? 'select' : displayedTool;
+  }
+
+  function exitDrawingTool() {
+    const current = currentTool();
+    if (current === 'select' || current === 'pan') {
+      return;
+    }
+
+    settled.current = activation;
+    setActivation({ key, completed: true });
+    onToolChange?.('select');
+  }
+
+  function interactionId() {
+    nextInteraction.current += 1;
+
+    return viewId + ':' + instanceId + ':' + nextInteraction.current;
+  }
 
   function begin(
     container: HTMLDivElement,
@@ -150,20 +128,21 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
     origin: CanvasPoint,
     action: PointerAction,
   ) {
-    const viewport = read().viewport;
     active.current = {
       pointerId: sample.pointerId,
       origin,
       start: relativePoint(sample, origin),
-      viewport,
-      tool,
+      viewport: read().viewport,
+      tool: currentTool(),
       action,
     };
     container.setPointerCapture?.(sample.pointerId);
+    setPointerActive(true);
   }
 
   function end(session: PointerSession) {
     active.current = null;
+    setPointerActive(false);
     const element = root.current;
     if (element?.hasPointerCapture?.(session.pointerId)) {
       element.releasePointerCapture(session.pointerId);
@@ -174,107 +153,173 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
     const session = active.current;
     if (session) {
       end(session);
-      update({ viewport: read().viewport }, timing);
     }
+
+    update({ viewport: read().viewport }, timing);
   }
 
   function clearSpace() {
     spaceHeld.current = false;
   }
 
-  function currentSession(session: PointerSession) {
-    if (session.tool !== tool) {
+  function currentSession({ action, tool: startedTool }: PointerSession) {
+    const now = currentTool();
+    const sameTool =
+      typeof now === 'string' || typeof startedTool === 'string'
+        ? now === startedTool
+        : now.requestId === startedTool.requestId;
+
+    if (!sameTool || action.kind === 'pan' || action.kind === 'marquee') {
+      return sameTool;
+    }
+    if (!canEdit) {
       return false;
     }
-    if (session.action.kind !== 'transform') {
-      return true;
+    if (action.kind === 'transform') {
+      return isCurrentEdit(index, pending, action.transform.targets);
+    }
+    if (action.kind === 'edit-connection') {
+      return editableTarget(index, pending, action.target.id)?.version === action.target.version;
     }
 
-    return canEdit && isCurrentEdit(index, pending, session.action.transform.targets);
+    return true;
   }
 
   const cancelStaleSession = useEffectEvent(() => {
     const session = active.current;
     if (session && !currentSession(session)) {
       cancel('frame');
+    } else if (!session && read().ports && currentTool() !== 'connector') {
+      cancel('frame');
     }
   });
   useLayoutEffect(() => {
     cancelStaleSession();
-  }, [canEdit, index, pending, tool]);
+  }, [canEdit, index, pending, key]);
 
   function beginTransform(
     container: HTMLDivElement,
-    sample: PointerSample,
+    sample: ReactPointerEvent<HTMLElement>,
     origin: CanvasPoint,
-    ids: readonly string[],
     kind: TransformGesture['kind'],
+    ids: readonly string[],
     handle?: ResizeHandle,
   ) {
     if (!canEdit) {
       return;
     }
 
-    const targets = ids.flatMap((id) => {
+    const moves = kind === 'move';
+    const duplicate = moves && sample.altKey;
+    const candidateIds = moves ? expandMoveIds(index, ids, pending) : ids;
+    const targets = candidateIds.flatMap((id) => {
       const object = editableTarget(index, pending, id);
+      const projection = object && projectObject(index, pending, id);
+      const canTransform = !moves || duplicate || canMove(index, id);
+      if (!object || !projection || !canTransform) {
+        return [];
+      }
 
-      return object ? [{ id, expectedVersion: object.version, geometry: object.geometry }] : [];
+      return [{ id, expectedVersion: object.version, geometry: projection.geometry }];
     });
 
-    if (targets.length === 0) {
+    if (targets.length === 0 || (!moves && targets.length !== ids.length)) {
       return;
     }
 
-    nextInteraction.current += 1;
     const start = screenToBoard(relativePoint(sample, origin), read().viewport);
     begin(container, sample, origin, {
       kind: 'transform',
-      transform: {
-        kind,
-        interactionId: viewId + ':' + instanceId + ':' + nextInteraction.current,
-        start,
-        targets,
-        handle,
-      },
+      duplicate,
+      transform: { kind, interactionId: interactionId(), start, targets, handle },
     });
+  }
+
+  function objectAt(
+    event: ReactPointerEvent<HTMLElement>,
+    container: HTMLDivElement,
+    origin: CanvasPoint,
+  ) {
+    const title = canvasSectionTitleId(event.target, container);
+    if (title && index.get(title)?.kind === 'section') {
+      return title;
+    }
+
+    const { viewport } = read();
+    const point = screenToBoard(relativePoint(event, origin), viewport);
+    const hits = queryScene(index, canvasHitBounds(point, viewport.zoom), pending);
+
+    return hitTest(hits, point, viewport.zoom);
   }
 
   function beginSelection(
     container: HTMLDivElement,
     event: ReactPointerEvent<HTMLDivElement>,
     origin: CanvasPoint,
+    id: string | undefined,
   ) {
-    const point = screenToBoard(relativePoint(event, origin), read().viewport);
-    const hits = queryScene(index, { ...point, width: 0, height: 0 }, pending);
-    const id = hitTest(hits, point);
     const toggle = event.shiftKey || event.ctrlKey || event.metaKey;
     if (!id) {
       const seed = toggle ? selection : [];
       if (!toggle && selection.length > 0) {
         onSelectionChange(seed);
       }
+
       begin(container, event, origin, { kind: 'marquee', selection: seed });
       return;
     }
 
     const held = selection.includes(id) && !toggle;
-    const selected = held ? selection : selectObject(selection, id, toggle);
+    const selected = held ? selection : selectObject(selection, id, toggle, index);
     if (!held) {
       onSelectionChange(selected);
     }
     if (!toggle && editableTarget(index, pending, id)) {
-      beginTransform(container, event, origin, selected, 'move');
+      beginTransform(container, event, origin, 'move', selected);
     }
   }
 
+  function beginTool(
+    container: HTMLDivElement,
+    event: ReactPointerEvent<HTMLDivElement>,
+    origin: CanvasPoint,
+    chosenTool: Exclude<CanvasTool, 'select' | 'pan'>,
+  ) {
+    const { viewport } = read();
+    const start = screenToBoard(relativePoint(event, origin), viewport);
+    const id = interactionId();
+    if (chosenTool === 'pen') {
+      begin(container, event, origin, {
+        kind: 'ink',
+        interactionId: id,
+        samples: [start],
+        style: penStyle,
+      });
+    } else if (chosenTool === 'connector') {
+      const { endpoint } = connectionTarget(start, viewport.zoom, { index, pending });
+      begin(container, event, origin, {
+        kind: 'create-connection',
+        interactionId: id,
+        start: endpoint,
+      });
+    } else {
+      begin(container, event, origin, {
+        kind: 'place',
+        interactionId: id,
+        placement: chosenTool.object,
+      });
+    }
+  }
+
+  function wantsPan(button: number) {
+    return button === middleButton || currentTool() === 'pan' || spaceHeld.current;
+  }
+
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (active.current || event.defaultPrevented) {
+    if (active.current || event.defaultPrevented || !isPrimaryPointer(event)) {
       return;
     }
     if (event.button !== primaryButton && event.button !== middleButton) {
-      return;
-    }
-    if (event.pointerType === 'touch' && !event.isPrimary) {
       return;
     }
 
@@ -283,91 +328,213 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
       return;
     }
 
-    const pan = event.button === middleButton || tool === 'pan' || spaceHeld.current;
-    const native = canvasNativeId(event.target, container);
-    if (native && !pan) {
+    const origin = containerOrigin(container);
+    const chosenTool = currentTool();
+    const pan = wantsPan(event.button);
+    const selecting = chosenTool === 'select' && !pan;
+    const id = selecting ? objectAt(event, container, origin) : undefined;
+    const native = selecting ? canvasNativeId(event.target, container) : undefined;
+    if (native && native === id) {
       if (!selection.includes(native)) {
-        onSelectionChange([native]);
+        onSelectionChange(selectObject(selection, native, false, index));
       }
+
       return;
     }
 
     event.preventDefault();
     container.focus({ preventScroll: true });
-    const origin = containerOrigin(container);
-    if (pan) {
+    if (pan || chosenTool === 'pan') {
       begin(container, event, origin, { kind: 'pan' });
+    } else if (chosenTool === 'select') {
+      beginSelection(container, event, origin, id);
     } else {
-      beginSelection(container, event, origin);
+      beginTool(container, event, origin, chosenTool);
     }
+  }
+
+  function handlePointerDownCapture(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!wantsPan(event.button)) {
+      return;
+    }
+
+    handlePointerDown(event);
+    if (active.current?.pointerId === event.pointerId && active.current.action.kind === 'pan') {
+      event.stopPropagation();
+    }
+  }
+
+  function prepareHandle(event: ReactPointerEvent<HTMLButtonElement>) {
+    const container = root.current;
+    const available = !active.current && currentTool() === 'select';
+    if (!container || !available || !isPrimaryPointer(event)) {
+      return undefined;
+    }
+
+    event.preventDefault();
+    container.focus({ preventScroll: true });
+
+    return container;
   }
 
   function handleHandlePointerDown(
     event: ReactPointerEvent<HTMLButtonElement>,
-    id: string,
     handle: TransformHandle,
   ) {
-    const container = root.current;
-    if (!container || active.current) {
-      return;
-    }
-    if (event.pointerType === 'touch' && !event.isPrimary) {
+    const container = prepareHandle(event);
+    if (!container) {
       return;
     }
 
-    event.preventDefault();
-    container.focus({ preventScroll: true });
     const origin = containerOrigin(container);
-    if (tool === 'pan' || spaceHeld.current) {
-      begin(container, event, origin, { kind: 'pan' });
-    } else if (handle === 'rotate') {
-      beginTransform(container, event, origin, [id], 'rotate');
+    if (handle === 'rotate') {
+      beginTransform(container, event, origin, 'rotate', selection);
     } else {
-      beginTransform(container, event, origin, [id], 'resize', handle);
+      beginTransform(container, event, origin, 'resize', selection, handle);
     }
   }
 
-  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const session = active.current;
-    if (!session || session.pointerId !== event.pointerId) {
-      return;
-    }
-    if (!ownsEvent(event.target, event.currentTarget)) {
+  function handlePortPointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    start: CanvasConnectionEndpoint,
+  ) {
+    const container = prepareHandle(event);
+    const id = start.attachment?.objectId;
+    const object = id && index.get(id);
+    const validSource = object && canConnectTo(object);
+    if (!container || !canEdit || !validSource) {
       return;
     }
 
-    if (!currentSession(session)) {
-      cancel();
-      return;
-    }
-
-    update(frameAt(session, relativePoint(event, session.origin)));
+    begin(container, event, containerOrigin(container), {
+      kind: 'create-connection',
+      interactionId: interactionId(),
+      start,
+    });
   }
 
-  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
-    const session = active.current;
-    if (!session || session.pointerId !== event.pointerId) {
-      return;
-    }
-    if (!ownsEvent(event.target, event.currentTarget)) {
-      return;
-    }
-
-    if (!currentSession(session)) {
-      cancel();
+  function handleConnectorPointerDown(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    id: string,
+    handle: 'start' | 'end' | number,
+  ) {
+    const container = prepareHandle(event);
+    if (!container || !canEdit) {
       return;
     }
 
-    const next = frameAt(session, relativePoint(event, session.origin));
+    const target = editableTarget(index, pending, id);
+    const route = projectObject(index, pending, id)?.connectorRoute;
+    if (target?.kind !== 'connector' || !route) {
+      return;
+    }
+
+    begin(container, event, containerOrigin(container), {
+      kind: 'edit-connection',
+      interactionId: interactionId(),
+      target,
+      handle,
+      bends: typeof handle === 'number' ? connectionHandleBends(route.points) : undefined,
+    });
+  }
+
+  function complete(session: PointerSession, next: CanvasFrame) {
     end(session);
     update({ viewport: next.viewport }, 'now');
     if (session.action.kind === 'marquee' && next.marquee) {
       const objects = queryScene(index, next.marquee, pending);
       onSelectionChange(marqueeSelection(objects, next.marquee, session.action.selection));
     }
-    if (next.preview) {
-      onEditIntent(next.preview);
+
+    const intent = next.preview ?? next.draft;
+    if (intent?.kind === 'create') {
+      exitDrawingTool();
     }
+    if (intent) {
+      onEditIntent(intent);
+    }
+  }
+
+  function sampleGesture(
+    session: PointerSession,
+    event: ReactPointerEvent<HTMLDivElement>,
+    final: boolean,
+  ) {
+    const screen = relativePoint(event, session.origin);
+    const modifiers = { altKey: event.altKey, shiftKey: event.shiftKey };
+    const { action, viewport } = session;
+    if (action.kind === 'ink') {
+      const point = screenToBoard(screen, viewport);
+      recordInk(action, point, viewport.zoom, event.shiftKey, final);
+    }
+
+    const resolve = () => gestureFrame(session, screen, modifiers, { index, pending, size });
+
+    if (final || (action.kind === 'ink' && action.samples.length >= maxInkSamples)) {
+      complete(session, resolve());
+    } else {
+      draw(resolve);
+    }
+  }
+
+  function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!ownsEvent(event.target, event.currentTarget)) {
+      return;
+    }
+
+    const session = active.current;
+    if (!session) {
+      if (currentTool() === 'connector') {
+        hoverPorts(event);
+      }
+
+      return;
+    }
+    if (session.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (!currentSession(session)) {
+      cancel();
+      return;
+    }
+
+    sampleGesture(session, event, false);
+  }
+
+  function hoverPorts(event: ReactPointerEvent<HTMLDivElement>) {
+    const screen = relativePoint(event, containerOrigin(event.currentTarget));
+    const { viewport } = read();
+    draw(() => {
+      const point = screenToBoard(screen, viewport);
+      const { ports, activePort } = connectionTarget(point, viewport.zoom, { index, pending });
+
+      return { viewport, ports, activePort };
+    });
+  }
+
+  function handlePointerLeave() {
+    if (!active.current && currentTool() === 'connector') {
+      cancel();
+    }
+  }
+
+  function handlePointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const session = active.current;
+    if (
+      !session ||
+      session.pointerId !== event.pointerId ||
+      !ownsEvent(event.target, event.currentTarget)
+    ) {
+      return;
+    }
+
+    if (!currentSession(session)) {
+      cancel();
+      return;
+    }
+
+    sampleGesture(session, event, true);
   }
 
   function handlePointerCancel(event: ReactPointerEvent<HTMLDivElement>) {
@@ -383,10 +550,10 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
     if (event.defaultPrevented || event.nativeEvent.isComposing) {
       return;
     }
-    if (!ownsEvent(event.target, event.currentTarget)) {
-      return;
-    }
-    if (canvasNativeId(event.target, event.currentTarget)) {
+    if (
+      !ownsEvent(event.target, event.currentTarget) ||
+      canvasNativeId(event.target, event.currentTarget)
+    ) {
       return;
     }
 
@@ -395,9 +562,12 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
       return;
     }
 
-    if (event.key === 'Escape' && active.current) {
+    const toolNow = currentTool();
+    const drawingTool = toolNow !== 'select' && toolNow !== 'pan';
+    if (event.key === 'Escape' && (active.current || drawingTool)) {
       event.preventDefault();
       cancel();
+      exitDrawingTool();
     }
     if (event.key === ' ') {
       event.preventDefault();
@@ -424,7 +594,7 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
     if (event.defaultPrevented || !ownsEvent(event.target, element)) {
       return;
     }
-    if (!zoom && tool !== 'pan' && native) {
+    if (!zoom && currentTool() === 'select' && native) {
       return;
     }
 
@@ -459,7 +629,6 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
     function handleWheel(event: WheelEvent) {
       onWheel(event, container);
     }
-
     function handleWindowBlur() {
       onWindowBlur();
     }
@@ -474,11 +643,17 @@ export function useCanvasInput({ root, size, index, pending, frame, props }: Can
   }, [root]);
 
   return {
+    toolKind,
+    pointerActive,
     cancel,
     clearSpace,
+    handlePointerDownCapture,
     handlePointerDown,
     handleHandlePointerDown,
+    handlePortPointerDown,
+    handleConnectorPointerDown,
     handlePointerMove,
+    handlePointerLeave,
     handlePointerUp,
     handlePointerCancel,
     handleKeyDown,

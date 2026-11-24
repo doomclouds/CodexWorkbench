@@ -1,0 +1,266 @@
+import type { CanvasFrame } from './canvas-frame.js';
+import {
+  connectionTarget,
+  connectorDraft,
+  inkFrame,
+  placementDraft,
+  resolveCanvasConnection,
+} from './canvas-creation.js';
+import type { CanvasProjection, InkGesture } from './canvas-creation.js';
+import { translateConnection } from './connectors/geometry.js';
+import type {
+  CanvasConnection,
+  CanvasConnectionEndpoint,
+  CanvasObject,
+  CanvasObjectChange,
+  CanvasPlacement,
+  CanvasPoint,
+  CanvasTool,
+  CanvasViewport,
+} from './contracts.js';
+import { getMoveSnapBounds, previewTransform, snapMove } from './gestures/index.js';
+import type { TransformGesture, TransformModifiers } from './gestures/index.js';
+import { scaleInk, snapInkPoint } from './ink/geometry.js';
+import { queryScene } from './scene/index.js';
+import {
+  getObjectBounds,
+  getViewportBounds,
+  panViewport,
+  screenToBoard,
+} from './viewport/index.js';
+import type { CanvasViewportSize } from './viewport/index.js';
+
+interface PlacementGesture {
+  kind: 'place';
+  interactionId: string;
+  placement: CanvasPlacement;
+}
+
+interface ConnectionGesture {
+  kind: 'create-connection';
+  interactionId: string;
+  start: CanvasConnectionEndpoint;
+}
+
+interface EndpointGesture {
+  kind: 'edit-connection';
+  interactionId: string;
+  target: Extract<CanvasObject, { kind: 'connector' }>;
+  handle: 'start' | 'end' | number;
+  bends?: readonly CanvasPoint[];
+}
+
+interface TransformAction {
+  kind: 'transform';
+  transform: TransformGesture;
+  duplicate: boolean;
+}
+
+export type PointerAction =
+  | { kind: 'pan' }
+  | { kind: 'marquee'; selection: readonly string[] }
+  | TransformAction
+  | PlacementGesture
+  | InkGesture
+  | ConnectionGesture
+  | EndpointGesture;
+
+export interface PointerSession {
+  pointerId: number;
+  origin: CanvasPoint;
+  start: CanvasPoint;
+  viewport: CanvasViewport;
+  tool: CanvasTool;
+  action: PointerAction;
+}
+
+interface FrameProjection extends CanvasProjection {
+  size: CanvasViewportSize;
+}
+
+const dragThreshold = 4;
+const placementThreshold = 5;
+const snappingOverscan = 12;
+
+function offset(start: CanvasPoint, end: CanvasPoint) {
+  return { x: end.x - start.x, y: end.y - start.y };
+}
+
+function distance(start: CanvasPoint, end: CanvasPoint) {
+  return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+function marqueeBetween(start: CanvasPoint, end: CanvasPoint) {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function changeGeometry(
+  change: CanvasObjectChange,
+  intent: NonNullable<CanvasFrame['preview']>,
+  view: FrameProjection,
+): CanvasObjectChange {
+  const object = view.index.get(change.id);
+  if (object?.kind === 'connector' && intent.kind === 'move') {
+    return { ...change, connection: translateConnection(object.connection, intent.delta) };
+  }
+  if (object?.kind === 'ink' && intent.kind === 'resize') {
+    return { ...change, ink: scaleInk(object.ink, object.geometry, change.geometry) };
+  }
+
+  return change;
+}
+
+function transformFrame(
+  action: TransformAction,
+  point: CanvasPoint,
+  viewport: CanvasViewport,
+  modifiers: TransformModifiers,
+  view: FrameProjection,
+): CanvasFrame {
+  const bounds = getMoveSnapBounds(action.transform, point);
+  const visible = getViewportBounds(viewport, view.size, snappingOverscan);
+  const references = bounds ? alignmentReferences(action.transform, visible, view) : [];
+  const snap = bounds && snapMove(bounds, references, viewport.zoom);
+  const aim = snap ? { x: point.x + snap.offset.x, y: point.y + snap.offset.y } : point;
+  const intent = previewTransform(action.transform, aim, modifiers);
+  if (!intent) {
+    return { viewport };
+  }
+
+  const changes = intent.changes.map((change) => changeGeometry(change, intent, view));
+  if (action.duplicate && intent.kind === 'move') {
+    const { interactionId, delta } = intent;
+
+    return {
+      viewport,
+      guides: snap?.guides,
+      draft: { kind: 'duplicate', interactionId, delta, sources: changes },
+    };
+  }
+
+  return { viewport, guides: snap?.guides, preview: { ...intent, changes } };
+}
+
+function alignmentReferences(
+  transform: TransformGesture,
+  bounds: ReturnType<typeof getViewportBounds>,
+  { index, pending }: FrameProjection,
+) {
+  const ids = new Set(transform.targets.map(({ id }) => id));
+
+  return queryScene(index, bounds, pending)
+    .filter(
+      ({ object }) => !ids.has(object.id) && object.kind !== 'ink' && object.kind !== 'connector',
+    )
+    .map(({ geometry }) => getObjectBounds(geometry));
+}
+
+function connectionFrame(
+  action: ConnectionGesture,
+  point: CanvasPoint,
+  viewport: CanvasViewport,
+  modifiers: TransformModifiers,
+  view: FrameProjection,
+): CanvasFrame {
+  const { start, interactionId } = action;
+  const { endpoint, ports, activePort } = connectionTarget(
+    point,
+    viewport.zoom,
+    view,
+    start.attachment?.objectId,
+  );
+  const end =
+    modifiers.shiftKey && !endpoint.attachment
+      ? { point: snapInkPoint(start.point, point) }
+      : endpoint;
+
+  return {
+    viewport,
+    ports,
+    activePort,
+    draft: {
+      kind: 'create',
+      interactionId,
+      object: connectorDraft({ start, end }, view),
+    },
+  };
+}
+
+function editConnectionFrame(
+  { target, handle, bends, interactionId }: EndpointGesture,
+  point: CanvasPoint,
+  viewport: CanvasViewport,
+  view: FrameProjection,
+): CanvasFrame {
+  const current = target.connection;
+  const other = handle === 'start' ? current.end : current.start;
+  const targetPort =
+    typeof handle === 'string'
+      ? connectionTarget(point, viewport.zoom, view, other.attachment?.objectId)
+      : undefined;
+  const connection: CanvasConnection =
+    targetPort && typeof handle === 'string'
+      ? { ...current, [handle]: targetPort.endpoint }
+      : {
+          ...current,
+          relativeBends: undefined,
+          bends: bends?.map((bend, index) => (index === handle ? point : bend)),
+        };
+  const change = {
+    id: target.id,
+    expectedVersion: target.version,
+    geometry: resolveCanvasConnection(connection, view).geometry,
+    connection,
+  };
+
+  return {
+    viewport,
+    ports: targetPort?.ports,
+    activePort: targetPort?.activePort,
+    preview: { kind: 'connect', interactionId, changes: [change] },
+  };
+}
+
+export function gestureFrame(
+  session: PointerSession,
+  screen: CanvasPoint,
+  modifiers: TransformModifiers,
+  view: FrameProjection,
+): CanvasFrame {
+  const { action, start, viewport } = session;
+  if (action.kind === 'pan') {
+    return { viewport: panViewport(viewport, offset(start, screen)) };
+  }
+  if (action.kind === 'ink') {
+    return inkFrame(action, viewport);
+  }
+
+  const point = screenToBoard(screen, viewport);
+  const anchor = screenToBoard(start, viewport);
+  const travel = distance(start, screen);
+  if (action.kind === 'place') {
+    const end = travel >= placementThreshold ? point : undefined;
+    const object = placementDraft(action.placement, anchor, end, modifiers.shiftKey);
+
+    return { viewport, draft: { kind: 'create', interactionId: action.interactionId, object } };
+  }
+  if (travel < dragThreshold) {
+    return { viewport };
+  }
+
+  switch (action.kind) {
+    case 'marquee':
+      return { viewport, marquee: marqueeBetween(anchor, point) };
+    case 'transform':
+      return transformFrame(action, point, viewport, modifiers, view);
+    case 'create-connection':
+      return connectionFrame(action, point, viewport, modifiers, view);
+    case 'edit-connection':
+      return editConnectionFrame(action, point, viewport, view);
+  }
+}

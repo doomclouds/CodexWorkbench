@@ -8,6 +8,7 @@ const boundary = 'canvas/contract-boundary';
 const canvas = 'src/ui/domain/canvas/';
 const surface = 'src/surfaces/board.ts';
 const component = 'tests/component/Canvas.test.tsx';
+const parity = 'tests/component/CanvasParity.test.tsx';
 const fixture = 'tests/fixtures/canvas/fixture.tsx';
 const publicPackage = '@codexworkbench/luming-studio-ii-web/ui/domain/canvas';
 
@@ -45,6 +46,21 @@ const rejected = [
     "import { active } from '../selection/select.js';",
   ],
   [
+    'rendering dependency inside scene geometry',
+    canvas + 'scene/index.ts',
+    "import { CanvasConnectorPath } from '../connectors/CanvasConnectorPath.js';",
+  ],
+  [
+    'ink JSX imported from its own geometry',
+    canvas + 'ink/geometry.ts',
+    "import { CanvasInkPath } from './CanvasInkPath.js';",
+  ],
+  [
+    'React inside connector geometry',
+    canvas + 'connectors/geometry.ts',
+    "import { useState } from 'react';",
+  ],
+  [
     'root through an inner module',
     canvas + 'scene/scene.ts',
     "import { Canvas } from '../Canvas.js';",
@@ -70,6 +86,11 @@ const rejected = [
     "import { Canvas } from '../../src/ui/domain/canvas/Canvas.js';",
   ],
   [
+    'parity test reaching connector internals',
+    parity,
+    "import { resolveConnection } from '../../src/ui/domain/canvas/connectors/geometry.js';",
+  ],
+  [
     'fixture depending on Surface',
     fixture,
     "export { save } from '../../../src/surfaces/board.js';",
@@ -88,6 +109,17 @@ const rejected = [
     'math test importing the UI',
     'tests/unit/canvas/viewport.test.ts',
     `import { Canvas } from '${publicPackage}';`,
+  ],
+  [
+    'ink unit test importing its JSX renderer',
+    'tests/unit/canvas/ink.test.ts',
+    "import { CanvasInkPath } from '../../../src/ui/domain/canvas/ink/CanvasInkPath.js';",
+  ],
+  [
+    'parity test mocking the public Canvas',
+    parity,
+    `import { vi } from 'vitest';\nvi.mock('${publicPackage}', factory);`,
+    'canvas/no-test-replacement',
   ],
   [
     'module mock through runner alias',
@@ -206,6 +238,10 @@ const accepted = [
   [canvas + 'viewport/math.ts', "import type { CanvasPoint } from '../contracts.js';"],
   [canvas + 'scene/scene.ts', "import { bounds } from '../viewport/math.js';"],
   [
+    canvas + 'scene/index.ts',
+    "import { resolveConnection } from '../connectors/geometry.js';\nimport { inkBounds } from '../ink/geometry.js';",
+  ],
+  [
     canvas + 'selection/select.ts',
     "import { bounds } from '../viewport/math.js';\nimport { query } from '../scene/scene.js';",
   ],
@@ -215,12 +251,20 @@ const accepted = [
     "import { setup } from '../fixtures/canvas/fixture.js';\nimport { Canvas } from '../../src/ui/domain/canvas/index.js';",
   ],
   [
+    parity,
+    "import { Canvas } from '../../src/ui/domain/canvas/index.js';\nimport { createControlFixture } from '../support/render-control.js';",
+  ],
+  [
     fixture,
     `import { Canvas } from '${publicPackage}';\nimport { Button } from '../../../src/ui/base/index.js';`,
   ],
   [
     'tests/unit/canvas/viewport.test.ts',
     "import { bounds } from '../../../src/ui/domain/canvas/viewport/math.js';\nimport type { CanvasPoint } from '../../../src/ui/domain/canvas/contracts.js';",
+  ],
+  [
+    'tests/unit/canvas/connectors.test.ts',
+    "import { findPort } from '../../../src/ui/domain/canvas/connectors/geometry.js';",
   ],
 ];
 

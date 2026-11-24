@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   CanvasEditIntent,
+  CanvasConnection,
   CanvasObject,
   CanvasObjectChange,
 } from '../../../src/ui/domain/canvas/contracts.js';
 import {
   buildPendingEdits,
   createSceneIndex,
+  isObjectLocked,
   projectObject,
   queryScene,
 } from '../../../src/ui/domain/canvas/scene/index.js';
@@ -33,6 +35,18 @@ function move(
 
 function edit(interactionId: string, ...changes: CanvasObjectChange[]): CanvasEditIntent {
   return { interactionId, kind: 'move', delta: { x: 0, y: 0 }, changes };
+}
+
+function connector(start: CanvasObject, end: CanvasObject): CanvasObject {
+  const connection: CanvasConnection = {
+    start: {
+      point: { x: start.geometry.x + start.geometry.width, y: 5 },
+      attachment: { objectId: start.id, port: 'right' },
+    },
+    end: { point: { x: end.geometry.x, y: 5 }, attachment: { objectId: end.id, port: 'left' } },
+  };
+
+  return { ...shape('connector', start.geometry.x), kind: 'connector', connection };
 }
 
 describe('Canvas scene', () => {
@@ -135,5 +149,200 @@ describe('Canvas scene', () => {
 
     expect(results.map(({ object }) => object.id)).toEqual(['3', '4', distant.id]);
     expect(geometryRead.mock.calls.length).toBeLessThan(10);
+  });
+
+  it('projects only affected attached routes and queries their updated bounds', () => {
+    const anchor = shape('anchor', 100);
+    const destination = shape('destination', 160);
+    const attached = connector(anchor, destination);
+    const distant = shape('distant', 500);
+    const untouched = {
+      ...connector(destination, distant),
+      id: 'untouched',
+    };
+    const index = createSceneIndex([attached, anchor, destination, distant, untouched]);
+    const empty = new Map<string, CanvasObjectChange>();
+    const pending = buildPendingEdits(index, [edit('move-anchor', move(anchor, 5))]);
+
+    expect(queryScene(index, visibleBounds, empty)).toEqual([]);
+    expect(queryScene(index, visibleBounds, pending).map(({ object }) => object.id)).toEqual([
+      'connector',
+      'anchor',
+    ]);
+    expect(projectObject(index, pending, attached.id)?.connectorRoute?.points[0]).toEqual({
+      x: 15,
+      y: 5,
+    });
+    expect(projectObject(index, pending, attached.id)?.object).toBe(attached);
+    expect(projectObject(index, pending, untouched.id)).toBe(
+      projectObject(index, empty, untouched.id),
+    );
+
+    const confirmed = {
+      ...anchor,
+      version: anchor.version + 1,
+      geometry: { ...anchor.geometry, x: 5 },
+    };
+    const revised = createSceneIndex([attached, confirmed, destination]);
+    expect(projectObject(revised, pending, attached.id)?.connectorRoute).toEqual(
+      projectObject(index, pending, attached.id)?.connectorRoute,
+    );
+  });
+
+  it('projects an edited connection against the effective geometry of its new anchor', () => {
+    const previous = shape('previous', 100);
+    const next = shape('next', 120);
+    const destination = shape('destination', 160);
+    const attached = connector(previous, destination);
+    const index = createSceneIndex([attached, previous, destination, next]);
+    const connection: CanvasConnection = {
+      start: { point: { x: 1, y: 5 }, attachment: { objectId: next.id, port: 'left' } },
+      end: { point: { x: 160, y: 5 }, attachment: { objectId: destination.id, port: 'left' } },
+    };
+    const pending = buildPendingEdits(index, [
+      edit('retarget', { ...move(attached, 0), connection }),
+      edit('move-new-anchor', move(next, 3)),
+    ]);
+
+    expect(projectObject(index, pending, attached.id)?.object).toMatchObject({ connection });
+    expect(projectObject(index, pending, attached.id)?.connectorRoute?.points[0]).toEqual({
+      x: 3,
+      y: 5,
+    });
+    const withoutTarget = createSceneIndex([attached, previous, destination]);
+
+    expect(projectObject(withoutTarget, pending, attached.id)?.connectorRoute?.points[0]).toEqual({
+      x: 1,
+      y: 5,
+    });
+  });
+
+  it('blocks pending edits under a locked ancestor and terminates a parent cycle', () => {
+    const locked = { ...shape('locked', 0), kind: 'section' as const, locked: true };
+    const section = { ...shape('section', 1), kind: 'section' as const, parentId: locked.id };
+    const child = { ...shape('child', 2), parentId: section.id };
+    const first = { ...shape('first', 30), parentId: 'second' };
+    const second = { ...shape('second', 31), parentId: first.id };
+    const index = createSceneIndex([locked, section, child, first, second]);
+    const pending = buildPendingEdits(index, [edit('move', move(child, 4), move(first, 32))]);
+
+    expect(isObjectLocked(index, child.id)).toBe(true);
+    expect(isObjectLocked(index, first.id)).toBe(false);
+    expect(isObjectLocked(index, 'missing')).toBe(false);
+    expect(index.childrenOf(section.id)).toEqual([child.id]);
+    expect(pending.has(child.id)).toBe(false);
+    expect(projectObject(index, pending, child.id)?.geometry).toBe(child.geometry);
+    expect(projectObject(index, pending, first.id)?.geometry.x).toBe(32);
+  });
+
+  it('indexes the effective stroke width of a pending ink resize', () => {
+    const object = {
+      ...shape('ink', 60, 10),
+      kind: 'ink' as const,
+      ink: {
+        points: [
+          { x: 0, y: 0 },
+          { x: 1, y: 1 },
+        ],
+        width: 2,
+      },
+    };
+    const index = createSceneIndex([object]);
+    const pending = buildPendingEdits(index, [
+      {
+        kind: 'resize',
+        interactionId: 'resize-ink',
+        changes: [{ ...move(object, 60), ink: { ...object.ink, width: 80 } }],
+      },
+    ]);
+
+    expect(queryScene(index, visibleBounds, new Map())).toEqual([]);
+    expect(queryScene(index, visibleBounds, pending)).toMatchObject([
+      { object: { id: object.id, ink: { width: 80 } } },
+    ]);
+    expect(object.ink.width).toBe(2);
+  });
+
+  it('uses the first repeated ID for drawing, indexed lookup, and bound endpoints', () => {
+    const first = shape('left', 0);
+    const repeated = shape('left', 90);
+    const right = shape('right', 20);
+    const edge = connector(first, right);
+    const index = createSceneIndex([first, repeated, edge, right]);
+
+    expect(index.get('left')).toBe(first);
+    expect(index.objects).toEqual([first, edge, right]);
+    expect(queryScene(index, visibleBounds, new Map()).map(({ object }) => object.id)).toEqual([
+      first.id,
+      edge.id,
+      right.id,
+    ]);
+    expect(projectObject(index, new Map(), edge.id)?.connectorRoute?.points[0]).toEqual({
+      x: 10,
+      y: 5,
+    });
+  });
+
+  it('keeps free endpoints and explicit turns while unrelated bounds change', () => {
+    const first = shape('first', 0);
+    const last = shape('last', 100);
+    const start = { x: 5, y: 20 };
+    const end = { x: 80, y: 20 };
+    const bends = [
+      { x: 5, y: 40 },
+      { x: 80, y: 40 },
+    ];
+    const edge = {
+      ...connector(first, last),
+      kind: 'connector' as const,
+      connection: { start: { point: start }, end: { point: end }, bends },
+    };
+    const index = createSceneIndex([first, edge, last]);
+    const pending = buildPendingEdits(index, [edit('move-nearby', move(first, 15))]);
+
+    expect(projectObject(index, pending, edge.id)?.connectorRoute?.points).toEqual([
+      start,
+      ...bends,
+      end,
+    ]);
+  });
+
+  it('reads each scene ID once and resolves each bound end during indexing only', () => {
+    const idRead = vi.fn();
+    const anchorRead = vi.fn();
+    const distantShapes = Array.from({ length: 2_048 }, (_, i) =>
+      shape(`distant-${i}`, 1000 + i * 20),
+    );
+    const left = shape('left', 0);
+    const right = shape('right', 20);
+    const anchors = [left, right];
+    const arrowCount = 128;
+    const edges = Array.from({ length: arrowCount }, (_, i) => ({
+      ...connector(left, right),
+      id: `edge-${i}`,
+    }));
+    const scene = [...distantShapes, ...anchors, ...edges].map((object) => ({
+      ...object,
+      get id() {
+        idRead();
+
+        return object.id;
+      },
+      get geometry() {
+        if (object === left || object === right) {
+          anchorRead();
+        }
+
+        return object.geometry;
+      },
+    }));
+    anchorRead.mockClear();
+    const index = createSceneIndex(scene);
+
+    expect(idRead).toHaveBeenCalledTimes(scene.length);
+    expect(anchorRead).toHaveBeenCalledTimes(2 + 2 * arrowCount);
+    anchorRead.mockClear();
+    expect(queryScene(index, visibleBounds, new Map())).toHaveLength(anchors.length + edges.length);
+    expect(anchorRead).not.toHaveBeenCalled();
   });
 });

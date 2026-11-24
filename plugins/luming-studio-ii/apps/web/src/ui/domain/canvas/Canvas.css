@@ -36,14 +36,10 @@
   transform-origin: 0 0;
 }
 
-.studio-canvas__world [data-canvas-object] {
-  pointer-events: auto;
-}
-
 .studio-canvas[data-tool='pan'] {
   cursor: grab;
 }
 
-.studio-canvas[data-tool='pan'] [data-canvas-object] {
-  pointer-events: none;
+.studio-canvas:is([data-tool='place'], [data-tool='pen'], [data-tool='connector']) {
+  cursor: crosshair;
 }

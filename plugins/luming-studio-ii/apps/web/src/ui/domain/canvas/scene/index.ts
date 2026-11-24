@@ -1,3 +1,5 @@
+import type { ResolvedConnection } from '../connectors/geometry.js';
+import { resolveConnection } from '../connectors/geometry.js';
 import type {
   CanvasEditIntent,
   CanvasGeometry,
@@ -5,10 +7,11 @@ import type {
   CanvasObjectChange,
   CanvasRect,
 } from '../contracts.js';
+import { inkBounds } from '../ink/geometry.js';
 import { getObjectBounds, rectsIntersect } from '../viewport/index.js';
 
 interface SceneEntry {
-  readonly object: CanvasObject;
+  readonly projected: ProjectedCanvasObject;
   readonly bounds: CanvasRect;
   readonly layer: number;
 }
@@ -31,11 +34,21 @@ export interface SceneIndex {
   get(id: string): CanvasObject | undefined;
   getEntry(id: string): SceneEntry | undefined;
   queryEntries(bounds: CanvasRect): SceneEntry[];
+  groupMembers(id: string): readonly string[];
+  childrenOf(id: string): readonly string[];
+  connectorsTo(id: string): readonly string[];
 }
 
 export interface ProjectedCanvasObject {
   readonly object: CanvasObject;
   readonly geometry: CanvasGeometry;
+  readonly connectorRoute?: ResolvedConnection;
+}
+
+interface SceneRelationships {
+  readonly groups: Map<string, string[]>;
+  readonly children: Map<string, string[]>;
+  readonly connectors: Map<string, string[]>;
 }
 
 const leafCapacity = 16;
@@ -96,19 +109,110 @@ function collectEntries(node: SceneNode, bounds: CanvasRect, entries: SceneEntry
   collectEntries(node.right, bounds, entries);
 }
 
-export function createSceneIndex(objects: readonly CanvasObject[]): SceneIndex {
-  const entries = objects.map((object, layer) => ({
-    object,
-    layer,
-    bounds: getObjectBounds(object.geometry),
-  }));
-  const byId = new Map(entries.map((entry) => [entry.object.id, entry]));
-  const root = entries.length ? buildNode(entries) : undefined;
+function addRelation(index: Map<string, string[]>, id: string | undefined, objectId: string) {
+  if (id === undefined) {
+    return;
+  }
+
+  const related = index.get(id);
+  if (related) {
+    related.push(objectId);
+    return;
+  }
+
+  index.set(id, [objectId]);
+}
+
+function indexRelationships(relationships: SceneRelationships, id: string, object: CanvasObject) {
+  addRelation(relationships.groups, object.groupId, id);
+  addRelation(relationships.children, object.parentId, id);
+  if (object.kind !== 'connector') {
+    return;
+  }
+
+  const start = object.connection.start.attachment?.objectId;
+  const end = object.connection.end.attachment?.objectId;
+  addRelation(relationships.connectors, start, id);
+  if (end !== start) {
+    addRelation(relationships.connectors, end, id);
+  }
+}
+
+function project(
+  object: CanvasObject,
+  geometryForId: (id: string) => CanvasGeometry | undefined,
+  change?: CanvasObjectChange,
+): ProjectedCanvasObject {
+  if (object.kind === 'connector') {
+    const connection = change?.connection ?? object.connection;
+    const connectorRoute = resolveConnection(connection, geometryForId, object.strokeWidth);
+
+    return {
+      object: connection === object.connection ? object : { ...object, connection },
+      geometry: connectorRoute.geometry,
+      connectorRoute,
+    };
+  }
+
+  const ink = change?.ink;
+
+  return {
+    object: object.kind === 'ink' && ink && ink !== object.ink ? { ...object, ink } : object,
+    geometry: change?.geometry ?? object.geometry,
+  };
+}
+
+export function projectedObjectBounds({ object, geometry }: ProjectedCanvasObject): CanvasRect {
+  return object.kind === 'ink' ? inkBounds(object.ink, geometry) : getObjectBounds(geometry);
+}
+
+export function createSceneIndex(source: readonly CanvasObject[]): SceneIndex {
+  const objects: CanvasObject[] = [];
+  const layersById = new Map<string, number>();
+  const relationships: SceneRelationships = {
+    groups: new Map(),
+    children: new Map(),
+    connectors: new Map(),
+  };
+
+  for (const object of source) {
+    const id = object.id;
+    if (layersById.has(id)) {
+      continue;
+    }
+
+    layersById.set(id, objects.length);
+    objects.push(object);
+    indexRelationships(relationships, id, object);
+  }
+
+  function getObject(id: string) {
+    const layer = layersById.get(id);
+
+    return layer === undefined ? undefined : objects[layer];
+  }
+
+  function anchorGeometry(id: string) {
+    const object = getObject(id);
+
+    return object?.kind === 'connector' ? undefined : object?.geometry;
+  }
+
+  const entries = objects.map((object, layer) => {
+    const projected = project(object, anchorGeometry);
+
+    return { projected, layer, bounds: projectedObjectBounds(projected) };
+  });
+  const root = entries.length ? buildNode(entries.slice()) : undefined;
 
   return {
     objects,
-    get: (id) => byId.get(id)?.object,
-    getEntry: (id) => byId.get(id),
+    get: getObject,
+    getEntry(id) {
+      const layer = layersById.get(id);
+
+      return layer === undefined ? undefined : entries[layer];
+    },
     queryEntries(bounds) {
       const matches: SceneEntry[] = [];
       if (root) {
@@ -117,11 +221,33 @@ export function createSceneIndex(objects: readonly CanvasObject[]): SceneIndex {
 
       return matches;
     },
+    groupMembers: (id) => relationships.groups.get(id) ?? [],
+    childrenOf: (id) => relationships.children.get(id) ?? [],
+    connectorsTo: (id) => relationships.connectors.get(id) ?? [],
   };
 }
 
-function canApply(object: CanvasObject | undefined, change: CanvasObjectChange): boolean {
-  return object !== undefined && !object.locked && object.version === change.expectedVersion;
+export function isObjectLocked(index: SceneIndex, id: string): boolean {
+  const visited = new Set<string>();
+  let current = index.get(id);
+  while (current && !visited.has(current.id)) {
+    if (current.locked) {
+      return true;
+    }
+
+    visited.add(current.id);
+    current = current.parentId === undefined ? undefined : index.get(current.parentId);
+  }
+
+  return false;
+}
+
+function applicableChange(index: SceneIndex, id: string, change?: CanvasObjectChange) {
+  if (!change || index.get(id)?.version !== change.expectedVersion || isObjectLocked(index, id)) {
+    return undefined;
+  }
+
+  return change;
 }
 
 export function buildPendingEdits(
@@ -131,8 +257,12 @@ export function buildPendingEdits(
   const pending = new Map<string, CanvasObjectChange>();
 
   for (const edit of edits) {
+    if (!('changes' in edit)) {
+      continue;
+    }
+
     for (const change of edit.changes) {
-      if (canApply(index.get(change.id), change)) {
+      if (applicableChange(index, change.id, change)) {
         pending.set(change.id, change);
       }
     }
@@ -141,8 +271,15 @@ export function buildPendingEdits(
   return pending;
 }
 
-function geometryFor(object: CanvasObject, change: CanvasObjectChange | undefined): CanvasGeometry {
-  return change && canApply(object, change) ? change.geometry : object.geometry;
+function anchorChanged(object: CanvasObject, changes: ReadonlyMap<string, CanvasObjectChange>) {
+  if (object.kind !== 'connector') {
+    return false;
+  }
+
+  const start = object.connection.start.attachment?.objectId;
+  const end = object.connection.end.attachment?.objectId;
+
+  return (start !== undefined && changes.has(start)) || (end !== undefined && changes.has(end));
 }
 
 export function projectObject(
@@ -150,10 +287,38 @@ export function projectObject(
   changes: ReadonlyMap<string, CanvasObjectChange>,
   id: string,
 ): ProjectedCanvasObject | undefined {
-  const object = index.get(id);
-  if (object) {
-    return { object, geometry: geometryFor(object, changes.get(id)) };
+  const entry = index.getEntry(id);
+  if (!entry) {
+    return undefined;
   }
+
+  const { object } = entry.projected;
+  const change = applicableChange(index, id, changes.get(id));
+  if (!change && !anchorChanged(object, changes)) {
+    return entry.projected;
+  }
+
+  return project(object, anchorGeometry, change);
+
+  function anchorGeometry(anchorId: string) {
+    const anchor = index.get(anchorId);
+    if (!anchor || anchor.kind === 'connector') {
+      return undefined;
+    }
+
+    return applicableChange(index, anchorId, changes.get(anchorId))?.geometry ?? anchor.geometry;
+  }
+}
+
+function affectedEntries(index: SceneIndex, changes: ReadonlyMap<string, CanvasObjectChange>) {
+  const affected = new Set(changes.keys());
+  for (const id of changes.keys()) {
+    for (const connector of index.connectorsTo(id)) {
+      affected.add(connector);
+    }
+  }
+
+  return affected;
 }
 
 export function queryScene(
@@ -161,24 +326,25 @@ export function queryScene(
   bounds: CanvasRect,
   changes: ReadonlyMap<string, CanvasObjectChange>,
 ): ProjectedCanvasObject[] {
-  const matches = index.queryEntries(bounds).filter(({ object }) => !changes.has(object.id));
+  const affected = affectedEntries(index, changes);
+  const matches = index
+    .queryEntries(bounds)
+    .filter(({ projected }) => !affected.has(projected.object.id));
 
-  for (const [id, change] of changes) {
+  for (const id of affected) {
     const entry = index.getEntry(id);
-    if (!entry) {
+    const projected = projectObject(index, changes, id);
+    if (!entry || !projected) {
       continue;
     }
 
-    const geometry = geometryFor(entry.object, change);
-    const projectedBounds =
-      geometry === entry.object.geometry ? entry.bounds : getObjectBounds(geometry);
+    const currentBounds =
+      projected === entry.projected ? entry.bounds : projectedObjectBounds(projected);
 
-    if (rectsIntersect(projectedBounds, bounds)) {
-      matches.push(entry);
+    if (rectsIntersect(currentBounds, bounds)) {
+      matches.push({ projected, layer: entry.layer, bounds: currentBounds });
     }
   }
 
-  return matches
-    .sort((left, right) => left.layer - right.layer)
-    .map(({ object }) => ({ object, geometry: geometryFor(object, changes.get(object.id)) }));
+  return matches.sort((left, right) => left.layer - right.layer).map(({ projected }) => projected);
 }

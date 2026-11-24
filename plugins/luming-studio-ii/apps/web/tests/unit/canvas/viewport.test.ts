@@ -58,6 +58,30 @@ describe('canvas viewport', () => {
     expect(fitViewport({ ...rect, width: 0, height: 0 }, size).zoom).toBe(8);
   });
 
+  it('keeps visible padding on all sides of a large board in a narrow panel', () => {
+    const rect = { x: -1000, y: -600, width: 2100, height: 1380 };
+    const size = { width: 550, height: 600 };
+    const padding = 40;
+    const view = fitViewport(rect, size, padding);
+    const topLeft = boardToScreen(rect, view);
+    const bottomRight = boardToScreen({ x: 1100, y: 780 }, view);
+
+    expect(topLeft.x).toBeCloseTo(padding);
+    expect(topLeft.y).toBeGreaterThanOrEqual(padding);
+    expect(bottomRight.x).toBeCloseTo(size.width - padding);
+    expect(bottomRight.y).toBeLessThanOrEqual(size.height - padding);
+  });
+
+  it('centers the target when padding exceeds a panel edge and caps padded zoom at native size', () => {
+    const rect = { x: 5, y: 8, width: 10, height: 10 };
+    const padding = 40;
+    const view = fitViewport(rect, { width: 1, height: 20 }, padding);
+
+    expect(view.zoom).toBeCloseTo(0.1);
+    expect(boardToScreen({ x: 10, y: 13 }, view)).toEqual({ x: 0.5, y: 10 });
+    expect(fitViewport(rect, { width: 400, height: 400 }, padding).zoom).toBe(1);
+  });
+
   it('normalizes invalid viewport data and empty measurements', () => {
     const invalidView = { x: Infinity, y: NaN, zoom: -5 };
     const size = { width: -30, height: Infinity };

@@ -1,9 +1,18 @@
 import { useMemo } from 'react';
+import { canConnectTo } from './canvas-creation.js';
 import type { CanvasFrame } from './canvas-frame.js';
-import type { CanvasEditIntent, CanvasObjectChange, CanvasProps } from './contracts.js';
-import { buildPendingEdits, createSceneIndex, projectObject, queryScene } from './scene/index.js';
-import type { SceneIndex } from './scene/index.js';
-import { getObjectBounds, getViewportBounds, rectsIntersect } from './viewport/index.js';
+import type { CanvasObjectChange, CanvasProps } from './contracts.js';
+import { getTransformBox } from './gestures/index.js';
+import {
+  buildPendingEdits,
+  createSceneIndex,
+  isObjectLocked,
+  projectedObjectBounds,
+  projectObject,
+  queryScene,
+} from './scene/index.js';
+import type { ProjectedCanvasObject, SceneIndex } from './scene/index.js';
+import { getViewportBounds, rectsIntersect } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
 const viewOverscan = 128;
@@ -14,7 +23,7 @@ export function editableTarget(
   id: string,
 ) {
   const object = index.get(id);
-  if (!object || object.locked || pending.has(id)) {
+  if (!object || isObjectLocked(index, id) || pending.has(id)) {
     return undefined;
   }
 
@@ -33,10 +42,36 @@ export function isCurrentEdit(
   });
 }
 
+export function selectionControls(
+  selected: readonly ProjectedCanvasObject[],
+  index: SceneIndex,
+  pending: ReadonlyMap<string, CanvasObjectChange>,
+  enabled: boolean,
+) {
+  if (!enabled || selected.length === 0) {
+    return {};
+  }
+
+  const object = selected.length === 1 ? selected[0] : undefined;
+  const single = object && editableTarget(index, pending, object.object.id) ? object : undefined;
+  const canTransform = selected.every(
+    ({ object }) => object.kind !== 'connector' && editableTarget(index, pending, object.id),
+  );
+  const geometries = selected.map(({ geometry }) => geometry);
+
+  return {
+    transformBox: canTransform ? getTransformBox(geometries) : undefined,
+    cornerResizeOnly:
+      selected.length > 1 && geometries.some(({ rotation }) => rotation % 360 !== 0),
+    selectedConnector: single?.object.kind === 'connector' ? single : undefined,
+    portSource: single && canConnectTo(single.object) ? single : undefined,
+  };
+}
+
 function projectedChanges(
   index: SceneIndex,
   pending: ReadonlyMap<string, CanvasObjectChange>,
-  preview: CanvasEditIntent | undefined,
+  preview: CanvasFrame['preview'],
 ) {
   if (!preview || !isCurrentEdit(index, pending, preview.changes)) {
     return pending;
@@ -76,7 +111,7 @@ export function useCanvasModel(
     const bounds = getViewportBounds(viewport, size);
 
     return windowed
-      .filter(({ geometry }) => rectsIntersect(getObjectBounds(geometry), bounds))
+      .filter((entry) => rectsIntersect(projectedObjectBounds(entry), bounds))
       .map(({ object }) => object.id);
   }, [windowed, viewport, size]);
   const selected = useMemo(

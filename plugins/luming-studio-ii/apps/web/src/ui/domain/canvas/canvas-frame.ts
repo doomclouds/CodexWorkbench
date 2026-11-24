@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import type { CanvasEditIntent, CanvasRect, CanvasViewport } from './contracts.js';
+import type {
+  CanvasCreateIntent,
+  CanvasDuplicateIntent,
+  CanvasEditIntent,
+  CanvasPoint,
+  CanvasRect,
+  CanvasViewport,
+} from './contracts.js';
+import type { AlignmentGuide } from './gestures/index.js';
 import { normalizeViewport } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
@@ -8,8 +16,12 @@ type CanvasRoot = RefObject<HTMLDivElement | null>;
 
 export interface CanvasFrame {
   viewport: CanvasViewport;
-  preview?: CanvasEditIntent;
+  preview?: Extract<CanvasEditIntent, { changes: readonly unknown[] }>;
+  draft?: CanvasCreateIntent | CanvasDuplicateIntent;
   marquee?: CanvasRect;
+  guides?: readonly AlignmentGuide[];
+  ports?: readonly CanvasPoint[];
+  activePort?: CanvasPoint;
 }
 
 interface ScheduledFrame {
@@ -20,6 +32,7 @@ interface ScheduledFrame {
 export interface CanvasFrameController {
   read: () => CanvasFrame;
   update: (next: CanvasFrame, timing?: 'now' | 'frame') => void;
+  draw: (resolve: () => CanvasFrame) => void;
 }
 
 export function useCanvasFrame(root: CanvasRoot, initialViewport?: CanvasViewport) {
@@ -28,6 +41,7 @@ export function useCanvasFrame(root: CanvasRoot, initialViewport?: CanvasViewpor
   }));
   const current = useRef(frame);
   const scheduled = useRef<ScheduledFrame | null>(null);
+  const drawing = useRef<(() => CanvasFrame) | undefined>(undefined);
 
   const clearSchedule = useCallback(() => {
     const pending = scheduled.current;
@@ -39,30 +53,50 @@ export function useCanvasFrame(root: CanvasRoot, initialViewport?: CanvasViewpor
 
   useEffect(() => clearSchedule, [clearSchedule]);
 
+  const commit = useCallback(() => {
+    scheduled.current = null;
+    const resolve = drawing.current;
+    drawing.current = undefined;
+    if (resolve) {
+      current.current = resolve();
+    }
+
+    setFrame(current.current);
+  }, []);
+
+  const schedule = useCallback(() => {
+    const view = root.current?.ownerDocument.defaultView;
+    if (!view?.requestAnimationFrame) {
+      commit();
+    } else if (!scheduled.current) {
+      scheduled.current = { view, id: view.requestAnimationFrame(commit) };
+    }
+  }, [root, commit]);
+
   const read = useCallback(() => current.current, []);
   const update = useCallback(
     (next: CanvasFrame, timing: 'now' | 'frame' = 'frame') => {
+      drawing.current = undefined;
       current.current = next;
-      const view = root.current?.ownerDocument.defaultView;
-      if (timing === 'now' || !view?.requestAnimationFrame) {
+      if (timing === 'now') {
         clearSchedule();
-        setFrame(next);
-        return;
-      }
-      if (scheduled.current) {
+        commit();
         return;
       }
 
-      const id = view.requestAnimationFrame(() => {
-        scheduled.current = null;
-        setFrame(current.current);
-      });
-      scheduled.current = { view, id };
+      schedule();
     },
-    [clearSchedule, root],
+    [clearSchedule, commit, schedule],
+  );
+  const draw = useCallback(
+    (resolve: () => CanvasFrame) => {
+      drawing.current = resolve;
+      schedule();
+    },
+    [schedule],
   );
 
-  return { frame, read, update };
+  return { frame, read, update, draw };
 }
 
 export function useCanvasSize(root: CanvasRoot): CanvasViewportSize {

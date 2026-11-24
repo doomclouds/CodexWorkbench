@@ -1,76 +1,56 @@
-import { useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import { useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import {
-  Button,
-  ScrollRegion,
-  TextArea,
-  ToggleButton,
-  Toolbar,
-} from '../../../src/ui/base/index.js';
+import { Button, Select, ToggleButton, Toolbar } from '../../../src/ui/base/index.js';
 import {
   Canvas,
   type CanvasHandle,
+  type CanvasPlacement,
   type CanvasTool,
   type CanvasViewport,
 } from '../../../src/ui/domain/canvas/index.js';
+import { useFixtureContent } from './contents.js';
 import { initialReceiptState, reduceReceipts } from './receipts.js';
 import './style.css';
 
 const initialViewport: CanvasViewport = { x: 0, y: 0, zoom: 1 };
-const previewRows = [
-  '检查滚动是否停留在原生内容内。',
-  '拖动选中文字时，应保留文本选择。',
-  '在文本框中输入并按方向键，检查光标移动。',
-  '从这个区域移出后，用滚轮平移画布。',
-  '按住 Ctrl 或 ⌘ 滚轮缩放画布。',
-  '切换平移工具后，拖动原生内容可平移画布。',
-  '切换只读后，检查移动与缩放手柄的限制。',
+const placementPresets: readonly CanvasPlacement[] = [
+  { kind: 'shape', label: '菱形', shape: 'diamond', width: 144, height: 100 },
+  { kind: 'section', label: '透明分区', transparent: true, width: 268, height: 170 },
+  { kind: 'note', label: '便签', width: 140, height: 116 },
+  { kind: 'html', label: 'HTML 预览', width: 288, height: 220 },
+  { kind: 'document', label: '文档', width: 280, height: 220 },
+  { kind: 'todo', label: '待办', width: 228, height: 156 },
+  { kind: 'table', label: '表格', width: 288, height: 212 },
 ];
-
-interface NativeContentProps {
-  readOnly: boolean;
-  text: string;
-  onTextChange: (text: string) => void;
-}
-
-function NativeContent({ readOnly, text, onTextChange }: NativeContentProps) {
-  return (
-    <div className="canvas-fixture-native">
-      <TextArea
-        label="原生文本框"
-        value={text}
-        onValueChange={onTextChange}
-        readOnly={readOnly}
-        rows={2}
-      />
-      <ScrollRegion axis="vertical" label="原生滚动区" contain>
-        <ul>
-          {previewRows.map((row) => (
-            <li key={row}>{row}</li>
-          ))}
-        </ul>
-      </ScrollRegion>
-    </div>
-  );
-}
+const placementOptions = placementPresets.map(({ kind, label }) => ({ id: kind, label }));
 
 function CanvasFixture() {
   const handle = useRef<CanvasHandle>(null);
+  const placementSequence = useRef(0);
   const [model, dispatch] = useReducer(reduceReceipts, initialReceiptState);
   const [tool, setTool] = useState<CanvasTool>('select');
+  const [placement, setPlacement] = useState('shape');
   const [readOnly, setReadOnly] = useState(false);
-  const [text, setText] = useState('在这里输入文字或拖选文本。');
   const [selection, setSelection] = useState<readonly string[]>([]);
   const [visible, setVisible] = useState<readonly string[]>([]);
   const [viewport, setViewport] = useState(initialViewport);
-  const content = useMemo(() => {
-    const native = <NativeContent readOnly={readOnly} text={text} onTextChange={setText} />;
-
-    return new Map<string, ReactNode>([['native', native]]);
-  }, [readOnly, text]);
+  const content = useFixtureContent(readOnly);
   const activeEdit = model.pending[0];
   const lastRejectedId = model.lastRejectedId;
+
+  function handlePlacementToggle(pressed: boolean) {
+    if (!pressed) {
+      setTool('select');
+      return;
+    }
+
+    const object = placementPresets.find(({ kind }) => kind === placement);
+    if (object) {
+      placementSequence.current += 1;
+      setTool({ kind: 'place', requestId: String(placementSequence.current), object });
+    }
+  }
 
   function handleFitSelection() {
     const ids = selection.length > 0 ? selection : model.scene.objects.map(({ id }) => id);
@@ -78,8 +58,13 @@ function CanvasFixture() {
   }
 
   function releaseReceipt(accepted: boolean) {
-    if (activeEdit) {
-      dispatch({ type: 'receipt', interactionId: activeEdit.interactionId, accepted });
+    if (!activeEdit) {
+      return;
+    }
+
+    dispatch({ type: 'receipt', interactionId: activeEdit.interactionId, accepted });
+    if (accepted && activeEdit.kind === 'create') {
+      setSelection([activeEdit.interactionId]);
     }
   }
 
@@ -93,7 +78,7 @@ function CanvasFixture() {
     <main className="canvas-fixture">
       <header>
         <h1>画布交互验收</h1>
-        <p>拖动重叠图形检查命中顺序。松开后用回执按钮确认或拒绝位置变化。</p>
+        <p>拖动检查命中、吸附和变形。按住 Alt 拖动复制，按 Esc 取消。操作完成后模拟确认或拒绝。</p>
       </header>
 
       <div className="canvas-fixture-actions">
@@ -108,10 +93,37 @@ function CanvasFixture() {
             pressed={tool === 'pan'}
             onPressedChange={() => setTool('pan')}
           />
+          <ToggleButton
+            label="画笔"
+            pressed={tool === 'pen'}
+            disabled={readOnly}
+            onPressedChange={() => setTool('pen')}
+          />
+          <ToggleButton
+            label="连线"
+            pressed={tool === 'connector'}
+            disabled={readOnly}
+            onPressedChange={() => setTool('connector')}
+          />
           <ToggleButton label="只读" pressed={readOnly} onPressedChange={setReadOnly} />
           <Button label="适配选区" onActivate={handleFitSelection} />
           <Button label="聚焦画布" onActivate={() => handle.current?.focus()} />
         </Toolbar>
+        <div className="canvas-fixture-placement">
+          <Select
+            label="对象类型"
+            value={placement}
+            options={placementOptions}
+            disabled={readOnly || typeof tool !== 'string'}
+            onValueChange={setPlacement}
+          />
+          <ToggleButton
+            label="放置对象"
+            pressed={typeof tool !== 'string'}
+            disabled={readOnly}
+            onPressedChange={handlePlacementToggle}
+          />
+        </div>
         <Toolbar label="模拟回执">
           <Button label="确认当前" disabled={!activeEdit} onActivate={() => releaseReceipt(true)} />
           <Button
@@ -136,6 +148,7 @@ function CanvasFixture() {
           pendingEdits={model.pending}
           contentById={content}
           onSelectionChange={setSelection}
+          onToolChange={setTool}
           onEditIntent={(intent) => dispatch({ type: 'edit', intent })}
           onViewportChange={setViewport}
           onVisibleObjectsChange={setVisible}

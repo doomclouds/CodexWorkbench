@@ -1,1 +1,1 @@
-export { CanvasOverlays, type CanvasOverlaysProps } from './CanvasOverlays.js';
+export { CanvasOverlays } from './CanvasOverlays.js';

@@ -70,6 +70,8 @@ pnpm --filter @codexworkbench/luming-studio-ii-web build
 
 画布从 `@codexworkbench/luming-studio-ii-web/ui/domain/canvas` 使用。调用方通过场景、属性、观察事件、编辑意图和句柄与 Canvas 交互。Canvas 专用 Lint 检查公开入口、内部模块依赖、I/O 及测试边界。
 
+验收页支持单次放置、框选、拖动吸附、多选变形、笔迹、连接点和折点。用「确认当前」或「拒绝当前」观察意图与回执。HTML、文档、待办和表格卡片通过正文插槽演示焦点、滚动与变形。
+
 ```sh
 pnpm --filter @codexworkbench/luming-studio-ii-web preview:canvas
 ```

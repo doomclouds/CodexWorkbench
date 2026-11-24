@@ -4,7 +4,12 @@ import type {
   CanvasGeometry,
   CanvasObjectChange,
 } from '../../../src/ui/domain/canvas/contracts.js';
-import { previewTransform } from '../../../src/ui/domain/canvas/gestures/index.js';
+import {
+  getMoveSnapBounds,
+  getTransformBox,
+  previewTransform,
+  snapMove,
+} from '../../../src/ui/domain/canvas/gestures/index.js';
 import type { TransformGesture } from '../../../src/ui/domain/canvas/gestures/index.js';
 
 const initial = { x: 10, y: 20, width: 100, height: 60, rotation: 0 };
@@ -182,7 +187,7 @@ it('rejects non-finite deltas and does not return a partial multi-target edit on
   expect(previewTransform(move, { x: Number.MAX_VALUE, y: 0 })).toBeUndefined();
 });
 
-it('requires a resize handle and exactly one target for a resize or rotation', () => {
+it('requires a resize handle and valid dimensions for every transformed target', () => {
   const shape = target('shape', 6, initial);
   const gesture: TransformGesture = {
     kind: 'resize',
@@ -194,7 +199,344 @@ it('requires a resize handle and exactly one target for a resize or rotation', (
   expect(previewTransform(gesture, point)).toBeUndefined();
   expect(previewTransform({ ...gesture, handle: 'ne', targets: [] }, point)).toBeUndefined();
 
-  const targets = [shape, target('other', 5, { ...initial, x: 170 })];
+  const targets = [shape, target('other', 5, { ...initial, x: 170, width: 0 })];
+  expect(getTransformBox(targets.map(({ geometry }) => geometry))).toBeUndefined();
   expect(previewTransform({ ...gesture, handle: 'ne', targets }, point)).toBeUndefined();
   expect(previewTransform({ ...gesture, kind: 'rotate', targets }, point)).toBeUndefined();
+});
+
+it.each([
+  ['nw', { x: -20, y: -10 }, { x: 80, y: 190, width: 120, height: 90 }],
+  ['ne', { x: 20, y: -10 }, { x: 100, y: 190, width: 120, height: 90 }],
+  ['sw', { x: -20, y: 10 }, { x: 80, y: 200, width: 120, height: 90 }],
+  ['se', { x: 20, y: 10 }, { x: 100, y: 200, width: 120, height: 90 }],
+  ['w', { x: 200, y: 999 }, { x: 176, y: 200, width: 24, height: 80 }],
+  ['e', { x: 20, y: 999 }, { x: 100, y: 200, width: 120, height: 80 }],
+  ['n', { x: 999, y: -10 }, { x: 100, y: 190, width: 100, height: 90 }],
+  ['s', { x: 999, y: 10 }, { x: 100, y: 200, width: 100, height: 90 }],
+] as const)('preserves the opposite anchor and minimum sizes at %s', (handle, point, bounds) => {
+  const geometry = { x: 100, y: 200, width: 100, height: 80, rotation: 0 };
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: `resize-${handle}`,
+    start: { x: 0, y: 0 },
+    targets: [target('shape', 5, geometry)],
+    handle,
+  };
+
+  expect(previewTransform(gesture, point)?.changes[0]?.geometry).toEqual({
+    ...bounds,
+    rotation: 0,
+  });
+});
+
+it('uses the local east edge and retains the opposite edge of a 90-degree shape', () => {
+  const geometry = { x: 0, y: 0, width: 100, height: 40, rotation: 90 };
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize-rotated-east',
+    start: { x: 0, y: 0 },
+    targets: [target('shape', 2, geometry)],
+    handle: 'e',
+  };
+  const resized = previewTransform(gesture, { x: 0, y: 50 })?.changes[0]?.geometry;
+  if (!resized) {
+    throw new Error('Missing local edge resize.');
+  }
+
+  expect(resized.width).toBeCloseTo(150);
+  expect(resized.height).toBeCloseTo(40);
+  expect(resized.x).toBeCloseTo(-25);
+  expect(resized.y).toBeCloseTo(25);
+  expect(resized.x + resized.width / 2).toBeCloseTo(50);
+  expect(resized.y + resized.height / 2 - resized.width / 2).toBeCloseTo(-30);
+});
+
+it('combines Shift aspect locking and Alt centre anchoring', () => {
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize-centre',
+    start: { x: 110, y: 80 },
+    targets: [target('shape', 5, initial)],
+    handle: 'se',
+  };
+  const end = { x: 160, y: 90 };
+
+  expect(previewTransform(gesture, end, { altKey: true })?.changes[0]?.geometry).toEqual({
+    ...initial,
+    x: -40,
+    y: 10,
+    width: 200,
+    height: 80,
+  });
+  expect(previewTransform(gesture, end, { shiftKey: true })?.changes[0]?.geometry).toEqual({
+    ...initial,
+    width: 150,
+    height: 90,
+  });
+  const centered = previewTransform(gesture, end, { altKey: true, shiftKey: true });
+  expect(centered?.changes[0]?.geometry).toEqual({
+    ...initial,
+    x: -40,
+    y: -10,
+    width: 200,
+    height: 120,
+  });
+});
+
+it('snaps the rotation delta in increments of 15 degrees and preserves the starting rotation', () => {
+  const gesture: TransformGesture = {
+    kind: 'rotate',
+    interactionId: 'rotate-snap',
+    start: pointAt(170),
+    targets: [target('shape', 5, { ...initial, rotation: 7 })],
+  };
+
+  expect(
+    previewTransform(gesture, pointAt(-170), { shiftKey: true })?.changes[0]?.geometry,
+  ).toEqual({
+    ...initial,
+    rotation: 22,
+  });
+  expect(previewTransform(gesture, pointAt(176), { shiftKey: true })).toBeUndefined();
+});
+
+it('keeps the ratio when dragging a corner or resizing an edge from the centre', () => {
+  const geometry = { ...initial, height: 50 };
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize-with-ratio',
+    start: { x: 0, y: 0 },
+    targets: [target('shape', 2, geometry)],
+    handle: 'se',
+  };
+  const corner = previewTransform(gesture, { x: 50, y: 5 }, { shiftKey: true });
+  const edge = previewTransform(
+    { ...gesture, handle: 'e' },
+    { x: 20, y: 0 },
+    { shiftKey: true, altKey: true },
+  );
+
+  expect(corner?.changes[0]?.geometry).toEqual({ ...geometry, width: 150, height: 75 });
+  expect(edge?.changes[0]?.geometry).toEqual({
+    ...geometry,
+    x: -10,
+    y: 10,
+    width: 140,
+    height: 70,
+  });
+});
+
+it('keeps the operation identity and base version in a centred proportional resize', () => {
+  const geometry = { x: 0, y: 0, width: 40, height: 40, rotation: 0 };
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize',
+    start: { x: 0, y: 0 },
+    targets: [target('shape', 4, geometry)],
+    handle: 'se',
+  };
+
+  expect(previewTransform(gesture, { x: 20, y: 10 }, { altKey: true, shiftKey: true })).toEqual({
+    kind: 'resize',
+    interactionId: 'resize',
+    changes: [target('shape', 4, { ...geometry, x: -20, y: -20, width: 80, height: 80 })],
+  });
+});
+
+it('snaps the legacy square rotation gesture to 15 degrees', () => {
+  const geometry = { x: 0, y: 0, width: 40, height: 40, rotation: 0 };
+  const gesture: TransformGesture = {
+    kind: 'rotate',
+    interactionId: 'rotate',
+    start: { x: 40, y: 20 },
+    targets: [target('shape', 4, geometry)],
+  };
+
+  expect(previewTransform(gesture, { x: 40, y: 28 }, { shiftKey: true })).toEqual({
+    kind: 'rotate',
+    interactionId: 'rotate',
+    changes: [target('shape', 4, { ...geometry, rotation: 15 })],
+  });
+});
+
+it('resizes an unrotated selection as a single box while preserving versions', () => {
+  const second = { ...initial, x: 170 };
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize-group',
+    start: { x: 270, y: 50 },
+    targets: [target('first', 3, initial), target('second', 5, second)],
+    handle: 'e',
+  };
+
+  expect(previewTransform(gesture, { x: 530, y: 80 })?.changes).toEqual([
+    target('first', 3, { ...initial, width: 200 }),
+    target('second', 5, { ...second, x: 330, width: 200 }),
+  ]);
+});
+
+it('scales all selected geometry on both axes and leaves its source values intact', () => {
+  const shape = Object.freeze({ x: 0, y: 0, width: 100, height: 80, rotation: 0 });
+  const ink = Object.freeze({ x: 200, y: 20, width: 40, height: 20, rotation: 0 });
+  const content = Object.freeze({ x: 30, y: 30, width: 100, height: 80, rotation: 0 });
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize-mixed-selection',
+    start: { x: 0, y: 0 },
+    targets: [target('shape', 2, shape), target('ink', 2, ink), target('html', 2, content)],
+    handle: 'se',
+  };
+
+  expect(previewTransform(gesture, { x: 240, y: 220 })?.changes).toEqual([
+    target('shape', 2, { ...shape, width: 200, height: 240 }),
+    target('ink', 2, { ...ink, x: 400, y: 60, width: 80, height: 60 }),
+    target('html', 2, { ...content, x: 60, y: 90, width: 200, height: 240 }),
+  ]);
+});
+
+it('uses world AABBs and uniform scaling for a selection containing a rotated object', () => {
+  const first = { ...initial, rotation: 90 };
+  const second = { ...initial, x: 170 };
+  expect(getTransformBox([first])).toEqual(first);
+  const box = getTransformBox([first, second]);
+  expect(box?.x).toBeCloseTo(30);
+  expect(box?.y).toBeCloseTo(0);
+  expect(box?.width).toBeCloseTo(240);
+  expect(box?.height).toBeCloseTo(100);
+  expect(box?.rotation).toBe(0);
+
+  const gesture: TransformGesture = {
+    kind: 'resize',
+    interactionId: 'resize-rotated-group',
+    start: { x: 270, y: 100 },
+    targets: [target('first', 3, first), target('second', 5, second)],
+    handle: 'se',
+  };
+  const geometry = previewTransform(gesture, { x: 330, y: 100 })?.changes[0]?.geometry;
+  expect(geometry?.x).toBeCloseTo(5);
+  expect(geometry?.y).toBeCloseTo(25);
+  expect(geometry?.width).toBeCloseTo(125);
+  expect(geometry?.height).toBeCloseTo(75);
+  expect(geometry?.rotation).toBe(90);
+});
+
+it('rotates the centres and angles of a selection around its world bounds', () => {
+  const second = { ...initial, x: 170 };
+  const gesture: TransformGesture = {
+    kind: 'rotate',
+    interactionId: 'rotate-group',
+    start: { x: 240, y: 50 },
+    targets: [target('first', 3, initial), target('second', 5, second)],
+  };
+  const intent = previewTransform(gesture, { x: 140, y: 150 });
+  const [firstResult, secondResult] = intent?.changes ?? [];
+
+  expect(firstResult?.expectedVersion).toBe(3);
+  expect(firstResult?.geometry.x).toBeCloseTo(90);
+  expect(firstResult?.geometry.y).toBeCloseTo(-60);
+  expect(firstResult?.geometry.rotation).toBe(90);
+  expect(secondResult?.expectedVersion).toBe(5);
+  expect(secondResult?.geometry.x).toBeCloseTo(90);
+  expect(secondResult?.geometry.y).toBeCloseTo(100);
+  expect(secondResult?.geometry.rotation).toBe(90);
+});
+
+it('rotates a member with an existing rotation around the shared centre', () => {
+  const first = { x: 50, y: 0, width: 100, height: 40, rotation: 5 };
+  const second = { ...first, x: -150, y: -40 };
+  const gesture: TransformGesture = {
+    kind: 'rotate',
+    interactionId: 'rotate-group-member',
+    start: { x: 100, y: 0 },
+    targets: [target('first', 2, first), target('second', 2, second)],
+  };
+  const rotated = previewTransform(gesture, { x: 0, y: 100 })?.changes[0]?.geometry;
+
+  expect(rotated?.x).toBeCloseTo(-70);
+  expect(rotated?.y).toBeCloseTo(80);
+  expect(rotated?.rotation).toBe(95);
+});
+
+const moving = { x: 100, y: 100, width: 40, height: 20 };
+
+it('snaps the nearest edge or centre independently in both axes and spans the snapped bounds', () => {
+  const right = { x: 144, y: 300, width: 20, height: 20 };
+  const below = { x: 300, y: 96, width: 20, height: 20 };
+  const farther = { ...right, x: 145 };
+
+  expect(snapMove(moving, [farther, right, below], 1)).toEqual({
+    offset: { x: 4, y: -4 },
+    guides: [
+      { axis: 'x', at: 144, from: 96, to: 320 },
+      { axis: 'y', at: 96, from: 104, to: 320 },
+    ],
+  });
+});
+
+it('compares distance in screen pixels using the current zoom', () => {
+  const target = { x: 145, y: 300, width: 20, height: 20 };
+  const unsnapped = { offset: { x: 0, y: 0 }, guides: [] };
+
+  expect(snapMove(moving, [target], 1).offset.x).toBe(5);
+  expect(snapMove(moving, [target], 2)).toEqual(unsnapped);
+  expect(snapMove(moving, [target], 0)).toEqual(unsnapped);
+});
+
+it('retains the six-pixel snap distance and board-space guide at half, normal and double zoom', () => {
+  const current = { x: 96, y: 0, width: 100, height: 80 };
+  const candidates = [{ x: 200, y: 30, width: 100, height: 80 }];
+  const guides = [{ axis: 'x', at: 200, from: 0, to: 110 }];
+
+  expect(snapMove(current, candidates, 1)).toEqual({ offset: { x: 4, y: 0 }, guides });
+  expect(snapMove(current, candidates, 2)).toEqual({ offset: { x: 0, y: 0 }, guides: [] });
+  expect(snapMove({ ...current, x: 90 }, candidates, 0.5)).toEqual({
+    offset: { x: 10, y: -10 },
+    guides: [
+      { axis: 'x', at: 200, from: -10, to: 110 },
+      { axis: 'y', at: 30, from: 100, to: 300 },
+    ],
+  });
+});
+
+it('keeps an alignment guide when the moving anchor is already on the target', () => {
+  const target = { x: 105, y: 300, width: 30, height: 20 };
+
+  expect(snapMove(moving, [target], 1)).toEqual({
+    offset: { x: 0, y: 0 },
+    guides: [{ axis: 'x', at: 120, from: 100, to: 320 }],
+  });
+});
+
+it('uses the moved world AABB of the entire selection and maps the snap back to a single edit', () => {
+  const first = { ...moving, rotation: 90 };
+  const second = { ...moving, x: 200, rotation: 0 };
+  const gesture: TransformGesture = {
+    kind: 'move',
+    interactionId: 'aligned-move',
+    start: { x: 0, y: 0 },
+    targets: [
+      { id: 'first', expectedVersion: 1, geometry: first },
+      { id: 'second', expectedVersion: 2, geometry: second },
+    ],
+  };
+  const point = { x: 10, y: 15 };
+  const bounds = getMoveSnapBounds(gesture, point);
+  if (!bounds) {
+    throw new Error('Missing move bounds.');
+  }
+
+  expect(bounds).toEqual({ x: 120, y: 105, width: 130, height: 40 });
+  const { offset } = snapMove(bounds, [{ x: 255, y: 400, width: 20, height: 20 }], 1);
+  const snappedPoint = { x: point.x + offset.x, y: point.y + offset.y };
+
+  expect(previewTransform(gesture, snappedPoint)).toEqual({
+    kind: 'move',
+    interactionId: 'aligned-move',
+    delta: { x: 15, y: 15 },
+    changes: [
+      { id: 'first', expectedVersion: 1, geometry: { ...first, x: 115, y: 115 } },
+      { id: 'second', expectedVersion: 2, geometry: { ...second, x: 215, y: 115 } },
+    ],
+  });
 });

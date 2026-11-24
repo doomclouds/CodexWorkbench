@@ -27,7 +27,7 @@ body {
 }
 
 .canvas-fixture {
-  max-width: 1100px;
+  max-width: 1440px;
   padding: 22px clamp(12px, 4vw, 36px) 34px;
   margin-inline: auto;
 }
@@ -46,6 +46,7 @@ body {
 .canvas-fixture-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: end;
   gap: 8px 16px;
   margin-block-end: 10px;
 }
@@ -55,9 +56,16 @@ body {
   flex-wrap: wrap;
 }
 
+.canvas-fixture-placement {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+
 .canvas-fixture-stage {
   overflow: hidden;
-  block-size: clamp(360px, 59vh, 560px);
+  block-size: clamp(360px, 63vh, 650px);
   border: 1px solid var(--fixture-border);
   border-radius: 12px;
   background: var(--fixture-panel);
@@ -89,6 +97,30 @@ body {
 
 .canvas-fixture-native li {
   padding-block: 4px;
+}
+
+.canvas-fixture-html {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+  background: var(--fixture-panel);
+}
+
+.canvas-fixture-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  text-align: start;
+  font-size: 0.88rem;
+}
+
+.canvas-fixture-table :is(th, td) {
+  padding: 6px 10px;
+  border-block-end: 1px solid var(--fixture-border);
+}
+
+.canvas-fixture-table thead {
+  background: var(--studio-ui-canvas-shape-surface);
 }
 
 .canvas-fixture-status {

@@ -1,10 +1,53 @@
-.studio-ui-canvas-shape-content {
+.studio-ui-canvas-object-label {
+  position: relative;
+  box-sizing: border-box;
   max-inline-size: 100%;
   max-block-size: 100%;
   overflow: hidden;
   padding: 0.5rem;
   overflow-wrap: anywhere;
   text-align: center;
+}
+
+.studio-ui-canvas-object--text > .studio-ui-canvas-object-label {
+  text-align: start;
+}
+
+.studio-ui-canvas-shape-outline {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  inline-size: 100%;
+  block-size: 100%;
+  fill: var(--studio-ui-canvas-shape-surface, ButtonFace);
+  stroke: var(--studio-ui-border, GrayText);
+  pointer-events: none;
+}
+
+.studio-ui-canvas-shape-outline > * {
+  vector-effect: non-scaling-stroke;
+}
+
+.studio-ui-canvas-section-title {
+  position: absolute;
+  inset-block-end: calc(100% + 0.25rem);
+  inset-inline-start: 0;
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  overflow: hidden;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  background-color: var(--studio-ui-canvas, Canvas);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-ui-canvas-section-hit-outline {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
 }
 
 .studio-ui-canvas-native-title {
@@ -26,4 +69,33 @@
   overscroll-behavior: contain;
   cursor: auto;
   user-select: text;
+}
+
+.studio-ui-canvas-native-content[inert] {
+  pointer-events: none;
+}
+
+:is(
+    .studio-ui-canvas-object--html,
+    .studio-ui-canvas-object--image,
+    .studio-ui-canvas-object--video
+  )
+  > .studio-ui-canvas-native-content {
+  padding: 0;
+}
+
+.studio-ui-canvas-object--html > .studio-ui-canvas-native-content > iframe {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+}
+
+:is(.studio-ui-canvas-object--image, .studio-ui-canvas-object--video)
+  > .studio-ui-canvas-native-content
+  > :is(img, video) {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
 }

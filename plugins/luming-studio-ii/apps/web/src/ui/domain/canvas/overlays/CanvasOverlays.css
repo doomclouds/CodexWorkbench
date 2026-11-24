@@ -65,3 +65,58 @@
   border-radius: 50%;
   cursor: grab;
 }
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='n'] {
+  top: 0;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='e'] {
+  top: 50%;
+  left: 100%;
+  cursor: ew-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='s'] {
+  top: 100%;
+  left: 50%;
+  cursor: ns-resize;
+}
+
+.studio-ui-canvas-transform-handle[data-canvas-handle='w'] {
+  top: 50%;
+  left: 0;
+  cursor: ew-resize;
+}
+
+.studio-ui-canvas-alignment-guide {
+  position: absolute;
+  background-color: var(--studio-ui-accent, Highlight);
+}
+
+.studio-ui-canvas-port {
+  position: absolute;
+  box-sizing: border-box;
+  inline-size: 0.625rem;
+  block-size: 0.625rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--studio-ui-accent, Highlight);
+  border-radius: 50%;
+  background: var(--studio-ui-surface, Canvas);
+  transform: translate(-50%, -50%);
+}
+
+.studio-ui-canvas-port--interactive {
+  appearance: none;
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.studio-ui-canvas-port--active {
+  inline-size: 0.875rem;
+  block-size: 0.875rem;
+  background: var(--studio-ui-accent, Highlight);
+}

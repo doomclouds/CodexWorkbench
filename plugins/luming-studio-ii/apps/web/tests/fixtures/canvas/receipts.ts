@@ -1,6 +1,9 @@
 import type {
+  CanvasConnectionEndpoint,
+  CanvasDuplicateIntent,
   CanvasEditIntent,
   CanvasObject,
+  CanvasObjectChange,
   CanvasScene,
 } from '../../../src/ui/domain/canvas/index.js';
 
@@ -44,6 +47,62 @@ export const initialScene: CanvasScene = {
       geometry: { x: 1460, y: 192, width: 210, height: 132, rotation: 0 },
       version: 1,
     },
+    {
+      id: 'html',
+      kind: 'html',
+      label: 'HTML 预览',
+      geometry: { x: 736, y: 84, width: 288, height: 220, rotation: 0 },
+      version: 1,
+    },
+    {
+      id: 'document',
+      kind: 'document',
+      label: '评审纪要',
+      geometry: { x: 1056, y: 84, width: 280, height: 220, rotation: 0 },
+      version: 1,
+    },
+    {
+      id: 'todo',
+      kind: 'todo',
+      label: '交接待办',
+      geometry: { x: 426, y: 448, width: 278, height: 120, rotation: 0 },
+      version: 1,
+    },
+    {
+      id: 'table',
+      kind: 'table',
+      label: '验收记录',
+      geometry: { x: 736, y: 356, width: 288, height: 212, rotation: 0 },
+      version: 1,
+    },
+    {
+      id: 'connector',
+      kind: 'connector',
+      label: '锁定检查',
+      geometry: { x: 249, y: 412, width: 177, height: 96, rotation: 0 },
+      connection: {
+        start: { point: { x: 249, y: 412 }, attachment: { objectId: 'locked', port: 'right' } },
+        end: { point: { x: 426, y: 508 }, attachment: { objectId: 'todo', port: 'left' } },
+      },
+      version: 1,
+    },
+    {
+      id: 'section',
+      kind: 'section',
+      label: '可穿透分区',
+      transparent: true,
+      geometry: { x: 30, y: 58, width: 370, height: 272, rotation: 0 },
+      version: 1,
+    },
+    {
+      id: 'nested-section',
+      kind: 'section',
+      parentId: 'section',
+      label: '内层分区',
+      transparent: true,
+      geometry: { x: 112, y: 140, width: 280, height: 178, rotation: 0 },
+      version: 1,
+    },
   ],
 };
 
@@ -69,7 +128,99 @@ export const initialReceiptState: ReceiptFixtureState = {
   lastReceipt: '尚无回执',
 };
 
+function applyObjectChange(object: CanvasObject, change: CanvasObjectChange): CanvasObject {
+  const updated = { ...object, geometry: change.geometry, version: object.version + 1 };
+  if (updated.kind === 'connector' && change.connection) {
+    return { ...updated, connection: change.connection };
+  }
+  if (updated.kind === 'ink' && change.ink) {
+    return { ...updated, ink: change.ink };
+  }
+
+  return updated;
+}
+
+function remapEndpoint(
+  endpoint: CanvasConnectionEndpoint,
+  copies: ReadonlyMap<string, string>,
+): CanvasConnectionEndpoint {
+  const { attachment } = endpoint;
+  if (!attachment) {
+    return endpoint;
+  }
+
+  const objectId = copies.get(attachment.objectId);
+
+  return objectId ? { ...endpoint, attachment: { ...attachment, objectId } } : endpoint;
+}
+
+function copyObject(
+  object: CanvasObject,
+  change: CanvasObjectChange,
+  id: string,
+  interactionId: string,
+  copies: ReadonlyMap<string, string>,
+): CanvasObject {
+  const { groupId, parentId, ...updated } = applyObjectChange(object, change);
+  const copiedParent = parentId ? copies.get(parentId) : undefined;
+  const copy = {
+    ...updated,
+    id,
+    version: 1,
+    groupId: groupId ? interactionId + ':' + groupId : undefined,
+    parentId: copiedParent,
+  };
+
+  if (copy.kind === 'connector') {
+    const { connection } = copy;
+
+    return {
+      ...copy,
+      connection: {
+        ...connection,
+        start: remapEndpoint(connection.start, copies),
+        end: remapEndpoint(connection.end, copies),
+      },
+    };
+  }
+
+  return copy;
+}
+
+function confirmDuplicate(
+  scene: CanvasScene,
+  intent: CanvasDuplicateIntent,
+): CanvasScene | undefined {
+  const changes = new Map(intent.sources.map((source) => [source.id, source]));
+  const copies = new Map(intent.sources.map(({ id }) => [id, intent.interactionId + ':' + id]));
+  const objects: CanvasObject[] = [];
+  for (const object of scene.objects) {
+    const change = changes.get(object.id);
+    const copyId = copies.get(object.id);
+    if (change && copyId) {
+      if (change.expectedVersion !== object.version || object.locked) {
+        return undefined;
+      }
+
+      objects.push(copyObject(object, change, copyId, intent.interactionId, copies));
+    }
+  }
+  if (objects.length === changes.size) {
+    return { ...scene, revision: scene.revision + 1, objects: [...scene.objects, ...objects] };
+  }
+}
+
 function confirmEdit(scene: CanvasScene, intent: CanvasEditIntent): CanvasScene | undefined {
+  const revision = scene.revision + 1;
+  if (intent.kind === 'create') {
+    const object = { ...intent.object, id: intent.interactionId, version: 1 };
+
+    return { ...scene, revision, objects: [...scene.objects, object] };
+  }
+  if (intent.kind === 'duplicate') {
+    return confirmDuplicate(scene, intent);
+  }
+
   const changes = new Map(intent.changes.map((change) => [change.id, change]));
 
   function applyChange(object: CanvasObject): CanvasObject {
@@ -80,12 +231,12 @@ function confirmEdit(scene: CanvasScene, intent: CanvasEditIntent): CanvasScene 
 
     changes.delete(object.id);
 
-    return { ...object, geometry: change.geometry, version: object.version + 1 };
+    return applyObjectChange(object, change);
   }
 
   const objects = scene.objects.map(applyChange);
   if (changes.size === 0) {
-    return { ...scene, revision: scene.revision + 1, objects };
+    return { ...scene, revision, objects };
   }
 }
 

@@ -20,7 +20,10 @@ const canvasSpecifier = packageName + '/ui/domain/canvas';
 const webRoot = dirname(sourceRoot);
 const canvasFixtureRoot = resolve(testsRoot, 'fixtures/canvas');
 const canvasUnitRoot = resolve(testsRoot, 'unit/canvas');
-const canvasComponentTest = resolve(testsRoot, 'component/Canvas.test');
+const canvasComponentTests = new Set([
+  resolve(testsRoot, 'component/Canvas.test'),
+  resolve(testsRoot, 'component/CanvasParity.test'),
+]);
 const testSupport = resolve(testsRoot, 'support/render-control');
 const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const absoluteSpecifier = /^(?:[\\/]|[a-z]:[\\/]|[a-z][a-z0-9+.-]*:\/\/|file:)/iu;
@@ -37,15 +40,23 @@ const testLibraries = new Set([
   'node:assert',
   'node:test',
 ]);
-const pureModules = new Set(['viewport', 'scene', 'selection', 'gestures']);
+const pathModules = new Set(['connectors', 'ink']);
+const pathGeometry = new Set(
+  ['connectors/geometry', 'connectors/handles', 'connectors/path', 'ink/geometry'].map((file) =>
+    resolve(canvasRoot, file),
+  ),
+);
+const pureModules = new Set(['viewport', 'scene', 'selection', 'gestures', ...pathModules]);
 const moduleDependencies = new Map([
   ['viewport', []],
-  ['scene', ['viewport']],
-  ['selection', ['viewport', 'scene']],
+  ['scene', ['viewport', 'connectors', 'ink']],
+  ['selection', ['viewport', 'scene', 'connectors', 'ink']],
   ['gestures', ['viewport']],
-  ['adapters', []],
-  ['rendering', ['adapters', 'scene']],
-  ['overlays', ['viewport', 'scene']],
+  ['connectors', ['viewport']],
+  ['ink', ['viewport']],
+  ['adapters', ['connectors', 'ink']],
+  ['rendering', ['adapters', 'scene', 'connectors']],
+  ['overlays', ['viewport', 'scene', 'gestures', 'connectors']],
 ]);
 const handleMethods = new Set(['focus', 'fitToObjects']);
 const requiredExports = ['Canvas', 'CanvasProps', 'CanvasHandle'];
@@ -64,12 +75,20 @@ function canvasModule(file) {
   return fileName ? directory : '';
 }
 
+function isPureCanvasFile(file) {
+  const module = canvasModule(file);
+
+  return pureModules.has(module) && (!pathModules.has(module) || pathGeometry.has(stem(file)));
+}
+
 function suiteKind(file) {
   if (contains(canvasUnitRoot, file)) {
     return 'unit';
   }
 
-  return stem(file) === canvasComponentTest || contains(canvasFixtureRoot, file) ? 'component' : '';
+  return canvasComponentTests.has(stem(file)) || contains(canvasFixtureRoot, file)
+    ? 'component'
+    : '';
 }
 
 function unitSubject(file) {
@@ -207,6 +226,9 @@ function allowedCanvasDependency(file, target) {
   if (stem(target) === canvasContracts || !owner) {
     return true;
   }
+  if (isPureCanvasFile(file) && pathModules.has(dependency) && !pathGeometry.has(stem(target))) {
+    return false;
+  }
 
   const allowed = moduleDependencies.get(owner);
 
@@ -218,7 +240,7 @@ function allowedUnitDependency(file, target) {
 
   return (
     stem(target) === canvasContracts ||
-    (pureModules.has(subject) && canvasModule(target) === subject && /\.(?:js|ts)$/u.test(target))
+    (isPureCanvasFile(target) && canvasModule(target) === subject && /\.(?:js|ts)$/u.test(target))
   );
 }
 
@@ -243,7 +265,9 @@ function dependencyProblem(file, target) {
       return allowedCanvasDependency(file, target) ? undefined : 'layer';
     }
 
-    return stem(file) !== canvasContracts && stem(target) === baseEntry ? undefined : 'import';
+    return stem(file) !== canvasContracts && !isPureCanvasFile(file) && stem(target) === baseEntry
+      ? undefined
+      : 'import';
   }
   if (suiteKind(file)) {
     return allowedTestDependency(file, target) ? undefined : 'suite';
@@ -260,7 +284,7 @@ function packageProblem(file, specifier) {
     return specifier === 'react' ? undefined : 'import';
   }
   if (contains(canvasRoot, file)) {
-    return libraries.has(specifier) ? undefined : 'import';
+    return !isPureCanvasFile(file) && libraries.has(specifier) ? undefined : 'import';
   }
   if (suiteKind(file)) {
     return testLibraries.has(specifier) ? undefined : 'suite';

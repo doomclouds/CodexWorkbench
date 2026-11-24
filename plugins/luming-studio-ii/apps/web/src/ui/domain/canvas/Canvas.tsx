@@ -1,14 +1,18 @@
 import { useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from 'react';
 import type { FocusEvent } from 'react';
+import { useCanvasDrafts } from './canvas-drafts.js';
+import { canvasNativeId } from './canvas-events.js';
 import { useCanvasFrame, useCanvasSize } from './canvas-frame.js';
-import { canvasNativeId, useCanvasInput } from './canvas-input.js';
-import { editableTarget, useCanvasModel } from './canvas-model.js';
+import { useCanvasInput } from './canvas-input.js';
+import { selectionControls, useCanvasModel } from './canvas-model.js';
 import type { CanvasProps } from './contracts.js';
 import { CanvasOverlays } from './overlays/index.js';
 import { CanvasObjects } from './rendering/index.js';
-import { projectObject } from './scene/index.js';
-import { fitViewport, getObjectBounds, mergeRects } from './viewport/index.js';
+import { projectedObjectBounds, projectObject } from './scene/index.js';
+import { fitViewport, mergeRects } from './viewport/index.js';
 import './Canvas.css';
+
+const fitPadding = 40;
 
 function sameIds(previous: readonly string[] | undefined, next: readonly string[]) {
   if (!previous || previous.length !== next.length) {
@@ -19,8 +23,7 @@ function sameIds(previous: readonly string[] | undefined, next: readonly string[
 }
 
 function CanvasSession(props: CanvasProps) {
-  const { label, tool, canEdit, initialViewport, onViewportChange, onVisibleObjectsChange, ref } =
-    props;
+  const { label, canEdit, initialViewport, onViewportChange, onVisibleObjectsChange, ref } = props;
   const root = useRef<HTMLDivElement>(null);
   const size = useCanvasSize(root);
   const [retainedId, setRetainedId] = useState<string>();
@@ -33,10 +36,18 @@ function CanvasSession(props: CanvasProps) {
     retainedId,
   );
   const input = useCanvasInput({ root, size, index, pending, frame: controller, props });
-  const firstSelected = selected[0]?.object.id;
-  const canTransform = canEdit && tool === 'select' && selected.length === 1;
-  const editable =
-    canTransform && firstSelected ? editableTarget(index, pending, firstSelected)?.id : undefined;
+  const drafts = useCanvasDrafts(props.pendingEdits, canEdit ? frame.draft : undefined, {
+    index,
+    pending,
+  });
+  const controls = selectionControls(
+    selected,
+    index,
+    pending,
+    canEdit && input.toolKind === 'select',
+  );
+  const activeEmbedId =
+    !input.pointerActive && props.selection.length === 1 ? props.selection[0] : undefined;
   const previousVisible = useRef<readonly string[] | undefined>(undefined);
   const observeVisible = useEffectEvent((ids: readonly string[]) => onVisibleObjectsChange?.(ids));
   const observeViewport = useEffectEvent(onViewportChange ?? (() => undefined));
@@ -62,7 +73,7 @@ function CanvasSession(props: CanvasProps) {
     const bounds = ids.flatMap((id) => {
       const item = projectObject(index, pending, id);
 
-      return item ? [getObjectBounds(item.geometry)] : [];
+      return item ? [projectedObjectBounds(item)] : [];
     });
     const target = mergeRects(bounds);
     if (!target || size.width <= 0 || size.height <= 0) {
@@ -70,7 +81,7 @@ function CanvasSession(props: CanvasProps) {
     }
 
     input.cancel();
-    update({ viewport: fitViewport(target, size) }, 'now');
+    update({ viewport: fitViewport(target, size, fitPadding) }, 'now');
   }
 
   useImperativeHandle(ref, () => ({ focus, fitToObjects }));
@@ -102,9 +113,11 @@ function CanvasSession(props: CanvasProps) {
       tabIndex={0}
       className="studio-canvas"
       data-canvas-root={props.viewId}
-      data-tool={tool}
+      data-tool={input.toolKind}
+      onPointerDownCapture={input.handlePointerDownCapture}
       onPointerDown={input.handlePointerDown}
       onPointerMove={input.handlePointerMove}
+      onPointerLeave={input.handlePointerLeave}
       onPointerUp={input.handlePointerUp}
       onPointerCancel={input.handlePointerCancel}
       onLostPointerCapture={input.handlePointerCancel}
@@ -114,15 +127,30 @@ function CanvasSession(props: CanvasProps) {
       onBlur={handleBlur}
     >
       <div className="studio-canvas__background" aria-hidden="true" />
-      <div className="studio-canvas__world" style={{ transform }}>
-        <CanvasObjects objects={painted} contentById={props.contentById} />
+      <div
+        className="studio-canvas__world"
+        style={{ transform }}
+        inert={input.toolKind !== 'select'}
+      >
+        <CanvasObjects
+          objects={painted}
+          contentById={props.contentById}
+          drafts={drafts}
+          zoom={zoom}
+          activeEmbedId={activeEmbedId}
+        />
       </div>
       <CanvasOverlays
         viewport={frame.viewport}
         selected={selected}
         marquee={frame.marquee}
-        editableId={editable}
+        guides={canEdit ? frame.guides : undefined}
+        ports={canEdit ? frame.ports : undefined}
+        activePort={canEdit ? frame.activePort : undefined}
+        {...controls}
         onHandlePointerDown={input.handleHandlePointerDown}
+        onPortPointerDown={input.handlePortPointerDown}
+        onConnectorPointerDown={input.handleConnectorPointerDown}
       />
     </div>
   );
