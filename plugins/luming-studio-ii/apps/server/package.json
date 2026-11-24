@@ -1,0 +1,11 @@
+{
+  "name": "@codexworkbench/luming-studio-ii-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Luming Studio II backend",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  }
+}

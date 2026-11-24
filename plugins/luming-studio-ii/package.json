@@ -1,0 +1,11 @@
+{
+  "name": "@codexworkbench/luming-studio-ii",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Luming Studio II plugin workspace",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  }
+}

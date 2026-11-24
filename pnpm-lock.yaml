@@ -223,6 +223,14 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.12.1)(jsdom@29.0.1)(vite@8.3.6(@types/node@24.12.1)(esbuild@0.28.2))
 
+  plugins/luming-studio-ii: {}
+
+  plugins/luming-studio-ii/apps/server: {}
+
+  plugins/luming-studio-ii/apps/web: {}
+
+  plugins/luming-studio-ii/packages/contracts: {}
+
 packages:
 
   '@ariakit/components@0.1.16':

@@ -1,0 +1,8 @@
+{
+  "name": "@codexworkbench/luming-studio-ii-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Luming Studio II Web frontend",
+  "license": "MIT"
+}

@@ -1,5 +1,7 @@
 packages:
   - plugins/*
+  - plugins/luming-studio-ii/apps/*
+  - plugins/luming-studio-ii/packages/*
   - packages/*
 allowBuilds:
   esbuild: true
