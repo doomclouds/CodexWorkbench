@@ -1,0 +1,4 @@
+interface:
+  display_name: "Luming · 工程流程"
+policy:
+  allow_implicit_invocation: true
