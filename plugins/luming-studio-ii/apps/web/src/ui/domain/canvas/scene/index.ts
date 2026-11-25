@@ -5,6 +5,9 @@ import type {
   CanvasGeometry,
   CanvasObject,
   CanvasObjectChange,
+  CanvasObjectExtension,
+  CanvasObjectKind,
+  CanvasObjectRegistry,
   CanvasRect,
 } from '../contracts.js';
 import { inkBounds } from '../ink/geometry.js';
@@ -43,7 +46,11 @@ export interface ProjectedCanvasObject {
   readonly object: CanvasObject;
   readonly geometry: CanvasGeometry;
   readonly connectorRoute?: ResolvedConnection;
+  readonly geometryExtension?: ObjectGeometryExtension;
+  readonly extensionBounds?: CanvasRect;
 }
+
+type ObjectGeometryExtension = Pick<CanvasObjectExtension, 'bounds' | 'hitTest'>;
 
 interface SceneRelationships {
   readonly groups: Map<string, string[]>;
@@ -142,31 +149,70 @@ function project(
   object: CanvasObject,
   geometryForId: (id: string) => CanvasGeometry | undefined,
   change?: CanvasObjectChange,
+  extension?: ObjectGeometryExtension,
 ): ProjectedCanvasObject {
   if (object.kind === 'connector') {
     const connection = change?.connection ?? object.connection;
     const connectorRoute = resolveConnection(connection, geometryForId, object.strokeWidth);
 
-    return {
-      object: connection === object.connection ? object : { ...object, connection },
-      geometry: connectorRoute.geometry,
-      connectorRoute,
-    };
+    return withGeometryExtension(
+      {
+        object: connection === object.connection ? object : { ...object, connection },
+        geometry: connectorRoute.geometry,
+        connectorRoute,
+      },
+      extension,
+    );
   }
 
   const ink = change?.ink;
 
-  return {
-    object: object.kind === 'ink' && ink && ink !== object.ink ? { ...object, ink } : object,
-    geometry: change?.geometry ?? object.geometry,
-  };
+  return withGeometryExtension(
+    {
+      object: object.kind === 'ink' && ink && ink !== object.ink ? { ...object, ink } : object,
+      geometry: change?.geometry ?? object.geometry,
+    },
+    extension,
+  );
 }
 
-export function projectedObjectBounds({ object, geometry }: ProjectedCanvasObject): CanvasRect {
+function isFiniteBounds({ x, y, width, height }: CanvasRect) {
+  return (
+    [x, y, width, height, x + width, y + height].every(Number.isFinite) &&
+    Math.min(width, height) >= 0
+  );
+}
+
+function withGeometryExtension(
+  projected: ProjectedCanvasObject,
+  extension?: ObjectGeometryExtension,
+): ProjectedCanvasObject {
+  if (!extension || (!extension.bounds && !extension.hitTest)) {
+    return projected;
+  }
+
+  const bounds = extension.bounds?.({ object: projected.object, geometry: projected.geometry });
+  const extensionBounds = bounds && isFiniteBounds(bounds) ? bounds : undefined;
+
+  return { ...projected, geometryExtension: extension, extensionBounds };
+}
+
+export function projectedObjectBounds({
+  object,
+  geometry,
+  extensionBounds,
+}: ProjectedCanvasObject): CanvasRect {
+  if (extensionBounds) {
+    return extensionBounds;
+  }
+
   return object.kind === 'ink' ? inkBounds(object.ink, geometry) : getObjectBounds(geometry);
 }
 
-export function createSceneIndex(source: readonly CanvasObject[]): SceneIndex {
+export function createSceneIndex(
+  source: readonly CanvasObject[],
+  registry?: CanvasObjectRegistry,
+): SceneIndex {
   const objects: CanvasObject[] = [];
   const layersById = new Map<string, number>();
   const relationships: SceneRelationships = {
@@ -174,6 +220,7 @@ export function createSceneIndex(source: readonly CanvasObject[]): SceneIndex {
     children: new Map(),
     connectors: new Map(),
   };
+  const extensions = new Map<CanvasObjectKind, ObjectGeometryExtension | undefined>();
 
   for (const object of source) {
     const id = object.id;
@@ -198,8 +245,20 @@ export function createSceneIndex(source: readonly CanvasObject[]): SceneIndex {
     return object?.kind === 'connector' ? undefined : object?.geometry;
   }
 
+  function geometryExtension(kind: CanvasObjectKind) {
+    if (!registry) {
+      return undefined;
+    }
+
+    if (!extensions.has(kind)) {
+      extensions.set(kind, registry.get(kind));
+    }
+
+    return extensions.get(kind);
+  }
+
   const entries = objects.map((object, layer) => {
-    const projected = project(object, anchorGeometry);
+    const projected = project(object, anchorGeometry, undefined, geometryExtension(object.kind));
 
     return { projected, layer, bounds: projectedObjectBounds(projected) };
   });
@@ -292,13 +351,13 @@ export function projectObject(
     return undefined;
   }
 
-  const { object } = entry.projected;
+  const { object, geometryExtension } = entry.projected;
   const change = applicableChange(index, id, changes.get(id));
   if (!change && !anchorChanged(object, changes)) {
     return entry.projected;
   }
 
-  return project(object, anchorGeometry, change);
+  return project(object, anchorGeometry, change, geometryExtension);
 
   function anchorGeometry(anchorId: string) {
     const anchor = index.get(anchorId);

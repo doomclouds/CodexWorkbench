@@ -7,17 +7,28 @@
   "license": "MIT",
   "exports": {
     "./ui/base": "./src/ui/base/index.ts",
-    "./ui/domain/canvas": "./src/ui/domain/canvas/index.ts"
+    "./ui/domain/canvas": "./src/ui/domain/canvas/index.ts",
+    "./ui/domain/objects": "./src/ui/domain/objects/index.ts",
+    "./ui/domain/objects/document": "./src/ui/domain/objects/document/index.ts",
+    "./ui/domain/objects/embed": "./src/ui/domain/objects/embed/index.ts",
+    "./ui/domain/objects/media": "./src/ui/domain/objects/media/index.ts",
+    "./ui/domain/objects/sticker": "./src/ui/domain/objects/sticker/index.ts",
+    "./ui/domain/objects/table": "./src/ui/domain/objects/table/index.ts",
+    "./ui/domain/objects/text": "./src/ui/domain/objects/text/index.ts",
+    "./ui/domain/objects/todo": "./src/ui/domain/objects/todo/index.ts"
   },
   "scripts": {
     "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && oxlint --deny-warnings src tests vite.config.ts vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && node ../../../../tooling/studio-lint/check-markup.mjs",
     "typecheck": "tsc --noEmit",
     "check": "pnpm lint && pnpm typecheck",
-    "test": "node --test tests/contracts/base-lint.test.mjs tests/contracts/canvas-lint.test.mjs && vitest run",
+    "test": "node --test tests/contracts/base-lint.test.mjs tests/contracts/canvas-lint.test.mjs tests/contracts/objects-lint.test.mjs && vitest run",
     "preview:canvas": "vite --host 127.0.0.1",
     "build": "pnpm check && pnpm test && vite build"
   },
   "dependencies": {
+    "@blocknote/ariakit": "0.54.0",
+    "@blocknote/core": "0.54.0",
+    "@blocknote/react": "0.54.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

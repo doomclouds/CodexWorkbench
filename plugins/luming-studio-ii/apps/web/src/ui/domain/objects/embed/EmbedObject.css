@@ -1,0 +1,77 @@
+.studio-ui-embed {
+  position: relative;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow: hidden;
+  border-radius: 0.35rem;
+  background: #f5f5f5;
+}
+
+.studio-ui-embed__canvas-view {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.studio-ui-embed[data-annotating] {
+  outline: 1px solid var(--studio-ui-accent, Highlight);
+}
+
+.studio-ui-embed > iframe {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+  background: #f5f5f5;
+}
+
+.studio-ui-embed__label {
+  display: grid;
+  box-sizing: border-box;
+  min-block-size: 100%;
+  place-items: center;
+  padding: 0.5rem;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.studio-ui-embed__notice,
+.studio-ui-embed__source-tools {
+  position: absolute;
+  inset-inline: 0.55rem;
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+}
+
+.studio-ui-embed__notice {
+  inset-block-end: 0.55rem;
+  z-index: 2;
+  max-block-size: 60%;
+  overflow: auto;
+  border: 1px solid var(--studio-ui-accent, Highlight);
+  border-radius: 0.35rem;
+  padding: 0.5rem;
+}
+
+.studio-ui-embed__notice pre {
+  margin-block: 0.25rem 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.studio-ui-embed__source-tools {
+  inset-inline-start: auto;
+  inset-block-start: 0.55rem;
+  z-index: 1;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: 0.35rem;
+}
+
+.studio-ui-embed__source-editor {
+  display: grid;
+  gap: 0.75rem;
+  inline-size: min(66ch, 70vw);
+}
+
+.studio-ui-embed__source-editor textarea {
+  font-family: ui-monospace, monospace;
+}

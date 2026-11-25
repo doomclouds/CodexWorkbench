@@ -7,6 +7,7 @@ import { errorHandlingSyntax, scriptRules } from '../../../../tooling/studio-lin
 import base from './lint/base-boundaries.mjs';
 import { browserCapabilities } from './lint/browser-capabilities.mjs';
 import canvas from './lint/canvas-boundaries.mjs';
+import objects from './lint/objects-boundaries.mjs';
 
 const recommended = reactHooks.configs.flat.recommended;
 const reactRules = Object.fromEntries(
@@ -71,10 +72,11 @@ export default defineConfig([
   },
   {
     files: ['src/' + scripts, 'tests/' + scripts],
-    plugins: { base, canvas },
+    plugins: { base, canvas, objects },
     rules: {
       'base/contract-boundary': 'error',
       'canvas/contract-boundary': 'error',
+      'objects/contract-boundary': 'error',
       'no-restricted-globals': ['error', { globals: ['require'], checkGlobalObject: true }],
       'no-restricted-syntax': ['error', ...errorHandlingSyntax, ...indirectImports],
     },
@@ -104,6 +106,29 @@ export default defineConfig([
         { globals: ['require', ...canvasGlobals], checkGlobalObject: true },
       ],
       'base/no-browser-io': 'error',
+    },
+  },
+  {
+    files: ['src/ui/domain/objects/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { globals: ['require', ...canvasGlobals], checkGlobalObject: true },
+      ],
+      'base/no-browser-io': 'error',
+    },
+  },
+  {
+    files: ['src/ui/domain/objects/embed/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          globals: ['require', ...canvasGlobals.filter(({ name }) => name !== 'postMessage')],
+          checkGlobalObject: true,
+        },
+      ],
+      'base/no-browser-io': ['error', { frameMessaging: true }],
     },
   },
   {

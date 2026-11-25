@@ -27,7 +27,7 @@ const handleLabels = {
 
 type TransformHandle = ResizeHandle | 'rotate';
 
-const cornerHandles: readonly TransformHandle[] = ['nw', 'ne', 'sw', 'se', 'rotate'];
+const cornerHandles: readonly TransformHandle[] = ['nw', 'ne', 'sw', 'se'];
 const edgeHandles: readonly TransformHandle[] = ['n', 'e', 's', 'w'];
 
 const portLabels = {
@@ -45,6 +45,8 @@ interface CanvasOverlaysProps {
   readonly ports?: readonly CanvasPoint[];
   readonly activePort?: CanvasPoint;
   readonly transformBox?: CanvasGeometry;
+  readonly allowResize?: boolean;
+  readonly allowRotate?: boolean;
   readonly cornerResizeOnly?: boolean;
   readonly selectedConnector?: ProjectedCanvasObject;
   readonly portSource?: ProjectedCanvasObject;
@@ -132,6 +134,8 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
     ports,
     activePort,
     transformBox,
+    allowResize,
+    allowRotate,
     cornerResizeOnly,
     selectedConnector,
     portSource,
@@ -140,7 +144,11 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
     onConnectorPointerDown,
   } = props;
   const view = normalizeViewport(viewport);
-  const handles = cornerResizeOnly ? cornerHandles : [...cornerHandles, ...edgeHandles];
+  const resizeHandles = cornerResizeOnly ? cornerHandles : [...cornerHandles, ...edgeHandles];
+  const handles: readonly TransformHandle[] = [
+    ...(allowResize ? resizeHandles : []),
+    ...(allowRotate ? (['rotate'] as const) : []),
+  ];
   const connection = selectedConnector?.connectorRoute;
 
   return (

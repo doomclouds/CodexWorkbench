@@ -1,15 +1,25 @@
-import { useEffect, useEffectEvent, useImperativeHandle, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { FocusEvent } from 'react';
 import { useCanvasDrafts } from './canvas-drafts.js';
 import { canvasNativeId } from './canvas-events.js';
 import { useCanvasFrame, useCanvasSize } from './canvas-frame.js';
 import { useCanvasInput } from './canvas-input.js';
 import { selectionControls, useCanvasModel } from './canvas-model.js';
-import type { CanvasProps } from './contracts.js';
+import { createCanvasObjectRegistry } from './canvas-registry.js';
+import type { CanvasObjectActivation, CanvasProps, CanvasViewportRequest } from './contracts.js';
 import { CanvasOverlays } from './overlays/index.js';
 import { CanvasObjects } from './rendering/index.js';
-import { projectedObjectBounds, projectObject } from './scene/index.js';
-import { fitViewport, mergeRects } from './viewport/index.js';
+import { isObjectLocked, projectedObjectBounds, projectObject } from './scene/index.js';
+import { fitViewport, mergeRects, normalizeViewport } from './viewport/index.js';
 import './Canvas.css';
 
 const fitPadding = 40;
@@ -27,6 +37,33 @@ function CanvasSession(props: CanvasProps) {
   const root = useRef<HTMLDivElement>(null);
   const size = useCanvasSize(root);
   const [retainedId, setRetainedId] = useState<string>();
+  const [retainedIds, setRetainedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [editRequest, setEditRequest] = useState<{ id: string; sequence: number }>();
+  const nextEditSequence = useRef(0);
+  const handleRetention = useCallback((id: string, retain: boolean) => {
+    if (!retain) {
+      setEditRequest((current) => (current?.id === id ? undefined : current));
+    }
+
+    setRetainedIds((held) => {
+      if (held.has(id) === retain) {
+        return held;
+      }
+
+      const next = new Set(held);
+      if (retain) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+
+      return next;
+    });
+  }, []);
+  const registry = useMemo(
+    () => createCanvasObjectRegistry(props.objectExtensions),
+    [props.objectExtensions],
+  );
   const controller = useCanvasFrame(root, initialViewport);
   const { frame, update } = controller;
   const { index, pending, selected, painted, visibleIds } = useCanvasModel(
@@ -34,23 +71,45 @@ function CanvasSession(props: CanvasProps) {
     frame,
     size,
     retainedId,
+    retainedIds,
+    registry,
   );
-  const input = useCanvasInput({ root, size, index, pending, frame: controller, props });
+  const input = useCanvasInput({
+    root,
+    size,
+    index,
+    pending,
+    registry,
+    frame: controller,
+    props: { ...props, onObjectActivate: activateObject },
+  });
   const drafts = useCanvasDrafts(props.pendingEdits, canEdit ? frame.draft : undefined, {
     index,
     pending,
   });
-  const controls = selectionControls(
-    selected,
-    index,
-    pending,
-    canEdit && input.toolKind === 'select',
-  );
+  const selecting = input.toolKind === 'select';
+  const controls = selectionControls(selected, index, pending, registry, canEdit && selecting);
   const activeEmbedId =
-    !input.pointerActive && props.selection.length === 1 ? props.selection[0] : undefined;
+    selecting && !input.pointerActive && props.selection.length === 1
+      ? props.selection[0]
+      : undefined;
   const previousVisible = useRef<readonly string[] | undefined>(undefined);
+  const appliedViewportRequest = useRef<string | undefined>(undefined);
   const observeVisible = useEffectEvent((ids: readonly string[]) => onVisibleObjectsChange?.(ids));
   const observeViewport = useEffectEvent(onViewportChange ?? (() => undefined));
+  const applyViewportRequest = useEffectEvent((request: CanvasViewportRequest | undefined) => {
+    if (!request || appliedViewportRequest.current === request.requestId) {
+      return;
+    }
+
+    appliedViewportRequest.current = request.requestId;
+    input.cancel('frame');
+    update({ viewport: normalizeViewport(request.viewport) });
+  });
+
+  useLayoutEffect(() => {
+    applyViewportRequest(props.viewportRequest);
+  }, [props.viewportRequest]);
 
   useEffect(() => {
     if (sameIds(previousVisible.current, visibleIds)) {
@@ -67,6 +126,12 @@ function CanvasSession(props: CanvasProps) {
 
   function focus() {
     root.current?.focus({ preventScroll: true });
+  }
+
+  function activateObject(activation: CanvasObjectActivation) {
+    nextEditSequence.current += 1;
+    setEditRequest({ id: activation.id, sequence: nextEditSequence.current });
+    props.onObjectActivate?.(activation);
   }
 
   function fitToObjects(ids: readonly string[]) {
@@ -116,6 +181,7 @@ function CanvasSession(props: CanvasProps) {
       data-tool={input.toolKind}
       onPointerDownCapture={input.handlePointerDownCapture}
       onPointerDown={input.handlePointerDown}
+      onDoubleClick={input.handleDoubleClick}
       onPointerMove={input.handlePointerMove}
       onPointerLeave={input.handlePointerLeave}
       onPointerUp={input.handlePointerUp}
@@ -138,6 +204,15 @@ function CanvasSession(props: CanvasProps) {
           drafts={drafts}
           zoom={zoom}
           activeEmbedId={activeEmbedId}
+          registry={registry}
+          payloadById={props.payloadById}
+          selection={props.selection}
+          canEdit={canEdit}
+          editRequest={editRequest}
+          isLocked={(id) => isObjectLocked(index, id)}
+          onObjectIntent={props.onObjectIntent}
+          onObjectNavigation={input.handleObjectNavigation}
+          onObjectRetentionChange={handleRetention}
         />
       </div>
       <CanvasOverlays

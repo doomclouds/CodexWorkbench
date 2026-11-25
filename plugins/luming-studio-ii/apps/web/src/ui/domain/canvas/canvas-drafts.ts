@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { CanvasProjection } from './canvas-creation.js';
-import { canConnectTo } from './canvas-creation.js';
+import { canConnectTo, connectorDraft } from './canvas-creation.js';
 import type { CanvasFrame } from './canvas-frame.js';
 import { isCurrentEdit } from './canvas-model.js';
 import { resolveConnection } from './connectors/geometry.js';
@@ -67,15 +67,33 @@ function draftsForIntent(intent: CanvasEditIntent, view: CanvasProjection) {
   if (intent.kind === 'duplicate') {
     return duplicateDrafts(intent, view);
   }
+
   if (intent.kind === 'create') {
-    return [
-      viewOfDraft(intent.interactionId, intent.object, (id) => {
-        const target = view.index.get(id);
-        if (target && canConnectTo(target)) {
-          return projectObject(view.index, view.pending, id)?.geometry;
-        }
-      }),
-    ];
+    function geometryForId(id: string) {
+      const target = view.index.get(id);
+      if (target && canConnectTo(target)) {
+        return projectObject(view.index, view.pending, id)?.geometry;
+      }
+    }
+
+    const draft = viewOfDraft(intent.interactionId, intent.object, geometryForId);
+    if (!intent.link) {
+      return [draft];
+    }
+
+    const { source, target } = intent.link;
+    const link = connectorDraft(
+      {
+        start: {
+          point: source.point,
+          attachment: { objectId: source.objectId, port: source.port },
+        },
+        end: { point: target.point },
+      },
+      view,
+    );
+
+    return [draft, viewOfDraft(intent.interactionId + ':connector', link, geometryForId)];
   }
 
   return [];

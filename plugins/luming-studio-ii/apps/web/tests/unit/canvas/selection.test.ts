@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import type { CanvasGeometry } from '../../../src/ui/domain/canvas/contracts.js';
+import { describe, expect, it, vi } from 'vitest';
+import type {
+  CanvasGeometry,
+  CanvasObjectHitContext,
+} from '../../../src/ui/domain/canvas/contracts.js';
 import {
   canvasHitBounds,
   hitTest,
@@ -39,6 +42,36 @@ describe('canvas selection', () => {
     expect(hitTest(before, overlap)).toBe('second');
     expect(hitTest(reordered, overlap)).toBe('first');
     expect(hitTest(before, overlap)).toBe('second');
+  });
+
+  it('uses a custom pure hit in visual order and passes through the part it rejects', () => {
+    const behind = projectedObject('behind');
+    const projected = projectedObject('custom', { x: 20 });
+    const extensionHit = vi.fn(({ geometry, point, zoom }: CanvasObjectHitContext) => {
+      const reachesX = Math.abs(point.x - geometry.x) * zoom <= 20;
+
+      return reachesX && point.y === geometry.y + geometry.height / 2;
+    });
+    const custom = {
+      ...projected,
+      object: { ...projected.object, kind: 'example:precise-card' as const },
+      geometryExtension: { hitTest: extensionHit },
+    };
+    const near = { x: 35, y: 20 };
+    const far = { x: 85, y: 20 };
+
+    expect(hitTest([behind, custom], near)).toBe(custom.object.id);
+    expect(extensionHit).toHaveBeenCalledExactlyOnceWith({
+      object: custom.object,
+      geometry: custom.geometry,
+      point: near,
+      zoom: 1,
+    });
+    expect(hitTest([behind, custom], near, 2)).toBe(behind.object.id);
+    expect(hitTest([behind, custom], far)).toBe(behind.object.id);
+    extensionHit.mockClear();
+    expect(hitTest([custom, behind], near)).toBe(behind.object.id);
+    expect(extensionHit).not.toHaveBeenCalled();
   });
 
   it('hits projected geometry after rotation and translation', () => {

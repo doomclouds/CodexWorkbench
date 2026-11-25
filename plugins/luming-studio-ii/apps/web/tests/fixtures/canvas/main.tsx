@@ -1,36 +1,28 @@
-import { useReducer, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { Button, Select, ToggleButton, Toolbar } from '../../../src/ui/base/index.js';
 import {
   Canvas,
   type CanvasHandle,
-  type CanvasPlacement,
   type CanvasTool,
   type CanvasViewport,
 } from '../../../src/ui/domain/canvas/index.js';
+import { studioObjectExtensions } from '../../../src/ui/domain/objects/index.js';
 import { useFixtureContent } from './contents.js';
-import { initialReceiptState, reduceReceipts } from './receipts.js';
+import { useFixtureModel } from './fixture-model.js';
+import { placementPresets } from './placements.js';
 import './style.css';
 
 const initialViewport: CanvasViewport = { x: 0, y: 0, zoom: 1 };
-const placementPresets: readonly CanvasPlacement[] = [
-  { kind: 'shape', label: '菱形', shape: 'diamond', width: 144, height: 100 },
-  { kind: 'section', label: '透明分区', transparent: true, width: 268, height: 170 },
-  { kind: 'note', label: '便签', width: 140, height: 116 },
-  { kind: 'html', label: 'HTML 预览', width: 288, height: 220 },
-  { kind: 'document', label: '文档', width: 280, height: 220 },
-  { kind: 'todo', label: '待办', width: 228, height: 156 },
-  { kind: 'table', label: '表格', width: 288, height: 212 },
-];
-const placementOptions = placementPresets.map(({ kind, label }) => ({ id: kind, label }));
+const placementOptions = placementPresets.map(({ id, object }) => ({ id, label: object.label }));
 
 function CanvasFixture() {
   const handle = useRef<CanvasHandle>(null);
   const placementSequence = useRef(0);
-  const [model, dispatch] = useReducer(reduceReceipts, initialReceiptState);
+  const { model, dispatch, onObjectIntent } = useFixtureModel();
   const [tool, setTool] = useState<CanvasTool>('select');
-  const [placement, setPlacement] = useState('shape');
+  const [placement, setPlacement] = useState('shape:diamond');
   const [readOnly, setReadOnly] = useState(false);
   const [selection, setSelection] = useState<readonly string[]>([]);
   const [visible, setVisible] = useState<readonly string[]>([]);
@@ -45,10 +37,17 @@ function CanvasFixture() {
       return;
     }
 
-    const object = placementPresets.find(({ kind }) => kind === placement);
+    const object = placementPresets.find(({ id }) => id === placement)?.object;
     if (object) {
       placementSequence.current += 1;
       setTool({ kind: 'place', requestId: String(placementSequence.current), object });
+    }
+  }
+
+  function handleLocateObject(id: string) {
+    if (id) {
+      setSelection([id]);
+      handle.current?.fitToObjects([id]);
     }
   }
 
@@ -78,7 +77,7 @@ function CanvasFixture() {
     <main className="canvas-fixture">
       <header>
         <h1>画布交互验收</h1>
-        <p>拖动检查命中、吸附和变形。按住 Alt 拖动复制，按 Esc 取消。操作完成后模拟确认或拒绝。</p>
+        <p>用「定位对象」查看各类对象。双击可编辑正文。拖动后的几何改动支持模拟确认或拒绝。</p>
       </header>
 
       <div className="canvas-fixture-actions">
@@ -109,6 +108,12 @@ function CanvasFixture() {
           <Button label="适配选区" onActivate={handleFitSelection} />
           <Button label="聚焦画布" onActivate={() => handle.current?.focus()} />
         </Toolbar>
+        <Select
+          label="定位对象"
+          value={selection[0] ?? ''}
+          options={model.scene.objects.map(({ id, label }) => ({ id, label }))}
+          onValueChange={handleLocateObject}
+        />
         <div className="canvas-fixture-placement">
           <Select
             label="对象类型"
@@ -147,9 +152,12 @@ function CanvasFixture() {
           initialViewport={initialViewport}
           pendingEdits={model.pending}
           contentById={content}
+          objectExtensions={studioObjectExtensions}
+          payloadById={model.payloads}
           onSelectionChange={setSelection}
           onToolChange={setTool}
           onEditIntent={(intent) => dispatch({ type: 'edit', intent })}
+          onObjectIntent={onObjectIntent}
           onViewportChange={setViewport}
           onVisibleObjectsChange={setVisible}
         />

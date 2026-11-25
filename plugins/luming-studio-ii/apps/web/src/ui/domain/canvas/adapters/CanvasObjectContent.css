@@ -99,3 +99,7 @@
   block-size: 100%;
   object-fit: contain;
 }
+.studio-ui-canvas-connector-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}

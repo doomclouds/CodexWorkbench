@@ -9,6 +9,12 @@ import {
   testsRoot,
 } from './project-paths.mjs';
 import { bindingOf } from './scope.mjs';
+import {
+  isObjectEntry,
+  objectsRoot,
+  objectTargets,
+  objectTestFamily,
+} from './objects-boundaries.mjs';
 
 const canvasRoot = resolve(sourceRoot, 'ui/domain/canvas');
 const canvasEntry = resolve(canvasRoot, 'index');
@@ -24,13 +30,14 @@ const canvasComponentTests = new Set([
   resolve(testsRoot, 'component/Canvas.test'),
   resolve(testsRoot, 'component/CanvasParity.test'),
 ]);
+const canvasObjectsTest = resolve(testsRoot, 'component/CanvasObjects.test');
 const testSupport = resolve(testsRoot, 'support/render-control');
 const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const absoluteSpecifier = /^(?:[\\/]|[a-z]:[\\/]|[a-z][a-z0-9+.-]*:\/\/|file:)/iu;
 const canvasTypeName = /^Canvas[A-Z][A-Za-z0-9]*$/u;
 const domTypeName =
   /^(?:HTML\w*Element|SVG\w*Element|Element|ElementRef|Node|Document|Window|Navigator|Event|EventTarget|DOM\w+|(?:Animation|BeforeUnload|Clipboard|Composition|Drag|Focus|Form|Input|Keyboard|Mouse|Pointer|Synthetic|Touch|Transition|UI|Wheel)Event|ComponentProps(?:WithRef|WithoutRef)?|DetailedHTMLProps|HTMLAttributes|JSX|RefObject|document|window)$/u;
-const publicReactTypes = new Set(['ReactNode', 'Ref']);
+const publicReactTypes = new Set(['ComponentType', 'ReactNode', 'Ref']);
 const publicDeclarations = new Set(['TSInterfaceDeclaration', 'TSTypeAliasDeclaration']);
 const libraries = new Set(['react', 'react-dom', 'react/jsx-runtime']);
 const testLibraries = new Set([
@@ -42,9 +49,13 @@ const testLibraries = new Set([
 ]);
 const pathModules = new Set(['connectors', 'ink']);
 const pathGeometry = new Set(
-  ['connectors/geometry', 'connectors/handles', 'connectors/path', 'ink/geometry'].map((file) =>
-    resolve(canvasRoot, file),
-  ),
+  [
+    'connectors/adjacent',
+    'connectors/geometry',
+    'connectors/handles',
+    'connectors/path',
+    'ink/geometry',
+  ].map((file) => resolve(canvasRoot, file)),
 );
 const pureModules = new Set(['viewport', 'scene', 'selection', 'gestures', ...pathModules]);
 const moduleDependencies = new Map([
@@ -86,9 +97,9 @@ function suiteKind(file) {
     return 'unit';
   }
 
-  return canvasComponentTests.has(stem(file)) || contains(canvasFixtureRoot, file)
-    ? 'component'
-    : '';
+  const canvasTest = canvasComponentTests.has(stem(file)) || stem(file) === canvasObjectsTest;
+
+  return canvasTest || contains(canvasFixtureRoot, file) ? 'component' : '';
 }
 
 function unitSubject(file) {
@@ -250,12 +261,14 @@ function allowedTestDependency(file, target) {
   }
 
   const entry = stem(target);
+  const shapeHarness = contains(canvasFixtureRoot, file) || stem(file) === canvasObjectsTest;
 
   return (
     entry === canvasEntry ||
     entry === baseEntry ||
     entry === testSupport ||
-    contains(canvasFixtureRoot, target)
+    contains(canvasFixtureRoot, target) ||
+    (shapeHarness && isObjectEntry(target))
   );
 }
 
@@ -521,8 +534,9 @@ function runnerBinding(sourceCode, actor) {
 function isControlReference(file, source) {
   return (
     typeof source === 'string' &&
-    referenceTargets(file, source).some(
-      (target) => contains(canvasRoot, target) || contains(baseRoot, target),
+    [...referenceTargets(file, source), ...objectTargets(file, source)].some(
+      (target) =>
+        contains(canvasRoot, target) || contains(baseRoot, target) || contains(objectsRoot, target),
     )
   );
 }
@@ -531,13 +545,15 @@ const noTestReplacement = {
   meta: {
     type: 'problem',
     schema: [],
-    messages: { replace: 'Exercise the real Canvas and Base modules in Canvas tests.' },
+    messages: {
+      replace: 'Exercise the real Canvas, Base and object modules in UI contract tests.',
+    },
   },
 
   create(context) {
     const file = context.physicalFilename;
     const sourceCode = context.sourceCode;
-    if (!suiteKind(file)) {
+    if (!suiteKind(file) && !objectTestFamily(file)) {
       return {};
     }
 

@@ -23,10 +23,13 @@ export function canvasHitBounds(point: CanvasPoint, zoom: number): CanvasRect {
 }
 
 function hitsObject(
-  { object, geometry, connectorRoute }: ProjectedCanvasObject,
+  { object, geometry, connectorRoute, geometryExtension }: ProjectedCanvasObject,
   point: CanvasPoint,
   zoom: number,
 ) {
+  if (geometryExtension?.hitTest) {
+    return geometryExtension.hitTest({ object, geometry, point, zoom });
+  }
   if (object.kind === 'ink') {
     return hitInk(object.ink, geometry, point, zoom);
   }

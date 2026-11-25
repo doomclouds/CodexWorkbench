@@ -12,6 +12,7 @@ export const browserCapabilities = [
 ];
 
 const browserGlobals = new Set(['globalThis', 'window', 'self']);
+const frameMessageMembers = new Set(['parent', 'postMessage']);
 const restrictedMembers = new Map([
   ['window', new Set([...browserCapabilities, 'parent', 'top'])],
   ['navigator', new Set(['clipboard'])],
@@ -70,15 +71,23 @@ function browserObject(sourceCode, expression, visited = new Set()) {
 const noBrowserIo = {
   meta: {
     type: 'problem',
-    schema: [],
+    schema: [
+      {
+        type: 'object',
+        properties: { frameMessaging: { type: 'boolean' } },
+        additionalProperties: false,
+      },
+    ],
     messages: { capability: 'Use a Surface or platform port for {{name}}.' },
   },
 
   create(context) {
     function reportCapability(node, target, name) {
       const group = browserGlobals.has(target) ? 'window' : target;
+      const frameMessage =
+        context.options[0]?.frameMessaging && group === 'window' && frameMessageMembers.has(name);
 
-      if (restrictedMembers.get(group)?.has(name)) {
+      if (!frameMessage && restrictedMembers.get(group)?.has(name)) {
         context.report({ node, messageId: 'capability', data: { name } });
       }
     }

@@ -4,11 +4,15 @@ import type {
   CanvasConnection,
   CanvasObject,
   CanvasObjectChange,
+  CanvasObjectExtension,
+  CanvasObjectGeometryContext,
+  CanvasObjectKind,
 } from '../../../src/ui/domain/canvas/contracts.js';
 import {
   buildPendingEdits,
   createSceneIndex,
   isObjectLocked,
+  projectedObjectBounds,
   projectObject,
   queryScene,
 } from '../../../src/ui/domain/canvas/scene/index.js';
@@ -149,6 +153,67 @@ describe('Canvas scene', () => {
 
     expect(results.map(({ object }) => object.id)).toEqual(['3', '4', distant.id]);
     expect(geometryRead.mock.calls.length).toBeLessThan(10);
+  });
+
+  it('indexes custom world bounds and only recalculates an edited object of the same kind', () => {
+    const first = { ...shape('first', -100), kind: 'example:offset-card' as const };
+    const second = { ...shape('second', 1_000), kind: first.kind };
+    const bounds = vi.fn(({ geometry }: CanvasObjectGeometryContext) => ({
+      x: geometry.x + 100,
+      y: geometry.y,
+      width: geometry.width,
+      height: geometry.height,
+    }));
+    const extension: CanvasObjectExtension = {
+      kind: first.kind,
+      capabilities: { move: true, resize: true, rotate: false, connect: false, content: 'passive' },
+      bounds,
+      hitTest: ({ geometry, point }) => point.x === geometry.x + 100 && point.y === geometry.y,
+    };
+    const get = vi.fn((kind: CanvasObjectKind) =>
+      kind === extension.kind ? extension : undefined,
+    );
+    const index = createSceneIndex([first, second], { get });
+    const committed = queryScene(index, visibleBounds, new Map());
+
+    expect(get).toHaveBeenCalledExactlyOnceWith(first.kind);
+    expect(committed.map(({ object }) => object.id)).toEqual([first.id]);
+    expect(committed.map(projectedObjectBounds)).toEqual([{ x: 0, y: 0, width: 10, height: 10 }]);
+    expect(bounds).toHaveBeenCalledTimes(2);
+
+    const pending = buildPendingEdits(index, [edit('move-custom', move(second, -95))]);
+    bounds.mockClear();
+    const visible = queryScene(index, visibleBounds, pending);
+
+    expect(bounds).toHaveBeenCalledExactlyOnceWith({
+      object: second,
+      geometry: { ...second.geometry, x: -95 },
+    });
+    expect(visible.map(({ object }) => object.id)).toEqual([first.id, second.id]);
+    expect(visible[0]).toBe(committed[0]);
+    expect(visible.map(projectedObjectBounds)[1]).toEqual({ x: 5, y: 0, width: 10, height: 10 });
+    expect(visible[1]?.geometryExtension?.hitTest).toBe(extension.hitTest);
+    expect(second.geometry.x).toBe(1_000);
+  });
+
+  it('keeps default spatial bounds when a custom geometry hook returns a nonfinite rectangle', () => {
+    const object = { ...shape('custom', 5), kind: 'example:invalid-card' as const };
+    const other = shape('other', 15);
+    const extension: CanvasObjectExtension = {
+      kind: object.kind,
+      capabilities: { move: true, resize: true, rotate: false, connect: false, content: 'passive' },
+      bounds: () => ({ x: Number.NaN, y: 0, width: 5, height: 5 }),
+    };
+    const index = createSceneIndex([object, other], {
+      get: (kind) => (kind === object.kind ? extension : undefined),
+    });
+    const inside = queryScene(index, visibleBounds, new Map());
+
+    expect(inside.map(({ object }) => object.id)).toEqual([object.id, other.id]);
+    expect(inside.map(projectedObjectBounds)).toEqual([
+      { x: 5, y: 0, width: 10, height: 10 },
+      { x: 15, y: 0, width: 10, height: 10 },
+    ]);
   });
 
   it('projects only affected attached routes and queries their updated bounds', () => {

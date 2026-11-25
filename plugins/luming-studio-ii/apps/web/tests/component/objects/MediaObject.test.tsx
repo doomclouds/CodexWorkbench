@@ -1,0 +1,317 @@
+import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  imageExtension,
+  LinkObject,
+  MediaObject,
+} from '../../../src/ui/domain/objects/media/index.js';
+import type {
+  ImageObjectProps,
+  SaveImageCrop,
+} from '../../../src/ui/domain/objects/media/index.js';
+import { createControlFixture } from '../../support/render-control.js';
+
+const photo = 'data:image/png;base64,AA';
+const video = 'https://example.test/demo.mp4';
+const imageProps: ImageObjectProps = {
+  kind: 'image',
+  label: '白板图片',
+  src: photo,
+  width: 100,
+  height: 100,
+  crop: { zoom: 2, x: 0.25, y: 1 },
+  naturalSize: { width: 400, height: 200 },
+};
+
+let fixture: ReturnType<typeof createControlFixture>;
+
+function showModal(this: HTMLDialogElement) {
+  this.open = true;
+}
+
+function closeModal(this: HTMLDialogElement) {
+  this.open = false;
+}
+
+if (typeof HTMLDialogElement.prototype.showModal !== 'function') {
+  Object.defineProperties(HTMLDialogElement.prototype, {
+    showModal: { value: showModal, configurable: true },
+    close: { value: closeModal, configurable: true },
+  });
+}
+
+beforeEach(() => {
+  fixture = createControlFixture();
+});
+
+afterEach(() => {
+  fixture.dispose();
+});
+
+function element<T extends HTMLElement>(selector: string): T {
+  const node = fixture.host.querySelector<T>(selector);
+  if (!node) {
+    throw new Error('Expected ' + selector);
+  }
+
+  return node;
+}
+
+function button(label: string): HTMLButtonElement {
+  const match = Array.from(fixture.host.querySelectorAll('button')).find(
+    (control) => control.textContent === label,
+  );
+
+  if (!match) {
+    throw new Error('Expected button ' + label);
+  }
+
+  return match;
+}
+
+function dispatch(node: HTMLElement, event: Event) {
+  act(() => {
+    node.dispatchEvent(event);
+  });
+}
+
+function openCrop() {
+  dispatch(element('img'), new MouseEvent('dblclick', { bubbles: true }));
+  expect(element<HTMLDialogElement>('dialog').open).toBe(true);
+}
+
+function setRange(label: string, value: number) {
+  const fieldLabel = Array.from(fixture.host.querySelectorAll('label')).find(
+    (labelElement) => labelElement.textContent === label,
+  );
+
+  const input = fieldLabel?.control;
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error('Expected range ' + label);
+  }
+
+  act(() => {
+    input.value = String(value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+describe('MediaObject', () => {
+  it('preserves the legacy native cover formula and saves crop metadata while retaining the source', async () => {
+    const onSaveCrop = vi.fn<SaveImageCrop>().mockResolvedValue(true);
+    fixture.render(<MediaObject {...imageProps} onSaveCrop={onSaveCrop} />);
+    const image = element<HTMLImageElement>('img');
+
+    expect(image.style.objectFit).toBe('cover');
+    expect(image.style.objectPosition).toBe('25% 100%');
+    expect(image.style.left).toBe('-25%');
+    expect(image.style.top).toBe('-100%');
+    expect(image.style.width).toBe('200%');
+    expect(image.style.height).toBe('200%');
+    openCrop();
+    setRange('裁剪缩放', 3);
+    await act(async () => button('保存裁剪').click());
+
+    expect(onSaveCrop).toHaveBeenCalledExactlyOnceWith({
+      crop: { zoom: 3, x: 0.25, y: 1 },
+      naturalSize: { width: 400, height: 200 },
+    });
+    expect(element('img')).toBe(image);
+    expect(image.getAttribute('src')).toBe(photo);
+    expect(fixture.host.querySelector('dialog')).toBeNull();
+  });
+
+  it('accepts decoded natural dimensions and waits for them before saving an uncached source', async () => {
+    const onSaveCrop = vi.fn<SaveImageCrop>().mockResolvedValue();
+    fixture.render(<MediaObject {...imageProps} naturalSize={undefined} onSaveCrop={onSaveCrop} />);
+    openCrop();
+    expect(button('保存裁剪').disabled).toBe(true);
+
+    const preview = element<HTMLImageElement>('dialog img');
+    Object.defineProperties(preview, {
+      naturalWidth: { value: 720, configurable: true },
+      naturalHeight: { value: 360, configurable: true },
+    });
+    dispatch(preview, new Event('load'));
+    expect(button('保存裁剪').disabled).toBe(false);
+    act(() => button('居中重置').click());
+    await act(async () => button('保存裁剪').click());
+
+    expect(onSaveCrop).toHaveBeenCalledExactlyOnceWith({
+      crop: { zoom: 1, x: 0.5, y: 0.5 },
+      naturalSize: { width: 720, height: 360 },
+    });
+  });
+
+  it.each(['readOnly', 'locked'] as const)(
+    'blocks crop when %s and closes a stale draft',
+    async (permission) => {
+      const onSaveCrop = vi.fn<SaveImageCrop>().mockResolvedValue(true);
+      fixture.render(<MediaObject {...imageProps} onSaveCrop={onSaveCrop} />);
+      openCrop();
+
+      fixture.render(
+        <MediaObject {...imageProps} {...{ [permission]: true }} onSaveCrop={onSaveCrop} />,
+      );
+      dispatch(element('img'), new MouseEvent('dblclick', { bubbles: true }));
+      expect(fixture.host.querySelector('dialog')).toBeNull();
+      expect(fixture.host.textContent).not.toContain('裁剪图片');
+      expect(onSaveCrop).not.toHaveBeenCalled();
+
+      fixture.render(<MediaObject {...imageProps} onSaveCrop={onSaveCrop} />);
+      expect(fixture.host.querySelector('dialog')).toBeNull();
+    },
+  );
+
+  it('keeps an edited crop after a rejected save and retries the same values', async () => {
+    const onSaveCrop = vi.fn<SaveImageCrop>();
+    onSaveCrop.mockRejectedValueOnce(new Error('图片版本已变化')).mockResolvedValueOnce(true);
+    fixture.render(<MediaObject {...imageProps} onSaveCrop={onSaveCrop} />);
+    openCrop();
+    setRange('裁剪水平位置', 75);
+    await act(async () => button('保存裁剪').click());
+
+    expect(element('dialog [role="alert"]').textContent).toBe('图片版本已变化');
+    expect(element<HTMLDialogElement>('dialog').open).toBe(true);
+    await act(async () => button('保存裁剪').click());
+    expect(onSaveCrop).toHaveBeenCalledTimes(2);
+    expect(onSaveCrop.mock.calls[1]).toEqual(onSaveCrop.mock.calls[0]);
+    expect(onSaveCrop.mock.calls[1]?.[0].crop.x).toBe(0.75);
+    expect(fixture.host.querySelector('dialog')).toBeNull();
+  });
+
+  it('reports injected loading and errors and restores the image after authorized resolution', () => {
+    fixture.render(<MediaObject {...imageProps} src={undefined} status={{ status: 'loading' }} />);
+    expect(element('[role="status"]').textContent).toContain('正在加载媒体');
+    expect(fixture.host.querySelector('img')).toBeNull();
+
+    fixture.render(
+      <MediaObject
+        {...imageProps}
+        src={undefined}
+        status={{ status: 'error', message: '图片不可用' }}
+      />,
+    );
+    expect(element('[role="alert"]').textContent).toBe('图片不可用');
+
+    fixture.render(<MediaObject {...imageProps} status={{ status: 'ready' }} />);
+    expect(fixture.host.textContent).not.toContain('图片不可用');
+    expect(element('img').getAttribute('src')).toBe(photo);
+  });
+
+  it('keeps video playback controls independent of the canvas transforms', () => {
+    fixture.render(<MediaObject kind="video" src={video} poster={photo} label="演示视频" />);
+    const player = element<HTMLVideoElement>('video');
+
+    expect(player.controls).toBe(true);
+    expect(player.getAttribute('poster')).toBe(photo);
+    expect(player.preload).toBe('metadata');
+    expect(player.playsInline).toBe(true);
+    expect(player.hasAttribute('data-canvas-native')).toBe(true);
+
+    fixture.render(
+      <MediaObject kind="video" src={video} poster={photo} label="演示视频" interactive={false} />,
+    );
+    expect(element('video')).toBe(player);
+    expect(player.controls).toBe(false);
+    expect(player.tabIndex).toBe(-1);
+    expect(player.hasAttribute('data-canvas-native')).toBe(false);
+
+    dispatch(player, new Event('error'));
+    expect(element('[role="alert"]').textContent).toBe('媒体加载失败。');
+  });
+
+  it('allows only an HTTP(S) image link and disables it when viewing a passive preview', () => {
+    fixture.render(<MediaObject {...imageProps} href="http://example.test/source" />);
+    expect(element<HTMLAnchorElement>('a[aria-label="打开图片链接"]').href).toBe(
+      'http://example.test/source',
+    );
+
+    fixture.render(<MediaObject {...imageProps} href="javascript:alert(1)" />);
+    expect(fixture.host.querySelector('a')).toBeNull();
+
+    fixture.render(
+      <MediaObject {...imageProps} href="https://example.test/source" interactive={false} />,
+    );
+    expect(fixture.host.querySelector('a')).toBeNull();
+  });
+});
+
+describe('LinkObject', () => {
+  it('opens an HTTP(S) target with isolation and preserves its visible label', () => {
+    fixture.render(<LinkObject label="架构规范" href="https://example.test/guide" />);
+    expect(fixture.host.textContent).toContain('架构规范');
+    const link = element<HTMLAnchorElement>('a[aria-label="打开链接"]');
+
+    expect(link.href).toBe('https://example.test/guide');
+    expect(link.target).toBe('_blank');
+    expect(link.relList.contains('noopener')).toBe(true);
+    expect(link.relList.contains('noreferrer')).toBe(true);
+  });
+
+  it.each(['javascript:alert(1)', 'file:///local.txt', '/relative'] as const)(
+    'shows the original text without opening a non-HTTP target %s',
+    (href) => {
+      fixture.render(<LinkObject href={href} />);
+
+      expect(fixture.host.textContent).toContain(href);
+      expect(fixture.host.querySelector('a')).toBeNull();
+    },
+  );
+});
+
+describe('imageExtension', () => {
+  it('opens by edit request and keeps the source version until the user opens a fresh crop', async () => {
+    const View = imageExtension.View;
+    const geometry = { x: 0, y: 0, width: 100, height: 100, rotation: 0 };
+    const value = { src: photo, crop: imageProps.crop, naturalSize: imageProps.naturalSize };
+    const request = vi
+      .fn<Parameters<typeof View>[0]['request']>()
+      .mockResolvedValueOnce({ ok: false, message: '图片版本已变化' })
+      .mockResolvedValueOnce({ ok: true, payload: { version: 3, value } });
+    const onRetentionChange = vi.fn<(retained: boolean) => void>();
+    const props = {
+      object: { kind: 'image' as const, label: '图片', geometry },
+      geometry,
+      zoom: 1,
+      selected: true,
+      interactive: true,
+      readOnly: false,
+      request,
+      onRetentionChange,
+    };
+
+    fixture.render(<View {...props} payload={{ version: 1, value }} />);
+    expect(onRetentionChange).not.toHaveBeenCalled();
+    fixture.render(<View {...props} payload={{ version: 1, value }} editRequest={1} />);
+    expect(element<HTMLDialogElement>('dialog').open).toBe(true);
+    expect(onRetentionChange.mock.calls).toEqual([[true]]);
+    setRange('裁剪缩放', 3);
+    fixture.render(<View {...props} payload={{ version: 2, value }} editRequest={1} />);
+    await act(async () => button('保存裁剪').click());
+
+    expect(request).toHaveBeenNthCalledWith(1, {
+      name: 'media.crop',
+      expectedVersion: 1,
+      value: {
+        crop: { zoom: 3, x: 0.25, y: 1 },
+        naturalSize: { width: 400, height: 200 },
+      },
+    });
+    expect(element('[role="alert"]').textContent).toBe('图片版本已变化');
+    expect(onRetentionChange.mock.calls).toEqual([[true]]);
+    act(() => button('关闭裁剪').click());
+    expect(fixture.host.querySelector('dialog')).toBeNull();
+    expect(onRetentionChange.mock.calls).toEqual([[true], [false]]);
+
+    fixture.render(<View {...props} payload={{ version: 2, value }} editRequest={2} />);
+    await act(async () => button('保存裁剪').click());
+    expect(request).toHaveBeenNthCalledWith(2, {
+      name: 'media.crop',
+      expectedVersion: 2,
+      value: { crop: imageProps.crop, naturalSize: imageProps.naturalSize },
+    });
+    expect(fixture.host.querySelector('dialog')).toBeNull();
+    expect(onRetentionChange.mock.calls).toEqual([[true], [false], [true], [false]]);
+  });
+});

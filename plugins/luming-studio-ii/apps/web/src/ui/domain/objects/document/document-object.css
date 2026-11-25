@@ -1,0 +1,179 @@
+.studio-document-object,
+.studio-document-surface {
+  block-size: 100%;
+  min-block-size: 0;
+}
+
+.studio-document-surface {
+  --studio-document-text-gray: #55565a;
+  --studio-document-text-brown: #70471f;
+  --studio-document-text-red: #9e303b;
+  --studio-document-text-orange: #964516;
+  --studio-document-text-yellow: #705307;
+  --studio-document-text-green: #1b6645;
+  --studio-document-text-blue: #245999;
+  --studio-document-text-purple: #7343a1;
+  --studio-document-text-pink: #9c396a;
+  --studio-document-background-gray: #e9eaed;
+  --studio-document-background-brown: #f0e4d6;
+  --studio-document-background-red: #f9dee2;
+  --studio-document-background-orange: #f9e2d2;
+  --studio-document-background-yellow: #fff3c3;
+  --studio-document-background-green: #dcefe3;
+  --studio-document-background-blue: #dcebf9;
+  --studio-document-background-purple: #eee1fa;
+  --studio-document-background-pink: #f6e1ee;
+  display: flex;
+  flex-direction: column;
+  user-select: text;
+}
+
+.studio-document-surface[data-paper-scheme='dark'] {
+  --studio-document-text-gray: #c3c1c7;
+  --studio-document-text-brown: #ebbd97;
+  --studio-document-text-red: #f5a0a8;
+  --studio-document-text-orange: #f9b18a;
+  --studio-document-text-yellow: #f3d36a;
+  --studio-document-text-green: #a1dcb8;
+  --studio-document-text-blue: #9ccafa;
+  --studio-document-text-purple: #d3b3f7;
+  --studio-document-text-pink: #efabd0;
+  --studio-document-background-gray: #444248;
+  --studio-document-background-brown: #5e452f;
+  --studio-document-background-red: #6f353e;
+  --studio-document-background-orange: #6a4028;
+  --studio-document-background-yellow: #685521;
+  --studio-document-background-green: #2d5640;
+  --studio-document-background-blue: #2b4b70;
+  --studio-document-background-purple: #543a72;
+  --studio-document-background-pink: #67354e;
+}
+
+.studio-document-surface > .studio-ui-scroll-region {
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.studio-document-top {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-block-end: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.studio-document-title {
+  overflow: hidden;
+  margin: 0;
+  font-size: 0.9375rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.studio-document-paper {
+  box-sizing: border-box;
+  min-block-size: 100%;
+  padding: 0.75rem;
+  text-align: start;
+}
+
+.studio-document-reading {
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+.studio-document-reading :is(p, h1, h2, h3, h4, h5, h6, blockquote, pre, ol, ul, figure, table) {
+  margin-block: 0.3em 0.7em;
+}
+
+.studio-document-reading :is(ol, ul) {
+  padding-inline-start: 1.6rem;
+}
+
+.studio-document-reading table {
+  border-collapse: collapse;
+}
+
+.studio-document-reading :is(th, td) {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid color-mix(in srgb, currentColor 23%, transparent);
+  text-align: start;
+}
+
+.studio-document-reading :is(pre, blockquote) {
+  padding: 0.5rem;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.studio-document-reading pre {
+  overflow-x: auto;
+}
+
+.studio-document-image img {
+  display: block;
+  max-inline-size: 100%;
+  block-size: auto;
+}
+
+.studio-document-reader-tools,
+.studio-document-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.studio-document-export {
+  position: relative;
+}
+
+.studio-document-export-options {
+  position: absolute;
+  z-index: 1;
+  inset-block-start: 100%;
+  inset-inline-start: 0;
+  display: grid;
+  gap: 0.25rem;
+  min-inline-size: max-content;
+  padding: 0.375rem;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: 0.5rem;
+  background: var(--studio-ui-surface, Canvas);
+}
+
+.studio-document-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-block-start: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.studio-document-comparison pre {
+  max-block-size: 9rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.studio-document-comparison > :last-child {
+  grid-column: span 2;
+}
+
+.studio-document-reading [data-document-match] {
+  background: var(--studio-document-background-yellow);
+}
+
+.studio-document-reading [data-document-current] {
+  outline: 1px solid var(--studio-document-text-yellow);
+}
+
+.studio-ui-dialog:has(.studio-document-surface) {
+  inline-size: min(60rem, calc(100% - 2rem));
+}
+
+.studio-ui-dialog .studio-document-surface {
+  block-size: min(66vh, 45rem);
+}
+
+.studio-ui-dialog .studio-document-paper {
+  padding: 1rem clamp(0.75rem, 4vw, 2.5rem);
+}

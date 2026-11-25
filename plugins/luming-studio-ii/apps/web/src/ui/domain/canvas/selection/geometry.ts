@@ -52,7 +52,10 @@ function corners({ x, y, width, height, rotation }: CanvasGeometry) {
 }
 
 export function withinSection(entry: ProjectedCanvasObject, section: CanvasGeometry) {
-  const points = entry.connectorRoute?.points ?? corners(entry.geometry);
+  const { extensionBounds, connectorRoute, geometry } = entry;
+  const points = extensionBounds
+    ? corners({ ...extensionBounds, rotation: 0 })
+    : (connectorRoute?.points ?? corners(geometry));
 
   return points.every((point) => containsPoint(point, section));
 }

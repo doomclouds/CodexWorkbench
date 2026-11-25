@@ -1,5 +1,6 @@
 import type {
   CanvasConnectionEndpoint,
+  CanvasCreateIntent,
   CanvasDuplicateIntent,
   CanvasEditIntent,
   CanvasObject,
@@ -106,7 +107,7 @@ export const initialScene: CanvasScene = {
   ],
 };
 
-interface ReceiptFixtureState {
+export interface ReceiptFixtureState {
   scene: CanvasScene;
   pending: readonly CanvasEditIntent[];
   intentCount: number;
@@ -116,7 +117,7 @@ interface ReceiptFixtureState {
   lastIntent?: CanvasEditIntent;
 }
 
-type ReceiptFixtureAction =
+export type ReceiptFixtureAction =
   | { type: 'edit'; intent: CanvasEditIntent }
   | { type: 'receipt'; interactionId: string; accepted: boolean };
 
@@ -210,12 +211,45 @@ function confirmDuplicate(
   }
 }
 
+function confirmCreate(scene: CanvasScene, intent: CanvasCreateIntent): CanvasScene | undefined {
+  const object = { ...intent.object, id: intent.interactionId, version: 1 };
+  const { link } = intent;
+  const revision = scene.revision + 1;
+  if (!link) {
+    return { ...scene, revision, objects: [...scene.objects, object] };
+  }
+
+  const { source, target } = link;
+  const origin = scene.objects.find(({ id }) => id === source.objectId);
+  if (origin?.version !== source.expectedVersion || origin.locked) {
+    return undefined;
+  }
+
+  const start = { point: source.point, attachment: { objectId: origin.id, port: source.port } };
+  const end = { point: target.point, attachment: { objectId: object.id, port: target.port } };
+  const geometry = {
+    x: Math.min(source.point.x, target.point.x),
+    y: Math.min(source.point.y, target.point.y),
+    width: Math.max(1, Math.abs(target.point.x - source.point.x)),
+    height: Math.max(1, Math.abs(target.point.y - source.point.y)),
+    rotation: 0,
+  };
+  const connector: CanvasObject = {
+    id: intent.interactionId + ':connector',
+    kind: 'connector',
+    label: '',
+    connection: { start, end },
+    version: 1,
+    geometry,
+  };
+
+  return { ...scene, revision, objects: [...scene.objects, object, connector] };
+}
+
 function confirmEdit(scene: CanvasScene, intent: CanvasEditIntent): CanvasScene | undefined {
   const revision = scene.revision + 1;
   if (intent.kind === 'create') {
-    const object = { ...intent.object, id: intent.interactionId, version: 1 };
-
-    return { ...scene, revision, objects: [...scene.objects, object] };
+    return confirmCreate(scene, intent);
   }
   if (intent.kind === 'duplicate') {
     return confirmDuplicate(scene, intent);

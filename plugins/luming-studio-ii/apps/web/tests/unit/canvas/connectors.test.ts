@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { CanvasConnection, CanvasGeometry } from '../../../src/ui/domain/canvas/contracts.js';
+import type {
+  CanvasConnection,
+  CanvasGeometry,
+  CanvasRect,
+} from '../../../src/ui/domain/canvas/contracts.js';
+import {
+  getAdjacentGeometry,
+  oppositePort,
+} from '../../../src/ui/domain/canvas/connectors/adjacent.js';
 import {
   connectionHitRadius,
   connectionPortOffset,
@@ -17,6 +25,53 @@ const line: CanvasConnection = {
   start: { point: { x: 0, y: 0 } },
   end: { point: { x: 100, y: 80 } },
 };
+
+function overlap(left: CanvasRect, right: CanvasRect) {
+  const horizontal = left.x < right.x + right.width && left.x + left.width > right.x;
+  const vertical = left.y < right.y + right.height && left.y + left.height > right.y;
+
+  return horizontal && vertical;
+}
+
+describe('adjacent connector placement', () => {
+  const source: CanvasGeometry = { x: 100, y: 120, width: 200, height: 100, rotation: 90 };
+  const findFree = () => undefined;
+
+  it('uses the existing note and shape gaps, with the same unrotated neighbor footprint', () => {
+    const note = getAdjacentGeometry(source, 'right', findFree, 'note');
+    const shape = getAdjacentGeometry({ ...source, x: 700 }, 'bottom', findFree);
+
+    expect(note).toEqual({ ...source, x: 324, rotation: 0 });
+    expect(shape).toEqual({ ...source, x: 700, y: 268, rotation: 0 });
+    expect(oppositePort('right')).toBe('left');
+    expect(oppositePort('bottom')).toBe('top');
+  });
+
+  it('skips each exact obstacle edge in the original row', () => {
+    const obstacles = [
+      { x: 340, y: 125, width: 340, height: 40 },
+      { x: 730, y: 115, width: 90, height: 50 },
+    ];
+    const findObstacle = (bounds: CanvasRect) =>
+      obstacles.find((obstacle) => overlap(bounds, obstacle));
+
+    expect(getAdjacentGeometry(source, 'right', findObstacle)).toEqual({
+      ...source,
+      x: 868,
+      rotation: 0,
+    });
+  });
+
+  it('keeps twelve units clear while allowing a blocker on the exact boundary', () => {
+    const near = { x: 559, y: 120, width: 20, height: 80 };
+    const outside = { ...near, x: 560 };
+    const clearNear = (bounds: CanvasRect) => (overlap(bounds, near) ? near : undefined);
+    const clearOutside = (bounds: CanvasRect) => (overlap(bounds, outside) ? outside : undefined);
+
+    expect(getAdjacentGeometry(source, 'right', clearNear).x).toBe(627);
+    expect(getAdjacentGeometry(source, 'right', clearOutside).x).toBe(348);
+  });
+});
 
 describe('connector geometry', () => {
   it('rotates an edge port and its outward handle around the object center', () => {

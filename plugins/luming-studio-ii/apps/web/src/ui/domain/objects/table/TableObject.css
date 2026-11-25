@@ -1,0 +1,101 @@
+.studio-object-table {
+  display: flex;
+  min-block-size: 100%;
+  flex-direction: column;
+  color: var(--studio-ui-text, CanvasText);
+  background-color: var(--studio-ui-surface, Canvas);
+}
+
+.studio-object-table-content {
+  position: relative;
+  min-block-size: 2rem;
+  flex: 1 1 auto;
+}
+
+.studio-object-table-grid {
+  inline-size: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background-color: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+}
+
+.studio-object-table-grid :is(th, td) {
+  box-sizing: border-box;
+  min-block-size: 2rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--studio-ui-border, GrayText);
+  overflow-wrap: anywhere;
+  text-align: start;
+  white-space: pre-wrap;
+  vertical-align: top;
+}
+
+.studio-object-table-grid th,
+.studio-object-table-outline-header {
+  background-color: var(--studio-ui-canvas-shape-surface, ButtonFace);
+  color: var(--studio-ui-text, CanvasText);
+  font-weight: 600;
+}
+
+.studio-object-table-outline-header {
+  min-block-size: 1.2rem;
+  border-block-end: 1px solid var(--studio-ui-border, GrayText);
+}
+
+.studio-object-table[data-table-detail='preview'] .studio-object-table-grid :is(th, td) {
+  position: relative;
+  block-size: 2.4rem;
+  padding: 0;
+}
+
+.studio-object-table-preview-text,
+.studio-object-table-preview-bar {
+  position: absolute;
+  inset-inline: min(10%, 0.8rem);
+  inset-block-start: 50%;
+  overflow: hidden;
+  transform: translateY(-50%);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.studio-object-table-preview-bar {
+  max-inline-size: 55%;
+  block-size: 0.18rem;
+  border-radius: 0.12rem;
+  background-color: currentColor;
+  opacity: 0.4;
+}
+
+.studio-object-table-column-handle {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.studio-object-table-column-handle:hover {
+  background-color: color-mix(in srgb, var(--studio-ui-focus, Highlight) 30%, transparent);
+}
+
+.studio-object-table-controls {
+  display: grid;
+  max-inline-size: 100%;
+  padding-block: 0.3rem;
+  gap: 0.3rem;
+}
+
+.studio-object-table-controls [role='toolbar'] {
+  flex-wrap: wrap;
+}
+
+.studio-object-table-editor {
+  box-sizing: border-box;
+  min-block-size: 1.4em;
+  padding: 0.125rem;
+  outline: 1px solid var(--studio-ui-focus, Highlight);
+}

@@ -10,6 +10,7 @@ import type {
   CanvasConnection,
   CanvasObject,
   CanvasObjectChange,
+  CanvasObjectRegistry,
   CanvasPenStyle,
   CanvasPlacement,
   CanvasPoint,
@@ -23,6 +24,7 @@ import type { SceneIndex } from './scene/index.js';
 export interface CanvasProjection {
   index: SceneIndex;
   pending: ReadonlyMap<string, CanvasObjectChange>;
+  registry?: CanvasObjectRegistry;
 }
 
 export interface InkGesture {
@@ -39,7 +41,11 @@ const minimumPlacementWidth = 32;
 const minimumPlacementHeight = 28;
 const connectorLabel = '连线';
 
-export function canConnectTo(object: CanvasObject) {
+export function canConnectTo(object: CanvasObject, registry?: CanvasObjectRegistry) {
+  if (registry) {
+    return registry.get(object.kind)?.capabilities.connect === true;
+  }
+
   return object.kind !== 'ink' && object.kind !== 'connector' && object.kind !== 'section';
 }
 
@@ -111,7 +117,9 @@ export function resolveCanvasConnection(connection: CanvasConnection, view: Canv
   return resolveConnection(connection, (id) => {
     const object = index.get(id);
 
-    return object && canConnectTo(object) ? projectObject(index, pending, id)?.geometry : undefined;
+    const usable = object && object.kind !== 'connector' && object.kind !== 'ink';
+
+    return usable ? projectObject(index, pending, id)?.geometry : undefined;
   });
 }
 
@@ -127,7 +135,7 @@ export function connectorDraft(connection: CanvasConnection, view: CanvasProject
 export function connectionTarget(
   point: CanvasPoint,
   zoom: number,
-  { index, pending }: CanvasProjection,
+  { index, pending, registry }: CanvasProjection,
   excludedId?: string,
 ) {
   const radius = connectionPortRadius(zoom);
@@ -138,7 +146,7 @@ export function connectionTarget(
     height: radius * 2,
   };
   const candidates = queryScene(index, limits, pending)
-    .filter(({ object }) => canConnectTo(object))
+    .filter(({ object }) => canConnectTo(object, registry))
     .map(({ object, geometry }) => ({ id: object.id, geometry }));
   const endpoint = findPort(point, candidates, zoom, excludedId);
   const target = candidates.find(({ id }) => id === endpoint.attachment?.objectId);

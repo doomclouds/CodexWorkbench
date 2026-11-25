@@ -1,0 +1,104 @@
+.luming-media-object,
+.luming-image-frame,
+.luming-media-video {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.luming-media-object,
+.luming-image-frame {
+  position: relative;
+}
+
+.luming-image-frame {
+  overflow: hidden;
+}
+
+.luming-image-frame img,
+.luming-media-video {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: contain;
+}
+
+.luming-media-video[data-interactive='false'] {
+  pointer-events: none;
+}
+
+.luming-media-object__actions {
+  position: absolute;
+  inset-block-start: 0.5rem;
+  inset-inline-end: 0.5rem;
+  display: flex;
+  gap: 0.375rem;
+}
+
+.luming-media-placeholder {
+  display: grid;
+  inline-size: 100%;
+  block-size: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem;
+  place-items: center;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.luming-image-crop {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.luming-image-crop__preview {
+  justify-self: center;
+  max-inline-size: 100%;
+  overflow: hidden;
+  background: var(--studio-ui-surface, Canvas);
+  border: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: 0.5rem;
+}
+
+.luming-image-crop__actions,
+.luming-media-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.luming-image-crop__actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.luming-media-link {
+  box-sizing: border-box;
+  padding: 0.625rem;
+  min-inline-size: 0;
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.luming-media-link__content {
+  display: grid;
+  min-inline-size: 0;
+  flex: 1;
+  gap: 0.25rem;
+}
+
+.luming-media-link__content :is(strong, span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.luming-media-link__content span {
+  color: var(--studio-ui-muted, GrayText);
+}
+
+.luming-media-link__target {
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--studio-ui-link, LinkText);
+  background: var(--studio-ui-surface, Canvas);
+}

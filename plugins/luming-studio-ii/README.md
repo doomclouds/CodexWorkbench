@@ -70,11 +70,19 @@ pnpm --filter @codexworkbench/luming-studio-ii-web build
 
 画布从 `@codexworkbench/luming-studio-ii-web/ui/domain/canvas` 使用。调用方通过场景、属性、观察事件、编辑意图和句柄与 Canvas 交互。Canvas 专用 Lint 检查公开入口、内部模块依赖、I/O 及测试边界。
 
-验收页支持单次放置、框选、拖动吸附、多选变形、笔迹、连接点和折点。用「确认当前」或「拒绝当前」观察意图与回执。HTML、文档、待办和表格卡片通过正文插槽演示焦点、滚动与变形。
+验收页支持单次放置、框选、拖动吸附、多选变形、笔迹、连接点和折点。用「确认当前」或「拒绝当前」观察几何意图与回执。用「定位对象」打开实际的文档、待办、表格、HTML、图解、图表、图片、视频、链接、便签、贴纸和形状。正文编辑走独立的版本化回执。
 
 ```sh
 pnpm --filter @codexworkbench/luming-studio-ii-web preview:canvas
 ```
+
+### Canvas 对象扩展
+
+Studio 通过 `objectExtensions` 装配内置定义。扩展按 `kind` 声明放置预设、变形与连线能力、正文交互方式，可选提供边界和命中计算。自定义类型使用 `example:badge` 形式的标识。
+
+Canvas 管理图层、选区、手势、焦点和裁剪。对象的 `View` 接收几何投影和独立的 `payloadById` 载荷，按自身规则管理正文与编辑状态。通过 `request` 提交操作时，Canvas 附上当前对象身份，宿主按预期版本返回确认或拒绝。对象可在草稿和编辑会话期间报告保活，Canvas 在对象有在途请求时也会保留挂载。
+
+对象注册文件只能引用 Canvas 的公开类型。Canvas 通过注册表调用对象能力。源码与组件测试都受依赖门禁约束，测试通过公开入口执行真实模块。
 
 按终端中的本地 Vite 地址打开 `/tests/fixtures/canvas/`。验收页用基础控件提供工具切换和模拟回执，可以检查预览、确认、拒绝、迟到确认及原生输入。
 

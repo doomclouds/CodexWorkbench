@@ -1,0 +1,108 @@
+.studio-ui-rich-text {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.studio-ui-rich-text-line {
+  min-height: 1.45em;
+}
+
+.studio-ui-rich-text-line.is-list {
+  display: flex;
+  gap: 0.4em;
+  text-align: start;
+}
+
+.studio-ui-rich-text-line > span:last-child {
+  min-width: 0;
+}
+
+.studio-ui-rich-text code {
+  padding: 0.08em 0.25em;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.studio-ui-rich-text a {
+  color: var(--studio-ui-accent);
+  text-decoration: underline;
+  pointer-events: auto;
+}
+
+.studio-ui-inline-text-editor {
+  overflow: auto;
+  width: 100%;
+  min-height: 1.5em;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+  pointer-events: auto;
+}
+
+.studio-ui-inline-text-editor:focus-visible {
+  outline: 1px solid var(--studio-ui-focus, currentColor);
+  outline-offset: -1px;
+}
+
+.studio-ui-text-object,
+.studio-ui-text-object-editor {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.studio-ui-text-object[tabindex],
+.studio-ui-text-object-editor {
+  pointer-events: auto;
+}
+
+.studio-ui-text-object-editor {
+  display: grid;
+  gap: 0.3rem;
+  align-items: start;
+  overflow: auto;
+}
+
+.studio-ui-text-object-editor [role='toolbar'] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.studio-ui-text-object-editor [role='toolbar'] button {
+  min-height: 1.5rem;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.75rem;
+}
+
+.studio-ui-text-object-link-fields {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.studio-ui-text-object-link-actions {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.studio-ui-canvas-text-body {
+  width: 100%;
+  min-width: 0;
+}
+
+.studio-ui-canvas-text-failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  pointer-events: auto;
+}

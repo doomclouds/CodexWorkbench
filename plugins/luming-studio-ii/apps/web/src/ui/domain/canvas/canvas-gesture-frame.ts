@@ -1,4 +1,5 @@
 import type { CanvasFrame } from './canvas-frame.js';
+import { placementFromPort } from './canvas-adjacent.js';
 import {
   connectionTarget,
   connectorDraft,
@@ -40,6 +41,8 @@ interface ConnectionGesture {
   kind: 'create-connection';
   interactionId: string;
   start: CanvasConnectionEndpoint;
+  sourceVersion?: number;
+  clickOnly?: boolean;
 }
 
 interface EndpointGesture {
@@ -231,6 +234,7 @@ export function gestureFrame(
   screen: CanvasPoint,
   modifiers: TransformModifiers,
   view: FrameProjection,
+  final = false,
 ): CanvasFrame {
   const { action, start, viewport } = session;
   if (action.kind === 'pan') {
@@ -250,6 +254,16 @@ export function gestureFrame(
     return { viewport, draft: { kind: 'create', interactionId: action.interactionId, object } };
   }
   if (travel < dragThreshold) {
+    if (final && action.kind === 'create-connection' && action.sourceVersion !== undefined) {
+      const from = action.start.attachment;
+      if (from?.port) {
+        return {
+          viewport,
+          draft: placementFromPort(view, from.objectId, from.port, action.interactionId),
+        };
+      }
+    }
+
     return { viewport };
   }
 
@@ -259,7 +273,9 @@ export function gestureFrame(
     case 'transform':
       return transformFrame(action, point, viewport, modifiers, view);
     case 'create-connection':
-      return connectionFrame(action, point, viewport, modifiers, view);
+      return action.clickOnly
+        ? { viewport }
+        : connectionFrame(action, point, viewport, modifiers, view);
     case 'edit-connection':
       return editConnectionFrame(action, point, viewport, view);
   }

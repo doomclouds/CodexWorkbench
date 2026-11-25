@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { canConnectTo } from './canvas-creation.js';
 import type { CanvasFrame } from './canvas-frame.js';
-import type { CanvasObjectChange, CanvasProps } from './contracts.js';
+import type { CanvasObjectChange, CanvasObjectRegistry, CanvasProps } from './contracts.js';
 import { getTransformBox } from './gestures/index.js';
 import {
   buildPendingEdits,
@@ -46,6 +46,7 @@ export function selectionControls(
   selected: readonly ProjectedCanvasObject[],
   index: SceneIndex,
   pending: ReadonlyMap<string, CanvasObjectChange>,
+  registry: CanvasObjectRegistry,
   enabled: boolean,
 ) {
   if (!enabled || selected.length === 0) {
@@ -54,17 +55,21 @@ export function selectionControls(
 
   const object = selected.length === 1 ? selected[0] : undefined;
   const single = object && editableTarget(index, pending, object.object.id) ? object : undefined;
-  const canTransform = selected.every(
-    ({ object }) => object.kind !== 'connector' && editableTarget(index, pending, object.id),
-  );
+  const allEditable = selected.every(({ object }) => editableTarget(index, pending, object.id));
+  const allowResize =
+    allEditable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.resize);
+  const allowRotate =
+    allEditable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.rotate);
   const geometries = selected.map(({ geometry }) => geometry);
 
   return {
-    transformBox: canTransform ? getTransformBox(geometries) : undefined,
+    transformBox: allowResize || allowRotate ? getTransformBox(geometries) : undefined,
+    allowResize,
+    allowRotate,
     cornerResizeOnly:
       selected.length > 1 && geometries.some(({ rotation }) => rotation % 360 !== 0),
     selectedConnector: single?.object.kind === 'connector' ? single : undefined,
-    portSource: single && canConnectTo(single.object) ? single : undefined,
+    portSource: single && canConnectTo(single.object, registry) ? single : undefined,
   };
 }
 
@@ -90,8 +95,10 @@ export function useCanvasModel(
   frame: CanvasFrame,
   size: CanvasViewportSize,
   retainedId: string | undefined,
+  retainedIds: ReadonlySet<string>,
+  registry: CanvasObjectRegistry,
 ) {
-  const index = useMemo(() => createSceneIndex(scene.objects), [scene.objects]);
+  const index = useMemo(() => createSceneIndex(scene.objects, registry), [scene.objects, registry]);
   const pending = useMemo(
     () => buildPendingEdits(index, pendingEdits ?? []),
     [index, pendingEdits],
@@ -124,14 +131,32 @@ export function useCanvasModel(
     [selection, index, changes],
   );
   const painted = useMemo(() => {
-    if (!retainedId || windowed.some(({ object }) => object.id === retainedId)) {
+    if (!retainedId && retainedIds.size === 0) {
       return windowed;
     }
 
-    const retained = projectObject(index, changes, retainedId);
+    const ids = new Set(retainedIds);
+    if (retainedId) {
+      ids.add(retainedId);
+    }
+    for (const { object } of windowed) {
+      ids.delete(object.id);
+    }
 
-    return retained ? [...windowed, retained] : windowed;
-  }, [windowed, retainedId, index, changes]);
+    const additions = [...ids].flatMap((id) => {
+      const projected = projectObject(index, changes, id);
+
+      return projected ? [projected] : [];
+    });
+
+    if (additions.length === 0) {
+      return windowed;
+    }
+
+    const layerOf = ({ object }: ProjectedCanvasObject) => index.getEntry(object.id)?.layer ?? 0;
+
+    return [...windowed, ...additions].sort((first, second) => layerOf(first) - layerOf(second));
+  }, [windowed, retainedId, retainedIds, index, changes]);
 
   return { index, pending, selected, painted, visibleIds };
 }
