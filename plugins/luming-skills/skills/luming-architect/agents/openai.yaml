@@ -1,0 +1,4 @@
+interface:
+  display_name: "Luming · 工程设计"
+policy:
+  allow_implicit_invocation: false
