@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "luming-skills",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "用于问题澄清、任务深化、工程设计与实施、并行派工、编程和中文写作的八项 Luming 技能。",
   "author": {
     "name": "doomclouds"
