@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "luming-skills",
+  "version": "0.1.2",
+  "description": "用于问题澄清、任务深化、并行派工、编程和中文写作的六项 Luming 技能。",
+  "author": {
+    "name": "doomclouds"
+  },
+  "homepage": "https://github.com/doomclouds/CodexWorkbench",
+  "repository": "https://github.com/doomclouds/CodexWorkbench",
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Luming Skills",
+        "shortDescription": "问题澄清、任务深化、并行派工、编程准则和中文写作",
+        "developerName": "doomclouds",
+        "category": "Productivity",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
+      }
+    }
+  }
+}

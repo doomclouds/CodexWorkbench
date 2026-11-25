@@ -1,0 +1,4 @@
+interface:
+  display_name: "Luming · 并行派工"
+policy:
+  allow_implicit_invocation: false

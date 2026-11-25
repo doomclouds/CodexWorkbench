@@ -1,0 +1,6 @@
+interface:
+  display_name: "Luming · 用自己的话复述"
+  short_description: "用自己的话说清目标、问题和本轮交付，便于用户指出哪里理解有偏差"
+  default_prompt: "请使用 $luming-in-your-own-words，说说你理解我要解决什么问题，这一轮想得到什么。"
+policy:
+  allow_implicit_invocation: false
