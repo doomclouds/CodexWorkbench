@@ -26,7 +26,7 @@ codex plugin add luming-skills@codex-workbench
 | [并行派工](skills/luming-swarm/SKILL.md) | 改编自 pstack 的 [swarm](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/skills/swarm/SKILL.md)。按 Luming 协作约定调整任务分派、写入范围和结果验收。 |
 | [工程流程](skills/luming-mode/SKILL.md) | 改编自 pstack 的 [poteto-mode](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/skills/poteto-mode/SKILL.md)。按本轮交付和已确认的范围选择工程设计、实施或并行派工。 |
 | [卡帕西编程准则](skills/luming-karpathy-guidelines/SKILL.md) | 译自 multica-ai 的 [karpathy-guidelines](https://github.com/multica-ai/andrej-karpathy-skills/blob/2c606141936f1eeef17fa3043a72095b4765b9c2/skills/karpathy-guidelines/SKILL.md)。上游根据 [Andrej Karpathy 的观察](https://x.com/karpathy/status/2015883857489522876)整理成四条编程准则。 |
-| [Luming 回复与写作](skills/luming-writing-style/SKILL.md) | 本地编写，综合多种写作方法。具体借鉴的作品和用法见[作者与作品来源](skills/luming-writing-style/references/author-sources.md)。 |
+| [Luming · 回复与写作](skills/luming-writing-style/SKILL.md) | 本地编写，综合多种写作方法。具体借鉴的作品和用法见[作者与作品来源](skills/luming-writing-style/references/author-sources.md)。 |
 
 ## 上游许可
 
