@@ -1,0 +1,6 @@
+interface:
+  display_name: "Luming · 把问题说准"
+  short_description: "从原始材料中辨认问题，选出经得起核实的专业术语，用它们重写描述"
+  default_prompt: "请使用 $luming-reframe，结合我的原话和材料，把我想做的事说准确。"
+policy:
+  allow_implicit_invocation: false
