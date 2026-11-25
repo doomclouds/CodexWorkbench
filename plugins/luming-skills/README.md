@@ -1,6 +1,6 @@
 # Luming Skills
 
-将问题澄清、任务提示词改写、编程和中文写作的五项 Luming 技能一起安装到 Codex。
+将问题澄清、任务提示词改写、并行派工、编程和中文写作的六项 Luming 技能一起安装到 Codex。
 
 ## 安装
 
@@ -15,13 +15,14 @@ codex plugin add luming-skills@codex-workbench
 
 ## 技能与来源
 
-在 Codex 输入框输入 `$` 并选取要使用的技能。「把问题说准」「把任务做深」「用自己的话复述」需要显式调用。下表保留译作使用的上游提交，方便对照原文。
+在 Codex 输入框输入 `$` 并选取要使用的技能。「把问题说准」「把任务做深」「用自己的话复述」「并行派工」需要显式调用。下表列出译作和改编所依据的上游提交，方便对照原文。
 
 | 技能 | 来源与调整 |
 | --- | --- |
 | [把问题说准](skills/luming-reframe/SKILL.md) | 译自 pstack 的 [reframe](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/skills/reframe/SKILL.md)。 |
 | [把任务做深](skills/luming-sharpen/SKILL.md) | 译自 pstack 的 [sharpen](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/skills/sharpen/SKILL.md)。 |
 | [用自己的话复述](skills/luming-in-your-own-words/SKILL.md) | 译自 pstack 的 [in-your-own-words](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/skills/in-your-own-words/SKILL.md)。多轮委托的示例和复述后的交付边界来自 Luming 的本地实践。 |
+| [并行派工](skills/luming-swarm/SKILL.md) | 改编自 pstack 的 [swarm](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/skills/swarm/SKILL.md)。按 Luming 协作约定调整任务分派、写入范围和结果验收。 |
 | [卡帕西编程准则](skills/luming-karpathy-guidelines/SKILL.md) | 译自 multica-ai 的 [karpathy-guidelines](https://github.com/multica-ai/andrej-karpathy-skills/blob/2c606141936f1eeef17fa3043a72095b4765b9c2/skills/karpathy-guidelines/SKILL.md)。上游根据 [Andrej Karpathy 的观察](https://x.com/karpathy/status/2015883857489522876)整理成四条编程准则。 |
 | [Luming 回复与写作](skills/luming-writing-style/SKILL.md) | 本地编写，综合多种写作方法。具体借鉴的作品和用法见[作者与作品来源](skills/luming-writing-style/references/author-sources.md)。 |
 
@@ -29,7 +30,7 @@ codex plugin add luming-skills@codex-workbench
 
 插件自有内容采用 [MIT 许可](LICENSE)。
 
-**pstack** 的三项译作沿用上游 [MIT 许可](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/LICENSE)。原版权声明和许可全文收录如下。
+**pstack** 的四项译作和改编沿用上游 [MIT 许可](https://github.com/backnotprop/pstack/blob/2a5621683e2bbb274efea8b52dd69f5beef6c25f/LICENSE)。原版权声明和许可全文收录如下。
 
 <details>
 <summary>pstack 版权声明与 MIT 许可原文</summary>

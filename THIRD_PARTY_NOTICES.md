@@ -10,9 +10,9 @@
 
 图片用于识别 Codex 官方扩展容器与配置入口，未作图像修改。项目 MIT 许可证不替代上述上游许可。用户提供的平台对照图与生成的原型不列为该上游仓库的原始文件。
 
-## Luming Skills 技能译作
+## Luming Skills 技能译作与改编
 
-`luming-skills` 收录 pstack 和 multica-ai 的四项技能译作。固定来源、上游归属与随包保留的许可见 [Luming Skills 说明](plugins/luming-skills/README.md#上游许可)。
+`luming-skills` 收录来自 pstack 和 multica-ai 的技能译作与改编。固定来源、上游归属与随包保留的许可见 [Luming Skills 说明](plugins/luming-skills/README.md#上游许可)。
 
 ## 文献插件运行依赖
 
