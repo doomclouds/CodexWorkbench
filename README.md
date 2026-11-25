@@ -4,7 +4,7 @@
 
 首个插件是 [文献库](plugins/agentero-library/README.md)，当前版本为 **0.5.0**：复用 Agentero CLI／MCP，在当前对话旁阅读 PDF、整理关联笔记和修订论文 Markdown。提供多级笔记目录、可拖动阅读分栏、多页批注附加到 Codex 原生输入框，以及明暗主题和回收站入口。
 
-[Luming Skills](plugins/luming-skills/README.md) 汇集五项 Luming 技能，覆盖问题澄清、任务深化、编程与中文写作。
+[Luming Skills](plugins/luming-skills/README.md) 汇集六项 Luming 技能，覆盖问题澄清、任务深化、并行派工、编程与中文写作。
 
 ## 安装插件
 
