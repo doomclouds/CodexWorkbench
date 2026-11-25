@@ -21,6 +21,12 @@
       "source": { "source": "local", "path": "./plugins/luming-studio" },
       "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
       "category": "Productivity"
+    },
+    {
+      "name": "luming-skills",
+      "source": { "source": "local", "path": "./plugins/luming-skills" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
     }
   ]
 }

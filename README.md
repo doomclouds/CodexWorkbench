@@ -4,18 +4,20 @@
 
 首个插件是 [文献库](plugins/agentero-library/README.md)，当前版本为 **0.5.0**：复用 Agentero CLI／MCP，在当前对话旁阅读 PDF、整理关联笔记和修订论文 Markdown。提供多级笔记目录、可拖动阅读分栏、多页批注附加到 Codex 原生输入框，以及明暗主题和回收站入口。
 
+[Luming Skills](plugins/luming-skills/README.md) 汇集五项 Luming 技能，覆盖问题澄清、任务深化、编程与中文写作。
+
 ## 安装插件
 
-在 Codex 中添加远程商城 `https://github.com/doomclouds/CodexWorkbench`，然后安装“文献库”。也可以使用：
+在 Codex 中添加远程商城 `https://github.com/doomclouds/CodexWorkbench`，然后选择要安装的插件。以下 CLI 命令以文献库为例。
 
 ```sh
 codex plugin marketplace add doomclouds/CodexWorkbench --ref main
 codex plugin add agentero-library@codex-workbench
 ```
 
-插件随仓库提供预构建运行文件，无需下载 ZIP、克隆源码或自行构建。运行需要 Node.js 24 与用户安装的 Agentero CLI v0.15.2；后台 PDF 原生处理还需要 PDFium，基础阅读器使用随插件提供的 PDF.js。翻译可选择 Agentero 文本翻译或单独配置兼容模型服务，具体设置见插件说明。
+文献库随仓库提供预构建运行文件，无需下载 ZIP、克隆源码或自行构建。运行需要 Node.js 24 与用户安装的 Agentero CLI v0.15.2；后台 PDF 原生处理还需要 PDFium，基础阅读器使用随插件提供的 PDF.js。翻译可选择 Agentero 文本翻译或单独配置兼容模型服务，具体设置见插件说明。
 
-Windows 已完成隔离 CLI／MCP 和模拟宿主浏览器验证；macOS arm64 尚未实测。自动检查与模拟宿主结果不代表所有 Codex 桌面版本的行为已经验证。
+文献库在 Windows 已完成隔离 CLI／MCP 和模拟宿主浏览器验证；macOS arm64 尚未实测。自动检查与模拟宿主结果不代表所有 Codex 桌面版本的行为已经验证。
 
 ## 开发方向
 

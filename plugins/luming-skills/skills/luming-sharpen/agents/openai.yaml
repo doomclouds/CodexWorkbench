@@ -1,0 +1,6 @@
+interface:
+  display_name: "Luming · 把任务做深"
+  short_description: "保持目标和范围，补足原始材料、专业方法和验证依据，交付改写后的任务提示词"
+  default_prompt: "请使用 $luming-sharpen，帮我把这项任务做深，给我一版可以直接使用的提示词。"
+policy:
+  allow_implicit_invocation: false
