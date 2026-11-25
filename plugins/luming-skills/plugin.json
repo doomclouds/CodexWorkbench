@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "luming-skills",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "用于问题澄清、任务深化、编程和中文写作的五项 Luming 技能。",
   "author": {
     "name": "doomclouds"
@@ -15,7 +15,9 @@
         "displayName": "Luming Skills",
         "shortDescription": "问题澄清、任务深化、编程准则和中文写作",
         "developerName": "doomclouds",
-        "category": "Productivity"
+        "category": "Productivity",
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
       }
     }
   }
