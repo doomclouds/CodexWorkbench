@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ArchiveImportService } from '../data/archive-import/index.js';
 import type { BoardCatalogService } from '../data/catalog/index.js';
 import type { WhiteboardService } from '../data/whiteboard/index.js';
-import { WhiteboardPage } from '../pages/whiteboard/index.js';
-import { WorkbenchPage } from '../pages/workbench/index.js';
 import './app.css';
+import { studioPages } from './routes.js';
+import { AppShell } from './shell/index.js';
+import { useArchiveImport } from './workflows/archive-import/useArchiveImport.js';
 
 type StudioLayout = 'list' | 'grid';
 type StudioTheme = 'light' | 'dark';
@@ -27,7 +29,10 @@ export interface StudioAppProps {
   readonly navigation: StudioNavigation;
   readonly preferences: StudioPreferences;
   readonly createCommandId: () => string;
+  readonly archiveImport?: ArchiveImportService;
 }
+
+const { whiteboard: WhiteboardPage, workbench: WorkbenchPage } = studioPages;
 
 export function StudioApp({
   catalog,
@@ -35,15 +40,31 @@ export function StudioApp({
   navigation,
   preferences,
   createCommandId,
+  archiveImport,
 }: StudioAppProps) {
   const [boardId, setBoardId] = useState(navigation.read);
   const [layout, setLayout] = useState(preferences.layout);
   const [resolvedTheme, setTheme] = useState(preferences.resolvedTheme);
+  const routeGeneration = useRef(0);
+  const importFlow = useArchiveImport({
+    service: archiveImport,
+    createCommandId,
+    readRouteGeneration: () => routeGeneration.current,
+    onOpenBoard: handleOpenBoard,
+  });
 
-  useEffect(() => navigation.subscribe(() => setBoardId(navigation.read())), [navigation]);
+  useEffect(
+    () =>
+      navigation.subscribe(() => {
+        routeGeneration.current += 1;
+        setBoardId(navigation.read());
+      }),
+    [navigation],
+  );
 
   function handleOpenBoard(id?: string) {
     navigation.write(id);
+    routeGeneration.current += 1;
     setBoardId(id);
   }
 
@@ -58,7 +79,11 @@ export function StudioApp({
   }
 
   return (
-    <div className="studio-whiteboard-app" data-theme={resolvedTheme}>
+    <AppShell
+      resolvedTheme={resolvedTheme}
+      notice={importFlow.feedback}
+      onDismissNotice={importFlow.dismissFeedback}
+    >
       {boardId ? (
         <WhiteboardPage
           boardId={boardId}
@@ -71,6 +96,7 @@ export function StudioApp({
           catalog={catalog}
           createCommandId={createCommandId}
           onOpenBoard={handleOpenBoard}
+          archiveImport={importFlow.workbench}
           preferences={{
             layout,
             resolvedTheme,
@@ -79,6 +105,6 @@ export function StudioApp({
           }}
         />
       )}
-    </div>
+    </AppShell>
   );
 }

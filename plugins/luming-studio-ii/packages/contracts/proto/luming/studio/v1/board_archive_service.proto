@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+service BoardArchiveService {
+  rpc GetArchiveImportReceipt(GetArchiveImportReceiptRequest) returns (GetArchiveImportReceiptResponse);
+}
+
+message ImportBoardArchiveResponse {
+  ArchiveImportReceipt receipt = 1;
+}
+
+message ArchiveImportReceipt {
+  string command_id = 1;
+  oneof outcome {
+    ImportedBoard imported = 2;
+    ArchiveImportRejection rejected = 3;
+  }
+}
+
+message ImportedBoard {
+  string board_id = 1;
+  string title = 2;
+}
+
+enum ArchiveImportRejectionReason {
+  ARCHIVE_IMPORT_REJECTION_REASON_UNSPECIFIED = 0;
+  ARCHIVE_IMPORT_REJECTION_REASON_INVALID_ARCHIVE = 1;
+  ARCHIVE_IMPORT_REJECTION_REASON_UNSUPPORTED_VERSION = 2;
+  ARCHIVE_IMPORT_REJECTION_REASON_INCOMPATIBLE_CONTENT = 3;
+  ARCHIVE_IMPORT_REJECTION_REASON_COMMAND_ID_REUSE = 4;
+}
+
+message ArchiveImportRejection {
+  ArchiveImportRejectionReason reason = 1;
+  string message = 2;
+}
+
+message GetArchiveImportReceiptRequest {
+  string command_id = 1;
+}
+
+message ArchiveImportReceiptNotRecorded {
+  string command_id = 1;
+}
+
+message GetArchiveImportReceiptResponse {
+  oneof result {
+    ArchiveImportReceipt receipt = 1;
+    ArchiveImportReceiptNotRecorded not_recorded = 2;
+  }
+}

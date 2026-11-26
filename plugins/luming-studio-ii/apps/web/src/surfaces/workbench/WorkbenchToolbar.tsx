@@ -45,6 +45,7 @@ interface WorkbenchToolbarProps {
   readonly onQueryChange: (query: string) => void;
   readonly onOrderChange: (order: CatalogOrder) => void;
   readonly onCreate: () => void;
+  readonly onImport?: () => void;
 }
 
 const orderOptions = [
@@ -62,6 +63,7 @@ export function WorkbenchToolbar({
   onQueryChange,
   onOrderChange,
   onCreate,
+  onImport,
 }: WorkbenchToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [menu, setMenu] = useState<OpenMenu>();
@@ -148,6 +150,11 @@ export function WorkbenchToolbar({
   function handleCreateBoard() {
     finishMenuAction();
     onCreate();
+  }
+
+  function handleImport() {
+    onImport?.();
+    finishMenuAction();
   }
 
   return (
@@ -257,7 +264,7 @@ export function WorkbenchToolbar({
         </WorkbenchMenu>
       )}
       {menu?.kind === 'create' && (
-        <WorkbenchMenu anchor={menu.anchor} label="新建作品" toolbar onClose={closeMenu}>
+        <WorkbenchMenu anchor={menu.anchor} label="新建作品" onClose={closeMenu}>
           <button
             type="button"
             role="menuitem"
@@ -268,7 +275,13 @@ export function WorkbenchToolbar({
             <span>白板</span>
           </button>
           <div className="studio-workbench-menu-rule" role="separator" />
-          <button type="button" role="menuitem" title={unsupported} disabled>
+          <button
+            type="button"
+            role="menuitem"
+            title={onImport ? undefined : unsupported}
+            disabled={!onImport || createBlocked}
+            onClick={handleImport}
+          >
             <Import size={16} />
             <span>导入作品</span>
           </button>

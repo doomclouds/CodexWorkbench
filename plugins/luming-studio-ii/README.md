@@ -150,3 +150,11 @@ Web 构建在原有控件库输出之外提供 `apps/web/dist/app/`。部署该�
 Web 根路径进入工作台。搜索、排序和分页从 `BoardCatalogService` 读取目录摘要。新建白板通过命令 ID 获取回执，目录、空白场景、创建者权限和成功回执一起提交。打开白板后使用既有的 `WhiteboardService`，`?board=<白板 ID>` 可直接定位白板。
 
 工作台、画布和对象的界面沿用原版 Studio 0.3.2。源码使用 Studio II 的公开能力契约，视觉验收使用同一场景、主题和视口做实屏对照。
+
+工作台和白板通过 `apps/web/src/app/routes.ts` 登记。架构 Lint 校验页面目录和装配入口。跨页的操作通知由 `apps/web/src/app/shell/operation-notice/` 呈现。
+
+### 导入作品
+
+工作台的「＋」菜单接收初代 Luming Studio 当前导出的 `.studio.zip`，归档清单版本为 `4`。服务端在暂存区验证清单、白板内容和素材，随后在同一个 SQLite 事务中发布到工作台并保存导入回执。归档原件分块保留，导入后打开白板的最新内容。
+
+`POST /luming.studio.v1.BoardArchiveService/ImportBoardArchive` 接收 `application/zip` 和 `X-Studio-Command-Id`，返回 Protobuf 回执。`GetArchiveImportReceipt` 查询当前操作者的回执。导入素材通过受白板成员权限保护的 `/studio-archive-assets/` 路径读取。本机预览的同源代理配置已包含这些路径。

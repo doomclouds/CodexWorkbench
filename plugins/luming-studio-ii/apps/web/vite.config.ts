@@ -3,6 +3,8 @@ import { defineConfig, type ProxyOptions, type UserConfig } from 'vite';
 
 const whiteboardRpcPrefix = '/luming.studio.v1.WhiteboardService/';
 const catalogRpcPrefix = '/luming.studio.v1.BoardCatalogService/';
+const archiveRpcPrefix = '/luming.studio.v1.BoardArchiveService/';
+const archiveAssetsPrefix = '/studio-archive-assets/';
 
 const editorPackages = [
   '@blocknote/core',
@@ -35,7 +37,12 @@ function whiteboardProxy(): Record<string, ProxyOptions> {
     headers: { authorization: 'Bearer ' + token },
   };
 
-  return { [whiteboardRpcPrefix]: proxy, [catalogRpcPrefix]: proxy };
+  return {
+    [whiteboardRpcPrefix]: proxy,
+    [catalogRpcPrefix]: proxy,
+    [archiveRpcPrefix]: proxy,
+    [archiveAssetsPrefix]: proxy,
+  };
 }
 
 const libraryConfig = {

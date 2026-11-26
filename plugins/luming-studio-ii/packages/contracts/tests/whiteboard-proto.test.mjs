@@ -84,7 +84,7 @@ function assertRoundTrip(type, value) {
   assert.deepEqual(decode(type, wire), value);
 }
 
-test('declares the typed unary methods for board catalog and whiteboard editing', () => {
+test('declares the typed unary methods for archive receipts, board catalog, and whiteboard editing', () => {
   const descriptor = JSON.parse(
     runBuf([
       'build',
@@ -99,6 +99,7 @@ test('declares the typed unary methods for board catalog and whiteboard editing'
     .filter((file) => file.package === protoPackage)
     .flatMap((file) => file.service ?? []);
   const methodsByService = new Map([
+    ['BoardArchiveService', ['GetArchiveImportReceipt']],
     ['BoardCatalogService', ['ListBoards', 'CreateBoard', 'GetCatalogCommandReceipt']],
     ['WhiteboardService', ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt']],
   ]);
@@ -126,6 +127,22 @@ test('declares the typed unary methods for board catalog and whiteboard editing'
       })),
     );
   }
+});
+
+test('preserves confirmed import outcomes and distinguishes missing archive receipts', () => {
+  const imported = { commandId, imported: { boardId, title: '导入的白板' } };
+  assertRoundTrip('ImportBoardArchiveResponse', { receipt: imported });
+  assertRoundTrip('GetArchiveImportReceiptResponse', { receipt: imported });
+  assertRoundTrip('GetArchiveImportReceiptResponse', { notRecorded: { commandId } });
+  assertRoundTrip('ImportBoardArchiveResponse', {
+    receipt: {
+      commandId,
+      rejected: {
+        reason: 'ARCHIVE_IMPORT_REJECTION_REASON_INVALID_ARCHIVE',
+        message: '备份格式无效。',
+      },
+    },
+  });
 });
 
 test('preserves omitted, zero, and large expected geometry versions', () => {

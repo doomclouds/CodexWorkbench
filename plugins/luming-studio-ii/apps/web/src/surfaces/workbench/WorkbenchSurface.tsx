@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore, type ChangeEvent } from 'react';
 import { AlertCircle, LayoutGrid, Loader2, Plus } from 'lucide-react';
 import {
   createCatalogDirectory,
@@ -12,11 +12,18 @@ import type { WorkbenchPreferences } from './preferences.js';
 import { useBoardCreation } from './useBoardCreation.js';
 import './workbench.css';
 
+interface WorkbenchArchiveImport {
+  readonly busy: boolean;
+  readonly catalogRefresh: number;
+  readonly onFile: (file: File) => void;
+}
+
 export interface WorkbenchSurfaceProps {
   readonly catalog: BoardCatalogService;
   readonly createCommandId: () => string;
   readonly onOpenBoard: (boardId: string) => void;
   readonly preferences: WorkbenchPreferences;
+  readonly archiveImport?: WorkbenchArchiveImport;
 }
 
 type CatalogDirectory = ReturnType<typeof createCatalogDirectory>;
@@ -27,7 +34,8 @@ interface CatalogResultsProps {
   readonly directory: CatalogDirectory;
   readonly layout: WorkbenchPreferences['layout'];
   readonly onOpenBoard: (boardId: string) => void;
-  readonly creation: BoardCreation;
+  readonly createBlocked: boolean;
+  readonly onCreate: () => void;
 }
 
 function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
@@ -74,10 +82,12 @@ function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
 
 function EmptyBoards({
   hasQuery,
-  creation,
+  createBlocked,
+  onCreate,
 }: {
   readonly hasQuery: boolean;
-  readonly creation: BoardCreation;
+  readonly createBlocked: boolean;
+  readonly onCreate: () => void;
 }) {
   return (
     <div className="studio-workbench-empty">
@@ -88,8 +98,8 @@ function EmptyBoards({
         <Button
           label="新建白板"
           icon={<Plus size={16} />}
-          disabled={creation.blocked}
-          onActivate={creation.create}
+          disabled={createBlocked}
+          onActivate={onCreate}
         />
       )}
     </div>
@@ -101,7 +111,8 @@ function CatalogResults({
   directory,
   layout,
   onOpenBoard,
-  creation,
+  createBlocked,
+  onCreate,
 }: CatalogResultsProps) {
   const { kind, boards, error, query, nextCursor, loadingMore } = snapshot;
   const waiting = kind === 'loading' && boards.length === 0;
@@ -124,7 +135,9 @@ function CatalogResults({
           <p>正在读取作品</p>
         </div>
       )}
-      {empty && <EmptyBoards hasQuery={!!query.trim()} creation={creation} />}
+      {empty && (
+        <EmptyBoards hasQuery={!!query.trim()} createBlocked={createBlocked} onCreate={onCreate} />
+      )}
       {boards.length > 0 && (
         <div
           className={'studio-workbench-cards studio-workbench-cards-' + layout}
@@ -154,12 +167,37 @@ export function WorkbenchSurface({
   createCommandId,
   onOpenBoard,
   preferences,
+  archiveImport,
 }: WorkbenchSurfaceProps) {
   const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot);
   const creation = useBoardCreation(catalog, createCommandId, onOpenBoard);
+  const archiveInput = useRef<HTMLInputElement>(null);
+  const createBlocked = creation.blocked || archiveImport?.busy === true;
+  const catalogRefresh = archiveImport?.catalogRefresh ?? 0;
+  const observedRefresh = useRef(catalogRefresh);
 
   useEffect(() => directory.open(), [directory]);
+
+  useEffect(() => {
+    if (observedRefresh.current !== catalogRefresh) {
+      observedRefresh.current = catalogRefresh;
+      directory.reload();
+    }
+  }, [catalogRefresh, directory]);
+
+  function openArchivePicker() {
+    archiveInput.current?.click();
+  }
+
+  function handleArchiveInput(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file && !createBlocked) {
+      archiveImport?.onFile(file);
+    }
+  }
 
   return (
     <div className="studio-workbench" data-studio-theme={preferences.resolvedTheme}>
@@ -172,19 +210,31 @@ export function WorkbenchSurface({
             order={snapshot.order}
             preferences={preferences}
             createBusy={creation.busy}
-            createBlocked={creation.blocked}
+            createBlocked={createBlocked}
             onQueryChange={directory.setQuery}
             onOrderChange={directory.setOrder}
             onCreate={creation.create}
+            onImport={archiveImport ? openArchivePicker : undefined}
           />
         </header>
-        <NewBoardCard disabled={creation.blocked} onCreate={creation.create} />
+        <NewBoardCard disabled={createBlocked} onCreate={creation.create} />
+        {archiveImport && (
+          <input
+            ref={archiveInput}
+            type="file"
+            accept=".zip,application/zip"
+            hidden
+            aria-label="导入作品"
+            onChange={handleArchiveInput}
+          />
+        )}
         <CatalogResults
           snapshot={snapshot}
           directory={directory}
           layout={preferences.layout}
           onOpenBoard={onOpenBoard}
-          creation={creation}
+          createBlocked={createBlocked}
+          onCreate={creation.create}
         />
       </main>
     </div>

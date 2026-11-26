@@ -21,6 +21,10 @@
     "./catalog/service": {
       "types": "./dist/proto/luming/studio/v1/board_catalog_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/board_catalog_service_pb.js"
+    },
+    "./archives/service": {
+      "types": "./dist/proto/luming/studio/v1/board_archive_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/board_archive_service_pb.js"
     }
   },
   "scripts": {

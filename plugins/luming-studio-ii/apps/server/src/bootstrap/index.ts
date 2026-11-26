@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { createWhiteboardHttpServer } from '../entrypoints/http/index.js';
+import { createArchiveImportRepository } from '../infrastructure/adapters/archives/index.js';
 import { createCatalogRepository } from '../infrastructure/adapters/catalog/index.js';
 import { createWhiteboardRepository } from '../infrastructure/adapters/index.js';
 import { openSqliteDatabase } from '../infrastructure/platform/index.js';
+import { createArchiveImportApplication } from '../modules/archives/application/index.js';
 import { createCatalogApplication } from '../modules/catalog/application/index.js';
 import { createWhiteboardApplication } from '../modules/whiteboard/application/index.js';
 
@@ -74,10 +76,16 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       newBoardId: randomUUID,
       now: Date.now,
     });
+    const archives = createArchiveImportRepository(database);
+    const archiveApplication = createArchiveImportApplication(archives, {
+      newBoardId: randomUUID,
+      now: Date.now,
+    });
 
     server = createWhiteboardHttpServer({
       application,
       catalogApplication,
+      archiveApplication,
       resolveActor: options.resolveActor,
       onError: options.onError,
     });

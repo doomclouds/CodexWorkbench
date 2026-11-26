@@ -14,6 +14,10 @@ export class HttpRequestError extends Error {
   }
 }
 
+export function mediaType(request: IncomingMessage): string | undefined {
+  return request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();
+}
+
 function requireBodySize(bytes: number): void {
   if (bytes > MAX_REQUEST_BYTES) {
     throw new HttpRequestError(413, 'Protobuf request exceeds the size limit');

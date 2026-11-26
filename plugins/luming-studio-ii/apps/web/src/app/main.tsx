@@ -1,8 +1,10 @@
 import { createRoot } from 'react-dom/client';
+import { createArchiveImportService } from '../data/archive-import/index.js';
 import { createBoardCatalogService } from '../data/catalog/index.js';
 import { createWhiteboardService } from '../data/whiteboard/index.js';
 import {
   createCommandId,
+  postArchive,
   postProtobuf,
   readBoardId,
   readPreferences,
@@ -20,11 +22,13 @@ if (!container) {
 
 const service = createWhiteboardService(postProtobuf);
 const catalog = createBoardCatalogService(postProtobuf);
+const archiveImport = createArchiveImportService(postArchive, postProtobuf);
 
 createRoot(container).render(
   <StudioApp
     catalog={catalog}
     service={service}
+    archiveImport={archiveImport}
     createCommandId={createCommandId}
     navigation={{ read: readBoardId, write: writeBoardLocation, subscribe: subscribeBoardLocation }}
     preferences={{ ...readPreferences(), rememberLayout, rememberTheme }}

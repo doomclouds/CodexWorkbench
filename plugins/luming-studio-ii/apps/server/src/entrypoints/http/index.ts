@@ -1,5 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import {
+  ArchiveRequestError,
+  type ArchiveImportApplication,
+} from '../../modules/archives/application/index.js';
+import {
   CatalogQueryError,
   type CatalogApplication,
 } from '../../modules/catalog/application/index.js';
@@ -7,50 +11,42 @@ import {
   WhiteboardAccessError,
   type WhiteboardApplication,
 } from '../../modules/whiteboard/application/index.js';
+import { archiveRoute, createArchiveReceiptRoute } from './archive-routes.js';
 import { createCatalogRoutes } from './catalog-routes.js';
-import { HttpRequestError, readBody } from './request.js';
+import { HttpRequestError, mediaType, readBody } from './request.js';
+import { protobufContentType, sendProtobuf, sendStatus } from './response.js';
 import { createWhiteboardRoutes } from './routes.js';
 import type { HttpActor, ProtobufRoute } from './unary-route.js';
 
-const PROTOBUF_CONTENT_TYPE = 'application/protobuf';
 const REQUEST_METHOD = 'POST';
 
 export interface WhiteboardHttpOptions {
   readonly application: WhiteboardApplication;
   readonly catalogApplication: CatalogApplication;
+  readonly archiveApplication: ArchiveImportApplication;
   readonly resolveActor: (request: IncomingMessage) => HttpActor | undefined;
   readonly onError: (error: unknown) => void;
 }
 
 type Routes = ReadonlyMap<string, ProtobufRoute>;
 
-function sendStatus(response: ServerResponse, status: number): void {
-  if (status === 413) {
-    response.setHeader('connection', 'close');
-  }
-
-  response.writeHead(status, { 'cache-control': 'no-store', 'content-length': 0 }).end();
-}
-
-function acceptsProtobuf(request: IncomingMessage): boolean {
-  const mediaType = request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();
-  return mediaType === PROTOBUF_CONTENT_TYPE;
-}
-
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   routes: Routes,
-  resolveActor: WhiteboardHttpOptions['resolveActor'],
+  { archiveApplication, resolveActor }: WhiteboardHttpOptions,
 ): Promise<void> {
-  const route = routes.get(request.url ?? '');
-  if (!route) {
+  const path = request.url ?? '';
+  const route = routes.get(path);
+  const rawRoute = archiveRoute(path, archiveApplication);
+  if (!route && !rawRoute) {
     sendStatus(response, 404);
     return;
   }
 
-  if (request.method !== REQUEST_METHOD) {
-    response.setHeader('allow', REQUEST_METHOD);
+  const method = rawRoute?.method ?? REQUEST_METHOD;
+  if (request.method !== method) {
+    response.setHeader('allow', method);
     sendStatus(response, 405);
     return;
   }
@@ -61,20 +57,18 @@ async function handleRequest(
     return;
   }
 
-  if (!acceptsProtobuf(request)) {
+  if (rawRoute) {
+    await rawRoute.run(actor, request, response);
+    return;
+  }
+  if (mediaType(request) !== protobufContentType) {
     sendStatus(response, 415);
     return;
   }
 
-  const body = await readBody(request);
-  const result = route(actor, body);
-
-  response.writeHead(200, {
-    'content-type': PROTOBUF_CONTENT_TYPE,
-    'content-length': result.byteLength,
-    'cache-control': 'no-store',
-  });
-  response.end(result);
+  if (route) {
+    sendProtobuf(response, route(actor, await readBody(request)));
+  }
 }
 
 function handleError(
@@ -83,7 +77,11 @@ function handleError(
   onError: WhiteboardHttpOptions['onError'],
 ): void {
   const canRespond = !response.destroyed && !response.headersSent;
-  if (error instanceof HttpRequestError || error instanceof CatalogQueryError) {
+  if (
+    error instanceof HttpRequestError ||
+    error instanceof CatalogQueryError ||
+    error instanceof ArchiveRequestError
+  ) {
     if (canRespond) {
       sendStatus(response, error instanceof HttpRequestError ? error.status : 400);
     }
@@ -107,14 +105,15 @@ function handleError(
 }
 
 export function createWhiteboardHttpServer(options: WhiteboardHttpOptions): Server {
-  const { application, catalogApplication, resolveActor, onError } = options;
+  const { application, catalogApplication, archiveApplication, onError } = options;
   const routes = new Map([
     ...createWhiteboardRoutes(application),
     ...createCatalogRoutes(catalogApplication),
+    createArchiveReceiptRoute(archiveApplication),
   ]);
 
   return createServer((request, response) => {
-    handleRequest(request, response, routes, resolveActor).catch((error: unknown) =>
+    handleRequest(request, response, routes, options).catch((error: unknown) =>
       handleError(response, error, onError),
     );
   });

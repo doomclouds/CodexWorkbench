@@ -56,6 +56,44 @@ test('opens a scene, reads visible bodies, and keeps the drag visible until the 
   }
 });
 
+test.each([
+  {
+    fill: 'color-mix(in srgb, Canvas 87%, #60a5fa)',
+    stroke: '#60a5fa',
+    expectedFill: 'color-mix(in srgb, var(--studio-ui-system-canvas, Canvas) 87%, #60a5fa)',
+    expectedStroke: 'rgb(96, 165, 250)',
+  },
+  {
+    fill: 'rgb(96, 165, 250)',
+    stroke: '#26f',
+    expectedFill: 'rgb(96, 165, 250)',
+    expectedStroke: 'rgb(34, 102, 255)',
+  },
+  {
+    fill: 'color-mix(in srgb, Canvas 101%, #60a5fa)',
+    stroke: 'color-mix(in srgb, Canvas 87%, var(--unexpected))',
+    expectedFill: 'var(--studio-ui-canvas-paper-secondary, #ececec)',
+    expectedStroke: 'transparent',
+  },
+])('renders only supported shape colors for $fill', async (colors) => {
+  const { fill, stroke, expectedFill, expectedStroke } = colors;
+  const rpc = createWhiteboardRpcMock({ shapeAppearance: { fill, stroke } });
+  const app = createAppMock(rpc.post);
+  try {
+    await app.open(sampleBoardId);
+    const outline = app
+      .canvas()
+      .querySelector<SVGSVGElement>(
+        '[data-canvas-object="rectangle"] .studio-ui-canvas-shape-outline',
+      );
+
+    expect(outline?.style.fill).toBe(`color-mix(in srgb, ${expectedFill} 100%, transparent)`);
+    expect(outline?.style.stroke).toBe(`color-mix(in srgb, ${expectedStroke} 100%, transparent)`);
+  } finally {
+    app.dispose();
+  }
+});
+
 test('retries the original move after the service returns no recorded receipt', async () => {
   const rpc = createWhiteboardRpcMock({
     move: (request, attempt) => {

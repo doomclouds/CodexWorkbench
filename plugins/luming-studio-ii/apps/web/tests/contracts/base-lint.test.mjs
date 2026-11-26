@@ -267,7 +267,7 @@ test('accepts explicit public exports and a consumer using the entry', async () 
   const consumer = "import { Button } from '../../ui/base/index.js';";
   const results = await Promise.all([
     eslint.lintText(entry, { filePath: 'src/ui/base/index.ts' }),
-    eslint.lintText(consumer, { filePath: 'src/pages/board/screen.ts' }),
+    eslint.lintText(consumer, { filePath: 'src/pages/whiteboard/screen.ts' }),
   ]);
 
   assert.deepEqual(

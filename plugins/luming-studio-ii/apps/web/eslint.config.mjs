@@ -46,10 +46,33 @@ const canvasGlobals = [
 );
 const applicationGlobals = [
   ...canvasGlobals,
-  ...['Buffer', 'crypto', 'globalThis', 'process', 'self', 'window'].map((name) => ({
+  ...[
+    'Buffer',
+    'FileReader',
+    'FileReaderSync',
+    'crypto',
+    'globalThis',
+    'process',
+    'self',
+    'showDirectoryPicker',
+    'showOpenFilePicker',
+    'showSaveFilePicker',
+    'window',
+  ].map((name) => ({
     name,
     message: 'Inject this host capability from the platform layer.',
   })),
+];
+const archiveReadMethods = '/^(arrayBuffer|bytes|stream|text)$/';
+const archiveReads = [
+  {
+    selector: `MemberExpression:matches([property.name=${archiveReadMethods}], [property.value=${archiveReadMethods}])`,
+    message: 'Pass the archive body to the platform upload capability.',
+  },
+  {
+    selector: `ObjectPattern > Property:matches([key.name=${archiveReadMethods}], [key.value=${archiveReadMethods}])`,
+    message: 'Pass the archive body to the platform upload capability.',
+  },
 ];
 const moduleMockNames = '/^(mock|doMock|importMock|spyOn|stubGlobal)$/';
 const applicationMockSyntax = [
@@ -188,6 +211,21 @@ export default defineConfig([
       'no-restricted-globals': [
         'error',
         { globals: ['require', 'document', ...applicationGlobals], checkGlobalObject: true },
+      ],
+    },
+  },
+  {
+    files: [
+      'src/app/workflows/archive-import/' + scripts,
+      'src/surfaces/workbench/' + scripts,
+      'src/data/archive-import/' + scripts,
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...errorHandlingSyntax,
+        ...indirectImports,
+        ...archiveReads,
       ],
     },
   },

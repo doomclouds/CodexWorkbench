@@ -17,10 +17,51 @@ const workbench = 'src/surfaces/workbench/Workbench.tsx';
 const workbenchPage = 'src/pages/workbench/WorkbenchPage.tsx';
 const catalog = 'src/data/catalog/client.ts';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
+const archiveWorkflow = 'src/app/workflows/archive-import/useArchiveImport.ts';
+const archiveData = 'src/data/archive-import/client.ts';
+const archiveProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/service';
+const routes = 'src/app/routes.ts';
+const appShell = 'src/app/shell/AppShell.tsx';
+const operationNotice = 'src/app/shell/operation-notice/OperationNoticeSlot.tsx';
+const actualPages = [
+  "import { WhiteboardPage } from '../pages/whiteboard/index.js';",
+  "import { WorkbenchPage } from '../pages/workbench/index.js';",
+  '',
+  'export const studioPages = { workbench: WorkbenchPage, whiteboard: WhiteboardPage };',
+].join('\n');
 
 const accepted = [
+  [
+    'src/app/StudioApp.tsx',
+    "import type { ArchiveClient } from '../data/archive-import/index.js';",
+  ],
+  ['src/app/main.tsx', "import { postArchive } from '../platform/browser/index.js';"],
+  [workbench, 'const archive = event.currentTarget.files?.[0];'],
+  [
+    archiveWorkflow,
+    "import type { ArchiveImportReceipt } from '../../../data/archive-import/index.js';",
+  ],
+  [archiveData, `import { ArchiveImportService } from '${archiveProtocol}';`],
+  [archiveData, 'const receiptBytes = upload(file);'],
+  ['src/platform/browser/index.ts', 'const request = fetch(path, { body: file });'],
+  [
+    'tests/integration/archive-import.test.tsx',
+    `import { ArchiveImportService } from '${archiveProtocol}';`,
+  ],
   ['src/app/main.tsx', "import { createRoot } from 'react-dom/client';"],
-  ['src/app/main.tsx', "import { WhiteboardPage } from '../pages/whiteboard/index.js';"],
+  [routes, actualPages],
+  [
+    routes,
+    "import { RecycleBinPage } from '../pages/recycle-bin/index.js';\n" +
+      actualPages.replace(
+        'workbench: WorkbenchPage',
+        "workbench: WorkbenchPage, 'recycle-bin': RecycleBinPage",
+      ),
+  ],
+  ['src/app/StudioApp.tsx', "import { studioPages } from './routes.js';"],
+  ['src/app/StudioApp.tsx', "import { AppShell } from './shell/index.js';"],
+  [appShell, "import { OperationNoticeSlot } from './operation-notice/index.js';"],
+  [operationNotice, "import { OperationNotice } from '../../../ui/base/index.js';"],
   ['src/app/main.tsx', "import { createTransport } from '../platform/transport/index.js';"],
   [page, "import { WhiteboardEditor } from '../../surfaces/whiteboard-editor/index.js';"],
   [page, "import type { WhiteboardClient } from '../../data/whiteboard/index.js';"],
@@ -37,7 +78,6 @@ const accepted = [
   [support, "import { WhiteboardPage } from '../../src/pages/whiteboard/index.js';"],
   [integration, `import { WhiteboardService } from '${protocol}';`],
   [integration, 'const request = async () => new Uint8Array();'],
-  ['src/app/main.tsx', "import { WorkbenchPage } from '../pages/workbench/index.js';"],
   [workbenchPage, "import { Workbench } from '../../surfaces/workbench/index.js';"],
   [workbench, "import type { CatalogClient } from '../../data/catalog/index.js';"],
   [workbench, "import { createPortal } from 'react-dom';"],
@@ -51,6 +91,124 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'a Shell notice that reaches a business Surface',
+    operationNotice,
+    "import { WorkbenchSurface } from '../../../surfaces/workbench/index.js';",
+  ],
+  [
+    'a Shell notice that reaches the archive data service',
+    operationNotice,
+    "import { createArchiveImportService } from '../../../data/archive-import/index.js';",
+  ],
+  [
+    'a Shell notice that reaches the browser platform',
+    operationNotice,
+    "import { postArchive } from '../../../platform/browser/index.js';",
+  ],
+  [
+    'a Shell notice that imports a private base file',
+    operationNotice,
+    "import { OperationNotice } from '../../../ui/base/OperationNotice/OperationNotice.js';",
+  ],
+  [
+    'App code outside the Shell that imports a base control',
+    'src/app/StudioApp.tsx',
+    "import { OperationNotice } from '../ui/base/index.js';",
+  ],
+  [
+    'App code that reaches inside the Shell',
+    'src/app/StudioApp.tsx',
+    "import { OperationNoticeSlot } from './shell/operation-notice/OperationNoticeSlot.js';",
+  ],
+  ['an unclassified archive file outside its module', 'src/data/archive-import.ts', 'export {};'],
+  [
+    'Workbench Surface reads a sibling whiteboard Surface',
+    workbench,
+    "import { WhiteboardEditorSurface } from '../whiteboard-editor/index.js';",
+  ],
+  [
+    'archive workflow reads a private data type',
+    archiveWorkflow,
+    "type Archive = import('../../../data/archive-import/client.js').ArchiveClient;",
+  ],
+  [
+    'Workbench bypasses the data port to upload',
+    workbench,
+    "import { postArchive } from '../../platform/browser/index.js';",
+  ],
+  [
+    'archive workflow opens a network request',
+    archiveWorkflow,
+    'const sent = fetch(path);',
+    'no-restricted-globals',
+  ],
+  [
+    'Workbench opens a file reader',
+    workbench,
+    'const reader = new FileReader();',
+    'no-restricted-globals',
+  ],
+  [
+    'Workbench reads a ZIP into memory',
+    workbench,
+    'const bytes = file.arrayBuffer();',
+    'no-restricted-syntax',
+  ],
+  [
+    'archive workflow reads a ZIP into memory',
+    archiveWorkflow,
+    'const bytes = file.arrayBuffer();',
+    'no-restricted-syntax',
+  ],
+  [
+    'archive data extracts a file stream method',
+    archiveData,
+    'const { stream: read } = file;',
+    'no-restricted-syntax',
+  ],
+  [
+    'archive data reads ZIP bytes through a computed property',
+    archiveData,
+    "const pending = file['bytes']();",
+    'no-restricted-syntax',
+  ],
+  [
+    'archive workflow decodes generated receipts',
+    archiveWorkflow,
+    `import type { ImportReceipt } from '${archiveProtocol}';`,
+  ],
+  [
+    'catalog imports an archive receipt codec',
+    catalog,
+    `import { ArchiveImportService } from '${archiveProtocol}';`,
+  ],
+  [
+    'archive data imports a catalog codec',
+    archiveData,
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    'platform decodes generated archive receipts',
+    platform,
+    `import { ArchiveImportService } from '${archiveProtocol}';`,
+  ],
+  [
+    'archive data imports an internal generated archive module',
+    archiveData,
+    `import { ArchiveImportService } from '${archiveProtocol}/private';`,
+  ],
+  [
+    'Shell notice mounts its own portal',
+    operationNotice,
+    "import { createPortal } from 'react-dom';",
+  ],
+  [
+    'archive AppMock replaces the real application',
+    'tests/integration/archive-import.test.tsx',
+    "import { vi as runner } from 'vitest';\n\nrunner.mock('../../src/app/index.js');",
+    'no-restricted-syntax',
+  ],
   ['icons in catalog data', catalog, "import { Search } from 'lucide-react';"],
   ['icons in the browser platform', platform, "import { Search } from 'lucide-react';"],
   ['icons in the Workbench page', workbenchPage, "import { Search } from 'lucide-react';"],
@@ -252,6 +410,52 @@ const rejected = [
     'base/test-contract',
   ],
 ];
+
+const rejectedPages = [
+  [
+    'an unregistered Page module without imports',
+    'src/pages/archive-import/ArchiveImportNoticePage.tsx',
+    'export const ArchiveImportNoticePage = () => null;',
+    'pageRegistration',
+  ],
+  [
+    'an App import targeting an unregistered Page',
+    'src/app/StudioApp.tsx',
+    "import { ArchiveImportNoticePage } from '../pages/archive-import/index.js';",
+    'pageRegistration',
+  ],
+  [
+    'a registered Page mounted outside the route registry',
+    'src/app/WhiteboardApp.tsx',
+    "import { WhiteboardPage } from '../pages/whiteboard/index.js';",
+    'pageWiring',
+  ],
+  [
+    'a page key referring to a different directory',
+    routes,
+    actualPages.replace('workbench: WorkbenchPage', "'recycle-bin': WorkbenchPage"),
+    'pageRegistry',
+  ],
+  [
+    'an imported component omitted from the route table',
+    routes,
+    actualPages.replace(/export const studioPages.*/u, 'export const studioPages = {};'),
+    'pageRegistry',
+  ],
+];
+
+for (const [title, filePath, text, messageId] of rejectedPages) {
+  test('rejects ' + title, async () => {
+    const [result] = await eslint.lintText(text, { filePath });
+
+    assert.ok(
+      result.messages.some(
+        (message) => message.ruleId === boundary && message.messageId === messageId,
+      ),
+      JSON.stringify(result.messages),
+    );
+  });
+}
 
 for (const [title, filePath, text, rule = boundary] of rejected) {
   test('rejects ' + title, async () => {

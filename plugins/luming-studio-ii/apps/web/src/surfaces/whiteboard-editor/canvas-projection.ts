@@ -73,12 +73,21 @@ const legacyShapeColors = new Map([
   ['none', 'none'],
 ]);
 const legacyColorLiteral = /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/iu;
+const legacyCanvasTint =
+  /^color-mix\(in srgb, *canvas (100|[1-9]?\d)%, *(#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8}))\)$/iu;
 const shapePaperFallback = 'var(--studio-ui-canvas-paper-secondary, #ececec)';
 
 function shapeColor(value?: string, fallback?: string): string | undefined {
   const color = value?.trim();
   if (!color) {
     return undefined;
+  }
+
+  const canvasTint = legacyCanvasTint.exec(color);
+  if (canvasTint) {
+    const [, weight, accent] = canvasTint;
+
+    return `color-mix(in srgb, var(--studio-ui-system-canvas, Canvas) ${weight}%, ${accent})`;
   }
 
   return (

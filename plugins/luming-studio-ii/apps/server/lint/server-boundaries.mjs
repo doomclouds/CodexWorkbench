@@ -3,7 +3,10 @@ import { localResolver, projectPath, serverRoot } from './project-paths.mjs';
 
 const whiteboard = 'src/modules/whiteboard/';
 const catalog = 'src/modules/catalog/';
+const archives = 'src/modules/archives/';
 const catalogAdapters = 'src/infrastructure/adapters/catalog/';
+const archivesAdapters = 'src/infrastructure/adapters/archives/';
+const archivesPlatform = 'src/infrastructure/platform/archives/';
 const layers = new Map([
   ['src/bootstrap/', 'bootstrap'],
   ['src/entrypoints/http/', 'http'],
@@ -15,11 +18,17 @@ const layers = new Map([
   [catalog + 'application/', 'catalog-application'],
   [catalog + 'domain/', 'catalog-domain'],
   [catalog + 'ports/', 'catalog-ports'],
+  [archives + 'application/', 'archives-application'],
+  [archives + 'domain/', 'archives-domain'],
+  [archives + 'ports/', 'archives-ports'],
   [catalogAdapters, 'catalog-adapters'],
+  [archivesAdapters, 'archives-adapters'],
   ['src/infrastructure/adapters/', 'adapters'],
+  [archivesPlatform, 'archives-platform'],
   ['src/infrastructure/platform/', 'platform'],
   ['tests/contracts/', 'contracts'],
   ['tests/unit/', 'unit'],
+  ['tests/integration/archives-platform/', 'archives-platform-tests'],
   ['tests/integration/', 'integration'],
   ['tests/fixtures/', 'fixtures'],
   ['tests/support/', 'support'],
@@ -35,6 +44,11 @@ const entries = new Map([
   ['catalog-domain', catalog + 'domain/index'],
   ['catalog-ports', catalog + 'ports/index'],
   ['catalog-adapters', catalogAdapters + 'index'],
+  ['archives-application', archives + 'application/index'],
+  ['archives-domain', archives + 'domain/index'],
+  ['archives-ports', archives + 'ports/index'],
+  ['archives-adapters', archivesAdapters + 'index'],
+  ['archives-platform', archivesPlatform + 'index'],
   ['adapters', 'src/infrastructure/adapters/index'],
   ['platform', 'src/infrastructure/platform/index'],
 ]);
@@ -46,12 +60,14 @@ const dependencies = new Map([
       'mcp',
       'application',
       'catalog-application',
+      'archives-application',
       'adapters',
       'catalog-adapters',
+      'archives-adapters',
       'platform',
     ],
   ],
-  ['http', ['application', 'catalog-application']],
+  ['http', ['application', 'catalog-application', 'archives-application']],
   ['mcp', ['application']],
   ['workflows', ['application']],
   ['application', ['domain', 'ports']],
@@ -60,6 +76,9 @@ const dependencies = new Map([
   ['catalog-application', ['catalog-domain', 'catalog-ports']],
   ['catalog-ports', ['catalog-domain']],
   ['catalog-adapters', ['catalog-ports', 'platform']],
+  ['archives-application', ['archives-domain', 'archives-ports']],
+  ['archives-ports', ['archives-domain']],
+  ['archives-adapters', ['archives-ports', 'platform', 'archives-platform']],
   ['contracts', ['bootstrap', 'support', 'fixtures']],
   [
     'unit',
@@ -70,13 +89,17 @@ const dependencies = new Map([
       'catalog-application',
       'catalog-domain',
       'catalog-ports',
+      'archives-application',
+      'archives-domain',
+      'archives-ports',
       'fixtures',
     ],
   ],
+  ['archives-platform-tests', ['archives-platform']],
   ['integration', ['bootstrap', 'support', 'fixtures']],
-  ['support', ['platform', 'adapters', 'catalog-adapters', 'fixtures']],
+  ['support', ['platform', 'adapters', 'catalog-adapters', 'archives-adapters', 'fixtures']],
 ]);
-const portLayers = new Set(['ports', 'catalog-ports']);
+const portLayers = new Set(['ports', 'catalog-ports', 'archives-ports']);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
 const protocols = new Set([
   protocolPrefix + 'scene',
@@ -85,13 +108,37 @@ const protocols = new Set([
   '@bufbuild/protobuf',
 ]);
 const protocolLayers = new Set(['http', 'mcp', 'contracts', 'integration', 'support']);
-const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
-const testLayers = new Set(['contracts', 'unit', 'integration', 'fixtures', 'support']);
+const httpProtocols = new Set([
+  '@codexworkbench/luming-studio-ii-contracts/catalog/service',
+  '@codexworkbench/luming-studio-ii-contracts/archives/service',
+]);
+const testLayers = new Set([
+  'contracts',
+  'unit',
+  'integration',
+  'archives-platform-tests',
+  'fixtures',
+  'support',
+]);
 const builtins = new Map([
   ['bootstrap', new Set(['crypto', 'os', 'path', 'process', 'url'])],
   ['http', new Set(['buffer', 'http', 'net', 'url'])],
   ['mcp', new Set(['buffer', 'stream', 'url'])],
   ['platform', new Set(['crypto', 'fs', 'fs/promises', 'os', 'path', 'sqlite', 'url'])],
+  [
+    'archives-platform',
+    new Set([
+      'buffer',
+      'crypto',
+      'fs',
+      'fs/promises',
+      'os',
+      'path',
+      'stream',
+      'stream/promises',
+      'zlib',
+    ]),
+  ],
 ]);
 const testBuiltins = new Set([
   'assert',
@@ -135,7 +182,7 @@ function allowsLocal(sourceLayer, targetPath, typeOnly) {
 }
 
 function allowsLibrary(layer, specifier, from) {
-  if (specifier === catalogProtocol) {
+  if (httpProtocols.has(specifier)) {
     return layer !== 'mcp' && protocolLayers.has(layer);
   }
   if (protocols.has(specifier)) {

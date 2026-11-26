@@ -1,5 +1,10 @@
-import { WhiteboardPage, type WhiteboardPageProps } from '../pages/whiteboard/index.js';
+import type { ComponentProps } from 'react';
 import './app.css';
+import { studioPages } from './routes.js';
+
+const { whiteboard: WhiteboardPage } = studioPages;
+
+type WhiteboardPageProps = ComponentProps<typeof WhiteboardPage>;
 
 export function WhiteboardApp({ boardId, service, createCommandId }: WhiteboardPageProps) {
   return (

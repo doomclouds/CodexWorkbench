@@ -1,6 +1,7 @@
-import { dirname, relative, resolve, sep } from 'node:path';
+import { basename, dirname, relative, resolve, sep } from 'node:path';
 import manifest from '../package.json' with { type: 'json' };
 import { isObjectEntry, objectTargets } from './objects-boundaries.mjs';
+import { isRegisteredPage, pageRegistryEntries, pageRegistryFile } from './page-registry.mjs';
 import { aliasTargets, contains, sourceRoot, testsRoot } from './project-paths.mjs';
 import { bindingOf } from './scope.mjs';
 
@@ -8,13 +9,15 @@ const webRoot = dirname(sourceRoot);
 const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const moduleRoots = new Set(['pages', 'surfaces', 'data', 'platform']);
 const applicationLayer = 'app';
+const shellRoot = resolve(sourceRoot, 'app/shell');
 const uiDirectories = new Map([
   ['ui/base', 'base'],
   ['ui/domain/canvas', 'canvas'],
   ['ui/domain/objects', 'objects'],
 ]);
 const dependencies = new Map([
-  ['app', ['pages', 'data', 'platform']],
+  ['app', ['pages', 'shell', 'data', 'platform']],
+  ['shell', ['base']],
   ['pages', ['surfaces', 'data', 'base']],
   ['surfaces', ['data', 'base', 'canvas', 'objects']],
   ['data', []],
@@ -33,6 +36,7 @@ const contractPackage = '@codexworkbench/luming-studio-ii-contracts';
 const protocolRuntimes = new Set(['@bufbuild/protobuf', '@bufbuild/protobuf/wkt']);
 const whiteboardData = resolve(sourceRoot, 'data/whiteboard');
 const catalogData = resolve(sourceRoot, 'data/catalog');
+const archiveImportData = resolve(sourceRoot, 'data/archive-import');
 const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
 const iconSurfaces = new Set([workbenchSurface, resolve(sourceRoot, 'surfaces/whiteboard-editor')]);
 const protocolOwners = new Map([
@@ -40,6 +44,7 @@ const protocolOwners = new Map([
   [contractPackage + '/whiteboard/payload', whiteboardData],
   [contractPackage + '/whiteboard/service', whiteboardData],
   [contractPackage + '/catalog/service', catalogData],
+  [contractPackage + '/archives/service', archiveImportData],
 ]);
 const protocolTestSuites = new Set(['contracts', 'fixtures', 'integration', 'support']);
 const applicationTestSuites = new Set(['integration', 'support']);
@@ -63,6 +68,10 @@ function sourceOwner(file) {
 
   const [layer, module, child] = relative(sourceRoot, file).split(sep);
   if (layer === applicationLayer) {
+    if (contains(shellRoot, file)) {
+      return { layer: 'shell', root: shellRoot };
+    }
+
     return { layer, root: resolve(sourceRoot, layer) };
   }
   if (moduleRoots.has(layer) && child) {
@@ -158,6 +167,7 @@ function allowedLibrary(owner, specifier, node) {
   switch (owner.layer) {
     case 'app':
       return appLibraries.has(specifier);
+    case 'shell':
     case 'pages':
     case 'surfaces':
       return reactLibraries.has(specifier);
@@ -188,6 +198,9 @@ const contractBoundary = {
     schema: [],
     messages: {
       location: 'Place this source in a declared frontend layer and module.',
+      pageRegistration: 'Register this navigation page in app/routes.ts.',
+      pageRegistry: 'Declare studioPages with explicit named imports from matching page entries.',
+      pageWiring: 'Use the application route registry to mount pages.',
       dependency: 'Use a declared frontend dependency through its public index.',
       literal: 'Use a literal frontend module reference without resource modifiers.',
       protocol: 'Keep generated Protobuf and codecs in the data layer.',
@@ -204,9 +217,23 @@ const contractBoundary = {
     const applicationTest = applicationTestSuites.has(suite);
     const isSource = contains(sourceRoot, file);
     const isEntry = owner && governed && publicEntry(file, owner);
+    const isRegistry = file === pageRegistryFile;
+    const declaredPages = isRegistry ? pageRegistryEntries(context.sourceCode.ast) : undefined;
+
+    function pageIsRegistered(targetOwner) {
+      return isRegistry
+        ? declaredPages?.has(basename(targetOwner.root))
+        : isRegisteredPage(targetOwner.root);
+    }
 
     function boundaryProblem(node, target) {
       const targetOwner = sourceOwner(target);
+      if (targetOwner?.layer === 'pages' && !pageIsRegistered(targetOwner)) {
+        return 'pageRegistration';
+      }
+      if (targetOwner?.layer === 'pages' && owner?.layer === 'app' && !isRegistry) {
+        return 'pageWiring';
+      }
       if (applicationTest) {
         return allowedTest(suite, target, targetOwner) ? undefined : 'test';
       }
@@ -291,6 +318,12 @@ const contractBoundary = {
       Program(node) {
         if (isSource && !owner) {
           context.report({ node, messageId: 'location' });
+        }
+        if (owner?.layer === 'pages' && !isRegisteredPage(owner.root)) {
+          context.report({ node, messageId: 'pageRegistration' });
+        }
+        if (isRegistry && !declaredPages) {
+          context.report({ node, messageId: 'pageRegistry' });
         }
       },
       ImportDeclaration: (node) => checkReference(node, node.source),

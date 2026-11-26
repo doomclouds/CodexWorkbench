@@ -10,9 +10,13 @@ const serverRoot = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = mkdtempSync(join(tmpdir(), 'luming-server-boundary-'));
 const whiteboard = 'src/modules/whiteboard/';
 const catalog = 'src/modules/catalog/';
+const archives = 'src/modules/archives/';
 const catalogAdapter = 'src/infrastructure/adapters/catalog/';
+const archivesAdapter = 'src/infrastructure/adapters/archives/';
+const archivesPlatform = 'src/infrastructure/platform/archives/';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
+const archivesProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/service';
 const boundaryRule = 'server/contract-boundary';
 
 const fixtureFiles = [
@@ -30,6 +34,14 @@ const fixtureFiles = [
   catalog + 'ports/index.ts',
   catalogAdapter + 'index.ts',
   catalogAdapter + 'private.ts',
+  archives + 'application/index.ts',
+  archives + 'application/private.ts',
+  archives + 'domain/index.ts',
+  archives + 'ports/index.ts',
+  archivesAdapter + 'index.ts',
+  archivesAdapter + 'private.ts',
+  archivesPlatform + 'index.ts',
+  archivesPlatform + 'private.ts',
   'src/infrastructure/adapters/index.ts',
   'src/infrastructure/adapters/private.ts',
   'src/infrastructure/platform/index.ts',
@@ -55,6 +67,7 @@ writeFileSync(
         '@board-app': [whiteboard + 'application/index.ts'],
         '@board/*': [whiteboard + '*'],
         '@catalog/*': [catalog + '*'],
+        '@archives/*': [archives + '*'],
         '@platform/*': ['src/infrastructure/platform/*'],
       },
     },
@@ -131,6 +144,40 @@ const permitted = [
     `import { create } from '../../src/bootstrap/index.js';\nimport { BoardCatalogService } from '${catalogProtocol}';`,
   ],
   ['tests/unit/catalog.test.ts', "import { title } from '@catalog/domain/index.js';"],
+  [
+    'src/entrypoints/http/archives.ts',
+    `import { intake } from '@archives/application/index.js';\nimport { ArchiveImportService } from '${archivesProtocol}';`,
+  ],
+  [
+    archives + 'application/index.ts',
+    "import { inspect } from '../domain/index.js';\nimport type { ArchiveStore } from '../ports/index.js';",
+  ],
+  [archives + 'ports/index.ts', "import type { Archive } from '../domain/index.js';"],
+  [
+    archivesAdapter + 'index.ts',
+    "import type { ArchiveStore } from '@archives/ports/index.js';\nimport { open } from '../../platform/index.js';\nimport { stageArchive } from '../../platform/archives/index.js';",
+  ],
+  [
+    archivesPlatform + 'index.ts',
+    "import { createHash } from 'node:crypto';\nimport { createReadStream } from 'node:fs';\nimport { mkdtemp } from 'node:fs/promises';\nimport { Readable } from 'node:stream';\nimport { pipeline } from 'node:stream/promises';\nimport { createInflateRaw } from 'node:zlib';",
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { intake } from '@archives/application/index.js';\nimport { repository } from '../infrastructure/adapters/archives/index.js';",
+  ],
+  [
+    'tests/support/archives.ts',
+    "import { repository } from '../../src/infrastructure/adapters/archives/index.js';",
+  ],
+  [
+    'tests/integration/archives.test.ts',
+    `import { create } from '../../src/bootstrap/index.js';\nimport { ArchiveImportService } from '${archivesProtocol}';`,
+  ],
+  [
+    'tests/integration/archives-platform/zip-reader.test.ts',
+    "import { extractZip } from '../../../src/infrastructure/platform/archives/index.js';",
+  ],
+  ['tests/unit/archives.test.ts', "import { inspect } from '@archives/domain/index.js';"],
 ];
 
 for (const [file, code] of permitted) {
@@ -140,6 +187,129 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'HTTP reaches private archive application code',
+    'src/entrypoints/http/archives.ts',
+    "import { intake } from '@archives/application/private.js';",
+  ],
+  [
+    'HTTP calls archive domain directly',
+    'src/entrypoints/http/archives.ts',
+    "import { inspect } from '@archives/domain/index.js';",
+  ],
+  [
+    'HTTP calls the archive filesystem platform',
+    'src/entrypoints/http/archives.ts',
+    "import { stageArchive } from '../../infrastructure/platform/archives/index.js';",
+  ],
+  [
+    'HTTP imports an internal archive protocol',
+    'src/entrypoints/http/archives.ts',
+    `import { ArchiveImportService } from '${archivesProtocol}/private';`,
+  ],
+  [
+    'MCP imports the archive HTTP protocol',
+    'src/entrypoints/mcp/archives.ts',
+    `import { ArchiveImportService } from '${archivesProtocol}';`,
+  ],
+  [
+    'archive application imports a catalog application',
+    archives + 'application/index.ts',
+    "import { list } from '@catalog/application/index.js';",
+  ],
+  [
+    'catalog application imports an archive application',
+    catalog + 'application/index.ts',
+    "import { intake } from '@archives/application/index.js';",
+  ],
+  [
+    'archive application uses generated receipts',
+    archives + 'application/index.ts',
+    `import type { ImportReceipt } from '${archivesProtocol}';`,
+  ],
+  [
+    'archive application accesses the host directly',
+    archives + 'application/index.ts',
+    'const response = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'archive domain imports Node streams',
+    archives + 'domain/index.ts',
+    "import type { Readable } from 'node:stream';",
+  ],
+  [
+    'archive ports import runtime domain code',
+    archives + 'ports/index.ts',
+    "import { inspect } from '../domain/index.js';",
+  ],
+  [
+    'an unclassified archive module leaf',
+    archives + 'index.ts',
+    'export {};',
+    boundaryRule,
+    'location',
+  ],
+  [
+    'archive adapter reaches a private platform file',
+    archivesAdapter + 'index.ts',
+    "import { stageArchive } from '../../platform/archives/private.js';",
+  ],
+  [
+    'archive adapter bypasses the platform ZIP capability',
+    archivesAdapter + 'index.ts',
+    "import { createInflateRaw } from 'node:zlib';",
+  ],
+  [
+    'archive adapter bypasses the platform digest capability',
+    archivesAdapter + 'index.ts',
+    "import { createHash } from 'node:crypto';",
+  ],
+  [
+    'legacy platform pulls the archive platform in through its own namespace',
+    'src/infrastructure/platform/index.ts',
+    "import { stageArchive } from './archives/index.js';",
+  ],
+  [
+    'archive platform opens a database directly',
+    archivesPlatform + 'index.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'catalog adapter imports the archives adapter',
+    catalogAdapter + 'index.ts',
+    "import { repository } from '../archives/index.js';",
+  ],
+  [
+    'archive adapter imports a whiteboard port',
+    archivesAdapter + 'index.ts',
+    "import type { Ports } from '@board/ports/index.js';",
+  ],
+  [
+    'bootstrap bypasses the archive adapter public entry',
+    'src/bootstrap/index.ts',
+    "import { repository } from '../infrastructure/adapters/archives/private.js';",
+  ],
+  [
+    'test support bypasses the archive adapter',
+    'tests/support/archives.ts',
+    "import { stageArchive } from '../../src/infrastructure/platform/archives/index.js';",
+  ],
+  [
+    'a business integration test bypasses the archive application',
+    'tests/integration/archives.test.ts',
+    "import { extractZip } from '../../src/infrastructure/platform/archives/index.js';",
+  ],
+  [
+    'a platform regression test reaches a private archive file',
+    'tests/integration/archives-platform/zip-reader.test.ts',
+    "import { extractZip } from '../../../src/infrastructure/platform/archives/private.js';",
+  ],
+  [
+    'a platform regression test reaches an archive application',
+    'tests/integration/archives-platform/zip-reader.test.ts',
+    "import { intake } from '@archives/application/index.js';",
+  ],
   [
     'HTTP reaches the private application',
     'src/entrypoints/http/handler.ts',

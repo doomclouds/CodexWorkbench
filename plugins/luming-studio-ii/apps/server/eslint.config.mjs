@@ -98,6 +98,9 @@ export default defineConfig([
       'src/modules/catalog/application/' + scripts,
       'src/modules/catalog/domain/' + scripts,
       'src/modules/catalog/ports/' + scripts,
+      'src/modules/archives/application/' + scripts,
+      'src/modules/archives/domain/' + scripts,
+      'src/modules/archives/ports/' + scripts,
       'src/application/workflows/' + scripts,
     ],
     rules: {

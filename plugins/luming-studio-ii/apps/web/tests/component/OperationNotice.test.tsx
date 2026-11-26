@@ -82,3 +82,33 @@ it('offers a dismissal action only when both requested and handled', () => {
   );
   expect(fixture.host.querySelector('button')?.textContent).toBe('关闭通知');
 });
+
+it.each([
+  { presentation: 'banner', level: 'error', role: 'alert', label: '关闭错误' },
+  { presentation: 'toast', level: 'success', role: 'status', label: '关闭通知' },
+] as const)('keeps $presentation announcements and compact dismissal accessible', (option) => {
+  const { presentation, level, role, label } = option;
+  const dismiss = vi.fn();
+  fixture.render(
+    <OperationNotice
+      id="operation"
+      level={level}
+      message="Import result"
+      presentation={presentation}
+      dismissible
+      dismissLabel={label}
+      onDismiss={dismiss}
+    />,
+  );
+
+  const notice = document.getElementById('operation');
+  const message = notice?.querySelector(`[role="${role}"]`);
+  const button = notice?.querySelector('button');
+  expect(notice?.dataset.presentation).toBe(presentation);
+  expect(message?.textContent).toBe('Import result');
+  expect(button?.getAttribute('aria-label')).toBe(label);
+  expect(button?.textContent).toBe('');
+
+  act(() => button?.click());
+  expect(dismiss).toHaveBeenCalledOnce();
+});

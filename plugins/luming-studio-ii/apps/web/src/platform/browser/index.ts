@@ -1,5 +1,8 @@
 const boardParameter = 'board';
 const protobufContentType = 'application/protobuf';
+const zipContentType = 'application/zip';
+const archiveCommandHeader = 'x-studio-command-id';
+const archiveTooLargeStatus = 413;
 const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
 
@@ -53,25 +56,28 @@ export function rememberTheme(theme: StudioTheme) {
   window.localStorage.setItem(themeKey, theme);
 }
 
-export async function postProtobuf(
+async function postBinary(
   path: string,
-  body: Uint8Array,
+  body: BodyInit,
+  headers: Record<string, string>,
   signal?: AbortSignal,
-): Promise<Uint8Array> {
+): Promise<Response> {
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) {
     throw new Error('白板服务请求必须使用同源路径。');
   }
 
-  const response = await fetch(path, {
+  return fetch(path, {
     method: 'POST',
-    headers: { 'content-type': protobufContentType, accept: protobufContentType },
-    body: new Uint8Array(body),
+    headers: { ...headers, accept: protobufContentType },
+    body,
     cache: 'no-store',
     credentials: 'same-origin',
     redirect: 'error',
     signal,
   });
+}
 
+async function readProtobufResponse(response: Response): Promise<Uint8Array> {
   if (!response.ok) {
     throw new Error(`白板服务请求失败（HTTP ${response.status}）。`);
   }
@@ -82,4 +88,39 @@ export async function postProtobuf(
   }
 
   return new Uint8Array(await response.arrayBuffer());
+}
+
+export async function postProtobuf(
+  path: string,
+  body: Uint8Array,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const response = await postBinary(
+    path,
+    new Uint8Array(body),
+    { 'content-type': protobufContentType },
+    signal,
+  );
+
+  return readProtobufResponse(response);
+}
+
+export async function postArchive(
+  path: string,
+  file: File,
+  commandId: string,
+  signal?: AbortSignal,
+): Promise<Uint8Array | 'tooLarge'> {
+  const response = await postBinary(
+    path,
+    file,
+    { 'content-type': zipContentType, [archiveCommandHeader]: commandId },
+    signal,
+  );
+
+  if (response.status === archiveTooLargeStatus) {
+    return 'tooLarge';
+  }
+
+  return readProtobufResponse(response);
 }

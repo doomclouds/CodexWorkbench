@@ -1,0 +1,22 @@
+.studio-whiteboard-app[data-theme='dark'] .studio-shell-operation-notice {
+  --studio-ui-operation-notice-surface: #1d1f21;
+  --studio-ui-operation-notice-text: #f0f0ef;
+  --studio-ui-operation-notice-error: #ff9397;
+  --studio-ui-operation-notice-focus: #bba5f2;
+  --studio-ui-operation-notice-shadow: 0 12px 40px #0006;
+}
+
+.studio-shell-operation-notice[data-placement='banner'] {
+  z-index: 50;
+  flex: 0 0 auto;
+}
+
+.studio-shell-operation-notice[data-placement='toast'] {
+  position: absolute;
+  z-index: 80;
+  bottom: 23px;
+  left: 50%;
+  width: max-content;
+  max-width: min(650px, 90%);
+  transform: translateX(-50%);
+}
