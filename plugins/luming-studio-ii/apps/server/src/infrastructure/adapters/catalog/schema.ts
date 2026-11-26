@@ -25,6 +25,15 @@ export const catalogSchema = `
     PRIMARY KEY (actor_id, command_id)
   ) STRICT;
 
+  CREATE TABLE IF NOT EXISTS catalog_duplicate_sources (
+    actor_id TEXT NOT NULL,
+    command_id TEXT NOT NULL,
+    source_board_id TEXT NOT NULL,
+    PRIMARY KEY (actor_id, command_id),
+    FOREIGN KEY (actor_id, command_id)
+      REFERENCES catalog_create_receipts (actor_id, command_id) ON DELETE CASCADE
+  ) STRICT;
+
   CREATE INDEX IF NOT EXISTS catalog_members_by_actor
     ON board_members (actor_id, board_id);
 

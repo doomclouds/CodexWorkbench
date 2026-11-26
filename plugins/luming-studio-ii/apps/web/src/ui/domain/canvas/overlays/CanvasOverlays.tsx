@@ -96,6 +96,29 @@ function screenBox(geometry: CanvasGeometry, viewport: CanvasViewport) {
 
 const toolbarMargin = 12;
 const toolbarGap = 8;
+const regionTitleClearance = 16;
+
+function selectionActionBounds(
+  objects: readonly ProjectedCanvasObject[],
+  viewport: CanvasViewport,
+) {
+  const bounds = mergeRects(objects.map(projectedObjectBounds));
+  if (!bounds) {
+    return undefined;
+  }
+
+  const frame = screenRect(bounds, viewport);
+  const hasExternalTitle = objects.some(({ object }) => object.kind === 'html');
+  if (!hasExternalTitle) {
+    return frame;
+  }
+
+  return {
+    ...frame,
+    top: frame.top - regionTitleClearance,
+    height: frame.height + regionTitleClearance,
+  };
+}
 
 function selectionToolbarPosition(
   anchor: ReturnType<typeof screenRect>,
@@ -167,7 +190,7 @@ function SelectionToolbar({ anchor, viewportSize, children }: SelectionToolbarPr
       data-canvas-controls=""
       data-canvas-selection-actions=""
       role="toolbar"
-      aria-label="选区操作"
+      aria-label="选区格式"
       style={position ?? { visibility: 'hidden' }}
     >
       {children}
@@ -349,7 +372,7 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
   const view = normalizeViewport(viewport);
   const portSource = visiblePortSource(source, view.zoom);
   const connection = selectedConnector?.connectorRoute;
-  const actionsBounds = selectionActions && mergeRects(selected.map(projectedObjectBounds));
+  const actionsBounds = selectionActions && selectionActionBounds(selected, view);
 
   return (
     <div className="studio-ui-canvas-overlays">
@@ -437,7 +460,7 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
         />
       )}
       {actionsBounds && viewportSize && (
-        <SelectionToolbar anchor={screenRect(actionsBounds, view)} viewportSize={viewportSize}>
+        <SelectionToolbar anchor={actionsBounds} viewportSize={viewportSize}>
           {selectionActions}
         </SelectionToolbar>
       )}

@@ -3,6 +3,7 @@ import type { DragEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } fr
 
 import { Button, Checkbox, ScrollRegion } from '../../../base/index.js';
 import type { TodoObjectItem, TodoObjectProps } from './contracts.js';
+import { TodoControlIcon } from './TodoControlIcon.js';
 import { TodoTextEditor } from './TodoTextEditor.js';
 import { maxTodoItems, taskLabel } from './todo-edit.js';
 import { useTodoAdornments } from './useTodoAdornments.js';
@@ -48,13 +49,19 @@ function sourceBadge(item: TodoObjectItem, props: TodoRowsProps) {
     <Button
       label={'打开任务来源：' + label}
       variant="ghost"
-      icon={<span className="studio-object-todo__source">↗ {label}</span>}
+      icon={
+        <span className="studio-object-todo__source">
+          <TodoControlIcon icon="link" size={15} />
+          <span>{label}</span>
+        </span>
+      }
       iconOnly
       onActivate={() => onOpen(source)}
     />
   ) : (
     <span className="studio-object-todo__source" title={label}>
-      {label}
+      <TodoControlIcon icon="link" size={15} />
+      <span>{label}</span>
     </span>
   );
 }
@@ -103,7 +110,7 @@ function rowAdornments(
 
 function stopBodyKey(event: KeyboardEvent<HTMLDivElement>) {
   const deletion = event.key === 'Delete' || event.key === 'Backspace';
-  const arrow = !hasModifier(event) && event.key.startsWith('Arrow');
+  const arrow = !event.ctrlKey && !event.metaKey && event.key.startsWith('Arrow');
   if (deletion || arrow) {
     event.stopPropagation();
   }
@@ -233,7 +240,7 @@ export function TodoRows(props: TodoRowsProps) {
           >
             <Button
               label={'调整顺序：' + label}
-              icon="⋮⋮"
+              icon={<TodoControlIcon icon="grip" />}
               iconOnly
               variant="ghost"
               disabled={!canReorder}
@@ -261,14 +268,16 @@ export function TodoRows(props: TodoRowsProps) {
         </div>
         {sourceBadge(item, props)}
         {editable && (
-          <Button
-            label={'删除任务：' + label}
-            icon="×"
-            iconOnly
-            variant="ghost"
-            disabled={!session.writable}
-            onActivate={() => session.changeRows([{ op: 'delete', id }])}
-          />
+          <span className="studio-object-todo__remove">
+            <Button
+              label={'删除任务：' + label}
+              icon={<TodoControlIcon icon="remove" />}
+              iconOnly
+              variant="ghost"
+              disabled={!session.writable}
+              onActivate={() => session.changeRows([{ op: 'delete', id }])}
+            />
+          </span>
         )}
       </li>
     );
@@ -291,7 +300,7 @@ export function TodoRows(props: TodoRowsProps) {
         {editable && !adding && (
           <Button
             label="添加任务"
-            icon="+"
+            icon={<TodoControlIcon icon="add" />}
             variant="ghost"
             disabled={!session.writable || items.length >= maxTodoItems}
             onActivate={() => session.start({ kind: 'new' }, '')}

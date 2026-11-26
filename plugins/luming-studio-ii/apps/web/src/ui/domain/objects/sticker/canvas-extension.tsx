@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { Dialog, StatusText } from '../../../base/index.js';
+import { useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+
+import { StatusText } from '../../../base/index.js';
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
-import type { StickerPreset } from './sticker-catalog.js';
+import { stickerDefinition } from './sticker-catalog.js';
 import { StickerObject } from './StickerObject.js';
-import { StickerPalette } from './StickerPalette.js';
 
 export interface StickerCanvasValue {
   readonly id?: string;
@@ -13,11 +14,12 @@ export interface StickerCanvasValue {
 interface StickerDraft {
   readonly editRequest: number;
   readonly expectedVersion: number;
+  readonly initialText: string;
 }
 
 interface StickerEditorProps {
   readonly draft: StickerDraft;
-  readonly selected?: string;
+  readonly readOnly: boolean;
   readonly request: CanvasObjectViewProps['request'];
   readonly onRetentionChange?: CanvasObjectViewProps['onRetentionChange'];
   readonly onClose: () => void;
@@ -38,73 +40,92 @@ function stickerValue(value: unknown): StickerCanvasValue {
   };
 }
 
-function StickerEditor({
+function LegacyStickerEditor({
   draft,
-  selected,
+  readOnly,
   request,
   onRetentionChange,
   onClose,
 }: StickerEditorProps) {
+  const input = useRef<HTMLInputElement>(null);
+  const pending = useRef(false);
+  const [text, setText] = useState(draft.initialText);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const pending = useRef(false);
+  const retain = useEffectEvent((retained: boolean) => onRetentionChange?.(retained));
 
-  useEffect(() => {
-    onRetentionChange?.(true);
+  useLayoutEffect(() => {
+    retain(true);
+    input.current?.focus({ preventScroll: true });
+    input.current?.select();
 
-    return () => onRetentionChange?.(false);
-  }, [onRetentionChange]);
+    return () => retain(false);
+  }, []);
 
-  function handleClose() {
-    if (!pending.current) {
-      onClose();
+  function handleSave() {
+    if (pending.current || readOnly) {
+      return;
     }
-  }
 
-  async function save(sticker: StickerPreset) {
-    if (pending.current) {
+    if (text === draft.initialText) {
+      onClose();
       return;
     }
 
     pending.current = true;
     setBusy(true);
     setMessage('');
-    try {
-      const receipt = await request({
-        name: 'sticker.select',
-        expectedVersion: draft.expectedVersion,
-        value: { id: sticker.id },
+    request({
+      name: 'sticker.select',
+      expectedVersion: draft.expectedVersion,
+      value: { fallback: text },
+    })
+      .then((result) => {
+        if (result.ok) {
+          onClose();
+        } else {
+          setMessage(result.message);
+        }
+      })
+      .finally(() => {
+        pending.current = false;
+        setBusy(false);
+      })
+      .catch((error: unknown) => {
+        setMessage(error instanceof Error ? error.message : '保存贴纸文字失败。');
       });
+  }
 
-      if (receipt.ok) {
-        onClose();
-      } else {
-        setMessage(receipt.message);
-      }
-    } catch (error) {
-      setMessage(error instanceof Error && error.message ? error.message : '更换贴纸失败。');
-    } finally {
-      pending.current = false;
-      setBusy(false);
+  function handleKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (pending.current || event.nativeEvent.isComposing || event.key === 'Process') {
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      handleSave();
     }
   }
 
   return (
-    <div className="luming-sticker-edit-layer" data-canvas-native="">
-      <Dialog
-        open
-        title="贴纸库"
-        closeLabel="关闭贴纸库"
-        dismissPolicy={{ escape: !busy }}
-        onRequestClose={handleClose}
-      >
-        <StickerPalette
-          selectedId={selected}
-          onSelect={(sticker) => void save(sticker)}
-          disabled={busy}
-        />
-        {message && <StatusText message={message} tone="error" announcement="assertive" />}
-      </Dialog>
+    <div className="luming-sticker-editor" data-canvas-native="">
+      <input
+        ref={input}
+        type="text"
+        aria-label="编辑文字"
+        value={text}
+        readOnly={busy || readOnly}
+        onChange={(event) => setText(event.currentTarget.value)}
+        onKeyDown={handleKey}
+        onBlur={handleSave}
+      />
+      {message && <StatusText message={message} tone="error" announcement="assertive" />}
     </div>
   );
 }
@@ -113,40 +134,41 @@ function StickerView({
   object,
   payload,
   readOnly,
-  locked,
   editRequest,
   request,
   onRetentionChange,
 }: CanvasObjectViewProps) {
   const { id, fallback } = stickerValue(payload?.value);
-  const canEdit = !readOnly && !locked && payload !== undefined;
+  const text = fallback ?? object.label;
+  const graphic = stickerDefinition(id);
+  const canOpenLegacy = !graphic && !readOnly;
   const [seen, setSeen] = useState<number>();
   const [draft, setDraft] = useState<StickerDraft>();
+
   if (seen !== editRequest) {
     setSeen(editRequest);
-    if (canEdit && editRequest !== undefined) {
-      setDraft({ editRequest, expectedVersion: payload.version });
+    if (canOpenLegacy && payload && editRequest !== undefined) {
+      setDraft({ editRequest, expectedVersion: payload.version, initialText: text });
     }
   }
-  if (draft && !canEdit) {
+  if (draft && graphic) {
     setDraft(undefined);
   }
 
-  return (
-    <>
-      <StickerObject id={id} fallback={fallback ?? object.label} />
-      {draft && canEdit && (
-        <StickerEditor
-          key={draft.editRequest}
-          draft={draft}
-          selected={id}
-          request={request}
-          onRetentionChange={onRetentionChange}
-          onClose={() => setDraft((current) => (current === draft ? undefined : current))}
-        />
-      )}
-    </>
-  );
+  if (draft && !graphic) {
+    return (
+      <LegacyStickerEditor
+        key={draft.editRequest}
+        draft={draft}
+        readOnly={readOnly}
+        request={request}
+        onRetentionChange={onRetentionChange}
+        onClose={() => setDraft((current) => (current === draft ? undefined : current))}
+      />
+    );
+  }
+
+  return <StickerObject id={id} fallback={text} />;
 }
 
 export const stickerExtension = {

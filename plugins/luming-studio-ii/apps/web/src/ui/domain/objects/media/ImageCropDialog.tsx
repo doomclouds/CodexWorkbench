@@ -99,8 +99,18 @@ export function ImageCropDialog({
           className="luming-image-crop__preview"
           style={{ width: frame.width * previewScale, aspectRatio: frame.width / frame.height }}
         >
-          <ImagePreview src={src} label={label} crop={crop} onNaturalSize={setDecodedSize} />
+          <ImagePreview
+            src={src}
+            label={label}
+            frame={frame}
+            naturalSize={natural}
+            crop={crop}
+            onNaturalSize={setDecodedSize}
+          />
         </div>
+        <p className="luming-image-crop__hint">
+          缩放图片，并调整画面位置。裁剪只改变显示范围，原始图片保持完整。
+        </p>
         <Range
           label="裁剪缩放"
           min={1}

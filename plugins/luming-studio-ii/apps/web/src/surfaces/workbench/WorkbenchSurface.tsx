@@ -37,6 +37,7 @@ export interface WorkbenchSurfaceProps {
   readonly archiveImport?: WorkbenchArchiveImport;
   readonly management?: CatalogManagementService;
   readonly onOpenTrash?: () => void;
+  readonly readRouteGeneration?: () => number;
 }
 
 type CatalogDirectory = ReturnType<typeof createCatalogDirectory>;
@@ -54,6 +55,7 @@ interface CatalogResultsProps {
     action: WorkbenchBoardAction,
     trigger: HTMLButtonElement,
   ) => void;
+  readonly onDuplicate?: (board: CatalogBoardSummary, trigger: HTMLButtonElement) => void;
 }
 
 interface RenameTarget {
@@ -64,25 +66,36 @@ interface RenameTarget {
 
 function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
   const { state } = creation;
-  if (state.kind === 'creating') {
+  const queryButton = useRef<HTMLButtonElement>(null);
+  const copying = state.kind !== 'idle' && state.action === 'duplicate';
+  const unknownCopy = state.kind === 'unknown' && copying ? state : undefined;
+  useEffect(() => {
+    if (unknownCopy) {
+      queryButton.current?.focus();
+    }
+  }, [unknownCopy]);
+
+  if (state.kind === 'creating' || state.kind === 'checking') {
+    const message = copying ? copyProgressMessages[state.kind] : createProgressMessages[state.kind];
+
     return (
-      <span className="studio-workbench-sr-only" role="status">
-        正在创建白板
-      </span>
-    );
-  }
-  if (state.kind === 'checking') {
-    return (
-      <span className="studio-workbench-sr-only" role="status">
-        正在查询创建回执
-      </span>
+      <div
+        className={copying ? 'studio-workbench-copy-progress' : 'studio-workbench-sr-only'}
+        role="status"
+      >
+        {copying && <Loader2 size={16} className="studio-workbench-spin" />}
+        <span>{message}</span>
+      </div>
     );
   }
   if (state.kind === 'rejected') {
     return (
       <div className="studio-workbench-error" role="alert">
         <AlertCircle size={16} />
-        <span>白板未创建。{state.detail}</span>
+        <span>
+          {copying ? '作品未复制。' : '白板未创建。'}
+          {state.detail}
+        </span>
       </div>
     );
   }
@@ -90,12 +103,15 @@ function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
     return (
       <div className="studio-workbench-error" role="alert">
         <AlertCircle size={16} />
-        <span>创建结果未知。{state.detail}</span>
-        <button type="button" onClick={creation.query}>
+        <span>
+          {copying ? '复制结果未知。' : '创建结果未知。'}
+          {state.detail}
+        </span>
+        <button type="button" ref={queryButton} onClick={creation.query}>
           查询回执
         </button>
         <button type="button" onClick={creation.retry}>
-          重试原创建
+          {copying ? '重试原复制' : '重试原创建'}
         </button>
       </div>
     );
@@ -103,6 +119,9 @@ function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
 
   return null;
 }
+
+const createProgressMessages = { creating: '正在创建白板', checking: '正在查询创建回执' };
+const copyProgressMessages = { creating: '正在复制作品', checking: '正在查询复制回执' };
 
 function EmptyBoards({
   hasQuery,
@@ -138,6 +157,7 @@ function CatalogResults({
   createBlocked,
   onCreate,
   onManage,
+  onDuplicate,
 }: CatalogResultsProps) {
   const { kind, boards, error, query, nextCursor, loadingMore } = snapshot;
   const waiting = kind === 'loading' && boards.length === 0;
@@ -176,6 +196,7 @@ function CatalogResults({
               onOpen={onOpenBoard}
               managementBlocked={createBlocked}
               onAction={onManage}
+              onDuplicate={onDuplicate}
             />
           ))}
         </div>
@@ -202,19 +223,45 @@ export function WorkbenchSurface({
   archiveImport,
   management,
   onOpenTrash,
+  readRouteGeneration,
 }: WorkbenchSurfaceProps) {
   const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot);
-  const creation = useBoardCreation(catalog, createCommandId, onOpenBoard);
+  const creation = useBoardCreation({
+    service: catalog,
+    createCommandId,
+    onOpenBoard,
+    readRouteGeneration,
+    onDuplicateConfirmed: directory.reload,
+  });
   const archiveInput = useRef<HTMLInputElement>(null);
   const filterButton = useRef<HTMLButtonElement>(null);
+  const duplicateTrigger = useRef<HTMLButtonElement | undefined>(undefined);
   const [rename, setRename] = useState<RenameTarget>();
   const controls = useBoardManagement(management, createCommandId, handleManaged, directory.reload);
   const createBlocked = creation.blocked || archiveImport?.busy === true || controls.blocked;
   const catalogRefresh = archiveImport?.catalogRefresh ?? 0;
   const observedRefresh = useRef(catalogRefresh);
+  const duplicateRejected =
+    creation.state.kind === 'rejected' && creation.state.action === 'duplicate'
+      ? creation.state
+      : undefined;
 
   useEffect(() => directory.open(), [directory]);
+
+  useEffect(() => {
+    if (!duplicateRejected) {
+      return;
+    }
+
+    const trigger = duplicateTrigger.current;
+    duplicateTrigger.current = undefined;
+    if (trigger?.isConnected && !trigger.disabled) {
+      trigger.focus();
+    } else {
+      filterButton.current?.focus();
+    }
+  }, [duplicateRejected]);
 
   useEffect(() => {
     if (observedRefresh.current !== catalogRefresh) {
@@ -263,6 +310,13 @@ export function WorkbenchSurface({
     );
   }
 
+  function handleDuplicate(board: CatalogBoardSummary, trigger: HTMLButtonElement) {
+    if (!createBlocked && board.canManage === true) {
+      duplicateTrigger.current = trigger;
+      creation.duplicate(board.boardId);
+    }
+  }
+
   const renamingBoard = snapshot.boards.find(({ boardId }) => boardId === rename?.boardId);
 
   function handleSaveRename(title: string) {
@@ -291,7 +345,7 @@ export function WorkbenchSurface({
             query={snapshot.query}
             order={snapshot.order}
             preferences={preferences}
-            createBusy={creation.busy}
+            createBusy={creation.createBusy}
             createBlocked={createBlocked}
             onQueryChange={directory.setQuery}
             onOrderChange={directory.setOrder}
@@ -320,6 +374,7 @@ export function WorkbenchSurface({
           createBlocked={createBlocked}
           onCreate={creation.create}
           onManage={management ? handleManage : undefined}
+          onDuplicate={catalog.duplicateBoard ? handleDuplicate : undefined}
         />
       </main>
       {rename && (

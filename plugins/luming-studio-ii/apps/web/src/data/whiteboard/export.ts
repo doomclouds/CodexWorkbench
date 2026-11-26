@@ -1,8 +1,10 @@
-import { create, fromBinary, toBinary } from '@bufbuild/protobuf';
+import { create, fromBinary, toBinary, type MessageInitShape } from '@bufbuild/protobuf';
 import {
   BoardExportFormat,
   BoardExportRejectionReason,
   WhiteboardService as wireService,
+  type ExportBoardFile as WireExportBoardFile,
+  type ExportBoardRequestSchema,
   type ExportBoardResponse,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import type { WhiteboardPost } from './contracts.js';
@@ -48,7 +50,7 @@ const formatTypes = {
   svg: 'image/svg+xml',
 } as const;
 
-const wireFormats = {
+export const wireFormats = {
   json: BoardExportFormat.JSON,
   svg: BoardExportFormat.SVG,
 };
@@ -63,36 +65,53 @@ const rejectionReasons = new Map<BoardExportRejectionReason, ExportBoardRejectio
 const exportMethod = wireService.method.exportBoard;
 const exportPath = '/' + wireService.typeName + '/' + exportMethod.name;
 
+export function writeExportScope(
+  scope: ExportBoardScope,
+): MessageInitShape<typeof ExportBoardRequestSchema>['scope'] {
+  return scope.kind === 'whole'
+    ? { case: 'whole', value: {} }
+    : { case: 'selection', value: { objectIds: [...scope.objectIds] } };
+}
+
+export function readExportFile(
+  { filename, revision, content, mimeType }: WireExportBoardFile,
+  expectedRevision: bigint,
+  format: ExportBoardFormat,
+): ExportBoardFile {
+  const expectedMimeType = formatTypes[format];
+  if (revision !== expectedRevision) {
+    throw new Error('导出文件版次与请求不一致。');
+  }
+  if (mimeType !== expectedMimeType || !filename.endsWith('.' + format)) {
+    throw new Error('导出文件格式与请求不一致。');
+  }
+  if (content.byteLength === 0) {
+    throw new Error('导出服务返回了空文件。');
+  }
+
+  return { filename, mimeType, revision, content };
+}
+
+export function readExportRejection(value: BoardExportRejectionReason): ExportBoardRejection {
+  const reason = rejectionReasons.get(value);
+  if (!reason) {
+    throw new Error('导出服务返回了未知的拒绝原因。');
+  }
+
+  return reason;
+}
+
 function readExport(
   { result }: ExportBoardResponse,
   { expectedRevision, format }: ExportBoardRequest,
 ): ExportBoardResult {
   switch (result.case) {
-    case 'file': {
-      const { filename, revision, content } = result.value;
-      const mimeType = formatTypes[format];
-      if (revision !== expectedRevision) {
-        throw new Error('导出文件版次与请求不一致。');
-      }
-      if (result.value.mimeType !== mimeType || !filename.endsWith('.' + format)) {
-        throw new Error('导出文件格式与请求不一致。');
-      }
-      if (content.byteLength === 0) {
-        throw new Error('导出服务返回了空文件。');
-      }
-
-      return { kind: 'file', file: { filename, mimeType, revision, content } };
-    }
+    case 'file':
+      return { kind: 'file', file: readExportFile(result.value, expectedRevision, format) };
     case 'stale':
       return { kind: 'stale', revision: result.value.revision };
-    case 'rejected': {
-      const reason = rejectionReasons.get(result.value.reason);
-      if (!reason) {
-        throw new Error('导出服务返回了未知的拒绝原因。');
-      }
-
-      return { kind: 'rejected', reason };
-    }
+    case 'rejected':
+      return { kind: 'rejected', reason: readExportRejection(result.value.reason) };
     case undefined:
       throw new Error('导出服务未返回处理结果。');
   }
@@ -107,10 +126,7 @@ export function createWhiteboardExportService(post: WhiteboardPost): ExportBoard
         boardId,
         expectedRevision,
         format: wireFormats[format],
-        scope:
-          scope.kind === 'whole'
-            ? { case: 'whole', value: {} }
-            : { case: 'selection', value: { objectIds: [...scope.objectIds] } },
+        scope: writeExportScope(scope),
       }),
     );
 

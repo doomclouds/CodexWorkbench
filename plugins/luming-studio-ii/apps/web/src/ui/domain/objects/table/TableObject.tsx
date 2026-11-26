@@ -24,6 +24,8 @@ import './TableObject.css';
 const defaultFontSize = 17;
 const readableFontSize = 8;
 const primaryButton = 0;
+const outlineBorder = 0.75;
+const controlsGap = 5;
 
 function tableScale(zoom: number) {
   return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
@@ -36,6 +38,7 @@ function TableObjectSession(props: TableObjectProps) {
     locked = false,
     selected,
     detail = 'full',
+    frameHeight,
     zoom = 1,
     fontSize = defaultFontSize,
     ref,
@@ -60,9 +63,14 @@ function TableObjectSession(props: TableObjectProps) {
   const activeRow = active?.row;
   const activeColumn = active?.column;
 
+  const focusSelectedCell = useEffectEvent(() => {
+    if (!visibleMenu) {
+      editor.current?.focus();
+    }
+  });
   useEffect(() => {
     if (activeRow !== undefined && activeColumn !== undefined) {
-      editor.current?.focus();
+      focusSelectedCell();
     }
   }, [activeRow, activeColumn]);
 
@@ -167,7 +175,7 @@ function TableObjectSession(props: TableObjectProps) {
 
     event.preventDefault();
     event.stopPropagation();
-    if (!active) {
+    if (!sameCell(active, cell)) {
       session.select(cell);
     }
 
@@ -260,8 +268,8 @@ function TableObjectSession(props: TableObjectProps) {
     setMenu(null);
   }
 
-  function handleOutlineOpen(event: MouseEvent<HTMLDivElement>) {
-    if (view !== 'outline' || event.button !== primaryButton) {
+  function handleOverviewOpen(event: MouseEvent<HTMLDivElement>) {
+    if (view === 'full' || event.button !== primaryButton) {
       return;
     }
 
@@ -269,37 +277,52 @@ function TableObjectSession(props: TableObjectProps) {
     session.select({ row: 0, column: 0 });
   }
 
+  const frameStyle = {
+    width: model.width,
+    height: frameHeight,
+    fontSize,
+    '--studio-object-table-outline-stroke': outlineBorder / scale + 'px',
+    '--studio-object-table-control-scale': 1 / scale,
+    '--studio-object-table-control-gap': controlsGap / scale + 'px',
+  };
+  const columnHandles = canResize && (detail === 'full' || resizing) && (
+    <TableColumns
+      model={model}
+      zoom={scale}
+      onStart={handleStartColumn}
+      onMove={columns.handleMove}
+      onEnd={handleFinishColumn}
+    />
+  );
+
   return (
     <div
       ref={root}
       className="studio-object-table"
       data-table-detail={view}
       data-table-static={!controls}
-      style={{ width: model.width, fontSize }}
-      onDoubleClick={handleOutlineOpen}
+      data-table-canvas-frame={frameHeight}
+      style={frameStyle}
+      onDoubleClick={handleOverviewOpen}
     >
       <div className="studio-object-table-content">
-        <TableGrid
-          model={model}
-          active={active}
-          detail={view}
-          readable={fontSize * scale >= readableFontSize}
-          bodyPaint={props.bodyPaint}
-          headerPaint={props.headerPaint}
-          renderEditor={renderEditor}
-          onCellPress={handleCellPress}
-          onCellOpen={handleCellOpen}
-          onCellMenu={handleMenuOpen}
-        />
-        {canResize && (detail === 'full' || resizing) && (
-          <TableColumns
+        <div className="studio-object-table-frame" style={props.bodyPaint}>
+          <TableGrid
             model={model}
+            active={active}
+            detail={view}
+            readable={fontSize * scale >= readableFontSize}
+            frameHeight={frameHeight}
             zoom={scale}
-            onStart={handleStartColumn}
-            onMove={columns.handleMove}
-            onEnd={handleFinishColumn}
+            bodyPaint={props.bodyPaint}
+            headerPaint={props.headerPaint}
+            renderEditor={renderEditor}
+            onCellPress={handleCellPress}
+            onCellOpen={handleCellOpen}
+            onCellMenu={handleMenuOpen}
           />
-        )}
+        </div>
+        {columnHandles}
       </div>
       {controls && (
         <TableControls
@@ -324,6 +347,7 @@ function TableObjectSession(props: TableObjectProps) {
           onInsert={handleInsert}
           onRemove={handleRemove}
           onClose={closeMenu}
+          onReturnFocus={focus}
         />
       )}
     </div>

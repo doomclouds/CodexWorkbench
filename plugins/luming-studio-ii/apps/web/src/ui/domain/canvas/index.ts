@@ -1,4 +1,6 @@
 export { Canvas } from './Canvas.js';
+export { CanvasShapeOutline } from './adapters/CanvasShapeOutline.js';
+export { expandCanvasSelection } from './selection/index.js';
 export type {
   CanvasConnectIntent,
   CanvasConnection,

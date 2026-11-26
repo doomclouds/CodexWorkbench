@@ -1,151 +1,216 @@
-import {
-  ArrowLeft,
-  ChevronDown,
-  Clock3,
-  Download,
-  Frame,
-  Hand,
-  Maximize,
-  MessageSquare,
-  Minus,
-  MousePointer2,
-  PenLine,
-  Plus,
-  Share2,
-  Smile,
-  Square,
-  StickyNote,
-  Timer,
-  Type,
-} from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { ArrowLeft, ChevronDown, Clock3, Maximize, MessageSquare, Share2 } from 'lucide-react';
+import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 
-import { AnchoredPopover } from '../../ui/base/index.js';
+import type { GeometryToolbarProps } from './GeometryToolbar.js';
+import './board-chrome.css';
 
-export type BoardTool = 'select' | 'pan';
+export { GeometryToolbar as BoardToolbar } from './GeometryToolbar.js';
+
+export type BoardTool = GeometryToolbarProps['tool'];
 
 interface BoardHeaderProps {
   readonly title: string;
-  readonly onBack?: () => void;
   readonly status: ReactNode;
-  readonly onOpenViewing?: (trigger: HTMLButtonElement) => void;
-  readonly onOpenExport?: (trigger: HTMLButtonElement) => void;
+  readonly canManage?: boolean;
+  readonly onBack?: () => void;
+  readonly onRename?: (title: string) => void;
+  readonly onOpenHistory?: (trigger: HTMLButtonElement) => void;
+  readonly historyOpen?: boolean;
+  readonly onOpenShare?: (trigger: HTMLButtonElement) => void;
+  readonly shareOpen?: boolean;
+  readonly onToggleFeedback?: (trigger: HTMLButtonElement) => void;
+  readonly feedbackOpen?: boolean;
+  readonly annotationActive?: boolean;
+  readonly onToggleAnnotation?: () => void;
+  readonly unresolvedFeedback?: boolean;
 }
 
-interface BoardToolbarProps {
-  readonly tool: BoardTool;
-  readonly onToolChange: (tool: BoardTool) => void;
-}
+type BoardTitleProps = Pick<BoardHeaderProps, 'title' | 'onRename'>;
+type FeedbackToolsProps = Pick<
+  BoardHeaderProps,
+  | 'onToggleFeedback'
+  | 'feedbackOpen'
+  | 'annotationActive'
+  | 'onToggleAnnotation'
+  | 'unresolvedFeedback'
+>;
 
-interface BoardViewportToolsProps {
-  readonly zoom: number;
-  readonly onZoom: (zoom: number) => void;
-  readonly onFit: (scope: 'board' | 'selection') => void;
-  readonly hasObjects: boolean;
-  readonly hasSelection: boolean;
-  readonly showGrid: boolean;
-  readonly onShowGridChange: (visible: boolean) => void;
-}
-
-const selectionTools = [
-  { tool: 'select', label: '选择', Icon: MousePointer2 },
-  { tool: 'pan', label: '平移', Icon: Hand },
-] as const;
-const placementTools = [
-  { label: '文字', Icon: Type },
-  { label: '分区', Icon: Frame },
-  { label: '便签', Icon: StickyNote },
-  { label: '画笔', Icon: PenLine },
-  { label: '形状', Icon: Square },
-  { label: '贴纸', Icon: Smile },
-] as const;
-const zoomPresets = [0.25, 0.5, 0.75, 1, 1.5, 2];
-const zoomStep = 1.2;
 const unavailable = '当前白板服务暂未提供此操作';
+const titleLimit = 200;
+
+function BoardTitle({ title, onRename }: BoardTitleProps) {
+  const [edit, setEdit] = useState({ title, draft: title });
+  const cancelled = useRef(false);
+  if (edit.title !== title) {
+    setEdit({ title, draft: title });
+  }
+
+  function changeTitle(draft: string) {
+    setEdit({ title, draft });
+  }
+
+  function handleTitleBlur() {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
+    if (!onRename) {
+      return;
+    }
+
+    const normalized = edit.draft.trim();
+    changeTitle(title);
+    if (normalized && normalized !== title) {
+      onRename(normalized);
+    }
+  }
+
+  function handleTitleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing || !onRename) {
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.currentTarget.blur();
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelled.current = true;
+      changeTitle(title);
+      event.currentTarget.blur();
+    }
+  }
+
+  return (
+    <input
+      className="whiteboard-chrome__name"
+      type="text"
+      aria-label="白板名称"
+      title={title}
+      maxLength={titleLimit}
+      value={onRename ? edit.draft : title}
+      readOnly={!onRename}
+      onChange={(event) => changeTitle(event.currentTarget.value)}
+      onBlur={handleTitleBlur}
+      onKeyDown={handleTitleKeyDown}
+    />
+  );
+}
+
+function handleAnnotationPointer(event: PointerEvent<HTMLButtonElement>) {
+  if (event.button === 0) {
+    event.preventDefault();
+  }
+}
+
+function FeedbackTools({
+  onToggleFeedback,
+  feedbackOpen = false,
+  annotationActive = false,
+  onToggleAnnotation,
+  unresolvedFeedback = false,
+}: FeedbackToolsProps) {
+  return (
+    <div className="whiteboard-chrome__comments">
+      <button
+        className="whiteboard-chrome__action whiteboard-chrome__annotation"
+        aria-label="备注"
+        title={onToggleAnnotation ? '备注（9）：点击目标添加备注' : unavailable}
+        aria-keyshortcuts="9"
+        aria-pressed={annotationActive}
+        type="button"
+        disabled={!onToggleAnnotation}
+        onPointerDown={handleAnnotationPointer}
+        onClick={onToggleAnnotation}
+      >
+        <MessageSquare size={20} fill={annotationActive ? 'currentColor' : 'none'} />
+      </button>
+      <button
+        className="whiteboard-chrome__action whiteboard-chrome__comment-list"
+        aria-label="备注列表"
+        aria-description={unresolvedFeedback ? '有未解决备注' : undefined}
+        aria-expanded={feedbackOpen}
+        title={onToggleFeedback ? '备注列表' : unavailable}
+        type="button"
+        disabled={!onToggleFeedback}
+        onClick={(event) => onToggleFeedback?.(event.currentTarget)}
+      >
+        <ChevronDown size={15} />
+        {unresolvedFeedback && (
+          <span className="whiteboard-chrome__comment-dot" aria-hidden="true" />
+        )}
+      </button>
+    </div>
+  );
+}
 
 export function BoardHeader({
   title,
-  onBack,
   status,
-  onOpenViewing,
-  onOpenExport,
+  onBack,
+  onRename,
+  canManage = onBack !== undefined || onRename !== undefined,
+  onOpenHistory,
+  historyOpen = false,
+  onOpenShare,
+  shareOpen = false,
+  onToggleFeedback,
+  feedbackOpen,
+  annotationActive,
+  onToggleAnnotation,
+  unresolvedFeedback,
 }: BoardHeaderProps) {
   return (
-    <header className="whiteboard-editor__header">
-      <div className="whiteboard-editor__header-main">
-        <button
-          className="whiteboard-editor__icon"
-          type="button"
-          aria-label="返回 Luming Studio"
-          onClick={onBack}
-          disabled={!onBack}
-        >
-          <ArrowLeft size={20} />
-        </button>
-        <h1 className="whiteboard-editor__title" title={title}>
-          {title}
-        </h1>
-        <div className="whiteboard-editor__status">{status}</div>
+    <header className="whiteboard-chrome">
+      <div className="whiteboard-chrome__identity">
+        {canManage && onBack && (
+          <button
+            className="whiteboard-chrome__action whiteboard-chrome__back"
+            type="button"
+            aria-label="返回 Luming Studio"
+            onClick={onBack}
+          >
+            <ArrowLeft size={20} />
+          </button>
+        )}
+        {!canManage && <Share2 className="whiteboard-chrome__guest" size={22} aria-hidden="true" />}
+        <BoardTitle title={title} onRename={canManage ? onRename : undefined} />
+        <div className="whiteboard-chrome__status">{status}</div>
       </div>
-      <div className="whiteboard-editor__actions">
-        {onOpenViewing && (
-          <button
-            className="whiteboard-editor__icon"
-            aria-label="全屏观看白板"
-            title="全屏观看白板"
-            type="button"
-            onClick={(event) => onOpenViewing(event.currentTarget)}
-          >
-            <Maximize size={20} />
-          </button>
-        )}
-        {onOpenExport && (
-          <button
-            className="whiteboard-editor__icon whiteboard-editor__share"
-            type="button"
-            aria-haspopup="dialog"
-            onClick={(event) => onOpenExport(event.currentTarget)}
-          >
-            <Download size={20} />
-            导出
-          </button>
-        )}
+      <div className="whiteboard-chrome__actions">
         <button
-          className="whiteboard-editor__icon"
+          className="whiteboard-chrome__action"
           aria-label="版本历史"
+          aria-expanded={historyOpen}
+          title={onOpenHistory ? '版本历史' : unavailable}
           type="button"
-          disabled
-          title={unavailable}
+          disabled={!onOpenHistory}
+          onClick={(event) => onOpenHistory?.(event.currentTarget)}
         >
           <Clock3 size={20} />
         </button>
         <button
-          className="whiteboard-editor__icon whiteboard-editor__share"
+          className="whiteboard-chrome__action whiteboard-chrome__share"
+          aria-label="分享"
+          title={onOpenShare ? '分享（可导出本地副本）' : '当前白板服务暂未接通分享'}
+          aria-expanded={onOpenShare ? shareOpen : undefined}
+          aria-haspopup={onOpenShare ? 'dialog' : undefined}
           type="button"
-          disabled
-          title={unavailable}
+          disabled={!onOpenShare}
+          onClick={(event) => onOpenShare?.(event.currentTarget)}
         >
-          <Share2 size={20} />
-          分享
+          <Share2 size={19} />
+          <span>分享</span>
         </button>
-        <button
-          className="whiteboard-editor__icon"
-          aria-label="备注列表"
-          type="button"
-          disabled
-          title={unavailable}
-        >
-          <MessageSquare size={20} />
-        </button>
-        <button
-          className="whiteboard-editor__icon"
-          aria-label="更多白板操作"
-          type="button"
-          disabled
-          title={unavailable}
-        >
-          <ChevronDown size={15} />
-        </button>
+        <FeedbackTools
+          onToggleFeedback={onToggleFeedback}
+          feedbackOpen={feedbackOpen}
+          annotationActive={annotationActive}
+          onToggleAnnotation={onToggleAnnotation}
+          unresolvedFeedback={unresolvedFeedback}
+        />
       </div>
     </header>
   );
@@ -158,7 +223,7 @@ interface SelectionViewingProps {
 export function BoardSelectionViewing({ onOpen }: SelectionViewingProps) {
   return (
     <button
-      className="whiteboard-editor__icon"
+      className="whiteboard-chrome__action whiteboard-chrome__selection-viewing"
       type="button"
       aria-label="全屏观看选区"
       title="全屏观看选区"
@@ -166,134 +231,5 @@ export function BoardSelectionViewing({ onOpen }: SelectionViewingProps) {
     >
       <Maximize size={18} />
     </button>
-  );
-}
-
-export function BoardToolbar({ tool, onToolChange }: BoardToolbarProps) {
-  return (
-    <div className="whiteboard-editor__toolbar" role="toolbar" aria-label="白板工具">
-      {selectionTools.map(({ tool: id, label, Icon }) => (
-        <button
-          key={id}
-          type="button"
-          aria-label={label}
-          title={label}
-          aria-pressed={tool === id}
-          onClick={() => onToolChange(id)}
-        >
-          <Icon size={20} />
-        </button>
-      ))}
-      {placementTools.map(({ label, Icon }) => (
-        <button key={label} type="button" aria-label={label} title={unavailable} disabled>
-          <Icon size={20} />
-        </button>
-      ))}
-    </div>
-  );
-}
-
-export function BoardViewportTools({
-  zoom,
-  onZoom,
-  onFit,
-  hasObjects,
-  hasSelection,
-  showGrid,
-  onShowGridChange,
-}: BoardViewportToolsProps) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
-
-  function closeAndFocus() {
-    setOpen(false);
-    anchor?.focus({ preventScroll: true });
-  }
-
-  function chooseZoom(value: number) {
-    onZoom(value);
-    closeAndFocus();
-  }
-
-  function handleFit(scope: 'board' | 'selection') {
-    onFit(scope);
-    closeAndFocus();
-  }
-
-  return (
-    <div className="whiteboard-editor__viewport-tools">
-      <button type="button" aria-label="计时器" disabled title={unavailable}>
-        <Timer size={19} />
-      </button>
-      <span className="whiteboard-editor__tool-divider" aria-hidden="true" />
-      <button
-        ref={setAnchor}
-        className="whiteboard-editor__zoom-value"
-        type="button"
-        aria-label="缩放菜单"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        {Math.round(zoom * 100)}% <ChevronDown size={14} />
-      </button>
-      <AnchoredPopover
-        open={open}
-        anchor={anchor}
-        onRequestClose={(reason) => {
-          if (reason === 'escape') {
-            closeAndFocus();
-            return;
-          }
-          setOpen(false);
-        }}
-      >
-        <div className="whiteboard-editor__zoom-menu" role="menu" aria-label="缩放与视图">
-          <div className="whiteboard-editor__zoom-steps">
-            <button type="button" aria-label="缩小" onClick={() => onZoom(zoom / zoomStep)}>
-              <Minus size={16} />
-            </button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button type="button" aria-label="放大" onClick={() => onZoom(zoom * zoomStep)}>
-              <Plus size={16} />
-            </button>
-          </div>
-          {zoomPresets.map((value) => (
-            <button key={value} type="button" role="menuitem" onClick={() => chooseZoom(value)}>
-              {Math.round(value * 100)}%
-            </button>
-          ))}
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!hasObjects}
-            onClick={() => handleFit('board')}
-          >
-            <Maximize size={15} />
-            适应白板
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!hasSelection}
-            onClick={() => handleFit('selection')}
-          >
-            <Maximize size={15} />
-            适应选区
-          </button>
-          <hr />
-          <details>
-            <summary>视图设置</summary>
-            <label>
-              <input
-                type="checkbox"
-                checked={showGrid}
-                onChange={(event) => onShowGridChange(event.currentTarget.checked)}
-              />
-              显示网格
-            </label>
-          </details>
-        </div>
-      </AnchoredPopover>
-    </div>
   );
 }

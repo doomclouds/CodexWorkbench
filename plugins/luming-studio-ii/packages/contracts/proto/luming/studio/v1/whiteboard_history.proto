@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "luming/studio/v1/whiteboard_edits.proto";
+import "luming/studio/v1/whiteboard_scene.proto";
+import "luming/studio/v1/whiteboard_service.proto";
+
+service BoardHistoryService {
+  rpc ListBoardVersions(ListBoardVersionsRequest) returns (ListBoardVersionsResponse);
+  rpc GetBoardVersionScene(GetBoardVersionSceneRequest) returns (GetBoardVersionSceneResponse);
+  rpc GetBoardVersionPayloads(GetBoardVersionPayloadsRequest) returns (GetBoardVersionPayloadsResponse);
+  rpc RestoreBoardVersion(RestoreBoardVersionRequest) returns (RestoreBoardVersionResponse);
+  rpc ExportBoardVersion(ExportBoardVersionRequest) returns (ExportBoardVersionResponse);
+}
+
+message ListBoardVersionsRequest {
+  string board_id = 1;
+  optional uint64 before_revision = 2;
+  uint32 limit = 3;
+}
+
+message ListBoardVersionsResponse {
+  optional uint64 current_revision = 1;
+  repeated BoardVersionSummary versions = 2;
+  optional uint64 next_before_revision = 3;
+}
+
+message BoardVersionSummary {
+  optional uint64 revision = 1;
+  string title = 2;
+  optional uint64 saved_at_millis = 3;
+  string actor_id = 4;
+  BoardVersionKind kind = 5;
+  uint32 changed_object_count = 6;
+  optional uint64 source_revision = 7;
+}
+
+enum BoardVersionKind {
+  BOARD_VERSION_KIND_UNSPECIFIED = 0;
+  BOARD_VERSION_KIND_BASELINE = 1;
+  BOARD_VERSION_KIND_GEOMETRY = 2;
+  BOARD_VERSION_KIND_CONTENT = 3;
+  BOARD_VERSION_KIND_IMAGE = 4;
+  BOARD_VERSION_KIND_RESTORE = 5;
+}
+
+message GetBoardVersionSceneRequest {
+  string board_id = 1;
+  optional uint64 revision = 2;
+}
+
+message GetBoardVersionSceneResponse {
+  BoardScene scene = 1;
+}
+
+message GetBoardVersionPayloadsRequest {
+  string board_id = 1;
+  optional uint64 revision = 2;
+  repeated string object_ids = 3;
+}
+
+message GetBoardVersionPayloadsResponse {
+  string board_id = 1;
+  optional uint64 revision = 2;
+  repeated ObjectPayloadResult results = 3;
+  bool unavailable = 4;
+}
+
+message RestoreBoardVersionRequest {
+  string board_id = 1;
+  string command_id = 2;
+  optional uint64 revision = 3;
+  optional uint64 expected_current_revision = 4;
+  oneof scope {
+    ExportWholeBoard whole = 5;
+    ExportBoardSelection selection = 6;
+  }
+}
+
+message RestoreBoardVersionResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message ExportBoardVersionRequest {
+  string board_id = 1;
+  optional uint64 revision = 2;
+  oneof scope {
+    ExportWholeBoard whole = 3;
+    ExportBoardSelection selection = 4;
+  }
+  BoardExportFormat format = 5;
+}
+
+message ExportBoardVersionResponse {
+  oneof result {
+    ExportBoardFile file = 1;
+    ExportBoardRejected rejected = 2;
+    bool unavailable = 3;
+  }
+}

@@ -9,6 +9,11 @@ export const browserCapabilities = [
   'sessionStorage',
   'indexedDB',
   'postMessage',
+  'FileReader',
+  'FileReaderSync',
+  'showDirectoryPicker',
+  'showOpenFilePicker',
+  'showSaveFilePicker',
 ];
 
 const browserGlobals = new Set(['globalThis', 'window', 'self']);
@@ -17,6 +22,7 @@ const restrictedMembers = new Map([
   ['window', new Set([...browserCapabilities, 'parent', 'top'])],
   ['navigator', new Set(['clipboard'])],
   ['document', new Set(['cookie'])],
+  ['URL', new Set(['createObjectURL', 'revokeObjectURL'])],
 ]);
 
 function propertyName(property, computed) {

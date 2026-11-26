@@ -66,6 +66,7 @@ describe('ActionMenu', () => {
   afterEach(() => {
     fixture.dispose();
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   function renderMenu(props: Partial<ActionMenuProps> = {}) {
@@ -104,7 +105,24 @@ describe('ActionMenu', () => {
       '删除',
     ]);
     expect(Number.parseFloat(menu.style.left)).toBe(point.x);
-    expect(Number.parseFloat(menu.style.top)).toBeGreaterThanOrEqual(point.y);
+    expect(Number.parseFloat(menu.style.top)).toBe(point.y);
+    expect(menu.dataset.placement).toBeUndefined();
+    expect(menu.style.getPropertyValue('--studio-ui-anchor-offset')).toBe('');
+  });
+
+  it('clamps a context menu at the right and bottom edges without flipping around the point', () => {
+    const width = 240;
+    const height = 160;
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, width, height),
+    );
+    const anchor = { x: window.innerWidth - 12, y: window.innerHeight - 20 };
+    renderMenu({ anchor });
+    const menu = getMenu(fixture.host);
+
+    expect(Number.parseFloat(menu.style.left)).toBe(window.innerWidth - width - 8);
+    expect(Number.parseFloat(menu.style.top)).toBe(window.innerHeight - height - 8);
+    expect(menu.dataset.placement).toBeUndefined();
   });
 
   it('requests an anchor-hidden close once when an open menu has no anchor', () => {
@@ -138,6 +156,25 @@ describe('ActionMenu', () => {
     expect(document.activeElement).toBe(last);
     press(last, 'Home');
     expect(document.activeElement).toBe(first);
+  });
+
+  it('renders a separator and a visual shortcut without adding navigation targets', () => {
+    renderMenu({
+      items: [
+        { id: 'forward', label: '上移一层' },
+        { id: 'delete', label: '删除', separatorBefore: true, shortcut: 'Delete' },
+      ],
+    });
+    const menu = getMenu(fixture.host);
+    const first = getItem(menu, '上移一层');
+    const shortcut = menu.querySelector('small');
+    expect(shortcut?.textContent).toBe('Delete');
+    expect(shortcut?.getAttribute('aria-hidden')).toBe('true');
+    expect(
+      menu.querySelector('[role="separator"]')?.nextElementSibling?.getAttribute('aria-label'),
+    ).toBe('删除');
+    press(first, 'ArrowDown');
+    expect(document.activeElement).toBe(shortcut?.parentElement);
   });
 
   it('uses native activation and only reports enabled actions', () => {

@@ -1,4 +1,4 @@
-import type { KeyboardEvent, Ref } from 'react';
+import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import {
   Button,
   SearchField,
@@ -18,9 +18,11 @@ type ExportAction = NonNullable<DocumentObjectProps['onExport']>;
 interface EditorToolbarProps {
   readonly mode: DocumentActivity['mode'];
   readonly iconOnly?: boolean;
+  readonly expandControl?: DocumentObjectProps['expandControl'];
   readonly readOnly: boolean;
   readonly exportOpen: boolean;
   readonly draft: ReturnType<typeof useDocumentDraft>;
+  readonly outline?: ReactNode;
   readonly onEdit: () => void;
   readonly onRead: () => void;
   readonly onOpen: () => void;
@@ -80,6 +82,24 @@ function DocumentExportIcon() {
       aria-hidden="true"
     >
       <path d="M12 3v12m-4-4 4 4 4-4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+    </svg>
+  );
+}
+
+function DocumentReadIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 7v15M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3a6 6 0 0 1 6 6 6 6 0 0 1 6-6h3a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-4a5 5 0 0 0-5 4 5 5 0 0 0-5-4Z" />
     </svg>
   );
 }
@@ -150,11 +170,72 @@ function DocumentExport({
   );
 }
 
+function DocumentModeAction({
+  mode,
+  iconOnly,
+  readOnly,
+  onEdit,
+  onRead,
+}: Pick<EditorToolbarProps, 'mode' | 'iconOnly' | 'readOnly' | 'onEdit' | 'onRead'>) {
+  const variant = iconOnly ? 'ghost' : undefined;
+  if (mode === 'edit') {
+    return (
+      <Button
+        label={iconOnly ? '阅读文档' : '回到阅读'}
+        icon={iconOnly ? <DocumentReadIcon /> : undefined}
+        iconOnly={iconOnly}
+        variant={variant}
+        onActivate={onRead}
+      />
+    );
+  }
+  if (readOnly && !iconOnly) {
+    return null;
+  }
+
+  return (
+    <Button
+      label="编辑文档"
+      icon={iconOnly ? <DocumentEditIcon /> : undefined}
+      iconOnly={iconOnly}
+      variant={variant}
+      disabled={readOnly}
+      onActivate={onEdit}
+    />
+  );
+}
+
+function DocumentExpandAction({
+  iconOnly,
+  expandControl,
+  onOpen,
+}: Pick<EditorToolbarProps, 'iconOnly' | 'expandControl' | 'onOpen'>) {
+  const button = (
+    <Button
+      label={expandControl?.label ?? '放大阅读'}
+      icon={iconOnly ? <DocumentOpenIcon /> : undefined}
+      iconOnly={iconOnly}
+      variant={iconOnly ? 'ghost' : undefined}
+      onActivate={onOpen}
+    />
+  );
+
+  return expandControl ? (
+    <span className="studio-document-expand-control" title={expandControl.title}>
+      {button}
+    </span>
+  ) : (
+    button
+  );
+}
+
 export function DocumentToolbar({
   mode,
   iconOnly = false,
+  expandControl,
   readOnly,
   draft,
+  outline,
   onEdit,
   onRead,
   onOpen,
@@ -172,26 +253,17 @@ export function DocumentToolbar({
     <>
       <Toolbar label="文档操作">
         {iconOnly && <DocumentCanvasSaveStatus draft={draft} />}
-        {mode !== 'edit' && (!readOnly || iconOnly) && (
-          <Button
-            label="编辑文档"
-            icon={iconOnly ? <DocumentEditIcon /> : undefined}
-            iconOnly={iconOnly}
-            variant={iconOnly ? 'ghost' : undefined}
-            disabled={readOnly}
-            onActivate={onEdit}
-          />
-        )}
+        <DocumentModeAction
+          mode={mode}
+          iconOnly={iconOnly}
+          readOnly={readOnly}
+          onEdit={onEdit}
+          onRead={onRead}
+        />
         {mode === 'inline' && (
-          <Button
-            label="放大阅读"
-            icon={iconOnly ? <DocumentOpenIcon /> : undefined}
-            iconOnly={iconOnly}
-            variant={iconOnly ? 'ghost' : undefined}
-            onActivate={onOpen}
-          />
+          <DocumentExpandAction iconOnly={iconOnly} expandControl={expandControl} onOpen={onOpen} />
         )}
-        {mode === 'edit' && <Button label="回到阅读" onActivate={onRead} />}
+        {outline}
         {onExport && (
           <DocumentExport
             draft={draft.draft}
@@ -213,7 +285,7 @@ export function DocumentToolbar({
         {onAnnotate && mode !== 'edit' && (
           <Button label="标注所选段落" variant="ghost" onActivate={onAnnotate} />
         )}
-        {mode === 'edit' && <DocumentSaveStatus draft={draft} />}
+        {!iconOnly && mode === 'edit' && <DocumentSaveStatus draft={draft} />}
       </Toolbar>
       {draft.failure && (
         <div className="studio-document-notice">

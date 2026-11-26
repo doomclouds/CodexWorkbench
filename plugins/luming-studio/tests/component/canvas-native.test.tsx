@@ -359,7 +359,7 @@ describe('native canvas parity', () => {
         x: 480,
         fill: 'rgba(0,0,0,0.1)',
       });
-      await mount(board([inner, outer, filled]));
+      await mount(board([inner, outer, filled]), { externalViewport: { x: 0, y: 0, zoom: 1 } });
 
       const innerFrame = host.querySelector('[data-element-id="inner-section"]')!;
       const outerFrame = host.querySelector('[data-element-id="outer-section"]')!;

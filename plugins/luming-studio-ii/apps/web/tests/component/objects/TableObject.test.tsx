@@ -292,6 +292,40 @@ it('opens outline editing from the public request and retains the editor across 
   expect(find('[data-table-detail]').dataset.tableDetail).toBe('full');
 });
 
+it('keeps the canvas frame dimensions and sizes overview rows like the original table', () => {
+  const request = vi.fn<TableViewProps['request']>();
+  mountExtension(request, { zoom: 0.3 });
+
+  const frame = find('[data-table-canvas-frame]');
+  const content = find('.studio-object-table-content');
+  const controls = find('[data-canvas-controls]');
+  expect(frame.style.height).toBe('240px');
+  expect(frame.getAttribute('data-table-detail')).toBe('preview');
+  expect([...content.querySelectorAll('tr')].map((row) => row.style.height)).toEqual([
+    '120px',
+    '120px',
+  ]);
+  expect(controls.parentElement).toBe(frame);
+  expect(content.contains(controls)).toBe(false);
+  expect(toolbarButton('添加表格行').textContent).toBe('＋行');
+  expect(toolbarButton('切换表头').textContent).toBe('表头');
+
+  mountExtension(request, { zoom: 0.1 });
+  expect(find('[data-table-canvas-frame]').getAttribute('data-table-detail')).toBe('outline');
+  expect(find('.studio-object-table-outline-header').style.height).toBe('120px');
+  expect(view.host.querySelector('table')).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('opens the first cell from a double-click on the overview frame', async () => {
+  const save = mount(initial, { detail: 'preview', frameHeight: 240, zoom: 0.4 });
+
+  await mouse(find('.studio-object-table-content'), 'dblclick');
+  expect(editor().getAttribute('aria-label')).toBe('表格第1行第1列');
+  expect(editor().textContent).toBe('A');
+  expect(save).not.toHaveBeenCalled();
+});
+
 it('formats only the selected rich cell text and submits its original version', async () => {
   const ref = createRef<TableObjectHandle>();
   const value = {
@@ -752,6 +786,35 @@ it('keeps a dirty cell open when its menu receives focus and submits it with the
   expect(current().data?.rows).toEqual([
     ['Draft before menu', 'B'],
     ['', ''],
+    ['C', 'D'],
+  ]);
+});
+
+it('opens another cell next to its menu and restores editor focus on Escape without losing the draft', async () => {
+  const { save, current } = editable();
+  await mouse(cell(0, 0), 'dblclick');
+  type('First cell draft');
+  await mouse(cell(1, 1), 'contextmenu', { button: 2 });
+
+  const firstAction = menuAction('在上方插入行');
+  expect(editor().textContent).toBe('D');
+  expect(document.activeElement).toBe(firstAction);
+  expect(save).not.toHaveBeenCalled();
+  await act(async () => {
+    firstAction.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  expect(document.body.querySelector('[role="menu"]')).toBeNull();
+  expect(document.activeElement).toBe(editor());
+
+  await key('Enter', { ctrlKey: true });
+  expect(current().data?.rows).toEqual([
+    ['First cell draft', 'B'],
     ['C', 'D'],
   ]);
 });

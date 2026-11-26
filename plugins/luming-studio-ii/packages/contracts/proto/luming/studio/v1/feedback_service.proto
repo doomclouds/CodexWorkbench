@@ -1,0 +1,192 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+service FeedbackService {
+  rpc ListThreads(ListThreadsRequest) returns (ListThreadsResponse);
+  rpc GetThread(GetThreadRequest) returns (GetThreadResponse);
+  rpc ApplyFeedback(ApplyFeedbackRequest) returns (ApplyFeedbackResponse);
+  rpc GetFeedbackReceipt(GetFeedbackReceiptRequest) returns (GetFeedbackReceiptResponse);
+}
+
+enum FeedbackThreadStatus {
+  FEEDBACK_THREAD_STATUS_UNSPECIFIED = 0;
+  FEEDBACK_THREAD_STATUS_OPEN = 1;
+  FEEDBACK_THREAD_STATUS_RESOLVED = 2;
+}
+
+message FeedbackPoint {
+  double x = 1;
+  double y = 2;
+}
+
+message FeedbackObjectPoint {
+  string object_id = 1;
+  double u = 2;
+  double v = 3;
+  optional uint64 geometry_version = 4;
+}
+
+message FeedbackAnchorTarget {
+  oneof target {
+    FeedbackPoint board_point = 1;
+    FeedbackObjectPoint object_point = 2;
+  }
+}
+
+message FeedbackFrozenObject {
+  string kind = 1;
+  string label = 2;
+  double x = 3;
+  double y = 4;
+  double width = 5;
+  double height = 6;
+  double rotation = 7;
+}
+
+message FeedbackAnchor {
+  FeedbackAnchorTarget target = 1;
+  uint64 source_board_revision = 2;
+  FeedbackPoint frozen_point = 3;
+  FeedbackFrozenObject frozen_object = 4;
+  bool target_missing = 5;
+}
+
+message FeedbackMessage {
+  string message_id = 1;
+  string author_actor_id = 2;
+  bool authored_by_viewer = 3;
+  string text = 4;
+  uint64 created_at_millis = 5;
+  uint64 updated_at_millis = 6;
+  uint64 version = 7;
+  bool can_edit = 8;
+}
+
+message FeedbackThread {
+  string thread_id = 1;
+  FeedbackThreadStatus status = 2;
+  FeedbackAnchor anchor = 3;
+  FeedbackMessage first = 4;
+  uint64 version = 5;
+  uint64 updated_at_millis = 6;
+  uint32 reply_count = 7;
+  bool can_resolve = 8;
+  bool can_delete = 9;
+}
+
+message ListThreadsRequest {
+  string board_id = 1;
+  uint32 page_size = 2;
+  optional string cursor = 3;
+  FeedbackThreadStatus status = 4;
+  optional string author_actor_id = 5;
+}
+
+message ListThreadsResponse {
+  repeated FeedbackThread threads = 1;
+  optional string next_cursor = 2;
+  bool can_write = 3;
+}
+
+message GetThreadRequest {
+  string board_id = 1;
+  string thread_id = 2;
+  uint32 page_size = 3;
+  optional string cursor = 4;
+}
+
+message GetThreadResponse {
+  FeedbackThread thread = 1;
+  repeated FeedbackMessage replies = 2;
+  optional string next_cursor = 3;
+  bool can_write = 4;
+}
+
+message FeedbackCreate {
+  FeedbackAnchorTarget anchor = 1;
+  string text = 2;
+}
+
+message FeedbackReply {
+  string thread_id = 1;
+  string text = 2;
+}
+
+message FeedbackEdit {
+  string thread_id = 1;
+  string message_id = 2;
+  optional uint64 expected_message_version = 3;
+  string text = 4;
+}
+
+message FeedbackThreadChange {
+  string thread_id = 1;
+  optional uint64 expected_thread_version = 2;
+}
+
+message ApplyFeedbackRequest {
+  string board_id = 1;
+  string command_id = 2;
+  oneof operation {
+    FeedbackCreate create = 3;
+    FeedbackReply reply = 4;
+    FeedbackEdit edit = 5;
+    FeedbackThreadChange resolve = 6;
+    FeedbackThreadChange reopen = 7;
+    FeedbackThreadChange delete = 8;
+  }
+}
+
+message ApplyFeedbackResponse {
+  FeedbackReceipt receipt = 1;
+}
+
+message FeedbackApplied {
+  string thread_id = 1;
+  uint64 thread_version = 2;
+  optional string message_id = 3;
+  optional uint64 message_version = 4;
+  bool deleted = 5;
+}
+
+enum FeedbackRejectionReason {
+  FEEDBACK_REJECTION_REASON_UNSPECIFIED = 0;
+  FEEDBACK_REJECTION_REASON_INVALID_TEXT = 1;
+  FEEDBACK_REJECTION_REASON_INVALID_ANCHOR = 2;
+  FEEDBACK_REJECTION_REASON_TARGET_CHANGED = 3;
+  FEEDBACK_REJECTION_REASON_NOT_FOUND = 4;
+  FEEDBACK_REJECTION_REASON_FORBIDDEN = 5;
+  FEEDBACK_REJECTION_REASON_VERSION_CHANGED = 6;
+  FEEDBACK_REJECTION_REASON_COMMAND_ID_REUSE = 7;
+}
+
+message FeedbackRejected {
+  FeedbackRejectionReason reason = 1;
+  optional uint64 current_version = 2;
+}
+
+message FeedbackReceipt {
+  string board_id = 1;
+  string command_id = 2;
+  oneof outcome {
+    FeedbackApplied applied = 3;
+    FeedbackRejected rejected = 4;
+  }
+}
+
+message GetFeedbackReceiptRequest {
+  string board_id = 1;
+  string command_id = 2;
+}
+
+message FeedbackReceiptNotRecorded {
+  string command_id = 1;
+}
+
+message GetFeedbackReceiptResponse {
+  oneof result {
+    FeedbackReceipt receipt = 1;
+    FeedbackReceiptNotRecorded not_recorded = 2;
+  }
+}

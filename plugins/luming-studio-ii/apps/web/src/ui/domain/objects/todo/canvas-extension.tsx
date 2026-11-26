@@ -12,6 +12,7 @@ import type {
   TodoSourceRef,
 } from './contracts.js';
 import { isTodoOverview, TodoObject } from './TodoObject.js';
+import { TodoContentConflict } from './useTodoEditor.js';
 
 const todoPaper = '#EFEFEF';
 
@@ -71,6 +72,8 @@ function TodoCanvasBody({
   readOnly,
   editRequest,
   focusedReading = false,
+  expanded: expandedOnBoard = false,
+  locked,
   onOpenPresentation,
   object,
   geometry,
@@ -83,7 +86,8 @@ function TodoCanvasBody({
   const [expandedEditing, setExpandedEditing] = useState(false);
   const value = useMemo(() => (id ? todoPayload(id, payload) : undefined), [id, payload]);
   const keepExpanded = expanded || expandedEditing;
-  const retain = value !== undefined && (focusedReading || editing || keepExpanded);
+  const nativeExpanded = expandedOnBoard || focusedReading;
+  const retain = value !== undefined && (nativeExpanded || editing || keepExpanded);
   const publishRetention = useEffectEvent((retain: boolean) => onRetentionChange?.(retain));
   useEffect(() => {
     publishRetention(retain);
@@ -104,6 +108,12 @@ function TodoCanvasBody({
     if (receipt.ok) {
       return todoPayload(operation.objectId, receipt.payload) ?? false;
     }
+    if (receipt.conflict) {
+      throw new TodoContentConflict(
+        receipt.message,
+        todoPayload(operation.objectId, receipt.current),
+      );
+    }
     if (receipt.message) {
       throw new Error(receipt.message);
     }
@@ -123,13 +133,16 @@ function TodoCanvasBody({
         readOnly={readOnly}
         editRequest={editRequest}
         focusedReading={focusedReading}
+        expanded={nativeExpanded}
+        movable={!nativeExpanded && !readOnly}
+        locked={locked}
         appearance={appearance}
         overview={overview}
         onEdit={handleEdit}
         onEditingChange={setEditing}
         onRequestExpand={open}
       />
-      {!focusedReading && !onOpenPresentation && (
+      {!nativeExpanded && !onOpenPresentation && (
         <Dialog
           title={value.title}
           open={expanded}

@@ -28,7 +28,9 @@ test('opens a scene, reads visible bodies, and keeps the drag visible until the 
   const app = createAppMock(rpc.post);
   try {
     await app.open(sampleBoardId);
-    expect(app.host.querySelector('h1')?.textContent).toBe('一期测试白板');
+    expect(app.host.querySelector<HTMLInputElement>('[aria-label="白板名称"]')?.value).toBe(
+      '一期测试白板',
+    );
     expect(rpc.payloadReads).toEqual([['caption']]);
     expect(app.canvas().textContent).toContain('从服务读取的正文');
     expect(position(app.canvas())).toBe('40px');
@@ -60,7 +62,7 @@ test.each([
   {
     fill: 'color-mix(in srgb, Canvas 87%, #60a5fa)',
     stroke: '#60a5fa',
-    expectedFill: 'color-mix(in srgb, var(--studio-ui-system-canvas, Canvas) 87%, #60a5fa)',
+    expectedFill: 'var(--studio-ui-canvas-paper-secondary, #ececec)',
     expectedStroke: 'rgb(96, 165, 250)',
   },
   {

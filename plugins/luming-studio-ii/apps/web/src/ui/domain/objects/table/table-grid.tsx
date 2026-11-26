@@ -9,6 +9,8 @@ interface TableGridProps {
   readonly active: CellAddress | null;
   readonly detail: TableObjectDetail;
   readonly readable: boolean;
+  readonly frameHeight?: number;
+  readonly zoom: number;
   readonly bodyPaint?: TableObjectPaint;
   readonly headerPaint?: TableObjectPaint;
   readonly renderEditor: (cell: CellAddress, text: string) => ReactNode;
@@ -36,6 +38,8 @@ export function TableGrid({
   active,
   detail,
   readable,
+  frameHeight,
+  zoom,
   bodyPaint,
   headerPaint,
   renderEditor,
@@ -43,9 +47,19 @@ export function TableGrid({
   onCellOpen,
   onCellMenu,
 }: TableGridProps) {
+  const previewRowHeight = frameHeight === undefined ? undefined : frameHeight / model.rows.length;
   if (detail === 'outline') {
+    const height =
+      frameHeight === undefined
+        ? undefined
+        : Math.min(frameHeight, Math.max(frameHeight / model.rows.length, 2 / zoom));
+
     return model.head ? (
-      <div className="studio-object-table-outline-header" aria-hidden="true" style={headerPaint} />
+      <div
+        className="studio-object-table-outline-header"
+        aria-hidden="true"
+        style={{ ...headerPaint, height }}
+      />
     ) : null;
   }
 
@@ -68,7 +82,7 @@ export function TableGrid({
     const Cell = header ? 'th' : 'td';
 
     return (
-      <tr key={model.rowIds[rowIndex]}>
+      <tr key={model.rowIds[rowIndex]} style={preview ? { height: previewRowHeight } : undefined}>
         {row.map((text, column) => {
           const cell = { row: rowIndex, column };
 

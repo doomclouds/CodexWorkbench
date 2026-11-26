@@ -113,7 +113,7 @@ describe('Canvas legacy native content parity', () => {
     render();
     const doc = element(fixture.host, '[aria-label="文档正文"]');
     const todo = element(fixture.host, '[aria-label="任务列表"]');
-    const expand = element(fixture.host, '[aria-label="放大阅读"]');
+    const expand = element(fixture.host, '[aria-label="展开文档"]');
     const expandTodo = element(fixture.host, '[aria-label="展开任务清单"]');
     expect(expand.closest('[inert]')).toBeNull();
     expect(expandTodo.closest('[inert]')).toBeNull();

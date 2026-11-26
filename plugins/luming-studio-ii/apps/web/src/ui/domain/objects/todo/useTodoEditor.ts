@@ -27,6 +27,16 @@ interface PendingTodoEdit {
   keepAdding: boolean;
 }
 
+export class TodoContentConflict extends Error {
+  constructor(
+    message: string,
+    readonly current?: TodoObjectSnapshot,
+  ) {
+    super(message);
+    this.name = 'TodoContentConflict';
+  }
+}
+
 const saveError = '清单草稿未保存。';
 const invalidEdit = '任务更改无效。';
 const tooManyLines = '粘贴的任务过多，请分批添加。';
@@ -70,6 +80,7 @@ export function useTodoEditor({
   const [draft, setDraft] = useState<TodoDraft>();
   const [pending, setPending] = useState<PendingTodoEdit>();
   const [error, setError] = useState<string>();
+  const [conflicted, setConflicted] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastRequest, setLastRequest] = useState<number>();
   const saving = useRef(false);
@@ -81,6 +92,7 @@ export function useTodoEditor({
     setPending(undefined);
     setDraft(undefined);
     setError(undefined);
+    setConflicted(false);
   }
   if (editRequest !== undefined && editRequest !== lastRequest && writable) {
     const first = current.items[0];
@@ -116,6 +128,7 @@ export function useTodoEditor({
     setPending(change);
     setBusy(true);
     setError(undefined);
+    setConflicted(false);
     try {
       const result = await onEdit(change.edit);
       if (!result || !validReceipt(result, change.edit)) {
@@ -136,6 +149,14 @@ export function useTodoEditor({
 
   function submit(change: PendingTodoEdit) {
     save(change).catch((failure: unknown) => {
+      if (failure instanceof TodoContentConflict) {
+        setConflicted(true);
+        const confirmed = failure.current;
+        if (confirmed) {
+          setReceipt((previous) => newestSnapshot(confirmed, previous));
+        }
+      }
+
       setError(failure instanceof Error ? failure.message : saveError);
     });
   }
@@ -233,9 +254,20 @@ export function useTodoEditor({
   }
 
   function retry() {
-    if (pending) {
+    if (pending && !conflicted) {
       submit(pending);
     }
+  }
+
+  function discardConflict() {
+    if (!conflicted || saving.current) {
+      return;
+    }
+
+    setPending(undefined);
+    setDraft(undefined);
+    setError(undefined);
+    setConflicted(false);
   }
 
   const projection = draft ? current : (pending?.preview ?? current);
@@ -244,6 +276,7 @@ export function useTodoEditor({
     draft,
     busy,
     pending: Boolean(pending),
+    conflicted,
     error,
     writable,
     projection,
@@ -255,6 +288,7 @@ export function useTodoEditor({
     setText,
     trackFocus,
     retry,
+    discardConflict,
   };
 }
 

@@ -1,0 +1,277 @@
+.whiteboard-viewport-tools {
+  --viewport-padding-block: 3px;
+  --viewport-padding-inline: 6px;
+  --studio-ui-surface: var(--board-float, Canvas);
+  --studio-ui-border: var(--board-float-border, #d9d9d9);
+  --studio-ui-text: var(--board-chrome-text, CanvasText);
+  --studio-ui-radius: 9px;
+  position: absolute;
+  z-index: 35;
+  inset-block-start: 12px;
+  inset-inline-end: 14px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: var(--viewport-padding-block) var(--viewport-padding-inline);
+  border: 1px solid var(--studio-ui-border);
+  border-radius: 18px;
+  color: var(--studio-ui-text);
+  background: var(--studio-ui-surface);
+  box-shadow: 0 3px 14px rgb(20 24 35 / 5.5%);
+}
+
+.whiteboard-viewport-tools :where(button) {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: 30px;
+  block-size: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  line-height: 1;
+}
+
+.whiteboard-viewport-tools :where(button):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.whiteboard-viewport-tools :where(button):hover:not(:disabled) {
+  background: var(--board-chrome-hover, #f1f3f4);
+}
+
+.whiteboard-viewport-tools__divider {
+  flex: 0 0 auto;
+  inline-size: 1px;
+  block-size: 21px;
+  margin-inline: 4px;
+  background: var(--studio-ui-border);
+}
+
+.whiteboard-viewport-tools__zoom-value {
+  inline-size: 75px;
+  gap: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.whiteboard-viewport-tools__zoom {
+  margin-block: calc(-1 * var(--viewport-padding-block));
+  margin-inline-end: calc(-1 * var(--viewport-padding-inline));
+  padding-block: var(--viewport-padding-block);
+  padding-inline-end: var(--viewport-padding-inline);
+}
+
+.whiteboard-viewport-tools__zoom > .studio-ui-anchored-popover {
+  box-sizing: border-box;
+  inline-size: min(225px, calc(100vw - 16px));
+  max-block-size: min(570px, max(4rem, calc(100dvh - 165px)));
+  padding: 7px;
+  box-shadow: 0 8px 26px rgb(0 0 0 / 13%);
+}
+
+.whiteboard-viewport-tools__menu {
+  font-size: 12px;
+}
+
+.whiteboard-viewport-tools__menu > button {
+  inline-size: 100%;
+  block-size: 32px;
+  justify-content: flex-start;
+  gap: 9px;
+  padding-inline: 9px;
+}
+
+.whiteboard-viewport-tools__menu button > span {
+  margin-inline-start: auto;
+  color: var(--board-chrome-muted, #707784);
+  font-size: 10px;
+}
+
+.whiteboard-viewport-tools__steps {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 6px 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.whiteboard-viewport-tools__menu hr {
+  margin-block: 6px;
+  border: 0;
+  border-block-start: 1px solid var(--studio-ui-border);
+}
+
+.whiteboard-viewport-tools__menu summary {
+  padding: 9px;
+  color: var(--board-chrome-muted, #707784);
+  cursor: pointer;
+}
+
+.whiteboard-viewport-tools__menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+}
+
+.whiteboard-board-timer {
+  align-self: stretch;
+}
+
+.whiteboard-board-timer__trigger {
+  inline-size: auto;
+  min-inline-size: 33px;
+  gap: 5px;
+}
+
+.whiteboard-viewport-tools .whiteboard-board-timer__trigger[aria-expanded='true'] {
+  color: #b95129;
+  background: #fbe9df;
+}
+
+.whiteboard-board-timer > .studio-ui-anchored-popover {
+  box-sizing: border-box;
+  z-index: 2;
+  inline-size: min(268px, calc(100vw - 16px));
+  padding: 16px;
+}
+
+.whiteboard-board-timer__layout {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.whiteboard-board-timer__layout[data-readonly] {
+  grid-template-columns: 1fr;
+}
+
+.whiteboard-board-timer__play {
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 50%;
+  color: white;
+  background: #2563eb;
+}
+
+.whiteboard-board-timer__play:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.whiteboard-board-timer__play:focus-visible {
+  outline: 2px solid var(--studio-ui-text);
+  outline-offset: 3px;
+}
+
+.whiteboard-board-timer__face {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 140px;
+  block-size: 54px;
+}
+
+.whiteboard-board-timer__digits {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 50px;
+  font-weight: 300;
+  line-height: 54px;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.whiteboard-board-timer__digits[data-ended] {
+  color: var(--board-chrome-muted, #707784);
+}
+
+.whiteboard-board-timer__duration {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.whiteboard-board-timer__duration > input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  color: transparent;
+  background: transparent;
+  font: inherit;
+  text-align: center;
+  caret-color: transparent;
+}
+
+.whiteboard-board-timer__duration > input:focus-visible {
+  background: color-mix(in srgb, var(--studio-ui-text) 7%, transparent);
+  box-shadow: inset 0 -2px var(--studio-ui-text);
+}
+
+.whiteboard-board-timer__slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 32px;
+  block-size: 54px;
+}
+
+.whiteboard-board-timer__adjust {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.whiteboard-board-timer__adjust > button {
+  inline-size: 32px;
+  block-size: 26px;
+}
+
+.whiteboard-board-timer__reset {
+  inline-size: 32px;
+  block-size: 40px;
+}
+
+.whiteboard-board-timer__status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .whiteboard-board-timer > .studio-ui-anchored-popover {
+    inline-size: min(284px, calc(100vw - 16px));
+  }
+
+  .whiteboard-board-timer__layout {
+    gap: 8px;
+  }
+
+  .whiteboard-board-timer__slot {
+    inline-size: 40px;
+    block-size: 82px;
+  }
+
+  .whiteboard-board-timer__adjust > button {
+    inline-size: 40px;
+    block-size: 40px;
+  }
+}

@@ -9,6 +9,7 @@ import type {
 } from '../domain/index.js';
 import type { CatalogLookup, CatalogRepository } from '../ports/index.js';
 import { CatalogQueryError, readCatalogCursor, writeCatalogCursor } from './cursor.js';
+import { duplicateBoard, type DuplicateBoardCommand } from './duplicate-board.js';
 import {
   manageBoard,
   purgeBoards,
@@ -17,6 +18,7 @@ import {
 } from './management.js';
 
 export { CatalogQueryError } from './cursor.js';
+export type { DuplicateBoardCommand } from './duplicate-board.js';
 export type {
   CatalogBoardSummary,
   CatalogReceipt,
@@ -55,6 +57,7 @@ export interface CatalogApplication {
   listBoards(actor: CatalogActor, request: CatalogListRequest): CatalogPage;
   listTrashedBoards(actor: CatalogActor, request: CatalogListRequest): CatalogTrashPage;
   createBoard(actor: CatalogActor, command: CreateBoardCommand): CatalogReceipt;
+  duplicateBoard(actor: CatalogActor, command: DuplicateBoardCommand): CatalogReceipt;
   manageBoard(actor: CatalogActor, command: ManageBoardCommand): CatalogReceipt;
   purgeBoards(actor: CatalogActor, command: PurgeBoardsCommand): CatalogReceipt;
   getReceipt(actor: CatalogActor, commandId: string): CatalogReceipt | undefined;
@@ -158,10 +161,13 @@ function createBoard(
   const title = normalizeBoardTitle(command.title);
 
   return repository.write((creation) => {
-    const stored = creation.getReceipt(actor.id, commandId)?.receipt;
+    const stored = creation.getReceipt(actor.id, commandId);
     if (stored) {
-      return stored.kind === 'created' && stored.board.title === title
-        ? stored
+      const { receipt, duplicateSourceId } = stored;
+      return duplicateSourceId === undefined &&
+        receipt.kind === 'created' &&
+        receipt.board.title === title
+        ? receipt
         : { kind: 'rejected', commandId, reason: 'commandIdReuse' };
     }
     if (title === undefined) {
@@ -183,6 +189,10 @@ export function createCatalogApplication(
     listBoards: (actor, request) => listBoards(repository, actor, request),
     listTrashedBoards: (actor, request) => listTrashedBoards(repository, actor, request),
     createBoard: (actor, command) => createBoard(repository, services, actor, command),
+    duplicateBoard: (actor, command) =>
+      duplicateBoard(repository, actor.id, command, (commandId, title) =>
+        newBoard(services, commandId, title),
+      ),
     manageBoard: (actor, command) => manageBoard(repository, actor.id, command, services.now),
     purgeBoards: (actor, command) => purgeBoards(repository, actor.id, command),
     getReceipt: (actor, commandId) => repository.getReceipt(actor.id, commandId),

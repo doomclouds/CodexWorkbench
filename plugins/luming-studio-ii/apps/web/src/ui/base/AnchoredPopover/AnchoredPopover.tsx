@@ -3,7 +3,11 @@ import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useAnchoredLayer } from '../internal/anchored-layer.js';
-import type { OverlayCloseReason, OverlayPlacement } from '../internal/anchored-layer.js';
+import type {
+  OverlayAlignment,
+  OverlayCloseReason,
+  OverlayPlacement,
+} from '../internal/anchored-layer.js';
 import './AnchoredPopover.css';
 
 export type AnchoredPopoverCloseReason = OverlayCloseReason;
@@ -15,6 +19,7 @@ export interface AnchoredPopoverProps {
   children: ReactNode;
   label?: string;
   placement?: AnchoredPopoverPlacement;
+  align?: OverlayAlignment;
   persistent?: boolean;
   portalRoot?: HTMLElement | null;
   initialFocus?: () => void;
@@ -42,10 +47,11 @@ function AnchoredPopoverLayer({
   children,
   label,
   placement,
+  align,
   persistent,
   onRequestClose,
 }: AnchoredPopoverLayerProps) {
-  const layer = useAnchoredLayer({ open, anchor, placement, persistent, onRequestClose });
+  const layer = useAnchoredLayer({ open, anchor, placement, align, persistent, onRequestClose });
 
   if (!open || !anchor) {
     return null;

@@ -1,6 +1,6 @@
 # 鹿鸣 · Luming Studio II
 
-面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 包提供基础控件、Canvas 运行时和一期白板编辑入口。
+面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。当前 Web 入口支持工作台、白板与对象编辑、备注、版本历史、观看、导出和当前格式归档导入。
 
 ## 项目结构
 
@@ -30,9 +30,8 @@ luming-studio-ii/
 │   │   └── tests/{unit,component,contracts,integration,fixtures,support}/
 │   └── server/
 │       ├── src/
-│       │   ├── entrypoints/{http,mcp}/
-│       │   ├── application/workflows/
-│       │   ├── modules/whiteboard/{application,domain,ports}/
+│       │   ├── entrypoints/http/
+│       │   ├── modules/{archives,catalog,feedback,whiteboard}/
 │       │   ├── infrastructure/{platform,adapters}/
 │       │   └── bootstrap/
 │       └── tests/{unit,contracts,integration,fixtures,support}/

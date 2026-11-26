@@ -1,15 +1,32 @@
 import type {
-  BoardAccess,
+  BoardEditReader,
+  BoardEditRepository,
+  BoardEditWriter,
   BoardHeader,
   BoardObject,
   ExportAssetRead,
   PayloadRecord,
   StoredReceipt,
-  WhiteboardReader,
-  WhiteboardRepository,
-  WhiteboardWriter,
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../platform/index.js';
+import { readBoardAccess } from './authorization/index.js';
+import {
+  advanceBoardRevision,
+  applyBoardChanges,
+  boardEditSchema,
+  hasUsedObjectId,
+} from './board-edit-storage.js';
+import { readEditReceipt, saveEditReceipt } from './board-edit-receipts.js';
+import {
+  boardHistorySchema,
+  publishBoardVersion,
+  readBoardVersion,
+  readBoardVersions,
+  readVersionObjects,
+  readVersionPayloadByteSize,
+  readVersionPayloads,
+  recordObjectHistory,
+} from './board-history-storage.js';
 import { decodeReceiptObject, decodeSceneObject } from './board-object-storage.js';
 import {
   decodeJson,
@@ -17,7 +34,6 @@ import {
   storedArray,
   storedDecimalVersion,
   storedRecord,
-  storedSqliteBool,
   storedText,
   storedVersion,
 } from './stored-values.js';
@@ -61,23 +77,6 @@ function readObjects(
   return query.all(...params).map(decodeSceneObject);
 }
 
-function readAccess(
-  connection: SqliteConnection,
-  boardId: string,
-  actorId: string,
-): BoardAccess | undefined {
-  const query = connection.prepare(`
-    SELECT m.can_edit
-    FROM board_members AS m
-    LEFT JOIN board_lifecycle AS l ON l.board_id = m.board_id
-    WHERE m.board_id = ? AND m.actor_id = ? AND l.trashed_at_millis IS NULL
-  `);
-  query.setReadBigInts(true);
-  const row = query.get(boardId, actorId);
-
-  return row && { canEdit: storedSqliteBool(row.can_edit, 'can_edit') };
-}
-
 function readBoard(connection: SqliteConnection, boardId: string): BoardHeader | undefined {
   const query = connection.prepare('SELECT title, revision FROM boards WHERE board_id = ?');
   query.setReadBigInts(true);
@@ -115,6 +114,29 @@ function readPayloads(
     bodyKind: storedText(row.body_kind, 'body_kind'),
     data: decodePayload(row.body_json),
   }));
+}
+
+function readPayloadByteSize(
+  connection: SqliteConnection,
+  boardId: string,
+  objectIds: readonly string[],
+  revision?: bigint,
+): bigint {
+  if (revision !== undefined) {
+    return readVersionPayloadByteSize(connection, boardId, revision, objectIds);
+  }
+  if (objectIds.length === 0) {
+    return 0n;
+  }
+
+  const query = connection.prepare(`
+    SELECT coalesce(sum(length(cast(body_json AS BLOB))), 0) AS total_bytes
+    FROM object_payloads
+    WHERE board_id = ? AND object_id IN (SELECT value FROM json_each(?))
+  `);
+  query.setReadBigInts(true);
+
+  return storedVersion(query.get(boardId, JSON.stringify(objectIds))?.total_bytes, 'total_bytes');
 }
 
 function readExportAsset(
@@ -190,6 +212,11 @@ function saveGeometry(
   boardId: string,
   objects: readonly BoardObject[],
 ): void {
+  recordObjectHistory(
+    connection,
+    boardId,
+    objects.map(({ objectId }) => objectId),
+  );
   const update = connection.prepare(`
     UPDATE board_objects
     SET x = ?, y = ?, detail_json = ?, geometry_version = ?
@@ -216,18 +243,6 @@ function saveGeometry(
   }
 }
 
-function advanceBoardRevision(connection: SqliteConnection, boardId: string): bigint {
-  const update = connection.prepare(`
-    UPDATE boards SET revision = revision + 1
-    WHERE board_id = ?
-    RETURNING revision
-  `);
-  update.setReadBigInts(true);
-  const row = update.get(boardId);
-
-  return storedVersion(row?.revision, 'revision');
-}
-
 function saveReceipt(connection: SqliteConnection, actorId: string, stored: StoredReceipt): void {
   const { boardId, commandId, outcome } = stored.receipt;
   if (outcome.kind !== 'applied') {
@@ -251,9 +266,13 @@ function saveReceipt(connection: SqliteConnection, actorId: string, stored: Stor
     .run(boardId, actorId, commandId, stored.signature, receiptJson);
 }
 
-function createReader(connection: SqliteConnection): WhiteboardReader {
+function createReader(connection: SqliteConnection): BoardEditReader {
   return {
-    getAccess: (boardId, actorId) => readAccess(connection, boardId, actorId),
+    getAccess: (boardId, actorId) => {
+      const access = readBoardAccess(connection, boardId, actorId);
+
+      return access && { canEdit: access.canEdit };
+    },
     getBoard: (boardId) => readBoard(connection, boardId),
     listObjects: (boardId, limit) =>
       limit === undefined
@@ -264,27 +283,92 @@ function createReader(connection: SqliteConnection): WhiteboardReader {
         ? []
         : readObjects(connection, listTargets, JSON.stringify(objectIds), boardId),
     getPayloads: (boardId, objectIds) => readPayloads(connection, boardId, objectIds),
+    payloadByteSize: (boardId, ids, revision) =>
+      readPayloadByteSize(connection, boardId, ids, revision),
     getExportAsset: (boardId, assetId, maximumBytes) =>
       readExportAsset(connection, boardId, assetId, maximumBytes),
     getReceipt: (boardId, actorId, commandId) =>
       readReceipt(connection, boardId, actorId, commandId),
+    getEditReceipt: (boardId, actorId, commandId) =>
+      readEditReceipt(connection, boardId, actorId, commandId),
+    listVersions: (boardId, before, limit) => readBoardVersions(connection, boardId, before, limit),
+    getVersion: (boardId, revision) => readBoardVersion(connection, boardId, revision),
+    listVersionObjects: (boardId, revision, objectIds) =>
+      readVersionObjects(connection, boardId, revision, objectIds),
+    getVersionPayloads: (boardId, revision, objectIds) =>
+      readVersionPayloads(connection, boardId, revision, objectIds),
   };
 }
 
-function createWriter(connection: SqliteConnection): WhiteboardWriter {
+function readRelatedConnectors(
+  connection: SqliteConnection,
+  boardId: string,
+  ids: readonly string[],
+) {
+  if (!ids.length) {
+    return [];
+  }
+
+  const query = `
+    WITH attached AS (
+      SELECT connector.object_id
+      FROM json_each(?) AS target
+      CROSS JOIN board_objects AS connector INDEXED BY board_connector_start
+        ON connector.board_id = ? AND connector.kind = 'connector'
+        AND json_extract(connector.detail_json, '$.start.attachment.objectId') = target.value
+      UNION
+      SELECT connector.object_id
+      FROM json_each(?) AS target
+      CROSS JOIN board_objects AS connector INDEXED BY board_connector_end
+        ON connector.board_id = ? AND connector.kind = 'connector'
+        AND json_extract(connector.detail_json, '$.end.attachment.objectId') = target.value
+    )
+    ${sceneFields}
+    FROM attached
+    CROSS JOIN board_objects AS o ON o.board_id = ? AND o.object_id = attached.object_id
+    ${payloadVersionJoin}
+    ${sceneOrder}
+  `;
+  const targets = JSON.stringify(ids);
+
+  return readObjects(connection, query, targets, boardId, targets, boardId, boardId);
+}
+
+function createWriter(connection: SqliteConnection): BoardEditWriter {
+  const reader = createReader(connection);
+
   return {
-    ...createReader(connection),
+    ...reader,
     listGroupObjects: (boardId, groupId) => readObjects(connection, listGroup, boardId, groupId),
     listChildObjects: (boardId, parentId) =>
       readObjects(connection, listChildren, boardId, parentId),
     saveGeometry: (boardId, objects) => saveGeometry(connection, boardId, objects),
-    advanceBoardRevision: (boardId) => advanceBoardRevision(connection, boardId),
+    advanceBoardRevision(boardId, commit) {
+      const before = commit ? readBoard(connection, boardId) : undefined;
+      const revision = advanceBoardRevision(connection, boardId);
+      if (before && commit) {
+        publishBoardVersion(connection, before, revision, commit);
+      }
+
+      return revision;
+    },
     saveReceipt: (actorId, stored) => saveReceipt(connection, actorId, stored),
+    hasUsedObjectId: (boardId, objectId) => hasUsedObjectId(connection, boardId, objectId),
+    listRelatedConnectors: (boardId, ids) => readRelatedConnectors(connection, boardId, ids),
+    applyBoardChanges: (board, changes, commit) =>
+      applyBoardChanges(connection, board, changes, commit, (ids) =>
+        reader.getObjects(board.boardId, ids),
+      ),
+    saveEditReceipt: (actorId, stored) => saveEditReceipt(connection, actorId, stored),
   };
 }
 
-export function createWhiteboardRepository(database: SqliteDatabase): WhiteboardRepository {
-  database.write((connection) => connection.exec(whiteboardSchema));
+export function createWhiteboardRepository(database: SqliteDatabase): BoardEditRepository {
+  database.write((connection) => {
+    connection.exec(whiteboardSchema);
+    connection.exec(boardEditSchema);
+    connection.exec(boardHistorySchema);
+  });
 
   return {
     read: (work) => database.read((connection) => work(createReader(connection))),

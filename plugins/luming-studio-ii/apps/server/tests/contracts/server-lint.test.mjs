@@ -11,12 +11,18 @@ const fixture = mkdtempSync(join(tmpdir(), 'luming-server-boundary-'));
 const whiteboard = 'src/modules/whiteboard/';
 const catalog = 'src/modules/catalog/';
 const archives = 'src/modules/archives/';
+const feedback = 'src/modules/feedback/';
 const catalogAdapter = 'src/infrastructure/adapters/catalog/';
 const archivesAdapter = 'src/infrastructure/adapters/archives/';
+const feedbackAdapter = 'src/infrastructure/adapters/feedback/';
+const authorizationAdapter = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const archivesProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/service';
+const editingProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+const historyProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
+const feedbackProtocol = '@codexworkbench/luming-studio-ii-contracts/feedback/service';
 const boundaryRule = 'server/contract-boundary';
 
 const fixtureFiles = [
@@ -32,7 +38,9 @@ const fixtureFiles = [
   catalog + 'domain/index.ts',
   catalog + 'domain/private.ts',
   catalog + 'ports/index.ts',
+  catalog + 'ports/private.ts',
   catalogAdapter + 'index.ts',
+  catalogAdapter + 'duplicate-board.ts',
   catalogAdapter + 'lifecycle.ts',
   catalogAdapter + 'private.ts',
   archives + 'application/index.ts',
@@ -43,7 +51,16 @@ const fixtureFiles = [
   archivesAdapter + 'private.ts',
   archivesPlatform + 'index.ts',
   archivesPlatform + 'private.ts',
+  feedback + 'application/index.ts',
+  feedback + 'application/private.ts',
+  feedback + 'domain/index.ts',
+  feedback + 'ports/index.ts',
+  feedbackAdapter + 'index.ts',
+  feedbackAdapter + 'private.ts',
+  authorizationAdapter + 'index.ts',
+  authorizationAdapter + 'private.ts',
   'src/infrastructure/adapters/index.ts',
+  'src/infrastructure/adapters/board-edit-storage.ts',
   'src/infrastructure/adapters/private.ts',
   'src/infrastructure/platform/index.ts',
   'tests/fixtures/board.ts',
@@ -88,6 +105,35 @@ async function inspect(filePath, code) {
 }
 
 const permitted = [
+  [
+    'src/entrypoints/http/catalog-routes.ts',
+    `import { BoardCatalogService } from '${catalogProtocol}';\nimport type { CatalogApplication } from '@catalog/application/index.js';`,
+  ],
+  [
+    catalog + 'application/duplicate-board.ts',
+    "import { normalizeTitle } from '../domain/index.js';\nimport type { CatalogWriter } from '../ports/index.js';",
+  ],
+  [catalogAdapter + 'index.ts', "import { duplicateBoard } from './duplicate-board.js';"],
+  [
+    catalogAdapter + 'duplicate-board.ts',
+    "import type { CatalogWriter } from '@catalog/ports/index.js';\nimport type { SqliteConnection } from '../../platform/index.js';",
+  ],
+  [
+    whiteboard + 'domain/object-content-edits-table.ts',
+    "import type { JsonObject } from './index.js';",
+  ],
+  [
+    whiteboard + 'application/edit-content.ts',
+    "import { editTableContent, editEmbedContent } from '../domain/index.js';\nimport type { BoardEditWriter } from '../ports/index.js';",
+  ],
+  [
+    'src/entrypoints/http/content-edits.ts',
+    `import type { EditObjectContentRequest } from '${editingProtocol}';\nimport type { BoardEditorApplication } from '@board-app';`,
+  ],
+  [
+    'tests/integration/whiteboard-content-edit.test.ts',
+    `import { createWhiteboardServer } from '../../src/bootstrap/index.js';\nimport { BoardEditService } from '${editingProtocol}';`,
+  ],
   [
     catalog + 'application/lifecycle.ts',
     "import type { CatalogRepository } from '../ports/index.js';",
@@ -183,6 +229,47 @@ const permitted = [
     "import { extractZip } from '../../../src/infrastructure/platform/archives/index.js';",
   ],
   ['tests/unit/archives.test.ts', "import { inspect } from '@archives/domain/index.js';"],
+  [
+    'src/entrypoints/http/whiteboard-edits.ts',
+    `import type { MutateGeometryRequest } from '${editingProtocol}';\nimport type { ListVersionsRequest } from '${historyProtocol}';\nimport { edit } from '@board-app';`,
+  ],
+  [
+    'src/entrypoints/http/feedback.ts',
+    `import { createFeedback } from '../../modules/feedback/application/index.js';\nimport type { ApplyFeedbackRequest } from '${feedbackProtocol}';`,
+  ],
+  [
+    feedback + 'application/index.ts',
+    "import { createThread } from '../domain/index.js';\nimport type { FeedbackRepository } from '../ports/index.js';",
+  ],
+  [feedback + 'ports/index.ts', "import type { Thread } from '../domain/index.js';"],
+  [
+    feedbackAdapter + 'index.ts',
+    "import type { FeedbackRepository } from '../../../modules/feedback/ports/index.js';\nimport type { SqliteDatabase } from '../../platform/index.js';\nimport { readBoardAccess } from '../authorization/index.js';",
+  ],
+  [
+    authorizationAdapter + 'index.ts',
+    "import type { SqliteConnection } from '../../platform/index.js';",
+  ],
+  [
+    'src/infrastructure/adapters/index.ts',
+    "import { readBoardAccess } from './authorization/index.js';",
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { createFeedback } from '../modules/feedback/application/index.js';\nimport { createRepository } from '../infrastructure/adapters/feedback/index.js';",
+  ],
+  [
+    'tests/integration/feedback.test.ts',
+    `import { create } from '../../src/bootstrap/index.js';\nimport type { ListThreadsRequest } from '${feedbackProtocol}';`,
+  ],
+  [
+    'tests/support/edit-protocol.ts',
+    `import type { ExportVersionRequest } from '${historyProtocol}';\nimport type { AttachBoardImageRequest } from '${editingProtocol}';`,
+  ],
+  [
+    'tests/unit/feedback.test.ts',
+    "import { createThread } from '../../src/modules/feedback/domain/index.js';\nimport type { FeedbackRepository } from '../../src/modules/feedback/ports/index.js';",
+  ],
 ];
 
 for (const [file, code] of permitted) {
@@ -192,6 +279,205 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'copy HTTP reaches the catalogue duplication adapter',
+    'src/entrypoints/http/catalog-routes.ts',
+    "import { duplicateBoard } from '../../infrastructure/adapters/catalog/duplicate-board.js';",
+  ],
+  [
+    'copy HTTP opens SQLite directly',
+    'src/entrypoints/http/catalog-routes.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'copy application reads generated requests rather than domain inputs',
+    catalog + 'application/duplicate-board.ts',
+    `import type { DuplicateBoardRequest } from '${catalogProtocol}';`,
+  ],
+  [
+    'copy application enters a catalogue port implementation detail',
+    catalog + 'application/duplicate-board.ts',
+    "import type { CatalogWriter } from '../ports/private.js';",
+  ],
+  [
+    'copy application bypasses ports and enters the duplicate adapter',
+    catalog + 'application/duplicate-board.ts',
+    "import { duplicateBoard } from '../../../infrastructure/adapters/catalog/duplicate-board.js';",
+  ],
+  [
+    'copy adapter imports a private whiteboard application',
+    catalogAdapter + 'duplicate-board.ts',
+    "import { copyScene } from '@board/application/private.js';",
+  ],
+  [
+    'copy adapter imports the private whiteboard persistence implementation',
+    catalogAdapter + 'duplicate-board.ts',
+    "import { applyBoardChanges } from '../board-edit-storage.js';",
+  ],
+  [
+    'copy adapter opens the host database outside platform',
+    catalogAdapter + 'duplicate-board.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'table content domain consumes a generated payload schema',
+    whiteboard + 'domain/object-content-edits-table.ts',
+    "import { TablePayloadSchema } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/payload';",
+  ],
+  [
+    'embed content domain fetches remote content directly',
+    whiteboard + 'domain/object-content-edits-embed.ts',
+    'const content = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'sticker content domain reads a host file directly',
+    whiteboard + 'domain/object-content-edits-sticker.ts',
+    "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'crop content domain takes SQLite access',
+    whiteboard + 'domain/object-content-edits-crop.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'embed content domain uses a generated codec',
+    whiteboard + 'domain/object-content-edits-embed.ts',
+    "import { fromBinary } from '@bufbuild/protobuf';",
+  ],
+  [
+    'sticker application bypasses the public domain entry',
+    whiteboard + 'application/edit-content.ts',
+    "import { editStickerContent } from '../domain/private.js';",
+  ],
+  [
+    'content application takes the object table adapter',
+    whiteboard + 'application/edit-content.ts',
+    "import { applyBoardChanges } from '../../../infrastructure/adapters/board-edit-storage.js';",
+  ],
+  [
+    'content HTTP bypasses the application and accesses the object table adapter',
+    'src/entrypoints/http/content-edits.ts',
+    "import { applyBoardChanges } from '../../infrastructure/adapters/board-edit-storage.js';",
+  ],
+  [
+    'content HTTP opens SQLite directly',
+    'src/entrypoints/http/content-edits.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'feedback domain uses SQLite outside a declared port',
+    feedback + 'domain/index.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'feedback domain uses host networking',
+    feedback + 'domain/index.ts',
+    'const payload = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'feedback application uses the host clock',
+    feedback + 'application/index.ts',
+    'const time = Date.now();',
+    'no-restricted-globals',
+  ],
+  [
+    'feedback consumes generated messages in a domain',
+    feedback + 'domain/index.ts',
+    `import type { ApplyFeedbackRequest } from '${feedbackProtocol}';`,
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'feedback application takes a dependency on whiteboard writes',
+    feedback + 'application/index.ts',
+    "import { move } from '@board-app';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'feedback application reaches an owning adapter',
+    feedback + 'application/index.ts',
+    "import { readBoardAccess } from '../../../infrastructure/adapters/authorization/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'feedback ports take domain runtime values',
+    feedback + 'ports/index.ts',
+    "import { createThread } from '../domain/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'feedback adapter takes whiteboard ports',
+    feedbackAdapter + 'index.ts',
+    "import type { WhiteboardRepository } from '@board/ports/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'feedback adapter bypasses the public authorization boundary',
+    feedbackAdapter + 'index.ts',
+    "import { readBoardAccess } from '../authorization/private.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'authorization adapter accesses Node SQLite rather than platform',
+    authorizationAdapter + 'index.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'HTTP bypasses the feedback public application',
+    'src/entrypoints/http/feedback.ts',
+    "import { createFeedback } from '../../modules/feedback/application/private.js';",
+  ],
+  [
+    'HTTP accesses the feedback adapter',
+    'src/entrypoints/http/feedback.ts',
+    "import { createRepository } from '../../infrastructure/adapters/feedback/index.js';",
+  ],
+  [
+    'bootstrap bypasses the feedback adapter boundary',
+    'src/bootstrap/index.ts',
+    "import { createRepository } from '../infrastructure/adapters/feedback/private.js';",
+  ],
+  [
+    'geometry application imports a generated write request',
+    whiteboard + 'application/edit-geometry.ts',
+    `import type { MutateGeometryRequest } from '${editingProtocol}';`,
+  ],
+  [
+    'history ports consume generated payloads',
+    whiteboard + 'ports/history.ts',
+    `import type { GetVersionPayloadsRequest } from '${historyProtocol}';`,
+  ],
+  [
+    'MCP imports an HTTP feedback wire contract',
+    'src/entrypoints/mcp/runtime.ts',
+    `import type { ApplyFeedbackRequest } from '${feedbackProtocol}';`,
+  ],
+  [
+    'media adapters access the file system directly',
+    'src/infrastructure/adapters/media.ts',
+    "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'feedback integration tests bypass bootstrap and construct the application',
+    'tests/integration/feedback.test.ts',
+    "import { createFeedback } from '../../src/modules/feedback/application/index.js';",
+  ],
+  [
+    'feedback unit tests consume generated requests',
+    'tests/unit/feedback.test.ts',
+    `import type { ApplyFeedbackRequest } from '${feedbackProtocol}';`,
+  ],
   [
     'whiteboard export reaches the filesystem instead of the repository port',
     whiteboard + 'application/export-board.ts',

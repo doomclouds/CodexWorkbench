@@ -1,0 +1,251 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "google/protobuf/struct.proto";
+import "luming/studio/v1/whiteboard_payload.proto";
+import "luming/studio/v1/whiteboard_scene.proto";
+import "luming/studio/v1/whiteboard_service.proto";
+
+service BoardEditService {
+  rpc EditBoardGeometry(EditBoardGeometryRequest) returns (EditBoardGeometryResponse);
+  rpc EditObjectContent(EditObjectContentRequest) returns (EditObjectContentResponse);
+  rpc AttachBoardImage(AttachBoardImageRequest) returns (AttachBoardImageResponse);
+  rpc GetBoardEditReceipt(GetBoardEditReceiptRequest) returns (GetBoardEditReceiptResponse);
+}
+
+message EditBoardGeometryRequest {
+  string board_id = 1;
+  string command_id = 2;
+  oneof operation {
+    CreateBoardObject create = 3;
+    TransformBoardObjects transform = 4;
+    ChangeBoardObjectLock change_lock = 5;
+    DeleteBoardObjects delete = 6;
+    ReorderBoardObjects reorder = 7;
+    DuplicateBoardObjects duplicate = 8;
+  }
+}
+
+message CreateBoardObject {
+  ObjectMetadata object = 1;
+  ObjectPayload initial_payload = 2;
+}
+
+message EditBoardTarget {
+  string object_id = 1;
+  optional uint64 expected_geometry_version = 2;
+}
+
+message TransformBoardObject {
+  EditBoardTarget target = 1;
+  Geometry geometry = 2;
+  ConnectorGeometry connector = 3;
+  InkPayload ink = 4;
+}
+
+enum BoardTransformKind {
+  BOARD_TRANSFORM_KIND_UNSPECIFIED = 0;
+  BOARD_TRANSFORM_KIND_RESIZE = 1;
+  BOARD_TRANSFORM_KIND_ROTATE = 2;
+  BOARD_TRANSFORM_KIND_CONNECT = 3;
+}
+
+message TransformBoardObjects {
+  BoardTransformKind kind = 1;
+  repeated TransformBoardObject objects = 2;
+}
+
+message ChangeBoardObjectLock {
+  repeated EditBoardTarget targets = 1;
+  bool locked = 2;
+}
+
+message DeleteBoardObjects {
+  repeated EditBoardTarget targets = 1;
+}
+
+enum BoardLayerDirection {
+  BOARD_LAYER_DIRECTION_UNSPECIFIED = 0;
+  BOARD_LAYER_DIRECTION_FORWARD = 1;
+  BOARD_LAYER_DIRECTION_BACKWARD = 2;
+  BOARD_LAYER_DIRECTION_FRONT = 3;
+  BOARD_LAYER_DIRECTION_BACK = 4;
+}
+
+message ReorderBoardObjects {
+  repeated EditBoardTarget targets = 1;
+  BoardLayerDirection direction = 2;
+  optional uint64 expected_board_revision = 3;
+}
+
+message DuplicateBoardObject {
+  EditBoardTarget source = 1;
+  string new_object_id = 2;
+}
+
+message DuplicateBoardObjects {
+  repeated DuplicateBoardObject targets = 1;
+  MoveDelta delta = 2;
+}
+
+message EditBoardGeometryResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message EditObjectContentRequest {
+  string board_id = 1;
+  string command_id = 2;
+  string object_id = 3;
+  optional uint64 expected_payload_version = 4;
+  oneof edit {
+    DocumentPayload document = 5;
+    TodoEdits todo = 6;
+    TextPayload text = 7;
+    SaveTableContent table = 8;
+    SaveEmbedSource embed_source = 9;
+    SaveEmbedState embed_state = 10;
+    SelectStickerContent sticker = 11;
+    CropBoardImage crop = 12;
+  }
+}
+
+message SaveTableContent {
+  TablePayload table = 1;
+  TableWidthChange width_change = 2;
+}
+
+message TableWidthChange {
+  double expected_width = 1;
+  double width = 2;
+}
+
+message SaveEmbedSource {
+  string title = 1;
+  string html = 2;
+  optional uint64 expected_source_revision = 3;
+}
+
+message SaveEmbedState {
+  google.protobuf.Value state = 1;
+}
+
+message SelectStickerContent {
+  string sticker_id = 1;
+  optional string fallback = 2;
+}
+
+message CropBoardImage {
+  ImageCrop crop = 1;
+  ImageSize natural_size = 2;
+}
+
+message TodoEdits {
+  repeated TodoEdit edits = 1;
+}
+
+message TodoEdit {
+  oneof operation {
+    string rename = 1;
+    InsertTodoItem insert = 2;
+    UpdateTodoItem update = 3;
+    string delete_item_id = 4;
+    MoveTodoItem move = 5;
+  }
+}
+
+message TodoPlacement {
+  oneof position {
+    bool first = 1;
+    bool append = 2;
+    string after_item_id = 3;
+  }
+}
+
+message InsertTodoItem {
+  TodoItem item = 1;
+  TodoPlacement placement = 2;
+}
+
+message UpdateTodoItem {
+  string item_id = 1;
+  optional string text = 2;
+  optional bool checked = 3;
+  oneof source_change {
+    TodoSourceRef source_ref = 4;
+    bool clear_source = 5;
+  }
+}
+
+message MoveTodoItem {
+  string item_id = 1;
+  TodoPlacement placement = 2;
+}
+
+message EditObjectContentResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message AttachBoardImageRequest {
+  string board_id = 1;
+  string command_id = 2;
+  string object_id = 3;
+  string display_name = 4;
+  Geometry geometry = 5;
+  bytes content = 6;
+}
+
+message AttachBoardImageResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message BoardEditReceipt {
+  string board_id = 1;
+  string command_id = 2;
+  oneof outcome {
+    BoardEditApplied applied = 3;
+    BoardEditConflict conflict = 4;
+    BoardEditRejected rejected = 5;
+  }
+}
+
+message BoardEditApplied {
+  optional uint64 board_revision = 1;
+  repeated ObjectMetadata changed_objects = 2;
+  repeated string removed_object_ids = 3;
+  repeated string object_order = 4;
+  repeated ObjectPayloadResult changed_payloads = 5;
+  bool details_expired = 6;
+}
+
+message BoardEditConflict {
+  optional uint64 board_revision = 1;
+  repeated ObjectMetadata current_objects = 2;
+  repeated ObjectPayloadResult current_payloads = 3;
+}
+
+message BoardEditRejected {
+  BoardEditRejectionReason reason = 1;
+}
+
+enum BoardEditRejectionReason {
+  BOARD_EDIT_REJECTION_REASON_UNSPECIFIED = 0;
+  BOARD_EDIT_REJECTION_REASON_FORBIDDEN = 1;
+  BOARD_EDIT_REJECTION_REASON_INVALID_EDIT = 2;
+  BOARD_EDIT_REJECTION_REASON_OBJECT_NOT_FOUND = 3;
+  BOARD_EDIT_REJECTION_REASON_GEOMETRY_LOCKED = 4;
+  BOARD_EDIT_REJECTION_REASON_COMMAND_ID_REUSE = 5;
+  BOARD_EDIT_REJECTION_REASON_UNSUPPORTED_KIND = 6;
+  BOARD_EDIT_REJECTION_REASON_VERSION_UNAVAILABLE = 7;
+  BOARD_EDIT_REJECTION_REASON_TOO_LARGE = 8;
+  BOARD_EDIT_REJECTION_REASON_INVALID_IMAGE = 9;
+}
+
+message GetBoardEditReceiptRequest {
+  string board_id = 1;
+  string command_id = 2;
+}
+
+message GetBoardEditReceiptResponse {
+  BoardEditReceipt receipt = 1;
+}

@@ -9,6 +9,8 @@ const archiveAssetPath = /^\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-
 const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
 
+export { prepareBoardImage } from './board-image.js';
+
 type LibraryLayout = 'grid' | 'list';
 type StudioTheme = 'light' | 'dark';
 
@@ -143,6 +145,10 @@ export async function postArchive(
   }
 
   return readProtobufResponse(response);
+}
+
+export function readHtmlSource(file: File): Promise<string> {
+  return file.text();
 }
 
 interface BoardDownload {

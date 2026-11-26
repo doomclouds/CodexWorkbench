@@ -10,7 +10,7 @@ import { readMoveReceipt, readReceiptLookup } from './receipt.js';
 import { readScene } from './scene.js';
 import { matchIdentity } from './values.js';
 
-async function request<Input extends DescMessage, Output extends DescMessage>(
+export async function request<Input extends DescMessage, Output extends DescMessage>(
   post: WhiteboardPost,
   method: DescMethodUnary<Input, Output>,
   input: MessageInitShape<Input>,

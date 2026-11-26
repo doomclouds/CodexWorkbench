@@ -1,12 +1,15 @@
+import { mergeConfirmedEdit, type AppliedBoardEdit } from './confirmed-edits.js';
 import { mergeConfirmedScene } from './confirmed-scene.js';
 import type {
   WhiteboardMoveCommand,
   WhiteboardMoveReceipt,
   WhiteboardObject,
   WhiteboardPayload,
+  WhiteboardPayloadResult,
   WhiteboardScene,
   WhiteboardService,
 } from './contracts.js';
+import type { BoardEditReceipt } from './edits-types.js';
 import {
   mergePayloadCache,
   missingPayloads,
@@ -35,16 +38,23 @@ interface WhiteboardSession {
   readonly reload: () => void;
   readonly observeVisible: (ids: readonly string[]) => void;
   readonly retryPayloads: () => void;
+  readonly acceptEdit: (receipt: AppliedBoardEdit) => void;
+  readonly acceptConflict: (receipt: ConflictingEdit) => void;
   readonly submitMove: (command: WhiteboardMoveCommand) => Promise<WhiteboardMoveReceipt>;
   readonly readReceipt: (commandId: string) => Promise<WhiteboardMoveReceipt | undefined>;
 }
+
+type WhiteboardWriteService = Pick<WhiteboardService, 'moveObjects' | 'getReceipt'>;
+type WhiteboardSessionService = Pick<WhiteboardService, 'getScene' | 'getPayloads'> &
+  Partial<WhiteboardWriteService>;
+type ConflictingEdit = Extract<BoardEditReceipt, { kind: 'conflict' }>;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 export function createWhiteboardSession(
-  service: WhiteboardService,
+  service: WhiteboardSessionService,
   boardId: string,
 ): WhiteboardSession {
   const listeners = new Set<() => void>();
@@ -55,6 +65,17 @@ export function createWhiteboardSession(
   let controller: AbortController | undefined;
   let readingPayloads: AbortSignal | undefined;
   let sceneRequest = 0;
+  let confirmedRevision = 0n;
+
+  function rememberRevision(revision: bigint) {
+    if (revision < confirmedRevision) {
+      return false;
+    }
+
+    confirmedRevision = revision;
+
+    return true;
+  }
 
   function publish(next: WhiteboardSnapshot) {
     snapshot = next;
@@ -110,8 +131,20 @@ export function createWhiteboardSession(
     );
   }
 
-  function acceptScene(scene: WhiteboardScene) {
+  function acceptScene(scene: WhiteboardScene, payloads?: readonly WhiteboardPayloadResult[]) {
     objects = new Map(scene.objects.map((object) => [object.id, object]));
+    if (payloads?.length) {
+      const requests = payloads.flatMap((result) => {
+        if (result.kind !== 'loaded') {
+          return [];
+        }
+
+        const { id, version } = result.payload;
+
+        return objects.get(id)?.payloadVersion === version ? [{ id, version }] : [];
+      });
+      cache = mergePayloadCache(cache, visible, objects, requests, payloads);
+    }
     publish({ kind: 'ready', scene, payloads: visiblePayloads(cache, objects) });
     requestVisible();
   }
@@ -142,8 +175,8 @@ export function createWhiteboardSession(
     if (scene.boardId !== boardId) {
       throw new Error('服务返回了其他白板。');
     }
-    if (snapshot.kind === 'ready' && scene.revision < snapshot.scene.revision) {
-      return;
+    if (!rememberRevision(scene.revision)) {
+      throw new Error('当前白板场景早于已确认版次，请重新读取。');
     }
 
     acceptScene(scene);
@@ -189,10 +222,61 @@ export function createWhiteboardSession(
       return;
     }
 
+    const revision = receipt.kind === 'rejected' ? undefined : receipt.revision;
+    if (revision === undefined || !rememberRevision(revision)) {
+      return;
+    }
+
+    if (revision > snapshot.scene.revision + 1n) {
+      reload();
+      return;
+    }
+
     const scene = mergeConfirmedScene(snapshot.scene, receipt);
     if (scene !== snapshot.scene) {
       acceptScene(scene);
     }
+  }
+
+  function acceptEdit(receipt: AppliedBoardEdit) {
+    if (receipt.boardId !== boardId || controller?.signal.aborted || snapshot.kind !== 'ready') {
+      return;
+    }
+    if (!rememberRevision(receipt.revision)) {
+      return;
+    }
+
+    if (receipt.detailsExpired) {
+      reload();
+      return;
+    }
+
+    const scene = mergeConfirmedEdit(snapshot.scene, receipt);
+    if (!scene) {
+      reload();
+    } else if (scene !== snapshot.scene) {
+      acceptScene(scene, receipt.payloads);
+    }
+  }
+
+  function acceptConflict(receipt: ConflictingEdit) {
+    if (receipt.boardId !== boardId || controller?.signal.aborted || snapshot.kind !== 'ready') {
+      return;
+    }
+
+    const { scene } = snapshot;
+    if (receipt.revision !== undefined && !rememberRevision(receipt.revision)) {
+      return;
+    }
+
+    if (receipt.objects.length) {
+      const current = new Map(receipt.objects.map((object) => [object.id, object]));
+      acceptScene(
+        { ...scene, objects: scene.objects.map((object) => current.get(object.id) ?? object) },
+        receipt.payloads,
+      );
+    }
+    reload();
   }
 
   return {
@@ -205,6 +289,8 @@ export function createWhiteboardSession(
     getSnapshot: () => snapshot,
     open,
     reload,
+    acceptEdit,
+    acceptConflict,
     observeVisible(ids) {
       visible = [...new Set(ids)];
       requestVisible();
@@ -220,6 +306,9 @@ export function createWhiteboardSession(
       if (command.boardId !== boardId) {
         throw new Error('移动命令和当前白板不匹配。');
       }
+      if (!service.moveObjects) {
+        throw new Error('当前白板视图为只读。');
+      }
 
       const receipt = await service.moveObjects(command, signal);
       signal.throwIfAborted();
@@ -229,7 +318,7 @@ export function createWhiteboardSession(
     },
     async readReceipt(commandId) {
       const signal = requireSignal();
-      const receipt = await service.getReceipt(boardId, commandId, signal);
+      const receipt = await service.getReceipt?.(boardId, commandId, signal);
       signal.throwIfAborted();
       if (receipt) {
         receiveReceipt(receipt, commandId);

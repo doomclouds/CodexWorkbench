@@ -77,6 +77,8 @@ export interface DocumentObjectProps {
   readonly paper?: DocumentPaper;
   readonly canvas?: { readonly width: number; readonly height: number; readonly zoom: number };
   readonly focusedReading?: boolean;
+  readonly expandControl?: { readonly label: string; readonly title: string };
+  readonly locked?: boolean;
   readonly onOpenPresentation?: () => void;
   readonly onClosePresentation?: () => void;
   readonly editRequest?: number;

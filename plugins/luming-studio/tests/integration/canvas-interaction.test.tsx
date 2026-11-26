@@ -1709,15 +1709,29 @@ describe('whiteboard direct interaction', () => {
           return (await send(name, args)) as T;
         },
       };
+      let notifySavedBoard: (() => void) | undefined;
+
+      function nextSavedBoard() {
+        return new Promise<void>((resolve) => {
+          notifySavedBoard = resolve;
+        });
+      }
+
       function Harness() {
         const [value, setValue] = useState(fixture.board);
+
+        function handleBoardChange(next: Board) {
+          setValue(next);
+          notifySavedBoard?.();
+          notifySavedBoard = undefined;
+        }
 
         return (
           <WhiteboardCanvas
             board={value}
             client={client}
             actor={LOCAL_ACTOR}
-            onChanged={setValue}
+            onChanged={handleBoardChange}
             onAnnotate={() => {}}
             externalViewport={initialViewport}
           />
@@ -1726,15 +1740,10 @@ describe('whiteboard direct interaction', () => {
 
       await act(async () => root.render(<Harness />));
       await click('画笔');
+      const dotSaved = nextSavedBoard();
       await pointer(5, 7);
-      await vi.waitFor(async () => {
-        await act(async () => {
-          await new Promise((resolve) => {
-            setTimeout(resolve, 5);
-          });
-        });
-        expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
-      });
+      await act(async () => dotSaved);
+      expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
       const first = (await service.execute('artifact_read', {
         artifactId: fixture.board.artifact.id,
         mode: 'board',
@@ -1764,15 +1773,10 @@ describe('whiteboard direct interaction', () => {
         });
       }
 
+      const longStrokeSaved = nextSavedBoard();
       await event(query('白板画布'), 'pointerup', 100 + 20000 * 3, 100 + 20000 * 3);
-      await vi.waitFor(async () => {
-        await act(async () => {
-          await new Promise((resolve) => {
-            setTimeout(resolve, 5);
-          });
-        });
-        expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
-      });
+      await act(async () => longStrokeSaved);
+      expect(host.querySelector('.studio-whiteboard')!.getAttribute('data-tool')).toBe('select');
       const latest = (await service.execute('artifact_read', {
         artifactId: fixture.board.artifact.id,
         mode: 'board',

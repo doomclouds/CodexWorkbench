@@ -227,7 +227,7 @@ export interface HtmlStateSave {
 }
 
 function isPositiveInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1;
 }
 
 export function validateHtmlStateMessage(
@@ -240,7 +240,10 @@ export function validateHtmlStateMessage(
   }
 
   const { baseVersion, saveId } = input;
-  if (!isPositiveInteger(baseVersion) || !isPositiveInteger(saveId)) {
+  const validVersion =
+    typeof baseVersion === 'number' && Number.isSafeInteger(baseVersion) && baseVersion >= 0;
+
+  if (!validVersion || !isPositiveInteger(saveId)) {
     return null;
   }
   if (!input.state || typeof input.state !== 'object' || Array.isArray(input.state)) {

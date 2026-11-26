@@ -66,6 +66,9 @@ export interface EmbedObjectProps {
   readonly committedState?: EmbedStateVersion;
   readonly annotation?: boolean;
   readonly interactive: boolean;
+  readonly editRequest?: number;
+  readonly useCanvasTools?: boolean;
+  readonly readHtmlSource?: (file: File) => Promise<string>;
   readonly zoom?: number;
   readonly preserveScroll?: boolean;
   readonly initialScroll?: EmbedPoint;

@@ -123,11 +123,39 @@
 }
 
 .studio-document-canvas-symbols,
+.studio-document-expand-control,
 .studio-document-canvas-save {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   gap: calc(8px * var(--document-ui-scale, 1));
+}
+
+.studio-document-move {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: calc(28px * var(--document-ui-scale, 1));
+  block-size: calc(28px * var(--document-ui-scale, 1));
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: light-dark(#4f5d75, #b7c0cd);
+  cursor: grab;
+  touch-action: none;
+}
+
+.studio-document-move:hover:not(:disabled) {
+  background: light-dark(#e1e3e7, #242b38);
+}
+
+.studio-document-move:active:not(:disabled) {
+  cursor: grabbing;
+}
+
+.studio-document-move:disabled {
+  cursor: default;
 }
 
 .studio-document-canvas-save {
@@ -163,9 +191,7 @@
 }
 
 .studio-document-surface[data-document-layout='outline'] .studio-document-top,
-.studio-document-surface[data-document-layout='compact']
-  .studio-document-canvas-symbols
-  svg:last-child,
+.studio-document-surface[data-document-layout='compact'] .studio-document-canvas-symbols > svg,
 .studio-document-surface[data-document-layout='thumbnail'] .studio-document-canvas-symbols,
 .studio-document-surface[data-document-layout='compact'] .studio-document-canvas-save,
 .studio-document-surface[data-document-layout='thumbnail'] .studio-document-top [role='toolbar'] {
@@ -288,8 +314,8 @@
 }
 
 .studio-document-surface[data-document-focused-reading] {
-  --document-focus-rule: color-mix(in srgb, currentColor 30%, transparent);
-  --document-focus-hover: color-mix(in srgb, currentColor 8%, transparent);
+  --document-focus-rule: light-dark(#a8b0bd, #667285);
+  --document-focus-hover: light-dark(#e1e3e7, #242b38);
   --studio-ui-text: currentColor;
   overflow: hidden;
   font:
@@ -333,6 +359,63 @@
   padding: 4px;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.5;
+}
+
+.studio-document-focused-heading .studio-document-canvas-symbols > svg {
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+.studio-document-focused-heading > .studio-ui-field {
+  flex: 1;
+  min-inline-size: 24px;
+}
+
+.studio-document-focused-heading > .studio-ui-field .studio-ui-field__label {
+  position: absolute;
+  clip-path: inset(50%);
+}
+
+.studio-document-focused-heading > .studio-ui-field input {
+  inline-size: 100%;
+  min-block-size: auto;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font:
+    600 14px/1.5 Arial,
+    'Microsoft YaHei',
+    sans-serif;
+}
+
+.studio-document-focused-heading [role='toolbar'] {
+  flex: none;
+}
+
+.studio-document-focused-heading [role='toolbar'] .studio-ui-button[data-icon-only] {
+  inline-size: 28px;
+  block-size: 28px;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0;
+}
+
+.studio-document-focused-heading .studio-ui-button[data-icon-only]:hover:not(:disabled) {
+  background: var(--document-focus-hover);
+}
+
+@media (max-width: 700px) {
+  .studio-document-focused-heading {
+    gap: 4px;
+    padding: 7px;
+  }
+
+  .studio-document-focused-heading .studio-document-canvas-save {
+    overflow: hidden;
+    max-inline-size: 50px;
+  }
 }
 
 .studio-document-focused-toggle {

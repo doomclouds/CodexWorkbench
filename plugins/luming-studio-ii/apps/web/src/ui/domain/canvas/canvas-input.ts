@@ -389,6 +389,7 @@ export function useCanvasInput({
         kind: 'create-connection',
         interactionId: id,
         start: endpoint,
+        style: penStyle,
       });
     } else if (registry.get(chosenTool.object.kind)) {
       begin(container, event, origin, {
@@ -477,8 +478,29 @@ export function useCanvasInput({
       return;
     }
 
+    const object = index.get(id);
+    if (object && registry.get(object.kind)?.activateOnDoubleClick === false) {
+      return;
+    }
+
     const point = screenToBoard(relativePoint(event, origin), read().viewport);
     props.onObjectActivate?.({ id, point });
+  }
+
+  function handleContextMenu(event: ReactMouseEvent<HTMLDivElement>) {
+    const { target, currentTarget: container } = event;
+    if (!props.onContextMenu || event.defaultPrevented || !ownsEvent(target, container)) {
+      return;
+    }
+    if (canvasNativeId(target, container) || isCanvasKeyboardControl(target, container)) {
+      return;
+    }
+
+    event.preventDefault();
+    const id = objectAt(event, container, containerOrigin(container));
+    const hit = id ? [id] : [];
+    const ids = id && selection.includes(id) ? selection : hit;
+    props.onContextMenu({ x: event.clientX, y: event.clientY }, ids);
   }
 
   function prepareHandle(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -726,6 +748,35 @@ export function useCanvasInput({
     event.currentTarget.focus({ preventScroll: true });
   }
 
+  function editSelected(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const [id] = selection;
+    const object = id && selection.length === 1 ? index.get(id) : undefined;
+    const editable = canEdit && currentTool() === 'select';
+    if (!editable || !object || !registry.get(object.kind)?.View) {
+      return;
+    }
+
+    event.preventDefault();
+    const { x, y, width, height } = object.geometry;
+    props.onObjectActivate?.({ id: object.id, point: { x: x + width / 2, y: y + height / 2 } });
+  }
+
+  function handleNavigationKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.altKey) {
+      return true;
+    }
+
+    const command = event.ctrlKey || event.metaKey;
+    const wantsAll = event.key.toLowerCase() === 'a' && !event.shiftKey;
+    if (command && wantsAll && !props.presentation) {
+      event.preventDefault();
+      onSelectionChange(props.scene.objects.map(({ id }) => id));
+      return true;
+    }
+
+    return handleViewportKey(event) || command;
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.key === 'Process') {
       return;
@@ -742,14 +793,14 @@ export function useCanvasInput({
       return;
     }
 
-    const command = event.ctrlKey || event.metaKey;
-
-    if (event.altKey || handleViewportKey(event) || command) {
+    if (handleNavigationKey(event)) {
       return;
     }
 
     if (event.key === 'Escape') {
       escapeCanvas(event);
+    } else if (event.key === 'Enter' || event.key === 'F2') {
+      editSelected(event);
     } else if (
       (event.code === 'Space' || event.key === ' ') &&
       !isCanvasActivationControl(target, currentTarget)
@@ -832,6 +883,7 @@ export function useCanvasInput({
     handlePointerDownCapture,
     handlePointerDown,
     handleDoubleClick,
+    handleContextMenu,
     handleObjectNavigation,
     handleHandlePointerDown,
     handlePortPointerDown,

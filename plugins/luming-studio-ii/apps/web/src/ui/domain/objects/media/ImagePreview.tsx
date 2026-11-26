@@ -1,45 +1,40 @@
 import type { CSSProperties, SyntheticEvent } from 'react';
 import type { ImageCrop, MediaSize } from './contracts.js';
-import { normalizeCrop, validMediaSize } from './media-geometry.js';
+import { imageCropRect, validMediaSize } from './media-geometry.js';
 
 export interface ImagePreviewProps {
   readonly src: string;
   readonly label: string;
+  readonly frame: MediaSize;
+  readonly naturalSize?: MediaSize;
   readonly crop?: ImageCrop;
   readonly onNaturalSize: (size: MediaSize) => void;
   readonly onError?: () => void;
   readonly onRequestCrop?: () => void;
 }
 
-function cropStyle(crop: ImageCrop | undefined): CSSProperties | undefined {
-  if (!crop) {
+function cropStyle(props: ImagePreviewProps): CSSProperties | undefined {
+  const { frame, naturalSize, crop } = props;
+  if (!crop || !validMediaSize(frame)) {
     return undefined;
   }
 
-  const { zoom, x, y } = normalizeCrop(crop);
+  const rect = imageCropRect(frame, validMediaSize(naturalSize) ? naturalSize : frame, crop);
   const percent = (value: number) => value * 100 + '%';
-  const size = percent(zoom);
 
   return {
     position: 'absolute',
-    left: percent((1 - zoom) * x),
-    top: percent((1 - zoom) * y),
-    width: size,
-    height: size,
+    left: percent(rect.x / frame.width),
+    top: percent(rect.y / frame.height),
+    width: percent(rect.width / frame.width),
+    height: percent(rect.height / frame.height),
     maxWidth: 'none',
-    objectFit: 'cover',
-    objectPosition: percent(x) + ' ' + percent(y),
   };
 }
 
-export function ImagePreview({
-  src,
-  label,
-  crop,
-  onNaturalSize,
-  onError,
-  onRequestCrop,
-}: ImagePreviewProps) {
+export function ImagePreview(props: ImagePreviewProps) {
+  const { src, label, onNaturalSize, onError, onRequestCrop } = props;
+
   function handleLoad(event: SyntheticEvent<HTMLImageElement>) {
     const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
     const size = { width, height };
@@ -52,9 +47,9 @@ export function ImagePreview({
     <div className="luming-image-frame">
       <img
         src={src}
-        alt={label}
+        alt={label || '白板图片'}
         draggable={false}
-        style={cropStyle(crop)}
+        style={cropStyle(props)}
         onLoad={handleLoad}
         onError={onError}
         onDoubleClick={onRequestCrop}

@@ -84,7 +84,7 @@ function assertRoundTrip(type, value) {
   assert.deepEqual(decode(type, wire), value);
 }
 
-test('declares the typed unary methods for archive receipts, board catalog, and whiteboard editing', () => {
+test('declares typed unary methods for catalog, whiteboard, history and feedback workflows', () => {
   const descriptor = JSON.parse(
     runBuf([
       'build',
@@ -106,11 +106,27 @@ test('declares the typed unary methods for archive receipts, board catalog, and 
         'ListBoards',
         'ListTrashedBoards',
         'CreateBoard',
+        'DuplicateBoard',
         'ManageBoard',
         'PurgeBoards',
         'GetCatalogCommandReceipt',
       ],
     ],
+    [
+      'BoardEditService',
+      ['EditBoardGeometry', 'EditObjectContent', 'AttachBoardImage', 'GetBoardEditReceipt'],
+    ],
+    [
+      'BoardHistoryService',
+      [
+        'ListBoardVersions',
+        'GetBoardVersionScene',
+        'GetBoardVersionPayloads',
+        'RestoreBoardVersion',
+        'ExportBoardVersion',
+      ],
+    ],
+    ['FeedbackService', ['ListThreads', 'GetThread', 'ApplyFeedback', 'GetFeedbackReceipt']],
     [
       'WhiteboardService',
       ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt', 'ExportBoard'],
@@ -140,6 +156,81 @@ test('declares the typed unary methods for archive receipts, board catalog, and 
       })),
     );
   }
+});
+
+test('preserves native content commands and independent table width checks', () => {
+  const common = { boardId, commandId, objectId: 'native-object', expectedPayloadVersion: '0' };
+  assertRoundTrip('EditObjectContentRequest', {
+    ...common,
+    table: {
+      table: {
+        text: '验收表格',
+        grid: {
+          rows: [{ cells: [{ text: '名称' }, { number: 2 }] }],
+          rowIds: ['row-1'],
+          columnIds: ['col-1', 'col-2'],
+          columnWidths: [240, 270],
+          head: true,
+        },
+      },
+      widthChange: { expectedWidth: 480, width: 510 },
+    },
+  });
+  assertRoundTrip('EditObjectContentRequest', {
+    ...common,
+    embedSource: {
+      title: '验收图解',
+      html: '<p>最新源码</p>',
+      expectedSourceRevision: '9007199254740993',
+    },
+  });
+  assertRoundTrip('EditObjectContentRequest', {
+    ...common,
+    embedState: { state: { phase: 'ready', positions: [2, 4] } },
+  });
+  assertRoundTrip('EditObjectContentRequest', {
+    ...common,
+    sticker: { stickerId: 'heart' },
+  });
+  assertRoundTrip('EditObjectContentRequest', {
+    ...common,
+    crop: {
+      crop: { zoom: 1.5, x: 0.25, y: 0.75 },
+      naturalSize: { width: 2, height: 3 },
+    },
+  });
+});
+
+test('uses the existing embedded payload on a geometry creation command', () => {
+  const title = 'HTML 图解';
+  const html = '<!doctype html><html lang="zh-CN"><p>流程预览</p></html>';
+  assertRoundTrip('EditBoardGeometryRequest', {
+    boardId,
+    commandId,
+    create: {
+      object: {
+        objectId: 'new-html-diagram',
+        kind: 'html',
+        label: title,
+        geometry: { x: 80, y: 80, width: 1440, height: 1120 },
+      },
+      initialPayload: { embed: { title, html, sourceRevision: '0' } },
+    },
+  });
+});
+
+test('keeps the applied editing receipt when optional historical details expire', () => {
+  assertRoundTrip('GetBoardEditReceiptResponse', {
+    receipt: {
+      boardId,
+      commandId,
+      applied: { boardRevision: '181', detailsExpired: true },
+    },
+  });
+});
+
+test('preserves the source board and command identity when duplicating', () => {
+  assertRoundTrip('DuplicateBoardRequest', { commandId, sourceBoardId: boardId });
 });
 
 test('preserves confirmed import outcomes and distinguishes missing archive receipts', () => {

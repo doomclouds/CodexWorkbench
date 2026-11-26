@@ -123,12 +123,18 @@ export function resolveCanvasConnection(connection: CanvasConnection, view: Canv
   });
 }
 
-export function connectorDraft(connection: CanvasConnection, view: CanvasProjection) {
+export function connectorDraft(
+  connection: CanvasConnection,
+  view: CanvasProjection,
+  style?: CanvasPenStyle,
+) {
   return {
     kind: 'connector' as const,
     label: connectorLabel,
     geometry: resolveCanvasConnection(connection, view).geometry,
     connection,
+    stroke: style?.stroke,
+    strokeWidth: style?.width,
   };
 }
 

@@ -26,7 +26,19 @@ export interface CatalogCreateRequest {
   readonly title: string;
 }
 
-export type CatalogRejectionReason = 'invalidTitle' | 'commandIdReuse' | 'unknown';
+export interface CatalogDuplicateRequest {
+  readonly commandId: string;
+  readonly sourceBoardId: string;
+}
+
+export type CatalogRejectionReason =
+  | 'invalidTitle'
+  | 'commandIdReuse'
+  | 'forbidden'
+  | 'entryVersionChanged'
+  | 'stateChanged'
+  | 'invalidCommand'
+  | 'unknown';
 
 export type CatalogReceipt =
   | { readonly kind: 'created'; readonly commandId: string; readonly board: CatalogBoardSummary }
@@ -45,6 +57,7 @@ export type CatalogPost = (
 export interface BoardCatalogService {
   listBoards(request: CatalogListRequest, signal?: AbortSignal): Promise<CatalogPage>;
   createBoard(request: CatalogCreateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;
+  duplicateBoard?(request: CatalogDuplicateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;
   getReceipt(commandId: string, signal?: AbortSignal): Promise<CatalogReceipt | undefined>;
 }
 
@@ -81,12 +94,7 @@ export interface CatalogPurgeRequest {
   readonly targets: readonly CatalogPurgeTarget[];
 }
 
-export type CatalogManagementRejectionReason =
-  | CatalogRejectionReason
-  | 'forbidden'
-  | 'entryVersionChanged'
-  | 'stateChanged'
-  | 'invalidCommand';
+export type CatalogManagementRejectionReason = CatalogRejectionReason;
 
 export type CatalogPurgeItemResult =
   | { readonly boardId: string; readonly deleted: true }

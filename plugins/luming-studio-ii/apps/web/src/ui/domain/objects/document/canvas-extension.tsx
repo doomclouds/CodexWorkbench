@@ -61,6 +61,7 @@ function DocumentCanvasView({
   readOnly,
   editRequest,
   focusedReading,
+  locked,
   onOpenPresentation,
   onClosePresentation,
   onRetentionChange,
@@ -106,6 +107,8 @@ function DocumentCanvasView({
       readOnly={readOnly}
       editRequest={editRequest}
       focusedReading={focusedReading}
+      expandControl={{ label: '展开文档', title: '展开阅读与编辑' }}
+      locked={locked}
       onOpenPresentation={onOpenPresentation}
       onClosePresentation={onClosePresentation}
       onCommit={handleCommit}

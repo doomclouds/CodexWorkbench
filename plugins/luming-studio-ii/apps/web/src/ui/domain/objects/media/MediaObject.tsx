@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type Ref } from 'react';
 import { Button, StatusText } from '../../../base/index.js';
 import type { ButtonHandle } from '../../../base/index.js';
 import type {
@@ -10,7 +10,7 @@ import type {
 } from './contracts.js';
 import { ImageCropDialog } from './ImageCropDialog.js';
 import { ImagePreview } from './ImagePreview.js';
-import { safeHttpLink } from './LinkObject.js';
+import { ExternalLinkIcon, safeHttpLink } from './LinkObject.js';
 import './media-object.css';
 
 const mediaLoadError: MediaObjectStatus = { status: 'error' };
@@ -53,6 +53,35 @@ function useCropEditor(allowed: boolean, request: number | undefined) {
   return { isOpen: editor.open, open, close };
 }
 
+interface ImageActionsProps {
+  readonly href?: string;
+  readonly showLink: boolean;
+  readonly showCrop: boolean;
+  readonly cropButton: Ref<ButtonHandle>;
+  readonly onCrop?: () => void;
+}
+
+function ImageActions({ href, showLink, showCrop, cropButton, onCrop }: ImageActionsProps) {
+  const link = safeHttpLink(href);
+
+  return (
+    <div className="luming-media-object__actions">
+      {link && showLink && (
+        <a
+          className="luming-image-link"
+          aria-label="打开图片链接"
+          href={link}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <ExternalLinkIcon size={16} />
+        </a>
+      )}
+      {onCrop && showCrop && <Button ref={cropButton} label="裁剪图片" onActivate={onCrop} />}
+    </div>
+  );
+}
+
 function ImageObject({
   src,
   label,
@@ -66,6 +95,8 @@ function ImageObject({
   readOnly,
   interactive = true,
   editRequest,
+  showCropControl = true,
+  showLinkControl = true,
   onCropActivityChange,
   onSaveCrop,
 }: ImageObjectProps) {
@@ -82,7 +113,6 @@ function ImageObject({
 
   const frame = { width, height };
   const natural = decodedSize ?? naturalSize;
-  const link = safeHttpLink(href);
   const openCrop = canCrop ? editor.open : undefined;
 
   return (
@@ -90,25 +120,20 @@ function ImageObject({
       <ImagePreview
         src={src}
         label={label}
+        frame={frame}
+        naturalSize={natural}
         crop={crop}
         onNaturalSize={setDecodedSize}
         onError={() => setFailed(true)}
         onRequestCrop={openCrop}
       />
-      <div className="luming-media-object__actions">
-        {link && interactive && (
-          <a
-            className="luming-media-link__target"
-            aria-label="打开图片链接"
-            href={link}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            打开
-          </a>
-        )}
-        {openCrop && <Button ref={cropButton} label="裁剪图片" onActivate={openCrop} />}
-      </div>
+      <ImageActions
+        href={href}
+        showLink={interactive && showLinkControl}
+        showCrop={showCropControl}
+        cropButton={cropButton}
+        onCrop={openCrop}
+      />
       {editor.isOpen && canCrop && (
         <ImageCropDialog
           src={src}

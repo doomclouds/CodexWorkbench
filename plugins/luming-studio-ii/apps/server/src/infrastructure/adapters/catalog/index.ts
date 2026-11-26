@@ -1,6 +1,7 @@
 import type {
   CatalogBoardSummary,
   CatalogCreatedReceipt,
+  CatalogDuplicateFailure,
   CatalogLookup,
   CatalogManagedBoard,
   CatalogOrder,
@@ -10,6 +11,7 @@ import type {
   StoredCatalogReceipt,
 } from '../../../modules/catalog/ports/index.js';
 import type { SqliteConnection, SqliteDatabase, SqliteRow } from '../../platform/index.js';
+import { duplicateBoard } from './duplicate-board.js';
 import { getManagementReceipt, saveManagementReceipt } from './management-receipts.js';
 import { catalogSchema } from './schema.js';
 
@@ -152,16 +154,31 @@ function getCreatedReceipt(
   connection: SqliteConnection,
   actorId: string,
   commandId: string,
-): CatalogCreatedReceipt | undefined {
+): StoredCatalogReceipt | undefined {
   const statement = connection.prepare(`
-    SELECT board_id, title, updated_at_millis, pinned, entry_version, 1 AS can_manage
-    FROM catalog_create_receipts
-    WHERE actor_id = ? AND command_id = ?
+    SELECT c.board_id, c.title, c.updated_at_millis, c.pinned, c.entry_version,
+      1 AS can_manage, d.source_board_id
+    FROM catalog_create_receipts AS c
+    LEFT JOIN catalog_duplicate_sources AS d
+      ON d.actor_id = c.actor_id AND d.command_id = c.command_id
+    WHERE c.actor_id = ? AND c.command_id = ?
   `);
   statement.setReadBigInts(true);
   const row = statement.get(actorId, commandId);
 
-  return row ? { kind: 'created', commandId, board: readSummary(row) } : undefined;
+  if (!row) {
+    return undefined;
+  }
+
+  const { source_board_id: sourceBoardId } = row;
+  if (sourceBoardId !== null && typeof sourceBoardId !== 'string') {
+    throw new Error('Invalid stored catalogue duplicate source.');
+  }
+
+  return {
+    receipt: { kind: 'created', commandId, board: readSummary(row) },
+    duplicateSourceId: sourceBoardId ?? undefined,
+  };
 }
 
 function getReceipt(
@@ -169,9 +186,10 @@ function getReceipt(
   actorId: string,
   commandId: string,
 ): StoredCatalogReceipt | undefined {
-  const created = getCreatedReceipt(connection, actorId, commandId);
-
-  return created ? { receipt: created } : getManagementReceipt(connection, actorId, commandId);
+  return (
+    getCreatedReceipt(connection, actorId, commandId) ??
+    getManagementReceipt(connection, actorId, commandId)
+  );
 }
 
 function getManagedBoard(
@@ -260,6 +278,29 @@ function saveBoard(
     .run(actorId, commandId, boardId, title, updatedAtMillis, pinValue, entryVersion);
 }
 
+function saveDuplicatedBoard(
+  connection: SqliteConnection,
+  actorId: string,
+  sourceBoardId: string,
+  receipt: CatalogCreatedReceipt,
+): CatalogDuplicateFailure | undefined {
+  const rejected = duplicateBoard(connection, sourceBoardId, receipt.board.boardId, () =>
+    saveBoard(connection, actorId, receipt),
+  );
+
+  if (rejected) {
+    return rejected;
+  }
+
+  connection
+    .prepare(
+      'INSERT INTO catalog_duplicate_sources (actor_id, command_id, source_board_id) VALUES (?, ?, ?)',
+    )
+    .run(actorId, receipt.commandId, sourceBoardId);
+
+  return undefined;
+}
+
 export function createCatalogRepository(database: SqliteDatabase): CatalogRepository {
   database.write((connection) => connection.exec(catalogSchema));
 
@@ -274,6 +315,8 @@ export function createCatalogRepository(database: SqliteDatabase): CatalogReposi
         work({
           getReceipt: (actorId, commandId) => getReceipt(connection, actorId, commandId),
           saveBoard: (actorId, receipt) => saveBoard(connection, actorId, receipt),
+          duplicateBoard: (actorId, sourceBoardId, receipt) =>
+            saveDuplicatedBoard(connection, actorId, sourceBoardId, receipt),
           getManagedBoard: (actorId, boardId) => getManagedBoard(connection, actorId, boardId),
           changeBoard: (board) => changeBoard(connection, board),
           deleteBoard: (boardId) => deleteBoard(connection, boardId),

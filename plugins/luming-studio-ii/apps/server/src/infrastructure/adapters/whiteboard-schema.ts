@@ -49,6 +49,13 @@ export const whiteboardSchema = `
   CREATE INDEX IF NOT EXISTS board_objects_parent
     ON board_objects (board_id, parent_id, layer_index, object_id);
 
+  CREATE INDEX IF NOT EXISTS board_connector_start
+    ON board_objects (board_id, json_extract(detail_json, '$.start.attachment.objectId'), object_id)
+    WHERE kind = 'connector';
+  CREATE INDEX IF NOT EXISTS board_connector_end
+    ON board_objects (board_id, json_extract(detail_json, '$.end.attachment.objectId'), object_id)
+    WHERE kind = 'connector';
+
   CREATE TABLE IF NOT EXISTS object_payloads (
     board_id TEXT NOT NULL,
     object_id TEXT NOT NULL,

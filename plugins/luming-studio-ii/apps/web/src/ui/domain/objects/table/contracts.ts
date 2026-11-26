@@ -52,6 +52,7 @@ export interface TableObjectProps {
   readonly canEdit: boolean;
   readonly locked?: boolean;
   readonly detail?: TableObjectDetail;
+  readonly frameHeight?: number;
   readonly zoom?: number;
   readonly fontSize?: number;
   readonly editRequest?: number;

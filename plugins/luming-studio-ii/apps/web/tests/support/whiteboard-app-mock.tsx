@@ -1,6 +1,11 @@
 import { act } from 'react';
 import { WhiteboardApp } from '../../src/app/index.js';
-import { createWhiteboardService, type WhiteboardPost } from '../../src/data/whiteboard/index.js';
+import {
+  createWhiteboardService,
+  type WhiteboardEditService,
+  type WhiteboardPost,
+  type WhiteboardService,
+} from '../../src/data/whiteboard/index.js';
 import { createControlFixture } from './render-control.js';
 
 export const boardCommandId = 'fixture-command';
@@ -28,7 +33,14 @@ interface Point {
   readonly y: number;
 }
 
-function emitPointer(target: HTMLElement, type: string, { x, y }: Point) {
+type PointerModifiers = Pick<PointerEventInit, 'altKey' | 'shiftKey'>;
+
+function emitPointer(
+  target: HTMLElement,
+  type: string,
+  { x, y }: Point,
+  modifiers?: PointerModifiers,
+) {
   target.dispatchEvent(
     new PointerEvent(type, {
       bubbles: true,
@@ -40,6 +52,7 @@ function emitPointer(target: HTMLElement, type: string, { x, y }: Point) {
       buttons: type === 'pointerup' ? 0 : 1,
       clientX: x,
       clientY: y,
+      ...modifiers,
     }),
   );
 }
@@ -51,10 +64,18 @@ async function update(action: () => void) {
   });
 }
 
-export function createAppMock(post: WhiteboardPost) {
+interface AppMockOptions {
+  readonly editService?: WhiteboardEditService;
+  readonly createCommandId?: () => string;
+}
+
+export function createAppMock(
+  source: WhiteboardPost | WhiteboardService,
+  { editService, createCommandId = () => boardCommandId }: AppMockOptions = {},
+) {
   const restoreLayout = withCanvasLayout();
   const fixture = createControlFixture();
-  const service = createWhiteboardService(post);
+  const service = typeof source === 'function' ? createWhiteboardService(source) : source;
 
   function canvas(): HTMLElement {
     const root = fixture.host.querySelector<HTMLElement>('[data-canvas-root]');
@@ -69,28 +90,31 @@ export function createAppMock(post: WhiteboardPost) {
     host: fixture.host,
     canvas,
     update,
-    async open(boardId: string) {
+    async open(boardId: string, key?: string) {
       await update(() =>
         fixture.render(
           <WhiteboardApp
+            key={key}
             boardId={boardId}
             service={service}
-            createCommandId={() => boardCommandId}
+            editService={editService}
+            createCommandId={createCommandId}
           />,
         ),
       );
     },
-    async drag(from: Point, to: Point) {
+    async drag(from: Point, to: Point, target?: HTMLElement, modifiers?: PointerModifiers) {
       const root = canvas();
       await update(() => {
-        emitPointer(root, 'pointerdown', from);
-        emitPointer(root, 'pointermove', to);
-        emitPointer(root, 'pointerup', to);
+        emitPointer(target ?? root, 'pointerdown', from, modifiers);
+        emitPointer(root, 'pointermove', to, modifiers);
+        emitPointer(root, 'pointerup', to, modifiers);
       });
     },
     async click(label: string) {
       const button = [...fixture.host.querySelectorAll('button')].find(
-        (candidate) => candidate.textContent?.trim() === label,
+        (candidate) =>
+          candidate.getAttribute('aria-label') === label || candidate.textContent?.trim() === label,
       );
 
       if (!button) {

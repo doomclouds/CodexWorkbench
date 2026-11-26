@@ -61,6 +61,8 @@ export interface TodoObjectProps {
   readonly interactive?: boolean;
   readonly readOnly?: boolean;
   readonly expanded?: boolean;
+  readonly movable?: boolean;
+  readonly locked?: boolean;
   readonly focusedReading?: boolean;
   readonly overview?: boolean;
   readonly editRequest?: number;

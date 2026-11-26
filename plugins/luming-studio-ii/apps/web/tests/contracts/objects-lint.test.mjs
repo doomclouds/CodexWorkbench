@@ -11,8 +11,31 @@ const fixture = 'tests/fixtures/canvas/contents.tsx';
 const consumer = 'src/surfaces/board/editor.ts';
 const testDocument = 'tests/component/objects/DocumentObject.test.tsx';
 const documentSpecifier = '@codexworkbench/luming-studio-ii-web/ui/domain/objects/document';
+const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+const editingFamilies = ['table', 'embed', 'sticker', 'media'];
 
 const rejected = [
+  ...editingFamilies.map((family) => [
+    family + ' registration importing the generated edit protocol',
+    source + family + '/canvas-extension.tsx',
+    `import type { EditObjectContentRequest } from '${editsProtocol}';`,
+  ]),
+  [
+    'sticker registration importing a Node file API',
+    source + 'sticker/canvas-extension.tsx',
+    "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'table registration importing an unrelated UI runtime',
+    source + 'table/canvas-extension.tsx',
+    "import { ref } from 'vue';",
+  ],
+  [
+    'media registration making its own network request',
+    source + 'media/canvas-extension.tsx',
+    'window.fetch(path);',
+    browser,
+  ],
   [
     'Surface deep import',
     consumer,
@@ -129,6 +152,20 @@ for (const [name, filePath, text, rule = boundary] of rejected) {
 }
 
 const accepted = [
+  ...editingFamilies.map((family) => [
+    source + family + '/canvas-extension.tsx',
+    [
+      "import type { CanvasObjectOperation, CanvasObjectViewProps } from '../../canvas/index.js';",
+      '',
+      'export function saveObject(view: CanvasObjectViewProps, operation: CanvasObjectOperation) {',
+      '  if (view.readOnly) {',
+      '    return;',
+      '  }',
+      '',
+      '  return view.request(operation);',
+      '}',
+    ].join('\n'),
+  ]),
   [consumer, `import { DocumentObject } from '${documentSpecifier}';`],
   [source + 'index.ts', "import { todoExtension } from './todo/index.js';"],
   [fixture, "import { TodoObject } from '../../../src/ui/domain/objects/todo/index.js';"],

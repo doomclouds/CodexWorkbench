@@ -29,11 +29,19 @@ export interface CatalogLookup extends CatalogScope {
 export interface StoredCatalogReceipt {
   readonly receipt: CatalogReceipt;
   readonly signature?: string;
+  readonly duplicateSourceId?: string;
 }
+
+export type CatalogDuplicateFailure = 'stateChanged' | 'invalidCommand';
 
 export interface CatalogWriter {
   getReceipt(actorId: string, commandId: string): StoredCatalogReceipt | undefined;
   saveBoard(actorId: string, receipt: CatalogCreatedReceipt): void;
+  duplicateBoard(
+    actorId: string,
+    sourceBoardId: string,
+    receipt: CatalogCreatedReceipt,
+  ): CatalogDuplicateFailure | undefined;
   getManagedBoard(actorId: string, boardId: string): CatalogManagedBoard | undefined;
   changeBoard(board: CatalogManagedBoard): void;
   deleteBoard(boardId: string): void;

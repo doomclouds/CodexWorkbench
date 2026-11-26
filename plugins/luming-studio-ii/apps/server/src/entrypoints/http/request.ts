@@ -18,14 +18,17 @@ export function mediaType(request: IncomingMessage): string | undefined {
   return request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase();
 }
 
-function requireBodySize(bytes: number): void {
-  if (bytes > MAX_REQUEST_BYTES) {
+function requireBodySize(bytes: number, limit: number): void {
+  if (bytes > limit) {
     throw new HttpRequestError(413, 'Protobuf request exceeds the size limit');
   }
 }
 
-export async function readBody(request: IncomingMessage): Promise<Uint8Array> {
-  requireBodySize(Number(request.headers['content-length'] ?? 0));
+export async function readBody(
+  request: IncomingMessage,
+  limit = MAX_REQUEST_BYTES,
+): Promise<Uint8Array> {
+  requireBodySize(Number(request.headers['content-length'] ?? 0), limit);
 
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -36,7 +39,7 @@ export async function readBody(request: IncomingMessage): Promise<Uint8Array> {
     }
 
     bytes += chunk.byteLength;
-    requireBodySize(bytes);
+    requireBodySize(bytes, limit);
     chunks.push(chunk);
   }
 

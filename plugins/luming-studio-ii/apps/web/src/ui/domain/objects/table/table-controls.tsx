@@ -1,6 +1,7 @@
+import type { KeyboardEvent, PointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 
-import { ActionMenu, Button, OperationNotice, ToggleButton, Toolbar } from '../../../base/index.js';
+import { ActionMenu, Button, OperationNotice, Toolbar } from '../../../base/index.js';
 import type { ActionMenuItem } from '../../../base/index.js';
 import type { CellAddress, TableAxis, TableModel } from './table-model.js';
 
@@ -37,6 +38,7 @@ interface TableMenuProps {
   readonly onInsert: (axis: TableAxis, index: number) => void;
   readonly onRemove: (axis: TableAxis, cell: CellAddress) => void;
   readonly onClose: () => void;
+  readonly onReturnFocus: () => void;
 }
 
 const menuActions: readonly MenuAction[] = [
@@ -52,6 +54,18 @@ function cannotRemove(axis: TableAxis, model: TableModel) {
   return axis === 'row' ? model.rows.length < 2 : model.columnIds.length < 2;
 }
 
+function handleControlsPress(event: PointerEvent<HTMLDivElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function handleControlsKey(event: KeyboardEvent<HTMLDivElement>) {
+  event.stopPropagation();
+  if (event.key === 'Escape') {
+    event.preventDefault();
+  }
+}
+
 export function TableControls({
   tableId,
   model,
@@ -65,25 +79,49 @@ export function TableControls({
   onDiscard,
 }: TableControlsProps) {
   return (
-    <div className="studio-object-table-controls">
+    <div
+      className="studio-object-table-controls"
+      data-canvas-controls=""
+      onPointerDown={handleControlsPress}
+      onKeyDown={handleControlsKey}
+    >
       <Toolbar label="表格操作">
-        <Button label="添加表格行" disabled={saving} onActivate={() => onInsert('row')} />
-        <Button label="添加表格列" disabled={saving} onActivate={() => onInsert('column')} />
-        <ToggleButton
-          label="切换表头"
-          pressed={model.head}
+        <Button
+          label="添加表格行"
+          iconOnly
+          icon="＋行"
           disabled={saving}
-          onPressedChange={onToggleHead}
+          onActivate={() => onInsert('row')}
         />
+        <Button
+          label="添加表格列"
+          iconOnly
+          icon="＋列"
+          disabled={saving}
+          onActivate={() => onInsert('column')}
+        />
+        <button
+          type="button"
+          aria-label="切换表头"
+          aria-pressed={model.head}
+          disabled={saving}
+          onClick={onToggleHead}
+        >
+          表头
+        </button>
         {active && (
           <>
             <Button
               label="删除当前行"
+              iconOnly
+              icon="删除行"
               disabled={saving || cannotRemove('row', model)}
               onActivate={() => onRemove('row', active)}
             />
             <Button
               label="删除当前列"
+              iconOnly
+              icon="删除列"
               disabled={saving || cannotRemove('column', model)}
               onActivate={() => onRemove('column', active)}
             />
@@ -113,6 +151,7 @@ export function TableCellMenu({
   onInsert,
   onRemove,
   onClose,
+  onReturnFocus,
 }: TableMenuProps) {
   const items = menuActions.map((action) => ({
     id: action.id,
@@ -142,6 +181,7 @@ export function TableCellMenu({
         label="表格单元格操作"
         anchor={menu.anchor}
         items={items}
+        returnFocus={onReturnFocus}
         onAction={handleCellAction}
         onRequestClose={onClose}
       />

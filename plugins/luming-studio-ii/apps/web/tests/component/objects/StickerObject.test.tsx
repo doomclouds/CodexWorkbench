@@ -135,55 +135,85 @@ describe('StickerPalette', () => {
 });
 
 describe('stickerExtension', () => {
-  it('keeps rejection visible with a frozen version and closes after a successful selection', async () => {
-    const View = stickerExtension.View;
-    const geometry = { x: 0, y: 0, width: 64, height: 64, rotation: 0 };
-    const request = vi
-      .fn<Parameters<typeof View>[0]['request']>()
-      .mockResolvedValueOnce({ ok: false, message: '贴纸版本已变化' })
-      .mockResolvedValueOnce({ ok: true, payload: { version: 3, value: { id: 'handshake' } } });
-    const onRetentionChange = vi.fn<(retained: boolean) => void>();
-    const props = {
+  const View = stickerExtension.View;
+  const geometry = { x: 0, y: 0, width: 64, height: 64, rotation: 0 };
+
+  function viewProps() {
+    return {
       object: { kind: 'sticker' as const, label: '贴纸', geometry },
       geometry,
       zoom: 1,
       selected: true,
       interactive: false,
       readOnly: false,
-      editRequest: 1,
-      request,
-      onRetentionChange,
+      request: vi.fn<Parameters<typeof View>[0]['request']>(),
+      onRetentionChange: vi.fn<(retained: boolean) => void>(),
     };
+  }
 
+  function enterText(text: string) {
+    const input = query<HTMLInputElement>('input[aria-label="编辑文字"]');
+    const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+
+    act(() => {
+      value?.set?.call(input, text);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    return input;
+  }
+
+  function key(input: HTMLInputElement, value: string) {
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true }));
+  }
+
+  it('keeps the original graphic sticker in placement mode when asked to edit', () => {
+    const props = viewProps();
     fixture.render(
-      <View {...props} payload={{ version: 1, value: { id: 'heart' } }} editRequest={undefined} />,
+      <View {...props} editRequest={1} payload={{ version: 1, value: { id: 'heart' } }} />,
     );
-    expect(onRetentionChange).not.toHaveBeenCalled();
-    fixture.render(<View {...props} payload={{ version: 1, value: { id: 'heart' } }} />);
-    expect(query<HTMLDialogElement>('dialog').open).toBe(true);
-    expect(onRetentionChange.mock.calls).toEqual([[true]]);
-    fixture.render(<View {...props} payload={{ version: 2, value: { id: 'heart' } }} />);
-    const select = query<HTMLButtonElement>('dialog button[aria-label="贴纸 握手"]');
-    await act(async () => select.click());
 
-    const operation = { name: 'sticker.select', expectedVersion: 1, value: { id: 'handshake' } };
-    expect(request).toHaveBeenNthCalledWith(1, operation);
-    expect(query('dialog [role="alert"]').textContent).toBe('贴纸版本已变化');
-    expect(query<HTMLDialogElement>('dialog').open).toBe(true);
-    expect(onRetentionChange.mock.calls).toEqual([[true]]);
+    expect(query('svg').getAttribute('data-sticker-icon-id')).toBe('heart');
+    expect(fixture.host.querySelector('dialog, input')).toBeNull();
+    expect(props.request).not.toHaveBeenCalled();
+    expect(props.onRetentionChange).not.toHaveBeenCalled();
+  });
 
-    const close = query<HTMLButtonElement>('dialog button[aria-label="关闭贴纸库"]');
-    act(() => close.click());
-    expect(fixture.host.querySelector('dialog')).toBeNull();
-    expect(onRetentionChange.mock.calls).toEqual([[true], [false]]);
+  it('keeps a rejected legacy text draft and only closes on cancel or confirmed save', async () => {
+    const props = viewProps();
+    props.request
+      .mockResolvedValueOnce({ ok: false, message: '贴纸版本已变化' })
+      .mockResolvedValueOnce({ ok: true, payload: { version: 3, value: { fallback: '已确认' } } });
     fixture.render(
-      <View {...props} payload={{ version: 2, value: { id: 'heart' } }} editRequest={2} />,
+      <View {...props} locked editRequest={1} payload={{ version: 1, value: { fallback: '★' } }} />,
     );
-    await act(async () =>
-      query<HTMLButtonElement>('dialog button[aria-label="贴纸 握手"]').click(),
+    expect(props.onRetentionChange).toHaveBeenCalledExactlyOnceWith(true);
+    const input = enterText('未确认');
+    fixture.render(
+      <View {...props} locked editRequest={1} payload={{ version: 2, value: { fallback: '✦' } }} />,
     );
-    expect(request).toHaveBeenNthCalledWith(2, { ...operation, expectedVersion: 2 });
-    expect(fixture.host.querySelector('dialog')).toBeNull();
-    expect(onRetentionChange.mock.calls).toEqual([[true], [false], [true], [false]]);
+    await act(async () => key(input, 'Enter'));
+    expect(props.request).toHaveBeenNthCalledWith(1, {
+      name: 'sticker.select',
+      expectedVersion: 1,
+      value: { fallback: '未确认' },
+    });
+    expect(input.value).toBe('未确认');
+    expect(query('[role="alert"]').textContent).toBe('贴纸版本已变化');
+
+    act(() => key(input, 'Escape'));
+    expect(fixture.host.querySelector('input')).toBeNull();
+    expect(props.onRetentionChange.mock.calls).toEqual([[true], [false]]);
+    fixture.render(
+      <View {...props} editRequest={2} payload={{ version: 2, value: { fallback: '✦' } }} />,
+    );
+    await act(async () => key(enterText('已确认'), 'Enter'));
+    expect(props.request).toHaveBeenNthCalledWith(2, {
+      name: 'sticker.select',
+      expectedVersion: 2,
+      value: { fallback: '已确认' },
+    });
+    expect(fixture.host.querySelector('input')).toBeNull();
+    expect(props.onRetentionChange.mock.calls).toEqual([[true], [false], [true], [false]]);
   });
 });

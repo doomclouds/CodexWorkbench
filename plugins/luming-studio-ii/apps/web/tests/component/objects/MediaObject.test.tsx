@@ -102,11 +102,9 @@ describe('MediaObject', () => {
     fixture.render(<MediaObject {...imageProps} onSaveCrop={onSaveCrop} />);
     const image = element<HTMLImageElement>('img');
 
-    expect(image.style.objectFit).toBe('cover');
-    expect(image.style.objectPosition).toBe('25% 100%');
-    expect(image.style.left).toBe('-25%');
+    expect(image.style.left).toBe('-75%');
     expect(image.style.top).toBe('-100%');
-    expect(image.style.width).toBe('200%');
+    expect(image.style.width).toBe('400%');
     expect(image.style.height).toBe('200%');
     openCrop();
     setRange('裁剪缩放', 3);
@@ -261,6 +259,28 @@ describe('LinkObject', () => {
 });
 
 describe('imageExtension', () => {
+  it('uses the original link icon at readable scale and leaves crop in the Canvas tools', () => {
+    const View = imageExtension.View;
+    const geometry = { x: 0, y: 0, width: 256, height: 144, rotation: 0 };
+    const props = {
+      object: { kind: 'image' as const, label: '白板图片', geometry },
+      geometry,
+      payload: { version: 1, value: { src: photo, href: 'https://example.test/gallery' } },
+      selected: true,
+      interactive: true,
+      readOnly: false,
+      request: vi.fn<Parameters<typeof View>[0]['request']>(),
+    };
+    fixture.render(<View {...props} zoom={0.49} />);
+    expect(fixture.host.querySelector('a, button')).toBeNull();
+
+    fixture.render(<View {...props} zoom={0.5} readOnly />);
+    const anchor = element<HTMLAnchorElement>('[aria-label="打开图片链接"]');
+    expect(anchor.href).toBe('https://example.test/gallery');
+    expect(anchor.querySelector('svg')).not.toBeNull();
+    expect(fixture.host.querySelector('button')).toBeNull();
+  });
+
   it('opens by edit request and keeps the source version until the user opens a fresh crop', async () => {
     const View = imageExtension.View;
     const geometry = { x: 0, y: 0, width: 100, height: 100, rotation: 0 };

@@ -15,6 +15,9 @@ const support = 'tests/support/app-mock.tsx';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 const workbench = 'src/surfaces/workbench/Workbench.tsx';
 const workbenchPage = 'src/pages/workbench/WorkbenchPage.tsx';
+const workbenchMount = 'src/surfaces/workbench/WorkbenchSurface.tsx';
+const workbenchCard = 'src/surfaces/workbench/WorkbenchCards.tsx';
+const workbenchCopy = 'src/surfaces/workbench/useBoardCopy.ts';
 const catalog = 'src/data/catalog/client.ts';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const archiveWorkflow = 'src/app/workflows/archive-import/useArchiveImport.ts';
@@ -26,6 +29,17 @@ const operationNotice = 'src/app/shell/operation-notice/OperationNoticeSlot.tsx'
 const recycleBin = 'src/surfaces/recycle-bin/RecycleBinSurface.tsx';
 const viewer = 'src/surfaces/whiteboard-viewing/WhiteboardViewingSurface.tsx';
 const exportPanel = 'src/surfaces/whiteboard-export/WhiteboardExportSurface.tsx';
+const history = 'src/surfaces/whiteboard-history/WhiteboardHistorySurface.tsx';
+const feedback = 'src/surfaces/whiteboard-feedback/WhiteboardFeedbackSurface.tsx';
+const media = 'src/surfaces/whiteboard-media/WhiteboardMediaSurface.tsx';
+const feedbackData = 'src/data/feedback/client.ts';
+const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+const historyProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
+const feedbackProtocol = '@codexworkbench/luming-studio-ii-contracts/feedback/service';
+const editorContent = 'src/surfaces/whiteboard-editor/use-content-edits.ts';
+const editorCommand = 'src/surfaces/whiteboard-editor/content-edit-command.ts';
+const editorMount = 'src/surfaces/whiteboard-editor/WhiteboardEditorSurface.tsx';
+const historyMount = 'src/surfaces/whiteboard-editor/HistoryCanvasView.tsx';
 const actualPages = [
   "import { WhiteboardPage } from '../pages/whiteboard/index.js';",
   "import { WorkbenchPage } from '../pages/workbench/index.js';",
@@ -34,6 +48,48 @@ const actualPages = [
 ].join('\n');
 
 const accepted = [
+  [
+    workbenchMount,
+    "import { createCatalogDirectory, type BoardCatalogService } from '../../data/catalog/index.js';",
+  ],
+  [workbenchCopy, "import type { CatalogCopyService } from '../../data/catalog/index.js';"],
+  [
+    'src/data/catalog/copy-protocol.ts',
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [editorContent, "import type { WhiteboardEditService } from '../../data/whiteboard/index.js';"],
+  [
+    editorCommand,
+    "import type { EditObjectContentOperation } from '../../data/whiteboard/index.js';",
+  ],
+  [page, "import { WhiteboardHistorySurface } from '../../surfaces/whiteboard-history/index.js';"],
+  [
+    page,
+    "import { WhiteboardFeedbackSurface } from '../../surfaces/whiteboard-feedback/index.js';",
+  ],
+  [page, "import { WhiteboardMediaSurface } from '../../surfaces/whiteboard-media/index.js';"],
+  [history, "import type { ReadBoardHistory } from '../../data/whiteboard/index.js';"],
+  [history, "import { History } from 'lucide-react';"],
+  [feedback, "import type { FeedbackClient } from '../../data/feedback/index.js';"],
+  [feedback, "import type { CanvasPoint } from '../../ui/domain/canvas/index.js';"],
+  [media, "import type { AttachBoardImage } from '../../data/whiteboard/index.js';"],
+  [media, 'const image = event.currentTarget.files?.[0];'],
+  [media, 'const image = await prepareImage(file);'],
+  [media, 'const data = image.bytes;'],
+  [data, `import { BoardEditService } from '${editsProtocol}';`],
+  [data, `import { WhiteboardHistoryService } from '${historyProtocol}';`],
+  [feedbackData, `import { FeedbackService } from '${feedbackProtocol}';`],
+  ['src/app/main.tsx', "import { createFeedbackService } from '../data/feedback/index.js';"],
+  ['src/platform/browser/index.ts', 'const bytes = await file.arrayBuffer();'],
+  ['src/platform/browser/index.ts', 'const preview = URL.createObjectURL(image);'],
+  [
+    'tests/integration/whiteboard-history.test.tsx',
+    `import { History } from '${historyProtocol}';`,
+  ],
+  [
+    'tests/integration/whiteboard-feedback.test.tsx',
+    `import { Feedback } from '${feedbackProtocol}';`,
+  ],
   [page, "import { WhiteboardViewingSurface } from '../../surfaces/whiteboard-viewing/index.js';"],
   [page, "import { WhiteboardExportSurface } from '../../surfaces/whiteboard-export/index.js';"],
   [viewer, "import type { CanvasViewport } from '../../ui/domain/canvas/index.js';"],
@@ -75,7 +131,11 @@ const accepted = [
   ['src/app/main.tsx', "import { createTransport } from '../platform/transport/index.js';"],
   [page, "import { WhiteboardEditor } from '../../surfaces/whiteboard-editor/index.js';"],
   [page, "import type { WhiteboardClient } from '../../data/whiteboard/index.js';"],
-  [surface, "import { createProjection } from '../../data/whiteboard/index.js';"],
+  [
+    editorMount,
+    "import { createWhiteboardSession, type WhiteboardService } from '../../data/whiteboard/index.js';",
+  ],
+  [historyMount, "import { createWhiteboardSession } from '../../data/whiteboard/index.js';"],
   [surface, "import { Canvas } from '@codexworkbench/luming-studio-ii-web/ui/domain/canvas';"],
   [surface, "import { Button } from '../../ui/base/index.js';"],
   [surfaceEntry, "export { WhiteboardEditor } from './Editor.js';"],
@@ -101,6 +161,208 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'the workbench card owns the copy protocol',
+    workbenchCard,
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    'the workbench copy hook makes its own request',
+    workbenchCopy,
+    'const response = fetch(path);',
+    'no-restricted-globals',
+  ],
+  [
+    'the workbench card stores copy state directly',
+    workbenchCard,
+    'window.localStorage.setItem(key, value);',
+    'base/no-browser-io',
+  ],
+  [
+    'the workbench copy hook imports the private implementation of its port',
+    workbenchCopy,
+    "import type { CatalogCopyService } from '../../data/catalog/copy-protocol.js';",
+  ],
+  [
+    'the workbench copy hook creates a catalog copy client',
+    workbenchCopy,
+    "import { createCatalogCopyService } from '../../data/catalog/index.js';",
+  ],
+  [
+    'the workbench card loads the catalog client dynamically',
+    workbenchCard,
+    "const client = import('../../data/catalog/index.js');",
+  ],
+  [
+    'the workbench mount constructs a copy client alongside its directory',
+    workbenchMount,
+    "import { createCatalogDirectory, createCatalogCopyService } from '../../data/catalog/index.js';",
+  ],
+  [
+    'editor content constructs its own edit client',
+    editorContent,
+    "import { createWhiteboardEditService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'editor content dynamically loads edit data',
+    editorContent,
+    "const service = import('../../data/whiteboard/index.js');",
+  ],
+  [
+    'editor content creates an independent board session',
+    editorContent,
+    "import { createWhiteboardSession } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'editor mount imports an edit client alongside the session factory',
+    editorMount,
+    "import { createWhiteboardSession, createWhiteboardEditService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'history canvas mount imports an edit client instead of a read session',
+    historyMount,
+    "import { createWhiteboardEditService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'editor command imports a private edit data type',
+    editorCommand,
+    "import type { EditObjectContentOperation } from '../../data/whiteboard/edits-types.js';",
+  ],
+  [
+    'editor command imports the generated edit request',
+    editorCommand,
+    `import type { EditObjectContentRequest } from '${editsProtocol}';`,
+  ],
+  [
+    'a workbench page importing the whiteboard history surface',
+    workbenchPage,
+    "import { History } from '../../surfaces/whiteboard-history/index.js';",
+  ],
+  [
+    'a workbench page importing the whiteboard feedback surface',
+    workbenchPage,
+    "import { Feedback } from '../../surfaces/whiteboard-feedback/index.js';",
+  ],
+  [
+    'a workbench page importing the whiteboard media surface',
+    workbenchPage,
+    "import { Media } from '../../surfaces/whiteboard-media/index.js';",
+  ],
+  [
+    'the whiteboard page reaches a private history component',
+    page,
+    "import { History } from '../../surfaces/whiteboard-history/HistoryPanel.js';",
+  ],
+  [
+    'history constructs its own board service',
+    history,
+    "import { createBoardHistory } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'feedback constructs its own service',
+    feedback,
+    "import { createFeedbackService } from '../../data/feedback/index.js';",
+  ],
+  [
+    'media constructs its own edit service',
+    media,
+    "import { createBoardEditService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'feedback reaches an unrelated data port',
+    feedback,
+    "import type { BoardEditService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'history reaches a feedback data port',
+    history,
+    "import type { FeedbackClient } from '../../data/feedback/index.js';",
+  ],
+  [
+    'media reaches a private transport type',
+    media,
+    "type Upload = import('../../data/whiteboard/media.js').Upload;",
+  ],
+  [
+    'the whiteboard editor imports the feedback surface',
+    surface,
+    "import { Feedback } from '../whiteboard-feedback/index.js';",
+  ],
+  [
+    'the whiteboard history uses the generated history protocol',
+    history,
+    `import type { ListVersionsRequest } from '${historyProtocol}';`,
+  ],
+  [
+    'the feedback surface uses the generated feedback protocol',
+    feedback,
+    `import { FeedbackService } from '${feedbackProtocol}';`,
+  ],
+  [
+    'the media surface uses the generated editing protocol',
+    media,
+    `import { BoardEditService } from '${editsProtocol}';`,
+  ],
+  [
+    'the canvas uses the generated editing protocol',
+    'src/ui/domain/canvas/Canvas.tsx',
+    `import type { BoardEditReceipt } from '${editsProtocol}';`,
+  ],
+  [
+    'the browser platform decodes the generated editing protocol',
+    platform,
+    `import { BoardEditService } from '${editsProtocol}';`,
+  ],
+  [
+    'whiteboard data uses the generated feedback protocol',
+    data,
+    `import { FeedbackService } from '${feedbackProtocol}';`,
+  ],
+  [
+    'feedback data uses the generated history protocol',
+    feedbackData,
+    `import { WhiteboardHistoryService } from '${historyProtocol}';`,
+  ],
+  [
+    'an object component test imports the feedback wire schema',
+    'tests/component/FeedbackPanel.test.tsx',
+    `import { FeedbackService } from '${feedbackProtocol}';`,
+  ],
+  [
+    'an integration test bypasses the feedback surface entry',
+    integration,
+    "import { FeedbackPanel } from '../../src/surfaces/whiteboard-feedback/FeedbackPanel.js';",
+  ],
+  [
+    'media reads selected file bytes directly',
+    media,
+    'const bytes = await file.arrayBuffer();',
+    'no-restricted-syntax',
+  ],
+  [
+    'media aliases selected file reads',
+    media,
+    'const { text: read } = file;',
+    'no-restricted-syntax',
+  ],
+  [
+    'the canvas uses a browser file reader',
+    'src/ui/domain/canvas/Canvas.tsx',
+    'const reader = new FileReader();',
+    'no-restricted-globals',
+  ],
+  [
+    'media allocates a browser preview URL',
+    media,
+    'const url = URL.createObjectURL(image);',
+    'base/no-browser-io',
+  ],
+  [
+    'a canvas object aliases browser preview URL cleanup',
+    'src/ui/domain/objects/media/MediaObject.tsx',
+    'const { revokeObjectURL: revoke } = URL;',
+    'base/no-browser-io',
+  ],
   [
     'the viewing surface reaches the whiteboard write service',
     viewer,

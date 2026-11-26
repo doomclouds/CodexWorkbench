@@ -91,6 +91,18 @@ dialog:has(.studio-ui-embed__source-editor) {
   min-inline-size: 0;
 }
 
+.studio-ui-embed__source-heading {
+  display: flex;
+  min-inline-size: 0;
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.studio-ui-embed__source-heading > :first-child {
+  flex: 1;
+  min-inline-size: 0;
+}
+
 .studio-ui-embed__source-editor textarea {
   block-size: min(47vh, 430px);
   min-block-size: 180px;
@@ -104,10 +116,35 @@ dialog:has(.studio-ui-embed__source-editor) {
   white-space: pre;
 }
 
-.studio-ui-embed__source-editor > button {
-  justify-self: end;
+.studio-ui-embed__source-note {
+  margin: 0;
+  color: var(--studio-ui-muted, GrayText);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.studio-ui-embed__source-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 9px;
   margin-block-start: 6px;
+}
+
+.studio-ui-embed__source-actions > button {
   padding: 7px 12px;
   border-radius: 8px;
   font-weight: 500;
+}
+
+@media (max-width: 690px) {
+  .studio-ui-embed__source-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .studio-ui-embed__source-heading button {
+    align-self: flex-start;
+  }
 }

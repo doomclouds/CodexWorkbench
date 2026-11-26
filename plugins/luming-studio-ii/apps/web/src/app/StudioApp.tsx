@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { ArchiveImportService } from '../data/archive-import/index.js';
 import type { BoardCatalogService, CatalogManagementService } from '../data/catalog/index.js';
+import { createCatalogBoardRename } from '../data/catalog/index.js';
 import type { ExportBoard, ExportBoardFile, WhiteboardService } from '../data/whiteboard/index.js';
 import type { StudioLocation } from '../platform/browser/index.js';
 import './app.css';
@@ -10,6 +11,7 @@ import { useArchiveImport } from './workflows/archive-import/useArchiveImport.js
 
 type StudioLayout = 'list' | 'grid';
 type StudioTheme = 'light' | 'dark';
+type BoardPageProps = ComponentProps<typeof WhiteboardPage>;
 
 interface StudioNavigation {
   readonly read: () => StudioLocation;
@@ -34,6 +36,11 @@ export interface StudioAppProps {
   readonly archiveImport?: ArchiveImportService;
   readonly exportBoard?: ExportBoard;
   readonly downloadExport?: (file: ExportBoardFile) => void;
+  readonly editService?: BoardPageProps['editService'];
+  readonly historyService?: BoardPageProps['historyService'];
+  readonly feedbackService?: BoardPageProps['feedbackService'];
+  readonly prepareImage?: BoardPageProps['prepareImage'];
+  readonly readHtmlSource?: BoardPageProps['readHtmlSource'];
 }
 
 const {
@@ -52,11 +59,21 @@ export function StudioApp({
   archiveImport,
   exportBoard,
   downloadExport,
+  editService,
+  historyService,
+  feedbackService,
+  prepareImage,
+  readHtmlSource,
 }: StudioAppProps) {
   const [location, setLocation] = useState(navigation.read);
   const [layout, setLayout] = useState(preferences.layout);
   const [resolvedTheme, setTheme] = useState(preferences.resolvedTheme);
   const routeGeneration = useRef(0);
+  const renameBoard = useMemo(
+    () =>
+      catalogManagement && createCatalogBoardRename(catalog, catalogManagement, createCommandId),
+    [catalog, catalogManagement, createCommandId],
+  );
   const importFlow = useArchiveImport({
     service: archiveImport,
     createCommandId,
@@ -111,6 +128,12 @@ export function StudioApp({
           onBack={openWorkbench}
           exportBoard={exportBoard}
           downloadExport={downloadExport}
+          editService={editService}
+          historyService={historyService}
+          feedbackService={feedbackService}
+          prepareImage={prepareImage}
+          renameBoard={renameBoard}
+          readHtmlSource={readHtmlSource}
         />
       );
     }
@@ -139,6 +162,7 @@ export function StudioApp({
         management={catalogManagement}
         createCommandId={createCommandId}
         onOpenBoard={handleOpenBoard}
+        readRouteGeneration={() => routeGeneration.current}
         onOpenTrash={catalogManagement ? openRecycleBin : undefined}
         archiveImport={importFlow.workbench}
         preferences={pagePreferences}

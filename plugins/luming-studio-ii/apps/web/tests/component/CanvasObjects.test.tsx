@@ -382,6 +382,52 @@ describe('Canvas object extensions', () => {
     expect(root.querySelector('dialog')).toBeNull();
   });
 
+  it('revokes one object type without removing the board writer', async () => {
+    const observe = vi.fn<(view: CanvasObjectViewProps) => void>();
+    const objectExtensions = [createBadgeExtension(observe), stickerExtension];
+    const sticker: CanvasObject = {
+      id: 'heart-sticker',
+      kind: 'sticker',
+      label: '爱心',
+      version: 1,
+      geometry: { x: 30, y: 30, width: 64, height: 64, rotation: 0 },
+    };
+    const saved = { version: 8, value: '已复核' };
+    const onObjectIntent = vi
+      .fn<(intent: CanvasObjectIntent) => CanvasObjectReceipt>()
+      .mockReturnValue({ ok: true, payload: saved });
+    const board = { ...scene, objects: [badge, sticker] };
+    renderCanvas({ scene: board, objectExtensions, onObjectIntent, payloadById: badgePayloads });
+    const badgeRequest = observe.mock.lastCall?.[0].request;
+    if (!badgeRequest) {
+      throw new Error('Expected a request function for the badge.');
+    }
+
+    renderCanvas({
+      scene: board,
+      objectExtensions,
+      onObjectIntent,
+      canWriteObject: (kind) => kind === sticker.kind,
+    });
+    expect(observe.mock.lastCall?.[0].readOnly).toBe(true);
+    await expect(badgeRequest(badgeOperation)).resolves.toMatchObject({ ok: false });
+    expect(onObjectIntent).not.toHaveBeenCalled();
+
+    renderCanvas({
+      scene: board,
+      objectExtensions,
+      onObjectIntent,
+      canWriteObject: (kind) => kind === badge.kind,
+    });
+    expect(observe.mock.lastCall?.[0].readOnly).toBe(false);
+    await expect(badgeRequest(badgeOperation)).resolves.toEqual({ ok: true, payload: saved });
+    expect(onObjectIntent).toHaveBeenCalledExactlyOnceWith({
+      ...badgeOperation,
+      objectId: badge.id,
+      kind: badge.kind,
+    });
+  });
+
   it('checks current permission and releases callbacks when a registered view is replaced or unmounted', async () => {
     const observe = vi.fn<(view: CanvasObjectViewProps) => void>();
     const objectExtensions = [createBadgeExtension(observe)];

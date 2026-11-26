@@ -94,7 +94,7 @@ describe('Canvas Todo presentation', () => {
     });
   }
 
-  it('opens the shared viewer and leaves the same task list mounted and read-only', () => {
+  it('opens the fitted viewer and keeps the same task list read-only without body permission', () => {
     const onOpenPresentation = vi.fn<(ids: readonly string[]) => void>();
     const onObjectIntent = vi.fn<NonNullable<CanvasProps['onObjectIntent']>>();
     render({ onOpenPresentation, onObjectIntent });
@@ -106,10 +106,13 @@ describe('Canvas Todo presentation', () => {
     render({
       onOpenPresentation,
       onObjectIntent,
-      presentation: { objectIds: [id], focusObjectId: id },
+      presentation: { objectIds: [id], expandedObjectId: id },
     });
-    const reading = fixture.host.querySelector('[data-todo-focused-reading]');
+    const reading = fixture.host.querySelector('[data-todo-expanded]');
     expect(reading).toBe(original);
+    expect(fixture.host.querySelector<HTMLElement>('[data-canvas-object]')?.style.width).toBe(
+      '320px',
+    );
     expect(reading?.querySelector('[aria-label="任务列表"]')?.textContent).toContain(task);
     expect(reading?.textContent).toContain('1/1 完成');
     expect(reading?.querySelector('[aria-label="展开任务清单"]')).toBeNull();
@@ -118,7 +121,7 @@ describe('Canvas Todo presentation', () => {
     expect(onObjectIntent).not.toHaveBeenCalled();
 
     render({ onOpenPresentation, onObjectIntent });
-    expect(fixture.host.querySelector('[data-todo-focused-reading]')).toBeNull();
+    expect(fixture.host.querySelector('[data-todo-expanded]')).toBeNull();
     expect(fixture.host.querySelector('[data-todo-id]')).toBe(original);
   });
 

@@ -25,7 +25,15 @@ const orders: Readonly<Record<CatalogSortOrder, BoardSortOrder>> = {
 const reasons = new Map<CatalogRejectionReason, RejectionReason>([
   [CatalogRejectionReason.INVALID_TITLE, 'invalidTitle'],
   [CatalogRejectionReason.COMMAND_ID_REUSE, 'commandIdReuse'],
+  [CatalogRejectionReason.FORBIDDEN, 'forbidden'],
+  [CatalogRejectionReason.ENTRY_VERSION_CHANGED, 'entryVersionChanged'],
+  [CatalogRejectionReason.STATE_CHANGED, 'stateChanged'],
+  [CatalogRejectionReason.INVALID_COMMAND, 'invalidCommand'],
 ]);
+
+export function readCatalogRejection(reason: CatalogRejectionReason): RejectionReason {
+  return reasons.get(reason) ?? 'unknown';
+}
 
 export async function request<Input extends DescMessage, Output extends DescMessage>(
   post: CatalogPost,
@@ -108,7 +116,7 @@ function readReceipt(
     case 'created':
       return { kind, commandId, board: readBoard(value) };
     case 'rejected':
-      return { kind, commandId, reason: reasons.get(value.reason) ?? 'unknown' };
+      return { kind, commandId, reason: readCatalogRejection(value.reason) };
     case undefined:
       throw new Error('Catalog receipt is missing a command outcome.');
     case 'changed':
@@ -134,28 +142,42 @@ export function readReceiptLookup<Receipt>(
   }
 }
 
-export function createBoardCatalogService(post: CatalogPost): BoardCatalogService {
-  const { listBoards, createBoard, getCatalogCommandReceipt } = wireService.method;
+export function createBoardCatalogService(post: CatalogPost) {
+  const { listBoards, createBoard, duplicateBoard, getCatalogCommandReceipt } = wireService.method;
 
   return {
-    async listBoards(input, signal) {
+    async listBoards(input, signal?: AbortSignal) {
       const { boards, nextCursor } = await request(post, listBoards, listInput(input), signal);
 
       return { boards: readBoards(boards), nextCursor };
     },
-    async createBoard({ commandId, title }, signal) {
+    async createBoard({ commandId, title }, signal?: AbortSignal) {
       requireCommandId(commandId);
 
       const response = await request(post, createBoard, { commandId, title }, signal);
 
       return readReceipt(response.receipt, commandId);
     },
-    async getReceipt(commandId, signal) {
+    async duplicateBoard({ sourceBoardId, commandId }, signal?: AbortSignal) {
+      requireCommandId(commandId);
+      if (!sourceBoardId.trim()) {
+        throw new Error('Catalog source board ID is required.');
+      }
+
+      const response = await request(post, duplicateBoard, { sourceBoardId, commandId }, signal);
+      const receipt = readReceipt(response.receipt, commandId);
+      if (receipt.kind === 'created' && receipt.board.boardId === sourceBoardId) {
+        throw new Error('Catalog duplicate receipt returned the source board ID.');
+      }
+
+      return receipt;
+    },
+    async getReceipt(commandId, signal?: AbortSignal) {
       requireCommandId(commandId);
 
       const response = await request(post, getCatalogCommandReceipt, { commandId }, signal);
 
       return readReceiptLookup(response, commandId, readReceipt);
     },
-  };
+  } satisfies BoardCatalogService;
 }

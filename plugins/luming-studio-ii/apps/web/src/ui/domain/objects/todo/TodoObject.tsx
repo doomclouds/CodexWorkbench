@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, CSSProperties, RefObject } from 'react';
 import { Button, Progress, StatusText } from '../../../base/index.js';
 import type { TodoObjectAppearance, TodoObjectProps } from './contracts.js';
+import { TodoControlIcon } from './TodoControlIcon.js';
 import { TodoRows } from './TodoRows.js';
 import { TodoTextEditor } from './TodoTextEditor.js';
 import { defaultTodoTitle } from './todo-edit.js';
@@ -19,21 +20,27 @@ export function isTodoOverview(width: number, height: number) {
   return width < overviewWidth || height < overviewHeight;
 }
 
-function TodoHeadingIcons() {
+function TodoHeadingIcons({
+  movable,
+  locked,
+}: {
+  readonly movable: boolean;
+  readonly locked: boolean;
+}) {
   return (
-    <span
-      className="studio-object-todo__heading-icons"
-      data-canvas-drag-surface="title"
-      aria-hidden="true"
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="9" cy="5" r="1" />
-        <circle cx="9" cy="12" r="1" />
-        <circle cx="9" cy="19" r="1" />
-        <circle cx="15" cy="5" r="1" />
-        <circle cx="15" cy="12" r="1" />
-        <circle cx="15" cy="19" r="1" />
-      </svg>
+    <span className="studio-object-todo__heading-icons">
+      {movable && (
+        <button
+          className="studio-object-todo__move"
+          data-canvas-drag-surface="title"
+          type="button"
+          aria-label="移动任务清单"
+          title="移动任务清单"
+          disabled={locked}
+        >
+          <TodoControlIcon icon="grip" size={18} />
+        </button>
+      )}
       <svg
         viewBox="0 0 24 24"
         fill="none"
@@ -41,6 +48,7 @@ function TodoHeadingIcons() {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
+        aria-hidden="true"
       >
         <rect x="3" y="4" width="5" height="5" rx="1" />
         <path d="M13 6h8M13 12h8M13 18h8M3 17l2 2 4-4" />
@@ -110,8 +118,11 @@ function saveStatus(session: TodoEditorSession, editable: boolean) {
   return (
     <div className="studio-object-todo__status">
       <StatusText message={session.error} tone="error" announcement="assertive" />
-      {session.pending && (
+      {session.pending && !session.conflicted && (
         <Button label="重试保存" variant="ghost" onActivate={session.retry} disabled={!editable} />
+      )}
+      {session.conflicted && (
+        <Button label="放弃本次修改" variant="ghost" onActivate={session.discardConflict} />
       )}
     </div>
   );
@@ -165,6 +176,8 @@ function TodoSession(props: TodoObjectProps) {
     onEdit,
     expanded,
     focusedReading,
+    movable = false,
+    locked = false,
     overview,
     editRequest,
     onEditingChange,
@@ -210,6 +223,7 @@ function TodoSession(props: TodoObjectProps) {
       data-todo-id={value.id}
       data-todo-layout={compact ? 'overview' : 'full'}
       data-todo-focused-reading={focusedReading || undefined}
+      data-todo-expanded={expanded || undefined}
       data-todo-scheme={scheme}
       style={style}
       aria-label={title}
@@ -217,7 +231,7 @@ function TodoSession(props: TodoObjectProps) {
       onPaste={handlePaste}
     >
       <header className="studio-object-todo__heading" data-canvas-native="">
-        <TodoHeadingIcons />
+        <TodoHeadingIcons movable={movable && !expanded} locked={locked || inProgress} />
         <div className="studio-object-todo__title">{titleContent(title, editable, session)}</div>
         <span className="studio-object-todo__count" aria-live="polite">
           {complete}/{items.length} 完成
@@ -225,7 +239,7 @@ function TodoSession(props: TodoObjectProps) {
         {canExpand && (
           <Button
             label="展开任务清单"
-            icon="⤢"
+            icon={<TodoControlIcon icon="expand" size={19} />}
             iconOnly
             variant="ghost"
             onActivate={onRequestExpand}

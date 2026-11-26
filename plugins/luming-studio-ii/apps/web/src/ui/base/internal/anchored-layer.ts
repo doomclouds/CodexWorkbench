@@ -2,9 +2,14 @@ import { useEffectEvent, useLayoutEffect, useRef } from 'react';
 import { nextLayerOrder, registerDismissableLayer } from './layer-dismiss.js';
 import type { LayerDismissReason } from './layer-dismiss.js';
 import { anchorElement, placeLayer } from './layer-position.js';
-import type { OverlayAnchor, OverlayPlacement } from './layer-position.js';
+import type { OverlayAlignment, OverlayAnchor, OverlayPlacement } from './layer-position.js';
 
-export type { OverlayAnchor, OverlayPlacement, OverlayPoint } from './layer-position.js';
+export type {
+  OverlayAlignment,
+  OverlayAnchor,
+  OverlayPlacement,
+  OverlayPoint,
+} from './layer-position.js';
 
 export type OverlayCloseReason = LayerDismissReason | 'anchor-hidden';
 
@@ -12,6 +17,7 @@ interface AnchoredLayerOptions {
   open: boolean;
   anchor: OverlayAnchor | null;
   placement?: OverlayPlacement;
+  align?: OverlayAlignment;
   persistent?: boolean;
   priority?: number;
   onRequestClose: (reason: OverlayCloseReason) => void;
@@ -20,7 +26,7 @@ interface AnchoredLayerOptions {
 function trackAnchor(
   root: HTMLDivElement,
   anchor: OverlayAnchor,
-  placement: OverlayPlacement,
+  { placement, align }: { placement: OverlayPlacement; align?: OverlayAlignment },
   view: Window & typeof globalThis,
   onHidden: () => void,
 ) {
@@ -31,7 +37,7 @@ function trackAnchor(
 
   function renderPosition() {
     const present = !element || element.isConnected;
-    const placed = present && intersecting && placeLayer(root, anchor, placement, view);
+    const placed = present && intersecting && placeLayer(root, anchor, placement, view, align);
     root.style.visibility = placed ? 'visible' : 'hidden';
     if (!placed && !hidden) {
       onHidden();
@@ -93,6 +99,7 @@ export function useAnchoredLayer({
   open,
   anchor,
   placement = 'bottom',
+  align,
   persistent = false,
   priority = 0,
   onRequestClose,
@@ -128,7 +135,7 @@ export function useAnchoredLayer({
       return;
     }
 
-    const disposePosition = trackAnchor(element, anchor, placement, view, () =>
+    const disposePosition = trackAnchor(element, anchor, { placement, align }, view, () =>
       requestClose('anchor-hidden'),
     );
     const disposeDismiss = registerDismissableLayer({
@@ -144,7 +151,7 @@ export function useAnchoredLayer({
       disposeDismiss();
       disposePosition();
     };
-  }, [open, anchor, placement, persistent, priority]);
+  }, [open, anchor, placement, align, persistent, priority]);
 
   return root;
 }

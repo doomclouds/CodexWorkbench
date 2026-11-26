@@ -1,16 +1,14 @@
 import type {
   Actor,
-  BoardAccess,
   BoardScene,
   CommandReceipt,
   ExportBoardCommand,
   ExportBoardResult,
   MoveCommand,
-  PayloadRecord,
   PayloadResult,
 } from '../domain/index.js';
-import { isSupportedPayload } from '../domain/index.js';
-import type { WhiteboardReader, WhiteboardRepository } from '../ports/index.js';
+import type { WhiteboardRepository } from '../ports/index.js';
+import { payloadResult, requireAccess, WhiteboardAccessError } from './board-read.js';
 import { executeBoardExport } from './export-board.js';
 import { executeMove } from './move-objects.js';
 
@@ -18,9 +16,13 @@ export type {
   Actor,
   Appearance,
   BoardAccess,
+  BoardEditReceipt,
+  BoardEditRejection,
   BoardHeader,
   BoardObject,
   BoardScene,
+  BoardVersionSummary,
+  ContentOperation,
   CommandReceipt,
   ConnectorDetail,
   ConnectorEndpoint,
@@ -30,6 +32,11 @@ export type {
   ExportBoardResult,
   Geometry,
   GeometryDetail,
+  GeometryLayerDirection,
+  GeometryObjectChange,
+  GeometryOperation,
+  GeometryTransformKind,
+  ImageOperation,
   JsonObject,
   JsonValue,
   MoveApplied,
@@ -43,7 +50,19 @@ export type {
   PayloadRecord,
   PayloadResult,
   Point,
+  TodoContentEdit,
+  TodoContentPlacement,
+  TodoContentSource,
 } from '../domain/index.js';
+export { createBoardEditorApplication, type BoardEditorApplication } from './board-editor.js';
+export {
+  createBoardHistoryApplication,
+  type BoardHistoryApplication,
+  type BoardHistoryPage,
+  type BoardVersionExportResult,
+  type RestoreBoardVersionCommand,
+} from './board-history.js';
+export { WhiteboardAccessError } from './board-read.js';
 
 export interface WhiteboardApplication {
   getBoardScene(actor: Actor, boardId: string): BoardScene;
@@ -57,35 +76,9 @@ export interface WhiteboardApplication {
   exportBoard(actor: Actor, command: ExportBoardCommand): ExportBoardResult;
 }
 
-export class WhiteboardAccessError extends Error {
-  constructor() {
-    super('Whiteboard access denied');
-    this.name = 'WhiteboardAccessError';
-  }
-}
-
-function requireAccess(reader: WhiteboardReader, actor: Actor, boardId: string): BoardAccess {
-  const access = reader.getAccess(boardId, actor.id);
-  if (!access) {
-    throw new WhiteboardAccessError();
-  }
-
-  return access;
-}
-
-function payloadResult(objectId: string, payload: PayloadRecord | undefined): PayloadResult {
-  if (!payload) {
-    return { kind: 'unavailable', objectId, reason: 'notFound' };
-  }
-  if (!isSupportedPayload(payload.bodyKind)) {
-    return { kind: 'unavailable', objectId, reason: 'unsupportedKind' };
-  }
-
-  return { kind: 'payload', payload };
-}
-
 export function createWhiteboardApplication(
   repository: WhiteboardRepository,
+  now?: () => number,
 ): WhiteboardApplication {
   return {
     getBoardScene(actor, boardId) {
@@ -113,7 +106,7 @@ export function createWhiteboardApplication(
       });
     },
     moveObjects(actor, command) {
-      return repository.write((writer) => executeMove(writer, actor, command));
+      return repository.write((writer) => executeMove(writer, actor, command, now));
     },
     getCommandReceipt(actor, boardId, commandId) {
       return repository.read((reader) => {

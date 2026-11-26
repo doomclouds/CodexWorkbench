@@ -2,6 +2,7 @@ import type {
   Actor,
   BoardHeader,
   BoardObject,
+  BoardVersionCommit,
   CommandReceipt,
   MoveCommand,
   MoveConflict,
@@ -51,6 +52,7 @@ function applyMove(
   writer: WhiteboardWriter,
   board: BoardHeader,
   command: MoveCommand,
+  stamp?: { readonly actorId: string; readonly savedAtMillis: number },
 ): MoveOutcome {
   const { boardId, revision } = board;
   const scope = createMoveScope(writer, boardId, command.targets);
@@ -88,6 +90,12 @@ function applyMove(
     return conflict('targetsChanged', revision, required);
   }
 
+  const movingIds = current.map(({ objectId }) => objectId);
+  const related = writer.listRelatedConnectors?.(boardId, movingIds);
+  if (related?.some((object) => scope.isLocked(object))) {
+    return { kind: 'rejected', reason: 'geometryLocked' };
+  }
+
   const objects = translatedObjects(current, command.delta);
   if (!objects) {
     return { kind: 'rejected', reason: 'invalidMove' };
@@ -95,13 +103,21 @@ function applyMove(
 
   writer.saveGeometry(boardId, objects);
 
-  return { kind: 'applied', boardRevision: writer.advanceBoardRevision(boardId), objects };
+  const commit: BoardVersionCommit | undefined = stamp && {
+    ...stamp,
+    kind: 'geometry',
+    changedObjectCount: objects.length,
+  };
+  const boardRevision = writer.advanceBoardRevision(boardId, commit);
+
+  return { kind: 'applied', boardRevision, objects };
 }
 
 export function executeMove(
   writer: WhiteboardWriter,
   actor: Actor,
   command: MoveCommand,
+  now?: () => number,
 ): CommandReceipt {
   const { boardId, commandId } = command;
   const access = writer.getAccess(boardId, actor.id);
@@ -123,7 +139,8 @@ export function executeMove(
     return receiptFor(command, { kind: 'rejected', reason: 'invalidMove' });
   }
 
-  const outcome = applyMove(writer, board, command);
+  const stamp = now && { actorId: actor.id, savedAtMillis: now() };
+  const outcome = applyMove(writer, board, command, stamp);
   const receipt = receiptFor(command, outcome);
   if (outcome.kind === 'applied') {
     writer.saveReceipt(actor.id, { signature: commandSignature(command), receipt });

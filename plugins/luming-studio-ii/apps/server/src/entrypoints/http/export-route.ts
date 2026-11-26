@@ -24,7 +24,7 @@ const rejectionByReason: Readonly<Record<Rejected['reason'], BoardExportRejectio
   tooLarge: BoardExportRejectionReason.TOO_LARGE,
 };
 
-function toExportFormat(format: BoardExportFormat): ExportBoardCommand['format'] {
+export function toExportFormat(format: BoardExportFormat): ExportBoardCommand['format'] {
   if (format === BoardExportFormat.JSON) {
     return 'json';
   }
@@ -35,7 +35,7 @@ function toExportFormat(format: BoardExportFormat): ExportBoardCommand['format']
   throw new HttpRequestError(400, 'A supported board export format is required');
 }
 
-function toExportScope(scope: ExportBoardRequest['scope']): ExportBoardCommand['scope'] {
+export function toExportScope(scope: ExportBoardRequest['scope']): ExportBoardCommand['scope'] {
   switch (scope.case) {
     case 'whole':
       return { kind: 'whole' };
@@ -59,7 +59,7 @@ function toExportCommand(request: ExportBoardRequest): ExportBoardCommand {
   };
 }
 
-function toExportResponse(result: ExportBoardResult): ExportResponse {
+export function toExportResponse(result: ExportBoardResult): ExportResponse {
   switch (result.kind) {
     case 'file': {
       const { filename, mimeType, revision, content } = result;

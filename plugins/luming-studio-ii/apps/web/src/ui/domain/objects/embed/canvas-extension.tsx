@@ -78,6 +78,8 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
     id,
     interactive,
     readOnly,
+    editRequest,
+    readHtmlSource,
     zoom,
     request,
     onNavigation,
@@ -150,6 +152,9 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
         kind={kind}
         value={value}
         interactive={interactive}
+        editRequest={editRequest}
+        useCanvasTools
+        readHtmlSource={readHtmlSource}
         zoom={zoom}
         preserveScroll
         onNavigation={onNavigation ? handleNavigation : undefined}
@@ -164,6 +169,7 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
 function embedExtension(kind: EmbedKind, label: string, width: number, height: number) {
   return {
     kind,
+    activateOnDoubleClick: false,
     capabilities: { content: 'embedded', move: true, resize: true, rotate: false, connect: true },
     placement: { kind, label, width, height },
     View: CanvasEmbedView,

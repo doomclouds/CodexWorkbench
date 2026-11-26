@@ -161,7 +161,12 @@ export interface CanvasObjectIntent extends CanvasObjectOperation {
 
 export type CanvasObjectReceipt =
   | { readonly ok: true; readonly payload: CanvasObjectPayload }
-  | { readonly ok: false; readonly message: string; readonly current?: CanvasObjectPayload };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly current?: CanvasObjectPayload;
+      readonly conflict?: true;
+    };
 
 export type CanvasObjectNavigation =
   | { readonly kind: 'space'; readonly held: boolean }
@@ -191,6 +196,8 @@ export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly locked?: boolean;
   readonly editRequest?: number;
   readonly focusedReading?: boolean;
+  readonly expanded?: boolean;
+  readonly readHtmlSource?: (file: File) => Promise<string>;
   readonly onOpenPresentation?: () => void;
   readonly onClosePresentation?: () => void;
   readonly request: (operation: CanvasObjectOperation) => Promise<CanvasObjectReceipt>;
@@ -204,6 +211,7 @@ export interface CanvasObjectExtension {
   readonly placement?: CanvasPlacement;
   readonly portClick?: 'place' | 'connect';
   readonly blocksPlacement?: boolean;
+  readonly activateOnDoubleClick?: boolean;
   readonly bounds?: (context: CanvasObjectGeometryContext) => CanvasRect;
   readonly hitTest?: (context: CanvasObjectHitContext) => boolean;
   readonly View?: ComponentType<CanvasObjectViewProps>;
@@ -298,6 +306,7 @@ export interface CanvasHandle {
 export interface CanvasPresentation {
   readonly objectIds: readonly string[];
   readonly focusObjectId?: string;
+  readonly expandedObjectId?: string;
 }
 
 export interface CanvasProps {
@@ -319,9 +328,14 @@ export interface CanvasProps {
   readonly payloadById?: ReadonlyMap<string, CanvasObjectPayload>;
   readonly contentById?: ReadonlyMap<string, ReactNode>;
   readonly onSelectionChange: (selection: readonly string[]) => void;
+  readonly onContextMenu?: (anchor: CanvasPoint, selection: readonly string[]) => void;
   readonly onObjectActivate?: (activation: CanvasObjectActivation) => void;
+  readonly editObjectRequest?: { readonly id: string };
+  readonly readHtmlSource?: CanvasObjectViewProps['readHtmlSource'];
+  readonly canEditExpandedObject?: boolean;
   readonly onOpenPresentation?: (ids: readonly string[]) => void;
   readonly onClosePresentation?: () => void;
+  readonly canWriteObject?: (kind: CanvasObjectKind) => boolean;
   readonly onObjectIntent?: (
     intent: CanvasObjectIntent,
   ) => CanvasObjectReceipt | Promise<CanvasObjectReceipt>;

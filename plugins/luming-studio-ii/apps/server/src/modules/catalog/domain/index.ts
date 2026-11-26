@@ -87,6 +87,16 @@ export function normalizeBoardTitle(title: string): string | undefined {
   return normalized || defaultBoardTitle;
 }
 
+export function duplicateBoardTitle(title: string): string | undefined {
+  const suffix = ' 副本';
+  const source = title
+    .trim()
+    .slice(0, maxTitleLength - suffix.length)
+    .replace(/\p{Cs}$/u, '');
+
+  return normalizeBoardTitle(source.trimEnd() + suffix);
+}
+
 export function catalogTimestamp(now: number): bigint {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new Error('The clock returned an invalid catalog timestamp.');

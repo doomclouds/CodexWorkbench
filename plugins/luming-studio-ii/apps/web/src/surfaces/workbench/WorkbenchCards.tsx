@@ -14,9 +14,11 @@ interface BoardCardProps {
     action: WorkbenchBoardAction,
     trigger: HTMLButtonElement,
   ) => void;
+  readonly onDuplicate?: (board: CatalogBoardSummary, trigger: HTMLButtonElement) => void;
 }
 
 export type WorkbenchBoardAction = 'rename' | 'pin' | 'trash';
+type CardMenuAction = WorkbenchBoardAction | 'duplicate';
 
 interface CardMenuAnchor {
   readonly button: HTMLButtonElement;
@@ -98,9 +100,12 @@ function BoardPreview() {
   );
 }
 
-type BoardCardMenuProps = Pick<BoardCardProps, 'board' | 'managementBlocked' | 'onAction'>;
+type BoardCardMenuProps = Pick<
+  BoardCardProps,
+  'board' | 'managementBlocked' | 'onAction' | 'onDuplicate'
+>;
 
-function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProps) {
+function BoardCardMenu({ board, managementBlocked, onAction, onDuplicate }: BoardCardMenuProps) {
   const [anchor, setAnchor] = useState<CardMenuAnchor>();
   const { title, pinned, canManage } = board;
   const label = '管理作品：' + title;
@@ -109,7 +114,7 @@ function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProp
     { label: pinned ? '取消固定' : '固定', icon: Pin, action: 'pin' },
     { label: '重命名', icon: FileCode2, action: 'rename' },
     { label: '复制链接', icon: Share2 },
-    { label: '复制作品', icon: Copy },
+    { label: '复制作品', icon: Copy, action: 'duplicate' },
   ] as const;
 
   function handleKey(event: KeyboardEvent<HTMLButtonElement>) {
@@ -119,8 +124,16 @@ function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProp
     }
   }
 
-  function runAction(action: WorkbenchBoardAction | undefined) {
-    const blocked = !actionsAvailable || managementBlocked;
+  function actionAvailable(action: CardMenuAction | undefined) {
+    if (action === 'duplicate') {
+      return canManage === true && onDuplicate !== undefined;
+    }
+
+    return action !== undefined && actionsAvailable;
+  }
+
+  function runAction(action: CardMenuAction | undefined) {
+    const blocked = !actionAvailable(action) || managementBlocked;
     if (!anchor || blocked || !action) {
       return;
     }
@@ -128,6 +141,11 @@ function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProp
     const trigger = anchor.button;
     setAnchor(undefined);
     trigger.focus();
+    if (action === 'duplicate') {
+      onDuplicate?.(board, trigger);
+      return;
+    }
+
     onAction?.(board, action, trigger);
   }
 
@@ -160,7 +178,7 @@ function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProp
         >
           {options.map((option) => {
             const action = 'action' in option ? option.action : undefined;
-            const enabled = action !== undefined && actionsAvailable;
+            const enabled = actionAvailable(action);
             const { label: text, icon: Icon } = option;
 
             return (
@@ -195,7 +213,14 @@ function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProp
   );
 }
 
-export function BoardCard({ board, layout, onOpen, managementBlocked, onAction }: BoardCardProps) {
+export function BoardCard({
+  board,
+  layout,
+  onOpen,
+  managementBlocked,
+  onAction,
+  onDuplicate,
+}: BoardCardProps) {
   return (
     <article className="studio-workbench-card">
       <button
@@ -215,7 +240,12 @@ export function BoardCard({ board, layout, onOpen, managementBlocked, onAction }
           </div>
         </div>
       </button>
-      <BoardCardMenu board={board} managementBlocked={managementBlocked} onAction={onAction} />
+      <BoardCardMenu
+        board={board}
+        managementBlocked={managementBlocked}
+        onAction={onAction}
+        onDuplicate={onDuplicate}
+      />
     </article>
   );
 }

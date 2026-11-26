@@ -195,18 +195,18 @@ export function WhiteboardViewingSurface({
           全屏观看 · 按 <kbd>Esc</kbd> 退出
         </div>
       )}
-      {active && (
+      {canvasReading && (
         <button
           ref={exit}
           type="button"
           className="whiteboard-viewing__exit"
           data-whiteboard-viewing-chrome
-          aria-label={documentReading ? '返回白板' : '退出全屏观看'}
-          title={documentReading ? '返回白板（Esc）' : '退出全屏观看（Esc）'}
+          aria-label="退出全屏观看"
+          title="退出全屏观看（Esc）"
           onClick={onExit}
         >
           <X size={18} />
-          <span>{documentReading ? '返回白板' : '退出全屏'}</span>
+          <span>退出全屏</span>
           <kbd>Esc</kbd>
         </button>
       )}

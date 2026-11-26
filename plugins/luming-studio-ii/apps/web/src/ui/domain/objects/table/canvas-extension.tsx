@@ -1,7 +1,13 @@
 import { useMemo } from 'react';
 
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
-import type { TableObjectActivity, TableObjectDraft, TableObjectValue } from './contracts.js';
+import type {
+  TableCellValue,
+  TableObjectActivity,
+  TableObjectDraft,
+  TableObjectValue,
+} from './contracts.js';
+import { readTable, type TableModel } from './table-model.js';
 import { TableObject } from './TableObject.js';
 
 function isCellValue(value: unknown) {
@@ -64,6 +70,53 @@ function tableDetail(geometry: CanvasObjectViewProps['geometry'], zoom: number) 
   return 'full';
 }
 
+function sameColumns<T>(base: readonly T[], target: readonly T[] | undefined) {
+  return target?.length === base.length && base.every((value, index) => value === target[index]);
+}
+
+function preserveCellType(next: TableCellValue, old: TableCellValue | undefined): TableCellValue {
+  return old !== undefined && String(old ?? '') === next ? old : next;
+}
+
+function preserveTableScalars(draft: TableObjectDraft, base: TableModel): TableObjectDraft {
+  const previous = draft.base.data?.rows;
+  if (!previous?.some((row) => row.some((cell) => typeof cell !== 'string'))) {
+    return draft;
+  }
+
+  const current = draft.value.data;
+  const { rows, rowIds, columnIds } = current ?? {};
+  if (!rows || !rowIds || !columnIds) {
+    return draft;
+  }
+
+  const baseRows = new Map(base.rowIds.map((id, index) => [id, previous[index]]));
+  const baseColumns = new Map(base.columnIds.map((id, index) => [id, index]));
+  const columnIndexes = columnIds.map((id) => baseColumns.get(id));
+  const cells = rows.map((row, index) => {
+    const source = baseRows.get(rowIds[index] ?? '');
+
+    return row.map((value, column) => {
+      const original = columnIndexes[column];
+
+      return preserveCellType(value, original === undefined ? undefined : source?.[original]);
+    });
+  });
+
+  return { ...draft, value: { ...draft.value, data: { ...current, rows: cells } } };
+}
+
+function tableSaveValue(draft: TableObjectDraft) {
+  const base = readTable(draft.base);
+  const { columnIds, columnWidths } = draft.value.data ?? {};
+  const sameWidth = draft.base.width === draft.value.width;
+  const sameLayout =
+    sameColumns(base.columnIds, columnIds) && sameColumns(base.widths, columnWidths);
+  const value = preserveTableScalars(draft, base);
+
+  return sameWidth && sameLayout ? value : { ...value, layoutChanged: true };
+}
+
 function TableCanvasView({
   id,
   object,
@@ -98,11 +151,14 @@ function TableCanvasView({
     const receipt = await request({
       name: 'table.save',
       expectedVersion: draft.base.version,
-      value: draft,
+      value: tableSaveValue(draft),
     });
 
     if (receipt.ok && isTableValue(receipt.payload.value)) {
       return receipt.payload.value;
+    }
+    if (!receipt.ok) {
+      throw new Error(receipt.message + ' 草稿已保留。');
     }
 
     return false as const;
@@ -121,6 +177,7 @@ function TableCanvasView({
       canEdit={interactive && !readOnly}
       locked={locked}
       detail={tableDetail(geometry, zoom)}
+      frameHeight={geometry.height}
       zoom={zoom}
       bodyPaint={{
         background: 'var(--studio-ui-canvas, Canvas)',

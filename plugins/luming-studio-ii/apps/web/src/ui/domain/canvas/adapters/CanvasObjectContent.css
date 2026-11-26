@@ -91,6 +91,10 @@
   overflow: hidden;
 }
 
+.studio-ui-canvas-object--table > .studio-ui-canvas-native-content[data-canvas-owned-frame] {
+  overflow: visible;
+}
+
 .studio-ui-canvas-embedded-title {
   position: absolute;
   inset-inline-start: 0;

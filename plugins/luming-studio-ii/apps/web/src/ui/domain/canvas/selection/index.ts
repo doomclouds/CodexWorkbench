@@ -1,8 +1,9 @@
 import { connectionHitRadius, hitConnection } from '../connectors/geometry.js';
-import type { CanvasObjectChange, CanvasPoint, CanvasRect } from '../contracts.js';
+import type { CanvasObject, CanvasObjectChange, CanvasPoint, CanvasRect } from '../contracts.js';
 import { hitInk } from '../ink/geometry.js';
 import type { ProjectedCanvasObject, SceneIndex } from '../scene/index.js';
 import {
+  createSceneIndex,
   isObjectLocked,
   projectedObjectBounds,
   projectObject,
@@ -116,6 +117,13 @@ export function expandMoveIds(
   changes: ReadonlyMap<string, CanvasObjectChange> = new Map(),
 ): readonly string[] {
   return expandIds(index, selection, changes, false);
+}
+
+export function expandCanvasSelection(
+  objects: readonly CanvasObject[],
+  ids: readonly string[],
+): readonly string[] {
+  return expandMoveIds(createSceneIndex(objects), ids);
 }
 
 export function expandSelectionIds(

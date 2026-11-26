@@ -1,12 +1,18 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createWhiteboardHttpServer } from '../entrypoints/http/index.js';
 import { createArchiveImportRepository } from '../infrastructure/adapters/archives/index.js';
 import { createCatalogRepository } from '../infrastructure/adapters/catalog/index.js';
+import { createFeedbackRepository } from '../infrastructure/adapters/feedback/index.js';
 import { createWhiteboardRepository } from '../infrastructure/adapters/index.js';
 import { openSqliteDatabase } from '../infrastructure/platform/index.js';
 import { createArchiveImportApplication } from '../modules/archives/application/index.js';
 import { createCatalogApplication } from '../modules/catalog/application/index.js';
-import { createWhiteboardApplication } from '../modules/whiteboard/application/index.js';
+import { createFeedbackApplication } from '../modules/feedback/application/index.js';
+import {
+  createBoardEditorApplication,
+  createBoardHistoryApplication,
+  createWhiteboardApplication,
+} from '../modules/whiteboard/application/index.js';
 
 type HttpOptions = Parameters<typeof createWhiteboardHttpServer>[0];
 type HttpServer = ReturnType<typeof createWhiteboardHttpServer>;
@@ -24,6 +30,10 @@ export interface WhiteboardServer {
 
 const loopback = '127.0.0.1';
 const maxPort = 65_535;
+
+function digest(value: string | Uint8Array) {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 function listenOnLoopback(server: HttpServer, port: number): Promise<URL> {
   if (!Number.isInteger(port) || port < 0 || port > maxPort) {
@@ -70,7 +80,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   let server: HttpServer;
   try {
     const repository = createWhiteboardRepository(database);
-    const application = createWhiteboardApplication(repository);
+    const application = createWhiteboardApplication(repository, Date.now);
     const archives = createArchiveImportRepository(database);
     const catalog = createCatalogRepository(database);
     const catalogApplication = createCatalogApplication(catalog, {
@@ -81,11 +91,18 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       newBoardId: randomUUID,
       now: Date.now,
     });
+    const feedbackRepository = createFeedbackRepository(database);
 
     server = createWhiteboardHttpServer({
       application,
       catalogApplication,
       archiveApplication,
+      features: {
+        editor: createBoardEditorApplication(repository, Date.now),
+        history: createBoardHistoryApplication(repository, Date.now),
+        feedback: createFeedbackApplication(feedbackRepository, { now: Date.now, digest }),
+        digest,
+      },
       resolveActor: options.resolveActor,
       onError: options.onError,
     });

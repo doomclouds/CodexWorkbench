@@ -29,6 +29,7 @@ const mediaCapabilities = {
   connect: true,
   content: 'native',
 } as const;
+const minimumControlSize = { width: 128, height: 72 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -92,6 +93,7 @@ function ImageView({
   interactive,
   readOnly,
   locked,
+  zoom,
   editRequest,
   request,
   onRetentionChange,
@@ -129,6 +131,11 @@ function ImageView({
       readOnly={readOnly}
       locked={locked}
       editRequest={editRequest}
+      showCropControl={false}
+      showLinkControl={
+        geometry.width * zoom >= minimumControlSize.width &&
+        geometry.height * zoom >= minimumControlSize.height
+      }
       onCropActivityChange={onRetentionChange}
       onSaveCrop={payload ? saveCrop : undefined}
     />

@@ -1,4 +1,4 @@
-import { useEffectEvent, useLayoutEffect, useRef } from 'react';
+import { Fragment, useEffectEvent, useLayoutEffect, useRef } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import { useAnchoredLayer } from '../internal/anchored-layer.js';
@@ -12,6 +12,8 @@ export interface ActionMenuItem {
   id: string;
   label: string;
   disabled?: boolean;
+  shortcut?: string;
+  separatorBefore?: boolean;
 }
 
 export interface ActionMenuProps {
@@ -168,17 +170,27 @@ export function ActionMenu({
       onKeyDown={handleKeyDown}
     >
       {items.map((item) => (
-        <button
-          key={item.id}
-          className="studio-ui-action-menu__item"
-          type="button"
-          role="menuitem"
-          tabIndex={-1}
-          aria-disabled={item.disabled || undefined}
-          onClick={() => handleAction(item)}
-        >
-          {item.label}
-        </button>
+        <Fragment key={item.id}>
+          {item.separatorBefore && (
+            <div className="studio-ui-action-menu__separator" role="separator" />
+          )}
+          <button
+            className="studio-ui-action-menu__item"
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            aria-label={item.shortcut ? item.label : undefined}
+            aria-disabled={item.disabled || undefined}
+            onClick={() => handleAction(item)}
+          >
+            {item.label}
+            {item.shortcut && (
+              <small className="studio-ui-action-menu__shortcut" aria-hidden="true">
+                {item.shortcut}
+              </small>
+            )}
+          </button>
+        </Fragment>
       ))}
     </div>
   );

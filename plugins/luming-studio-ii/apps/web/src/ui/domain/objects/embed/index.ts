@@ -1,5 +1,7 @@
 export { chartExtension, diagramExtension, htmlExtension } from './canvas-extension.js';
 export { EmbedObject } from './EmbedObject.js';
+export { HtmlSourceDialog } from './HtmlSourceDialog.js';
+export type { HtmlSourceDialogProps } from './HtmlSourceDialog.js';
 export type {
   EmbedJson,
   EmbedKind,

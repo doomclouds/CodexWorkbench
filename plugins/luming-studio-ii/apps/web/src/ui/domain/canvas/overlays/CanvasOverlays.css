@@ -30,9 +30,9 @@
   padding: 5px 7px;
   overflow: auto;
   scrollbar-width: thin;
-  border: 1px solid var(--studio-ui-border, GrayText);
+  border: 1px solid var(--studio-ui-canvas-selection-border, var(--studio-ui-border, GrayText));
   border-radius: 10px;
-  background: var(--studio-ui-surface, Canvas);
+  background: var(--studio-ui-canvas-selection-surface, var(--studio-ui-surface, Canvas));
   color: var(--studio-ui-text, CanvasText);
   box-shadow: 0 5px 18px #0002;
   pointer-events: auto;

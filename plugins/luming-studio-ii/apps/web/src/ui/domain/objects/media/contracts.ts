@@ -34,6 +34,8 @@ export interface ImageObjectProps extends MediaObjectBaseProps, MediaSize {
   readonly locked?: boolean;
   readonly readOnly?: boolean;
   readonly editRequest?: number;
+  readonly showCropControl?: boolean;
+  readonly showLinkControl?: boolean;
   readonly onCropActivityChange?: (active: boolean) => void;
   readonly onSaveCrop?: SaveImageCrop;
 }

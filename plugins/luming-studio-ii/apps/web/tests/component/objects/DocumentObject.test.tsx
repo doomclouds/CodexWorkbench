@@ -614,7 +614,7 @@ it('keeps an expanded document mounted and releases clean inline content', async
     />,
   );
   expect(onRetentionChange).toHaveBeenLastCalledWith(false);
-  click('放大阅读');
+  click('展开文档');
   expect(onRetentionChange).toHaveBeenLastCalledWith(true);
   await act(async () => button('返回白板').click());
   expect(onRetentionChange).toHaveBeenLastCalledWith(false);
@@ -644,7 +644,9 @@ it('opens the registered document through the whiteboard presentation action', a
     />,
   );
 
-  await act(async () => button('放大阅读').click());
+  const expand = button('展开文档');
+  expect(expand.closest('[title]')?.getAttribute('title')).toBe('展开阅读与编辑');
+  await act(async () => expand.click());
 
   expect(onOpenPresentation).toHaveBeenCalledOnce();
   expect(document.querySelector('dialog')).toBeNull();
@@ -705,7 +707,7 @@ it.each([
   { scheme: 'dark', fill: '#1c1d1e' },
 ] as const)(
   'places the $scheme paper return action inside the focused document header',
-  (paper) => {
+  async (paper) => {
     const onClosePresentation = vi.fn();
     render({ focusedReading: true, paper, onClosePresentation });
 
@@ -715,7 +717,7 @@ it.each([
     expect(back.closest('[data-canvas-presentation-exit]')).not.toBeNull();
     expect(focused.style.getPropertyValue('--studio-document-paper')).toBe(paper.fill);
     expect(focused.dataset.paperScheme).toBe(paper.scheme);
-    click('返回白板');
+    await act(async () => button('返回白板').click());
     expect(onClosePresentation).toHaveBeenCalledOnce();
   },
 );

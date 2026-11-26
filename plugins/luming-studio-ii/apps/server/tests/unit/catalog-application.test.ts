@@ -45,6 +45,7 @@ function fixture() {
             receipts.set(JSON.stringify([actorId, receipt.commandId]), receipt);
           };
         },
+        duplicateBoard: vi.fn(),
         getManagedBoard: vi.fn(),
         changeBoard: vi.fn(),
         deleteBoard: vi.fn(),

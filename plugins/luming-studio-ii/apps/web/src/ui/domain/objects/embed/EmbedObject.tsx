@@ -186,6 +186,9 @@ function EmbedHtmlBody(props: EmbedObjectProps) {
         key={element.id}
         value={element}
         interactive={interactive}
+        editRequest={props.editRequest}
+        useCanvasTools={props.useCanvasTools}
+        readHtmlSource={props.readHtmlSource}
         onSave={props.onSaveSource}
         onEditingChange={handleSourceEditing}
       />

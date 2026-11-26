@@ -73,21 +73,12 @@ const legacyShapeColors = new Map([
   ['none', 'none'],
 ]);
 const legacyColorLiteral = /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/iu;
-const legacyCanvasTint =
-  /^color-mix\(in srgb, *canvas (100|[1-9]?\d)%, *(#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8}))\)$/iu;
 const shapePaperFallback = 'var(--studio-ui-canvas-paper-secondary, #ececec)';
 
 function shapeColor(value?: string, fallback?: string): string | undefined {
   const color = value?.trim();
   if (!color) {
     return undefined;
-  }
-
-  const canvasTint = legacyCanvasTint.exec(color);
-  if (canvasTint) {
-    const [, weight, accent] = canvasTint;
-
-    return `color-mix(in srgb, var(--studio-ui-system-canvas, Canvas) ${weight}%, ${accent})`;
   }
 
   return (
@@ -181,11 +172,36 @@ function convertTodoSource(item: unknown): unknown {
   return { ...item, sourceRef: { ...source, version: safeVersion(source.version) } };
 }
 
+function projectTodoValue(value: Readonly<Record<string, unknown>>, id: string, version: number) {
+  return {
+    ...value,
+    id,
+    revision: version,
+    items: Array.isArray(value.items) ? value.items.map(convertTodoSource) : [],
+  };
+}
+
+export function projectEditablePayload(
+  payload: WhiteboardPayload,
+  object?: WhiteboardObject,
+): CanvasObjectPayload | undefined {
+  const { id, version: sourceVersion, body } = payload;
+  const version = safeVersion(sourceVersion);
+  if (version === undefined || body.kind === 'ink') {
+    return undefined;
+  }
+
+  const value = projectPayloadValue(body, id, version, object?.geometry.width);
+
+  return value && { version, value };
+}
+
 function projectPayloadValue(
   body: Exclude<WhiteboardPayload['body'], { kind: 'ink' }>,
-  object: CanvasObject,
+  id: string,
   version: number,
-): Readonly<Record<string, unknown>> {
+  width?: number,
+): Readonly<Record<string, unknown>> | undefined {
   const { kind, value } = body;
 
   switch (kind) {
@@ -196,21 +212,16 @@ function projectPayloadValue(
 
       return {
         ...value,
-        id: object.id,
+        id,
         version,
         sourceRevision:
           typeof sourceRevision === 'bigint' ? safeVersion(sourceRevision) : sourceRevision,
       };
     }
     case 'todo':
-      return {
-        ...value,
-        id: object.id,
-        revision: version,
-        items: Array.isArray(value.items) ? value.items.map(convertTodoSource) : [],
-      };
+      return projectTodoValue(value, id, version);
     case 'table':
-      return { ...value, id: object.id, version, width: object.geometry.width };
+      return width === undefined ? undefined : { ...value, id, version, width };
     case 'extension':
     case 'image':
     case 'link':
@@ -263,7 +274,10 @@ export function projectPayloads(
       continue;
     }
 
-    payloadById.set(id, { version, value: projectPayloadValue(body, object, version) });
+    const value = projectPayloadValue(body, id, version, object.geometry.width);
+    if (value) {
+      payloadById.set(id, { version, value });
+    }
   }
 
   return { scene: sceneWithInk(projection.scene, inkById), payloadById, unsafePayloadVersion };

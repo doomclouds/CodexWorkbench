@@ -31,6 +31,25 @@
   cursor: pointer;
 }
 
+.studio-ui-action-menu__item:has(.studio-ui-action-menu__shortcut) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.studio-ui-action-menu__shortcut {
+  color: var(--studio-ui-muted, GrayText);
+  font-size: 0.625rem;
+  white-space: nowrap;
+}
+
+.studio-ui-action-menu__separator {
+  block-size: 1px;
+  margin: 0.25rem;
+  background: var(--studio-ui-border, GrayText);
+}
+
 .studio-ui-action-menu__item[aria-disabled='true'] {
   color: var(--studio-ui-muted, GrayText);
   cursor: default;

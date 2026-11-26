@@ -46,3 +46,48 @@ export {
 } from './movement.js';
 export { isSupportedPayload } from './payload.js';
 export { sectionContains } from './section.js';
+export type {
+  BoardChanges,
+  BoardEditApplied,
+  BoardEditAsset,
+  BoardEditConflict,
+  BoardEditDecision,
+  BoardEditIdentity,
+  BoardEditReceipt,
+  BoardEditRejected,
+  BoardEditRejection,
+  BoardVersionCommit,
+  BoardVersionKind,
+  BoardVersionSummary,
+  StoredBoardEditReceipt,
+} from './board-edits.js';
+export type {
+  GeometryLayerDirection,
+  GeometryObjectChange,
+  GeometryOperation,
+  GeometryTransformKind,
+} from './geometry-edits.js';
+export {
+  advanceGeometry,
+  connectorAttachmentIds,
+  geometryInWorld,
+  hasValidConnectorGeometry,
+  hasValidEditInk,
+  validateCreatedObject,
+  validNewObjectId,
+} from './geometry-edits.js';
+export { initialGeometryPayload, supportsGeometryCreation } from './geometry-edit-payloads.js';
+export type {
+  ContentOperation,
+  TodoContentEdit,
+  TodoContentPlacement,
+  TodoContentSource,
+} from './object-content-edits.js';
+export { editDocumentContent } from './object-content-edits-document.js';
+export { editTextContent } from './object-content-edits-text.js';
+export { editTodoContent } from './object-content-edits-todo.js';
+export { editTableContent, tableContentIssue } from './object-content-edits-table.js';
+export { editEmbedSource, editEmbedState } from './object-content-edits-embed.js';
+export { editImageCrop, editStickerContent } from './object-content-edits-media.js';
+export { planImageChanges, type ImageOperation } from './image-edits.js';
+export { boardWritePayloadLimit } from './board-edits.js';

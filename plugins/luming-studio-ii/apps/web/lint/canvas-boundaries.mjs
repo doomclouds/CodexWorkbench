@@ -71,6 +71,10 @@ const moduleDependencies = new Map([
 ]);
 const handleMethods = new Set(['focus', 'fitToObjects']);
 const requiredExports = ['Canvas', 'CanvasProps', 'CanvasHandle'];
+const readonlyExports = new Map([
+  ['CanvasShapeOutline', './adapters/CanvasShapeOutline.js'],
+  ['expandCanvasSelection', './selection/index.js'],
+]);
 
 function stem(file) {
   return file.replace(scriptExtension, '');
@@ -148,12 +152,12 @@ function isPublicReExport(node, file) {
     const name = nameOf(specifier.exported);
     const sameName = specifier.type === 'ExportSpecifier' && name === nameOf(specifier.local);
     const typeOnly = node.exportKind === 'type' || specifier.exportKind === 'type';
+    const valueAllowed =
+      (target === canvasComponent && name === 'Canvas') || readonlyExports.get(name) === source;
 
     return (
       sameName &&
-      (typeOnly
-        ? target === canvasContracts && canvasTypeName.test(name)
-        : target === canvasComponent && name === 'Canvas')
+      (typeOnly ? target === canvasContracts && canvasTypeName.test(name) : valueAllowed)
     );
   });
 }

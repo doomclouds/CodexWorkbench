@@ -18,6 +18,18 @@
       "types": "./dist/proto/luming/studio/v1/whiteboard_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/whiteboard_service_pb.js"
     },
+    "./whiteboard/edits": {
+      "types": "./dist/proto/luming/studio/v1/whiteboard_edits_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/whiteboard_edits_pb.js"
+    },
+    "./whiteboard/history": {
+      "types": "./dist/proto/luming/studio/v1/whiteboard_history_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/whiteboard_history_pb.js"
+    },
+    "./feedback/service": {
+      "types": "./dist/proto/luming/studio/v1/feedback_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/feedback_service_pb.js"
+    },
     "./catalog/service": {
       "types": "./dist/proto/luming/studio/v1/board_catalog_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/board_catalog_service_pb.js"

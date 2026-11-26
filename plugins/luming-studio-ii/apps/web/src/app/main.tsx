@@ -4,7 +4,10 @@ import {
   createBoardCatalogService,
   createCatalogManagementService,
 } from '../data/catalog/index.js';
+import { createBoardFeedbackService } from '../data/feedback/index.js';
 import {
+  createBoardHistoryService,
+  createWhiteboardEditService,
   createWhiteboardExportService,
   createWhiteboardService,
 } from '../data/whiteboard/index.js';
@@ -13,6 +16,8 @@ import {
   downloadBoardFile,
   postArchive,
   postProtobuf,
+  prepareBoardImage,
+  readHtmlSource,
   readPreferences,
   readStudioLocation,
   rememberLayout,
@@ -30,6 +35,9 @@ if (!container) {
 
 const service = createWhiteboardService(postProtobuf, resolveArchiveAssetUrl);
 const exportBoard = createWhiteboardExportService(postProtobuf);
+const editService = createWhiteboardEditService(postProtobuf, resolveArchiveAssetUrl);
+const historyService = createBoardHistoryService(postProtobuf, resolveArchiveAssetUrl);
+const feedbackService = createBoardFeedbackService(postProtobuf);
 const catalog = createBoardCatalogService(postProtobuf);
 const catalogManagement = createCatalogManagementService(postProtobuf);
 const archiveImport = createArchiveImportService(postArchive, postProtobuf);
@@ -41,6 +49,11 @@ createRoot(container).render(
     service={service}
     exportBoard={exportBoard}
     downloadExport={downloadBoardFile}
+    editService={editService}
+    historyService={historyService}
+    feedbackService={feedbackService}
+    prepareImage={prepareBoardImage}
+    readHtmlSource={readHtmlSource}
     archiveImport={archiveImport}
     createCommandId={createCommandId}
     navigation={{

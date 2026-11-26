@@ -2,6 +2,9 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type ProxyOptions, type UserConfig } from 'vite';
 
 const whiteboardRpcPrefix = '/luming.studio.v1.WhiteboardService/';
+const boardEditRpcPrefix = '/luming.studio.v1.BoardEditService/';
+const boardHistoryRpcPrefix = '/luming.studio.v1.BoardHistoryService/';
+const feedbackRpcPrefix = '/luming.studio.v1.FeedbackService/';
 const catalogRpcPrefix = '/luming.studio.v1.BoardCatalogService/';
 const archiveRpcPrefix = '/luming.studio.v1.BoardArchiveService/';
 const archiveAssetsPrefix = '/studio-archive-assets/';
@@ -39,6 +42,9 @@ function whiteboardProxy(): Record<string, ProxyOptions> {
 
   return {
     [whiteboardRpcPrefix]: proxy,
+    [boardEditRpcPrefix]: proxy,
+    [boardHistoryRpcPrefix]: proxy,
+    [feedbackRpcPrefix]: proxy,
     [catalogRpcPrefix]: proxy,
     [archiveRpcPrefix]: proxy,
     [archiveAssetsPrefix]: proxy,

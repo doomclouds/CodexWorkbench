@@ -11,6 +11,15 @@ const component = 'tests/component/Canvas.test.tsx';
 const parity = 'tests/component/CanvasParity.test.tsx';
 const fixture = 'tests/fixtures/canvas/fixture.tsx';
 const publicPackage = '@codexworkbench/luming-studio-ii-web/ui/domain/canvas';
+const publicEntry = canvas + 'index.ts';
+const requiredExports = [
+  "export { Canvas } from './Canvas.js';",
+  "export type { CanvasProps, CanvasHandle } from './contracts.js';",
+].join('\n');
+const readonlyExports = [
+  "export { CanvasShapeOutline } from './adapters/CanvasShapeOutline.js';",
+  "export { expandCanvasSelection } from './selection/index.js';",
+];
 
 const rejected = [
   [
@@ -152,6 +161,38 @@ const rejected = [
   ],
   ['wildcard exports', canvas + 'index.ts', "export * from './contracts.js';"],
   ['missing public contracts', canvas + 'index.ts', "export { Canvas } from './Canvas.js';"],
+  ...[
+    [
+      'shape outline from another path',
+      "export { CanvasShapeOutline } from './rendering/CanvasObjects.js';",
+    ],
+    [
+      'an alternate shape outline path',
+      "export { CanvasShapeOutline } from './adapters/../adapters/CanvasShapeOutline.js';",
+    ],
+    [
+      'a renamed shape outline',
+      "export { CanvasShapeOutline as PreviewOutline } from './adapters/CanvasShapeOutline.js';",
+    ],
+    [
+      'selection expansion from another path',
+      "export { expandCanvasSelection } from './selection/geometry.js';",
+    ],
+    [
+      'an internal selection function renamed to the public API',
+      "export { expandSelectionIds as expandCanvasSelection } from './selection/index.js';",
+    ],
+    [
+      'another value from the allowed selection module',
+      "export { canvasHitBounds } from './selection/index.js';",
+    ],
+  ].map(([name, statement]) => [
+    name,
+    publicEntry,
+    `${requiredExports}\n${statement}`,
+    boundary,
+    'export',
+  ]),
   [
     'arbitrary barrel exports',
     canvas + 'index.ts',
@@ -199,12 +240,14 @@ const rejected = [
   ],
 ];
 
-for (const [name, filePath, source, rule = boundary] of rejected) {
+for (const [name, filePath, source, rule = boundary, messageId] of rejected) {
   test('rejects ' + name, async () => {
     const [result] = await eslint.lintText(source, { filePath });
 
     assert.ok(
-      result.messages.some((message) => message.ruleId === rule),
+      result.messages.some(
+        (message) => message.ruleId === rule && (!messageId || message.messageId === messageId),
+      ),
       JSON.stringify(result.messages),
     );
   });
@@ -212,11 +255,10 @@ for (const [name, filePath, source, rule = boundary] of rejected) {
 
 const accepted = [
   [surface, `import { Canvas } from '${publicPackage}';`],
+  [surface, `import { CanvasShapeOutline, expandCanvasSelection } from '${publicPackage}';`],
   [surface, "void import('../../ui/domain/canvas/index.js');"],
-  [
-    canvas + 'index.ts',
-    "export { Canvas } from './Canvas.js';\nexport type { CanvasProps, CanvasHandle } from './contracts.js';",
-  ],
+  [publicEntry, requiredExports],
+  [publicEntry, [requiredExports, ...readonlyExports].join('\n')],
   [
     canvas + 'Canvas.tsx',
     [

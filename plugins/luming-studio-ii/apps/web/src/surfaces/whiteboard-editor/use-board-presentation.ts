@@ -44,16 +44,16 @@ export function useBoardPresentation({
 
     const [first] = objectIds;
     const kind = first ? objects.get(first)?.kind : undefined;
-    const focusObjectId =
+    const expandedObjectId =
       objectIds.length === 1 && (kind === 'document' || kind === 'todo') ? first : undefined;
+    const focusObjectId = kind === 'document' ? expandedObjectId : undefined;
 
-    setWatching({ scope: { objectIds, focusObjectId }, viewport, trigger });
+    setWatching({ scope: { objectIds, focusObjectId, expandedObjectId }, viewport, trigger });
     afterLayout(() => {
       if (!focusObjectId) {
         onFit();
+        focusCanvas();
       }
-
-      focusCanvas();
     });
   }
 

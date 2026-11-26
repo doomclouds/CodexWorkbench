@@ -108,6 +108,7 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
     listBoards,
     listTrashedBoards,
     createBoard,
+    duplicateBoard,
     manageBoard,
     purgeBoards,
     getCatalogCommandReceipt,
@@ -140,6 +141,14 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
       const receipt = application.createBoard(actor, {
         commandId: requireId(request.commandId),
         title: request.title,
+      });
+
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(duplicateBoard, (actor, request) => {
+      const receipt = application.duplicateBoard(actor, {
+        commandId: requireId(request.commandId),
+        sourceBoardId: requireId(request.sourceBoardId),
       });
 
       return { receipt: toCatalogReceipt(receipt) };

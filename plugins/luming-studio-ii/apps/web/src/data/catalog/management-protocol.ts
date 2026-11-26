@@ -2,7 +2,6 @@ import type { MessageInitShape } from '@bufbuild/protobuf';
 import {
   BoardCatalogService,
   BoardLifecycleAction,
-  CatalogRejectionReason,
   type CatalogCommandReceipt,
   type CatalogPurgeItemResult as WirePurgeItem,
   type ManageBoardRequestSchema,
@@ -10,7 +9,6 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import type {
   CatalogManagementReceipt,
-  CatalogManagementRejectionReason,
   CatalogManagementService,
   CatalogManageRequest,
   CatalogPost,
@@ -21,20 +19,12 @@ import type {
 import {
   listInput,
   readBoard,
+  readCatalogRejection,
   readCommandOutcome,
   readReceiptLookup,
   request,
   requireCommandId,
 } from './protocol.js';
-
-const managementReasons = new Map<CatalogRejectionReason, CatalogManagementRejectionReason>([
-  [CatalogRejectionReason.INVALID_TITLE, 'invalidTitle'],
-  [CatalogRejectionReason.COMMAND_ID_REUSE, 'commandIdReuse'],
-  [CatalogRejectionReason.FORBIDDEN, 'forbidden'],
-  [CatalogRejectionReason.ENTRY_VERSION_CHANGED, 'entryVersionChanged'],
-  [CatalogRejectionReason.STATE_CHANGED, 'stateChanged'],
-  [CatalogRejectionReason.INVALID_COMMAND, 'invalidCommand'],
-]);
 
 type WireOperation = MessageInitShape<typeof ManageBoardRequestSchema>['operation'];
 
@@ -79,7 +69,7 @@ function readPurgeItem({ boardId, outcome }: WirePurgeItem): CatalogPurgeItemRes
     return {
       boardId,
       deleted: false,
-      reason: managementReasons.get(outcome.value.reason) ?? 'unknown',
+      reason: readCatalogRejection(outcome.value.reason),
     };
   }
 
@@ -107,7 +97,7 @@ function readManagementReceipt(
     case 'purged':
       return { kind, commandId, items: readPurgeItems(value.items) };
     case 'rejected':
-      return { kind, commandId, reason: managementReasons.get(value.reason) ?? 'unknown' };
+      return { kind, commandId, reason: readCatalogRejection(value.reason) };
     case 'created':
     case undefined:
       throw new Error('Catalog receipt is missing a management outcome.');

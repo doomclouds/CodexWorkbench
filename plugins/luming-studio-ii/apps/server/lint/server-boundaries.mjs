@@ -4,8 +4,11 @@ import { localResolver, projectPath, serverRoot } from './project-paths.mjs';
 const whiteboard = 'src/modules/whiteboard/';
 const catalog = 'src/modules/catalog/';
 const archives = 'src/modules/archives/';
+const feedback = 'src/modules/feedback/';
 const catalogAdapters = 'src/infrastructure/adapters/catalog/';
 const archivesAdapters = 'src/infrastructure/adapters/archives/';
+const feedbackAdapters = 'src/infrastructure/adapters/feedback/';
+const authorizationAdapters = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
 const layers = new Map([
   ['src/bootstrap/', 'bootstrap'],
@@ -21,8 +24,13 @@ const layers = new Map([
   [archives + 'application/', 'archives-application'],
   [archives + 'domain/', 'archives-domain'],
   [archives + 'ports/', 'archives-ports'],
+  [feedback + 'application/', 'feedback-application'],
+  [feedback + 'domain/', 'feedback-domain'],
+  [feedback + 'ports/', 'feedback-ports'],
   [catalogAdapters, 'catalog-adapters'],
   [archivesAdapters, 'archives-adapters'],
+  [feedbackAdapters, 'feedback-adapters'],
+  [authorizationAdapters, 'authorization-adapters'],
   ['src/infrastructure/adapters/', 'adapters'],
   [archivesPlatform, 'archives-platform'],
   ['src/infrastructure/platform/', 'platform'],
@@ -47,7 +55,12 @@ const entries = new Map([
   ['archives-application', archives + 'application/index'],
   ['archives-domain', archives + 'domain/index'],
   ['archives-ports', archives + 'ports/index'],
+  ['feedback-application', feedback + 'application/index'],
+  ['feedback-domain', feedback + 'domain/index'],
+  ['feedback-ports', feedback + 'ports/index'],
   ['archives-adapters', archivesAdapters + 'index'],
+  ['feedback-adapters', feedbackAdapters + 'index'],
+  ['authorization-adapters', authorizationAdapters + 'index'],
   ['archives-platform', archivesPlatform + 'index'],
   ['adapters', 'src/infrastructure/adapters/index'],
   ['platform', 'src/infrastructure/platform/index'],
@@ -61,24 +74,30 @@ const dependencies = new Map([
       'application',
       'catalog-application',
       'archives-application',
+      'feedback-application',
       'adapters',
       'catalog-adapters',
       'archives-adapters',
+      'feedback-adapters',
       'platform',
     ],
   ],
-  ['http', ['application', 'catalog-application', 'archives-application']],
+  ['http', ['application', 'catalog-application', 'archives-application', 'feedback-application']],
   ['mcp', ['application']],
   ['workflows', ['application']],
   ['application', ['domain', 'ports']],
   ['ports', ['domain']],
-  ['adapters', ['ports', 'platform']],
+  ['adapters', ['ports', 'platform', 'authorization-adapters']],
   ['catalog-application', ['catalog-domain', 'catalog-ports']],
   ['catalog-ports', ['catalog-domain']],
   ['catalog-adapters', ['catalog-ports', 'platform']],
   ['archives-application', ['archives-domain', 'archives-ports']],
   ['archives-ports', ['archives-domain']],
   ['archives-adapters', ['archives-ports', 'platform', 'archives-platform']],
+  ['feedback-application', ['feedback-domain', 'feedback-ports']],
+  ['feedback-ports', ['feedback-domain']],
+  ['feedback-adapters', ['feedback-ports', 'platform', 'authorization-adapters']],
+  ['authorization-adapters', ['platform']],
   ['contracts', ['bootstrap', 'support', 'fixtures']],
   [
     'unit',
@@ -92,14 +111,27 @@ const dependencies = new Map([
       'archives-application',
       'archives-domain',
       'archives-ports',
+      'feedback-application',
+      'feedback-domain',
+      'feedback-ports',
       'fixtures',
     ],
   ],
   ['archives-platform-tests', ['archives-platform']],
   ['integration', ['bootstrap', 'support', 'fixtures']],
-  ['support', ['platform', 'adapters', 'catalog-adapters', 'archives-adapters', 'fixtures']],
+  [
+    'support',
+    [
+      'platform',
+      'adapters',
+      'catalog-adapters',
+      'archives-adapters',
+      'feedback-adapters',
+      'fixtures',
+    ],
+  ],
 ]);
-const portLayers = new Set(['ports', 'catalog-ports', 'archives-ports']);
+const portLayers = new Set(['ports', 'catalog-ports', 'archives-ports', 'feedback-ports']);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
 const protocols = new Set([
   protocolPrefix + 'scene',
@@ -109,8 +141,11 @@ const protocols = new Set([
 ]);
 const protocolLayers = new Set(['http', 'mcp', 'contracts', 'integration', 'support']);
 const httpProtocols = new Set([
+  protocolPrefix + 'edits',
+  protocolPrefix + 'history',
   '@codexworkbench/luming-studio-ii-contracts/catalog/service',
   '@codexworkbench/luming-studio-ii-contracts/archives/service',
+  '@codexworkbench/luming-studio-ii-contracts/feedback/service',
 ]);
 const testLayers = new Set([
   'contracts',

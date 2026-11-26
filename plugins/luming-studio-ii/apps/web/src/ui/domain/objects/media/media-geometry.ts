@@ -18,6 +18,15 @@ export function normalizeCrop(crop: ImageCrop | undefined): ImageCrop {
   };
 }
 
+export function imageCropRect(frame: MediaSize, natural: MediaSize, input: ImageCrop) {
+  const crop = normalizeCrop(input);
+  const scale = Math.max(frame.width / natural.width, frame.height / natural.height) * crop.zoom;
+  const width = natural.width * scale;
+  const height = natural.height * scale;
+
+  return { x: (frame.width - width) * crop.x, y: (frame.height - height) * crop.y, width, height };
+}
+
 export function validMediaSize(value: MediaSize | undefined): value is MediaSize {
   return (
     value !== undefined &&

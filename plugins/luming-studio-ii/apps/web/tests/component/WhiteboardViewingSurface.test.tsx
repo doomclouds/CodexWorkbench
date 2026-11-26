@@ -118,7 +118,7 @@ describe('Whiteboard viewing controls and scoped ink', () => {
     );
   }
 
-  it('keeps Canvas mounted and uses one return command for a single document', () => {
+  it('keeps Canvas mounted and leaves the document return action to its reading surface', () => {
     render({ active: false });
     const board = canvas();
     expect(fixture.host.querySelector('[role="toolbar"]')).toBeNull();
@@ -128,7 +128,8 @@ describe('Whiteboard viewing controls and scoped ink', () => {
     render({ documentReading: true });
     expect(canvas()).toBe(board);
     expect(fixture.host.querySelector('[role="toolbar"]')).toBeNull();
-    click('返回白板');
+    expect(fixture.host.querySelector('[data-whiteboard-viewing-chrome]')).toBeNull();
+    press(canvas(), 'Escape');
     expect(onExit).toHaveBeenCalledOnce();
     render({ active: false });
     expect(canvas()).toBe(board);

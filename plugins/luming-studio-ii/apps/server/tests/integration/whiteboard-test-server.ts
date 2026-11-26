@@ -3,19 +3,24 @@ import { createWhiteboardServer } from '../../src/bootstrap/index.js';
 import { actorHeader } from '../support/whiteboard-client.js';
 import { createTemporaryDatabase, seedWhiteboardDatabase } from '../support/whiteboard-database.js';
 
+const listenAttempts = 6;
+const probeTimeout = 3_000;
+
+function isBlockedFetchPort(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+
+  return cause instanceof Error && cause.message === 'bad port';
+}
+
 export function useWhiteboardTestServer() {
   let database: ReturnType<typeof createTemporaryDatabase> | undefined;
   let server: ReturnType<typeof createWhiteboardServer> | undefined;
   let address: URL | undefined;
   let errors: unknown[];
 
-  async function start() {
-    if (!database) {
-      throw new Error('The test database has not been created');
-    }
-
-    server = createWhiteboardServer({
-      databasePath: database.path,
+  function openServer(databasePath: string) {
+    return createWhiteboardServer({
+      databasePath,
       resolveActor(request) {
         const actorId = request.headers[actorHeader];
 
@@ -25,7 +30,34 @@ export function useWhiteboardTestServer() {
         errors.push(error);
       },
     });
-    address = await server.listen();
+  }
+
+  async function start() {
+    if (!database) {
+      throw new Error('The test database has not been created');
+    }
+
+    let lastError: unknown;
+    for (let count = 0; count < listenAttempts; count++) {
+      const instance = openServer(database.path);
+      try {
+        const url = await instance.listen();
+        await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(probeTimeout) });
+        server = instance;
+        address = url;
+
+        return;
+      } catch (error) {
+        await instance.close();
+        if (!isBlockedFetchPort(error)) {
+          throw error;
+        }
+
+        lastError = error;
+      }
+    }
+
+    throw new Error('No test listener accepted a Fetch request.', { cause: lastError });
   }
 
   beforeEach(async () => {

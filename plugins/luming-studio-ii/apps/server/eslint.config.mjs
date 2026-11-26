@@ -101,6 +101,9 @@ export default defineConfig([
       'src/modules/archives/application/' + scripts,
       'src/modules/archives/domain/' + scripts,
       'src/modules/archives/ports/' + scripts,
+      'src/modules/feedback/application/' + scripts,
+      'src/modules/feedback/domain/' + scripts,
+      'src/modules/feedback/ports/' + scripts,
       'src/application/workflows/' + scripts,
     ],
     rules: {

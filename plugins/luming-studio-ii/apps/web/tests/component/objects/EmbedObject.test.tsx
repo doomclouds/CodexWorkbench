@@ -145,11 +145,21 @@ it('keeps source drafts on rejected Canvas receipts and applies a confirmed new 
   const originalDocument = frame.srcdoc;
   enableModalFixture(doc);
   expect(onRetentionChange).not.toHaveBeenCalled();
+  expect(doc.querySelector('.studio-ui-embed__source-tools')).toBeNull();
 
-  await act(async () => clickEditorButton(doc, '编辑 HTML 源码'));
+  await act(async () =>
+    host.root.render(
+      <CanvasEmbed
+        {...canvasEmbedProps()}
+        editRequest={1}
+        request={request}
+        onRetentionChange={onRetentionChange}
+      />,
+    ),
+  );
   expect(onRetentionChange).toHaveBeenCalledExactlyOnceWith(true);
   await act(async () => changeSource(host, nextHtml));
-  await act(async () => clickEditorButton(doc, '保存 HTML 源码'));
+  await act(async () => clickEditorButton(doc, '保存源码'));
 
   expect(request).toHaveBeenNthCalledWith(1, {
     name: 'embed.save-source',
@@ -161,7 +171,7 @@ it('keeps source drafts on rejected Canvas receipts and applies a confirmed new 
   expect(frame.srcdoc).toBe(originalDocument);
   expect(onRetentionChange).toHaveBeenCalledExactlyOnceWith(true);
 
-  await act(async () => clickEditorButton(doc, '保存 HTML 源码'));
+  await act(async () => clickEditorButton(doc, '保存源码'));
   expect(request).toHaveBeenCalledTimes(2);
   expect(doc.querySelector('dialog[open]')).toBeNull();
   expect(doc.querySelector('iframe')).toBe(frame);
@@ -253,17 +263,17 @@ function changeSource(host: ReturnType<typeof mount>, next: string) {
 }
 
 function enableModalFixture(doc: Document) {
-  const dialog = doc.querySelector('dialog')!;
-  if (typeof dialog.showModal !== 'function') {
-    Object.defineProperties(dialog, {
+  const prototype = doc.defaultView?.HTMLDialogElement.prototype;
+  if (prototype && typeof prototype.showModal !== 'function') {
+    Object.defineProperties(prototype, {
       showModal: {
-        value: () => {
-          dialog.open = true;
+        value(this: HTMLDialogElement) {
+          this.open = true;
         },
       },
       close: {
-        value: () => {
-          dialog.open = false;
+        value(this: HTMLDialogElement) {
+          this.open = false;
         },
       },
     });
@@ -289,7 +299,7 @@ it('retains unsaved source after a rejected update and applies only the confirme
 
   await act(async () => clickEditorButton(doc, '编辑 HTML 源码'));
   await act(async () => changeSource(host, nextHtml));
-  await act(async () => clickEditorButton(doc, '保存 HTML 源码'));
+  await act(async () => clickEditorButton(doc, '保存源码'));
 
   const draft = { title: '', html: nextHtml };
   expect(onSaveSource).toHaveBeenNthCalledWith(1, draft, region.sourceRevision);
@@ -297,7 +307,7 @@ it('retains unsaved source after a rejected update and applies only the confirme
   expect(doc.body.textContent).toContain('已有新的源码版本。');
   expect(frame.srcdoc).toBe(originalDocument);
 
-  await act(async () => clickEditorButton(doc, '保存 HTML 源码'));
+  await act(async () => clickEditorButton(doc, '保存源码'));
   expect(onSaveSource).toHaveBeenNthCalledWith(2, draft, region.sourceRevision);
   expect(doc.querySelector('dialog[open]')).toBeNull();
   expect(frame.srcdoc).toBe(originalDocument);
@@ -305,6 +315,45 @@ it('retains unsaved source after a rejected update and applies only the confirme
   await act(async () => render({ ...region, html: nextHtml, version: 5, sourceRevision: 3 }));
   expect(doc.querySelector('iframe')).toBe(frame);
   expect(frame.srcdoc).toContain(nextHtml);
+});
+
+it('loads a selected HTML file through the injected port without replacing the edited region title', async () => {
+  const host = mount();
+  const { document, File, Event } = host.dom.window;
+  const source = '<h1>文件图解</h1>';
+  const file = new File([source], '导入题目.html', { type: 'text/html' });
+  const readHtmlSource = vi.fn<(file: File) => Promise<string>>().mockResolvedValue(source);
+  const onSaveSource = vi.fn<NonNullable<EmbedObjectProps['onSaveSource']>>().mockResolvedValue();
+  enableModalFixture(document);
+
+  await act(async () =>
+    host.root.render(
+      <EmbedObject
+        kind="html"
+        value={{ ...region, title: '现有图解名' }}
+        interactive
+        editRequest={1}
+        readHtmlSource={readHtmlSource}
+        onSaveSource={onSaveSource}
+      />,
+    ),
+  );
+  const input = document.querySelector('input[type="file"]');
+  if (!input) {
+    throw new Error('Expected the HTML file picker.');
+  }
+
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  await act(async () => {
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(readHtmlSource).toHaveBeenCalledExactlyOnceWith(file);
+  expect(document.querySelector('textarea')?.value).toBe(source);
+  await act(async () => clickEditorButton(document, '保存源码'));
+  expect(onSaveSource).toHaveBeenCalledExactlyOnceWith(
+    { title: '现有图解名', html: source },
+    region.sourceRevision,
+  );
 });
 
 it('forwards only current interactive-frame pointer messages and clears position when interaction ends', async () => {

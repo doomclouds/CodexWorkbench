@@ -177,7 +177,9 @@ describe('TodoObject', () => {
     expect(region.style.getPropertyValue('--todo-ui-scale')).toBe('1.8');
     expect(region.textContent).toContain('发布验收');
     expect(region.textContent).toContain('1/2 完成');
-    expect(required<HTMLProgressElement>('progress').value).toBe(1);
+    const progress = required<HTMLProgressElement>('progress');
+    expect(progress.value).toBe(1);
+    expect(progress.previousElementSibling?.tagName).toBe('HEADER');
     expect(renderOutsideRows).toHaveBeenLastCalledWith([]);
     expect(region.querySelector('[data-fallback-pin]')).toBeTruthy();
     expect(rows()).toHaveLength(0);

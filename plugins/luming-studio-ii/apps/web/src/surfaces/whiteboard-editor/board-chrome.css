@@ -1,0 +1,185 @@
+.whiteboard-chrome {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  block-size: 57px;
+  padding: 8px 20px;
+  border-block-end: 1px solid var(--board-chrome-border, #d9d9d9);
+  color: var(--board-chrome-text, CanvasText);
+  background: var(--board-chrome, Canvas);
+}
+
+.whiteboard-chrome__identity {
+  display: flex;
+  min-inline-size: 0;
+  flex: 1;
+  align-items: center;
+  gap: 9px;
+}
+
+.whiteboard-chrome__name {
+  box-sizing: border-box;
+  inline-size: clamp(110px, 22vw, 300px);
+  min-inline-size: 40px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.whiteboard-chrome__name:hover:not([readonly]),
+.whiteboard-chrome__name:focus {
+  border-color: var(--board-chrome-border, #d9d9d9);
+}
+
+.whiteboard-chrome__name:focus {
+  outline: none;
+  background: var(--board-chrome-hover, #f1f3f4);
+}
+
+.whiteboard-chrome__status {
+  flex: 0 0 auto;
+  color: var(--board-chrome-muted, #5f6368);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.whiteboard-chrome__guest {
+  flex-shrink: 0;
+  color: var(--studio-ui-accent, #eb6c36);
+}
+
+.whiteboard-chrome__actions,
+.whiteboard-chrome__comments {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.whiteboard-chrome__actions {
+  gap: 10px;
+}
+
+.whiteboard-chrome__comments {
+  gap: 1px;
+}
+
+.whiteboard-chrome__action {
+  position: relative;
+  display: inline-flex;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  inline-size: 37px;
+  block-size: 37px;
+  padding: 6px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--board-chrome-muted, currentColor);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.whiteboard-chrome__action:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.whiteboard-chrome__action:not(:disabled):hover,
+.whiteboard-chrome__action[aria-expanded='true'] {
+  color: var(--board-chrome-text, CanvasText);
+  background: var(--board-chrome-hover, #f1f3f4);
+}
+
+.whiteboard-chrome__action:focus-visible {
+  outline: 2px solid var(--studio-ui-focus, Highlight);
+  outline-offset: 1px;
+}
+
+.whiteboard-chrome__back {
+  inline-size: 33px;
+  block-size: 33px;
+  border-radius: 7px;
+}
+
+.whiteboard-chrome__share {
+  gap: 7px;
+  inline-size: auto;
+  min-inline-size: 36px;
+  block-size: 36px;
+  padding-inline: 8px;
+  color: var(--board-chrome-text, CanvasText);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.whiteboard-chrome__annotation[aria-pressed='true'] {
+  color: var(--studio-ui-accent, #eb6c36);
+  background: color-mix(in srgb, var(--studio-ui-accent, #eb6c36) 16%, transparent);
+}
+
+.whiteboard-chrome__comment-list {
+  inline-size: 23px;
+  block-size: 33px;
+  padding: 3px;
+  border-radius: 7px;
+}
+
+.whiteboard-chrome__comment-dot {
+  position: absolute;
+  inset-block-start: 5px;
+  inset-inline-end: 5px;
+  inline-size: 5px;
+  block-size: 5px;
+  border-radius: 50%;
+  background: var(--studio-ui-accent, #eb6c36);
+}
+
+.whiteboard-chrome__selection-viewing {
+  inline-size: 29px;
+  block-size: 30px;
+  border-radius: 5px;
+}
+
+@media (max-width: 690px) {
+  .whiteboard-chrome {
+    block-size: 55px;
+    padding: 7px 9px;
+  }
+
+  .whiteboard-chrome__actions {
+    gap: 3px;
+  }
+
+  .whiteboard-chrome__name {
+    inline-size: clamp(90px, 25vw, 170px);
+    font-size: 12px;
+    padding: 3px;
+  }
+
+  .whiteboard-chrome__actions .whiteboard-chrome__action {
+    inline-size: 32px;
+    block-size: 32px;
+  }
+
+  .whiteboard-chrome__share > span {
+    display: none;
+  }
+
+  .whiteboard-chrome__actions .whiteboard-chrome__comment-list {
+    inline-size: 22px;
+  }
+}

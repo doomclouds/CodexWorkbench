@@ -8,11 +8,26 @@ import {
   type CatalogApplication,
 } from '../../modules/catalog/application/index.js';
 import {
+  FeedbackAccessError,
+  FeedbackQueryError,
+  FeedbackThreadNotFoundError,
+  type FeedbackApplication,
+} from '../../modules/feedback/application/index.js';
+import {
   WhiteboardAccessError,
+  type BoardEditorApplication,
+  type BoardHistoryApplication,
   type WhiteboardApplication,
 } from '../../modules/whiteboard/application/index.js';
 import { archiveRoute, createArchiveReceiptRoute } from './archive-routes.js';
 import { createCatalogRoutes } from './catalog-routes.js';
+import {
+  boardImageRequestLimit,
+  boardImageRoutePath,
+  createBoardEditRoutes,
+} from './edit-routes.js';
+import { createFeedbackRoutes } from './feedback-routes.js';
+import { createBoardHistoryRoutes } from './history-routes.js';
 import { HttpRequestError, mediaType, readBody } from './request.js';
 import { protobufContentType, sendProtobuf, sendStatus } from './response.js';
 import { createWhiteboardRoutes } from './routes.js';
@@ -20,10 +35,18 @@ import type { HttpActor, ProtobufRoute } from './unary-route.js';
 
 const REQUEST_METHOD = 'POST';
 
+interface BoardHttpFeatures {
+  readonly editor: BoardEditorApplication;
+  readonly history: BoardHistoryApplication;
+  readonly feedback: FeedbackApplication;
+  readonly digest: (value: Uint8Array) => string;
+}
+
 export interface WhiteboardHttpOptions {
   readonly application: WhiteboardApplication;
   readonly catalogApplication: CatalogApplication;
   readonly archiveApplication: ArchiveImportApplication;
+  readonly features?: BoardHttpFeatures;
   readonly resolveActor: (request: IncomingMessage) => HttpActor | undefined;
   readonly onError: (error: unknown) => void;
 }
@@ -67,7 +90,8 @@ async function handleRequest(
   }
 
   if (route) {
-    sendProtobuf(response, route(actor, await readBody(request)));
+    const limit = path === boardImageRoutePath ? boardImageRequestLimit : undefined;
+    sendProtobuf(response, route(actor, await readBody(request, limit)));
   }
 }
 
@@ -77,11 +101,12 @@ function handleError(
   onError: WhiteboardHttpOptions['onError'],
 ): void {
   const canRespond = !response.destroyed && !response.headersSent;
-  if (
-    error instanceof HttpRequestError ||
+  const invalidRequest =
     error instanceof CatalogQueryError ||
-    error instanceof ArchiveRequestError
-  ) {
+    error instanceof ArchiveRequestError ||
+    error instanceof FeedbackQueryError;
+
+  if (error instanceof HttpRequestError || invalidRequest) {
     if (canRespond) {
       sendStatus(response, error instanceof HttpRequestError ? error.status : 400);
     }
@@ -89,9 +114,17 @@ function handleError(
     return;
   }
 
-  if (error instanceof WhiteboardAccessError) {
+  if (error instanceof WhiteboardAccessError || error instanceof FeedbackAccessError) {
     if (canRespond) {
       sendStatus(response, 403);
+    }
+
+    return;
+  }
+
+  if (error instanceof FeedbackThreadNotFoundError) {
+    if (canRespond) {
+      sendStatus(response, 404);
     }
 
     return;
@@ -105,9 +138,17 @@ function handleError(
 }
 
 export function createWhiteboardHttpServer(options: WhiteboardHttpOptions): Server {
-  const { application, catalogApplication, archiveApplication, onError } = options;
+  const { application, catalogApplication, archiveApplication, features, onError } = options;
+  const studioRoutes = features
+    ? [
+        ...createBoardEditRoutes(features.editor, features.digest),
+        ...createBoardHistoryRoutes(features.history, features.digest),
+        ...createFeedbackRoutes(features.feedback),
+      ]
+    : [];
   const routes = new Map([
     ...createWhiteboardRoutes(application),
+    ...studioRoutes,
     ...createCatalogRoutes(catalogApplication),
     createArchiveReceiptRoute(archiveApplication),
   ]);

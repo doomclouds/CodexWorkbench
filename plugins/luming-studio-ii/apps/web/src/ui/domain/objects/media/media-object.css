@@ -12,6 +12,7 @@
 
 .luming-image-frame {
   overflow: hidden;
+  border-radius: 4px;
 }
 
 .luming-image-frame img,
@@ -19,7 +20,6 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  border-radius: 4px;
   object-fit: contain;
 }
 
@@ -29,10 +29,21 @@
 
 .luming-media-object__actions {
   position: absolute;
-  inset-block-start: 0.5rem;
-  inset-inline-end: 0.5rem;
+  inset-block-start: 6px;
+  inset-inline-end: 6px;
   display: flex;
   gap: 0.375rem;
+}
+
+.luming-image-link {
+  display: grid;
+  inline-size: 28px;
+  block-size: 28px;
+  place-items: center;
+  border: 1px solid var(--board-float-border, GrayText);
+  border-radius: 5px;
+  background: var(--board-float, Canvas);
+  color: var(--board-chrome-text, CanvasText);
 }
 
 .luming-media-placeholder {
@@ -79,6 +90,13 @@ dialog:has(.luming-image-crop) {
   overflow: hidden;
   background: var(--color-background-secondary, light-dark(#f3f4f5, #323438));
   border: 1px solid var(--studio-ui-border, GrayText);
+}
+
+.luming-image-crop__hint {
+  margin: 0;
+  color: var(--studio-ui-muted, GrayText);
+  font-size: 12px;
+  line-height: 1.7;
 }
 
 .luming-image-crop__actions,

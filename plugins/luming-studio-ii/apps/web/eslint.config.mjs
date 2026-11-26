@@ -46,19 +46,7 @@ const canvasGlobals = [
 );
 const applicationGlobals = [
   ...canvasGlobals,
-  ...[
-    'Buffer',
-    'FileReader',
-    'FileReaderSync',
-    'crypto',
-    'globalThis',
-    'process',
-    'self',
-    'showDirectoryPicker',
-    'showOpenFilePicker',
-    'showSaveFilePicker',
-    'window',
-  ].map((name) => ({
+  ...['Buffer', 'crypto', 'globalThis', 'process', 'self', 'window'].map((name) => ({
     name,
     message: 'Inject this host capability from the platform layer.',
   })),
@@ -72,6 +60,16 @@ const archiveReads = [
   {
     selector: `ObjectPattern > Property:matches([key.name=${archiveReadMethods}], [key.value=${archiveReadMethods}])`,
     message: 'Pass the archive body to the platform upload capability.',
+  },
+];
+const mediaFileReads = [
+  {
+    selector: `CallExpression[callee.type="MemberExpression"]:matches([callee.property.name=${archiveReadMethods}], [callee.property.value=${archiveReadMethods}])`,
+    message: 'Read selected media through an injected platform capability.',
+  },
+  {
+    selector: `ObjectPattern > Property:matches([key.name=${archiveReadMethods}], [key.value=${archiveReadMethods}])`,
+    message: 'Read selected media through an injected platform capability.',
   },
 ];
 const moduleMockNames = '/^(mock|doMock|importMock|spyOn|stubGlobal)$/';
@@ -226,6 +224,17 @@ export default defineConfig([
         ...errorHandlingSyntax,
         ...indirectImports,
         ...archiveReads,
+      ],
+    },
+  },
+  {
+    files: ['src/surfaces/whiteboard-media/' + scripts],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...errorHandlingSyntax,
+        ...indirectImports,
+        ...mediaFileReads,
       ],
     },
   },

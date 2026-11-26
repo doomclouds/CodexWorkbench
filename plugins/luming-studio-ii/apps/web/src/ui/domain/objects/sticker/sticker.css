@@ -5,30 +5,84 @@
 }
 
 .luming-sticker-fallback {
+  display: grid;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  place-items: center;
+  overflow-wrap: anywhere;
   line-height: 1;
+  text-align: center;
 }
 
-.luming-sticker-edit-layer {
-  position: absolute;
-  pointer-events: none;
+.luming-sticker-editor {
+  display: grid;
+  inline-size: 100%;
+  block-size: 100%;
+  min-inline-size: 0;
+  grid-template-rows: 1fr auto;
+  align-items: center;
 }
 
-.luming-sticker-edit-layer dialog {
-  pointer-events: auto;
+.luming-sticker-editor > input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 4px;
+  border: 1px solid var(--studio-ui-focus, Highlight);
+  border-radius: 5px;
+  background: var(--studio-ui-surface, Canvas);
+  color: inherit;
+  font: inherit;
+  text-align: center;
 }
 
 .luming-sticker-palette {
   display: grid;
+  inline-size: min(330px, 100%);
   min-inline-size: 0;
-  gap: 0.625rem;
+  gap: 9px;
+}
+
+.luming-sticker-palette__search {
+  display: flex;
+  block-size: 35px;
+  align-items: center;
+  gap: 7px;
+  padding-inline: 8px;
+  border: 1px solid var(--board-float-border, GrayText);
+  border-radius: 7px;
+  background: var(--board-chrome-hover, Canvas);
+}
+
+.luming-sticker-palette__search > .studio-ui-search-field {
+  flex: 1;
+}
+
+.luming-sticker-palette__search .studio-ui-field__label {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.luming-sticker-palette__search input[type='search'] {
+  min-block-size: auto;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
 }
 
 .luming-sticker-palette__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(2.5rem, 1fr));
-  gap: 0.25rem;
-  max-block-size: 13rem;
-  overflow: auto;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+  min-block-size: 0;
+  max-block-size: 19rem;
+  overflow-y: auto;
 }
 
 .luming-sticker-palette__preview {
@@ -36,17 +90,27 @@
   aspect-ratio: 1;
   place-items: center;
   box-sizing: border-box;
-  padding: 0.5rem;
+  min-inline-size: 0;
+  padding: 3px;
   border: 1px solid transparent;
-  border-radius: 0.375rem;
+  border-radius: 7px;
   background: transparent;
   cursor: pointer;
 }
 
-.luming-sticker-palette__preview:hover,
-.luming-sticker-palette__preview[aria-pressed='true'] {
+.luming-sticker-palette__preview > svg {
+  max-inline-size: 40px;
+  max-block-size: 40px;
+}
+
+.luming-sticker-palette__preview:hover {
   background: var(--studio-ui-hover, ButtonFace);
   border-color: var(--studio-ui-border, GrayText);
+}
+
+.luming-sticker-palette__preview[aria-pressed='true'] {
+  border-color: var(--studio-ui-accent, Highlight);
+  background: color-mix(in srgb, var(--studio-ui-accent, Highlight) 13%, transparent);
 }
 
 .luming-sticker-palette__preview:focus-visible {
@@ -61,7 +125,10 @@
 
 .luming-sticker-palette__empty {
   display: flex;
+  min-block-size: 150px;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 0.5rem;
+  color: var(--board-chrome-muted, GrayText);
 }

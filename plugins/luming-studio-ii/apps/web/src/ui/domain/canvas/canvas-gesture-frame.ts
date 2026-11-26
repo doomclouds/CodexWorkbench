@@ -14,6 +14,7 @@ import type {
   CanvasConnectionEndpoint,
   CanvasObject,
   CanvasObjectChange,
+  CanvasPenStyle,
   CanvasPlacement,
   CanvasPoint,
   CanvasTool,
@@ -41,6 +42,7 @@ interface ConnectionGesture {
   kind: 'create-connection';
   interactionId: string;
   start: CanvasConnectionEndpoint;
+  style?: CanvasPenStyle;
   sourceVersion?: number;
   clickOnly?: boolean;
 }
@@ -189,7 +191,7 @@ function connectionFrame(
     draft: {
       kind: 'create',
       interactionId,
-      object: connectorDraft({ start, end }, view),
+      object: connectorDraft({ start, end }, view, action.style),
     },
   };
 }

@@ -100,32 +100,33 @@ function CanvasSession(props: CanvasProps) {
     [props.objectExtensions],
   );
   const controller = useCanvasFrame(root, initialViewport);
+  const focusedId = presentation?.focusObjectId;
   const { frame, update } = controller;
   const { index, pending, selected, painted, visibleIds } = useCanvasModel(
     props,
     frame,
     size,
-    presentation?.focusObjectId ?? retainedId,
+    focusedId ?? retainedId,
     retainedIds,
     registry,
   );
   const presentationIds = useMemo(() => {
-    if (presentation?.focusObjectId) {
-      return new Set([presentation.focusObjectId]);
+    if (focusedId) {
+      return new Set([focusedId]);
     }
     if (!presentation || presentation.objectIds.length === 0) {
       return undefined;
     }
 
     return new Set(expandSelectionIds(index, presentation.objectIds, pending));
-  }, [presentation, index, pending]);
+  }, [focusedId, presentation, index, pending]);
   const visibleInMode = useMemo(() => {
-    if (presentation?.focusObjectId) {
-      return [presentation.focusObjectId];
+    if (focusedId) {
+      return [focusedId];
     }
 
     return presentationIds ? visibleIds.filter((id) => presentationIds.has(id)) : visibleIds;
-  }, [presentation, presentationIds, visibleIds]);
+  }, [focusedId, presentationIds, visibleIds]);
 
   function fittedViewport(ids: readonly string[], maxZoom?: number) {
     const bounds = ids.flatMap((id) => {
@@ -241,10 +242,33 @@ function CanvasSession(props: CanvasProps) {
   }
 
   function activateObject(activation: CanvasObjectActivation) {
-    nextEditSequence.current += 1;
-    setEditRequest({ id: activation.id, sequence: nextEditSequence.current });
+    requestObjectEdit(activation.id);
     props.onObjectActivate?.(activation);
   }
+
+  function requestObjectEdit(id: string) {
+    const object = index.get(id);
+
+    const editable =
+      canEdit || (props.canEditExpandedObject && presentation?.expandedObjectId === id);
+
+    if (!editable || !object || props.canWriteObject?.(object.kind) === false) {
+      return;
+    }
+
+    nextEditSequence.current += 1;
+
+    setEditRequest({ id, sequence: nextEditSequence.current });
+  }
+
+  const applyObjectEdit = useEffectEvent((request: CanvasProps['editObjectRequest']) => {
+    if (request) {
+      requestObjectEdit(request.id);
+    }
+  });
+  useLayoutEffect(() => {
+    applyObjectEdit(props.editObjectRequest);
+  }, [props.editObjectRequest]);
 
   function fitObjects(ids: readonly string[], timing: 'now' | 'frame') {
     const viewport = fittedViewport(ids);
@@ -302,7 +326,6 @@ function CanvasSession(props: CanvasProps) {
   const { x, y, zoom } = frame.viewport;
   const transform = `translate(${x}px, ${y}px) scale(${zoom})`;
   const spacing = gridSpacing(zoom);
-  const focusedId = presentation?.focusObjectId;
   const paintedInMode = presentationIds
     ? painted.filter(({ object }) => presentationIds.has(object.id))
     : painted;
@@ -320,6 +343,7 @@ function CanvasSession(props: CanvasProps) {
       onPointerDownCapture={input.handlePointerDownCapture}
       onPointerDown={input.handlePointerDown}
       onDoubleClick={input.handleDoubleClick}
+      onContextMenu={input.handleContextMenu}
       onPointerMove={input.handlePointerMove}
       onPointerLeave={input.handlePointerLeave}
       onPointerUp={input.handlePointerUp}
@@ -355,9 +379,13 @@ function CanvasSession(props: CanvasProps) {
           selection={props.selection}
           viewing={Boolean(presentation)}
           focusObjectId={focusedId}
+          expandedObjectId={presentation?.expandedObjectId}
           canEdit={canEdit}
+          canEditExpandedObject={props.canEditExpandedObject}
           editRequest={editRequest}
+          readHtmlSource={props.readHtmlSource}
           isLocked={(id) => isObjectLocked(index, id)}
+          canWriteObject={props.canWriteObject}
           onObjectIntent={props.onObjectIntent}
           onOpenPresentation={props.onOpenPresentation}
           onClosePresentation={props.onClosePresentation}

@@ -1,5 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
+import type { CSSProperties, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, ScrollRegion, StatusText } from '../../../base/index.js';
 import type { SearchFieldHandle } from '../../../base/index.js';
@@ -10,6 +19,7 @@ import { DocumentComparison, DocumentTitle, DocumentToolbar } from './DocumentTo
 import { untitledDocument } from './model.js';
 import { useDocumentDraft } from './useDocumentDraft.js';
 import { useDocumentPan } from './useDocumentPan.js';
+import { useDocumentView } from './useDocumentView.js';
 import { useDocumentViewport } from './useDocumentViewport.js';
 import './document-object.css';
 
@@ -18,11 +28,6 @@ const nativeControl = 'button,input,textarea,select,a[href],[contenteditable]';
 const vendorMenu = '.bn-suggestion-menu,[role="menu"],[role="listbox"]';
 const readingBackground = '#ffffff';
 const readingInk = '#211f1d';
-
-interface DocumentView {
-  readonly mode: DocumentActivity['mode'];
-  readonly focusBlockId?: string;
-}
 
 function panelPresentation(
   paper: DocumentObjectProps['paper'],
@@ -62,25 +67,46 @@ function documentLayout(canvas: NonNullable<DocumentObjectProps['canvas']>) {
   return 'detail';
 }
 
-function DocumentCanvasHeading({ visible }: { readonly visible: boolean }) {
+function DocumentCanvasHeading({
+  visible,
+  moveHandle,
+  locked,
+}: {
+  readonly visible: boolean;
+  readonly moveHandle: boolean;
+  readonly locked: boolean;
+}) {
   if (!visible) {
     return null;
   }
 
   return (
-    <span
-      className="studio-document-canvas-symbols"
-      data-canvas-drag-surface="title"
-      aria-hidden="true"
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="9" cy="5" r="1" />
-        <circle cx="9" cy="12" r="1" />
-        <circle cx="9" cy="19" r="1" />
-        <circle cx="15" cy="5" r="1" />
-        <circle cx="15" cy="12" r="1" />
-        <circle cx="15" cy="19" r="1" />
-      </svg>
+    <span className="studio-document-canvas-symbols">
+      {moveHandle && (
+        <button
+          className="studio-document-move"
+          data-canvas-drag-surface="title"
+          type="button"
+          aria-label="移动文档"
+          title={locked ? '文档位置已锁定' : '拖动把手移动文档'}
+          disabled={locked}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="5" r="1" />
+            <circle cx="9" cy="12" r="1" />
+            <circle cx="9" cy="19" r="1" />
+            <circle cx="15" cy="5" r="1" />
+            <circle cx="15" cy="12" r="1" />
+            <circle cx="15" cy="19" r="1" />
+          </svg>
+        </button>
+      )}
       <svg
         viewBox="0 0 24 24"
         fill="none"
@@ -88,6 +114,7 @@ function DocumentCanvasHeading({ visible }: { readonly visible: boolean }) {
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
+        aria-hidden="true"
       >
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 0v6h6M8 13h8m-8 4h8" />
       </svg>
@@ -108,6 +135,10 @@ function blockTarget(target: EventTarget | null) {
   }
 }
 
+function plainDocumentInput(event: KeyboardEvent | MouseEvent): boolean {
+  return ![event.altKey, event.ctrlKey, event.metaKey, event.shiftKey].some(Boolean);
+}
+
 function notifyMode(
   onActivity: DocumentObjectProps['onActivity'],
   mode: DocumentActivity['mode'],
@@ -118,17 +149,6 @@ function notifyMode(
   onActivity?.({ mode, dirty, saving, composing });
 }
 
-function documentPhase(
-  mode: DocumentActivity['mode'],
-  focused: boolean,
-  readOnly: boolean,
-  composing: boolean,
-): DocumentActivity['mode'] {
-  const blockedEditor = mode === 'edit' && readOnly && !composing;
-
-  return focused || blockedEditor ? 'read' : mode;
-}
-
 export function DocumentObject({
   value,
   interactive = true,
@@ -137,6 +157,8 @@ export function DocumentObject({
   paper,
   canvas,
   focusedReading = false,
+  expandControl,
+  locked = false,
   onOpenPresentation,
   onClosePresentation,
   editRequest,
@@ -148,17 +170,26 @@ export function DocumentObject({
   resolveImage,
   uploadImage,
 }: DocumentObjectProps) {
-  const [view, setView] = useState<DocumentView>({ mode: 'inline' });
-  const [consumedEditRequest, setConsumedEditRequest] = useState<number>();
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   const [composing, setComposing] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [comparing, setComparing] = useState(false);
   const searchField = useRef<SearchFieldHandle>(null);
-  const readOnly = readOnlyDocument || focusedReading;
+  const readOnly = readOnlyDocument;
+  const {
+    view,
+    setView,
+    mode: phase,
+    standalone,
+  } = useDocumentView({
+    focused: focusedReading,
+    readOnly,
+    composing,
+    editRequest,
+    onOpen: onOpenPresentation,
+  });
   const draft = useDocumentDraft({ value, readOnly, composing, onCommit, onChange });
   const { dirty, saving } = draft;
-  const phase = documentPhase(view.mode, focusedReading, readOnly, composing);
   const viewport = useDocumentViewport(phase, draft.draft.document, draft.confirmed.version);
   const {
     scroll,
@@ -174,15 +205,14 @@ export function DocumentObject({
   const matchingIds = new Set(viewport.matches.map((block) => block.id));
   const { layout, shell, surface } = panelPresentation(paper, canvas, expanded);
   const observe = useEffectEvent(() => notifyMode(onActivity, phase, dirty, saving, composing));
-
-  if (editRequest !== undefined && consumedEditRequest !== editRequest) {
-    setConsumedEditRequest(editRequest);
-    if (!readOnly) {
-      setView({ mode: 'edit' });
-    }
-  }
+  const focusReader = (focusedReading || interactive) && !editing;
 
   useEffect(() => observe(), [phase, dirty, saving, composing]);
+  useLayoutEffect(() => {
+    if (focusReader) {
+      paperNode.current?.parentElement?.focus({ preventScroll: true });
+    }
+  }, [focusedReading, focusReader, paperNode]);
 
   const capturePortal = useCallback((node: HTMLElement | null) => {
     if (node) {
@@ -209,12 +239,14 @@ export function DocumentObject({
 
   async function switchMode(mode: 'inline' | 'read') {
     if (composing || !(await draft.prepareExit())) {
-      return;
+      return false;
     }
 
     setComparing(false);
     setExportOpen(false);
     setView({ mode });
+
+    return true;
   }
 
   function handleBack() {
@@ -223,7 +255,13 @@ export function DocumentObject({
     } else if (comparing) {
       setComparing(false);
     } else {
-      switchMode('inline').catch(draft.reportFailure);
+      switchMode('inline')
+        .then((closed) => {
+          if (closed && focusedReading) {
+            onClosePresentation?.();
+          }
+        })
+        .catch(draft.reportFailure);
     }
   }
 
@@ -240,18 +278,14 @@ export function DocumentObject({
       return;
     }
 
-    draft
-      .prepareExit()
-      .then((ready) => {
-        if (ready) {
-          onOpenPresentation();
-        }
-      })
-      .catch(draft.reportFailure);
+    switchMode('read').catch(draft.reportFailure);
   }
 
   function handleDoubleClick(event: MouseEvent<HTMLDivElement>) {
-    if (event.defaultPrevented || expanded || readOnly) {
+    if (event.defaultPrevented || editing || readOnly) {
+      return;
+    }
+    if (!plainDocumentInput(event)) {
       return;
     }
 
@@ -265,7 +299,8 @@ export function DocumentObject({
   }
 
   function handleEscape(event: KeyboardEvent<HTMLDivElement>) {
-    if (composing || event.nativeEvent.isComposing || vendorControlsOpen(event.currentTarget)) {
+    const composingNow = composing || event.nativeEvent.isComposing || event.key === 'Process';
+    if (composingNow || event.repeat || vendorControlsOpen(event.currentTarget)) {
       return;
     }
 
@@ -292,6 +327,10 @@ export function DocumentObject({
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     pan.handleKeyDown(event);
+    if (handleReadingShortcut(event)) {
+      return;
+    }
+
     const command = event.ctrlKey || event.metaKey;
     if (expanded && command && event.key.toLowerCase() === 'f') {
       event.preventDefault();
@@ -303,22 +342,72 @@ export function DocumentObject({
     viewport.handleSelectAll(event);
   }
 
-  const actions = (
-    <DocumentToolbar
-      mode={phase}
-      iconOnly={layout !== undefined}
-      readOnly={readOnly}
-      draft={draft}
-      exportOpen={exportOpen}
-      onEdit={() => openEditor()}
-      onOpen={handleOpen}
-      onRead={handleRead}
-      onExport={onExport}
-      onToggleExport={toggleExport}
-      onAnnotate={onAnnotate ? annotate : undefined}
-      onCompare={() => setComparing(true)}
-    />
-  );
+  function handleReadingShortcut(event: KeyboardEvent<HTMLDivElement>): boolean {
+    const composingNow = event.nativeEvent.isComposing || event.key === 'Process';
+    if (event.defaultPrevented || event.repeat || composingNow) {
+      return false;
+    }
+
+    if (focusedReading && event.key === 'Escape' && !editing) {
+      event.preventDefault();
+      event.stopPropagation();
+      handleBack();
+
+      return true;
+    }
+
+    const enterEditor = event.key === 'Enter' || event.key === 'F2';
+    const target = event.target;
+    const readingArea = paperNode.current?.parentElement;
+    const inReader = target instanceof Element && readingArea?.contains(target);
+    if (!enterEditor || !plainDocumentInput(event) || !inReader) {
+      return false;
+    }
+    if (readOnly || editing || target.closest(nativeControl)) {
+      return false;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    openEditor(blockTarget(target));
+
+    return true;
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    pan.handlePointerDown(event);
+    if (event.defaultPrevented || event.button !== 0 || !focusReader) {
+      return;
+    }
+
+    const target = event.target;
+    const reader = paperNode.current?.parentElement;
+    const inReader = target instanceof Element && reader?.contains(target);
+    if (inReader && !target.closest(nativeControl)) {
+      reader?.focus({ preventScroll: true });
+    }
+  }
+
+  function renderActions(outline?: ReactNode) {
+    return (
+      <DocumentToolbar
+        mode={phase}
+        iconOnly={layout !== undefined || focusedReading}
+        expandControl={expandControl}
+        readOnly={readOnly}
+        draft={draft}
+        outline={outline}
+        exportOpen={exportOpen}
+        onEdit={() => openEditor()}
+        onOpen={handleOpen}
+        onRead={handleRead}
+        onExport={onExport}
+        onToggleExport={toggleExport}
+        onAnnotate={onAnnotate ? annotate : undefined}
+        onCompare={() => setComparing(true)}
+      />
+    );
+  }
   const content = (
     <ScrollRegion label="文档正文" axis="both" contain ref={scroll} onScroll={handleScroll}>
       <div
@@ -369,26 +458,30 @@ export function DocumentObject({
       onKeyDown={handleKeyDown}
       onKeyUp={pan.handleKeyUp}
       onBlur={pan.resetDrag}
-      onPointerDown={pan.handlePointerDown}
+      onPointerDown={handlePointerDown}
       onPointerMove={pan.handlePointerMove}
       onPointerUp={pan.handlePointerEnd}
       onPointerCancel={pan.handlePointerEnd}
     >
       <DocumentReadingLayout
         focused={focusedReading}
-        onBack={onClosePresentation}
-        title={draft.draft.title}
+        onBack={onClosePresentation ? handleBack : undefined}
+        closingDisabled={composing}
         viewport={viewport}
         searchField={searchField}
         expanded={expanded}
         interactive={interactive}
         heading={
           <>
-            <DocumentCanvasHeading visible={layout !== undefined} />
+            <DocumentCanvasHeading
+              visible={layout !== undefined || focusedReading}
+              moveHandle={layout !== undefined}
+              locked={locked || readOnly}
+            />
             <DocumentTitle draft={draft} editing={editing} readOnly={readOnly} inline={!expanded} />
-            {actions}
           </>
         }
+        renderActions={renderActions}
         comparison={
           comparing && (
             <DocumentComparison
@@ -411,7 +504,7 @@ export function DocumentObject({
       className="studio-document-object"
       data-theme={theme}
     >
-      {expanded && !focusedReading && portal
+      {standalone && portal
         ? createPortal(
             <Dialog
               open

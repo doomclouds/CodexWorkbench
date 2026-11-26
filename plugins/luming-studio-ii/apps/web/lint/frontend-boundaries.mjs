@@ -37,20 +37,45 @@ const protocolRuntimes = new Set(['@bufbuild/protobuf', '@bufbuild/protobuf/wkt'
 const whiteboardData = resolve(sourceRoot, 'data/whiteboard');
 const catalogData = resolve(sourceRoot, 'data/catalog');
 const archiveImportData = resolve(sourceRoot, 'data/archive-import');
+const feedbackData = resolve(sourceRoot, 'data/feedback');
+const whiteboardPage = resolve(sourceRoot, 'pages/whiteboard');
 const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
+const editorSurface = resolve(sourceRoot, 'surfaces/whiteboard-editor');
 const viewingSurface = resolve(sourceRoot, 'surfaces/whiteboard-viewing');
 const exportSurface = resolve(sourceRoot, 'surfaces/whiteboard-export');
+const historySurface = resolve(sourceRoot, 'surfaces/whiteboard-history');
+const feedbackSurface = resolve(sourceRoot, 'surfaces/whiteboard-feedback');
+const mediaSurface = resolve(sourceRoot, 'surfaces/whiteboard-media');
+const extraWhiteboardSurfaces = new Set([historySurface, feedbackSurface, mediaSurface]);
 const iconSurfaces = new Set([
   workbenchSurface,
   viewingSurface,
   exportSurface,
-  resolve(sourceRoot, 'surfaces/whiteboard-editor'),
+  ...extraWhiteboardSurfaces,
+  editorSurface,
   resolve(sourceRoot, 'surfaces/recycle-bin'),
+]);
+const surfaceDataMounts = new Map([
+  [resolve(editorSurface, 'WhiteboardEditorSurface.tsx'), 'createWhiteboardSession'],
+  [resolve(editorSurface, 'HistoryCanvasView.tsx'), 'createWhiteboardSession'],
+  [resolve(workbenchSurface, 'WorkbenchSurface.tsx'), 'createCatalogDirectory'],
+]);
+const injectedSurfacePorts = new Map([
+  [workbenchSurface, catalogData],
+  [editorSurface, whiteboardData],
+  [viewingSurface, undefined],
+  [exportSurface, whiteboardData],
+  [historySurface, whiteboardData],
+  [feedbackSurface, feedbackData],
+  [mediaSurface, whiteboardData],
 ]);
 const protocolOwners = new Map([
   [contractPackage + '/whiteboard/scene', whiteboardData],
   [contractPackage + '/whiteboard/payload', whiteboardData],
   [contractPackage + '/whiteboard/service', whiteboardData],
+  [contractPackage + '/whiteboard/edits', whiteboardData],
+  [contractPackage + '/whiteboard/history', whiteboardData],
+  [contractPackage + '/feedback/service', feedbackData],
   [contractPackage + '/catalog/service', catalogData],
   [contractPackage + '/archives/service', archiveImportData],
 ]);
@@ -127,7 +152,20 @@ function isTypeOnly(node) {
   );
 }
 
-function allowedLocal(owner, target, targetOwner, typeOnly) {
+function isSurfaceDataMountImport(file, node) {
+  const factory = surfaceDataMounts.get(file);
+  if (!factory || node.type !== 'ImportDeclaration' || !node.specifiers.length) {
+    return false;
+  }
+
+  return node.specifiers.every(
+    (member) =>
+      member.type === 'ImportSpecifier' &&
+      (member.importKind === 'type' || member.imported.name === factory),
+  );
+}
+
+function allowedLocal(owner, target, targetOwner, file, node) {
   if (!targetOwner) {
     return false;
   }
@@ -137,14 +175,20 @@ function allowedLocal(owner, target, targetOwner, typeOnly) {
   if (!dependencies.get(owner.layer)?.includes(targetOwner.layer)) {
     return false;
   }
+  if (extraWhiteboardSurfaces.has(targetOwner.root) && owner.root !== whiteboardPage) {
+    return false;
+  }
+
+  const typeOnly = isTypeOnly(node);
   if (owner.layer === 'pages' && targetOwner.layer === 'data') {
     return typeOnly && publicEntry(target, targetOwner);
   }
-  if (targetOwner.layer === 'data' && owner.root === viewingSurface) {
-    return false;
-  }
-  if (targetOwner.layer === 'data' && owner.root === exportSurface) {
-    return targetOwner.root === whiteboardData && typeOnly && publicEntry(target, targetOwner);
+
+  if (targetOwner.layer === 'data' && injectedSurfacePorts.has(owner.root)) {
+    const publicPort =
+      targetOwner.root === injectedSurfacePorts.get(owner.root) && publicEntry(target, targetOwner);
+
+    return publicPort && (typeOnly || isSurfaceDataMountImport(file, node));
   }
 
   return publicEntry(target, targetOwner);
@@ -252,9 +296,7 @@ const contractBoundary = {
         return allowedTest(suite, target, targetOwner) ? undefined : 'test';
       }
       if (governed) {
-        return allowedLocal(owner, target, targetOwner, isTypeOnly(node))
-          ? undefined
-          : 'dependency';
+        return allowedLocal(owner, target, targetOwner, file, node) ? undefined : 'dependency';
       }
       if (isSource && dependencies.has(targetOwner?.layer)) {
         return 'dependency';

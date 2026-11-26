@@ -6,6 +6,7 @@ service BoardCatalogService {
   rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
   rpc ListTrashedBoards(ListTrashedBoardsRequest) returns (ListTrashedBoardsResponse);
   rpc CreateBoard(CreateBoardRequest) returns (CreateBoardResponse);
+  rpc DuplicateBoard(DuplicateBoardRequest) returns (DuplicateBoardResponse);
   rpc ManageBoard(ManageBoardRequest) returns (ManageBoardResponse);
   rpc PurgeBoards(PurgeBoardsRequest) returns (PurgeBoardsResponse);
   rpc GetCatalogCommandReceipt(GetCatalogCommandReceiptRequest) returns (GetCatalogCommandReceiptResponse);
@@ -61,6 +62,15 @@ message CreateBoardRequest {
 }
 
 message CreateBoardResponse {
+  CatalogCommandReceipt receipt = 1;
+}
+
+message DuplicateBoardRequest {
+  string command_id = 1;
+  string source_board_id = 2;
+}
+
+message DuplicateBoardResponse {
   CatalogCommandReceipt receipt = 1;
 }
 
