@@ -71,12 +71,12 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   try {
     const repository = createWhiteboardRepository(database);
     const application = createWhiteboardApplication(repository);
+    const archives = createArchiveImportRepository(database);
     const catalog = createCatalogRepository(database);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
       now: Date.now,
     });
-    const archives = createArchiveImportRepository(database);
     const archiveApplication = createArchiveImportApplication(archives, {
       newBoardId: randomUUID,
       now: Date.now,

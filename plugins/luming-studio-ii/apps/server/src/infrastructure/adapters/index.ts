@@ -65,9 +65,12 @@ function readAccess(
   boardId: string,
   actorId: string,
 ): BoardAccess | undefined {
-  const query = connection.prepare(
-    'SELECT can_edit FROM board_members WHERE board_id = ? AND actor_id = ?',
-  );
+  const query = connection.prepare(`
+    SELECT m.can_edit
+    FROM board_members AS m
+    LEFT JOIN board_lifecycle AS l ON l.board_id = m.board_id
+    WHERE m.board_id = ? AND m.actor_id = ? AND l.trashed_at_millis IS NULL
+  `);
   query.setReadBigInts(true);
   const row = query.get(boardId, actorId);
 

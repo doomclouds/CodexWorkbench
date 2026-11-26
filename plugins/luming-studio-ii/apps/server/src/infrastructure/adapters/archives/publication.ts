@@ -193,7 +193,9 @@ export function readPublishedAsset(
     SELECT a.mime_type, a.bytes
     FROM board_archive_assets AS a
     JOIN board_members AS m ON m.board_id = a.board_id
+    LEFT JOIN board_lifecycle AS l ON l.board_id = a.board_id
     WHERE m.actor_id = ? AND a.board_id = ? AND a.asset_id = ?
+      AND l.trashed_at_millis IS NULL
   `)
     .get(actorId, boardId, assetId);
 

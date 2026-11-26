@@ -4,7 +4,10 @@ package luming.studio.v1;
 
 service BoardCatalogService {
   rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
+  rpc ListTrashedBoards(ListTrashedBoardsRequest) returns (ListTrashedBoardsResponse);
   rpc CreateBoard(CreateBoardRequest) returns (CreateBoardResponse);
+  rpc ManageBoard(ManageBoardRequest) returns (ManageBoardResponse);
+  rpc PurgeBoards(PurgeBoardsRequest) returns (PurgeBoardsResponse);
   rpc GetCatalogCommandReceipt(GetCatalogCommandReceiptRequest) returns (GetCatalogCommandReceiptResponse);
 }
 
@@ -20,6 +23,7 @@ message BoardSummary {
   optional uint64 updated_at_millis = 3;
   bool pinned = 4;
   optional uint64 entry_version = 5;
+  bool can_manage = 6;
 }
 
 message ListBoardsRequest {
@@ -34,6 +38,23 @@ message ListBoardsResponse {
   optional string next_cursor = 2;
 }
 
+message TrashedBoardSummary {
+  BoardSummary board = 1;
+  uint64 trashed_at_millis = 2;
+}
+
+message ListTrashedBoardsRequest {
+  string query = 1;
+  BoardSortOrder order = 2;
+  uint32 page_size = 3;
+  optional string cursor = 4;
+}
+
+message ListTrashedBoardsResponse {
+  repeated TrashedBoardSummary boards = 1;
+  optional string next_cursor = 2;
+}
+
 message CreateBoardRequest {
   string command_id = 1;
   string title = 2;
@@ -43,11 +64,60 @@ message CreateBoardResponse {
   CatalogCommandReceipt receipt = 1;
 }
 
+enum BoardLifecycleAction {
+  BOARD_LIFECYCLE_ACTION_UNSPECIFIED = 0;
+  BOARD_LIFECYCLE_ACTION_TRASH = 1;
+  BOARD_LIFECYCLE_ACTION_RESTORE = 2;
+}
+
+message ManageBoardRequest {
+  string command_id = 1;
+  string board_id = 2;
+  optional uint64 expected_entry_version = 3;
+  oneof operation {
+    string title = 4;
+    bool pinned = 5;
+    BoardLifecycleAction lifecycle = 6;
+  }
+}
+
+message ManageBoardResponse {
+  CatalogCommandReceipt receipt = 1;
+}
+
+message PurgeBoardTarget {
+  string board_id = 1;
+  optional uint64 expected_entry_version = 2;
+}
+
+message PurgeBoardsRequest {
+  string command_id = 1;
+  repeated PurgeBoardTarget targets = 2;
+}
+
+message PurgeBoardsResponse {
+  CatalogCommandReceipt receipt = 1;
+}
+
+message CatalogPurgeItemResult {
+  string board_id = 1;
+  oneof outcome {
+    bool deleted = 2;
+    CatalogRejection rejected = 3;
+  }
+}
+
+message CatalogPurgeResult {
+  repeated CatalogPurgeItemResult items = 1;
+}
+
 message CatalogCommandReceipt {
   string command_id = 1;
   oneof outcome {
     BoardSummary created = 2;
     CatalogRejection rejected = 3;
+    BoardSummary changed = 4;
+    CatalogPurgeResult purged = 5;
   }
 }
 
@@ -55,6 +125,10 @@ enum CatalogRejectionReason {
   CATALOG_REJECTION_REASON_UNSPECIFIED = 0;
   CATALOG_REJECTION_REASON_INVALID_TITLE = 1;
   CATALOG_REJECTION_REASON_COMMAND_ID_REUSE = 2;
+  CATALOG_REJECTION_REASON_FORBIDDEN = 3;
+  CATALOG_REJECTION_REASON_ENTRY_VERSION_CHANGED = 4;
+  CATALOG_REJECTION_REASON_STATE_CHANGED = 5;
+  CATALOG_REJECTION_REASON_INVALID_COMMAND = 6;
 }
 
 message CatalogRejection {

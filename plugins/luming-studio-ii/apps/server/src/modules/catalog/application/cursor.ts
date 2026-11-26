@@ -51,7 +51,7 @@ export function readCatalogCursor(cursor: string, scope: CatalogScope): CatalogP
   if (values.version !== cursorVersion || values.actorId !== scope.actorId) {
     throw new CatalogQueryError('The catalog cursor is invalid for this actor.');
   }
-  if (values.query !== scope.query || values.order !== scope.order) {
+  if (values.query !== scope.query || values.order !== scope.order || values.view !== scope.view) {
     throw new CatalogQueryError('The catalog cursor belongs to another query.');
   }
 
@@ -63,18 +63,33 @@ export function readCatalogCursor(cursor: string, scope: CatalogScope): CatalogP
     throw new CatalogQueryError('The catalog cursor position is invalid.');
   }
 
-  return { boardId, title, pinned, updatedAtMillis: cursorTimestamp(updatedAtMillis) };
+  const position = { boardId, title, pinned, updatedAtMillis: cursorTimestamp(updatedAtMillis) };
+  if (scope.view !== 'trash') {
+    return position;
+  }
+
+  const trashedAtMillis = cursorTimestamp(values.trashedAtMillis);
+  if (trashedAtMillis === undefined) {
+    throw new CatalogQueryError('The trash cursor timestamp is missing.');
+  }
+
+  return { ...position, trashedAtMillis };
 }
 
 export function writeCatalogCursor(scope: CatalogScope, position: CatalogPosition): string {
-  const { boardId, title, pinned, updatedAtMillis } = position;
+  const { actorId, query, order, view } = scope;
+  const { boardId, title, pinned, updatedAtMillis, trashedAtMillis } = position;
 
   return JSON.stringify({
     version: cursorVersion,
-    ...scope,
+    actorId,
+    query,
+    order,
+    view,
     boardId,
     title,
     pinned,
     updatedAtMillis: updatedAtMillis?.toString(),
+    trashedAtMillis: trashedAtMillis?.toString(),
   });
 }

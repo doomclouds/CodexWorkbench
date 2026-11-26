@@ -8,7 +8,15 @@ interface BoardCardProps {
   readonly board: CatalogBoardSummary;
   readonly layout: WorkbenchLayout;
   readonly onOpen: (boardId: string) => void;
+  readonly managementBlocked: boolean;
+  readonly onAction?: (
+    board: CatalogBoardSummary,
+    action: WorkbenchBoardAction,
+    trigger: HTMLButtonElement,
+  ) => void;
 }
+
+export type WorkbenchBoardAction = 'rename' | 'pin' | 'trash';
 
 interface CardMenuAnchor {
   readonly button: HTMLButtonElement;
@@ -90,15 +98,19 @@ function BoardPreview() {
   );
 }
 
-function BoardCardMenu({ title, pinned }: { readonly title: string; readonly pinned: boolean }) {
+type BoardCardMenuProps = Pick<BoardCardProps, 'board' | 'managementBlocked' | 'onAction'>;
+
+function BoardCardMenu({ board, managementBlocked, onAction }: BoardCardMenuProps) {
   const [anchor, setAnchor] = useState<CardMenuAnchor>();
+  const { title, pinned, canManage } = board;
   const label = '管理作品：' + title;
+  const actionsAvailable = canManage === true && onAction !== undefined;
   const options = [
-    { label: pinned ? '取消固定' : '固定', icon: Pin },
-    { label: '重命名', icon: FileCode2 },
+    { label: pinned ? '取消固定' : '固定', icon: Pin, action: 'pin' },
+    { label: '重命名', icon: FileCode2, action: 'rename' },
     { label: '复制链接', icon: Share2 },
     { label: '复制作品', icon: Copy },
-  ];
+  ] as const;
 
   function handleKey(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -107,43 +119,72 @@ function BoardCardMenu({ title, pinned }: { readonly title: string; readonly pin
     }
   }
 
+  function runAction(action: WorkbenchBoardAction | undefined) {
+    const blocked = !actionsAvailable || managementBlocked;
+    if (!anchor || blocked || !action) {
+      return;
+    }
+
+    const trigger = anchor.button;
+    setAnchor(undefined);
+    trigger.focus();
+    onAction?.(board, action, trigger);
+  }
+
   return (
     <div className="studio-workbench-card-actions">
       {pinned && <Pin size={15} className="studio-workbench-pin-mark" aria-label="已固定" />}
-      <button
-        type="button"
-        className="studio-workbench-icon-button"
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={anchor !== undefined}
-        onClick={(event) => {
-          const button = event.currentTarget;
-          setAnchor((current) => (current ? undefined : { button, focus: 'first' }));
-        }}
-        onKeyDown={handleKey}
-      >
-        <MoreHorizontal size={20} />
-      </button>
-      {anchor && (
+      {canManage !== false && (
+        <button
+          type="button"
+          className="studio-workbench-icon-button"
+          aria-label={label}
+          aria-haspopup="menu"
+          aria-expanded={anchor !== undefined}
+          disabled={managementBlocked}
+          onClick={(event) => {
+            const button = event.currentTarget;
+            setAnchor((current) => (current ? undefined : { button, focus: 'first' }));
+          }}
+          onKeyDown={handleKey}
+        >
+          <MoreHorizontal size={20} />
+        </button>
+      )}
+      {anchor && canManage !== false && (
         <WorkbenchMenu
           anchor={anchor.button}
           label={label}
           initialFocus={anchor.focus}
           onClose={() => setAnchor(undefined)}
         >
-          {options.map(({ label: option, icon: Icon }) => (
-            <button type="button" key={option} role="menuitem" title={unsupported} disabled>
-              <Icon size={16} />
-              {option}
-            </button>
-          ))}
+          {options.map((option) => {
+            const action = 'action' in option ? option.action : undefined;
+            const enabled = action !== undefined && actionsAvailable;
+            const { label: text, icon: Icon } = option;
+
+            return (
+              <button
+                type="button"
+                key={text}
+                role="menuitem"
+                title={enabled ? undefined : unsupported}
+                disabled={!enabled || managementBlocked}
+                onClick={() => runAction(action)}
+              >
+                <Icon size={16} />
+                {text}
+              </button>
+            );
+          })}
           <div className="studio-workbench-menu-rule" role="separator" />
           <button
             type="button"
             role="menuitem"
             className="studio-workbench-danger-text"
-            title={unsupported}
-            disabled
+            title={actionsAvailable ? undefined : unsupported}
+            disabled={!actionsAvailable || managementBlocked}
+            onClick={() => runAction('trash')}
           >
             <Trash2 size={16} />
             移入回收站
@@ -154,7 +195,7 @@ function BoardCardMenu({ title, pinned }: { readonly title: string; readonly pin
   );
 }
 
-export function BoardCard({ board, layout, onOpen }: BoardCardProps) {
+export function BoardCard({ board, layout, onOpen, managementBlocked, onAction }: BoardCardProps) {
   return (
     <article className="studio-workbench-card">
       <button
@@ -174,7 +215,7 @@ export function BoardCard({ board, layout, onOpen }: BoardCardProps) {
           </div>
         </div>
       </button>
-      <BoardCardMenu title={board.title} pinned={board.pinned} />
+      <BoardCardMenu board={board} managementBlocked={managementBlocked} onAction={onAction} />
     </article>
   );
 }

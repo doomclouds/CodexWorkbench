@@ -11,6 +11,7 @@ import {
 import type {
   BoardCatalogService,
   CatalogBoardSummary,
+  CatalogListRequest,
   CatalogPost,
   CatalogReceipt,
   CatalogRejectionReason as RejectionReason,
@@ -26,7 +27,7 @@ const reasons = new Map<CatalogRejectionReason, RejectionReason>([
   [CatalogRejectionReason.COMMAND_ID_REUSE, 'commandIdReuse'],
 ]);
 
-async function request<Input extends DescMessage, Output extends DescMessage>(
+export async function request<Input extends DescMessage, Output extends DescMessage>(
   post: CatalogPost,
   method: DescMethodUnary<Input, Output>,
   input: MessageInitShape<Input>,
@@ -39,12 +40,13 @@ async function request<Input extends DescMessage, Output extends DescMessage>(
   return fromBinary(method.output, response, { readUnknownFields: false });
 }
 
-function readBoard({
+export function readBoard({
   boardId,
   title,
   updatedAtMillis,
   pinned,
   entryVersion,
+  canManage,
 }: BoardSummary): CatalogBoardSummary {
   if (!boardId.trim()) {
     throw new Error('Catalog response is missing a board ID.');
@@ -53,7 +55,11 @@ function readBoard({
     throw new Error('Catalog response is missing a board entry version.');
   }
 
-  return { boardId, title, updatedAtMillis, pinned, entryVersion };
+  return { boardId, title, updatedAtMillis, pinned, entryVersion, canManage };
+}
+
+export function listInput(input: CatalogListRequest) {
+  return { ...input, order: orders[input.order] };
 }
 
 function readBoards(boards: readonly BoardSummary[]): readonly CatalogBoardSummary[] {
@@ -70,7 +76,7 @@ function readBoards(boards: readonly BoardSummary[]): readonly CatalogBoardSumma
   });
 }
 
-function requireCommandId(commandId: string): void {
+export function requireCommandId(commandId: string): void {
   if (!commandId.trim()) {
     throw new Error('Catalog command ID is required.');
   }
@@ -82,17 +88,21 @@ function matchCommandId(actual: string, expected: string): void {
   }
 }
 
-function readReceipt(
-  receipt: CatalogCommandReceipt | undefined,
-  commandId: string,
-): CatalogReceipt {
+export function readCommandOutcome(receipt: CatalogCommandReceipt | undefined, commandId: string) {
   if (receipt === undefined) {
     throw new Error('Catalog response is missing a command receipt.');
   }
 
   matchCommandId(receipt.commandId, commandId);
 
-  const { case: kind, value } = receipt.outcome;
+  return receipt.outcome;
+}
+
+function readReceipt(
+  receipt: CatalogCommandReceipt | undefined,
+  commandId: string,
+): CatalogReceipt {
+  const { case: kind, value } = readCommandOutcome(receipt, commandId);
 
   switch (kind) {
     case 'created':
@@ -101,16 +111,20 @@ function readReceipt(
       return { kind, commandId, reason: reasons.get(value.reason) ?? 'unknown' };
     case undefined:
       throw new Error('Catalog receipt is missing a command outcome.');
+    case 'changed':
+    case 'purged':
+      throw new Error('Catalog receipt has an unexpected creation outcome.');
   }
 }
 
-function readReceiptLookup(
+export function readReceiptLookup<Receipt>(
   { result }: GetCatalogCommandReceiptResponse,
   commandId: string,
-): CatalogReceipt | undefined {
+  read: (receipt: CatalogCommandReceipt, commandId: string) => Receipt,
+): Receipt | undefined {
   switch (result.case) {
     case 'receipt':
-      return readReceipt(result.value, commandId);
+      return read(result.value, commandId);
     case 'notRecorded':
       matchCommandId(result.value.commandId, commandId);
 
@@ -124,13 +138,8 @@ export function createBoardCatalogService(post: CatalogPost): BoardCatalogServic
   const { listBoards, createBoard, getCatalogCommandReceipt } = wireService.method;
 
   return {
-    async listBoards({ query, order, pageSize, cursor }, signal) {
-      const { boards, nextCursor } = await request(
-        post,
-        listBoards,
-        { query, order: orders[order], pageSize, cursor },
-        signal,
-      );
+    async listBoards(input, signal) {
+      const { boards, nextCursor } = await request(post, listBoards, listInput(input), signal);
 
       return { boards: readBoards(boards), nextCursor };
     },
@@ -146,7 +155,7 @@ export function createBoardCatalogService(post: CatalogPost): BoardCatalogServic
 
       const response = await request(post, getCatalogCommandReceipt, { commandId }, signal);
 
-      return readReceiptLookup(response, commandId);
+      return readReceiptLookup(response, commandId, readReceipt);
     },
   };
 }

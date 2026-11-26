@@ -17,8 +17,31 @@ export const catalogSchema = `
     PRIMARY KEY (actor_id, command_id)
   ) STRICT;
 
+  CREATE TABLE IF NOT EXISTS catalog_management_receipts (
+    actor_id TEXT NOT NULL,
+    command_id TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json)),
+    PRIMARY KEY (actor_id, command_id)
+  ) STRICT;
+
   CREATE INDEX IF NOT EXISTS catalog_members_by_actor
     ON board_members (actor_id, board_id);
+
+  CREATE TRIGGER IF NOT EXISTS catalog_record_created_owner
+  AFTER INSERT ON catalog_create_receipts
+  BEGIN
+    INSERT INTO board_lifecycle (board_id, owner_actor_id)
+    VALUES (NEW.board_id, NEW.actor_id);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS catalog_record_imported_owner
+  AFTER INSERT ON archive_import_receipts
+  WHEN NEW.board_id IS NOT NULL
+  BEGIN
+    INSERT INTO board_lifecycle (board_id, owner_actor_id)
+    VALUES (NEW.board_id, NEW.actor_id);
+  END;
 
   CREATE TRIGGER IF NOT EXISTS catalog_track_board_edit
   AFTER UPDATE OF revision ON boards
@@ -29,4 +52,20 @@ export const catalogSchema = `
     ON CONFLICT (board_id) DO UPDATE SET updated_at_millis =
       MAX(catalog_entries.updated_at_millis, excluded.updated_at_millis);
   END;
+
+  WITH provenance AS (
+    SELECT board_id, actor_id FROM catalog_create_receipts
+    UNION
+    SELECT board_id, actor_id FROM archive_import_receipts WHERE board_id IS NOT NULL
+  ), confirmed_owner AS (
+    SELECT board_id, MIN(actor_id) AS actor_id
+    FROM provenance
+    GROUP BY board_id
+    HAVING COUNT(*) = 1
+  )
+  INSERT INTO board_lifecycle (board_id, owner_actor_id)
+  SELECT owner.board_id, owner.actor_id
+  FROM confirmed_owner AS owner
+  JOIN board_members AS member ON member.board_id = owner.board_id AND member.actor_id = owner.actor_id
+  WHERE NOT EXISTS (SELECT 1 FROM board_lifecycle AS lifecycle WHERE lifecycle.board_id = owner.board_id);
 `;

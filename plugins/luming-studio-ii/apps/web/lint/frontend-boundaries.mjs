@@ -38,7 +38,11 @@ const whiteboardData = resolve(sourceRoot, 'data/whiteboard');
 const catalogData = resolve(sourceRoot, 'data/catalog');
 const archiveImportData = resolve(sourceRoot, 'data/archive-import');
 const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
-const iconSurfaces = new Set([workbenchSurface, resolve(sourceRoot, 'surfaces/whiteboard-editor')]);
+const iconSurfaces = new Set([
+  workbenchSurface,
+  resolve(sourceRoot, 'surfaces/whiteboard-editor'),
+  resolve(sourceRoot, 'surfaces/recycle-bin'),
+]);
 const protocolOwners = new Map([
   [contractPackage + '/whiteboard/scene', whiteboardData],
   [contractPackage + '/whiteboard/payload', whiteboardData],

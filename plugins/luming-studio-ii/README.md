@@ -151,10 +151,16 @@ Web 根路径进入工作台。搜索、排序和分页从 `BoardCatalogService`
 
 工作台、画布和对象的界面沿用原版 Studio 0.3.2。源码使用 Studio II 的公开能力契约，视觉验收使用同一场景、主题和视口做实屏对照。
 
-工作台和白板通过 `apps/web/src/app/routes.ts` 登记。架构 Lint 校验页面目录和装配入口。跨页的操作通知由 `apps/web/src/app/shell/operation-notice/` 呈现。
+工作台、白板和回收站通过 `apps/web/src/app/routes.ts` 登记。架构 Lint 校验页面目录和装配入口。跨页的操作通知由 `apps/web/src/app/shell/operation-notice/` 呈现。
 
 ### 导入作品
 
 工作台的「＋」菜单接收初代 Luming Studio 当前导出的 `.studio.zip`，归档清单版本为 `4`。服务端在暂存区验证清单、白板内容和素材，随后在同一个 SQLite 事务中发布到工作台并保存导入回执。归档原件分块保留，导入后打开白板的最新内容。
 
 `POST /luming.studio.v1.BoardArchiveService/ImportBoardArchive` 接收 `application/zip` 和 `X-Studio-Command-Id`，返回 Protobuf 回执。`GetArchiveImportReceipt` 查询当前操作者的回执。导入素材通过受白板成员权限保护的 `/studio-archive-assets/` 路径读取。本机预览的同源代理配置已包含这些路径。
+
+### 作品管理与回收站
+
+作品所有者可从工作台卡片或列表菜单重命名、固定和移入回收站。通过「筛选作品 → 回收站」进入 `?view=trash`，可以搜索、恢复，或者确认后清理所选作品。恢复沿用原白板 ID、内容和固定状态。
+
+`BoardCatalogService` 提供 `ListTrashedBoards`、`ManageBoard` 和 `PurgeBoards`。写入校验目录条目版本，通过原命令 ID 查询回执。清空先收齐确认时的作品和版本，每批最多提交 100 项。服务端逐项检查所有者、回收状态和版本，并在 SQLite 事务中保存批次结果。

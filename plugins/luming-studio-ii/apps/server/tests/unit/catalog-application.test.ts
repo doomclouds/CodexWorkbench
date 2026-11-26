@@ -18,6 +18,7 @@ const nowMillis = 1_800_000_000_000;
 function fixture() {
   const receipts = new Map<string, CatalogCreatedReceipt>();
   const listBoards = vi.fn<CatalogRepository['listBoards']>(() => []);
+  const listTrashedBoards = vi.fn<CatalogRepository['listTrashedBoards']>(() => []);
   const beforeCommit = vi.fn();
   const now = vi.fn(() => nowMillis);
   let lastBoardId = 0;
@@ -29,16 +30,25 @@ function fixture() {
 
   const repository: CatalogRepository = {
     listBoards,
+    listTrashedBoards,
     getReceipt,
     write(work) {
       let persist: (() => void) | undefined;
       const result = work({
-        getReceipt,
+        getReceipt(actorId, commandId) {
+          const receipt = getReceipt(actorId, commandId);
+
+          return receipt && { receipt };
+        },
         saveBoard(actorId, receipt) {
           persist = () => {
             receipts.set(JSON.stringify([actorId, receipt.commandId]), receipt);
           };
         },
+        getManagedBoard: vi.fn(),
+        changeBoard: vi.fn(),
+        deleteBoard: vi.fn(),
+        saveManagementReceipt: vi.fn(),
       });
       beforeCommit();
       persist?.();
@@ -50,6 +60,7 @@ function fixture() {
   return {
     app: createCatalogApplication(repository, { newBoardId, now }),
     listBoards,
+    listTrashedBoards,
     beforeCommit,
     newBoardId,
     now,
@@ -63,6 +74,7 @@ function summary(boardId: string, updatedAtMillis?: bigint): CatalogBoardSummary
     updatedAtMillis,
     pinned: false,
     entryVersion: 0n,
+    canManage: false,
   };
 }
 
@@ -112,6 +124,26 @@ describe('Catalog application', () => {
     expect(listBoards).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves the deletion timestamp and keeps active and trash cursors separate', () => {
+    const { app, listBoards, listTrashedBoards } = fixture();
+    const first = { board: summary('current'), trashedAtMillis: 120n };
+    const second = { board: summary('older'), trashedAtMillis: 100n };
+    listTrashedBoards.mockReturnValueOnce([first, second]).mockReturnValueOnce([second]);
+    const { nextCursor } = app.listTrashedBoards(owner, recentRequest);
+    expect(nextCursor).toBeTypeOf('string');
+    const nextRequest = { ...recentRequest, cursor: nextCursor };
+
+    expect(() => app.listBoards(owner, nextRequest)).toThrow(CatalogQueryError);
+    expect(listBoards).not.toHaveBeenCalled();
+    expect(app.listTrashedBoards(owner, nextRequest).boards).toEqual([second]);
+    expect(listTrashedBoards).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        view: 'trash',
+        after: expect.objectContaining({ boardId: first.board.boardId, trashedAtMillis: 120n }),
+      }),
+    );
+  });
+
   it('rejects invalid pagination and malformed cursors before consulting storage', () => {
     const { app, listBoards } = fixture();
     const requests: CatalogListRequest[] = [
@@ -140,6 +172,7 @@ describe('Catalog application', () => {
         pinned: false,
         entryVersion: 1n,
         updatedAtMillis: BigInt(nowMillis),
+        canManage: true,
       },
     });
     expect(app.createBoard(owner, { ...command, title: 'Architecture' })).toEqual(created);

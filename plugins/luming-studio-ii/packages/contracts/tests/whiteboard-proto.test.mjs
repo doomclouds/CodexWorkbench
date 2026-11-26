@@ -100,7 +100,17 @@ test('declares the typed unary methods for archive receipts, board catalog, and 
     .flatMap((file) => file.service ?? []);
   const methodsByService = new Map([
     ['BoardArchiveService', ['GetArchiveImportReceipt']],
-    ['BoardCatalogService', ['ListBoards', 'CreateBoard', 'GetCatalogCommandReceipt']],
+    [
+      'BoardCatalogService',
+      [
+        'ListBoards',
+        'ListTrashedBoards',
+        'CreateBoard',
+        'ManageBoard',
+        'PurgeBoards',
+        'GetCatalogCommandReceipt',
+      ],
+    ],
     ['WhiteboardService', ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt']],
   ]);
   assert.deepEqual(services.map(({ name }) => name).sort(), [...methodsByService.keys()]);

@@ -6,6 +6,7 @@ export interface CatalogBoardSummary {
   readonly updatedAtMillis?: bigint;
   readonly pinned: boolean;
   readonly entryVersion: bigint;
+  readonly canManage?: boolean;
 }
 
 export interface CatalogListRequest {
@@ -45,4 +46,81 @@ export interface BoardCatalogService {
   listBoards(request: CatalogListRequest, signal?: AbortSignal): Promise<CatalogPage>;
   createBoard(request: CatalogCreateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;
   getReceipt(commandId: string, signal?: AbortSignal): Promise<CatalogReceipt | undefined>;
+}
+
+export interface TrashedBoardSummary {
+  readonly board: CatalogBoardSummary;
+  readonly trashedAtMillis: bigint;
+}
+
+export interface TrashedCatalogPage {
+  readonly boards: readonly TrashedBoardSummary[];
+  readonly nextCursor?: string;
+}
+
+type CatalogManageOperation =
+  | { readonly kind: 'rename'; readonly title: string }
+  | { readonly kind: 'pin'; readonly pinned: boolean }
+  | { readonly kind: 'trash' }
+  | { readonly kind: 'restore' };
+
+export interface CatalogManageRequest {
+  readonly commandId: string;
+  readonly boardId: string;
+  readonly expectedEntryVersion: bigint;
+  readonly operation: CatalogManageOperation;
+}
+
+export interface CatalogPurgeTarget {
+  readonly boardId: string;
+  readonly expectedEntryVersion: bigint;
+}
+
+export interface CatalogPurgeRequest {
+  readonly commandId: string;
+  readonly targets: readonly CatalogPurgeTarget[];
+}
+
+export type CatalogManagementRejectionReason =
+  | CatalogRejectionReason
+  | 'forbidden'
+  | 'entryVersionChanged'
+  | 'stateChanged'
+  | 'invalidCommand';
+
+export type CatalogPurgeItemResult =
+  | { readonly boardId: string; readonly deleted: true }
+  | {
+      readonly boardId: string;
+      readonly deleted: false;
+      readonly reason: CatalogManagementRejectionReason;
+    };
+
+export type CatalogManagementReceipt =
+  | { readonly kind: 'changed'; readonly commandId: string; readonly board: CatalogBoardSummary }
+  | {
+      readonly kind: 'purged';
+      readonly commandId: string;
+      readonly items: readonly CatalogPurgeItemResult[];
+    }
+  | {
+      readonly kind: 'rejected';
+      readonly commandId: string;
+      readonly reason: CatalogManagementRejectionReason;
+    };
+
+export interface CatalogManagementService {
+  listTrashedBoards(request: CatalogListRequest, signal?: AbortSignal): Promise<TrashedCatalogPage>;
+  manageBoard(
+    request: CatalogManageRequest,
+    signal?: AbortSignal,
+  ): Promise<CatalogManagementReceipt>;
+  purgeBoards(
+    request: CatalogPurgeRequest,
+    signal?: AbortSignal,
+  ): Promise<CatalogManagementReceipt>;
+  getReceipt(
+    commandId: string,
+    signal?: AbortSignal,
+  ): Promise<CatalogManagementReceipt | undefined>;
 }

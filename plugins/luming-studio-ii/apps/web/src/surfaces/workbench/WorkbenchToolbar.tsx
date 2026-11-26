@@ -5,6 +5,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type Ref,
 } from 'react';
 import {
   ArrowDownAZ,
@@ -46,6 +47,8 @@ interface WorkbenchToolbarProps {
   readonly onOrderChange: (order: CatalogOrder) => void;
   readonly onCreate: () => void;
   readonly onImport?: () => void;
+  readonly onOpenTrash?: () => void;
+  readonly filterButton?: Ref<HTMLButtonElement>;
 }
 
 const orderOptions = [
@@ -64,6 +67,8 @@ export function WorkbenchToolbar({
   onOrderChange,
   onCreate,
   onImport,
+  onOpenTrash,
+  filterButton,
 }: WorkbenchToolbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [menu, setMenu] = useState<OpenMenu>();
@@ -157,6 +162,11 @@ export function WorkbenchToolbar({
     finishMenuAction();
   }
 
+  function handleOpenTrash() {
+    finishMenuAction();
+    onOpenTrash?.();
+  }
+
   return (
     <div className="studio-workbench-controls" role="toolbar" aria-label="作品工具栏">
       <div ref={searchGroup} className="studio-workbench-search-group" data-open={searchVisible}>
@@ -194,6 +204,7 @@ export function WorkbenchToolbar({
         )}
       </div>
       <button
+        ref={filterButton}
         type="button"
         className="studio-workbench-icon-button"
         aria-label="筛选作品"
@@ -257,7 +268,13 @@ export function WorkbenchToolbar({
             <Pin size={16} />
             <span>已固定</span>
           </button>
-          <button type="button" role="menuitem" title={unsupported} disabled>
+          <button
+            type="button"
+            role="menuitem"
+            title={onOpenTrash ? undefined : unsupported}
+            disabled={!onOpenTrash}
+            onClick={handleOpenTrash}
+          >
             <Trash2 size={16} />
             <span>回收站</span>
           </button>

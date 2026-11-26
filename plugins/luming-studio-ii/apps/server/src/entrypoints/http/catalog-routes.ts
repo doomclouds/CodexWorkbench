@@ -1,20 +1,37 @@
 import { create, type MessageInitShape } from '@bufbuild/protobuf';
 import {
   BoardCatalogService,
+  BoardLifecycleAction,
   BoardSortOrder,
   CatalogCommandReceiptSchema,
   CatalogRejectionReason,
   type CatalogCommandReceipt,
   type GetCatalogCommandReceiptResponseSchema,
+  type ManageBoardRequest,
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import type {
   CatalogApplication,
   CatalogReceipt,
+  CatalogRejectionReason as ApplicationRejection,
+  ManageBoardCommand,
 } from '../../modules/catalog/application/index.js';
 import { HttpRequestError, requireId } from './request.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
 type ReceiptResponseInit = MessageInitShape<typeof GetCatalogCommandReceiptResponseSchema>;
+type ReceiptOutcomeInit = NonNullable<
+  MessageInitShape<typeof CatalogCommandReceiptSchema>['outcome']
+>;
+type ManageOperation = ManageBoardCommand['operation'];
+
+const catalogRejections: Record<ApplicationRejection, CatalogRejectionReason> = {
+  invalidTitle: CatalogRejectionReason.INVALID_TITLE,
+  commandIdReuse: CatalogRejectionReason.COMMAND_ID_REUSE,
+  forbidden: CatalogRejectionReason.FORBIDDEN,
+  entryVersionChanged: CatalogRejectionReason.ENTRY_VERSION_CHANGED,
+  stateChanged: CatalogRejectionReason.STATE_CHANGED,
+  invalidCommand: CatalogRejectionReason.INVALID_COMMAND,
+};
 
 function toSortOrder(order: BoardSortOrder): 'recent' | 'title' {
   switch (order) {
@@ -28,27 +45,73 @@ function toSortOrder(order: BoardSortOrder): 'recent' | 'title' {
   }
 }
 
-function toCatalogReceipt(receipt: CatalogReceipt): CatalogCommandReceipt {
-  if (receipt.kind === 'created') {
-    return create(CatalogCommandReceiptSchema, {
-      commandId: receipt.commandId,
-      outcome: { case: 'created', value: receipt.board },
-    });
+function toReceiptOutcome(receipt: CatalogReceipt): ReceiptOutcomeInit {
+  switch (receipt.kind) {
+    case 'created':
+      return { case: 'created', value: receipt.board };
+    case 'changed':
+      return { case: 'changed', value: receipt.board };
+    case 'purged':
+      return {
+        case: 'purged',
+        value: {
+          items: receipt.items.map((item) => ({
+            boardId: item.boardId,
+            outcome: item.deleted
+              ? { case: 'deleted', value: true }
+              : { case: 'rejected', value: { reason: catalogRejections[item.reason] } },
+          })),
+        },
+      };
+    case 'rejected':
+      return { case: 'rejected', value: { reason: catalogRejections[receipt.reason] } };
   }
+}
 
-  const reason =
-    receipt.reason === 'invalidTitle'
-      ? CatalogRejectionReason.INVALID_TITLE
-      : CatalogRejectionReason.COMMAND_ID_REUSE;
-
+function toCatalogReceipt(receipt: CatalogReceipt): CatalogCommandReceipt {
   return create(CatalogCommandReceiptSchema, {
     commandId: receipt.commandId,
-    outcome: { case: 'rejected', value: { reason } },
+    outcome: toReceiptOutcome(receipt),
   });
 }
 
+function requireEntryVersion(value: bigint | undefined): bigint {
+  if (value === undefined) {
+    throw new HttpRequestError(400, 'Catalogue entry version is required');
+  }
+
+  return value;
+}
+
+function toManageOperation(operation: ManageBoardRequest['operation']): ManageOperation {
+  switch (operation.case) {
+    case 'title':
+      return { kind: 'rename', title: operation.value };
+    case 'pinned':
+      return { kind: 'pin', pinned: operation.value };
+    case 'lifecycle':
+      if (operation.value === BoardLifecycleAction.TRASH) {
+        return { kind: 'trash' };
+      }
+      if (operation.value === BoardLifecycleAction.RESTORE) {
+        return { kind: 'restore' };
+      }
+
+      throw new HttpRequestError(400, 'Unsupported catalogue lifecycle action');
+    case undefined:
+      throw new HttpRequestError(400, 'Catalogue operation is required');
+  }
+}
+
 export function createCatalogRoutes(application: CatalogApplication): readonly RouteEntry[] {
-  const { listBoards, createBoard, getCatalogCommandReceipt } = BoardCatalogService.method;
+  const {
+    listBoards,
+    listTrashedBoards,
+    createBoard,
+    manageBoard,
+    purgeBoards,
+    getCatalogCommandReceipt,
+  } = BoardCatalogService.method;
 
   return [
     unaryRoute(listBoards, (actor, request) => {
@@ -62,10 +125,42 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
 
       return { boards: [...result.boards], nextCursor: result.nextCursor };
     }),
+    unaryRoute(listTrashedBoards, (actor, request) => {
+      const { query, order, pageSize, cursor } = request;
+      const result = application.listTrashedBoards(actor, {
+        query,
+        order: toSortOrder(order),
+        pageSize,
+        cursor,
+      });
+
+      return { boards: [...result.boards], nextCursor: result.nextCursor };
+    }),
     unaryRoute(createBoard, (actor, request) => {
       const receipt = application.createBoard(actor, {
         commandId: requireId(request.commandId),
         title: request.title,
+      });
+
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(manageBoard, (actor, request) => {
+      const receipt = application.manageBoard(actor, {
+        commandId: requireId(request.commandId),
+        boardId: requireId(request.boardId),
+        expectedEntryVersion: requireEntryVersion(request.expectedEntryVersion),
+        operation: toManageOperation(request.operation),
+      });
+
+      return { receipt: toCatalogReceipt(receipt) };
+    }),
+    unaryRoute(purgeBoards, (actor, request) => {
+      const receipt = application.purgeBoards(actor, {
+        commandId: requireId(request.commandId),
+        targets: request.targets.map(({ boardId, expectedEntryVersion }) => ({
+          boardId: requireId(boardId),
+          expectedEntryVersion: requireEntryVersion(expectedEntryVersion),
+        })),
       });
 
       return { receipt: toCatalogReceipt(receipt) };

@@ -111,10 +111,10 @@ function archiveAppMock(provideArchive = true) {
       getReceipt: () => Promise.resolve(undefined),
     },
     navigation: {
-      read: () => route,
-      write(boardId) {
-        route = boardId;
-        opened.push(boardId);
+      read: () => (route ? { kind: 'whiteboard', boardId: route } : { kind: 'workbench' }),
+      write(location) {
+        route = location.kind === 'whiteboard' ? location.boardId : undefined;
+        opened.push(route);
       },
       subscribe: () => () => undefined,
     },

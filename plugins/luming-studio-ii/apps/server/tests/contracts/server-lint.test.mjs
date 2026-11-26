@@ -33,6 +33,7 @@ const fixtureFiles = [
   catalog + 'domain/private.ts',
   catalog + 'ports/index.ts',
   catalogAdapter + 'index.ts',
+  catalogAdapter + 'lifecycle.ts',
   catalogAdapter + 'private.ts',
   archives + 'application/index.ts',
   archives + 'application/private.ts',
@@ -87,6 +88,10 @@ async function inspect(filePath, code) {
 }
 
 const permitted = [
+  [
+    catalog + 'application/lifecycle.ts',
+    "import type { CatalogRepository } from '../ports/index.js';",
+  ],
   [
     'src/entrypoints/http/handler.ts',
     `import { open } from '@board-app';\nimport type { MoveObjectsRequest } from '${protocol}';`,
@@ -187,6 +192,21 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'catalogue lifecycle uses the SQLite host directly',
+    catalog + 'application/lifecycle.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'catalogue lifecycle uses a generated purge request',
+    catalog + 'application/lifecycle.ts',
+    `import type { PurgeBoardsRequest } from '${catalogProtocol}';`,
+  ],
+  [
+    'an archive adapter bypasses the catalogue lifecycle through its private repository',
+    archivesAdapter + 'publication.ts',
+    "import { purgeBoards } from '../catalog/lifecycle.js';",
+  ],
   [
     'HTTP reaches private archive application code',
     'src/entrypoints/http/archives.ts',

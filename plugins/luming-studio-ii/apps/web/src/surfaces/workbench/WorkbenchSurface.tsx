@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore, type ChangeEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ChangeEvent,
+} from 'react';
 import { AlertCircle, LayoutGrid, Loader2, Plus } from 'lucide-react';
 import {
   createCatalogDirectory,
   type BoardCatalogService,
+  type CatalogBoardSummary,
   type CatalogDirectorySnapshot,
+  type CatalogManagementService,
 } from '../../data/catalog/index.js';
 import { Button } from '../../ui/base/index.js';
-import { BoardCard, NewBoardCard } from './WorkbenchCards.js';
+import { BoardCard, NewBoardCard, type WorkbenchBoardAction } from './WorkbenchCards.js';
+import { ManagementStatus, RenameBoardDialog } from './WorkbenchManagement.js';
 import { WorkbenchToolbar } from './WorkbenchToolbar.js';
 import type { WorkbenchPreferences } from './preferences.js';
 import { useBoardCreation } from './useBoardCreation.js';
+import { useBoardManagement } from './useBoardManagement.js';
 import './workbench.css';
 
 interface WorkbenchArchiveImport {
@@ -24,6 +35,8 @@ export interface WorkbenchSurfaceProps {
   readonly onOpenBoard: (boardId: string) => void;
   readonly preferences: WorkbenchPreferences;
   readonly archiveImport?: WorkbenchArchiveImport;
+  readonly management?: CatalogManagementService;
+  readonly onOpenTrash?: () => void;
 }
 
 type CatalogDirectory = ReturnType<typeof createCatalogDirectory>;
@@ -36,6 +49,17 @@ interface CatalogResultsProps {
   readonly onOpenBoard: (boardId: string) => void;
   readonly createBlocked: boolean;
   readonly onCreate: () => void;
+  readonly onManage?: (
+    board: CatalogBoardSummary,
+    action: WorkbenchBoardAction,
+    trigger: HTMLButtonElement,
+  ) => void;
+}
+
+interface RenameTarget {
+  readonly boardId: string;
+  readonly title: string;
+  readonly trigger: HTMLButtonElement;
 }
 
 function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
@@ -113,6 +137,7 @@ function CatalogResults({
   onOpenBoard,
   createBlocked,
   onCreate,
+  onManage,
 }: CatalogResultsProps) {
   const { kind, boards, error, query, nextCursor, loadingMore } = snapshot;
   const waiting = kind === 'loading' && boards.length === 0;
@@ -144,7 +169,14 @@ function CatalogResults({
           aria-busy={kind === 'loading' || loadingMore}
         >
           {boards.map((board) => (
-            <BoardCard key={board.boardId} board={board} layout={layout} onOpen={onOpenBoard} />
+            <BoardCard
+              key={board.boardId}
+              board={board}
+              layout={layout}
+              onOpen={onOpenBoard}
+              managementBlocked={createBlocked}
+              onAction={onManage}
+            />
           ))}
         </div>
       )}
@@ -168,12 +200,17 @@ export function WorkbenchSurface({
   onOpenBoard,
   preferences,
   archiveImport,
+  management,
+  onOpenTrash,
 }: WorkbenchSurfaceProps) {
   const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot);
   const creation = useBoardCreation(catalog, createCommandId, onOpenBoard);
   const archiveInput = useRef<HTMLInputElement>(null);
-  const createBlocked = creation.blocked || archiveImport?.busy === true;
+  const filterButton = useRef<HTMLButtonElement>(null);
+  const [rename, setRename] = useState<RenameTarget>();
+  const controls = useBoardManagement(management, createCommandId, handleManaged, directory.reload);
+  const createBlocked = creation.blocked || archiveImport?.busy === true || controls.blocked;
   const catalogRefresh = archiveImport?.catalogRefresh ?? 0;
   const observedRefresh = useRef(catalogRefresh);
 
@@ -199,9 +236,54 @@ export function WorkbenchSurface({
     }
   }
 
+  function handleManaged() {
+    filterButton.current?.focus();
+    directory.reload();
+    setRename(undefined);
+  }
+
+  function handleManage(
+    board: CatalogBoardSummary,
+    action: WorkbenchBoardAction,
+    trigger: HTMLButtonElement,
+  ) {
+    if (createBlocked || board.canManage !== true) {
+      return;
+    }
+
+    if (action === 'rename') {
+      controls.dismiss();
+      setRename({ boardId: board.boardId, title: board.title, trigger });
+      return;
+    }
+
+    controls.manage(
+      board,
+      action === 'pin' ? { kind: 'pin', pinned: !board.pinned } : { kind: 'trash' },
+    );
+  }
+
+  const renamingBoard = snapshot.boards.find(({ boardId }) => boardId === rename?.boardId);
+
+  function handleSaveRename(title: string) {
+    if (!createBlocked && renamingBoard?.canManage === true) {
+      controls.manage(renamingBoard, { kind: 'rename', title });
+    }
+  }
+
+  function restoreRenameFocus(trigger: HTMLButtonElement) {
+    if (trigger.isConnected) {
+      trigger.focus();
+      return;
+    }
+
+    filterButton.current?.focus();
+  }
+
   return (
     <div className="studio-workbench" data-studio-theme={preferences.resolvedTheme}>
       <CreationStatus creation={creation} />
+      {!rename && <ManagementStatus management={controls} />}
       <main className="studio-workbench-main" aria-label="Luming Studio">
         <header className="studio-workbench-header">
           <h1>Luming Studio</h1>
@@ -215,6 +297,8 @@ export function WorkbenchSurface({
             onOrderChange={directory.setOrder}
             onCreate={creation.create}
             onImport={archiveImport ? openArchivePicker : undefined}
+            onOpenTrash={onOpenTrash}
+            filterButton={filterButton}
           />
         </header>
         <NewBoardCard disabled={createBlocked} onCreate={creation.create} />
@@ -235,8 +319,19 @@ export function WorkbenchSurface({
           onOpenBoard={onOpenBoard}
           createBlocked={createBlocked}
           onCreate={creation.create}
+          onManage={management ? handleManage : undefined}
         />
       </main>
+      {rename && (
+        <RenameBoardDialog
+          initialTitle={rename.title}
+          blocked={createBlocked || renamingBoard?.canManage !== true}
+          management={controls}
+          onClose={() => setRename(undefined)}
+          onSave={handleSaveRename}
+          restoreFocus={() => restoreRenameFocus(rename.trigger)}
+        />
+      )}
     </div>
   );
 }

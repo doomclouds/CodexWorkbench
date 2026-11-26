@@ -1,15 +1,29 @@
-import { normalizeBoardTitle } from '../domain/index.js';
+import { catalogTimestamp, normalizeBoardTitle } from '../domain/index.js';
 import type {
   CatalogBoardSummary,
   CatalogCreatedReceipt,
   CatalogOrder,
   CatalogReceipt,
+  CatalogScope,
+  CatalogTrashedBoard,
 } from '../domain/index.js';
-import type { CatalogRepository } from '../ports/index.js';
+import type { CatalogLookup, CatalogRepository } from '../ports/index.js';
 import { CatalogQueryError, readCatalogCursor, writeCatalogCursor } from './cursor.js';
+import {
+  manageBoard,
+  purgeBoards,
+  type ManageBoardCommand,
+  type PurgeBoardsCommand,
+} from './management.js';
 
 export { CatalogQueryError } from './cursor.js';
-export type { CatalogBoardSummary, CatalogReceipt } from '../domain/index.js';
+export type {
+  CatalogBoardSummary,
+  CatalogReceipt,
+  CatalogRejectionReason,
+  CatalogTrashedBoard,
+} from '../domain/index.js';
+export type { ManageBoardCommand, PurgeBoardsCommand } from './management.js';
 
 export interface CatalogActor {
   readonly id: string;
@@ -27,6 +41,11 @@ export interface CatalogPage {
   readonly nextCursor?: string;
 }
 
+export interface CatalogTrashPage {
+  readonly boards: readonly CatalogTrashedBoard[];
+  readonly nextCursor?: string;
+}
+
 export interface CreateBoardCommand {
   readonly commandId: string;
   readonly title: string;
@@ -34,7 +53,10 @@ export interface CreateBoardCommand {
 
 export interface CatalogApplication {
   listBoards(actor: CatalogActor, request: CatalogListRequest): CatalogPage;
+  listTrashedBoards(actor: CatalogActor, request: CatalogListRequest): CatalogTrashPage;
   createBoard(actor: CatalogActor, command: CreateBoardCommand): CatalogReceipt;
+  manageBoard(actor: CatalogActor, command: ManageBoardCommand): CatalogReceipt;
+  purgeBoards(actor: CatalogActor, command: PurgeBoardsCommand): CatalogReceipt;
   getReceipt(actor: CatalogActor, commandId: string): CatalogReceipt | undefined;
 }
 
@@ -47,11 +69,11 @@ const maxQueryLength = 200;
 const maxPageSize = 100;
 const initialEntryVersion = 1n;
 
-function listBoards(
-  repository: CatalogRepository,
+function catalogLookup(
   actor: CatalogActor,
   request: CatalogListRequest,
-): CatalogPage {
+  view?: CatalogScope['view'],
+): CatalogLookup {
   const { order, pageSize, cursor } = request;
   const query = request.query.trim();
   if (query.length > maxQueryLength) {
@@ -64,23 +86,47 @@ function listBoards(
     throw new CatalogQueryError('The catalog page size is out of range.');
   }
 
-  const scope = { actorId: actor.id, query, order };
+  const scope = { actorId: actor.id, query, order, view };
   const after = cursor === undefined ? undefined : readCatalogCursor(cursor, scope);
-  const found = repository.listBoards({ ...scope, limit: pageSize + 1, after });
+
+  return { ...scope, limit: pageSize + 1, after };
+}
+
+function listBoards(
+  repository: CatalogRepository,
+  actor: CatalogActor,
+  request: CatalogListRequest,
+): CatalogPage {
+  const { pageSize } = request;
+  const lookup = catalogLookup(actor, request);
+  const found = repository.listBoards(lookup);
   const boards = found.slice(0, pageSize);
   const lastBoard = boards.at(-1);
   const nextCursor =
-    lastBoard && found.length > pageSize ? writeCatalogCursor(scope, lastBoard) : undefined;
+    lastBoard && found.length > pageSize ? writeCatalogCursor(lookup, lastBoard) : undefined;
 
   return { boards, nextCursor };
 }
 
-function creationTimestamp(now: number): bigint {
-  if (!Number.isSafeInteger(now) || now < 0) {
-    throw new Error('The clock returned an invalid catalog timestamp.');
-  }
+function listTrashedBoards(
+  repository: CatalogRepository,
+  actor: CatalogActor,
+  request: CatalogListRequest,
+): CatalogTrashPage {
+  const { pageSize } = request;
+  const lookup = catalogLookup(actor, request, 'trash');
+  const found = repository.listTrashedBoards(lookup);
+  const boards = found.slice(0, pageSize);
+  const lastBoard = boards.at(-1);
+  const nextCursor =
+    lastBoard && found.length > pageSize
+      ? writeCatalogCursor(lookup, {
+          ...lastBoard.board,
+          trashedAtMillis: lastBoard.trashedAtMillis,
+        })
+      : undefined;
 
-  return BigInt(now);
+  return { boards, nextCursor };
 }
 
 function newBoard(
@@ -94,9 +140,10 @@ function newBoard(
     board: {
       boardId: services.newBoardId(),
       title,
-      updatedAtMillis: creationTimestamp(services.now()),
+      updatedAtMillis: catalogTimestamp(services.now()),
       pinned: false,
       entryVersion: initialEntryVersion,
+      canManage: true,
     },
   };
 }
@@ -111,9 +158,9 @@ function createBoard(
   const title = normalizeBoardTitle(command.title);
 
   return repository.write((creation) => {
-    const stored = creation.getReceipt(actor.id, commandId);
+    const stored = creation.getReceipt(actor.id, commandId)?.receipt;
     if (stored) {
-      return stored.board.title === title
+      return stored.kind === 'created' && stored.board.title === title
         ? stored
         : { kind: 'rejected', commandId, reason: 'commandIdReuse' };
     }
@@ -134,7 +181,10 @@ export function createCatalogApplication(
 ): CatalogApplication {
   return {
     listBoards: (actor, request) => listBoards(repository, actor, request),
+    listTrashedBoards: (actor, request) => listTrashedBoards(repository, actor, request),
     createBoard: (actor, command) => createBoard(repository, services, actor, command),
+    manageBoard: (actor, command) => manageBoard(repository, actor.id, command, services.now),
+    purgeBoards: (actor, command) => purgeBoards(repository, actor.id, command),
     getReceipt: (actor, commandId) => repository.getReceipt(actor.id, commandId),
   };
 }

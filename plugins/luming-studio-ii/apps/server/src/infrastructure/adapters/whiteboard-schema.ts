@@ -12,6 +12,16 @@ export const whiteboardSchema = `
     PRIMARY KEY (board_id, actor_id)
   ) STRICT;
 
+  CREATE TABLE IF NOT EXISTS board_lifecycle (
+    board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
+    owner_actor_id TEXT NOT NULL,
+    trashed_at_millis INTEGER CHECK (trashed_at_millis >= 0)
+  ) STRICT;
+
+  CREATE INDEX IF NOT EXISTS board_lifecycle_trash_by_owner
+    ON board_lifecycle (owner_actor_id, trashed_at_millis DESC, board_id)
+    WHERE trashed_at_millis IS NOT NULL;
+
   CREATE TABLE IF NOT EXISTS board_objects (
     board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
     object_id TEXT NOT NULL,

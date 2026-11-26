@@ -23,6 +23,7 @@ const archiveProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/ser
 const routes = 'src/app/routes.ts';
 const appShell = 'src/app/shell/AppShell.tsx';
 const operationNotice = 'src/app/shell/operation-notice/OperationNoticeSlot.tsx';
+const recycleBin = 'src/surfaces/recycle-bin/RecycleBinSurface.tsx';
 const actualPages = [
   "import { WhiteboardPage } from '../pages/whiteboard/index.js';",
   "import { WorkbenchPage } from '../pages/workbench/index.js';",
@@ -62,6 +63,9 @@ const accepted = [
   ['src/app/StudioApp.tsx', "import { AppShell } from './shell/index.js';"],
   [appShell, "import { OperationNoticeSlot } from './operation-notice/index.js';"],
   [operationNotice, "import { OperationNotice } from '../../../ui/base/index.js';"],
+  [recycleBin, "import { Dialog, Checkbox } from '../../ui/base/index.js';"],
+  [recycleBin, "import type { CatalogManagementService } from '../../data/catalog/index.js';"],
+  [recycleBin, "import { Trash2 } from 'lucide-react';"],
   ['src/app/main.tsx', "import { createTransport } from '../platform/transport/index.js';"],
   [page, "import { WhiteboardEditor } from '../../surfaces/whiteboard-editor/index.js';"],
   [page, "import type { WhiteboardClient } from '../../data/whiteboard/index.js';"],
@@ -91,6 +95,27 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'Recycle Bin decodes the generated catalogue protocol',
+    recycleBin,
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    'Recycle Bin imports private parts of the catalogue transport',
+    recycleBin,
+    "import { purgeBoards } from '../../data/catalog/lifecycle-protocol.js';",
+  ],
+  [
+    'Recycle Bin reaches the Workbench Surface',
+    recycleBin,
+    "import { WorkbenchSurface } from '../workbench/index.js';",
+  ],
+  [
+    'Recycle Bin replaces confirmation with a host dialog',
+    recycleBin,
+    "window.confirm('Permanently delete this board?');",
+    'no-restricted-globals',
+  ],
   [
     'a Shell notice that reaches a business Surface',
     operationNotice,

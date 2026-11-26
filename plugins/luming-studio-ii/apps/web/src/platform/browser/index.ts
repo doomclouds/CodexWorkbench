@@ -1,4 +1,6 @@
 const boardParameter = 'board';
+const viewParameter = 'view';
+const trashView = 'trash';
 const protobufContentType = 'application/protobuf';
 const zipContentType = 'application/zip';
 const archiveCommandHeader = 'x-studio-command-id';
@@ -9,22 +11,35 @@ const themeKey = 'luming-studio-ii:theme';
 type LibraryLayout = 'grid' | 'list';
 type StudioTheme = 'light' | 'dark';
 
-export function readBoardId(): string | undefined {
-  const query = new URLSearchParams(window.location.search);
+export type StudioLocation =
+  | { readonly kind: 'workbench' }
+  | { readonly kind: 'whiteboard'; readonly boardId: string }
+  | { readonly kind: 'recycle-bin' };
 
-  return query.get(boardParameter)?.trim() || undefined;
+export function readStudioLocation(): StudioLocation {
+  const query = new URLSearchParams(window.location.search);
+  if (query.get(viewParameter) === trashView) {
+    return { kind: 'recycle-bin' };
+  }
+
+  const boardId = query.get(boardParameter)?.trim();
+
+  return boardId ? { kind: 'whiteboard', boardId } : { kind: 'workbench' };
 }
 
 export function createCommandId(): string {
   return crypto.randomUUID();
 }
 
-export function writeBoardLocation(boardId?: string) {
+export function writeStudioLocation(location: StudioLocation) {
   const url = new URL(window.location.href);
-  if (boardId) {
-    url.searchParams.set(boardParameter, boardId);
-  } else {
-    url.searchParams.delete(boardParameter);
+  url.searchParams.delete(boardParameter);
+  url.searchParams.delete(viewParameter);
+  if (location.kind === 'whiteboard') {
+    url.searchParams.set(boardParameter, location.boardId);
+  }
+  if (location.kind === 'recycle-bin') {
+    url.searchParams.set(viewParameter, trashView);
   }
 
   if (url.href !== window.location.href) {
@@ -32,7 +47,7 @@ export function writeBoardLocation(boardId?: string) {
   }
 }
 
-export function subscribeBoardLocation(listener: () => void) {
+export function subscribeStudioLocation(listener: () => void) {
   window.addEventListener('popstate', listener);
   return () => window.removeEventListener('popstate', listener);
 }

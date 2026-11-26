@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ArchiveImportService } from '../data/archive-import/index.js';
-import type { BoardCatalogService } from '../data/catalog/index.js';
+import type { BoardCatalogService, CatalogManagementService } from '../data/catalog/index.js';
 import type { WhiteboardService } from '../data/whiteboard/index.js';
+import type { StudioLocation } from '../platform/browser/index.js';
 import './app.css';
 import { studioPages } from './routes.js';
 import { AppShell } from './shell/index.js';
@@ -11,8 +12,8 @@ type StudioLayout = 'list' | 'grid';
 type StudioTheme = 'light' | 'dark';
 
 interface StudioNavigation {
-  readonly read: () => string | undefined;
-  readonly write: (boardId?: string) => void;
+  readonly read: () => StudioLocation;
+  readonly write: (location: StudioLocation) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
@@ -25,6 +26,7 @@ interface StudioPreferences {
 
 export interface StudioAppProps {
   readonly catalog: BoardCatalogService;
+  readonly catalogManagement?: CatalogManagementService;
   readonly service: WhiteboardService;
   readonly navigation: StudioNavigation;
   readonly preferences: StudioPreferences;
@@ -32,17 +34,22 @@ export interface StudioAppProps {
   readonly archiveImport?: ArchiveImportService;
 }
 
-const { whiteboard: WhiteboardPage, workbench: WorkbenchPage } = studioPages;
+const {
+  whiteboard: WhiteboardPage,
+  workbench: WorkbenchPage,
+  'recycle-bin': RecycleBinPage,
+} = studioPages;
 
 export function StudioApp({
   catalog,
+  catalogManagement,
   service,
   navigation,
   preferences,
   createCommandId,
   archiveImport,
 }: StudioAppProps) {
-  const [boardId, setBoardId] = useState(navigation.read);
+  const [location, setLocation] = useState(navigation.read);
   const [layout, setLayout] = useState(preferences.layout);
   const [resolvedTheme, setTheme] = useState(preferences.resolvedTheme);
   const routeGeneration = useRef(0);
@@ -57,15 +64,27 @@ export function StudioApp({
     () =>
       navigation.subscribe(() => {
         routeGeneration.current += 1;
-        setBoardId(navigation.read());
+        setLocation(navigation.read());
       }),
     [navigation],
   );
 
-  function handleOpenBoard(id?: string) {
-    navigation.write(id);
+  function navigate(target: StudioLocation) {
+    navigation.write(target);
     routeGeneration.current += 1;
-    setBoardId(id);
+    setLocation(target);
+  }
+
+  function handleOpenBoard(boardId: string) {
+    navigate({ kind: 'whiteboard', boardId });
+  }
+
+  function openWorkbench() {
+    navigate({ kind: 'workbench' });
+  }
+
+  function openRecycleBin() {
+    navigate({ kind: 'recycle-bin' });
   }
 
   function changeLayout(next: StudioLayout) {
@@ -78,33 +97,56 @@ export function StudioApp({
     setTheme(next);
   }
 
+  function renderPage() {
+    if (location.kind === 'whiteboard') {
+      return (
+        <WhiteboardPage
+          boardId={location.boardId}
+          service={service}
+          createCommandId={createCommandId}
+          onBack={openWorkbench}
+        />
+      );
+    }
+
+    const pagePreferences = {
+      layout,
+      resolvedTheme,
+      onLayoutChange: changeLayout,
+      onThemeChange: changeTheme,
+    };
+
+    if (location.kind === 'recycle-bin') {
+      return (
+        <RecycleBinPage
+          management={catalogManagement}
+          createCommandId={createCommandId}
+          onBack={openWorkbench}
+          preferences={pagePreferences}
+        />
+      );
+    }
+
+    return (
+      <WorkbenchPage
+        catalog={catalog}
+        management={catalogManagement}
+        createCommandId={createCommandId}
+        onOpenBoard={handleOpenBoard}
+        onOpenTrash={catalogManagement ? openRecycleBin : undefined}
+        archiveImport={importFlow.workbench}
+        preferences={pagePreferences}
+      />
+    );
+  }
+
   return (
     <AppShell
       resolvedTheme={resolvedTheme}
       notice={importFlow.feedback}
       onDismissNotice={importFlow.dismissFeedback}
     >
-      {boardId ? (
-        <WhiteboardPage
-          boardId={boardId}
-          service={service}
-          createCommandId={createCommandId}
-          onBack={() => handleOpenBoard()}
-        />
-      ) : (
-        <WorkbenchPage
-          catalog={catalog}
-          createCommandId={createCommandId}
-          onOpenBoard={handleOpenBoard}
-          archiveImport={importFlow.workbench}
-          preferences={{
-            layout,
-            resolvedTheme,
-            onLayoutChange: changeLayout,
-            onThemeChange: changeTheme,
-          }}
-        />
-      )}
+      {renderPage()}
     </AppShell>
   );
 }

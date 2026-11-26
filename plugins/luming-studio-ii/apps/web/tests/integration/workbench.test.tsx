@@ -113,9 +113,10 @@ function appMock() {
       getReceipt: () => Promise.resolve(undefined),
     },
     navigation: {
-      read: () => currentBoard,
-      write(boardId) {
-        currentBoard = boardId;
+      read: () =>
+        currentBoard ? { kind: 'whiteboard', boardId: currentBoard } : { kind: 'workbench' },
+      write(location) {
+        currentBoard = location.kind === 'whiteboard' ? location.boardId : undefined;
       },
       subscribe: () => () => undefined,
     },
