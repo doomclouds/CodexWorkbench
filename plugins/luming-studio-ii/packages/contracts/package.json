@@ -4,5 +4,32 @@
   "private": true,
   "type": "module",
   "description": "Luming Studio II cross-language protocol contracts",
-  "license": "MIT"
+  "license": "MIT",
+  "exports": {
+    "./whiteboard/scene": {
+      "types": "./dist/proto/luming/studio/v1/whiteboard_scene_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/whiteboard_scene_pb.js"
+    },
+    "./whiteboard/payload": {
+      "types": "./dist/proto/luming/studio/v1/whiteboard_payload_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/whiteboard_payload_pb.js"
+    },
+    "./whiteboard/service": {
+      "types": "./dist/proto/luming/studio/v1/whiteboard_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/whiteboard_service_pb.js"
+    }
+  },
+  "scripts": {
+    "check": "buf format --diff --exit-code && buf lint && buf build",
+    "test": "node --test tests/whiteboard-proto.test.mjs",
+    "generate": "buf generate",
+    "build": "pnpm check && pnpm test && pnpm generate"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.17.0"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.75.0",
+    "@bufbuild/protoc-gen-es": "2.17.0"
+  }
 }

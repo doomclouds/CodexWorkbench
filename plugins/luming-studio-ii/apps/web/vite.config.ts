@@ -1,5 +1,7 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type ProxyOptions, type UserConfig } from 'vite';
+
+const whiteboardRpcPrefix = '/luming.studio.v1.WhiteboardService/';
 
 const editorPackages = [
   '@blocknote/core',
@@ -12,7 +14,30 @@ function entry(path: string) {
   return fileURLToPath(new URL(path, import.meta.url));
 }
 
-export default defineConfig({
+function whiteboardProxy(): Record<string, ProxyOptions> {
+  const endpoint = process.env.LUMING_STUDIO_II_WEB_API;
+  const token = process.env.LUMING_STUDIO_II_TOKEN;
+  if (!endpoint || !token) {
+    throw new Error('Set LUMING_STUDIO_II_WEB_API and LUMING_STUDIO_II_TOKEN.');
+  }
+
+  const url = new URL(endpoint);
+  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1') {
+    throw new Error('The whiteboard API must use an HTTP loopback address.');
+  }
+  if (url.href !== url.origin + '/') {
+    throw new Error('Set the whiteboard API to a bare origin.');
+  }
+
+  return {
+    [whiteboardRpcPrefix]: {
+      target: url.origin,
+      headers: { authorization: 'Bearer ' + token },
+    },
+  };
+}
+
+const libraryConfig = {
   optimizeDeps: {
     include: editorPackages,
   },
@@ -37,4 +62,16 @@ export default defineConfig({
       external: ['react', 'react-dom', 'react/jsx-runtime', ...editorPackages],
     },
   },
+} satisfies UserConfig;
+
+export default defineConfig(({ command, mode }) => {
+  if (mode !== 'whiteboard') {
+    return libraryConfig;
+  }
+
+  return {
+    optimizeDeps: libraryConfig.optimizeDeps,
+    build: { outDir: 'dist/app' },
+    server: command === 'serve' ? { proxy: whiteboardProxy() } : undefined,
+  };
 });

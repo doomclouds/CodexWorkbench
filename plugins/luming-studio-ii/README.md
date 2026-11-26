@@ -1,6 +1,6 @@
 # 鹿鸣 · Luming Studio II
 
-面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 包提供基础控件和 Canvas 运行时，插件运行入口随第一个业务闭环接入。
+面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 包提供基础控件、Canvas 运行时和一期白板编辑入口。
 
 ## 项目结构
 
@@ -91,3 +91,56 @@ Canvas 管理图层、选区、手势、焦点和裁剪。对象的 `View` 接�
 首批运行代码接入前建立源码和测试的 Lint、类型检查与构建门禁。首个闭环覆盖开板、移动对象与保存回执。前端立即预览手势，服务端校验授权与版本后提交变更，回执更新前端的确认投影。验证覆盖前端组件与 AppMock、协议往返、真实 SQLite 写入和失败恢复。
 
 目录分工依据白板「Luming Studio 架构设计」中的「前端目录与文件归属」「后端目标目录」和 Protobuf 契约图。
+
+### 一期白板协议
+
+`luming.studio.v1.WhiteboardService` 定义「实施计划设计」第一阶段的四个操作。消息按场景、对象正文和服务入口拆分，HTTP 路由和身份解析由接入适配器实现。
+
+| 操作 | 数据与结果 |
+| --- | --- |
+| `GetBoardScene` | 返回按图层排序的对象元数据及白板访问权限。连接线的端点和折点随几何返回。 |
+| `GetObjectPayloads` | 按对象 ID 批量请求。每项返回带正文版本的类型化载荷或不可用原因，其他对象的结果可独立使用。 |
+| `MoveObjects` | 一条命令携带白板 ID、命令 ID、画布坐标位移和全部目标对象的预期几何版本。回执区分成功、冲突和拒绝。 |
+| `GetCommandReceipt` | 按白板和命令 ID 查询当前操作者有权读取的留存回执。暂无记录时，前端继续保留结果未知状态。 |
+
+- `board_revision` 表示白板提交进度。移动校验每个受影响对象的 `geometry_version`，正文读取和合并使用独立的 `payload_version`。版本采用带存在性的 `uint64`，映射到 Canvas 的 `number` 前要校验整数精度。
+- 墨迹元数据带边界和笔宽，采样点按需读取。前端适配时以边界占位，加载采样点后将其补入 Canvas 的墨迹几何，供绘制和精确命中。自定义对象使用开放的 `kind`，扩展正文带 `schema_id` 并由注册的解析器读取。
+- 服务端先校验白板访问权限，再依据操作者、白板和命令 ID 查询留存回执。相同规范化命令可复用留存回执。沿用同一 ID 的不同内容会被拒绝。
+- 新移动命令校验写入权限、目标集合、锁定与版本。每个目标 ID 只出现一次。分组或父子关系改变移动范围时，推进受影响对象的几何版本。成功时在同一次事务推进几何与白板版本并写入回执。
+- 移动回执只返回受影响对象的确认投影。前端按对象 ID 和几何版本合并，并保留既有图层顺序和较新的正文投影。
+
+```sh
+pnpm --filter @codexworkbench/luming-studio-ii-contracts build
+```
+
+该命令运行 Buf 格式、Lint、编译与二进制契约测试。仓库检查和构建入口也执行协议门禁。
+
+### 一期后端
+
+服务端使用 Node.js、TypeScript 和 `node:sqlite`。协议包生成的 JavaScript 和声明由 HTTP 入口使用。白板应用服务通过仓储端口读取和提交，SQLite 适配器持有表结构和 SQL。
+
+`POST /luming.studio.v1.WhiteboardService/{Method}` 接收和返回 `application/protobuf`。业务拒绝与冲突通过 `CommandReceipt` 表达。读取权限和操作者身份由服务端的接入上下文与白板成员记录确定。
+
+SQLite 将白板、成员、场景元数据、对象正文和成功回执分别保存。几何与正文版本独立推进。正文在自己的记录中保存结构化数据。服务端按白板和对象 ID 读取，移动只更新目标几何及版次并留存成功回执。
+
+服务端构建先运行通用代码规则、分层依赖检查、类型检查和 Lint 契约测试，再执行领域与真实 SQLite 的集成测试。源码、测试和规则文件沿用 Studio 的格式、复杂度、无注释与异步约束。
+
+```sh
+pnpm --filter @codexworkbench/luming-studio-ii-server build
+```
+
+本机运行使用 `pnpm --filter @codexworkbench/luming-studio-ii-server start`。启动前为服务进程设置 `LUMING_STUDIO_II_DB`、`LUMING_STUDIO_II_ACTOR` 和 `LUMING_STUDIO_II_TOKEN`。请求携带 `Authorization: Bearer <token>`。可选的 `LUMING_STUDIO_II_PORT` 指定端口，缺省时选择可用端口。服务绑定 `127.0.0.1` 并在启动后输出地址。集成测试使用自己创建的临时库和种子白板。
+
+### 一期前端
+
+白板编辑 Surface 使用真实 Canvas、对象扩展和基础控件。开板先读场景，正文按可见对象和正文版本分批请求。拖动在 Canvas 中立即预览，松手后提交一条移动命令。成功回执更新已确认位置。出现冲突时重新读取场景。结果未知时可以查询回执或用原命令重试。对象正文在这一阶段用于查看。
+
+Web 子项目的架构 Lint 约束层间依赖和公开入口。Protobuf 编解码由数据层负责，浏览器网络和命令 ID 由平台层提供。集成测试通过 AppMock 挂载真实应用，在传输边界注入二进制请求和响应。
+
+本机预览时，将 `LUMING_STUDIO_II_WEB_API` 设为后端输出的环回地址，并使用与后端一致的 `LUMING_STUDIO_II_TOKEN`。运行下列命令，然后在终端显示的 URL 后加上 `?board=<白板 ID>`。Vite 在同源代理中附加认证头。
+
+```sh
+pnpm --filter @codexworkbench/luming-studio-ii-web preview:whiteboard
+```
+
+Web 构建在原有控件库输出之外提供 `apps/web/dist/app/`。部署该页面时，宿主需要在同源地址提供白板服务路由和认证。

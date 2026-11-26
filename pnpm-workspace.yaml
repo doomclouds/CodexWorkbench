@@ -4,4 +4,5 @@ packages:
   - plugins/luming-studio-ii/packages/*
   - packages/*
 allowBuilds:
+  '@bufbuild/buf': false
   esbuild: true

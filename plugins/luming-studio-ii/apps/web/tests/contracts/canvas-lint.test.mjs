@@ -6,7 +6,7 @@ import { ESLint } from 'eslint';
 const eslint = new ESLint({ cwd: fileURLToPath(new URL('../../', import.meta.url)) });
 const boundary = 'canvas/contract-boundary';
 const canvas = 'src/ui/domain/canvas/';
-const surface = 'src/surfaces/board.ts';
+const surface = 'src/surfaces/board/editor.ts';
 const component = 'tests/component/Canvas.test.tsx';
 const parity = 'tests/component/CanvasParity.test.tsx';
 const fixture = 'tests/fixtures/canvas/fixture.tsx';
@@ -16,16 +16,20 @@ const rejected = [
   [
     'private value',
     surface,
-    "import { projectPoint } from '../ui/domain/canvas/viewport/math.js';",
+    "import { projectPoint } from '../../ui/domain/canvas/viewport/math.js';",
   ],
-  ['private type', surface, "import type { CanvasProps } from '../ui/domain/canvas/contracts.js';"],
+  [
+    'private type',
+    surface,
+    "import type { CanvasProps } from '../../ui/domain/canvas/contracts.js';",
+  ],
   [
     'private type query',
     surface,
-    "type Result = import('../ui/domain/canvas/contracts.js').CanvasProps;",
+    "type Result = import('../../ui/domain/canvas/contracts.js').CanvasProps;",
   ],
-  ['private re-export', surface, "export * from '../ui/domain/canvas/scene/scene.js';"],
-  ['private dynamic import', surface, "void import('../ui/domain/canvas/scene/scene.js');"],
+  ['private re-export', surface, "export * from '../../ui/domain/canvas/scene/scene.js';"],
+  ['private dynamic import', surface, "void import('../../ui/domain/canvas/scene/scene.js');"],
   ['unresolvable dynamic import', surface, 'void import(moduleName);'],
   ['private package subpath', surface, `import { Canvas } from '${publicPackage}/Canvas.js';`],
   [
@@ -33,7 +37,7 @@ const rejected = [
     surface,
     `import { Canvas } from '${publicPackage}/index.js';`,
   ],
-  ['raw public entry', surface, "import template from '../ui/domain/canvas/index.ts?raw';"],
+  ['raw public entry', surface, "import template from '../../ui/domain/canvas/index.ts?raw';"],
   ['Vite absolute path', surface, "import Canvas from '/src/ui/domain/canvas/Canvas.tsx';"],
   [
     'unapproved dependency',
@@ -73,7 +77,7 @@ const rejected = [
   [
     'Surface dependency',
     canvas + 'Canvas.tsx',
-    "import { save } from '../../../surfaces/board.js';",
+    "import { save } from '../../../surfaces/board/index.js';",
   ],
   [
     'host dependency',
@@ -93,7 +97,7 @@ const rejected = [
   [
     'fixture depending on Surface',
     fixture,
-    "export { save } from '../../../src/surfaces/board.js';",
+    "export { save } from '../../../src/surfaces/board/index.js';",
   ],
   [
     'test importing a business fixture',
@@ -207,8 +211,8 @@ for (const [name, filePath, source, rule = boundary] of rejected) {
 }
 
 const accepted = [
-  [surface, `export { Canvas } from '${publicPackage}';`],
-  [surface, "void import('../ui/domain/canvas/index.js');"],
+  [surface, `import { Canvas } from '${publicPackage}';`],
+  [surface, "void import('../../ui/domain/canvas/index.js');"],
   [
     canvas + 'index.ts',
     "export { Canvas } from './Canvas.js';\nexport type { CanvasProps, CanvasHandle } from './contracts.js';",

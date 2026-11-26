@@ -1,0 +1,66 @@
+.whiteboard-editor {
+  display: flex;
+  flex-direction: column;
+  inline-size: 100%;
+  block-size: 100%;
+  min-block-size: 18rem;
+  overflow: hidden;
+  background: var(--studio-ui-surface, Canvas);
+  color: var(--studio-ui-text, CanvasText);
+}
+
+.whiteboard-editor__header {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  min-block-size: 3.5rem;
+  padding-block: 0.375rem;
+  padding-inline: clamp(0.75rem, 2vw, 1.5rem);
+  border-block-end: 1px solid var(--studio-ui-border, color-mix(in srgb, CanvasText 16%, Canvas));
+}
+
+.whiteboard-editor__title {
+  flex: 1 1 10rem;
+  min-inline-size: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.whiteboard-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.875rem;
+}
+
+.whiteboard-editor__state,
+.whiteboard-editor__empty {
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.whiteboard-editor__state {
+  flex: 1 1 auto;
+  background: var(--studio-ui-canvas, Canvas);
+}
+
+.whiteboard-editor__canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+
+.whiteboard-editor__empty {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

@@ -18,17 +18,20 @@
     "./ui/domain/objects/todo": "./src/ui/domain/objects/todo/index.ts"
   },
   "scripts": {
-    "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && oxlint --deny-warnings src tests vite.config.ts vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && node ../../../../tooling/studio-lint/check-markup.mjs",
+    "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && oxlint --deny-warnings src tests vite.config.ts vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vite.config.ts vitest.config.mts index.html && node ../../../../tooling/studio-lint/check-markup.mjs src tests index.html",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm lint && pnpm typecheck",
-    "test": "node --test tests/contracts/base-lint.test.mjs tests/contracts/canvas-lint.test.mjs tests/contracts/objects-lint.test.mjs && vitest run",
+    "check": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && pnpm lint && pnpm typecheck",
+    "test": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && node --test tests/contracts/base-lint.test.mjs tests/contracts/canvas-lint.test.mjs tests/contracts/objects-lint.test.mjs tests/contracts/frontend-lint.test.mjs && vitest run",
     "preview:canvas": "vite --host 127.0.0.1",
-    "build": "pnpm check && pnpm test && vite build"
+    "preview:whiteboard": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && vite --mode whiteboard --host 127.0.0.1",
+    "build": "pnpm check && pnpm test && vite build && vite build --mode whiteboard"
   },
   "dependencies": {
     "@blocknote/ariakit": "0.54.0",
     "@blocknote/core": "0.54.0",
     "@blocknote/react": "0.54.0",
+    "@bufbuild/protobuf": "2.17.0",
+    "@codexworkbench/luming-studio-ii-contracts": "workspace:*",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

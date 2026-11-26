@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "google/protobuf/struct.proto";
+import "luming/studio/v1/whiteboard_scene.proto";
+
+message ObjectPayload {
+  optional uint64 payload_version = 1;
+  oneof body {
+    TextPayload text = 2;
+    DocumentPayload document = 3;
+    EmbedPayload embed = 4;
+    TodoPayload todo = 5;
+    TablePayload table = 6;
+    ImagePayload image = 7;
+    VideoPayload video = 8;
+    LinkPayload link = 9;
+    StickerPayload sticker = 10;
+    InkPayload ink = 11;
+    ExtensionPayload extension = 12;
+  }
+}
+
+message TextPayload {
+  string text = 1;
+  optional string color = 2;
+  optional string font_family = 3;
+  optional double font_size = 4;
+  TextAlignment align = 5;
+}
+
+enum TextAlignment {
+  TEXT_ALIGNMENT_UNSPECIFIED = 0;
+  TEXT_ALIGNMENT_LEFT = 1;
+  TEXT_ALIGNMENT_CENTER = 2;
+  TEXT_ALIGNMENT_RIGHT = 3;
+}
+
+message DocumentPayload {
+  string title = 1;
+  uint32 schema_version = 2;
+  repeated DocumentBlock blocks = 3;
+}
+
+message DocumentBlock {
+  string block_id = 1;
+  string type = 2;
+  google.protobuf.Struct props = 3;
+  google.protobuf.Value content = 4;
+  repeated DocumentBlock children = 5;
+}
+
+message EmbedPayload {
+  optional string title = 1;
+  optional string html = 2;
+  optional uint64 source_revision = 3;
+  google.protobuf.Value state = 4;
+}
+
+message TodoPayload {
+  string title = 1;
+  repeated TodoItem items = 2;
+}
+
+message TodoItem {
+  string item_id = 1;
+  string text = 2;
+  bool checked = 3;
+  TodoSourceRef source_ref = 4;
+}
+
+message TodoSourceRef {
+  optional string board_id = 1;
+  string object_id = 2;
+  optional string block_id = 3;
+  optional string item_id = 4;
+  optional uint64 version = 5;
+}
+
+message TablePayload {
+  optional string text = 1;
+  TableGrid grid = 2;
+}
+
+message TableGrid {
+  repeated TableRow rows = 1;
+  repeated string row_ids = 2;
+  repeated string column_ids = 3;
+  repeated double column_widths = 4;
+  optional bool head = 5;
+}
+
+message TableRow {
+  repeated TableCell cells = 1;
+}
+
+message TableCell {
+  oneof value {
+    string text = 1;
+    double number = 2;
+    bool bool_value = 3;
+    google.protobuf.NullValue null_value = 4;
+  }
+}
+
+message ImagePayload {
+  optional string src = 1;
+  optional string href = 2;
+  ImageCrop crop = 3;
+  ImageSize natural_size = 4;
+}
+
+message ImageCrop {
+  double zoom = 1;
+  double x = 2;
+  double y = 3;
+}
+
+message ImageSize {
+  uint32 width = 1;
+  uint32 height = 2;
+}
+
+message VideoPayload {
+  optional string src = 1;
+  optional string poster = 2;
+}
+
+message LinkPayload {
+  optional string href = 1;
+}
+
+message StickerPayload {
+  optional string sticker_id = 1;
+  optional string fallback = 2;
+}
+
+message InkPayload {
+  repeated Point points = 1;
+}
+
+message ExtensionPayload {
+  string schema_id = 1;
+  bytes data = 2;
+}

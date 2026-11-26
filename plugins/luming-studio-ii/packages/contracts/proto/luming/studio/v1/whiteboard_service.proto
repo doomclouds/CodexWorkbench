@@ -1,0 +1,127 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "luming/studio/v1/whiteboard_payload.proto";
+import "luming/studio/v1/whiteboard_scene.proto";
+
+service WhiteboardService {
+  rpc GetBoardScene(GetBoardSceneRequest) returns (GetBoardSceneResponse);
+  rpc GetObjectPayloads(GetObjectPayloadsRequest) returns (GetObjectPayloadsResponse);
+  rpc MoveObjects(MoveObjectsRequest) returns (MoveObjectsResponse);
+  rpc GetCommandReceipt(GetCommandReceiptRequest) returns (GetCommandReceiptResponse);
+}
+
+message GetBoardSceneRequest {
+  string board_id = 1;
+}
+
+message GetBoardSceneResponse {
+  BoardScene scene = 1;
+}
+
+message GetObjectPayloadsRequest {
+  string board_id = 1;
+  repeated string object_ids = 2;
+}
+
+message GetObjectPayloadsResponse {
+  string board_id = 1;
+  repeated ObjectPayloadResult results = 2;
+}
+
+message ObjectPayloadResult {
+  string object_id = 1;
+  oneof result {
+    ObjectPayload payload = 2;
+    ObjectPayloadUnavailable unavailable = 3;
+  }
+}
+
+message ObjectPayloadUnavailable {
+  ObjectPayloadUnavailableReason reason = 1;
+}
+
+enum ObjectPayloadUnavailableReason {
+  OBJECT_PAYLOAD_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  OBJECT_PAYLOAD_UNAVAILABLE_REASON_NOT_FOUND = 1;
+  OBJECT_PAYLOAD_UNAVAILABLE_REASON_UNSUPPORTED_KIND = 2;
+}
+
+message MoveObjectsRequest {
+  string board_id = 1;
+  string command_id = 2;
+  MoveDelta delta = 3;
+  repeated MoveTarget targets = 4;
+}
+
+message MoveDelta {
+  double dx = 1;
+  double dy = 2;
+}
+
+message MoveTarget {
+  string object_id = 1;
+  optional uint64 expected_geometry_version = 2;
+}
+
+message MoveObjectsResponse {
+  CommandReceipt receipt = 1;
+}
+
+message CommandReceipt {
+  string board_id = 1;
+  string command_id = 2;
+  oneof outcome {
+    MoveApplied applied = 3;
+    MoveConflict conflict = 4;
+    MoveRejected rejected = 5;
+  }
+}
+
+message MoveApplied {
+  optional uint64 board_revision = 1;
+  repeated ObjectMetadata objects = 2;
+}
+
+message MoveConflict {
+  MoveConflictReason reason = 1;
+  optional uint64 board_revision = 2;
+  repeated ObjectMetadata current_objects = 3;
+  repeated string missing_object_ids = 4;
+}
+
+enum MoveConflictReason {
+  MOVE_CONFLICT_REASON_UNSPECIFIED = 0;
+  MOVE_CONFLICT_REASON_GEOMETRY_VERSION_CHANGED = 1;
+  MOVE_CONFLICT_REASON_TARGETS_CHANGED = 2;
+}
+
+message MoveRejected {
+  MoveRejectionReason reason = 1;
+}
+
+enum MoveRejectionReason {
+  MOVE_REJECTION_REASON_UNSPECIFIED = 0;
+  MOVE_REJECTION_REASON_FORBIDDEN = 1;
+  MOVE_REJECTION_REASON_GEOMETRY_LOCKED = 2;
+  MOVE_REJECTION_REASON_INVALID_MOVE = 3;
+  MOVE_REJECTION_REASON_COMMAND_ID_REUSE = 4;
+}
+
+message GetCommandReceiptRequest {
+  string board_id = 1;
+  string command_id = 2;
+}
+
+message GetCommandReceiptResponse {
+  oneof result {
+    CommandReceipt receipt = 1;
+    CommandReceiptNotRecorded not_recorded = 2;
+  }
+}
+
+message CommandReceiptNotRecorded {
+  string board_id = 1;
+  string command_id = 2;
+}

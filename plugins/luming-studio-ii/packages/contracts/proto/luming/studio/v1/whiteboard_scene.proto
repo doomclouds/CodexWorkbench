@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+message BoardScene {
+  string board_id = 1;
+  string title = 2;
+  optional uint64 board_revision = 3;
+  repeated ObjectMetadata objects = 4;
+  BoardAccess access = 5;
+}
+
+message BoardAccess {
+  bool can_edit = 1;
+}
+
+message ObjectMetadata {
+  string object_id = 1;
+  string kind = 2;
+  string label = 3;
+  Geometry geometry = 4;
+  optional uint64 geometry_version = 5;
+  optional uint64 payload_version = 6;
+  bool locked = 7;
+  optional string parent_id = 8;
+  optional string group_id = 9;
+  ObjectAppearance appearance = 10;
+  oneof geometry_detail {
+    ShapeGeometry shape = 11;
+    SectionGeometry section = 12;
+    InkGeometry ink = 13;
+    ConnectorGeometry connector = 14;
+  }
+}
+
+message Geometry {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+  double rotation = 5;
+}
+
+message Point {
+  double x = 1;
+  double y = 2;
+}
+
+message ObjectAppearance {
+  optional string fill = 1;
+  optional string stroke = 2;
+  optional double stroke_width = 3;
+  bool dashed = 4;
+  bool hollow = 5;
+}
+
+message ShapeGeometry {
+  string outline = 1;
+}
+
+message SectionGeometry {
+  bool transparent = 1;
+}
+
+message InkGeometry {
+  double width = 1;
+}
+
+message ConnectorGeometry {
+  ConnectorEndpoint start = 1;
+  ConnectorEndpoint end = 2;
+  repeated Point bends = 3;
+  RelativeBends relative_bends = 4;
+  Point label_offset = 5;
+  ConnectorHead start_head = 6;
+  ConnectorHead end_head = 7;
+}
+
+message ConnectorEndpoint {
+  Point point = 1;
+  ConnectorAttachment attachment = 2;
+}
+
+message ConnectorAttachment {
+  string object_id = 1;
+  ConnectorPort port = 2;
+}
+
+message RelativeBends {
+  BendAxis first_axis = 1;
+  repeated double offsets = 2;
+}
+
+enum ConnectorPort {
+  CONNECTOR_PORT_UNSPECIFIED = 0;
+  CONNECTOR_PORT_TOP = 1;
+  CONNECTOR_PORT_BOTTOM = 2;
+  CONNECTOR_PORT_LEFT = 3;
+  CONNECTOR_PORT_RIGHT = 4;
+}
+
+enum ConnectorHead {
+  CONNECTOR_HEAD_UNSPECIFIED = 0;
+  CONNECTOR_HEAD_NONE = 1;
+  CONNECTOR_HEAD_ARROW = 2;
+  CONNECTOR_HEAD_CIRCLE = 3;
+}
+
+enum BendAxis {
+  BEND_AXIS_UNSPECIFIED = 0;
+  BEND_AXIS_HORIZONTAL = 1;
+  BEND_AXIS_VERTICAL = 2;
+}

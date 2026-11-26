@@ -52,7 +52,7 @@ const rejected = [
   [
     'base fixture re-exports a Surface',
     'tests/support/render-control.ts',
-    "export { save } from '../../src/surfaces/board.js';",
+    "export { save } from '../../src/surfaces/board/index.js';",
     boundary,
   ],
   [
@@ -136,7 +136,7 @@ const rejected = [
   [
     'dependency on a Surface',
     'src/ui/base/Button/Button.tsx',
-    "import { save } from '../../../surfaces/board.js';",
+    "import { save } from '../../../surfaces/board/index.js';",
     boundary,
   ],
   [
@@ -264,10 +264,10 @@ test('accepts explicit public exports and a consumer using the entry', async () 
     "export { Button } from './Button/Button.js';",
     "export type { ButtonProps, ButtonHandle } from './Button/Button.js';",
   ].join('\n');
-  const consumer = "export { Button } from '../ui/base/index.js';";
+  const consumer = "import { Button } from '../../ui/base/index.js';";
   const results = await Promise.all([
     eslint.lintText(entry, { filePath: 'src/ui/base/index.ts' }),
-    eslint.lintText(consumer, { filePath: 'src/pages/board.ts' }),
+    eslint.lintText(consumer, { filePath: 'src/pages/board/screen.ts' }),
   ]);
 
   assert.deepEqual(

@@ -1,0 +1,38 @@
+export type {
+  Actor,
+  Appearance,
+  BoardAccess,
+  BoardHeader,
+  BoardObject,
+  BoardScene,
+  CommandReceipt,
+  ConnectorDetail,
+  ConnectorEndpoint,
+  ConnectorHead,
+  ConnectorPort,
+  Geometry,
+  GeometryDetail,
+  JsonObject,
+  JsonValue,
+  MoveApplied,
+  MoveCommand,
+  MoveConflict,
+  MoveDelta,
+  MoveOutcome,
+  MoveRejected,
+  MoveRejectionReason,
+  MoveTarget,
+  PayloadRecord,
+  PayloadResult,
+  Point,
+  StoredReceipt,
+} from './model.js';
+export {
+  canAdvanceVersion,
+  canTranslate,
+  commandSignature,
+  hasValidMoveInput,
+  translateObject,
+} from './movement.js';
+export { isSupportedPayload } from './payload.js';
+export { sectionContains } from './section.js';

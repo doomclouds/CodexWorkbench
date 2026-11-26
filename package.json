@@ -14,9 +14,9 @@
     "url": "git+https://github.com/doomclouds/CodexWorkbench.git"
   },
   "scripts": {
-    "check": "node tooling/check-repository.mjs && pnpm --filter @codexworkbench/luming-studio --filter @codexworkbench/luming-studio-ii-web lint && pnpm --filter \"./plugins/*\" --filter @codexworkbench/luming-studio-ii-web typecheck",
-    "test": "node --test tooling/check-repository.test.mjs tooling/collect-agentero-licenses.test.mjs tooling/app-sdk-debug.test.mjs tooling/build-agentero-branding.test.mjs && pnpm --filter \"./plugins/*\" --filter @codexworkbench/luming-studio-ii-web test",
-    "build": "pnpm --filter \"./plugins/*\" --filter @codexworkbench/luming-studio-ii-web build"
+    "check": "node tooling/check-repository.mjs && pnpm --filter @codexworkbench/luming-studio-ii-contracts check && pnpm --filter @codexworkbench/luming-studio-ii-server check && pnpm --filter @codexworkbench/luming-studio --filter @codexworkbench/luming-studio-ii-web lint && pnpm --filter \"./plugins/*\" --filter @codexworkbench/luming-studio-ii-web typecheck",
+    "test": "node --test tooling/check-repository.test.mjs tooling/collect-agentero-licenses.test.mjs tooling/app-sdk-debug.test.mjs tooling/build-agentero-branding.test.mjs && pnpm --filter \"./plugins/*\" --filter @codexworkbench/luming-studio-ii-web --filter @codexworkbench/luming-studio-ii-contracts --filter @codexworkbench/luming-studio-ii-server test",
+    "build": "pnpm --filter @codexworkbench/luming-studio-ii-contracts build && pnpm --filter @codexworkbench/luming-studio-ii-server build && pnpm --filter \"./plugins/*\" --filter @codexworkbench/luming-studio-ii-web build"
   },
   "devDependencies": {
     "@babel/core": "8.0.7",
