@@ -26,6 +26,7 @@ interface ConnectorHeadProps {
 }
 
 const connectorDashPattern = '6 5';
+export const connectorLabelLift = 28;
 
 function ConnectorHead({ head, tip, neighbor, strokeWidth }: ConnectorHeadProps) {
   if (head === 'none') {
@@ -90,45 +91,44 @@ export function CanvasConnectorPath({
   const { x, y, width, height } = geometry;
 
   return (
-    <svg
-      className="studio-ui-canvas-connector"
-      data-canvas-connector-preview={preview || undefined}
-      style={{ color: stroke }}
-      viewBox={`${x} ${y} ${width} ${height}`}
-      aria-hidden="true"
-    >
-      <path
-        d={connectionPathData(points)}
-        data-canvas-geometry-hit=""
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-        strokeDasharray={dashed ? connectorDashPattern : undefined}
-        strokeLinecap="round"
-      />
-      <ConnectorHead
-        head={connection.startHead ?? 'none'}
-        tip={start}
-        neighbor={points[1] ?? start}
-        strokeWidth={strokeWidth}
-      />
-      <ConnectorHead
-        head={connection.endHead ?? 'arrow'}
-        tip={end}
-        neighbor={points.at(-2) ?? end}
-        strokeWidth={strokeWidth}
-      />
+    <>
+      <svg
+        className="studio-ui-canvas-connector"
+        data-canvas-connector-preview={preview || undefined}
+        style={{ color: stroke }}
+        viewBox={`${x} ${y} ${width} ${height}`}
+        aria-hidden="true"
+      >
+        <path
+          d={connectionPathData(points)}
+          data-canvas-geometry-hit=""
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          strokeDasharray={dashed ? connectorDashPattern : undefined}
+          strokeLinecap="round"
+        />
+        <ConnectorHead
+          head={connection.startHead ?? 'none'}
+          tip={start}
+          neighbor={points[1] ?? start}
+          strokeWidth={strokeWidth}
+        />
+        <ConnectorHead
+          head={connection.endHead ?? 'arrow'}
+          tip={end}
+          neighbor={points.at(-2) ?? end}
+          strokeWidth={strokeWidth}
+        />
+      </svg>
       {label && labelPosition && (
-        <text
+        <div
           className="studio-ui-canvas-connector-label"
-          x={labelPosition.x}
-          y={labelPosition.y}
-          textAnchor="middle"
-          dominantBaseline="central"
+          style={{ left: labelPosition.x - x, top: labelPosition.y - y - connectorLabelLift }}
         >
           {label}
-        </text>
+        </div>
       )}
-    </svg>
+    </>
   );
 }

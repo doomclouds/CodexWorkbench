@@ -1,22 +1,28 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import {
+  CatalogQueryError,
+  type CatalogApplication,
+} from '../../modules/catalog/application/index.js';
+import {
   WhiteboardAccessError,
-  type Actor,
   type WhiteboardApplication,
 } from '../../modules/whiteboard/application/index.js';
+import { createCatalogRoutes } from './catalog-routes.js';
 import { HttpRequestError, readBody } from './request.js';
-import { createRoutes } from './routes.js';
+import { createWhiteboardRoutes } from './routes.js';
+import type { HttpActor, ProtobufRoute } from './unary-route.js';
 
 const PROTOBUF_CONTENT_TYPE = 'application/protobuf';
 const REQUEST_METHOD = 'POST';
 
 export interface WhiteboardHttpOptions {
   readonly application: WhiteboardApplication;
-  readonly resolveActor: (request: IncomingMessage) => Actor | undefined;
+  readonly catalogApplication: CatalogApplication;
+  readonly resolveActor: (request: IncomingMessage) => HttpActor | undefined;
   readonly onError: (error: unknown) => void;
 }
 
-type Routes = ReturnType<typeof createRoutes>;
+type Routes = ReadonlyMap<string, ProtobufRoute>;
 
 function sendStatus(response: ServerResponse, status: number): void {
   if (status === 413) {
@@ -77,9 +83,9 @@ function handleError(
   onError: WhiteboardHttpOptions['onError'],
 ): void {
   const canRespond = !response.destroyed && !response.headersSent;
-  if (error instanceof HttpRequestError) {
+  if (error instanceof HttpRequestError || error instanceof CatalogQueryError) {
     if (canRespond) {
-      sendStatus(response, error.status);
+      sendStatus(response, error instanceof HttpRequestError ? error.status : 400);
     }
 
     return;
@@ -101,8 +107,11 @@ function handleError(
 }
 
 export function createWhiteboardHttpServer(options: WhiteboardHttpOptions): Server {
-  const { application, resolveActor, onError } = options;
-  const routes = createRoutes(application);
+  const { application, catalogApplication, resolveActor, onError } = options;
+  const routes = new Map([
+    ...createWhiteboardRoutes(application),
+    ...createCatalogRoutes(catalogApplication),
+  ]);
 
   return createServer((request, response) => {
     handleRequest(request, response, routes, resolveActor).catch((error: unknown) =>

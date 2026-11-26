@@ -15,6 +15,40 @@ const darknessThreshold = 128;
 const overviewWidth = 228;
 const overviewHeight = 110;
 
+export function isTodoOverview(width: number, height: number) {
+  return width < overviewWidth || height < overviewHeight;
+}
+
+function TodoHeadingIcons() {
+  return (
+    <span
+      className="studio-object-todo__heading-icons"
+      data-canvas-drag-surface="title"
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="9" cy="5" r="1" />
+        <circle cx="9" cy="12" r="1" />
+        <circle cx="9" cy="19" r="1" />
+        <circle cx="15" cy="5" r="1" />
+        <circle cx="15" cy="12" r="1" />
+        <circle cx="15" cy="19" r="1" />
+      </svg>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="3" y="4" width="5" height="5" rx="1" />
+        <path d="M13 6h8M13 12h8M13 18h8M3 17l2 2 4-4" />
+      </svg>
+    </span>
+  );
+}
+
 function paperScheme(paper?: string) {
   if (!paper || !paperPattern.test(paper)) {
     return undefined;
@@ -114,7 +148,7 @@ function useTodoOverview(ref: RefObject<HTMLElement | null>) {
     const observer = new Observer(([entry]) => {
       if (entry) {
         const { width, height } = entry.contentRect;
-        setSmall(width < overviewWidth || height < overviewHeight);
+        setSmall(isTodoOverview(width, height));
       }
     });
     observer.observe(element);
@@ -181,6 +215,7 @@ function TodoSession(props: TodoObjectProps) {
       onPaste={handlePaste}
     >
       <header className="studio-object-todo__heading">
+        <TodoHeadingIcons />
         <div className="studio-object-todo__title">{titleContent(title, editable, session)}</div>
         <span className="studio-object-todo__count" aria-live="polite">
           {complete}/{items.length} 完成

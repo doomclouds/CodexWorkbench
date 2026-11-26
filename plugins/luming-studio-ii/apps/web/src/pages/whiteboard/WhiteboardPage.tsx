@@ -6,9 +6,10 @@ export interface WhiteboardPageProps {
   readonly boardId?: string;
   readonly service: WhiteboardService;
   readonly createCommandId: () => string;
+  readonly onBack?: () => void;
 }
 
-export function WhiteboardPage({ boardId, service, createCommandId }: WhiteboardPageProps) {
+export function WhiteboardPage({ boardId, service, createCommandId, onBack }: WhiteboardPageProps) {
   if (!boardId) {
     return (
       <StatePanel kind="empty" title="请选择白板" detail="在地址中用 ?board= 指定要打开的白板。" />
@@ -21,6 +22,7 @@ export function WhiteboardPage({ boardId, service, createCommandId }: Whiteboard
       boardId={boardId}
       service={service}
       createCommandId={createCommandId}
+      onBack={onBack}
     />
   );
 }

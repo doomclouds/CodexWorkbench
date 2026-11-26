@@ -17,6 +17,10 @@
     "./whiteboard/service": {
       "types": "./dist/proto/luming/studio/v1/whiteboard_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/whiteboard_service_pb.js"
+    },
+    "./catalog/service": {
+      "types": "./dist/proto/luming/studio/v1/board_catalog_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/board_catalog_service_pb.js"
     }
   },
   "scripts": {

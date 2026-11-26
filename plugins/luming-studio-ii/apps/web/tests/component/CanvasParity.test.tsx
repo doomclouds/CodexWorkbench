@@ -341,12 +341,46 @@ describe('Canvas legacy interaction parity', () => {
 
     expect(camera.x + 440 * camera.zoom).toBeCloseTo(360);
     expect(camera.y + 140 * camera.zoom).toBeCloseTo(250);
-    expect(card.width * camera.zoom).toBeLessThan(500);
+    expect(card.width * camera.zoom).toBeCloseTo(356);
     expect(onVisibleObjectsChange.mock.lastCall?.[0]).toContain('card');
     expect(onVisibleObjectsChange.mock.lastCall?.[0]).not.toContain('remote');
     onViewportChange.mockClear();
     act(() => ref.current?.fitToObjects(['missing']));
     expect(onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it('fits once when the initial scene becomes available', async () => {
+    const onViewportChange = vi.fn<(viewport: CanvasViewport) => void>();
+    const scene: CanvasScene = {
+      ...board,
+      objects: board.objects.slice(0, 1).map((object) => ({
+        ...object,
+        geometry: { x: 80, y: 80, width: 720, height: 130, rotation: 0 },
+      })),
+    };
+    const props = { fitOnMount: true, initialViewport: undefined, onViewportChange };
+    renderCanvas({ ...props, scene: { ...scene, objects: [] } });
+    await flushFrame();
+    expect(onViewportChange).toHaveBeenLastCalledWith(view);
+
+    renderCanvas({ ...props, scene });
+    await flushFrame();
+    expect(onViewportChange).toHaveBeenLastCalledWith({ x: 8, y: 134, zoom: 0.8 });
+    onViewportChange.mockClear();
+    const moved = scene.objects.map((object) => ({
+      ...object,
+      geometry: { ...object.geometry, x: 2080 },
+    }));
+    renderCanvas({ ...props, scene: { ...scene, objects: moved } });
+    await flushFrame();
+    expect(onViewportChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps an explicit viewport instead of fitting on mount', async () => {
+    const initialViewport = { x: 30, y: -25, zoom: 0.8 };
+    const { onViewportChange } = renderCanvas({ fitOnMount: true, initialViewport });
+    await flushFrame();
+    expect(onViewportChange).toHaveBeenCalledExactlyOnceWith(initialViewport);
   });
 
   it('keeps the same embedded HTML element across zoom and a confirmed scene update', async () => {
@@ -457,6 +491,7 @@ describe('Canvas legacy interaction parity', () => {
     const person = requireElement<SVGSVGElement>(region, '[data-canvas-object="person"] svg');
     const arrow = requireElement<SVGSVGElement>(region, '[data-canvas-object="line"] svg');
     const line = requireElement<SVGPathElement>(arrow, 'path');
+    const caption = requireElement<HTMLElement>(region, '.studio-ui-canvas-connector-label');
 
     expect(person.querySelector('path')).not.toBeNull();
     expect(person.style.fill).toBe('none');
@@ -464,6 +499,8 @@ describe('Canvas legacy interaction parity', () => {
     expect(line.getAttribute('stroke-dasharray')).toBe('6 5');
     expect(arrow.querySelector('circle')).not.toBeNull();
     expect(arrow.querySelector('polyline')).toBeNull();
+    expect(caption.textContent).toBe('标注');
+    expect(caption.closest('svg')).toBeNull();
   });
 });
 

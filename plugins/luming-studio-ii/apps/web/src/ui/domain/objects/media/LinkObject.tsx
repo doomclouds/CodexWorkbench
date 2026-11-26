@@ -16,6 +16,18 @@ export function LinkObject({ label = '链接', href, interactive = true }: LinkO
 
   return (
     <div className="luming-media-link">
+      <svg
+        width="22"
+        height="22"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        aria-hidden="true"
+      >
+        <path d="m10 13 4-4m-6 7-1 1a3.5 3.5 0 1 1-5-5l4-4a3.5 3.5 0 0 1 5 0m2 7a3.5 3.5 0 0 0 5 0l4-4a3.5 3.5 0 1 0-5-5l-1 1" />
+      </svg>
       <div className="luming-media-link__content">
         <strong>{label}</strong>
         {href && <span>{href}</span>}
@@ -28,7 +40,19 @@ export function LinkObject({ label = '链接', href, interactive = true }: LinkO
           target="_blank"
           rel="noopener noreferrer"
         >
-          打开
+          <svg
+            width="17"
+            height="17"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 3h6v6m0-6-9 9m6 1v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          </svg>
         </a>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
-import type { KeyboardEvent, MouseEvent } from 'react';
+import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Dialog, ScrollRegion, StatusText } from '../../../base/index.js';
 import type { SearchFieldHandle } from '../../../base/index.js';
@@ -28,12 +28,74 @@ interface DocumentView {
   readonly focusBlockId?: string;
 }
 
-function panelStyles(paper: DocumentObjectProps['paper']) {
+function panelPresentation(
+  paper: DocumentObjectProps['paper'],
+  canvas: DocumentObjectProps['canvas'],
+  expanded: boolean,
+) {
   const scheme = paper?.scheme ?? 'light';
   const backgroundColor = paper?.fill ?? (scheme === 'dark' ? '#1c1d1e' : readingBackground);
   const color = paper?.ink ?? (scheme === 'dark' ? '#f7f4ed' : readingInk);
+  const inline = expanded ? undefined : canvas;
+  const layout = inline && documentLayout(inline);
+  const shell = { backgroundColor, color, colorScheme: scheme };
+  const surface = {
+    ...shell,
+    backgroundColor: paper?.backdrop ?? backgroundColor,
+    '--document-ui-scale': inline && Math.min(1 / inline.zoom, 1.5),
+    '--document-canvas-scale': inline?.zoom,
+  } as CSSProperties;
 
-  return { backgroundColor, color, colorScheme: scheme };
+  return { layout, shell, surface };
+}
+
+function documentLayout(canvas: NonNullable<DocumentObjectProps['canvas']>) {
+  const width = canvas.width * canvas.zoom;
+  const height = canvas.height * canvas.zoom;
+  if (width < 120 || height < 56) {
+    return 'outline';
+  }
+  if (width < 220 || height < 90) {
+    return 'thumbnail';
+  }
+  if (width < 320 || height < 140) {
+    return 'compact';
+  }
+
+  return 'detail';
+}
+
+function DocumentCanvasHeading({ visible }: { readonly visible: boolean }) {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <span
+      className="studio-document-canvas-symbols"
+      data-canvas-drag-surface="title"
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="9" cy="5" r="1" />
+        <circle cx="9" cy="12" r="1" />
+        <circle cx="9" cy="19" r="1" />
+        <circle cx="15" cy="5" r="1" />
+        <circle cx="15" cy="12" r="1" />
+        <circle cx="15" cy="19" r="1" />
+      </svg>
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 0v6h6M8 13h8m-8 4h8" />
+      </svg>
+    </span>
+  );
 }
 
 function vendorControlsOpen(container: HTMLElement) {
@@ -64,6 +126,7 @@ export function DocumentObject({
   readOnly = false,
   theme = 'light',
   paper,
+  canvas,
   editRequest,
   onChange,
   onCommit,
@@ -96,7 +159,7 @@ export function DocumentObject({
   const expanded = phase !== 'inline';
   const editing = phase === 'edit';
   const matchingIds = new Set(viewport.matches.map((block) => block.id));
-  const shell = panelStyles(paper);
+  const { layout, shell, surface } = panelPresentation(paper, canvas, expanded);
   const observe = useEffectEvent(() => notifyMode(onActivity, phase, dirty, saving, composing));
 
   if (editRequest !== undefined && consumedEditRequest !== editRequest) {
@@ -215,6 +278,7 @@ export function DocumentObject({
   const actions = (
     <DocumentToolbar
       mode={phase}
+      iconOnly={layout !== undefined}
       readOnly={readOnly}
       draft={draft}
       exportOpen={exportOpen}
@@ -231,8 +295,9 @@ export function DocumentObject({
     <div
       className="studio-document-surface"
       data-document-view={phase}
+      data-document-layout={layout}
       data-paper-scheme={shell.colorScheme}
-      style={{ backgroundColor: paper?.backdrop ?? shell.backgroundColor, color: shell.color }}
+      style={surface}
       onKeyDownCapture={handleKeyDownCapture}
       onKeyDown={handleKeyDown}
       onKeyUp={pan.handleKeyUp}
@@ -243,6 +308,7 @@ export function DocumentObject({
       onPointerCancel={pan.handlePointerEnd}
     >
       <div className="studio-document-top">
+        <DocumentCanvasHeading visible={layout !== undefined} />
         <DocumentTitle draft={draft} editing={editing} readOnly={readOnly} inline={!expanded} />
         {actions}
         {expanded && <DocumentReaderTools viewport={viewport} searchField={searchField} />}

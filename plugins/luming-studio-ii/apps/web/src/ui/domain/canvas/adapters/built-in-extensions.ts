@@ -41,14 +41,29 @@ function placementDefinition(placement: CanvasPlacement, capabilities: CanvasObj
 const builtInDefinitions: readonly CanvasBuiltInExtension[] = [
   {
     kind: 'shape',
-    placement: { kind: 'shape', shape: 'rounded', label: '形状', width: 144, height: 100 },
+    placement: {
+      kind: 'shape',
+      shape: 'rounded',
+      label: '',
+      width: 208,
+      height: 112,
+      fill: '#EFEFEF',
+      stroke: 'transparent',
+    },
     capabilities: passiveBox,
     Frame: CanvasShapeFrame,
     portClick: 'connect',
   },
   {
     kind: 'section',
-    placement: { kind: 'section', label: '分区', transparent: true, width: 268, height: 170 },
+    placement: {
+      kind: 'section',
+      label: '分区',
+      width: 600,
+      height: 360,
+      fill: '#EFEFEF',
+      stroke: '#9ca3af',
+    },
     capabilities: detachedBox,
     Frame: CanvasSectionFrame,
     blocksPlacement: false,
@@ -67,9 +82,15 @@ const builtInDefinitions: readonly CanvasBuiltInExtension[] = [
     Frame: CanvasConnectorFrame,
     blocksPlacement: false,
   },
-  placementDefinition({ kind: 'text', label: '文本', width: 210, height: 85 }, passiveBox),
+  placementDefinition(
+    { kind: 'text', label: '', width: 300, height: 70, fill: 'transparent' },
+    passiveBox,
+  ),
   {
-    ...placementDefinition({ kind: 'note', label: '便签', width: 140, height: 116 }, passiveBox),
+    ...placementDefinition(
+      { kind: 'note', label: '', width: 208, height: 184, fill: '#F9E56F' },
+      passiveBox,
+    ),
     portClick: 'place',
   },
   {

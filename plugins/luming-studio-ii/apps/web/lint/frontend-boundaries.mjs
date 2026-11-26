@@ -30,12 +30,16 @@ const testLibraries = new Set([
   'node:assert/strict',
 ]);
 const contractPackage = '@codexworkbench/luming-studio-ii-contracts';
-const protocolLibraries = new Set([
-  '@bufbuild/protobuf',
-  '@bufbuild/protobuf/wkt',
-  contractPackage + '/whiteboard/scene',
-  contractPackage + '/whiteboard/payload',
-  contractPackage + '/whiteboard/service',
+const protocolRuntimes = new Set(['@bufbuild/protobuf', '@bufbuild/protobuf/wkt']);
+const whiteboardData = resolve(sourceRoot, 'data/whiteboard');
+const catalogData = resolve(sourceRoot, 'data/catalog');
+const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
+const iconSurfaces = new Set([workbenchSurface, resolve(sourceRoot, 'surfaces/whiteboard-editor')]);
+const protocolOwners = new Map([
+  [contractPackage + '/whiteboard/scene', whiteboardData],
+  [contractPackage + '/whiteboard/payload', whiteboardData],
+  [contractPackage + '/whiteboard/service', whiteboardData],
+  [contractPackage + '/catalog/service', catalogData],
 ]);
 const protocolTestSuites = new Set(['contracts', 'fixtures', 'integration', 'support']);
 const applicationTestSuites = new Set(['integration', 'support']);
@@ -76,6 +80,17 @@ function isProtocol(specifier) {
   const family = specifier.split('/').slice(0, 2).join('/');
 
   return family === contractPackage || family === '@bufbuild/protobuf';
+}
+
+function allowedProtocol(specifier, owner, suite) {
+  const test = protocolTestSuites.has(suite);
+  if (protocolRuntimes.has(specifier)) {
+    return owner?.layer === 'data' || test;
+  }
+
+  const protocolOwner = protocolOwners.get(specifier);
+
+  return protocolOwner !== undefined && (protocolOwner === owner?.root || test);
 }
 
 function publicEntry(file, owner) {
@@ -122,8 +137,25 @@ function allowedTest(suite, target, owner) {
   return dependent === suite || dependent === 'fixtures' || dependent === 'support';
 }
 
-function allowedLibrary(layer, specifier) {
-  switch (layer) {
+function isPortalImport(node) {
+  const member = node.specifiers?.[0];
+
+  return (
+    node.type === 'ImportDeclaration' &&
+    node.specifiers.length === 1 &&
+    member?.imported?.name === 'createPortal'
+  );
+}
+
+function allowedLibrary(owner, specifier, node) {
+  if (specifier === 'lucide-react') {
+    return iconSurfaces.has(owner.root);
+  }
+  if (owner.root === workbenchSurface && specifier === 'react-dom') {
+    return isPortalImport(node);
+  }
+
+  switch (owner.layer) {
     case 'app':
       return appLibraries.has(specifier);
     case 'pages':
@@ -192,7 +224,7 @@ const contractBoundary = {
     }
 
     function packageProblem(node, specifier, reexport) {
-      if (governed && !allowedLibrary(owner.layer, specifier)) {
+      if (governed && !allowedLibrary(owner, specifier, node)) {
         return 'dependency';
       }
       if (governed && reexport && !isTypeOnly(node)) {
@@ -226,9 +258,7 @@ const contractBoundary = {
       const [specifier] = written.split(/[?#]/u, 1);
       const targets = referenceTargets(file, specifier);
       if (targets.length === 0 && isProtocol(specifier)) {
-        const allowedOwner = owner?.layer === 'data' || protocolTestSuites.has(suite);
-
-        return allowedOwner && protocolLibraries.has(written) && !reexport ? undefined : 'protocol';
+        return allowedProtocol(written, owner, suite) && !reexport ? undefined : 'protocol';
       }
       if (explicitReference && specifier !== written) {
         return 'literal';

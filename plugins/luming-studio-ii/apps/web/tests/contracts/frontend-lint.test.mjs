@@ -13,6 +13,10 @@ const platform = 'src/platform/transport/index.ts';
 const integration = 'tests/integration/whiteboard-editor.test.tsx';
 const support = 'tests/support/app-mock.tsx';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+const workbench = 'src/surfaces/workbench/Workbench.tsx';
+const workbenchPage = 'src/pages/workbench/WorkbenchPage.tsx';
+const catalog = 'src/data/catalog/client.ts';
+const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 
 const accepted = [
   ['src/app/main.tsx', "import { createRoot } from 'react-dom/client';"],
@@ -33,9 +37,85 @@ const accepted = [
   [support, "import { WhiteboardPage } from '../../src/pages/whiteboard/index.js';"],
   [integration, `import { WhiteboardService } from '${protocol}';`],
   [integration, 'const request = async () => new Uint8Array();'],
+  ['src/app/main.tsx', "import { WorkbenchPage } from '../pages/workbench/index.js';"],
+  [workbenchPage, "import { Workbench } from '../../surfaces/workbench/index.js';"],
+  [workbench, "import type { CatalogClient } from '../../data/catalog/index.js';"],
+  [workbench, "import { createPortal } from 'react-dom';"],
+  [workbench, "import { Search } from 'lucide-react';"],
+  [surface, "import { ArrowLeft } from 'lucide-react';"],
+  [catalog, `import { BoardCatalogService } from '${catalogProtocol}';`],
+  [
+    'tests/integration/workbench.test.tsx',
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
 ];
 
 const rejected = [
+  ['icons in catalog data', catalog, "import { Search } from 'lucide-react';"],
+  ['icons in the browser platform', platform, "import { Search } from 'lucide-react';"],
+  ['icons in the Workbench page', workbenchPage, "import { Search } from 'lucide-react';"],
+  [
+    'icon API in another Surface',
+    'src/surfaces/archive/Archive.tsx',
+    "import { Search } from 'lucide-react';",
+  ],
+  ['an unclassified workbench catalog leaf', 'src/data/catalog.ts', 'export {};'],
+  [
+    'workbench page reaches a private Surface',
+    workbenchPage,
+    "import { Workbench } from '../../surfaces/workbench/Workbench.js';",
+  ],
+  [
+    'workbench Surface bypasses the catalog data entry',
+    workbench,
+    "type Catalog = import('../../data/catalog/client.js').CatalogClient;",
+  ],
+  [
+    'workbench imports a generated catalog request',
+    workbench,
+    `import type { ListBoardsRequest } from '${catalogProtocol}';`,
+  ],
+  [
+    'catalog data imports an internal generated module',
+    catalog,
+    `import { BoardCatalogService } from '${catalogProtocol}/index';`,
+  ],
+  [
+    'catalog codec in the whiteboard module',
+    data,
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  ['whiteboard codec in catalog data', catalog, `import { WhiteboardService } from '${protocol}';`],
+  [
+    'catalog codec in the browser platform',
+    platform,
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    'direct catalog network call from Workbench',
+    workbench,
+    'const response = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'direct catalog network call from data',
+    catalog,
+    'const response = fetch(url);',
+    'no-restricted-globals',
+  ],
+  ['a portal outside Workbench', surface, "import { createPortal } from 'react-dom';"],
+  ['a portal in the Workbench page', workbenchPage, "import { createPortal } from 'react-dom';"],
+  ['a React DOM namespace in Workbench', workbench, "import * as renderer from 'react-dom';"],
+  [
+    'mixed portal and React DOM runtime imports',
+    workbench,
+    "import { createPortal, flushSync } from 'react-dom';",
+  ],
+  [
+    'an independent React mount in Workbench',
+    workbench,
+    "import { createRoot } from 'react-dom/client';",
+  ],
   ['unclassified source', 'src/other/module.ts', 'export const value = 1;'],
   ['file outside a Surface module', 'src/surfaces/Editor.tsx', 'export const value = 1;'],
   [

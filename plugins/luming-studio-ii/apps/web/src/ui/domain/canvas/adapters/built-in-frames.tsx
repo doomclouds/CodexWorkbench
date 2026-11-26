@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { CanvasConnectorPath } from '../connectors/CanvasConnectorPath.js';
+import { CanvasConnectorPath, connectorLabelLift } from '../connectors/CanvasConnectorPath.js';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type { CanvasGeometry, CanvasObjectDraft } from '../contracts.js';
 import { CanvasInkPath } from '../ink/CanvasInkPath.js';
@@ -11,6 +11,7 @@ export interface CanvasPrimitiveFrameProps {
   readonly zoom: number;
   readonly content?: ReactNode;
   readonly showCaption: boolean;
+  readonly selected: boolean;
   readonly connectorRoute?: ResolvedConnection;
 }
 
@@ -39,7 +40,15 @@ export function CanvasShapeFrame({
         hollow={object.hollow}
       />
       {showCaption && (
-        <div className="studio-ui-canvas-object-label">{content ?? object.label}</div>
+        <div
+          className={
+            object.shape === 'person'
+              ? 'studio-ui-canvas-object-label studio-ui-canvas-object-label--person'
+              : 'studio-ui-canvas-object-label'
+          }
+        >
+          {content ?? object.label}
+        </div>
       )}
     </>
   );
@@ -118,6 +127,7 @@ export function CanvasConnectorFrame({
   connectorRoute,
   content,
   showCaption,
+  selected,
 }: CanvasPrimitiveFrameProps) {
   if (object.kind !== 'connector' || !connectorRoute) {
     return null;
@@ -133,13 +143,16 @@ export function CanvasConnectorFrame({
         route={connectorRoute}
         connection={object.connection}
         label={defaultCaption}
-        stroke={object.stroke}
+        stroke={selected ? 'var(--studio-ui-accent, #eb6c36)' : object.stroke}
         dashed={object.dashed}
       />
       {customCaption && labelPosition && (
         <div
           className="studio-ui-canvas-connector-label"
-          style={{ left: labelPosition.x - geometry.x, top: labelPosition.y - geometry.y }}
+          style={{
+            left: labelPosition.x - geometry.x,
+            top: labelPosition.y - geometry.y - connectorLabelLift,
+          }}
         >
           {content}
         </div>

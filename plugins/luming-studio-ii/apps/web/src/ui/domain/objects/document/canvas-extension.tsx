@@ -22,6 +22,7 @@ const blockTypes = new Set([
   'image',
   'divider',
 ]);
+const documentPaper = '#EFEFEF';
 
 function validBlock(block: unknown, depth: number): block is DocumentBlock {
   if (!isRecord(block) || !isRecord(block.props) || depth === documentTreeDepth) {
@@ -61,6 +62,8 @@ function DocumentCanvasView({
   onRetentionChange,
   request,
   object,
+  geometry,
+  zoom,
 }: CanvasObjectViewProps) {
   const value = readDocument(payload?.value);
   if (!value) {
@@ -93,7 +96,8 @@ function DocumentCanvasView({
   return (
     <DocumentObject
       value={value}
-      paper={object.fill ? { fill: object.fill } : undefined}
+      paper={{ fill: object.fill ?? documentPaper }}
+      canvas={{ width: geometry.width, height: geometry.height, zoom }}
       readOnly={readOnly}
       editRequest={editRequest}
       onCommit={handleCommit}
@@ -105,6 +109,6 @@ function DocumentCanvasView({
 export const documentExtension: CanvasObjectExtension = {
   kind: 'document',
   capabilities: { content: 'native', move: true, resize: true, rotate: false, connect: true },
-  placement: { kind: 'document', label: '文档', width: 680, height: 480 },
+  placement: { kind: 'document', label: '文档', width: 680, height: 560, fill: documentPaper },
   View: DocumentCanvasView,
 };

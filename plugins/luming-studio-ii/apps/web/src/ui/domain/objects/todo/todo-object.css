@@ -1,6 +1,8 @@
 .studio-object-todo {
   --todo-paper: var(--studio-ui-surface, Canvas);
   --todo-ui-scale: 1;
+  --todo-rule: light-dark(#a8b0bd, #5e6570);
+  --studio-ui-accent: light-dark(#6d33d3, #c5adff);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -9,15 +11,29 @@
   block-size: 100%;
   min-inline-size: 0;
   min-block-size: 0;
-  gap: 0.375rem;
-  padding: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--todo-rule);
+  border-radius: 8px;
   background: var(--todo-paper);
   color: var(--studio-ui-text, CanvasText);
+  font:
+    15px/1.4 Arial,
+    'Microsoft YaHei',
+    sans-serif;
 }
 
-.studio-object-todo[data-todo-scheme] {
-  --studio-ui-text: light-dark(#172033, #f0f3f7);
-  --studio-ui-muted: light-dark(#536078, #b3bccb);
+.studio-object-todo[data-todo-scheme='light'] {
+  --studio-ui-text: #111111;
+  --studio-ui-muted: #4f5d75;
+  --studio-ui-accent: #6d33d3;
+  --todo-rule: #a8b0bd;
+}
+
+.studio-object-todo[data-todo-scheme='dark'] {
+  --studio-ui-text: #f7f4ed;
+  --studio-ui-muted: #b7c0cd;
+  --studio-ui-accent: #c5adff;
+  --todo-rule: #5e6570;
 }
 
 .studio-object-todo[data-todo-layout='overview'] {
@@ -27,9 +43,50 @@
 
 .studio-object-todo__heading {
   display: flex;
+  box-sizing: border-box;
+  min-block-size: 46px;
+  flex-shrink: 0;
   align-items: center;
-  gap: 0.5em;
+  gap: 8px;
+  padding: 4px 12px;
+  border-block-end: 1px solid color-mix(in srgb, var(--todo-rule) 65%, transparent);
   min-inline-size: 0;
+}
+
+.studio-object-todo__heading-icons {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.studio-object-todo__heading-icons svg {
+  inline-size: 18px;
+  block-size: 18px;
+}
+
+.studio-object-todo__heading-icons svg:first-child {
+  color: var(--studio-ui-muted, GrayText);
+}
+
+.studio-object-todo__heading-icons svg:last-child {
+  inline-size: 22px;
+  block-size: 22px;
+}
+
+.studio-object-todo__heading .studio-ui-button[data-icon-only] {
+  inline-size: 28px;
+  block-size: 28px;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0;
+}
+
+.studio-object-todo[data-todo-layout='overview'] .studio-object-todo__heading {
+  min-block-size: 0;
+  gap: min(1.5%, 6px);
+  padding-inline: min(3%, 12px);
+  border-block-end: 0;
 }
 
 .studio-object-todo__title,
@@ -42,14 +99,17 @@
 .studio-object-todo__title h3 {
   margin: 0;
   overflow: hidden;
-  font-size: 1em;
+  padding: 3px 2px;
+  font-size: 17px;
+  font-weight: 650;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .studio-object-todo__count {
   flex: none;
-  font-size: 0.8em;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   color: var(--studio-ui-muted, GrayText);
 }
@@ -73,10 +133,11 @@
 .studio-object-todo__row {
   display: flex;
   align-items: center;
-  min-block-size: 2rem;
-  padding-block: 0.125rem;
-  gap: 0.25rem;
-  border-block-end: 1px solid color-mix(in srgb, currentcolor 12%, transparent);
+  min-block-size: 43px;
+  box-sizing: border-box;
+  padding: 4px 12px;
+  gap: 8px;
+  border-block-end: 1px solid color-mix(in srgb, var(--todo-rule) 55%, transparent);
 }
 
 .studio-object-todo__row[data-todo-drop='before'] {
@@ -93,9 +154,10 @@
 
 .studio-object-todo__checked {
   display: inline-flex;
-  flex: 0 0 1.375rem;
+  flex: 0 0 17px;
   align-items: center;
   justify-content: flex-start;
+  margin-inline: 2px;
   overflow: hidden;
 }
 
@@ -104,9 +166,22 @@
   white-space: nowrap;
 }
 
-.studio-object-todo__task[data-completed='true'] {
-  color: var(--studio-ui-muted, GrayText);
-  text-decoration: line-through;
+.studio-object-todo__checked > [data-checked] {
+  display: grid;
+  box-sizing: border-box;
+  inline-size: 17px;
+  block-size: 17px;
+  place-items: center;
+  border: 1.5px solid var(--studio-ui-muted, GrayText);
+  border-radius: 4px;
+}
+
+.studio-object-todo__checked > [data-checked='true'] {
+  border-color: var(--studio-ui-accent, Highlight);
+  background: var(--studio-ui-accent, Highlight);
+  color: var(--todo-paper);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .studio-object-todo__title > button,

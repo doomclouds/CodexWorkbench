@@ -11,7 +11,9 @@ import type {
   TodoObjectSnapshot,
   TodoSourceRef,
 } from './contracts.js';
-import { TodoObject } from './TodoObject.js';
+import { isTodoOverview, TodoObject } from './TodoObject.js';
+
+const todoPaper = '#EFEFEF';
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -69,6 +71,7 @@ function TodoCanvasBody({
   readOnly,
   editRequest,
   object,
+  geometry,
   zoom,
   request,
   onRetentionChange,
@@ -106,7 +109,8 @@ function TodoCanvasBody({
     return false;
   }
 
-  const appearance = { paper: object.fill, uiScale: 1 / zoom };
+  const appearance = { paper: object.fill ?? todoPaper, uiScale: 1 / zoom };
+  const overview = isTodoOverview(geometry.width * zoom, geometry.height * zoom);
 
   return (
     <>
@@ -116,6 +120,7 @@ function TodoCanvasBody({
         readOnly={readOnly}
         editRequest={editRequest}
         appearance={appearance}
+        overview={overview}
         onEdit={handleEdit}
         onEditingChange={setEditing}
         onRequestExpand={() => setExpanded(true)}
@@ -143,7 +148,7 @@ function TodoCanvasBody({
 
 export const todoExtension: CanvasObjectExtension = {
   kind: 'todo',
-  placement: { kind: 'todo', label: '任务清单', width: 540, height: 420 },
+  placement: { kind: 'todo', label: '任务清单', width: 540, height: 420, fill: todoPaper },
   capabilities: { move: true, resize: true, rotate: false, connect: true, content: 'native' },
   View: TodoCanvasBody,
 };

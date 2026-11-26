@@ -2,7 +2,8 @@ import type { CanvasPoint } from './contracts.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
 const elementSelector = '[data-canvas-object]';
-const labelSelector = '[data-canvas-section-title], [data-canvas-connector-label]';
+const labelSelector =
+  '[data-canvas-section-title], [data-canvas-connector-label], [data-canvas-external-title]';
 const rootSelector = '[data-canvas-root]';
 const nativeSelector = '[data-canvas-native]';
 const handleSelector = '[data-canvas-handle], [data-canvas-port], [data-canvas-connector-handle]';
@@ -46,6 +47,15 @@ export function canvasDragSurface(target: EventTarget | null, container: HTMLDiv
   }
   if (element?.closest('[data-canvas-drag-surface="title"]')) {
     return 'title';
+  }
+
+  const body = element?.closest('[data-canvas-drag-surface="body"]');
+  const interactive = element?.closest(
+    'a, button, input, select, textarea, [contenteditable="true"], [role="button"]',
+  );
+
+  if (body && !interactive) {
+    return 'body';
   }
 }
 

@@ -274,6 +274,7 @@ function TableObjectSession(props: TableObjectProps) {
       ref={root}
       className="studio-object-table"
       data-table-detail={view}
+      data-table-static={!controls}
       style={{ width: model.width, fontSize }}
       onDoubleClick={handleOutlineOpen}
     >

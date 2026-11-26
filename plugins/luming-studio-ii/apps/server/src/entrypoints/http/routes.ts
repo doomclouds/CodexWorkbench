@@ -1,58 +1,22 @@
-import {
-  create,
-  toBinary,
-  type DescMessage,
-  type MessageInitShape,
-  type MessageShape,
-} from '@bufbuild/protobuf';
+import type { MessageInitShape } from '@bufbuild/protobuf';
 import {
   WhiteboardService,
   type GetCommandReceiptResponseSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
-import type { Actor, WhiteboardApplication } from '../../modules/whiteboard/application/index.js';
+import type { WhiteboardApplication } from '../../modules/whiteboard/application/index.js';
 import { toPayloadResult } from './payload.js';
 import { toCommandReceipt, toMoveCommand } from './receipt.js';
-import { decodeRequest, requireId } from './request.js';
+import { requireId } from './request.js';
 import { toBoardScene } from './scene.js';
+import { unaryRoute, type RouteEntry } from './unary-route.js';
 
-type WhiteboardRoute = (actor: Actor, body: Uint8Array) => Uint8Array;
-type RouteEntry = readonly [string, WhiteboardRoute];
 type ReceiptResponseInit = MessageInitShape<typeof GetCommandReceiptResponseSchema>;
-type RouteHandler<Input extends DescMessage, Output extends DescMessage> = (
-  actor: Actor,
-  request: MessageShape<Input>,
-) => MessageInitShape<Output>;
 
-interface UnaryMethod<Input extends DescMessage, Output extends DescMessage> {
-  readonly name: string;
-  readonly methodKind: 'unary';
-  readonly input: Input;
-  readonly output: Output;
-}
-
-function unaryRoute<Input extends DescMessage, Output extends DescMessage>(
-  method: UnaryMethod<Input, Output>,
-  handle: RouteHandler<Input, Output>,
-): RouteEntry {
-  const path = `/${WhiteboardService.typeName}/${method.name}`;
-
-  return [
-    path,
-    (actor, body) => {
-      const request = decodeRequest(method.input, body);
-      const response = handle(actor, request);
-      return toBinary(method.output, create(method.output, response));
-    },
-  ];
-}
-
-export function createRoutes(
-  application: WhiteboardApplication,
-): ReadonlyMap<string, WhiteboardRoute> {
+export function createWhiteboardRoutes(application: WhiteboardApplication): readonly RouteEntry[] {
   const { getBoardScene, getObjectPayloads, moveObjects, getCommandReceipt } =
     WhiteboardService.method;
 
-  return new Map([
+  return [
     unaryRoute(getBoardScene, (actor, request) => ({
       scene: toBoardScene(application.getBoardScene(actor, requireId(request.boardId))),
     })),
@@ -76,5 +40,5 @@ export function createRoutes(
           : { case: 'notRecorded', value: { boardId, commandId } },
       };
     }),
-  ]);
+  ];
 }

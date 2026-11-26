@@ -252,7 +252,7 @@ export function TodoRows(props: TodoRowsProps) {
             />
           ) : (
             <span aria-label={checked ? '已完成' : '未完成'} data-checked={checked}>
-              {checked ? '✓' : '○'}
+              {checked ? '✓' : null}
             </span>
           )}
         </span>

@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react';
 import { OperationNotice, StatusText } from '../../ui/base/index.js';
 import type { useMoveSession } from './move-session.js';
 
@@ -11,10 +12,15 @@ export function MoveStatus({ controls }: MoveFeedbackProps) {
       return <StatusText message="保存中" busy announcement="polite" />;
     case 'checking':
       return <StatusText message="正在查询回执" busy announcement="polite" />;
-    case 'saved':
-      return <StatusText message="已保存" tone="success" announcement="polite" />;
-    case 'conflict':
     case 'idle':
+    case 'saved':
+      return (
+        <span className="whiteboard-editor__saved" role="status">
+          <Check size={13} />
+          已保存
+        </span>
+      );
+    case 'conflict':
     case 'rejected':
     case 'unknown':
     case 'unsupported':

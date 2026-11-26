@@ -27,8 +27,11 @@ const handleLabels = {
 
 type TransformHandle = ResizeHandle | 'rotate';
 
-const cornerHandles: readonly TransformHandle[] = ['nw', 'ne', 'sw', 'se'];
-const edgeHandles: readonly TransformHandle[] = ['n', 'e', 's', 'w'];
+const cornerHandles = ['nw', 'ne', 'sw', 'se'] as const;
+const edgeHandles = ['n', 'e', 's', 'w'] as const;
+const textEdgeHandles = ['e', 'w'] as const;
+const resizeCursors = ['ew-resize', 'nwse-resize', 'ns-resize', 'nesw-resize'] as const;
+const resizeDirections = { nw: 1, n: 2, ne: 3, e: 0, se: 1, s: 2, sw: 3, w: 0 };
 
 const portLabels = {
   top: '从上端口连线',
@@ -48,6 +51,7 @@ interface CanvasOverlaysProps {
   readonly allowResize?: boolean;
   readonly allowRotate?: boolean;
   readonly cornerResizeOnly?: boolean;
+  readonly lockedSelection?: boolean;
   readonly selectedConnector?: ProjectedCanvasObject;
   readonly portSource?: ProjectedCanvasObject;
   readonly onHandlePointerDown: (
@@ -104,6 +108,38 @@ function handlePress(event: PointerEvent<HTMLButtonElement>, press: () => void) 
   }
 }
 
+function resizeCursor(handle: ResizeHandle, rotation: number) {
+  const direction = (resizeDirections[handle] + Math.round(rotation / 45)) % 4;
+
+  return resizeCursors[(direction + 4) % 4];
+}
+
+function selectedResizeEdges(
+  selected: readonly ProjectedCanvasObject[],
+  cornersOnly: boolean | undefined,
+): readonly ResizeHandle[] {
+  const singleKind = selected.length === 1 ? selected[0]?.object.kind : undefined;
+  if (singleKind === 'text') {
+    return textEdgeHandles;
+  }
+
+  return cornersOnly ||
+    singleKind === 'sticker' ||
+    selected.some(({ object }) => object.kind === 'image')
+    ? []
+    : edgeHandles;
+}
+
+function visiblePortSource(source: ProjectedCanvasObject | undefined, zoom: number) {
+  if (!source || zoom < 0.25) {
+    return undefined;
+  }
+
+  const { width, height } = source.geometry;
+
+  return Math.max(width, height) * zoom >= 40 ? source : undefined;
+}
+
 function connectorHandles(points: readonly CanvasPoint[]) {
   const start = points[0];
   const end = points.at(-1);
@@ -138,44 +174,66 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
     allowRotate,
     cornerResizeOnly,
     selectedConnector,
-    portSource,
+    portSource: source,
+    lockedSelection,
     onHandlePointerDown,
     onPortPointerDown,
     onConnectorPointerDown,
   } = props;
   const view = normalizeViewport(viewport);
-  const resizeHandles = cornerResizeOnly ? cornerHandles : [...cornerHandles, ...edgeHandles];
-  const handles: readonly TransformHandle[] = [
-    ...(allowResize ? resizeHandles : []),
-    ...(allowRotate ? (['rotate'] as const) : []),
-  ];
+  const resizeHandles = [...cornerHandles, ...selectedResizeEdges(selected, cornerResizeOnly)];
+  const singleKind = selected.length === 1 ? selected[0]?.object.kind : undefined;
+  const outsideResize = singleKind === 'document' || singleKind === 'todo' || singleKind === 'html';
+  const portSource = visiblePortSource(source, view.zoom);
   const connection = selectedConnector?.connectorRoute;
 
   return (
     <div className="studio-ui-canvas-overlays">
-      {selected.map(({ object, geometry }) => (
-        <div
-          key={object.id}
-          className="studio-ui-canvas-selection-outline"
-          style={screenBox(geometry, view)}
-          aria-hidden="true"
-        />
-      ))}
       {transformBox && (
-        <div className="studio-ui-canvas-selection-outline" style={screenBox(transformBox, view)}>
-          {handles.map((handle) => (
-            <button
-              key={handle}
-              className="studio-ui-canvas-transform-handle"
-              data-canvas-handle={handle}
-              type="button"
-              tabIndex={-1}
-              aria-label={handleLabels[handle]}
-              onPointerDown={(event) =>
-                handlePress(event, () => onHandlePointerDown(event, handle))
-              }
-            />
-          ))}
+        <div
+          className="studio-ui-canvas-selection-outline"
+          data-canvas-outside-resize={outsideResize || undefined}
+          style={screenBox(transformBox, view)}
+        >
+          {allowRotate &&
+            cornerHandles.map((corner) => (
+              <button
+                key={`rotate-${corner}`}
+                className="studio-ui-canvas-rotate-hit"
+                data-canvas-handle="rotate"
+                data-canvas-rotate-corner={corner}
+                type="button"
+                tabIndex={-1}
+                aria-label={`旋转所选对象 ${corner}`}
+                onPointerDown={(event) =>
+                  handlePress(event, () => onHandlePointerDown(event, 'rotate'))
+                }
+              />
+            ))}
+          {allowResize &&
+            resizeHandles.map((handle) => (
+              <button
+                key={handle}
+                className="studio-ui-canvas-transform-handle"
+                data-canvas-handle={handle}
+                type="button"
+                tabIndex={-1}
+                aria-label={handleLabels[handle]}
+                style={{ cursor: resizeCursor(handle, transformBox.rotation) }}
+                onPointerDown={(event) =>
+                  handlePress(event, () => onHandlePointerDown(event, handle))
+                }
+              />
+            ))}
+          {lockedSelection &&
+            cornerHandles.map((handle) => (
+              <span
+                key={handle}
+                className="studio-ui-canvas-transform-handle studio-ui-canvas-transform-handle--locked"
+                data-canvas-locked-corner={handle}
+                aria-hidden="true"
+              />
+            ))}
         </div>
       )}
       {portSource &&

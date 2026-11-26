@@ -296,6 +296,7 @@ export interface CanvasProps {
   readonly penStyle?: CanvasPenStyle;
   readonly canEdit: boolean;
   readonly initialViewport?: CanvasViewport;
+  readonly fitOnMount?: boolean;
   readonly viewportRequest?: CanvasViewportRequest;
   readonly pendingEdits?: readonly CanvasEditIntent[];
   readonly objectExtensions?: readonly CanvasObjectExtension[];

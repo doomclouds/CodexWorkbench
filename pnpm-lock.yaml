@@ -298,6 +298,9 @@ importers:
       '@codexworkbench/luming-studio-ii-contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      lucide-react:
+        specifier: 1.70.0
+        version: 1.70.0(@types/react@19.2.14)(react@19.3.1)
       react:
         specifier: 19.3.1
         version: 19.3.1

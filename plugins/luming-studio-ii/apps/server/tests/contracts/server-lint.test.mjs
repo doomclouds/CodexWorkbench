@@ -9,7 +9,10 @@ import { ESLint } from 'eslint';
 const serverRoot = fileURLToPath(new URL('../../', import.meta.url));
 const fixture = mkdtempSync(join(tmpdir(), 'luming-server-boundary-'));
 const whiteboard = 'src/modules/whiteboard/';
+const catalog = 'src/modules/catalog/';
+const catalogAdapter = 'src/infrastructure/adapters/catalog/';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const boundaryRule = 'server/contract-boundary';
 
 const fixtureFiles = [
@@ -20,6 +23,13 @@ const fixtureFiles = [
   whiteboard + 'domain/index.ts',
   whiteboard + 'domain/private.ts',
   whiteboard + 'ports/index.ts',
+  catalog + 'application/index.ts',
+  catalog + 'application/private.ts',
+  catalog + 'domain/index.ts',
+  catalog + 'domain/private.ts',
+  catalog + 'ports/index.ts',
+  catalogAdapter + 'index.ts',
+  catalogAdapter + 'private.ts',
   'src/infrastructure/adapters/index.ts',
   'src/infrastructure/adapters/private.ts',
   'src/infrastructure/platform/index.ts',
@@ -44,6 +54,7 @@ writeFileSync(
       paths: {
         '@board-app': [whiteboard + 'application/index.ts'],
         '@board/*': [whiteboard + '*'],
+        '@catalog/*': [catalog + '*'],
         '@platform/*': ['src/infrastructure/platform/*'],
       },
     },
@@ -94,6 +105,32 @@ const permitted = [
     'tests/unit/move.test.ts',
     "import { move } from '../../src/modules/whiteboard/domain/index.js';\nimport type { Ports } from '../../src/modules/whiteboard/ports/index.js';\nimport { vi } from 'vitest';",
   ],
+  [
+    'src/entrypoints/http/catalog.ts',
+    `import { list } from '@catalog/application/index.js';\nimport { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    catalog + 'application/index.ts',
+    "import { title } from '../domain/index.js';\nimport type { Repository } from '../ports/index.js';",
+  ],
+  [catalog + 'ports/index.ts', "import type { Board } from '../domain/index.js';"],
+  [
+    catalogAdapter + 'index.ts',
+    "import type { Repository } from '@catalog/ports/index.js';\nimport { open } from '../../platform/index.js';",
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { list } from '@catalog/application/index.js';\nimport { repository } from '../infrastructure/adapters/catalog/index.js';",
+  ],
+  [
+    'tests/support/catalog.ts',
+    "import { repository } from '../../src/infrastructure/adapters/catalog/index.js';",
+  ],
+  [
+    'tests/integration/catalog.test.ts',
+    `import { create } from '../../src/bootstrap/index.js';\nimport { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  ['tests/unit/catalog.test.ts', "import { title } from '@catalog/domain/index.js';"],
 ];
 
 for (const [file, code] of permitted) {
@@ -292,6 +329,74 @@ const rejected = [
     whiteboard + 'domain/index.ts',
     'function deep(a, b, c, d) {\n if (a) {\n  if (b) {\n   if (c) {\n    if (d) {\n     result();\n    }\n   }\n  }\n }\n}',
     'max-depth',
+  ],
+  [
+    'HTTP reaches a private catalog application file',
+    'src/entrypoints/http/catalog.ts',
+    "import { list } from '@catalog/application/private.js';",
+  ],
+  [
+    'HTTP bypasses the catalog application',
+    'src/entrypoints/http/catalog.ts',
+    "import type { Board } from '@catalog/domain/index.js';",
+  ],
+  [
+    'catalog imports whiteboard application APIs',
+    catalog + 'application/index.ts',
+    "import { open } from '@board-app';",
+  ],
+  [
+    'whiteboard reaches catalog internals',
+    whiteboard + 'domain/index.ts',
+    "import type { Board } from '@catalog/domain/private.js';",
+  ],
+  [
+    'catalog ports import domain runtime values',
+    catalog + 'ports/index.ts',
+    "import { title } from '../domain/index.js';",
+  ],
+  [
+    'catalog reads generated requests in its application',
+    catalog + 'application/index.ts',
+    `import type { ListBoardsRequest } from '${catalogProtocol}';`,
+  ],
+  [
+    'catalog reads the host clock in its domain',
+    catalog + 'domain/index.ts',
+    'const time = Date.now();',
+    'no-restricted-globals',
+  ],
+  [
+    'catalog performs host I/O in its port',
+    catalog + 'ports/index.ts',
+    'const response = fetch(url);',
+    'no-restricted-globals',
+  ],
+  ['an unclassified catalog leaf', catalog + 'index.ts', 'export {};', boundaryRule, 'location'],
+  [
+    'catalog adapter reaches whiteboard adapter internals',
+    catalogAdapter + 'index.ts',
+    "import { sql } from '../private.js';",
+  ],
+  [
+    'whiteboard adapters import catalog adapters',
+    'src/infrastructure/adapters/index.ts',
+    "import { repository } from './catalog/index.js';",
+  ],
+  [
+    'catalog adapter imports another context port',
+    catalogAdapter + 'index.ts',
+    "import type { Ports } from '@board/ports/index.js';",
+  ],
+  [
+    'bootstrap bypasses the catalog adapter public entry',
+    'src/bootstrap/index.ts',
+    "import { repository } from '../infrastructure/adapters/catalog/private.js';",
+  ],
+  [
+    'integration bypasses bootstrap and imports a catalog adapter',
+    'tests/integration/catalog.test.ts',
+    "import { repository } from '../../src/infrastructure/adapters/catalog/index.js';",
   ],
 ];
 

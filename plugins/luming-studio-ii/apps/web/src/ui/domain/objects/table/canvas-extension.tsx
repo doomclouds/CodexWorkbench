@@ -51,8 +51,22 @@ function isTableValue(value: unknown): value is TableObjectValue {
   return stamped && width && content;
 }
 
+function tableDetail(geometry: CanvasObjectViewProps['geometry'], zoom: number) {
+  const width = geometry.width * zoom;
+  const height = geometry.height * zoom;
+  if (width < 96 || height < 44) {
+    return 'outline';
+  }
+  if (width < 240 || height < 96 || 17 * zoom < 8) {
+    return 'preview';
+  }
+
+  return 'full';
+}
+
 function TableCanvasView({
   id,
+  object,
   payload,
   geometry,
   selected,
@@ -106,7 +120,13 @@ function TableCanvasView({
       selected={selected}
       canEdit={interactive && !readOnly}
       locked={locked}
+      detail={tableDetail(geometry, zoom)}
       zoom={zoom}
+      bodyPaint={{
+        background: 'var(--studio-ui-canvas, Canvas)',
+        color: 'var(--studio-ui-canvas-ink, CanvasText)',
+      }}
+      headerPaint={{ background: object.fill ?? '#eff0f1', color: '#2d3142' }}
       editRequest={editRequest}
       onSave={handleSave}
       onActivityChange={handleActivityChange}
@@ -117,6 +137,6 @@ function TableCanvasView({
 export const tableExtension: CanvasObjectExtension = {
   kind: 'table',
   capabilities: { content: 'native', move: true, resize: true, rotate: false, connect: true },
-  placement: { kind: 'table', label: '表格', width: 480, height: 180 },
+  placement: { kind: 'table', label: '表格', width: 480, height: 180, fill: '#ffffff' },
   View: TableCanvasView,
 };

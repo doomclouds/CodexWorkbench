@@ -49,21 +49,25 @@ export function selectionControls(
   registry: CanvasObjectRegistry,
   enabled: boolean,
 ) {
-  if (!enabled || selected.length === 0) {
+  if (selected.length === 0) {
     return {};
   }
 
   const object = selected.length === 1 ? selected[0] : undefined;
-  const single = object && editableTarget(index, pending, object.object.id) ? object : undefined;
-  const allEditable = selected.every(({ object }) => editableTarget(index, pending, object.id));
+  const single =
+    enabled && object && editableTarget(index, pending, object.object.id) ? object : undefined;
+  const allEditable =
+    enabled && selected.every(({ object }) => editableTarget(index, pending, object.id));
   const allowResize =
     allEditable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.resize);
   const allowRotate =
     allEditable && selected.every(({ object }) => registry.get(object.kind)?.capabilities.rotate);
   const geometries = selected.map(({ geometry }) => geometry);
+  const showSelectionBox = object?.object.kind !== 'connector' || !allEditable;
 
   return {
-    transformBox: allowResize || allowRotate ? getTransformBox(geometries) : undefined,
+    transformBox: showSelectionBox ? getTransformBox(geometries) : undefined,
+    lockedSelection: !allEditable,
     allowResize,
     allowRotate,
     cornerResizeOnly:

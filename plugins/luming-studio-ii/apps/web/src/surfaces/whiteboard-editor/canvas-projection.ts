@@ -50,6 +50,43 @@ const contentKinds = new Set<string>([
   'sticker',
 ]);
 
+const legacyShapeColors = new Map([
+  ['paper', 'var(--studio-ui-canvas, #f5f5f5)'],
+  ['paper-2', 'var(--studio-ui-canvas-paper-secondary, #ececec)'],
+  ['ink', 'var(--studio-ui-canvas-ink, #2d3142)'],
+  ['muted', 'var(--studio-ui-canvas-muted, #4f5d75)'],
+  ['accent', 'var(--studio-ui-accent, #eb6c36)'],
+  ['link', 'var(--studio-ui-canvas-link, #2e5aa8)'],
+  ['soft', 'var(--studio-ui-canvas-soft, #68738a)'],
+  ['rule', 'var(--studio-ui-canvas-rule, #bfc0c0)'],
+  ['ink-strong', '#111111'],
+  ['white', '#ffffff'],
+  ['black', '#000000'],
+  ['transparent', '#00000000'],
+  ['yellow', '#f6e39c'],
+  ['peach', '#f4c3a4'],
+  ['pink', '#edbdd5'],
+  ['green', '#bcd6be'],
+  ['blue', '#b8d2ed'],
+  ['purple', '#d0c0e5'],
+  ['terracotta', '#b64e2a'],
+  ['none', 'none'],
+]);
+const legacyColorLiteral = /^(?:#[\da-f]{3,8}|rgba?\([\d., /]+\))$/iu;
+const shapePaperFallback = 'var(--studio-ui-canvas-paper-secondary, #ececec)';
+
+function shapeColor(value?: string, fallback?: string): string | undefined {
+  const color = value?.trim();
+  if (!color) {
+    return undefined;
+  }
+
+  return (
+    legacyShapeColors.get(color.toLowerCase()) ??
+    (legacyColorLiteral.test(color) ? color : fallback)
+  );
+}
+
 function isShape(value: string): value is CanvasShape {
   return shapes.has(value);
 }
@@ -74,6 +111,8 @@ function projectObject(object: WhiteboardObject, version: number): CanvasObject 
         ...common,
         kind: 'shape',
         shape: isShape(detail.outline) ? detail.outline : undefined,
+        fill: shapeColor(appearance?.fill, shapePaperFallback),
+        stroke: shapeColor(appearance?.stroke, 'transparent'),
       };
     case 'section':
       return { ...common, kind: 'section', transparent: detail.transparent };
@@ -82,6 +121,16 @@ function projectObject(object: WhiteboardObject, version: number): CanvasObject 
     case 'connector':
       return { ...common, kind: 'connector', connection: detail.connection };
     case undefined:
+      if (kind === 'shape') {
+        return {
+          ...common,
+          kind: 'shape',
+          shape: 'rounded',
+          fill: shapeColor(appearance?.fill, shapePaperFallback),
+          stroke: shapeColor(appearance?.stroke, 'transparent'),
+        };
+      }
+
       return { ...common, kind: isContentKind(kind) ? kind : 'native' };
   }
 }

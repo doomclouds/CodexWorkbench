@@ -32,6 +32,9 @@ test('opens a scene, reads visible bodies, and keeps the drag visible until the 
     expect(rpc.payloadReads).toEqual([['caption']]);
     expect(app.canvas().textContent).toContain('从服务读取的正文');
     expect(position(app.canvas())).toBe('40px');
+    expect(
+      app.canvas().querySelector('[data-canvas-object="rectangle"].studio-ui-canvas-object--shape'),
+    ).not.toBeNull();
 
     await app.drag(from, to);
     expect(app.host.textContent).toContain('保存中');

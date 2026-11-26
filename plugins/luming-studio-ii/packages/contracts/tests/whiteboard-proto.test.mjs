@@ -84,7 +84,7 @@ function assertRoundTrip(type, value) {
   assert.deepEqual(decode(type, wire), value);
 }
 
-test('declares four typed unary methods on WhiteboardService', () => {
+test('declares the typed unary methods for board catalog and whiteboard editing', () => {
   const descriptor = JSON.parse(
     runBuf([
       'build',
@@ -98,28 +98,34 @@ test('declares four typed unary methods on WhiteboardService', () => {
   const services = descriptor.file
     .filter((file) => file.package === protoPackage)
     .flatMap((file) => file.service ?? []);
-  assert.deepEqual(services.map(({ name }) => name), ['WhiteboardService']);
+  const methodsByService = new Map([
+    ['BoardCatalogService', ['ListBoards', 'CreateBoard', 'GetCatalogCommandReceipt']],
+    ['WhiteboardService', ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt']],
+  ]);
+  assert.deepEqual(services.map(({ name }) => name).sort(), [...methodsByService.keys()]);
 
-  const methods = ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt'];
-  const signatures = services[0].method.map(
-    ({ name, inputType, outputType, clientStreaming = false, serverStreaming = false }) => ({
-      name,
-      inputType,
-      outputType,
-      clientStreaming,
-      serverStreaming,
-    }),
-  );
-  assert.deepEqual(
-    signatures,
-    methods.map((name) => ({
-      name,
-      inputType: `.${protoPackage}.${name}Request`,
-      outputType: `.${protoPackage}.${name}Response`,
-      clientStreaming: false,
-      serverStreaming: false,
-    })),
-  );
+  for (const service of services) {
+    const signatures = service.method.map(
+      ({ name, inputType, outputType, clientStreaming = false, serverStreaming = false }) => ({
+        name,
+        inputType,
+        outputType,
+        clientStreaming,
+        serverStreaming,
+      }),
+    );
+    const methods = methodsByService.get(service.name);
+    assert.deepEqual(
+      signatures,
+      methods.map((name) => ({
+        name,
+        inputType: `.${protoPackage}.${name}Request`,
+        outputType: `.${protoPackage}.${name}Response`,
+        clientStreaming: false,
+        serverStreaming: false,
+      })),
+    );
+  }
 });
 
 test('preserves omitted, zero, and large expected geometry versions', () => {

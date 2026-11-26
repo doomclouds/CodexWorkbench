@@ -1,7 +1,17 @@
 import { createRoot } from 'react-dom/client';
+import { createBoardCatalogService } from '../data/catalog/index.js';
 import { createWhiteboardService } from '../data/whiteboard/index.js';
-import { createCommandId, postProtobuf, readBoardId } from '../platform/browser/index.js';
-import { WhiteboardApp } from './index.js';
+import {
+  createCommandId,
+  postProtobuf,
+  readBoardId,
+  readPreferences,
+  rememberLayout,
+  rememberTheme,
+  subscribeBoardLocation,
+  writeBoardLocation,
+} from '../platform/browser/index.js';
+import { StudioApp } from './index.js';
 
 const container = document.getElementById('root');
 if (!container) {
@@ -9,6 +19,14 @@ if (!container) {
 }
 
 const service = createWhiteboardService(postProtobuf);
+const catalog = createBoardCatalogService(postProtobuf);
+
 createRoot(container).render(
-  <WhiteboardApp boardId={readBoardId()} service={service} createCommandId={createCommandId} />,
+  <StudioApp
+    catalog={catalog}
+    service={service}
+    createCommandId={createCommandId}
+    navigation={{ read: readBoardId, write: writeBoardLocation, subscribe: subscribeBoardLocation }}
+    preferences={{ ...readPreferences(), rememberLayout, rememberTheme }}
+  />,
 );

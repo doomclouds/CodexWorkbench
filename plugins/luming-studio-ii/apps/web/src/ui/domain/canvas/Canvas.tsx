@@ -22,7 +22,13 @@ import { isObjectLocked, projectedObjectBounds, projectObject } from './scene/in
 import { fitViewport, mergeRects, normalizeViewport } from './viewport/index.js';
 import './Canvas.css';
 
-const fitPadding = 40;
+const fitPadding = 72;
+
+function gridSpacing(zoom: number) {
+  const spacing = 24 * zoom;
+
+  return spacing >= 8 ? spacing : spacing * 2 ** Math.ceil(Math.log2(8 / spacing));
+}
 
 function sameIds(previous: readonly string[] | undefined, next: readonly string[]) {
   if (!previous || previous.length !== next.length) {
@@ -33,7 +39,15 @@ function sameIds(previous: readonly string[] | undefined, next: readonly string[
 }
 
 function CanvasSession(props: CanvasProps) {
-  const { label, canEdit, initialViewport, onViewportChange, onVisibleObjectsChange, ref } = props;
+  const {
+    label,
+    canEdit,
+    initialViewport,
+    fitOnMount,
+    onViewportChange,
+    onVisibleObjectsChange,
+    ref,
+  } = props;
   const root = useRef<HTMLDivElement>(null);
   const size = useCanvasSize(root);
   const [retainedId, setRetainedId] = useState<string>();
@@ -88,13 +102,14 @@ function CanvasSession(props: CanvasProps) {
     pending,
   });
   const selecting = input.toolKind === 'select';
-  const controls = selectionControls(selected, index, pending, registry, canEdit && selecting);
+  const controls = selectionControls(selecting ? selected : [], index, pending, registry, canEdit);
   const activeEmbedId =
     selecting && !input.pointerActive && props.selection.length === 1
       ? props.selection[0]
       : undefined;
   const previousVisible = useRef<readonly string[] | undefined>(undefined);
   const appliedViewportRequest = useRef<string | undefined>(undefined);
+  const openingFitApplied = useRef(false);
   const observeVisible = useEffectEvent((ids: readonly string[]) => onVisibleObjectsChange?.(ids));
   const observeViewport = useEffectEvent(onViewportChange ?? (() => undefined));
   const applyViewportRequest = useEffectEvent((request: CanvasViewportRequest | undefined) => {
@@ -134,7 +149,7 @@ function CanvasSession(props: CanvasProps) {
     props.onObjectActivate?.(activation);
   }
 
-  function fitToObjects(ids: readonly string[]) {
+  function fitObjects(ids: readonly string[], timing: 'now' | 'frame') {
     const bounds = ids.flatMap((id) => {
       const item = projectObject(index, pending, id);
 
@@ -142,14 +157,39 @@ function CanvasSession(props: CanvasProps) {
     });
     const target = mergeRects(bounds);
     if (!target || size.width <= 0 || size.height <= 0) {
-      return;
+      return false;
     }
 
-    input.cancel();
-    update({ viewport: fitViewport(target, size, fitPadding) }, 'now');
+    input.cancel(timing);
+    update({ viewport: fitViewport(target, size, fitPadding) }, timing);
+
+    return true;
+  }
+
+  function fitToObjects(ids: readonly string[]) {
+    fitObjects(ids, 'now');
   }
 
   useImperativeHandle(ref, () => ({ focus, fitToObjects }));
+
+  const fitOpeningScene = useEffectEvent(() => {
+    if (!fitOnMount || openingFitApplied.current) {
+      return;
+    }
+
+    if (initialViewport || appliedViewportRequest.current !== undefined) {
+      openingFitApplied.current = true;
+      return;
+    }
+
+    openingFitApplied.current = fitObjects(
+      props.scene.objects.map(({ id }) => id),
+      'frame',
+    );
+  });
+  useLayoutEffect(() => {
+    fitOpeningScene();
+  }, [fitOnMount, initialViewport, props.scene.objects, props.viewportRequest, size]);
 
   function handleFocus(event: FocusEvent<HTMLDivElement>) {
     setRetainedId(canvasNativeId(event.target, event.currentTarget));
@@ -169,6 +209,7 @@ function CanvasSession(props: CanvasProps) {
 
   const { x, y, zoom } = frame.viewport;
   const transform = `translate(${x}px, ${y}px) scale(${zoom})`;
+  const spacing = gridSpacing(zoom);
 
   return (
     <div
@@ -192,7 +233,14 @@ function CanvasSession(props: CanvasProps) {
       onFocus={handleFocus}
       onBlur={handleBlur}
     >
-      <div className="studio-canvas__background" aria-hidden="true" />
+      <div
+        className="studio-canvas__background"
+        style={{
+          backgroundPosition: `${x}px ${y}px`,
+          backgroundSize: `${spacing}px ${spacing}px`,
+        }}
+        aria-hidden="true"
+      />
       <div
         className="studio-canvas__world"
         style={{ transform }}
@@ -217,7 +265,7 @@ function CanvasSession(props: CanvasProps) {
       </div>
       <CanvasOverlays
         viewport={frame.viewport}
-        selected={selected}
+        selected={selecting ? selected : []}
         marquee={frame.marquee}
         guides={canEdit ? frame.guides : undefined}
         ports={canEdit ? frame.ports : undefined}

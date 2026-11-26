@@ -95,6 +95,9 @@ export default defineConfig([
       'src/modules/whiteboard/application/' + scripts,
       'src/modules/whiteboard/domain/' + scripts,
       'src/modules/whiteboard/ports/' + scripts,
+      'src/modules/catalog/application/' + scripts,
+      'src/modules/catalog/domain/' + scripts,
+      'src/modules/catalog/ports/' + scripts,
       'src/application/workflows/' + scripts,
     ],
     rules: {

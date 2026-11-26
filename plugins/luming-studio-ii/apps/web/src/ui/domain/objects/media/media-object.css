@@ -19,6 +19,7 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
+  border-radius: 4px;
   object-fit: contain;
 }
 
@@ -73,32 +74,47 @@
 
 .luming-media-link {
   box-sizing: border-box;
-  padding: 0.625rem;
+  padding: 16px;
   min-inline-size: 0;
   inline-size: 100%;
   block-size: 100%;
+  gap: 14px;
+  border: 1px solid #d4d7dd;
+  border-radius: 7px;
+  background: var(--studio-ui-canvas-object-fill, #ffffff);
+  color: #2d3142;
+}
+
+.luming-media-link > svg {
+  flex: none;
+  color: #6a778d;
 }
 
 .luming-media-link__content {
-  display: grid;
   min-inline-size: 0;
   flex: 1;
-  gap: 0.25rem;
 }
 
 .luming-media-link__content :is(strong, span) {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.luming-media-link__content strong {
+  font-size: 15px;
+  line-height: 1.6;
+}
+
 .luming-media-link__content span {
-  color: var(--studio-ui-muted, GrayText);
+  color: #657084;
+  font-size: 12px;
 }
 
 .luming-media-link__target {
-  padding: 0.375rem 0.5rem;
-  border-radius: 0.375rem;
-  color: var(--studio-ui-link, LinkText);
-  background: var(--studio-ui-surface, Canvas);
+  display: flex;
+  flex: none;
+  padding: 8px;
+  color: #6c778b;
 }

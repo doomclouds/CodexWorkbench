@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import { createWhiteboardHttpServer } from '../entrypoints/http/index.js';
+import { createCatalogRepository } from '../infrastructure/adapters/catalog/index.js';
 import { createWhiteboardRepository } from '../infrastructure/adapters/index.js';
 import { openSqliteDatabase } from '../infrastructure/platform/index.js';
+import { createCatalogApplication } from '../modules/catalog/application/index.js';
 import { createWhiteboardApplication } from '../modules/whiteboard/application/index.js';
 
 type HttpOptions = Parameters<typeof createWhiteboardHttpServer>[0];
@@ -66,8 +69,15 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   try {
     const repository = createWhiteboardRepository(database);
     const application = createWhiteboardApplication(repository);
+    const catalog = createCatalogRepository(database);
+    const catalogApplication = createCatalogApplication(catalog, {
+      newBoardId: randomUUID,
+      now: Date.now,
+    });
+
     server = createWhiteboardHttpServer({
       application,
+      catalogApplication,
       resolveActor: options.resolveActor,
       onError: options.onError,
     });

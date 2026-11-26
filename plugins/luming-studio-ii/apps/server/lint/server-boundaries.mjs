@@ -2,6 +2,8 @@ import { isBuiltin } from 'node:module';
 import { localResolver, projectPath, serverRoot } from './project-paths.mjs';
 
 const whiteboard = 'src/modules/whiteboard/';
+const catalog = 'src/modules/catalog/';
+const catalogAdapters = 'src/infrastructure/adapters/catalog/';
 const layers = new Map([
   ['src/bootstrap/', 'bootstrap'],
   ['src/entrypoints/http/', 'http'],
@@ -10,6 +12,10 @@ const layers = new Map([
   [whiteboard + 'application/', 'application'],
   [whiteboard + 'domain/', 'domain'],
   [whiteboard + 'ports/', 'ports'],
+  [catalog + 'application/', 'catalog-application'],
+  [catalog + 'domain/', 'catalog-domain'],
+  [catalog + 'ports/', 'catalog-ports'],
+  [catalogAdapters, 'catalog-adapters'],
   ['src/infrastructure/adapters/', 'adapters'],
   ['src/infrastructure/platform/', 'platform'],
   ['tests/contracts/', 'contracts'],
@@ -25,22 +31,52 @@ const entries = new Map([
   ['application', whiteboard + 'application/index'],
   ['domain', whiteboard + 'domain/index'],
   ['ports', whiteboard + 'ports/index'],
+  ['catalog-application', catalog + 'application/index'],
+  ['catalog-domain', catalog + 'domain/index'],
+  ['catalog-ports', catalog + 'ports/index'],
+  ['catalog-adapters', catalogAdapters + 'index'],
   ['adapters', 'src/infrastructure/adapters/index'],
   ['platform', 'src/infrastructure/platform/index'],
 ]);
 const dependencies = new Map([
-  ['bootstrap', ['http', 'mcp', 'application', 'adapters', 'platform']],
-  ['http', ['application']],
+  [
+    'bootstrap',
+    [
+      'http',
+      'mcp',
+      'application',
+      'catalog-application',
+      'adapters',
+      'catalog-adapters',
+      'platform',
+    ],
+  ],
+  ['http', ['application', 'catalog-application']],
   ['mcp', ['application']],
   ['workflows', ['application']],
   ['application', ['domain', 'ports']],
   ['ports', ['domain']],
   ['adapters', ['ports', 'platform']],
+  ['catalog-application', ['catalog-domain', 'catalog-ports']],
+  ['catalog-ports', ['catalog-domain']],
+  ['catalog-adapters', ['catalog-ports', 'platform']],
   ['contracts', ['bootstrap', 'support', 'fixtures']],
-  ['unit', ['application', 'domain', 'ports', 'fixtures']],
+  [
+    'unit',
+    [
+      'application',
+      'domain',
+      'ports',
+      'catalog-application',
+      'catalog-domain',
+      'catalog-ports',
+      'fixtures',
+    ],
+  ],
   ['integration', ['bootstrap', 'support', 'fixtures']],
-  ['support', ['platform', 'adapters', 'fixtures']],
+  ['support', ['platform', 'adapters', 'catalog-adapters', 'fixtures']],
 ]);
+const portLayers = new Set(['ports', 'catalog-ports']);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
 const protocols = new Set([
   protocolPrefix + 'scene',
@@ -49,6 +85,7 @@ const protocols = new Set([
   '@bufbuild/protobuf',
 ]);
 const protocolLayers = new Set(['http', 'mcp', 'contracts', 'integration', 'support']);
+const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 const testLayers = new Set(['contracts', 'unit', 'integration', 'fixtures', 'support']);
 const builtins = new Map([
   ['bootstrap', new Set(['crypto', 'os', 'path', 'process', 'url'])],
@@ -90,7 +127,7 @@ function allowsLocal(sourceLayer, targetPath, typeOnly) {
   if (!dependencies.get(sourceLayer)?.includes(targetLayer)) {
     return false;
   }
-  if (sourceLayer === 'ports' && !typeOnly) {
+  if (portLayers.has(sourceLayer) && !typeOnly) {
     return false;
   }
 
@@ -98,6 +135,9 @@ function allowsLocal(sourceLayer, targetPath, typeOnly) {
 }
 
 function allowsLibrary(layer, specifier, from) {
+  if (specifier === catalogProtocol) {
+    return layer !== 'mcp' && protocolLayers.has(layer);
+  }
   if (protocols.has(specifier)) {
     return protocolLayers.has(layer);
   }

@@ -17,6 +17,7 @@ type ExportAction = NonNullable<DocumentObjectProps['onExport']>;
 
 interface EditorToolbarProps {
   readonly mode: DocumentActivity['mode'];
+  readonly iconOnly?: boolean;
   readonly readOnly: boolean;
   readonly exportOpen: boolean;
   readonly draft: ReturnType<typeof useDocumentDraft>;
@@ -27,6 +28,60 @@ interface EditorToolbarProps {
   readonly onExport?: DocumentObjectProps['onExport'];
   readonly onAnnotate?: () => void;
   readonly onCompare: () => void;
+}
+
+function DocumentOpenIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3m-5 13h3a2 2 0 0 0 2-2v-3M8 21H5a2 2 0 0 1-2-2v-3" />
+    </svg>
+  );
+}
+
+function DocumentEditIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M15 5l4 4M4 20l4-.8L20 7a2.8 2.8 0 0 0-4-4L4.8 16z" />
+    </svg>
+  );
+}
+
+function DocumentExportIcon() {
+  return (
+    <svg
+      width="17"
+      height="17"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3v12m-4-4 4 4 4-4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+    </svg>
+  );
 }
 
 function DocumentSaveStatus({ draft }: { readonly draft: EditorToolbarProps['draft'] }) {
@@ -40,12 +95,34 @@ function DocumentSaveStatus({ draft }: { readonly draft: EditorToolbarProps['dra
   return <StatusText message={draft.dirty ? '待保存' : '已保存'} />;
 }
 
+function DocumentCanvasSaveStatus({ draft }: { readonly draft: EditorToolbarProps['draft'] }) {
+  const confirmed = !draft.failure && !draft.saving && !draft.dirty;
+
+  return (
+    <span className="studio-document-canvas-save">
+      {confirmed && (
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path d="m2 8 4 4 8-8" />
+        </svg>
+      )}
+      <DocumentSaveStatus draft={draft} />
+    </span>
+  );
+}
+
 function DocumentExport({
   draft,
+  iconOnly,
   exportOpen,
   onToggleExport,
   onExport,
-}: Pick<EditorToolbarProps, 'exportOpen' | 'onToggleExport'> & {
+}: Pick<EditorToolbarProps, 'exportOpen' | 'iconOnly' | 'onToggleExport'> & {
   readonly draft: DocumentDraft;
   readonly onExport: ExportAction;
 }) {
@@ -56,7 +133,13 @@ function DocumentExport({
 
   return (
     <div className="studio-document-export">
-      <Button label="导出文档" variant="ghost" onActivate={onToggleExport} />
+      <Button
+        label="导出文档"
+        variant="ghost"
+        icon={iconOnly ? <DocumentExportIcon /> : undefined}
+        iconOnly={iconOnly}
+        onActivate={onToggleExport}
+      />
       {exportOpen && (
         <div className="studio-document-export-options" role="group" aria-label="文档导出格式">
           <Button label="全文 HTML" onActivate={() => exportDocument('html')} />
@@ -69,6 +152,7 @@ function DocumentExport({
 
 export function DocumentToolbar({
   mode,
+  iconOnly = false,
   readOnly,
   draft,
   onEdit,
@@ -87,15 +171,43 @@ export function DocumentToolbar({
   return (
     <>
       <Toolbar label="文档操作">
-        {mode === 'inline' && <Button label="放大阅读" onActivate={onOpen} />}
-        {mode !== 'edit' && !readOnly && <Button label="编辑文档" onActivate={onEdit} />}
+        {iconOnly && <DocumentCanvasSaveStatus draft={draft} />}
+        {mode !== 'edit' && (!readOnly || iconOnly) && (
+          <Button
+            label="编辑文档"
+            icon={iconOnly ? <DocumentEditIcon /> : undefined}
+            iconOnly={iconOnly}
+            variant={iconOnly ? 'ghost' : undefined}
+            disabled={readOnly}
+            onActivate={onEdit}
+          />
+        )}
+        {mode === 'inline' && (
+          <Button
+            label="放大阅读"
+            icon={iconOnly ? <DocumentOpenIcon /> : undefined}
+            iconOnly={iconOnly}
+            variant={iconOnly ? 'ghost' : undefined}
+            onActivate={onOpen}
+          />
+        )}
         {mode === 'edit' && <Button label="回到阅读" onActivate={onRead} />}
         {onExport && (
           <DocumentExport
             draft={draft.draft}
+            iconOnly={iconOnly}
             exportOpen={exportOpen}
             onToggleExport={onToggleExport}
             onExport={onExport}
+          />
+        )}
+        {!onExport && iconOnly && (
+          <Button
+            label="导出文档"
+            icon={<DocumentExportIcon />}
+            iconOnly
+            variant="ghost"
+            disabled
           />
         )}
         {onAnnotate && mode !== 'edit' && (

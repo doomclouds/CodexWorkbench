@@ -11,9 +11,14 @@ interface CanvasObjectContentProps {
   readonly content?: ReactNode;
   readonly connectorRoute?: ResolvedConnection;
   readonly interactive: boolean;
+  readonly ownsFrame: boolean;
+  readonly canEdit: boolean;
+  readonly selected: boolean;
   readonly mode: CanvasObjectCapabilities['content'];
   readonly Frame?: ComponentType<CanvasPrimitiveFrameProps>;
 }
+
+const draggableBodyKinds = new Set<CanvasObjectDraft['kind']>(['link', 'image', 'table']);
 
 export function CanvasObjectContent({
   object,
@@ -22,6 +27,9 @@ export function CanvasObjectContent({
   content,
   connectorRoute,
   interactive,
+  ownsFrame,
+  canEdit,
+  selected,
   mode,
   Frame,
 }: CanvasObjectContentProps) {
@@ -34,8 +42,14 @@ export function CanvasObjectContent({
       connectorRoute={connectorRoute}
       content={showCaption ? content : undefined}
       showCaption={showCaption}
+      selected={selected}
     />
   );
+
+  const embedded = ownsFrame && mode === 'embedded';
+  const captionVisible = object.kind === 'html' && zoom >= 0.5 && geometry.width * zoom >= 96;
+  const captionScale = Math.min(1 / zoom, 1);
+  const canDragBody = ownsFrame && draggableBodyKinds.has(object.kind);
 
   if (showCaption) {
     return (
@@ -46,14 +60,37 @@ export function CanvasObjectContent({
   return (
     <>
       {primitive}
-      <div className="studio-ui-canvas-native-title">{object.label}</div>
+      {!ownsFrame && <div className="studio-ui-canvas-native-title">{object.label}</div>}
       <div
         className="studio-ui-canvas-native-content"
         data-canvas-native={interactive ? '' : undefined}
+        data-canvas-owned-frame={ownsFrame ? '' : undefined}
+        data-canvas-drag-surface={canDragBody ? 'body' : undefined}
         inert={!interactive}
       >
         {content}
       </div>
+      {embedded && captionVisible && (
+        <div
+          className="studio-ui-canvas-embedded-title"
+          data-canvas-external-title=""
+          style={{
+            width: geometry.width / captionScale,
+            bottom: `calc(100% + ${8 * captionScale}px)`,
+            transform: `scale(${captionScale})`,
+          }}
+        >
+          <strong title={object.label}>{object.label}</strong>
+        </div>
+      )}
+      {embedded && interactive && canEdit && (
+        <div
+          className="studio-ui-canvas-embedded-move-edge"
+          data-canvas-drag-surface="title"
+          aria-hidden="true"
+          style={{ height: Math.min(6 / zoom, geometry.height / 4) }}
+        />
+      )}
     </>
   );
 }

@@ -90,6 +90,16 @@ function useDraftRetention(
   }, [retained, observesRetention]);
 }
 
+function canvasTextColor(object: CanvasObjectViewProps['object'], color: string | undefined) {
+  if (object.kind === 'connector') {
+    return undefined;
+  }
+
+  const pinnedNote = object.kind === 'note' && object.fill?.toLowerCase() === '#f9e56f';
+
+  return pinnedNote && color?.toLowerCase() === '#0b0b0b' ? undefined : color;
+}
+
 function CanvasTextView({
   id,
   object,
@@ -216,7 +226,7 @@ function CanvasTextView({
         editing={editing}
         readOnly={!writable || saving}
         singleLine={singleLine}
-        color={body.color}
+        color={canvasTextColor(object, body.color)}
         fontFamily={body.fontFamily}
         fontSize={body.fontSize}
         align={body.align}
@@ -251,14 +261,14 @@ const labelCapabilities: CanvasObjectExtension['capabilities'] = {
 export const textExtension: CanvasObjectExtension = {
   kind: 'text',
   capabilities: labelCapabilities,
-  placement: { kind: 'text', label: '文本', width: 210, height: 85 },
+  placement: { kind: 'text', label: '文本', width: 300, height: 70, fill: 'transparent' },
   View: CanvasTextView,
 };
 
 export const noteExtension: CanvasObjectExtension = {
   kind: 'note',
   capabilities: labelCapabilities,
-  placement: { kind: 'note', label: '便签', width: 140, height: 116 },
+  placement: { kind: 'note', label: '便签', width: 208, height: 184, fill: '#F9E56F' },
   portClick: 'place',
   View: CanvasTextView,
 };
@@ -266,7 +276,15 @@ export const noteExtension: CanvasObjectExtension = {
 export const shapeExtension: CanvasObjectExtension = {
   kind: 'shape',
   capabilities: labelCapabilities,
-  placement: { kind: 'shape', shape: 'rounded', label: '形状', width: 144, height: 100 },
+  placement: {
+    kind: 'shape',
+    shape: 'rounded',
+    label: '形状',
+    width: 208,
+    height: 112,
+    fill: '#EFEFEF',
+    stroke: 'transparent',
+  },
   portClick: 'connect',
   View: CanvasTextView,
 };
@@ -275,7 +293,14 @@ export const sectionExtension: CanvasObjectExtension = {
   kind: 'section',
   capabilities: { ...labelCapabilities, rotate: false },
   blocksPlacement: false,
-  placement: { kind: 'section', label: '分区', transparent: true, width: 268, height: 170 },
+  placement: {
+    kind: 'section',
+    label: '分区',
+    width: 600,
+    height: 360,
+    fill: '#EFEFEF',
+    stroke: '#9ca3af',
+  },
   View: CanvasTextView,
 };
 

@@ -34,25 +34,20 @@ function personPath(width: number, height: number) {
 }
 
 function databasePath(width: number, height: number) {
-  const cap = Math.min(18, height / 4);
-  const base = height - cap;
-  const curve = cap * (4 / 3);
-
   return [
-    `M 0 ${cap} C 0 ${cap - curve} ${width} ${cap - curve} ${width} ${cap}`,
-    `V ${base} C ${width} ${base + curve} 0 ${base + curve} 0 ${base} Z`,
-    `M 0 ${cap} C 0 ${cap + curve} ${width} ${cap + curve} ${width} ${cap}`,
+    `M 0 18 C 0 -6 ${width} -6 ${width} 18`,
+    `V ${height - 18} C ${width} ${height + 6} 0 ${height + 6} 0 ${height - 18} Z`,
+    `M 0 18 C 0 42 ${width} 42 ${width} 18`,
   ].join(' ');
 }
 
 function documentPath(width: number, height: number) {
-  const wave = Math.min(10, height / 5);
-  const edge = height - wave * 1.5;
+  const edge = height - 15;
 
   return [
     `M 0 0 H ${width} V ${edge}`,
-    `Q ${width * 0.75} ${edge - 2 * wave} ${width / 2} ${edge}`,
-    `Q ${width * 0.25} ${edge + 2 * wave} 0 ${edge} Z`,
+    `Q ${width * 0.75} ${height - 35} ${width / 2} ${edge}`,
+    `Q ${width * 0.25} ${height + 5} 0 ${edge} Z`,
   ].join(' ');
 }
 
@@ -69,12 +64,10 @@ function cloudPath(width: number, height: number) {
 }
 
 function queueOutline(width: number, height: number) {
-  const inset = Math.min(queueInset, width / 3);
-
   return (
     <>
       <rect width={width} height={height} />
-      <path d={`M ${inset} 0 V ${height} M ${width - inset} 0 V ${height}`} fill="none" />
+      <path d={`M ${queueInset} 0 V ${height} M ${width - queueInset} 0 V ${height}`} fill="none" />
     </>
   );
 }
@@ -139,7 +132,7 @@ export function CanvasShapeOutline({
       className="studio-ui-canvas-shape-outline"
       aria-hidden="true"
       focusable="false"
-      viewBox={`0 0 ${Math.max(width, 1)} ${Math.max(height, 1)}`}
+      viewBox={`-2 -2 ${width + 4} ${height + 4}`}
       preserveAspectRatio="none"
       style={{
         fill: hollow ? 'none' : shapeColor(fill),

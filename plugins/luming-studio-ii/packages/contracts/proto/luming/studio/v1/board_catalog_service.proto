@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+service BoardCatalogService {
+  rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
+  rpc CreateBoard(CreateBoardRequest) returns (CreateBoardResponse);
+  rpc GetCatalogCommandReceipt(GetCatalogCommandReceiptRequest) returns (GetCatalogCommandReceiptResponse);
+}
+
+enum BoardSortOrder {
+  BOARD_SORT_ORDER_UNSPECIFIED = 0;
+  BOARD_SORT_ORDER_RECENT = 1;
+  BOARD_SORT_ORDER_TITLE = 2;
+}
+
+message BoardSummary {
+  string board_id = 1;
+  string title = 2;
+  optional uint64 updated_at_millis = 3;
+  bool pinned = 4;
+  optional uint64 entry_version = 5;
+}
+
+message ListBoardsRequest {
+  string query = 1;
+  BoardSortOrder order = 2;
+  uint32 page_size = 3;
+  optional string cursor = 4;
+}
+
+message ListBoardsResponse {
+  repeated BoardSummary boards = 1;
+  optional string next_cursor = 2;
+}
+
+message CreateBoardRequest {
+  string command_id = 1;
+  string title = 2;
+}
+
+message CreateBoardResponse {
+  CatalogCommandReceipt receipt = 1;
+}
+
+message CatalogCommandReceipt {
+  string command_id = 1;
+  oneof outcome {
+    BoardSummary created = 2;
+    CatalogRejection rejected = 3;
+  }
+}
+
+enum CatalogRejectionReason {
+  CATALOG_REJECTION_REASON_UNSPECIFIED = 0;
+  CATALOG_REJECTION_REASON_INVALID_TITLE = 1;
+  CATALOG_REJECTION_REASON_COMMAND_ID_REUSE = 2;
+}
+
+message CatalogRejection {
+  CatalogRejectionReason reason = 1;
+}
+
+message GetCatalogCommandReceiptRequest {
+  string command_id = 1;
+}
+
+message CatalogReceiptNotRecorded {
+  string command_id = 1;
+}
+
+message GetCatalogCommandReceiptResponse {
+  oneof result {
+    CatalogCommandReceipt receipt = 1;
+    CatalogReceiptNotRecorded not_recorded = 2;
+  }
+}

@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type ProxyOptions, type UserConfig } from 'vite';
 
 const whiteboardRpcPrefix = '/luming.studio.v1.WhiteboardService/';
+const catalogRpcPrefix = '/luming.studio.v1.BoardCatalogService/';
 
 const editorPackages = [
   '@blocknote/core',
@@ -29,12 +30,12 @@ function whiteboardProxy(): Record<string, ProxyOptions> {
     throw new Error('Set the whiteboard API to a bare origin.');
   }
 
-  return {
-    [whiteboardRpcPrefix]: {
-      target: url.origin,
-      headers: { authorization: 'Bearer ' + token },
-    },
+  const proxy = {
+    target: url.origin,
+    headers: { authorization: 'Bearer ' + token },
   };
+
+  return { [whiteboardRpcPrefix]: proxy, [catalogRpcPrefix]: proxy };
 }
 
 const libraryConfig = {

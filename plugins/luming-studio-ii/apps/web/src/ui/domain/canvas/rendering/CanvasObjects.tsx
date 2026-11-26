@@ -67,17 +67,28 @@ interface CanvasObjectStyle extends CSSProperties {
   '--studio-ui-canvas-object-line-style'?: string;
 }
 
-function objectStyle(object: CanvasObjectDraft, { x, y, width, height, rotation }: CanvasGeometry) {
+function objectStyle(
+  object: CanvasObjectDraft,
+  { x, y, width, height, rotation }: CanvasGeometry,
+  zoom: number,
+) {
+  const fill = object.fill?.toLowerCase();
+  const pinnedNote = object.kind === 'note' && fill === '#f9e56f';
+  const widthAtZoom =
+    object.kind === 'section' && zoom < 0.5
+      ? Math.max(object.strokeWidth ?? 1, 0.7 / zoom)
+      : object.strokeWidth;
   const style: CanvasObjectStyle = {
     left: x,
     top: y,
     width,
     height,
     transform: `rotate(${rotation}deg)`,
-    '--studio-ui-canvas-object-fill': object.fill,
+    color: pinnedNote ? 'light-dark(#0b0b0b, #efefef)' : undefined,
+    '--studio-ui-canvas-object-fill': pinnedNote ? 'light-dark(#f9e56f, #f5d515)' : object.fill,
     '--studio-ui-canvas-object-stroke': object.stroke,
     '--studio-ui-canvas-object-stroke-width':
-      object.strokeWidth === undefined ? undefined : `${object.strokeWidth}px`,
+      widthAtZoom === undefined ? undefined : `${widthAtZoom}px`,
     '--studio-ui-canvas-object-line-style': object.dashed ? 'dashed' : undefined,
   };
 
@@ -94,6 +105,26 @@ function canInteractWithBody(
   }
 
   return mode === 'embedded' ? embedActive : mode === 'native';
+}
+
+const ownedFrameKinds = new Set<CanvasObjectDraft['kind']>([
+  'document',
+  'todo',
+  'table',
+  'link',
+  'image',
+  'video',
+  'html',
+  'diagram',
+  'chart',
+]);
+
+function usesOwnedFrame(
+  kind: CanvasObjectDraft['kind'],
+  view: CanvasObjectExtension['View'],
+  payload: CanvasObjectPayload | undefined,
+) {
+  return Boolean(view && payload) && ownedFrameKinds.has(kind);
 }
 
 const CanvasObjectView = memo(
@@ -123,6 +154,7 @@ const CanvasObjectView = memo(
     const readOnly = !canEdit || !onObjectIntent;
     const blockedEmbed = mode === 'embedded' && !interactive;
     const View = extension?.View;
+    const ownsFrame = usesOwnedFrame(object.kind, View, payload);
     const body = View ? (
       <CanvasRegisteredBody
         View={View}
@@ -151,8 +183,9 @@ const CanvasObjectView = memo(
         data-canvas-object={id}
         data-canvas-draft={draft ? '' : undefined}
         data-canvas-transparent={transparent ? '' : undefined}
+        data-canvas-locked={locked ? '' : undefined}
         aria-hidden={draft || undefined}
-        style={objectStyle(object, geometry)}
+        style={objectStyle(object, geometry, zoom)}
       >
         <CanvasObjectContent
           object={object}
@@ -161,6 +194,9 @@ const CanvasObjectView = memo(
           content={body}
           connectorRoute={connectorRoute}
           interactive={interactive}
+          ownsFrame={ownsFrame}
+          canEdit={canEdit}
+          selected={selected}
           mode={mode}
           Frame={frame?.Frame}
         />

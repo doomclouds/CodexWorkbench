@@ -74,6 +74,7 @@ export interface DocumentObjectProps {
   readonly readOnly?: boolean;
   readonly theme?: 'light' | 'dark';
   readonly paper?: DocumentPaper;
+  readonly canvas?: { readonly width: number; readonly height: number; readonly zoom: number };
   readonly editRequest?: number;
   readonly onChange?: (draft: DocumentDraft) => void;
   readonly onCommit?: (commit: DocumentCommit) => Promise<DocumentCommitResult>;

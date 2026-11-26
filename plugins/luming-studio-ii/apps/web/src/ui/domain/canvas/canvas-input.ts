@@ -403,7 +403,7 @@ export function useCanvasInput({
     }
   }
 
-  function nativePointer(id: string, surface: 'title' | 'background' | undefined) {
+  function nativePointer(id: string, surface: ReturnType<typeof canvasDragSurface>) {
     if (!canEdit || !surface || !editableTarget(index, pending, id)) {
       return true;
     }

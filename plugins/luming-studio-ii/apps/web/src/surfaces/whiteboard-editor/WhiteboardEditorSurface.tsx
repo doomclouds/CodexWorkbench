@@ -5,8 +5,11 @@ import {
   Canvas,
   type CanvasHandle,
   type CanvasObjectExtension,
+  type CanvasViewport,
+  type CanvasViewportRequest,
 } from '../../ui/domain/canvas/index.js';
 import { studioObjectExtensions } from '../../ui/domain/objects/index.js';
+import { BoardHeader, BoardToolbar, BoardViewportTools, type BoardTool } from './BoardChrome.js';
 import { MoveNotice, MoveStatus } from './MoveFeedback.js';
 import { projectPayloads, projectScene } from './canvas-projection.js';
 import { useMoveSession } from './move-session.js';
@@ -16,6 +19,7 @@ export interface WhiteboardEditorSurfaceProps {
   readonly boardId: string;
   readonly service: WhiteboardService;
   readonly createCommandId: () => string;
+  readonly onBack?: () => void;
 }
 
 type WhiteboardSession = ReturnType<typeof createWhiteboardSession>;
@@ -28,12 +32,14 @@ interface BoardWorkspaceProps {
   readonly session: WhiteboardSession;
   readonly projection: SceneProjection;
   readonly createCommandId: () => string;
+  readonly onBack?: () => void;
 }
 
 interface BoardSurfaceProps {
   readonly state: ReadyState;
   readonly session: WhiteboardSession;
   readonly createCommandId: () => string;
+  readonly onBack?: () => void;
 }
 
 const movable = {
@@ -54,10 +60,21 @@ const moveExtensions: readonly CanvasObjectExtension[] = [
   { kind: 'native', capabilities: { ...movable, content: 'native' } },
 ];
 
-function BoardWorkspace({ state, session, projection, createCommandId }: BoardWorkspaceProps) {
+function BoardWorkspace({
+  state,
+  session,
+  projection,
+  createCommandId,
+  onBack,
+}: BoardWorkspaceProps) {
   const board = state.scene;
   const canvas = useRef<CanvasHandle>(null);
+  const area = useRef<HTMLDivElement>(null);
+  const zoomRequest = useRef(0);
   const [selected, setSelected] = useState<readonly string[]>([]);
+  const [tool, setTool] = useState<BoardTool>('select');
+  const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, zoom: 1 });
+  const [viewportRequest, setViewportRequest] = useState<CanvasViewportRequest>();
   const selection = useMemo(
     () => selected.filter((id) => projection.objectsById.has(id)),
     [selected, projection.objectsById],
@@ -75,43 +92,61 @@ function BoardWorkspace({ state, session, projection, createCommandId }: BoardWo
     canvas.current?.fitToObjects([...projection.objectsById.keys()]);
   }
 
+  function handleZoomBoard(value: number) {
+    const bounds = area.current?.getBoundingClientRect();
+    if (!bounds) {
+      return;
+    }
+
+    const zoom = Math.max(0.05, Math.min(4, value));
+    const scale = zoom / viewport.zoom;
+    const x = bounds.width / 2;
+    const y = bounds.height / 2;
+    setViewportRequest({
+      requestId: String(++zoomRequest.current),
+      viewport: { x: x - (x - viewport.x) * scale, y: y - (y - viewport.y) * scale, zoom },
+    });
+  }
+
   return (
     <>
-      <header className="whiteboard-editor__header">
-        <h1 className="whiteboard-editor__title">{title}</h1>
-        <div className="whiteboard-editor__actions">
-          {!board.canEdit && <StatusText message="只读" />}
-          <MoveStatus controls={move} />
-          <Button
-            label="适应画布"
-            variant="ghost"
-            disabled={projected.scene.objects.length === 0}
-            onActivate={fitBoard}
-          />
-        </div>
-      </header>
+      <BoardHeader
+        title={title}
+        onBack={onBack}
+        status={board.canEdit ? <MoveStatus controls={move} /> : <StatusText message="只读" />}
+      />
       <MoveNotice controls={move} />
       <BoardReadNotices
         state={state}
         session={session}
         unsafePayloadVersion={projected.unsafePayloadVersion}
       />
-      <div className="whiteboard-editor__canvas">
+      <div ref={area} className="whiteboard-editor__canvas">
         <Canvas
           ref={canvas}
           viewId={board.boardId}
           label={title}
           scene={projected.scene}
           selection={selection}
-          tool="select"
+          tool={tool}
+          fitOnMount={Boolean(onBack)}
+          viewportRequest={viewportRequest}
           canEdit={canEdit}
           pendingEdits={move.pendingEdits}
           objectExtensions={moveExtensions}
           payloadById={projected.payloadById}
           onSelectionChange={setSelected}
           onEditIntent={move.handleEdit}
+          onViewportChange={setViewport}
           onVisibleObjectsChange={session.observeVisible}
         />
+        <BoardViewportTools
+          zoom={viewport.zoom}
+          onZoom={handleZoomBoard}
+          onFit={fitBoard}
+          hasObjects={projected.scene.objects.length > 0}
+        />
+        {board.canEdit && <BoardToolbar tool={tool} onToolChange={setTool} />}
         {projected.scene.objects.length === 0 && (
           <div className="whiteboard-editor__empty">
             <StatePanel kind="empty" title="白板里还没有对象" />
@@ -158,7 +193,7 @@ function BoardReadNotices({ state, session, unsafePayloadVersion }: BoardReadNot
   );
 }
 
-function LoadedBoard({ state, session, createCommandId }: BoardSurfaceProps) {
+function LoadedBoard({ state, session, createCommandId, onBack }: BoardSurfaceProps) {
   const projection = useMemo(() => projectScene(state.scene), [state.scene]);
   if (!projection) {
     return (
@@ -179,6 +214,7 @@ function LoadedBoard({ state, session, createCommandId }: BoardSurfaceProps) {
       session={session}
       projection={projection}
       createCommandId={createCommandId}
+      onBack={onBack}
     />
   );
 }
@@ -187,6 +223,7 @@ export function WhiteboardEditorSurface({
   boardId,
   service,
   createCommandId,
+  onBack,
 }: WhiteboardEditorSurfaceProps) {
   const session = useMemo(() => createWhiteboardSession(service, boardId), [service, boardId]);
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -216,6 +253,7 @@ export function WhiteboardEditorSurface({
           state={state}
           session={session}
           createCommandId={createCommandId}
+          onBack={onBack}
         />
       )}
     </section>

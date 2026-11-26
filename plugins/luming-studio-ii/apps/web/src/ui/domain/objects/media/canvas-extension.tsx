@@ -173,6 +173,6 @@ export const videoExtension = {
 export const linkExtension = {
   kind: 'link',
   capabilities: mediaCapabilities,
-  placement: { kind: 'link', label: '链接', width: 320, height: 94 },
+  placement: { kind: 'link', label: '链接', width: 320, height: 94, fill: '#ffffff' },
   View: LinkView,
 } satisfies CanvasObjectExtension;
