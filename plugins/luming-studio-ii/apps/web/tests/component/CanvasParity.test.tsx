@@ -56,7 +56,13 @@ function requireElement<T extends Element>(root: ParentNode, selector: string) {
   return element;
 }
 
-function pointer(target: EventTarget, type: string, point: CanvasPoint, button = 0) {
+function pointer(
+  target: EventTarget,
+  type: string,
+  point: CanvasPoint,
+  button = 0,
+  modifiers: Pick<PointerEventInit, 'shiftKey'> = {},
+) {
   const event = new PointerEvent(type, {
     bubbles: true,
     cancelable: true,
@@ -67,20 +73,26 @@ function pointer(target: EventTarget, type: string, point: CanvasPoint, button =
     pointerId: 1,
     pointerType: 'mouse',
     isPrimary: true,
+    ...modifiers,
   });
   target.dispatchEvent(event);
 
   return event;
 }
 
-function key(target: EventTarget, keyName: string) {
-  const event = new KeyboardEvent('keydown', { key: keyName, bubbles: true, cancelable: true });
+function key(target: EventTarget, keyName: string, options: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', {
+    key: keyName,
+    bubbles: true,
+    cancelable: true,
+    ...options,
+  });
   target.dispatchEvent(event);
 
   return event;
 }
 
-function zoom(target: EventTarget, point: CanvasPoint) {
+function zoom(target: EventTarget, point: CanvasPoint, options: WheelEventInit = {}) {
   const event = new WheelEvent('wheel', {
     bubbles: true,
     cancelable: true,
@@ -88,6 +100,7 @@ function zoom(target: EventTarget, point: CanvasPoint) {
     deltaY: -100,
     clientX: point.x,
     clientY: point.y,
+    ...options,
   });
   target.dispatchEvent(event);
 
@@ -230,6 +243,165 @@ describe('Canvas legacy interaction parity', () => {
     expect(onEditIntent).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { mode: WheelEvent.DOM_DELTA_PIXEL, delta: -500, exponent: 0.18 },
+    { mode: WheelEvent.DOM_DELTA_LINE, delta: -5, exponent: 0.12 },
+    { mode: WheelEvent.DOM_DELTA_PAGE, delta: 1, exponent: -0.18 },
+  ])('normalizes and clamps legacy wheel zoom in mode $mode', async ({ mode, delta, exponent }) => {
+    const { region, onViewportChange } = renderCanvas();
+
+    act(() => {
+      zoom(region, shapeCenter, { ctrlKey: false, metaKey: true, deltaMode: mode, deltaY: delta });
+    });
+    await flushFrame();
+
+    const viewport = onViewportChange.mock.lastCall?.[0] ?? view;
+    expect(viewport.zoom).toBeCloseTo(Math.exp(exponent));
+    expect((shapeCenter.x - viewport.x) / viewport.zoom).toBeCloseTo(shapeCenter.x);
+    expect((shapeCenter.y - viewport.y) / viewport.zoom).toBeCloseTo(shapeCenter.y);
+  });
+
+  it('leaves native wheels alone in Pan and captures modified zoom before a native child stops it', async () => {
+    const content = (
+      <textarea
+        aria-label="原生正文"
+        data-canvas-native=""
+        onWheel={(event) => event.stopPropagation()}
+      />
+    );
+    const { region, onViewportChange } = renderCanvas({
+      tool: 'pan',
+      contentById: new Map([['document', content]]),
+    });
+    const input = requireElement<HTMLTextAreaElement>(region, 'textarea');
+    onViewportChange.mockClear();
+
+    act(() => {
+      expect(zoom(input, documentBody, { ctrlKey: false }).defaultPrevented).toBe(false);
+    });
+    await flushFrame();
+    expect(onViewportChange).not.toHaveBeenCalled();
+
+    act(() => {
+      expect(zoom(input, documentBody).defaultPrevented).toBe(true);
+    });
+    await flushFrame();
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBeCloseTo(Math.exp(0.15));
+  });
+
+  it('restores legacy shortcuts for zoom, reset, and fitting board or selection', () => {
+    const { region, onViewportChange } = renderCanvas({ selection: ['card'] });
+
+    act(() => {
+      expect(key(region, '=', { ctrlKey: true }).defaultPrevented).toBe(true);
+    });
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBeCloseTo(1.2);
+
+    act(() => {
+      expect(key(region, '0', { metaKey: true }).defaultPrevented).toBe(true);
+    });
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBe(1);
+
+    act(() => {
+      expect(key(region, '!', { shiftKey: true, code: 'Digit1' }).defaultPrevented).toBe(true);
+    });
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBeLessThan(1);
+
+    act(() => {
+      expect(key(region, '@', { shiftKey: true, code: 'Digit2' }).defaultPrevented).toBe(true);
+    });
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBeGreaterThan(1);
+
+    act(() => {
+      expect(key(region, ')', { shiftKey: true, code: 'Digit0' }).defaultPrevented).toBe(true);
+    });
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBe(1);
+  });
+
+  it('clears an idle selection and returns an idle Pan tool to Select on Escape', () => {
+    const { region, onSelectionChange } = renderCanvas({ selection: ['card'] });
+    act(() => {
+      expect(key(region, 'Escape').defaultPrevented).toBe(true);
+    });
+    expect(onSelectionChange).toHaveBeenLastCalledWith([]);
+
+    const onToolChange = vi.fn();
+    const pan = renderCanvas({ tool: 'pan', onToolChange });
+    act(() => {
+      expect(key(pan.region, 'Escape').defaultPrevented).toBe(true);
+    });
+    expect(onToolChange).toHaveBeenLastCalledWith('select');
+  });
+
+  it('fits the board when Shift+2 is pressed with an empty selection', () => {
+    const { region, onViewportChange } = renderCanvas({ selection: [] });
+    onViewportChange.mockClear();
+
+    act(() => {
+      expect(key(region, '@', { shiftKey: true, code: 'Digit2' }).defaultPrevented).toBe(true);
+    });
+
+    expect(onViewportChange.mock.lastCall?.[0].zoom).toBeLessThan(1);
+  });
+
+  it('moves the existing selection and the newly Shift-selected object in one gesture', () => {
+    const { region, onSelectionChange, onEditIntent } = renderCanvas({ selection: ['remote'] });
+
+    act(() => {
+      pointer(region, 'pointerdown', shapeCenter, 0, { shiftKey: true });
+      pointer(region, 'pointermove', dragEnd);
+      pointer(region, 'pointerup', dragEnd);
+    });
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['remote', 'card']);
+    const move = onEditIntent.mock.lastCall?.[0];
+    expect(move?.kind).toBe('move');
+    expect(move?.kind === 'move' && move.changes.map(({ id }) => id)).toEqual(['remote', 'card']);
+  });
+
+  it('does not move the remaining selection when Shift toggles an object off', () => {
+    const { region, onSelectionChange, onEditIntent } = renderCanvas({
+      selection: ['remote', 'card'],
+    });
+
+    act(() => {
+      pointer(region, 'pointerdown', shapeCenter, 0, { shiftKey: true });
+      pointer(region, 'pointermove', dragEnd);
+      pointer(region, 'pointerup', dragEnd);
+    });
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith(['remote']);
+    expect(onEditIntent).not.toHaveBeenCalled();
+  });
+
+  it('hides edit handles during Space and middle-button pan and restores them on release', () => {
+    const { region, onSelectionChange, onEditIntent } = renderCanvas({ selection: ['card'] });
+    const handles = '[data-canvas-handle]';
+    expect(region.querySelector(handles)).not.toBeNull();
+
+    act(() => {
+      key(region, ' ', { code: 'Space' });
+    });
+    expect(region.querySelector(handles)).toBeNull();
+
+    act(() => {
+      region.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', code: 'Space', bubbles: true }));
+    });
+    expect(region.querySelector(handles)).not.toBeNull();
+
+    act(() => {
+      pointer(region, 'pointerdown', shapeCenter, 1);
+    });
+    expect(region.querySelector(handles)).toBeNull();
+
+    act(() => {
+      pointer(region, 'pointercancel', shapeCenter, 1);
+    });
+    expect(region.querySelector(handles)).not.toBeNull();
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(onEditIntent).not.toHaveBeenCalled();
+  });
+
   it('opens directly at an explicit viewport and only mounts objects within its window', () => {
     const opening = { x: -4100, y: -2450, zoom: 1 };
     const renderContent = vi.fn(() => <p>离屏正文</p>);
@@ -256,15 +428,53 @@ describe('Canvas legacy interaction parity', () => {
     act(() => {
       input.focus();
       expect(key(input, '+').defaultPrevented).toBe(false);
+      expect(key(input, '=', { ctrlKey: true }).defaultPrevented).toBe(false);
+      expect(key(input, '0', { metaKey: true }).defaultPrevented).toBe(false);
       expect(key(input, 'Escape').defaultPrevented).toBe(false);
       outside.focus();
       expect(key(outside, '+').defaultPrevented).toBe(false);
+      expect(key(outside, '!', { shiftKey: true, code: 'Digit1' }).defaultPrevented).toBe(false);
     });
     await flushFrame();
 
     expect(onSelectionChange).not.toHaveBeenCalled();
     expect(onViewportChange).not.toHaveBeenCalled();
     expect(onEditIntent).not.toHaveBeenCalled();
+  });
+
+  it('returns focus to Canvas after an unhandled Escape in the selected document body', () => {
+    const content = (
+      <div
+        aria-label="文档阅读正文"
+        data-canvas-native=""
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.shiftKey && event.key === 'Escape') {
+            event.preventDefault();
+          }
+        }}
+      >
+        阅读正文
+      </div>
+    );
+    const { region, onSelectionChange } = renderCanvas({
+      selection: ['document'],
+      contentById: new Map([['document', content]]),
+    });
+    const body = requireElement<HTMLDivElement>(region, '[aria-label="文档阅读正文"]');
+
+    act(() => {
+      body.focus();
+      key(body, 'Escape', { shiftKey: true });
+    });
+    expect(onSelectionChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(body);
+
+    act(() => {
+      expect(key(body, 'Escape').defaultPrevented).toBe(true);
+    });
+    expect(onSelectionChange).toHaveBeenCalledExactlyOnceWith([]);
+    expect(document.activeElement).toBe(region);
   });
 
   it('treats sub-threshold document header motion at any zoom as selection only', () => {

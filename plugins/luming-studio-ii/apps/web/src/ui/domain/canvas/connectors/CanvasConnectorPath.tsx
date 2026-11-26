@@ -12,6 +12,7 @@ import './CanvasConnectorPath.css';
 interface CanvasConnectorPathProps {
   readonly route: ResolvedConnection;
   readonly connection: CanvasConnection;
+  readonly zoom: number;
   readonly label?: string;
   readonly preview?: boolean;
   readonly stroke?: string;
@@ -26,6 +27,8 @@ interface ConnectorHeadProps {
 }
 
 const connectorDashPattern = '6 5';
+const overviewZoom = 0.5;
+const minimumOverviewStroke = 0.7;
 export const connectorLabelLift = 28;
 
 function ConnectorHead({ head, tip, neighbor, strokeWidth }: ConnectorHeadProps) {
@@ -76,6 +79,7 @@ function ConnectorHead({ head, tip, neighbor, strokeWidth }: ConnectorHeadProps)
 export function CanvasConnectorPath({
   route,
   connection,
+  zoom,
   label,
   preview = false,
   stroke,
@@ -89,6 +93,13 @@ export function CanvasConnectorPath({
   }
 
   const { x, y, width, height } = geometry;
+  const renderedStrokeWidth =
+    zoom > 0 && zoom < overviewZoom
+      ? Math.max(strokeWidth, minimumOverviewStroke / zoom)
+      : strokeWidth;
+  const separatePaint = renderedStrokeWidth > strokeWidth;
+  const pathData = connectionPathData(points);
+  const dashPattern = dashed ? connectorDashPattern : undefined;
 
   return (
     <>
@@ -100,14 +111,25 @@ export function CanvasConnectorPath({
         aria-hidden="true"
       >
         <path
-          d={connectionPathData(points)}
+          d={pathData}
           data-canvas-geometry-hit=""
           fill="none"
-          stroke="currentColor"
+          stroke={separatePaint ? 'transparent' : 'currentColor'}
           strokeWidth={strokeWidth}
-          strokeDasharray={dashed ? connectorDashPattern : undefined}
+          strokeDasharray={dashPattern}
           strokeLinecap="round"
         />
+        {separatePaint && (
+          <path
+            d={pathData}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={renderedStrokeWidth}
+            strokeDasharray={dashPattern}
+            strokeLinecap="round"
+            pointerEvents="none"
+          />
+        )}
         <ConnectorHead
           head={connection.startHead ?? 'none'}
           tip={start}

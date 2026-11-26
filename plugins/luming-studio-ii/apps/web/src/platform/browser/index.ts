@@ -5,6 +5,7 @@ const protobufContentType = 'application/protobuf';
 const zipContentType = 'application/zip';
 const archiveCommandHeader = 'x-studio-command-id';
 const archiveTooLargeStatus = 413;
+const archiveAssetPath = /^\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128}$/u;
 const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
 
@@ -29,6 +30,10 @@ export function readStudioLocation(): StudioLocation {
 
 export function createCommandId(): string {
   return crypto.randomUUID();
+}
+
+export function resolveArchiveAssetUrl(source: string): string {
+  return archiveAssetPath.test(source) ? new URL(source, window.location.origin).href : source;
 }
 
 export function writeStudioLocation(location: StudioLocation) {
@@ -138,4 +143,25 @@ export async function postArchive(
   }
 
   return readProtobufResponse(response);
+}
+
+interface BoardDownload {
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly content: Uint8Array;
+}
+
+export function downloadBoardFile({ filename, mimeType, content }: BoardDownload): void {
+  const url = URL.createObjectURL(new Blob([new Uint8Array(content)], { type: mimeType }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+
+  try {
+    document.body.append(anchor);
+    anchor.click();
+  } finally {
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
 }

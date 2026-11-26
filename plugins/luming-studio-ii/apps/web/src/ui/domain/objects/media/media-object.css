@@ -46,6 +46,28 @@
   text-align: center;
 }
 
+dialog:has(.luming-image-crop) {
+  --studio-ui-surface: var(--color-background-primary, light-dark(#ffffff, #242528));
+  --studio-ui-text: var(--color-text-primary, light-dark(#2d3142, #ecebed));
+  --studio-ui-muted: var(--color-text-secondary, light-dark(#707784, #a6a8b0));
+  --studio-ui-border: var(--color-border-primary, light-dark(#dfe1e5, #414349));
+  --studio-ui-button-background: var(--studio-ui-surface);
+  --studio-ui-button-foreground: var(--studio-ui-text);
+  --studio-ui-accent: #d96b3a;
+  --studio-ui-accent-text: #fff;
+  --studio-ui-dialog-padding: 22px;
+  --studio-ui-dialog-gap: 18px;
+  --studio-ui-dialog-shadow: 0 18px 60px rgb(15 20 30 / 20%);
+  --studio-ui-dialog-title-size: 17px;
+  --studio-ui-dialog-title-weight: 600;
+  --studio-ui-dialog-close-color: var(--studio-ui-muted);
+  --studio-ui-radius: 12px;
+  --studio-ui-control-radius: 6px;
+  --studio-ui-backdrop: rgb(20 24 33 / 28%);
+  inline-size: min(660px, calc(100% - 44px));
+  max-block-size: calc(100dvh - 44px);
+}
+
 .luming-image-crop {
   display: grid;
   gap: 0.75rem;
@@ -55,9 +77,8 @@
   justify-self: center;
   max-inline-size: 100%;
   overflow: hidden;
-  background: var(--studio-ui-surface, Canvas);
+  background: var(--color-background-secondary, light-dark(#f3f4f5, #323438));
   border: 1px solid var(--studio-ui-border, GrayText);
-  border-radius: 0.5rem;
 }
 
 .luming-image-crop__actions,
@@ -70,6 +91,16 @@
 .luming-image-crop__actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+  margin-block-start: 8px;
+}
+
+.luming-image-crop__actions > button {
+  padding: 8px 13px;
+  font-size: 12px;
+}
+
+.luming-image-crop__actions > button[data-variant='primary'] {
+  border-color: #cb602f;
 }
 
 .luming-media-link {

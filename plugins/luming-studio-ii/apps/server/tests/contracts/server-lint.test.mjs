@@ -193,6 +193,16 @@ for (const [file, code] of permitted) {
 
 const rejected = [
   [
+    'whiteboard export reaches the filesystem instead of the repository port',
+    whiteboard + 'application/export-board.ts',
+    "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'whiteboard export imports the generated response',
+    whiteboard + 'application/export-board.ts',
+    `import { ExportBoardResponseSchema } from '${protocol}';`,
+  ],
+  [
     'catalogue lifecycle uses the SQLite host directly',
     catalog + 'application/lifecycle.ts',
     "import { DatabaseSync } from 'node:sqlite';",

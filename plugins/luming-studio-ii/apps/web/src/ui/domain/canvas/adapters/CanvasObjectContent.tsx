@@ -11,6 +11,7 @@ interface CanvasObjectContentProps {
   readonly content?: ReactNode;
   readonly connectorRoute?: ResolvedConnection;
   readonly interactive: boolean;
+  readonly inert: boolean;
   readonly ownsFrame: boolean;
   readonly canEdit: boolean;
   readonly selected: boolean;
@@ -27,6 +28,7 @@ export function CanvasObjectContent({
   content,
   connectorRoute,
   interactive,
+  inert,
   ownsFrame,
   canEdit,
   selected,
@@ -66,7 +68,7 @@ export function CanvasObjectContent({
         data-canvas-native={interactive ? '' : undefined}
         data-canvas-owned-frame={ownsFrame ? '' : undefined}
         data-canvas-drag-surface={canDragBody ? 'body' : undefined}
-        inert={!interactive}
+        inert={inert}
       >
         {content}
       </div>

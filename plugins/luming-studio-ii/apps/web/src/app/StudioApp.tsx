@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ArchiveImportService } from '../data/archive-import/index.js';
 import type { BoardCatalogService, CatalogManagementService } from '../data/catalog/index.js';
-import type { WhiteboardService } from '../data/whiteboard/index.js';
+import type { ExportBoard, ExportBoardFile, WhiteboardService } from '../data/whiteboard/index.js';
 import type { StudioLocation } from '../platform/browser/index.js';
 import './app.css';
 import { studioPages } from './routes.js';
@@ -32,6 +32,8 @@ export interface StudioAppProps {
   readonly preferences: StudioPreferences;
   readonly createCommandId: () => string;
   readonly archiveImport?: ArchiveImportService;
+  readonly exportBoard?: ExportBoard;
+  readonly downloadExport?: (file: ExportBoardFile) => void;
 }
 
 const {
@@ -48,6 +50,8 @@ export function StudioApp({
   preferences,
   createCommandId,
   archiveImport,
+  exportBoard,
+  downloadExport,
 }: StudioAppProps) {
   const [location, setLocation] = useState(navigation.read);
   const [layout, setLayout] = useState(preferences.layout);
@@ -105,6 +109,8 @@ export function StudioApp({
           service={service}
           createCommandId={createCommandId}
           onBack={openWorkbench}
+          exportBoard={exportBoard}
+          downloadExport={downloadExport}
         />
       );
     }

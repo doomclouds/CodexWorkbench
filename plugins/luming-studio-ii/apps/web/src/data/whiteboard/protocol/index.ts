@@ -39,7 +39,10 @@ function writeMove(
   };
 }
 
-export function createWhiteboardService(post: WhiteboardPost): WhiteboardService {
+export function createWhiteboardService(
+  post: WhiteboardPost,
+  resolveAssetUrl: (source: string) => string = (source) => source,
+): WhiteboardService {
   const { getBoardScene, getObjectPayloads, moveObjects, getCommandReceipt } = wireService.method;
 
   return {
@@ -57,7 +60,7 @@ export function createWhiteboardService(post: WhiteboardPost): WhiteboardService
       const response = await request(post, getObjectPayloads, { boardId, objectIds }, signal);
       matchIdentity(response.boardId, boardId, 'board ID');
 
-      return readPayloads(response.results, objectIds);
+      return readPayloads(response.results, objectIds, resolveAssetUrl);
     },
     async moveObjects(command, signal) {
       const response = await request(post, moveObjects, writeMove(command), signal);

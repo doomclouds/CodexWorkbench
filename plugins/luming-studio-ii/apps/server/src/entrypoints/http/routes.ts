@@ -4,6 +4,7 @@ import {
   type GetCommandReceiptResponseSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import type { WhiteboardApplication } from '../../modules/whiteboard/application/index.js';
+import { createExportRoute } from './export-route.js';
 import { toPayloadResult } from './payload.js';
 import { toCommandReceipt, toMoveCommand } from './receipt.js';
 import { requireId } from './request.js';
@@ -17,6 +18,7 @@ export function createWhiteboardRoutes(application: WhiteboardApplication): read
     WhiteboardService.method;
 
   return [
+    createExportRoute(application),
     unaryRoute(getBoardScene, (actor, request) => ({
       scene: toBoardScene(application.getBoardScene(actor, requireId(request.boardId))),
     })),

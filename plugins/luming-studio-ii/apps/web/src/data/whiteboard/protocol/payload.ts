@@ -16,6 +16,8 @@ import type { WhiteboardPayload, WhiteboardPayloadResult } from '../contracts.js
 import { readPoint } from './scene.js';
 import { requireField } from './values.js';
 
+type ResolveAssetUrl = (source: string) => string;
+
 const alignment = new Map<TextAlignment, string>([
   [TextAlignment.LEFT, 'left'],
   [TextAlignment.CENTER, 'center'],
@@ -26,15 +28,22 @@ const unavailableReasons = new Map<ObjectPayloadUnavailableReason, string>([
   [ObjectPayloadUnavailableReason.UNSUPPORTED_KIND, 'unsupportedKind'],
 ]);
 
-function readDocumentBlock(block: DocumentBlock): Readonly<Record<string, unknown>> {
+function readDocumentBlock(
+  block: DocumentBlock,
+  resolveAssetUrl: ResolveAssetUrl,
+): Readonly<Record<string, unknown>> {
   const { blockId, type, props, content, children } = block;
+  const blockProps =
+    type === 'image' && typeof props?.url === 'string'
+      ? { ...props, url: resolveAssetUrl(props.url) }
+      : (props ?? {});
 
   return {
     id: blockId,
     type,
-    props: props ?? {},
+    props: blockProps,
     content: content && toJson(ValueSchema, content),
-    children: children.map(readDocumentBlock),
+    children: children.map((child) => readDocumentBlock(child, resolveAssetUrl)),
   };
 }
 
@@ -76,7 +85,10 @@ function readGrid(grid: TableGrid | undefined) {
   };
 }
 
-function readBody(body: ObjectPayload['body']): WhiteboardPayload['body'] | undefined {
+function readBody(
+  body: ObjectPayload['body'],
+  resolveAssetUrl: ResolveAssetUrl,
+): WhiteboardPayload['body'] | undefined {
   const { case: kind, value } = body;
 
   switch (kind) {
@@ -98,7 +110,7 @@ function readBody(body: ObjectPayload['body']): WhiteboardPayload['body'] | unde
           title: value.title,
           document: {
             schemaVersion: value.schemaVersion,
-            blocks: value.blocks.map(readDocumentBlock),
+            blocks: value.blocks.map((block) => readDocumentBlock(block, resolveAssetUrl)),
           },
         },
       };
@@ -155,7 +167,10 @@ function readBody(body: ObjectPayload['body']): WhiteboardPayload['body'] | unde
   }
 }
 
-function readPayload({ objectId: id, result }: ObjectPayloadResult): WhiteboardPayloadResult {
+function readPayload(
+  { objectId: id, result }: ObjectPayloadResult,
+  resolveAssetUrl: ResolveAssetUrl,
+): WhiteboardPayloadResult {
   if (result.case === 'unavailable') {
     return {
       kind: 'unavailable',
@@ -168,7 +183,7 @@ function readPayload({ objectId: id, result }: ObjectPayloadResult): WhiteboardP
   }
 
   const version = requireField(result.value.payloadVersion, 'object payload version');
-  const body = readBody(result.value.body);
+  const body = readBody(result.value.body, resolveAssetUrl);
 
   return body
     ? { kind: 'loaded', payload: { id, version, body } }
@@ -178,6 +193,7 @@ function readPayload({ objectId: id, result }: ObjectPayloadResult): WhiteboardP
 export function readPayloads(
   results: readonly ObjectPayloadResult[],
   expectedIds: readonly string[],
+  resolveAssetUrl: ResolveAssetUrl,
 ): readonly WhiteboardPayloadResult[] {
   const remaining = new Set(expectedIds);
   const payloads = results.map((result) => {
@@ -185,7 +201,7 @@ export function readPayloads(
       throw new Error('Whiteboard response has an unexpected or duplicate payload object ID.');
     }
 
-    return readPayload(result);
+    return readPayload(result, resolveAssetUrl);
   });
 
   if (remaining.size > 0) {

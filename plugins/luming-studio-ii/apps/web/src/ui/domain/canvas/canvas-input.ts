@@ -12,7 +12,9 @@ import {
   canvasDragSurface,
   canvasLabelId,
   containerOrigin,
+  isCanvasActivationControl,
   isCanvasHandle,
+  isCanvasKeyboardControl,
   ownsEvent,
   relativePoint,
   wheelDelta,
@@ -26,6 +28,7 @@ import { useObjectNavigation } from './canvas-object-navigation.js';
 import { connectionHandleBends } from './connectors/handles.js';
 import type {
   CanvasConnectionEndpoint,
+  CanvasFitScope,
   CanvasObjectChange,
   CanvasObjectKind,
   CanvasObjectNavigation,
@@ -33,6 +36,7 @@ import type {
   CanvasPoint,
   CanvasProps,
   CanvasTool,
+  CanvasViewport,
 } from './contracts.js';
 import type { ResizeHandle, TransformGesture } from './gestures/index.js';
 import { maxInkSamples } from './ink/geometry.js';
@@ -61,11 +65,40 @@ interface CanvasInputOptions {
   registry: CanvasObjectRegistry;
   frame: CanvasFrameController;
   props: CanvasProps;
+  fitScene: (scope: CanvasFitScope) => CanvasViewport | undefined;
 }
 
 const primaryButton = 0;
 const middleButton = 1;
 const keyboardZoomFactor = 1.2;
+
+function keyboardFit(event: ReactKeyboardEvent<HTMLDivElement>): CanvasFitScope | undefined {
+  if (event.ctrlKey || event.metaKey) {
+    return event.key === '0' ? 'auto' : undefined;
+  }
+  if (!event.shiftKey) {
+    return undefined;
+  }
+  if (event.code === 'Digit1') {
+    return 'board';
+  }
+  if (event.code === 'Digit2') {
+    return 'selection';
+  }
+}
+
+function keyboardZoom(event: ReactKeyboardEvent<HTMLDivElement>, zoom: number) {
+  const reset = event.shiftKey && event.code === 'Digit0';
+  if (reset && !event.ctrlKey && !event.metaKey) {
+    return 1 / zoom;
+  }
+  if (event.key === '+' || event.key === '=') {
+    return keyboardZoomFactor;
+  }
+  if (event.key === '-') {
+    return 1 / keyboardZoomFactor;
+  }
+}
 
 function isPrimaryPointer(event: ReactPointerEvent<HTMLElement>) {
   return event.pointerType !== 'touch' || event.isPrimary;
@@ -90,10 +123,12 @@ export function useCanvasInput({
   registry,
   frame,
   props,
+  fitScene,
 }: CanvasInputOptions) {
   const active = useRef<PointerSession | null>(null);
-  const [pointerActive, setPointerActive] = useState(false);
+  const [pointerAction, setPointerAction] = useState<PointerAction['kind']>();
   const spaceHeld = useRef(false);
+  const [spaceActive, setSpaceActive] = useState(false);
   const nextInteraction = useRef(0);
   const instanceId = useId();
   const {
@@ -110,9 +145,7 @@ export function useCanvasInput({
   const key = typeof tool === 'string' ? tool : 'place:' + tool.requestId;
   const [activation, setActivation] = useState({ key, completed: false });
   const settled = useRef<typeof activation | undefined>(undefined);
-  const objectNavigation = useObjectNavigation(root, frame, size, (held) => {
-    spaceHeld.current = held;
-  });
+  const objectNavigation = useObjectNavigation(root, frame, updateSpace);
 
   if (activation.key !== key) {
     setActivation({ key, completed: false });
@@ -159,12 +192,12 @@ export function useCanvasInput({
     };
     container.setPointerCapture?.(sample.pointerId);
     objectNavigation.stop();
-    setPointerActive(true);
+    setPointerAction(action.kind);
   }
 
   function end(session: PointerSession) {
     active.current = null;
-    setPointerActive(false);
+    setPointerAction(undefined);
     const element = root.current;
     if (element?.hasPointerCapture?.(session.pointerId)) {
       element.releasePointerCapture(session.pointerId);
@@ -181,8 +214,13 @@ export function useCanvasInput({
     update({ viewport: read().viewport }, timing);
   }
 
+  function updateSpace(held: boolean) {
+    spaceHeld.current = held;
+    setSpaceActive(held);
+  }
+
   function clearSpace() {
-    spaceHeld.current = false;
+    updateSpace(false);
   }
 
   function handleObjectNavigation(id: string, event: CanvasObjectNavigation) {
@@ -323,7 +361,8 @@ export function useCanvasInput({
     if (!held) {
       onSelectionChange(selected);
     }
-    if (!toggle && editableTarget(index, pending, id)) {
+    const shiftAdded = event.shiftKey && !selection.includes(id);
+    if ((!toggle || shiftAdded) && editableTarget(index, pending, id)) {
       beginTransform(container, event, origin, 'move', selected);
     }
   }
@@ -379,10 +418,11 @@ export function useCanvasInput({
 
     const origin = containerOrigin(container);
     const chosenTool = currentTool();
-    const pan = wantsPan(event.button);
+    const nativeTarget = canvasNativeId(event.target, container);
+    const pan = wantsPan(event.button) || Boolean(props.presentation && !nativeTarget);
     const selecting = chosenTool === 'select' && !pan;
     const id = selecting ? objectAt(event, container, origin) : undefined;
-    const native = selecting ? canvasNativeId(event.target, container) : undefined;
+    const native = selecting ? nativeTarget : undefined;
     const surface = canvasDragSurface(event.target, container);
     if (native && native === id && nativePointer(native, surface)) {
       if (!selection.includes(native)) {
@@ -630,55 +670,111 @@ export function useCanvasInput({
     }
   }
 
-  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.defaultPrevented || event.nativeEvent.isComposing) {
-      return;
-    }
-    if (
-      !ownsEvent(event.target, event.currentTarget) ||
-      canvasNativeId(event.target, event.currentTarget)
-    ) {
-      return;
-    }
-
-    const modified = event.ctrlKey || event.metaKey || event.altKey;
-    if (modified) {
-      return;
-    }
-
+  function escapeCanvas(event: ReactKeyboardEvent<HTMLDivElement>) {
     const toolNow = currentTool();
     const drawingTool = toolNow !== 'select' && toolNow !== 'pan';
-    if (event.key === 'Escape' && (active.current || drawingTool)) {
+    if (active.current || objectNavigation.panning || drawingTool) {
       event.preventDefault();
       cancel();
       exitDrawingTool();
-    }
-    if (event.key === ' ') {
+    } else if (toolNow === 'pan') {
       event.preventDefault();
-      spaceHeld.current = true;
-    }
-    if (event.key === '+' || event.key === '=' || event.key === '-') {
+      onToolChange?.('select');
+    } else if (selection.length > 0) {
       event.preventDefault();
-      cancel();
-      const anchor = { x: size.width / 2, y: size.height / 2 };
-      const factor = event.key === '-' ? 1 / keyboardZoomFactor : keyboardZoomFactor;
-      update({ viewport: zoomViewport(read().viewport, anchor, factor) }, 'now');
+      onSelectionChange([]);
+    }
+  }
+
+  function handleViewportKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const fit = keyboardFit(event);
+    if (fit) {
+      event.preventDefault();
+      const viewport = fitScene(fit);
+      if (viewport) {
+        cancel();
+        update({ viewport }, 'now');
+      }
+
+      return true;
+    }
+
+    const viewport = read().viewport;
+    const factor = keyboardZoom(event, viewport.zoom);
+    if (factor === undefined) {
+      return false;
+    }
+
+    event.preventDefault();
+    cancel();
+    const anchor = { x: size.width / 2, y: size.height / 2 };
+    update({ viewport: zoomViewport(viewport, anchor, factor) }, 'now');
+
+    return true;
+  }
+
+  function escapeNativeDocument(event: ReactKeyboardEvent<HTMLDivElement>, id: string) {
+    const modified = event.altKey || event.ctrlKey || event.metaKey;
+    const selectedDocument =
+      selection.length === 1 && selection[0] === id && index.get(id)?.kind === 'document';
+
+    if (event.key !== 'Escape' || modified || !selectedDocument) {
+      return;
+    }
+
+    escapeCanvas(event);
+    event.currentTarget.focus({ preventScroll: true });
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.key === 'Process') {
+      return;
+    }
+
+    const { target, currentTarget } = event;
+    if (!ownsEvent(target, currentTarget) || isCanvasKeyboardControl(target, currentTarget)) {
+      return;
+    }
+
+    const native = canvasNativeId(target, currentTarget);
+    if (native) {
+      escapeNativeDocument(event, native);
+      return;
+    }
+
+    const command = event.ctrlKey || event.metaKey;
+
+    if (event.altKey || handleViewportKey(event) || command) {
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      escapeCanvas(event);
+    } else if (
+      (event.code === 'Space' || event.key === ' ') &&
+      !isCanvasActivationControl(target, currentTarget)
+    ) {
+      event.preventDefault();
+      updateSpace(true);
     }
   }
 
   function handleKeyUp(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (event.key === ' ' && ownsEvent(event.target, event.currentTarget)) {
+    if (
+      (event.code === 'Space' || event.key === ' ') &&
+      ownsEvent(event.target, event.currentTarget)
+    ) {
       clearSpace();
     }
   }
 
   const onWheel = useEffectEvent((event: WheelEvent, element: HTMLDivElement) => {
-    const zoom = event.ctrlKey || event.metaKey;
-    const native = canvasNativeId(event.target, element);
     if (event.defaultPrevented || !ownsEvent(event.target, element)) {
       return;
     }
-    if (!zoom && currentTool() === 'select' && native) {
+
+    const zoom = event.ctrlKey || event.metaKey;
+    if (!zoom && canvasNativeId(event.target, element)) {
       return;
     }
 
@@ -687,12 +783,13 @@ export function useCanvasInput({
       return;
     }
 
-    const delta = wheelDelta(event, size);
     const { viewport } = read();
     if (zoom) {
       const point = relativePoint(event, containerOrigin(element));
-      update({ viewport: zoomViewport(viewport, point, wheelZoomFactor(delta.y)) });
+      const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+      update({ viewport: zoomViewport(viewport, point, factor) });
     } else {
+      const delta = wheelDelta(event, size);
       update({ viewport: panViewport(viewport, { x: -delta.x, y: -delta.y }) });
     }
   });
@@ -717,18 +814,19 @@ export function useCanvasInput({
       onWindowBlur();
     }
 
-    element.addEventListener('wheel', handleWheel, { passive: false });
+    element.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     view?.addEventListener('blur', handleWindowBlur);
 
     return () => {
-      element.removeEventListener('wheel', handleWheel);
+      element.removeEventListener('wheel', handleWheel, true);
       view?.removeEventListener('blur', handleWindowBlur);
     };
   }, [root]);
 
   return {
     toolKind,
-    pointerActive,
+    pointerActive: pointerAction !== undefined,
+    temporaryPan: spaceActive || pointerAction === 'pan' || objectNavigation.panning,
     cancel,
     clearSpace,
     handlePointerDownCapture,

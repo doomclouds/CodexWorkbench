@@ -18,10 +18,15 @@ export interface CanvasViewport extends CanvasPoint {
   readonly zoom: number;
 }
 
-export interface CanvasViewportRequest {
+export type CanvasFitScope = 'auto' | 'board' | 'selection';
+
+export type CanvasViewportRequest = {
   readonly requestId: string;
-  readonly viewport: CanvasViewport;
-}
+} & (
+  | { readonly viewport: CanvasViewport }
+  | { readonly fit: CanvasFitScope }
+  | { readonly zoom: number }
+);
 
 export interface CanvasObjectActivation {
   readonly id: string;
@@ -185,6 +190,9 @@ export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly readOnly: boolean;
   readonly locked?: boolean;
   readonly editRequest?: number;
+  readonly focusedReading?: boolean;
+  readonly onOpenPresentation?: () => void;
+  readonly onClosePresentation?: () => void;
   readonly request: (operation: CanvasObjectOperation) => Promise<CanvasObjectReceipt>;
   readonly onNavigation?: (event: CanvasObjectNavigation) => void;
   readonly onRetentionChange?: (retain: boolean) => void;
@@ -287,6 +295,11 @@ export interface CanvasHandle {
   fitToObjects(ids: readonly string[]): void;
 }
 
+export interface CanvasPresentation {
+  readonly objectIds: readonly string[];
+  readonly focusObjectId?: string;
+}
+
 export interface CanvasProps {
   readonly viewId: string;
   readonly label: string;
@@ -298,12 +311,17 @@ export interface CanvasProps {
   readonly initialViewport?: CanvasViewport;
   readonly fitOnMount?: boolean;
   readonly viewportRequest?: CanvasViewportRequest;
+  readonly showGrid?: boolean;
+  readonly presentation?: CanvasPresentation;
+  readonly selectionActions?: ReactNode;
   readonly pendingEdits?: readonly CanvasEditIntent[];
   readonly objectExtensions?: readonly CanvasObjectExtension[];
   readonly payloadById?: ReadonlyMap<string, CanvasObjectPayload>;
   readonly contentById?: ReadonlyMap<string, ReactNode>;
   readonly onSelectionChange: (selection: readonly string[]) => void;
   readonly onObjectActivate?: (activation: CanvasObjectActivation) => void;
+  readonly onOpenPresentation?: (ids: readonly string[]) => void;
+  readonly onClosePresentation?: () => void;
   readonly onObjectIntent?: (
     intent: CanvasObjectIntent,
   ) => CanvasObjectReceipt | Promise<CanvasObjectReceipt>;

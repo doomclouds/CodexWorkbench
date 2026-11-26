@@ -7,8 +7,12 @@ const labelSelector =
 const rootSelector = '[data-canvas-root]';
 const nativeSelector = '[data-canvas-native]';
 const handleSelector = '[data-canvas-handle], [data-canvas-port], [data-canvas-connector-handle]';
+const keyboardControlSelector =
+  'input, textarea, select, iframe, [contenteditable]:not([contenteditable="false"]), [role="dialog"], [role="menu"], [role="listbox"], [role="combobox"]';
 const wheelLineSize = 16;
-const wheelZoomRate = 0.002;
+const wheelPageSize = 800;
+const wheelZoomLimit = 120;
+const wheelZoomRate = 0.0015;
 
 function elementTarget(target: EventTarget | null, container: HTMLDivElement) {
   const ElementType = container.ownerDocument.defaultView?.Element;
@@ -20,8 +24,21 @@ function elementTarget(target: EventTarget | null, container: HTMLDivElement) {
 export function ownsEvent(target: EventTarget | null, container: HTMLDivElement) {
   const element = elementTarget(target, container);
   const dialog = element?.closest('dialog[open]');
+  const controls = element?.closest('[data-canvas-controls]');
 
-  return element?.closest(rootSelector) === container && (!dialog || !container.contains(dialog));
+  return (
+    element?.closest(rootSelector) === container &&
+    (!dialog || !container.contains(dialog)) &&
+    (!controls || !container.contains(controls))
+  );
+}
+
+export function isCanvasKeyboardControl(target: EventTarget | null, container: HTMLDivElement) {
+  return Boolean(elementTarget(target, container)?.closest(keyboardControlSelector));
+}
+
+export function isCanvasActivationControl(target: EventTarget | null, container: HTMLDivElement) {
+  return Boolean(elementTarget(target, container)?.closest('button, a[href]'));
 }
 
 export function canvasNativeId(target: EventTarget | null, container: HTMLDivElement) {
@@ -89,6 +106,15 @@ export function wheelDelta(
   return { x: event.deltaX * scale, y: event.deltaY * scale };
 }
 
-export function wheelZoomFactor(delta: number) {
-  return Math.exp(-delta * wheelZoomRate);
+export function wheelZoomFactor(delta: number, mode: number) {
+  let pixels = delta;
+  if (mode === WheelEvent.DOM_DELTA_LINE) {
+    pixels *= wheelLineSize;
+  } else if (mode === WheelEvent.DOM_DELTA_PAGE) {
+    pixels *= wheelPageSize;
+  }
+
+  const bounded = Math.max(-wheelZoomLimit, Math.min(wheelZoomLimit, pixels));
+
+  return Math.exp(-bounded * wheelZoomRate);
 }

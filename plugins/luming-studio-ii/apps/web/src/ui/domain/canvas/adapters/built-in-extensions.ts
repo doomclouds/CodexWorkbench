@@ -80,6 +80,7 @@ const builtInDefinitions: readonly CanvasBuiltInExtension[] = [
     kind: 'connector',
     capabilities: connectorCapabilities,
     Frame: CanvasConnectorFrame,
+    usesZoom: true,
     blocksPlacement: false,
   },
   placementDefinition(

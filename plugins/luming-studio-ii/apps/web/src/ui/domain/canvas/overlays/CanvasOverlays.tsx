@@ -1,4 +1,5 @@
-import type { PointerEvent } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
+import type { PointerEvent, ReactNode } from 'react';
 import { connectionPortOffset, connectionPorts, portPoint } from '../connectors/geometry.js';
 import { connectionHandleBends } from '../connectors/handles.js';
 import type {
@@ -9,8 +10,9 @@ import type {
   CanvasViewport,
 } from '../contracts.js';
 import type { AlignmentGuide, ResizeHandle } from '../gestures/index.js';
-import type { ProjectedCanvasObject } from '../scene/index.js';
-import { boardToScreen, normalizeViewport } from '../viewport/index.js';
+import { projectedObjectBounds, type ProjectedCanvasObject } from '../scene/index.js';
+import { boardToScreen, mergeRects, normalizeViewport } from '../viewport/index.js';
+import type { CanvasViewportSize } from '../viewport/index.js';
 import './CanvasOverlays.css';
 
 const handleLabels = {
@@ -43,6 +45,8 @@ const portLabels = {
 interface CanvasOverlaysProps {
   readonly viewport: CanvasViewport;
   readonly selected: readonly ProjectedCanvasObject[];
+  readonly viewportSize?: CanvasViewportSize;
+  readonly selectionActions?: ReactNode;
   readonly marquee?: CanvasRect;
   readonly guides?: readonly AlignmentGuide[];
   readonly ports?: readonly CanvasPoint[];
@@ -88,6 +92,87 @@ function screenPosition(point: CanvasPoint, viewport: CanvasViewport) {
 
 function screenBox(geometry: CanvasGeometry, viewport: CanvasViewport) {
   return { ...screenRect(geometry, viewport), transform: 'rotate(' + geometry.rotation + 'deg)' };
+}
+
+const toolbarMargin = 12;
+const toolbarGap = 8;
+
+function selectionToolbarPosition(
+  anchor: ReturnType<typeof screenRect>,
+  toolbar: CanvasViewportSize,
+  viewport: CanvasViewportSize,
+) {
+  const right = viewport.width - toolbarMargin - toolbar.width;
+  const bottom = viewport.height - toolbarMargin - toolbar.height;
+  const measured = toolbar.width > 0 && toolbar.height > 0;
+  const fits = right >= toolbarMargin && bottom >= toolbarMargin;
+  if (!measured || !fits) {
+    return undefined;
+  }
+
+  const visibleX = anchor.left + anchor.width >= 0 && anchor.left <= viewport.width;
+  const visibleY = anchor.top + anchor.height >= 0 && anchor.top <= viewport.height;
+  if (!visibleX || !visibleY) {
+    return undefined;
+  }
+
+  const above = anchor.top - toolbarGap - toolbar.height;
+  const below = anchor.top + anchor.height + toolbarGap;
+  const preferred = above >= toolbarMargin || below > bottom ? above : below;
+  const center = anchor.left + (anchor.width - toolbar.width) / 2;
+
+  return {
+    left: Math.max(toolbarMargin, Math.min(center, right)),
+    top: Math.max(toolbarMargin, Math.min(preferred, bottom)),
+  };
+}
+
+interface SelectionToolbarProps {
+  readonly anchor: ReturnType<typeof screenRect>;
+  readonly viewportSize: CanvasViewportSize;
+  readonly children: ReactNode;
+}
+
+function SelectionToolbar({ anchor, viewportSize, children }: SelectionToolbarProps) {
+  const toolbar = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<CanvasViewportSize>({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const node = toolbar.current;
+    if (!node) {
+      return;
+    }
+
+    const measure = () => {
+      const { width, height } = node.getBoundingClientRect();
+      setSize((current) =>
+        width === current.width && height === current.height ? current : { width, height },
+      );
+    };
+
+    measure();
+    const Observer = node.ownerDocument.defaultView?.ResizeObserver;
+    const observer = Observer ? new Observer(measure) : undefined;
+    observer?.observe(node);
+
+    return () => observer?.disconnect();
+  }, []);
+
+  const position = selectionToolbarPosition(anchor, size, viewportSize);
+
+  return (
+    <div
+      ref={toolbar}
+      className="studio-ui-canvas-selection-actions"
+      data-canvas-controls=""
+      data-canvas-selection-actions=""
+      role="toolbar"
+      aria-label="选区操作"
+      style={position ?? { visibility: 'hidden' }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function guideRect({ axis, at, from, to }: AlignmentGuide, viewport: CanvasViewport) {
@@ -161,9 +246,90 @@ function connectorHandles(points: readonly CanvasPoint[]) {
   ];
 }
 
+interface SelectionOutlineProps extends Pick<
+  CanvasOverlaysProps,
+  | 'selected'
+  | 'viewport'
+  | 'allowResize'
+  | 'allowRotate'
+  | 'cornerResizeOnly'
+  | 'lockedSelection'
+  | 'onHandlePointerDown'
+> {
+  readonly transformBox: CanvasGeometry;
+}
+
+function SelectionOutline({
+  selected,
+  viewport,
+  allowResize,
+  allowRotate,
+  cornerResizeOnly,
+  lockedSelection,
+  onHandlePointerDown,
+  transformBox,
+}: SelectionOutlineProps) {
+  const resizeHandles = [...cornerHandles, ...selectedResizeEdges(selected, cornerResizeOnly)];
+  const singleKind = selected.length === 1 ? selected[0]?.object.kind : undefined;
+  const outsideResize = singleKind === 'document' || singleKind === 'todo' || singleKind === 'html';
+  const showStaticCorners =
+    !allowResize &&
+    (lockedSelection ||
+      selected.some(({ object }) => !['link', 'connector'].includes(object.kind)));
+
+  return (
+    <div
+      className="studio-ui-canvas-selection-outline"
+      data-canvas-outside-resize={outsideResize || undefined}
+      style={screenBox(transformBox, viewport)}
+    >
+      {allowRotate &&
+        cornerHandles.map((corner) => (
+          <button
+            key={`rotate-${corner}`}
+            className="studio-ui-canvas-rotate-hit"
+            data-canvas-handle="rotate"
+            data-canvas-rotate-corner={corner}
+            type="button"
+            tabIndex={-1}
+            aria-label={`旋转所选对象 ${corner}`}
+            onPointerDown={(event) =>
+              handlePress(event, () => onHandlePointerDown(event, 'rotate'))
+            }
+          />
+        ))}
+      {allowResize &&
+        resizeHandles.map((handle) => (
+          <button
+            key={handle}
+            className="studio-ui-canvas-transform-handle"
+            data-canvas-handle={handle}
+            type="button"
+            tabIndex={-1}
+            aria-label={handleLabels[handle]}
+            style={{ cursor: resizeCursor(handle, transformBox.rotation) }}
+            onPointerDown={(event) => handlePress(event, () => onHandlePointerDown(event, handle))}
+          />
+        ))}
+      {showStaticCorners &&
+        cornerHandles.map((handle) => (
+          <span
+            key={handle}
+            className="studio-ui-canvas-transform-handle studio-ui-canvas-transform-handle--static"
+            data-canvas-static-corner={handle}
+            data-canvas-locked-corner={lockedSelection ? handle : undefined}
+            aria-hidden="true"
+          />
+        ))}
+    </div>
+  );
+}
+
 export function CanvasOverlays(props: CanvasOverlaysProps) {
   const {
     viewport,
+    viewportSize,
+    selectionActions,
     selected,
     marquee,
     guides,
@@ -181,60 +347,23 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
     onConnectorPointerDown,
   } = props;
   const view = normalizeViewport(viewport);
-  const resizeHandles = [...cornerHandles, ...selectedResizeEdges(selected, cornerResizeOnly)];
-  const singleKind = selected.length === 1 ? selected[0]?.object.kind : undefined;
-  const outsideResize = singleKind === 'document' || singleKind === 'todo' || singleKind === 'html';
   const portSource = visiblePortSource(source, view.zoom);
   const connection = selectedConnector?.connectorRoute;
+  const actionsBounds = selectionActions && mergeRects(selected.map(projectedObjectBounds));
 
   return (
     <div className="studio-ui-canvas-overlays">
       {transformBox && (
-        <div
-          className="studio-ui-canvas-selection-outline"
-          data-canvas-outside-resize={outsideResize || undefined}
-          style={screenBox(transformBox, view)}
-        >
-          {allowRotate &&
-            cornerHandles.map((corner) => (
-              <button
-                key={`rotate-${corner}`}
-                className="studio-ui-canvas-rotate-hit"
-                data-canvas-handle="rotate"
-                data-canvas-rotate-corner={corner}
-                type="button"
-                tabIndex={-1}
-                aria-label={`旋转所选对象 ${corner}`}
-                onPointerDown={(event) =>
-                  handlePress(event, () => onHandlePointerDown(event, 'rotate'))
-                }
-              />
-            ))}
-          {allowResize &&
-            resizeHandles.map((handle) => (
-              <button
-                key={handle}
-                className="studio-ui-canvas-transform-handle"
-                data-canvas-handle={handle}
-                type="button"
-                tabIndex={-1}
-                aria-label={handleLabels[handle]}
-                style={{ cursor: resizeCursor(handle, transformBox.rotation) }}
-                onPointerDown={(event) =>
-                  handlePress(event, () => onHandlePointerDown(event, handle))
-                }
-              />
-            ))}
-          {lockedSelection &&
-            cornerHandles.map((handle) => (
-              <span
-                key={handle}
-                className="studio-ui-canvas-transform-handle studio-ui-canvas-transform-handle--locked"
-                data-canvas-locked-corner={handle}
-                aria-hidden="true"
-              />
-            ))}
-        </div>
+        <SelectionOutline
+          transformBox={transformBox}
+          viewport={view}
+          selected={selected}
+          allowResize={allowResize}
+          allowRotate={allowRotate}
+          cornerResizeOnly={cornerResizeOnly}
+          lockedSelection={lockedSelection}
+          onHandlePointerDown={onHandlePointerDown}
+        />
       )}
       {portSource &&
         connectionPorts.map((port) => (
@@ -306,6 +435,11 @@ export function CanvasOverlays(props: CanvasOverlaysProps) {
           style={screenPosition(activePort, view)}
           aria-hidden="true"
         />
+      )}
+      {actionsBounds && viewportSize && (
+        <SelectionToolbar anchor={screenRect(actionsBounds, view)} viewportSize={viewportSize}>
+          {selectionActions}
+        </SelectionToolbar>
       )}
     </div>
   );

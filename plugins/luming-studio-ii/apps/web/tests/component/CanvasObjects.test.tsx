@@ -15,6 +15,7 @@ import {
   type CanvasScene,
   type CanvasViewport,
 } from '../../src/ui/domain/canvas/index.js';
+import { stickerExtension } from '../../src/ui/domain/objects/sticker/index.js';
 import { todoExtension } from '../../src/ui/domain/objects/todo/index.js';
 import { initialReceiptState, reduceReceipts } from '../fixtures/canvas/receipts.js';
 import { createControlFixture } from '../support/render-control.js';
@@ -354,6 +355,33 @@ describe('Canvas object extensions', () => {
     });
   });
 
+  it('keeps the sticker palette closed without an object writer', () => {
+    const sticker: CanvasObject = {
+      id: 'heart-sticker',
+      kind: 'sticker',
+      label: '爱心',
+      version: 1,
+      geometry: { x: 30, y: 30, width: 64, height: 64, rotation: 0 },
+    };
+    const onObjectActivate = vi.fn<(activation: CanvasObjectActivation) => void>();
+    const { root } = renderCanvas({
+      scene: { ...scene, objects: [sticker] },
+      selection: [sticker.id],
+      objectExtensions: [stickerExtension],
+      payloadById: new Map([[sticker.id, { version: 1, value: { id: 'heart' } }]]),
+      onObjectActivate,
+    });
+    act(() => {
+      root.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: 50, clientY: 50 }));
+    });
+
+    expect(onObjectActivate).toHaveBeenCalledExactlyOnceWith({
+      id: sticker.id,
+      point: { x: 50, y: 50 },
+    });
+    expect(root.querySelector('dialog')).toBeNull();
+  });
+
   it('checks current permission and releases callbacks when a registered view is replaced or unmounted', async () => {
     const observe = vi.fn<(view: CanvasObjectViewProps) => void>();
     const objectExtensions = [createBadgeExtension(observe)];
@@ -477,6 +505,7 @@ describe('Canvas object extensions', () => {
       });
     const { root } = renderCanvas({
       scene: { ...scene, objects: [object] },
+      selection: [object.id],
       objectExtensions: [todoExtension],
       payloadById: new Map([[object.id, { version: todo.revision, value: todo }]]),
       onObjectIntent,
@@ -504,7 +533,7 @@ describe('Canvas object extensions', () => {
     expect(root.textContent).toContain('1/1 完成');
   });
 
-  it('retains a rejected todo title draft offscreen and releases the body after a successful retry', async () => {
+  it('retains a rejected todo title draft offscreen and releases the saved body when evicted', async () => {
     const object: CanvasObject = {
       id: 'retained-checklist',
       kind: 'todo',
@@ -522,6 +551,7 @@ describe('Canvas object extensions', () => {
       .mockReturnValueOnce({ ok: true, payload: { version: saved.revision, value: saved } });
     const props = {
       scene: { ...scene, objects: [object] },
+      selection: [object.id],
       objectExtensions: [todoExtension],
       payloadById: new Map([[object.id, { version: todo.revision, value: todo }]]),
       onObjectIntent,
@@ -573,6 +603,9 @@ describe('Canvas object extensions', () => {
       viewportRequest: { requestId: 'todo-cleared', viewport: movedViewport },
     });
     await flushFrame();
+    expect(root.querySelector('[data-todo-id]')?.getAttribute('aria-label')).toBe(draftTitle);
+
+    renderCanvas({ ...props, payloadById: new Map() });
     expect(root.querySelector('[data-todo-id]')).toBeNull();
   });
 

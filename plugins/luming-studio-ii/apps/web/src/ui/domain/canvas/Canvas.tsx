@@ -15,14 +15,27 @@ import { useCanvasFrame, useCanvasSize } from './canvas-frame.js';
 import { useCanvasInput } from './canvas-input.js';
 import { selectionControls, useCanvasModel } from './canvas-model.js';
 import { createCanvasObjectRegistry } from './canvas-registry.js';
-import type { CanvasObjectActivation, CanvasProps, CanvasViewportRequest } from './contracts.js';
+import type {
+  CanvasFitScope,
+  CanvasObjectActivation,
+  CanvasProps,
+  CanvasViewportRequest,
+} from './contracts.js';
 import { CanvasOverlays } from './overlays/index.js';
 import { CanvasObjects } from './rendering/index.js';
 import { isObjectLocked, projectedObjectBounds, projectObject } from './scene/index.js';
-import { fitViewport, mergeRects, normalizeViewport } from './viewport/index.js';
+import { expandSelectionIds } from './selection/index.js';
+import {
+  fitViewport,
+  MAX_ZOOM,
+  mergeRects,
+  normalizeViewport,
+  zoomViewport,
+} from './viewport/index.js';
 import './Canvas.css';
 
 const fitPadding = 72;
+const presentationPadding = 48;
 
 function gridSpacing(zoom: number) {
   const spacing = 24 * zoom;
@@ -38,6 +51,13 @@ function sameIds(previous: readonly string[] | undefined, next: readonly string[
   return previous.every((id, index) => id === next[index]);
 }
 
+function selectionActionSlot(props: CanvasProps, input: ReturnType<typeof useCanvasInput>) {
+  const selecting = input.toolKind === 'select' && !input.temporaryPan;
+  const visible = selecting && !input.pointerActive && !props.presentation;
+
+  return visible ? props.selectionActions : undefined;
+}
+
 function CanvasSession(props: CanvasProps) {
   const {
     label,
@@ -46,6 +66,7 @@ function CanvasSession(props: CanvasProps) {
     fitOnMount,
     onViewportChange,
     onVisibleObjectsChange,
+    presentation,
     ref,
   } = props;
   const root = useRef<HTMLDivElement>(null);
@@ -84,10 +105,56 @@ function CanvasSession(props: CanvasProps) {
     props,
     frame,
     size,
-    retainedId,
+    presentation?.focusObjectId ?? retainedId,
     retainedIds,
     registry,
   );
+  const presentationIds = useMemo(() => {
+    if (presentation?.focusObjectId) {
+      return new Set([presentation.focusObjectId]);
+    }
+    if (!presentation || presentation.objectIds.length === 0) {
+      return undefined;
+    }
+
+    return new Set(expandSelectionIds(index, presentation.objectIds, pending));
+  }, [presentation, index, pending]);
+  const visibleInMode = useMemo(() => {
+    if (presentation?.focusObjectId) {
+      return [presentation.focusObjectId];
+    }
+
+    return presentationIds ? visibleIds.filter((id) => presentationIds.has(id)) : visibleIds;
+  }, [presentation, presentationIds, visibleIds]);
+
+  function fittedViewport(ids: readonly string[], maxZoom?: number) {
+    const bounds = ids.flatMap((id) => {
+      const item = projectObject(index, pending, id);
+
+      return item ? [projectedObjectBounds(item)] : [];
+    });
+    const target = mergeRects(bounds);
+    if (!target || size.width <= 0 || size.height <= 0) {
+      return undefined;
+    }
+
+    return fitViewport(target, size, presentation ? presentationPadding : fitPadding, maxZoom);
+  }
+
+  function resolveSceneFit(scope: CanvasFitScope) {
+    if (presentation) {
+      const ids = presentationIds ?? props.scene.objects.map(({ id }) => id);
+
+      return fittedViewport([...ids], MAX_ZOOM);
+    }
+
+    const selectedIds =
+      scope === 'board' ? [] : expandSelectionIds(index, props.selection, pending);
+    const ids = selectedIds.length > 0 ? selectedIds : props.scene.objects.map(({ id }) => id);
+
+    return fittedViewport(ids, scope === 'selection' ? MAX_ZOOM : undefined);
+  }
+
   const input = useCanvasInput({
     root,
     size,
@@ -95,6 +162,7 @@ function CanvasSession(props: CanvasProps) {
     pending,
     registry,
     frame: controller,
+    fitScene: resolveSceneFit,
     props: { ...props, onObjectActivate: activateObject },
   });
   const drafts = useCanvasDrafts(props.pendingEdits, canEdit ? frame.draft : undefined, {
@@ -102,7 +170,13 @@ function CanvasSession(props: CanvasProps) {
     pending,
   });
   const selecting = input.toolKind === 'select';
-  const controls = selectionControls(selecting ? selected : [], index, pending, registry, canEdit);
+  const controls = selectionControls(
+    selecting && !input.temporaryPan ? selected : [],
+    index,
+    pending,
+    registry,
+    canEdit,
+  );
   const activeEmbedId =
     selecting && !input.pointerActive && props.selection.length === 1
       ? props.selection[0]
@@ -112,28 +186,51 @@ function CanvasSession(props: CanvasProps) {
   const openingFitApplied = useRef(false);
   const observeVisible = useEffectEvent((ids: readonly string[]) => onVisibleObjectsChange?.(ids));
   const observeViewport = useEffectEvent(onViewportChange ?? (() => undefined));
+
+  function requestedViewport(request: CanvasViewportRequest) {
+    if ('viewport' in request) {
+      return normalizeViewport(request.viewport);
+    }
+    if ('fit' in request) {
+      return resolveSceneFit(request.fit);
+    }
+
+    const current = controller.read().viewport;
+
+    return zoomViewport(
+      current,
+      { x: size.width / 2, y: size.height / 2 },
+      request.zoom / current.zoom,
+    );
+  }
+
   const applyViewportRequest = useEffectEvent((request: CanvasViewportRequest | undefined) => {
     if (!request || appliedViewportRequest.current === request.requestId) {
       return;
     }
 
+    const viewport = requestedViewport(request);
+    if (!viewport) {
+      return;
+    }
+
     appliedViewportRequest.current = request.requestId;
     input.cancel('frame');
-    update({ viewport: normalizeViewport(request.viewport) });
+    update({ viewport });
   });
 
   useLayoutEffect(() => {
     applyViewportRequest(props.viewportRequest);
-  }, [props.viewportRequest]);
+  }, [props.viewportRequest, props.scene.objects, size]);
 
   useEffect(() => {
-    if (sameIds(previousVisible.current, visibleIds)) {
+    if (sameIds(previousVisible.current, visibleInMode)) {
       return;
     }
 
-    previousVisible.current = visibleIds;
-    observeVisible(visibleIds);
-  }, [visibleIds]);
+    previousVisible.current = visibleInMode;
+    observeVisible(visibleInMode);
+  }, [visibleInMode]);
 
   useEffect(() => {
     observeViewport(frame.viewport);
@@ -150,18 +247,13 @@ function CanvasSession(props: CanvasProps) {
   }
 
   function fitObjects(ids: readonly string[], timing: 'now' | 'frame') {
-    const bounds = ids.flatMap((id) => {
-      const item = projectObject(index, pending, id);
-
-      return item ? [projectedObjectBounds(item)] : [];
-    });
-    const target = mergeRects(bounds);
-    if (!target || size.width <= 0 || size.height <= 0) {
+    const viewport = fittedViewport(ids);
+    if (!viewport) {
       return false;
     }
 
     input.cancel(timing);
-    update({ viewport: fitViewport(target, size, fitPadding) }, timing);
+    update({ viewport }, timing);
 
     return true;
   }
@@ -210,6 +302,10 @@ function CanvasSession(props: CanvasProps) {
   const { x, y, zoom } = frame.viewport;
   const transform = `translate(${x}px, ${y}px) scale(${zoom})`;
   const spacing = gridSpacing(zoom);
+  const focusedId = presentation?.focusObjectId;
+  const paintedInMode = presentationIds
+    ? painted.filter(({ object }) => presentationIds.has(object.id))
+    : painted;
 
   return (
     <div
@@ -220,6 +316,7 @@ function CanvasSession(props: CanvasProps) {
       className="studio-canvas"
       data-canvas-root={props.viewId}
       data-tool={input.toolKind}
+      data-canvas-presentation={presentation ? '' : undefined}
       onPointerDownCapture={input.handlePointerDownCapture}
       onPointerDown={input.handlePointerDown}
       onDoubleClick={input.handleDoubleClick}
@@ -236,6 +333,7 @@ function CanvasSession(props: CanvasProps) {
       <div
         className="studio-canvas__background"
         style={{
+          backgroundImage: props.showGrid === false || focusedId ? 'none' : undefined,
           backgroundPosition: `${x}px ${y}px`,
           backgroundSize: `${spacing}px ${spacing}px`,
         }}
@@ -243,11 +341,11 @@ function CanvasSession(props: CanvasProps) {
       />
       <div
         className="studio-canvas__world"
-        style={{ transform }}
+        style={{ transform: focusedId ? undefined : transform }}
         inert={input.toolKind !== 'select'}
       >
         <CanvasObjects
-          objects={painted}
+          objects={paintedInMode}
           contentById={props.contentById}
           drafts={drafts}
           zoom={zoom}
@@ -255,16 +353,22 @@ function CanvasSession(props: CanvasProps) {
           registry={registry}
           payloadById={props.payloadById}
           selection={props.selection}
+          viewing={Boolean(presentation)}
+          focusObjectId={focusedId}
           canEdit={canEdit}
           editRequest={editRequest}
           isLocked={(id) => isObjectLocked(index, id)}
           onObjectIntent={props.onObjectIntent}
+          onOpenPresentation={props.onOpenPresentation}
+          onClosePresentation={props.onClosePresentation}
           onObjectNavigation={input.handleObjectNavigation}
           onObjectRetentionChange={handleRetention}
         />
       </div>
       <CanvasOverlays
         viewport={frame.viewport}
+        viewportSize={size}
+        selectionActions={selectionActionSlot(props, input)}
         selected={selecting ? selected : []}
         marquee={frame.marquee}
         guides={canEdit ? frame.guides : undefined}

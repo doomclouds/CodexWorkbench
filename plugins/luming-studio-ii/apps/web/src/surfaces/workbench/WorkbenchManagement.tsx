@@ -108,7 +108,7 @@ export function RenameBoardDialog({
       <Dialog
         open
         title="重命名作品"
-        closeLabel="关闭"
+        closeLabel="关闭弹窗"
         initialFocus={() => input.current?.focus()}
         restoreFocus={restoreFocus}
         dismissPolicy={{ backdrop: true }}

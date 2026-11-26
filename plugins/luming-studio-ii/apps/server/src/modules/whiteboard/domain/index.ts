@@ -27,6 +27,16 @@ export type {
   Point,
   StoredReceipt,
 } from './model.js';
+export type {
+  BoardExportAsset,
+  BoardExportRejection,
+  BoardExportSnapshot,
+  BoardExportStale,
+  ExportBoardCommand,
+  ExportBoardResult,
+} from './export-types.js';
+export { selectExportObjects } from './export-scope.js';
+export { renderExportFile } from './export-file.js';
 export {
   canAdvanceVersion,
   canTranslate,

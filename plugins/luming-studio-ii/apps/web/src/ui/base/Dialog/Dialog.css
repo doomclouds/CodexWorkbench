@@ -6,7 +6,10 @@
   border-radius: var(--studio-ui-radius, 0.75rem);
   background: var(--studio-ui-surface, Canvas);
   color: var(--studio-ui-text, CanvasText);
-  box-shadow: 0 0.75rem 3rem var(--studio-ui-shadow, rgb(0 0 0 / 22%));
+  box-shadow: var(
+    --studio-ui-dialog-shadow,
+    0 0.75rem 3rem var(--studio-ui-shadow, rgb(0 0 0 / 22%))
+  );
   overscroll-behavior: contain;
 }
 
@@ -16,15 +19,34 @@
 
 .studio-ui-dialog__body {
   display: grid;
-  gap: 0.875rem;
-  padding: 1.25rem;
+  gap: var(--studio-ui-dialog-gap, 0.875rem);
+  padding: var(--studio-ui-dialog-padding, 1.25rem);
 }
 
 .studio-ui-dialog__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 10px;
+  margin-block-end: var(--studio-ui-dialog-header-space, 0);
+}
+
+.studio-ui-dialog__header > button[data-icon-only='true'] {
+  flex: none;
+  inline-size: 26px;
+  block-size: 26px;
+  min-inline-size: 0;
+  min-block-size: 0;
+  margin-block-start: -4px;
+  margin-inline-end: -4px;
+  padding: 0;
+  border-radius: 7px;
+  color: var(--studio-ui-dialog-close-color, inherit);
+}
+
+.studio-ui-dialog__header > button[data-icon-only='true']:not(:disabled, :focus-visible):hover {
+  background: var(--studio-ui-hover, color-mix(in srgb, currentColor 10%, transparent));
+  outline: none;
 }
 
 .studio-ui-dialog__title,
@@ -33,9 +55,10 @@
 }
 
 .studio-ui-dialog__title {
-  font-size: 1.125rem;
+  font-size: var(--studio-ui-dialog-title-size, 1.125rem);
+  font-weight: var(--studio-ui-dialog-title-weight, bold);
 }
 
 .studio-ui-dialog__description {
-  color: var(--studio-ui-muted, CanvasText);
+  color: var(--studio-ui-dialog-description-color, var(--studio-ui-muted, CanvasText));
 }

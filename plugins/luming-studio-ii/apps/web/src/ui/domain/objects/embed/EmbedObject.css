@@ -66,12 +66,48 @@
   border-radius: 0.35rem;
 }
 
+dialog:has(.studio-ui-embed__source-editor) {
+  --studio-ui-surface: light-dark(#fff, #1d1f21);
+  --studio-ui-text: light-dark(#25282d, #f0f0ef);
+  --studio-ui-muted: light-dark(#69717c, #a6adb5);
+  --studio-ui-border: light-dark(#dedfdf, #383d42);
+  --studio-ui-accent: var(--studio-ui-text);
+  --studio-ui-accent-text: var(--studio-ui-surface);
+  --studio-ui-dialog-padding: 21px;
+  --studio-ui-dialog-gap: 20px;
+  --studio-ui-dialog-shadow: 0 10px 36px light-dark(#171a2020, #0006);
+  --studio-ui-dialog-title-size: 16px;
+  --studio-ui-dialog-title-weight: 500;
+  --studio-ui-radius: 13px;
+  --studio-ui-control-radius: 7px;
+  --studio-ui-backdrop: #090d1566;
+  inline-size: min(890px, calc(100% - 50px));
+  max-block-size: calc(100dvh - 50px);
+}
+
 .studio-ui-embed__source-editor {
   display: grid;
-  gap: 0.75rem;
-  inline-size: min(66ch, 70vw);
+  gap: 16px;
+  min-inline-size: 0;
 }
 
 .studio-ui-embed__source-editor textarea {
-  font-family: ui-monospace, monospace;
+  block-size: min(47vh, 430px);
+  min-block-size: 180px;
+  padding: 13px;
+  border-radius: 8px;
+  font:
+    12px/1.7 Consolas,
+    'SFMono-Regular',
+    monospace;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.studio-ui-embed__source-editor > button {
+  justify-self: end;
+  margin-block-start: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  font-weight: 500;
 }

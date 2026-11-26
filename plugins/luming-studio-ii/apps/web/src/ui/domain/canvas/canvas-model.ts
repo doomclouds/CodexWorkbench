@@ -1,7 +1,12 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { canConnectTo } from './canvas-creation.js';
 import type { CanvasFrame } from './canvas-frame.js';
-import type { CanvasObjectChange, CanvasObjectRegistry, CanvasProps } from './contracts.js';
+import type {
+  CanvasObjectChange,
+  CanvasObjectKind,
+  CanvasObjectRegistry,
+  CanvasProps,
+} from './contracts.js';
 import { getTransformBox } from './gestures/index.js';
 import {
   buildPendingEdits,
@@ -16,6 +21,16 @@ import { getViewportBounds, rectsIntersect } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
 const viewOverscan = 128;
+const visitedOffscreenBodyLimit = 256;
+const visitedBodyKinds = new Set<CanvasObjectKind>([
+  'html',
+  'diagram',
+  'chart',
+  'document',
+  'todo',
+  'table',
+  'video',
+]);
 
 export function editableTarget(
   index: SceneIndex,
@@ -94,8 +109,57 @@ function projectedChanges(
   return changes;
 }
 
+function hasCachedBody(
+  id: string,
+  index: SceneIndex,
+  registry: CanvasObjectRegistry,
+  payloadById: CanvasProps['payloadById'],
+) {
+  const kind = index.get(id)?.kind;
+  const payload = payloadById?.get(id);
+  if (!kind || !payload) {
+    return false;
+  }
+  if (!visitedBodyKinds.has(kind) || !registry.get(kind)?.View) {
+    return false;
+  }
+
+  if (kind === 'diagram' || kind === 'chart') {
+    const value = payload.value;
+
+    return Boolean(
+      value && typeof value === 'object' && 'html' in value && typeof value.html === 'string',
+    );
+  }
+
+  return true;
+}
+
+function useVisitedBodies(
+  windowed: readonly ProjectedCanvasObject[],
+  index: SceneIndex,
+  registry: CanvasObjectRegistry,
+  payloadById: CanvasProps['payloadById'],
+) {
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
+  const cached = useCallback(
+    (id: string) => hasCachedBody(id, index, registry, payloadById),
+    [index, registry, payloadById],
+  );
+  const retained = useMemo(() => [...seen].filter(cached), [seen, cached]);
+  const entering = windowed.filter(({ object }) => !seen.has(object.id) && cached(object.id));
+  if (retained.length !== seen.size || entering.length) {
+    const next = new Set([...retained, ...entering.map(({ object }) => object.id)]);
+    setSeen(next);
+
+    return next;
+  }
+
+  return seen;
+}
+
 export function useCanvasModel(
-  { scene, pendingEdits, selection, canEdit }: CanvasProps,
+  { scene, pendingEdits, selection, canEdit, payloadById }: CanvasProps,
   frame: CanvasFrame,
   size: CanvasViewportSize,
   retainedId: string | undefined,
@@ -118,6 +182,7 @@ export function useCanvasModel(
 
     return queryScene(index, bounds, changes);
   }, [index, viewport, size, changes]);
+  const visitedBodies = useVisitedBodies(windowed, index, registry, payloadById);
   const visibleIds = useMemo(() => {
     const bounds = getViewportBounds(viewport, size);
 
@@ -135,7 +200,7 @@ export function useCanvasModel(
     [selection, index, changes],
   );
   const painted = useMemo(() => {
-    if (!retainedId && retainedIds.size === 0) {
+    if (!retainedId && retainedIds.size === 0 && visitedBodies.size === 0) {
       return windowed;
     }
 
@@ -143,8 +208,15 @@ export function useCanvasModel(
     if (retainedId) {
       ids.add(retainedId);
     }
-    for (const { object } of windowed) {
-      ids.delete(object.id);
+
+    const windowIds = new Set(windowed.map(({ object }) => object.id));
+    for (const id of windowIds) {
+      ids.delete(id);
+    }
+
+    const offscreenVisits = [...visitedBodies].filter((id) => !windowIds.has(id) && !ids.has(id));
+    for (const id of offscreenVisits.slice(-visitedOffscreenBodyLimit)) {
+      ids.add(id);
     }
 
     const additions = [...ids].flatMap((id) => {
@@ -160,7 +232,7 @@ export function useCanvasModel(
     const layerOf = ({ object }: ProjectedCanvasObject) => index.getEntry(object.id)?.layer ?? 0;
 
     return [...windowed, ...additions].sort((first, second) => layerOf(first) - layerOf(second));
-  }, [windowed, retainedId, retainedIds, index, changes]);
+  }, [windowed, retainedId, retainedIds, visitedBodies, index, changes]);
 
   return { index, pending, selected, painted, visibleIds };
 }

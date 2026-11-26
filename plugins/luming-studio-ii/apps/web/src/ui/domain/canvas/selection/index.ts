@@ -115,16 +115,33 @@ export function expandMoveIds(
   selection: readonly string[],
   changes: ReadonlyMap<string, CanvasObjectChange> = new Map(),
 ): readonly string[] {
+  return expandIds(index, selection, changes, false);
+}
+
+export function expandSelectionIds(
+  index: SceneIndex,
+  selection: readonly string[],
+  changes: ReadonlyMap<string, CanvasObjectChange> = new Map(),
+): readonly string[] {
+  return expandIds(index, selection, changes, true);
+}
+
+function expandIds(
+  index: SceneIndex,
+  selection: readonly string[],
+  changes: ReadonlyMap<string, CanvasObjectChange>,
+  includeLocked: boolean,
+): readonly string[] {
   const pending = new Set(selection);
   const seenGroups = new Set<string>();
-  const movable: string[] = [];
+  const included: string[] = [];
   for (const id of pending) {
     const entry = projectObject(index, changes, id);
-    if (!entry || isObjectLocked(index, id)) {
+    if (!entry || (!includeLocked && isObjectLocked(index, id))) {
       continue;
     }
 
-    movable.push(id);
+    included.push(id);
     addIds(index.childrenOf(id));
     const { groupId, kind } = entry.object;
     if (groupId !== undefined && !seenGroups.has(groupId)) {
@@ -142,7 +159,7 @@ export function expandMoveIds(
     }
   }
 
-  return movable;
+  return included;
 
   function addIds(ids: readonly string[]) {
     for (const id of ids) {

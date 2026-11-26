@@ -2,6 +2,7 @@ import {
   ArrowLeft,
   ChevronDown,
   Clock3,
+  Download,
   Frame,
   Hand,
   Maximize,
@@ -19,12 +20,16 @@ import {
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
+import { AnchoredPopover } from '../../ui/base/index.js';
+
 export type BoardTool = 'select' | 'pan';
 
 interface BoardHeaderProps {
   readonly title: string;
   readonly onBack?: () => void;
   readonly status: ReactNode;
+  readonly onOpenViewing?: (trigger: HTMLButtonElement) => void;
+  readonly onOpenExport?: (trigger: HTMLButtonElement) => void;
 }
 
 interface BoardToolbarProps {
@@ -35,8 +40,11 @@ interface BoardToolbarProps {
 interface BoardViewportToolsProps {
   readonly zoom: number;
   readonly onZoom: (zoom: number) => void;
-  readonly onFit: () => void;
+  readonly onFit: (scope: 'board' | 'selection') => void;
   readonly hasObjects: boolean;
+  readonly hasSelection: boolean;
+  readonly showGrid: boolean;
+  readonly onShowGridChange: (visible: boolean) => void;
 }
 
 const selectionTools = [
@@ -55,7 +63,13 @@ const zoomPresets = [0.25, 0.5, 0.75, 1, 1.5, 2];
 const zoomStep = 1.2;
 const unavailable = '当前白板服务暂未提供此操作';
 
-export function BoardHeader({ title, onBack, status }: BoardHeaderProps) {
+export function BoardHeader({
+  title,
+  onBack,
+  status,
+  onOpenViewing,
+  onOpenExport,
+}: BoardHeaderProps) {
   return (
     <header className="whiteboard-editor__header">
       <div className="whiteboard-editor__header-main">
@@ -74,6 +88,28 @@ export function BoardHeader({ title, onBack, status }: BoardHeaderProps) {
         <div className="whiteboard-editor__status">{status}</div>
       </div>
       <div className="whiteboard-editor__actions">
+        {onOpenViewing && (
+          <button
+            className="whiteboard-editor__icon"
+            aria-label="全屏观看白板"
+            title="全屏观看白板"
+            type="button"
+            onClick={(event) => onOpenViewing(event.currentTarget)}
+          >
+            <Maximize size={20} />
+          </button>
+        )}
+        {onOpenExport && (
+          <button
+            className="whiteboard-editor__icon whiteboard-editor__share"
+            type="button"
+            aria-haspopup="dialog"
+            onClick={(event) => onOpenExport(event.currentTarget)}
+          >
+            <Download size={20} />
+            导出
+          </button>
+        )}
         <button
           className="whiteboard-editor__icon"
           aria-label="版本历史"
@@ -115,6 +151,24 @@ export function BoardHeader({ title, onBack, status }: BoardHeaderProps) {
   );
 }
 
+interface SelectionViewingProps {
+  readonly onOpen: (trigger: HTMLButtonElement) => void;
+}
+
+export function BoardSelectionViewing({ onOpen }: SelectionViewingProps) {
+  return (
+    <button
+      className="whiteboard-editor__icon"
+      type="button"
+      aria-label="全屏观看选区"
+      title="全屏观看选区"
+      onClick={(event) => onOpen(event.currentTarget)}
+    >
+      <Maximize size={18} />
+    </button>
+  );
+}
+
 export function BoardToolbar({ tool, onToolChange }: BoardToolbarProps) {
   return (
     <div className="whiteboard-editor__toolbar" role="toolbar" aria-label="白板工具">
@@ -139,17 +193,31 @@ export function BoardToolbar({ tool, onToolChange }: BoardToolbarProps) {
   );
 }
 
-export function BoardViewportTools({ zoom, onZoom, onFit, hasObjects }: BoardViewportToolsProps) {
+export function BoardViewportTools({
+  zoom,
+  onZoom,
+  onFit,
+  hasObjects,
+  hasSelection,
+  showGrid,
+  onShowGridChange,
+}: BoardViewportToolsProps) {
   const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+
+  function closeAndFocus() {
+    setOpen(false);
+    anchor?.focus({ preventScroll: true });
+  }
 
   function chooseZoom(value: number) {
     onZoom(value);
-    setOpen(false);
+    closeAndFocus();
   }
 
-  function handleFit() {
-    onFit();
-    setOpen(false);
+  function handleFit(scope: 'board' | 'selection') {
+    onFit(scope);
+    closeAndFocus();
   }
 
   return (
@@ -159,6 +227,7 @@ export function BoardViewportTools({ zoom, onZoom, onFit, hasObjects }: BoardVie
       </button>
       <span className="whiteboard-editor__tool-divider" aria-hidden="true" />
       <button
+        ref={setAnchor}
         className="whiteboard-editor__zoom-value"
         type="button"
         aria-label="缩放菜单"
@@ -167,7 +236,17 @@ export function BoardViewportTools({ zoom, onZoom, onFit, hasObjects }: BoardVie
       >
         {Math.round(zoom * 100)}% <ChevronDown size={14} />
       </button>
-      {open && (
+      <AnchoredPopover
+        open={open}
+        anchor={anchor}
+        onRequestClose={(reason) => {
+          if (reason === 'escape') {
+            closeAndFocus();
+            return;
+          }
+          setOpen(false);
+        }}
+      >
         <div className="whiteboard-editor__zoom-menu" role="menu" aria-label="缩放与视图">
           <div className="whiteboard-editor__zoom-steps">
             <button type="button" aria-label="缩小" onClick={() => onZoom(zoom / zoomStep)}>
@@ -183,12 +262,38 @@ export function BoardViewportTools({ zoom, onZoom, onFit, hasObjects }: BoardVie
               {Math.round(value * 100)}%
             </button>
           ))}
-          <button type="button" role="menuitem" disabled={!hasObjects} onClick={handleFit}>
-            <Maximize size={16} />
-            适应画布
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!hasObjects}
+            onClick={() => handleFit('board')}
+          >
+            <Maximize size={15} />
+            适应白板
           </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!hasSelection}
+            onClick={() => handleFit('selection')}
+          >
+            <Maximize size={15} />
+            适应选区
+          </button>
+          <hr />
+          <details>
+            <summary>视图设置</summary>
+            <label>
+              <input
+                type="checkbox"
+                checked={showGrid}
+                onChange={(event) => onShowGridChange(event.currentTarget.checked)}
+              />
+              显示网格
+            </label>
+          </details>
         </div>
-      )}
+      </AnchoredPopover>
     </div>
   );
 }

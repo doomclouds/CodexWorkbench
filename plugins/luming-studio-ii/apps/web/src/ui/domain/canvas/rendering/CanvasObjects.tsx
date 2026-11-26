@@ -4,8 +4,8 @@ import type { CSSProperties, ReactNode } from 'react';
 import { builtInFrame, CanvasObjectContent } from '../adapters/index.js';
 import type { ResolvedConnection } from '../connectors/geometry.js';
 import type {
-  CanvasGeometry,
   CanvasObjectCapabilities,
+  CanvasGeometry,
   CanvasObjectDraft,
   CanvasObjectExtension,
   CanvasObjectNavigation,
@@ -34,8 +34,12 @@ interface CanvasObjectsProps {
   zoom?: number;
   activeEmbedId?: string;
   editRequest?: { readonly id: string; readonly sequence: number };
+  viewing?: boolean;
+  focusObjectId?: string;
   isLocked?: (id: string) => boolean;
   onObjectIntent?: CanvasProps['onObjectIntent'];
+  onOpenPresentation?: CanvasProps['onOpenPresentation'];
+  onClosePresentation?: CanvasProps['onClosePresentation'];
   onObjectNavigation?: (id: string, event: CanvasObjectNavigation) => void;
   onObjectRetentionChange?: (id: string, retain: boolean) => void;
 }
@@ -50,11 +54,15 @@ interface CanvasRenderedObjectProps {
   extension?: CanvasObjectExtension;
   frame?: ReturnType<typeof builtInFrame>;
   selected?: boolean;
+  singleSelected?: boolean;
   embedActive?: boolean;
   canEdit?: boolean;
   locked?: boolean;
   editRequest?: number;
+  focusedReading?: boolean;
   onObjectIntent?: CanvasObjectsProps['onObjectIntent'];
+  onOpenPresentation?: CanvasObjectsProps['onOpenPresentation'];
+  onClosePresentation?: CanvasObjectsProps['onClosePresentation'];
   onObjectNavigation?: CanvasObjectsProps['onObjectNavigation'];
   onObjectRetentionChange?: CanvasObjectsProps['onObjectRetentionChange'];
   zoom: number;
@@ -71,6 +79,7 @@ function objectStyle(
   object: CanvasObjectDraft,
   { x, y, width, height, rotation }: CanvasGeometry,
   zoom: number,
+  focusedReading?: boolean,
 ) {
   const fill = object.fill?.toLowerCase();
   const pinnedNote = object.kind === 'note' && fill === '#f9e56f';
@@ -92,19 +101,44 @@ function objectStyle(
     '--studio-ui-canvas-object-line-style': object.dashed ? 'dashed' : undefined,
   };
 
-  return style;
+  return focusedReading
+    ? { ...style, left: 0, top: 0, width: '100%', height: '100%', transform: 'none' }
+    : style;
 }
 
-function canInteractWithBody(
+const minimumVideoControlWidth = 128;
+const minimumVideoControlHeight = 72;
+
+function nativeBodyActive(
+  kind: CanvasObjectDraft['kind'],
+  geometry: CanvasGeometry,
+  zoom: number,
+  singleSelected: boolean,
+) {
+  if (kind === 'document' || kind === 'todo') {
+    return singleSelected;
+  }
+  if (kind === 'video') {
+    return (
+      geometry.width * zoom >= minimumVideoControlWidth &&
+      geometry.height * zoom >= minimumVideoControlHeight
+    );
+  }
+
+  return true;
+}
+
+function bodyInteraction(
   mode: CanvasObjectCapabilities['content'],
   draft: boolean,
   embedActive: boolean,
+  nativeActive: boolean,
 ) {
-  if (draft) {
-    return false;
-  }
+  const embedded = mode === 'embedded';
+  const interactive = !draft && (embedded ? embedActive : mode === 'native' && nativeActive);
+  const blockedEmbed = embedded && !interactive;
 
-  return mode === 'embedded' ? embedActive : mode === 'native';
+  return { interactive, blockedEmbed, inert: draft || blockedEmbed };
 }
 
 const ownedFrameKinds = new Set<CanvasObjectDraft['kind']>([
@@ -138,11 +172,15 @@ const CanvasObjectView = memo(
     extension,
     frame,
     selected = false,
+    singleSelected,
     embedActive = false,
     canEdit = false,
     locked,
     editRequest,
+    focusedReading,
     onObjectIntent,
+    onOpenPresentation,
+    onClosePresentation,
     onObjectNavigation,
     onObjectRetentionChange,
     zoom,
@@ -150,11 +188,18 @@ const CanvasObjectView = memo(
     const draft = id === undefined;
     const transparent = object.kind === 'section' && object.transparent;
     const mode = extension?.capabilities.content ?? 'passive';
-    const interactive = canInteractWithBody(mode, draft, embedActive);
-    const readOnly = !canEdit || !onObjectIntent;
-    const blockedEmbed = mode === 'embedded' && !interactive;
     const View = extension?.View;
+    const bodySelected = Boolean(singleSelected || focusedReading);
+    const nativeActive = !View || nativeBodyActive(object.kind, geometry, zoom, bodySelected);
+    const { interactive, blockedEmbed, inert } = bodyInteraction(
+      mode,
+      draft,
+      embedActive,
+      nativeActive,
+    );
+    const readOnly = !canEdit || !onObjectIntent;
     const ownsFrame = usesOwnedFrame(object.kind, View, payload);
+    const focusedAttribute = focusedReading ? '' : undefined;
     const body = View ? (
       <CanvasRegisteredBody
         View={View}
@@ -169,6 +214,9 @@ const CanvasObjectView = memo(
         readOnly={readOnly}
         locked={locked}
         editRequest={editRequest}
+        focusedReading={focusedReading}
+        onOpenPresentation={onOpenPresentation}
+        onClosePresentation={onClosePresentation}
         onObjectIntent={blockedEmbed ? undefined : onObjectIntent}
         onObjectNavigation={interactive ? onObjectNavigation : undefined}
         onObjectRetentionChange={onObjectRetentionChange}
@@ -184,8 +232,10 @@ const CanvasObjectView = memo(
         data-canvas-draft={draft ? '' : undefined}
         data-canvas-transparent={transparent ? '' : undefined}
         data-canvas-locked={locked ? '' : undefined}
+        data-canvas-focused-reading={focusedAttribute}
+        data-canvas-controls={focusedAttribute}
         aria-hidden={draft || undefined}
-        style={objectStyle(object, geometry, zoom)}
+        style={objectStyle(object, geometry, zoom, focusedReading)}
       >
         <CanvasObjectContent
           object={object}
@@ -194,6 +244,7 @@ const CanvasObjectView = memo(
           content={body}
           connectorRoute={connectorRoute}
           interactive={interactive}
+          inert={inert}
           ownsFrame={ownsFrame}
           canEdit={canEdit}
           selected={selected}
@@ -224,8 +275,12 @@ export function CanvasObjects({
   zoom = 1,
   activeEmbedId,
   editRequest,
+  viewing,
+  focusObjectId,
   isLocked,
   onObjectIntent,
+  onOpenPresentation,
+  onClosePresentation,
   onObjectNavigation,
   onObjectRetentionChange,
 }: CanvasObjectsProps) {
@@ -247,11 +302,15 @@ export function CanvasObjects({
         extension={extension}
         frame={frame}
         selected={selectedIds.has(id)}
-        embedActive={id === activeEmbedId}
+        singleSelected={selection.length === 1 && selectedIds.has(id)}
+        embedActive={viewing || id === activeEmbedId}
+        focusedReading={id === focusObjectId}
         canEdit={canEdit}
         locked={locked || isLocked?.(id)}
         editRequest={editRequest?.id === id ? editRequest.sequence : undefined}
         onObjectIntent={onObjectIntent}
+        onOpenPresentation={onOpenPresentation}
+        onClosePresentation={id === focusObjectId ? onClosePresentation : undefined}
         onObjectNavigation={onObjectNavigation}
         onObjectRetentionChange={onObjectRetentionChange}
         zoom={objectZoom(frame, extension, zoom)}

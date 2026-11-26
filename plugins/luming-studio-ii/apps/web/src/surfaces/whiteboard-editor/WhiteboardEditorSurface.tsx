@@ -3,16 +3,25 @@ import { createWhiteboardSession, type WhiteboardService } from '../../data/whit
 import { Button, OperationNotice, StatePanel, StatusText } from '../../ui/base/index.js';
 import {
   Canvas,
+  type CanvasFitScope,
   type CanvasHandle,
   type CanvasObjectExtension,
   type CanvasViewport,
   type CanvasViewportRequest,
 } from '../../ui/domain/canvas/index.js';
 import { studioObjectExtensions } from '../../ui/domain/objects/index.js';
-import { BoardHeader, BoardToolbar, BoardViewportTools, type BoardTool } from './BoardChrome.js';
+import {
+  BoardHeader,
+  BoardSelectionViewing,
+  BoardToolbar,
+  BoardViewportTools,
+  type BoardTool,
+} from './BoardChrome.js';
 import { MoveNotice, MoveStatus } from './MoveFeedback.js';
+import type { WhiteboardEditorFeatures } from './board-features.js';
 import { projectPayloads, projectScene } from './canvas-projection.js';
 import { useMoveSession } from './move-session.js';
+import { useBoardPresentation } from './use-board-presentation.js';
 import './whiteboard-editor.css';
 
 export interface WhiteboardEditorSurfaceProps {
@@ -20,6 +29,7 @@ export interface WhiteboardEditorSurfaceProps {
   readonly service: WhiteboardService;
   readonly createCommandId: () => string;
   readonly onBack?: () => void;
+  readonly features: WhiteboardEditorFeatures;
 }
 
 type WhiteboardSession = ReturnType<typeof createWhiteboardSession>;
@@ -33,6 +43,7 @@ interface BoardWorkspaceProps {
   readonly projection: SceneProjection;
   readonly createCommandId: () => string;
   readonly onBack?: () => void;
+  readonly features: WhiteboardEditorFeatures;
 }
 
 interface BoardSurfaceProps {
@@ -40,6 +51,7 @@ interface BoardSurfaceProps {
   readonly session: WhiteboardSession;
   readonly createCommandId: () => string;
   readonly onBack?: () => void;
+  readonly features: WhiteboardEditorFeatures;
 }
 
 const movable = {
@@ -66,15 +78,17 @@ function BoardWorkspace({
   projection,
   createCommandId,
   onBack,
+  features,
 }: BoardWorkspaceProps) {
   const board = state.scene;
-  const canvas = useRef<CanvasHandle>(null);
-  const area = useRef<HTMLDivElement>(null);
-  const zoomRequest = useRef(0);
+  const viewportRequestId = useRef(0);
+  const canvasRef = useRef<CanvasHandle>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [tool, setTool] = useState<BoardTool>('select');
+  const [showGrid, setShowGrid] = useState(true);
   const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, zoom: 1 });
   const [viewportRequest, setViewportRequest] = useState<CanvasViewportRequest>();
+  const [exportAnchor, setExportAnchor] = useState<HTMLButtonElement>();
   const selection = useMemo(
     () => selected.filter((id) => projection.objectsById.has(id)),
     [selected, projection.objectsById],
@@ -88,73 +102,139 @@ function BoardWorkspace({
   const canEdit = mayEdit && move.pendingEdits.length === 0;
   const title = board.title || '白板';
 
-  function fitBoard() {
-    canvas.current?.fitToObjects([...projection.objectsById.keys()]);
+  function fitViewport(fit: CanvasFitScope) {
+    setViewportRequest({ requestId: String(++viewportRequestId.current), fit });
   }
 
-  function handleZoomBoard(value: number) {
-    const bounds = area.current?.getBoundingClientRect();
-    if (!bounds) {
-      return;
-    }
+  function handleZoomBoard(zoom: number) {
+    setViewportRequest({ requestId: String(++viewportRequestId.current), zoom });
+  }
 
-    const zoom = Math.max(0.05, Math.min(4, value));
-    const scale = zoom / viewport.zoom;
-    const x = bounds.width / 2;
-    const y = bounds.height / 2;
-    setViewportRequest({
-      requestId: String(++zoomRequest.current),
-      viewport: { x: x - (x - viewport.x) * scale, y: y - (y - viewport.y) * scale, zoom },
-    });
+  function restoreViewport(restored: CanvasViewport) {
+    setViewportRequest({ requestId: String(++viewportRequestId.current), viewport: restored });
+  }
+
+  function focusCanvas() {
+    canvasRef.current?.focus();
+  }
+
+  function fitPresentation() {
+    fitViewport('auto');
+  }
+
+  const { scope, enter, exit } = useBoardPresentation({
+    objects: projection.objectsById,
+    viewport,
+    onRestore: restoreViewport,
+    onFit: fitPresentation,
+    focusCanvas,
+  });
+
+  function handleOpenViewing(ids: readonly string[], trigger?: HTMLButtonElement) {
+    setExportAnchor(undefined);
+    enter(ids, trigger);
+  }
+
+  const selectionActions = (
+    <BoardSelectionViewing onOpen={(trigger) => handleOpenViewing(selection, trigger)} />
+  );
+  const canvas = (
+    <Canvas
+      ref={canvasRef}
+      viewId={board.boardId}
+      label={title}
+      scene={projected.scene}
+      selection={scope ? [] : selection}
+      tool={scope ? 'select' : tool}
+      fitOnMount={Boolean(onBack)}
+      viewportRequest={viewportRequest}
+      showGrid={showGrid}
+      presentation={scope}
+      selectionActions={selectionActions}
+      canEdit={canEdit && !scope}
+      pendingEdits={scope ? undefined : move.pendingEdits}
+      objectExtensions={moveExtensions}
+      payloadById={projected.payloadById}
+      onSelectionChange={scope ? ignoreSelection : setSelected}
+      onEditIntent={move.handleEdit}
+      onOpenPresentation={handleOpenViewing}
+      onClosePresentation={exit}
+      onViewportChange={setViewport}
+      onVisibleObjectsChange={session.observeVisible}
+    />
+  );
+  const { Viewing, renderExport } = features;
+
+  function renderStatus() {
+    return board.canEdit ? <MoveStatus controls={move} /> : <StatusText message="只读" />;
   }
 
   return (
     <>
-      <BoardHeader
-        title={title}
-        onBack={onBack}
-        status={board.canEdit ? <MoveStatus controls={move} /> : <StatusText message="只读" />}
-      />
-      <MoveNotice controls={move} />
-      <BoardReadNotices
-        state={state}
-        session={session}
-        unsafePayloadVersion={projected.unsafePayloadVersion}
-      />
-      <div ref={area} className="whiteboard-editor__canvas">
-        <Canvas
-          ref={canvas}
-          viewId={board.boardId}
-          label={title}
-          scene={projected.scene}
-          selection={selection}
-          tool={tool}
-          fitOnMount={Boolean(onBack)}
-          viewportRequest={viewportRequest}
-          canEdit={canEdit}
-          pendingEdits={move.pendingEdits}
-          objectExtensions={moveExtensions}
-          payloadById={projected.payloadById}
-          onSelectionChange={setSelected}
-          onEditIntent={move.handleEdit}
-          onViewportChange={setViewport}
-          onVisibleObjectsChange={session.observeVisible}
+      <div hidden={Boolean(scope)}>
+        <BoardHeader
+          title={title}
+          onBack={onBack}
+          status={renderStatus()}
+          onOpenViewing={(trigger) => handleOpenViewing([], trigger)}
+          onOpenExport={renderExport ? setExportAnchor : undefined}
         />
-        <BoardViewportTools
-          zoom={viewport.zoom}
+        <MoveNotice controls={move} />
+        <BoardReadNotices
+          state={state}
+          session={session}
+          unsafePayloadVersion={projected.unsafePayloadVersion}
+        />
+      </div>
+      <div className="whiteboard-editor__canvas">
+        <Viewing
+          active={Boolean(scope)}
+          documentReading={Boolean(scope?.focusObjectId)}
+          title={title}
+          viewport={viewport}
           onZoom={handleZoomBoard}
-          onFit={fitBoard}
-          hasObjects={projected.scene.objects.length > 0}
-        />
-        {board.canEdit && <BoardToolbar tool={tool} onToolChange={setTool} />}
+          onFit={fitPresentation}
+          onExit={exit}
+          onCanvasFocus={focusCanvas}
+        >
+          {canvas}
+        </Viewing>
+        <div hidden={Boolean(scope)}>
+          <BoardViewportTools
+            zoom={viewport.zoom}
+            onZoom={handleZoomBoard}
+            onFit={fitViewport}
+            hasObjects={projected.scene.objects.length > 0}
+            hasSelection={selection.length > 0}
+            showGrid={showGrid}
+            onShowGridChange={setShowGrid}
+          />
+          {board.canEdit && <BoardToolbar tool={tool} onToolChange={setTool} />}
+        </div>
         {projected.scene.objects.length === 0 && (
           <div className="whiteboard-editor__empty">
             <StatePanel kind="empty" title="白板里还没有对象" />
           </div>
         )}
       </div>
+      {exportAnchor &&
+        renderExport?.({
+          anchor: exportAnchor,
+          context: {
+            boardId: board.boardId,
+            title,
+            revision: board.revision,
+            selectedIds: selection,
+          },
+          onRequestClose: () => setExportAnchor(undefined),
+          restoreFocus: () => exportAnchor.focus({ preventScroll: true }),
+        })}
     </>
   );
+}
+
+function ignoreSelection() {
+  return undefined;
 }
 
 interface BoardReadNoticesProps {
@@ -193,7 +273,7 @@ function BoardReadNotices({ state, session, unsafePayloadVersion }: BoardReadNot
   );
 }
 
-function LoadedBoard({ state, session, createCommandId, onBack }: BoardSurfaceProps) {
+function LoadedBoard({ state, session, createCommandId, onBack, features }: BoardSurfaceProps) {
   const projection = useMemo(() => projectScene(state.scene), [state.scene]);
   if (!projection) {
     return (
@@ -215,6 +295,7 @@ function LoadedBoard({ state, session, createCommandId, onBack }: BoardSurfacePr
       projection={projection}
       createCommandId={createCommandId}
       onBack={onBack}
+      features={features}
     />
   );
 }
@@ -224,6 +305,7 @@ export function WhiteboardEditorSurface({
   service,
   createCommandId,
   onBack,
+  features,
 }: WhiteboardEditorSurfaceProps) {
   const session = useMemo(() => createWhiteboardSession(service, boardId), [service, boardId]);
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
@@ -254,6 +336,7 @@ export function WhiteboardEditorSurface({
           session={session}
           createCommandId={createCommandId}
           onBack={onBack}
+          features={features}
         />
       )}
     </section>

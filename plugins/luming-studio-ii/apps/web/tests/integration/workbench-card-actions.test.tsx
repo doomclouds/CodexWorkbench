@@ -182,6 +182,11 @@ describe('Workbench management through the public Surface', () => {
       expect(document.activeElement).toBe(findButton(host, '管理作品：交付白板'));
 
       await chooseAction(host, managedBoard.title, '重命名');
+      await click(host, '关闭弹窗');
+      expect(host.querySelector('dialog[open]')).toBeNull();
+      expect(document.activeElement).toBe(findButton(host, '管理作品：交付白板'));
+
+      await chooseAction(host, managedBoard.title, '重命名');
       await enterTitle(host, ' 交付计划 ');
       await click(host, '保存');
       expect(fixture.commands[0]).toMatchObject({

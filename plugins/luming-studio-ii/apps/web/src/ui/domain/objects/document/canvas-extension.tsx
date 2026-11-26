@@ -57,8 +57,12 @@ function readDocument(value: unknown): DocumentValue | undefined {
 
 function DocumentCanvasView({
   payload,
+  interactive,
   readOnly,
   editRequest,
+  focusedReading,
+  onOpenPresentation,
+  onClosePresentation,
   onRetentionChange,
   request,
   object,
@@ -98,8 +102,12 @@ function DocumentCanvasView({
       value={value}
       paper={{ fill: object.fill ?? documentPaper }}
       canvas={{ width: geometry.width, height: geometry.height, zoom }}
+      interactive={interactive}
       readOnly={readOnly}
       editRequest={editRequest}
+      focusedReading={focusedReading}
+      onOpenPresentation={onOpenPresentation}
+      onClosePresentation={onClosePresentation}
       onCommit={handleCommit}
       onActivity={handleActivity}
     />

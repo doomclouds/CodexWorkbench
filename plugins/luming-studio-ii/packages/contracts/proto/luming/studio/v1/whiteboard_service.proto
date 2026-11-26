@@ -10,6 +10,60 @@ service WhiteboardService {
   rpc GetObjectPayloads(GetObjectPayloadsRequest) returns (GetObjectPayloadsResponse);
   rpc MoveObjects(MoveObjectsRequest) returns (MoveObjectsResponse);
   rpc GetCommandReceipt(GetCommandReceiptRequest) returns (GetCommandReceiptResponse);
+  rpc ExportBoard(ExportBoardRequest) returns (ExportBoardResponse);
+}
+
+message ExportBoardRequest {
+  string board_id = 1;
+  optional uint64 expected_revision = 2;
+  oneof scope {
+    ExportWholeBoard whole = 3;
+    ExportBoardSelection selection = 4;
+  }
+  BoardExportFormat format = 5;
+}
+
+message ExportWholeBoard {}
+
+message ExportBoardSelection {
+  repeated string object_ids = 1;
+}
+
+enum BoardExportFormat {
+  BOARD_EXPORT_FORMAT_UNSPECIFIED = 0;
+  BOARD_EXPORT_FORMAT_JSON = 1;
+  BOARD_EXPORT_FORMAT_SVG = 2;
+}
+
+message ExportBoardResponse {
+  oneof result {
+    ExportBoardFile file = 1;
+    ExportBoardStale stale = 2;
+    ExportBoardRejected rejected = 3;
+  }
+}
+
+message ExportBoardFile {
+  string filename = 1;
+  string mime_type = 2;
+  uint64 revision = 3;
+  bytes content = 4;
+}
+
+message ExportBoardStale {
+  uint64 revision = 1;
+}
+
+message ExportBoardRejected {
+  BoardExportRejectionReason reason = 1;
+}
+
+enum BoardExportRejectionReason {
+  BOARD_EXPORT_REJECTION_REASON_UNSPECIFIED = 0;
+  BOARD_EXPORT_REJECTION_REASON_INVALID_SELECTION = 1;
+  BOARD_EXPORT_REJECTION_REASON_UNSUPPORTED = 2;
+  BOARD_EXPORT_REJECTION_REASON_ASSET_UNAVAILABLE = 3;
+  BOARD_EXPORT_REJECTION_REASON_TOO_LARGE = 4;
 }
 
 message GetBoardSceneRequest {

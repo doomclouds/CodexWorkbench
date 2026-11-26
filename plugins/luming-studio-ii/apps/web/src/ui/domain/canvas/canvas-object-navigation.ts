@@ -1,10 +1,9 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { containerOrigin, wheelDelta, wheelZoomFactor } from './canvas-events.js';
+import { containerOrigin, wheelZoomFactor } from './canvas-events.js';
 import type { CanvasFrameController } from './canvas-frame.js';
 import type { CanvasObjectNavigation, CanvasPoint, CanvasViewport } from './contracts.js';
 import { panViewport, zoomViewport } from './viewport/index.js';
-import type { CanvasViewportSize } from './viewport/index.js';
 
 interface EmbeddedPan {
   id: string;
@@ -16,13 +15,16 @@ interface EmbeddedPan {
 export function useObjectNavigation(
   root: RefObject<HTMLDivElement | null>,
   frame: CanvasFrameController,
-  size: CanvasViewportSize,
   setSpace: (held: boolean) => void,
 ) {
   const pan = useRef<EmbeddedPan | undefined>(undefined);
+  const [panning, setPanning] = useState(false);
 
   function stop() {
-    pan.current = undefined;
+    if (pan.current) {
+      pan.current = undefined;
+      setPanning(false);
+    }
   }
 
   function applyPan(id: string, event: Extract<CanvasObjectNavigation, { kind: 'pan' }>) {
@@ -34,6 +36,7 @@ export function useObjectNavigation(
         start: { x: event.screenX, y: event.screenY },
         viewport: frame.read().viewport,
       };
+      setPanning(true);
 
       return;
     }
@@ -58,8 +61,7 @@ export function useObjectNavigation(
 
     const origin = containerOrigin(element);
     const anchor = { x: event.x - origin.x, y: event.y - origin.y };
-    const delta = wheelDelta({ deltaX: 0, deltaY: event.deltaY, deltaMode: event.deltaMode }, size);
-    const factor = wheelZoomFactor(delta.y);
+    const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
     frame.update({ viewport: zoomViewport(frame.read().viewport, anchor, factor) });
   }
 
@@ -77,5 +79,5 @@ export function useObjectNavigation(
     }
   }
 
-  return { navigate, stop };
+  return { navigate, panning, stop };
 }

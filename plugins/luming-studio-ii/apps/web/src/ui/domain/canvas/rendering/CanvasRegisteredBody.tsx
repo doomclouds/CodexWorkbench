@@ -14,12 +14,13 @@ type RetainObject = (id: string, retain: boolean) => void;
 
 interface CanvasRegisteredBodyProps extends Omit<
   CanvasObjectViewProps,
-  'request' | 'onNavigation' | 'onRetentionChange'
+  'request' | 'onNavigation' | 'onRetentionChange' | 'onOpenPresentation'
 > {
   readonly View: ComponentType<CanvasObjectViewProps>;
   readonly onObjectIntent?: SubmitObjectIntent;
   readonly onObjectNavigation?: NavigateObject;
   readonly onObjectRetentionChange?: RetainObject;
+  readonly onOpenPresentation?: CanvasProps['onOpenPresentation'];
 }
 
 interface CanvasBodyTarget {
@@ -44,6 +45,7 @@ export function CanvasRegisteredBody({
   onObjectIntent,
   onObjectNavigation,
   onObjectRetentionChange,
+  onOpenPresentation,
   ...props
 }: CanvasRegisteredBodyProps) {
   const { id, object, readOnly } = props;
@@ -132,6 +134,11 @@ export function CanvasRegisteredBody({
     },
     [id, target],
   );
+  const openPresentation = useCallback(() => {
+    if (id !== undefined && authority.current?.target === target) {
+      onOpenPresentation?.([id]);
+    }
+  }, [id, target, onOpenPresentation]);
 
   return (
     <View
@@ -139,6 +146,7 @@ export function CanvasRegisteredBody({
       request={request}
       onNavigation={id !== undefined && onObjectNavigation ? navigate : undefined}
       onRetentionChange={id !== undefined && onObjectRetentionChange ? retain : undefined}
+      onOpenPresentation={onOpenPresentation && id !== undefined ? openPresentation : undefined}
     />
   );
 }

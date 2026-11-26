@@ -172,12 +172,8 @@ describe('stickerExtension', () => {
     expect(query<HTMLDialogElement>('dialog').open).toBe(true);
     expect(onRetentionChange.mock.calls).toEqual([[true]]);
 
-    const close = Array.from(
-      fixture.host.querySelectorAll<HTMLButtonElement>('dialog button'),
-    ).find((button) => button.textContent === '关闭贴纸库');
-    act(() => {
-      close?.click();
-    });
+    const close = query<HTMLButtonElement>('dialog button[aria-label="关闭贴纸库"]');
+    act(() => close.click());
     expect(fixture.host.querySelector('dialog')).toBeNull();
     expect(onRetentionChange.mock.calls).toEqual([[true], [false]]);
     fixture.render(

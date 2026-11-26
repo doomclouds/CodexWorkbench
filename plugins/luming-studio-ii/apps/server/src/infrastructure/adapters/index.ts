@@ -2,6 +2,7 @@ import type {
   BoardAccess,
   BoardHeader,
   BoardObject,
+  ExportAssetRead,
   PayloadRecord,
   StoredReceipt,
   WhiteboardReader,
@@ -52,7 +53,7 @@ const listTargets = `
 function readObjects(
   connection: SqliteConnection,
   statement: string,
-  ...params: string[]
+  ...params: (string | number)[]
 ): BoardObject[] {
   const query = connection.prepare(statement);
   query.setReadBigInts(true);
@@ -114,6 +115,40 @@ function readPayloads(
     bodyKind: storedText(row.body_kind, 'body_kind'),
     data: decodePayload(row.body_json),
   }));
+}
+
+function readExportAsset(
+  connection: SqliteConnection,
+  boardId: string,
+  assetId: string,
+  maximumBytes: number,
+): ExportAssetRead | undefined {
+  const row = connection
+    .prepare(`
+      SELECT mime_type, CASE WHEN length(bytes) <= ? THEN bytes END AS bytes
+      FROM board_archive_assets
+      WHERE board_id = ? AND asset_id = ?
+    `)
+    .get(maximumBytes, boardId, assetId);
+
+  if (!row) {
+    return undefined;
+  }
+  if (row.bytes === null) {
+    return { kind: 'tooLarge' };
+  }
+  if (!(row.bytes instanceof Uint8Array)) {
+    throw new Error('Invalid archived asset bytes.');
+  }
+
+  return {
+    kind: 'asset',
+    asset: {
+      mimeType: storedText(row.mime_type, 'asset mime type'),
+      byteLength: row.bytes.byteLength,
+      base64: Buffer.from(row.bytes).toString('base64'),
+    },
+  };
 }
 
 function readReceipt(
@@ -220,12 +255,17 @@ function createReader(connection: SqliteConnection): WhiteboardReader {
   return {
     getAccess: (boardId, actorId) => readAccess(connection, boardId, actorId),
     getBoard: (boardId) => readBoard(connection, boardId),
-    listObjects: (boardId) => readObjects(connection, listScene, boardId),
+    listObjects: (boardId, limit) =>
+      limit === undefined
+        ? readObjects(connection, listScene, boardId)
+        : readObjects(connection, listScene + ' LIMIT ?', boardId, limit),
     getObjects: (boardId, objectIds) =>
       objectIds.length === 0
         ? []
         : readObjects(connection, listTargets, JSON.stringify(objectIds), boardId),
     getPayloads: (boardId, objectIds) => readPayloads(connection, boardId, objectIds),
+    getExportAsset: (boardId, assetId, maximumBytes) =>
+      readExportAsset(connection, boardId, assetId, maximumBytes),
     getReceipt: (boardId, actorId, commandId) =>
       readReceipt(connection, boardId, actorId, commandId),
   };

@@ -41,6 +41,17 @@
   font-size: calc(0.875rem * var(--todo-ui-scale));
 }
 
+.studio-object-todo[data-todo-focused-reading] {
+  border: 0;
+  border-radius: 0;
+  padding-block-start: 3.25rem;
+}
+
+.studio-object-todo[data-todo-focused-reading] .studio-object-todo__task > span {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .studio-object-todo__heading {
   display: flex;
   box-sizing: border-box;

@@ -164,6 +164,7 @@ function TodoSession(props: TodoObjectProps) {
     value,
     onEdit,
     expanded,
+    focusedReading,
     overview,
     editRequest,
     onEditingChange,
@@ -208,13 +209,14 @@ function TodoSession(props: TodoObjectProps) {
       className="studio-object-todo"
       data-todo-id={value.id}
       data-todo-layout={compact ? 'overview' : 'full'}
+      data-todo-focused-reading={focusedReading || undefined}
       data-todo-scheme={scheme}
       style={style}
       aria-label={title}
       aria-busy={session.busy || undefined}
       onPaste={handlePaste}
     >
-      <header className="studio-object-todo__heading">
+      <header className="studio-object-todo__heading" data-canvas-native="">
         <TodoHeadingIcons />
         <div className="studio-object-todo__title">{titleContent(title, editable, session)}</div>
         <span className="studio-object-todo__count" aria-live="polite">
@@ -252,5 +254,13 @@ function TodoSession(props: TodoObjectProps) {
 }
 
 export function TodoObject(props: TodoObjectProps) {
-  return <TodoSession key={props.value.id} {...props} />;
+  return (
+    <TodoSession
+      key={props.value.id}
+      {...props}
+      expanded={props.expanded || props.focusedReading}
+      readOnly={props.readOnly || props.focusedReading}
+      editRequest={props.focusedReading ? undefined : props.editRequest}
+    />
+  );
 }

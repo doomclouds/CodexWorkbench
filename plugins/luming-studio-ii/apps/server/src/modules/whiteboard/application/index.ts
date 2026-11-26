@@ -3,12 +3,15 @@ import type {
   BoardAccess,
   BoardScene,
   CommandReceipt,
+  ExportBoardCommand,
+  ExportBoardResult,
   MoveCommand,
   PayloadRecord,
   PayloadResult,
 } from '../domain/index.js';
 import { isSupportedPayload } from '../domain/index.js';
 import type { WhiteboardReader, WhiteboardRepository } from '../ports/index.js';
+import { executeBoardExport } from './export-board.js';
 import { executeMove } from './move-objects.js';
 
 export type {
@@ -23,6 +26,8 @@ export type {
   ConnectorEndpoint,
   ConnectorHead,
   ConnectorPort,
+  ExportBoardCommand,
+  ExportBoardResult,
   Geometry,
   GeometryDetail,
   JsonObject,
@@ -49,6 +54,7 @@ export interface WhiteboardApplication {
   ): readonly PayloadResult[];
   moveObjects(actor: Actor, command: MoveCommand): CommandReceipt;
   getCommandReceipt(actor: Actor, boardId: string, commandId: string): CommandReceipt | undefined;
+  exportBoard(actor: Actor, command: ExportBoardCommand): ExportBoardResult;
 }
 
 export class WhiteboardAccessError extends Error {
@@ -114,6 +120,16 @@ export function createWhiteboardApplication(
         requireAccess(reader, actor, boardId);
 
         return reader.getReceipt(boardId, actor.id, commandId)?.receipt;
+      });
+    },
+    exportBoard(actor, command) {
+      return executeBoardExport(repository, actor, command, requireAccess, (reader) => {
+        const board = reader.getBoard(command.boardId);
+        if (!board) {
+          throw new WhiteboardAccessError();
+        }
+
+        return board;
       });
     },
   };

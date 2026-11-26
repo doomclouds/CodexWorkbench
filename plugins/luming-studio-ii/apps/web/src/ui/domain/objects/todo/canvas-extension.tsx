@@ -70,6 +70,8 @@ function TodoCanvasBody({
   interactive,
   readOnly,
   editRequest,
+  focusedReading = false,
+  onOpenPresentation,
   object,
   geometry,
   zoom,
@@ -81,7 +83,7 @@ function TodoCanvasBody({
   const [expandedEditing, setExpandedEditing] = useState(false);
   const value = useMemo(() => (id ? todoPayload(id, payload) : undefined), [id, payload]);
   const keepExpanded = expanded || expandedEditing;
-  const retain = value !== undefined && (editing || keepExpanded);
+  const retain = value !== undefined && (focusedReading || editing || keepExpanded);
   const publishRetention = useEffectEvent((retain: boolean) => onRetentionChange?.(retain));
   useEffect(() => {
     publishRetention(retain);
@@ -109,8 +111,9 @@ function TodoCanvasBody({
     return false;
   }
 
-  const appearance = { paper: object.fill ?? todoPaper, uiScale: 1 / zoom };
+  const appearance = { paper: object.fill ?? todoPaper, uiScale: focusedReading ? 1 : 1 / zoom };
   const overview = isTodoOverview(geometry.width * zoom, geometry.height * zoom);
+  const open = onOpenPresentation ?? (() => setExpanded(true));
 
   return (
     <>
@@ -119,29 +122,32 @@ function TodoCanvasBody({
         interactive={interactive}
         readOnly={readOnly}
         editRequest={editRequest}
+        focusedReading={focusedReading}
         appearance={appearance}
         overview={overview}
         onEdit={handleEdit}
         onEditingChange={setEditing}
-        onRequestExpand={() => setExpanded(true)}
+        onRequestExpand={open}
       />
-      <Dialog
-        title={value.title}
-        open={expanded}
-        closeLabel="关闭待办"
-        onRequestClose={() => setExpanded(false)}
-      >
-        {keepExpanded && (
-          <TodoObject
-            value={value}
-            readOnly={readOnly}
-            appearance={appearance}
-            expanded
-            onEdit={handleEdit}
-            onEditingChange={setExpandedEditing}
-          />
-        )}
-      </Dialog>
+      {!focusedReading && !onOpenPresentation && (
+        <Dialog
+          title={value.title}
+          open={expanded}
+          closeLabel="关闭待办"
+          onRequestClose={() => setExpanded(false)}
+        >
+          {keepExpanded && (
+            <TodoObject
+              value={value}
+              readOnly={readOnly}
+              appearance={appearance}
+              expanded
+              onEdit={handleEdit}
+              onEditingChange={setExpandedEditing}
+            />
+          )}
+        </Dialog>
+      )}
     </>
   );
 }

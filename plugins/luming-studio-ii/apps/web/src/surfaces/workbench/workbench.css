@@ -107,16 +107,18 @@
   --studio-ui-surface: var(--workbench-surface);
   --studio-ui-text: var(--workbench-text);
   --studio-ui-muted: var(--workbench-muted);
+  --studio-ui-hover: var(--workbench-hover);
   --studio-ui-backdrop: #090d1566;
+  --studio-ui-dialog-padding: 21px;
+  --studio-ui-dialog-gap: 20px;
+  --studio-ui-dialog-shadow: var(--workbench-shadow);
+  --studio-ui-dialog-title-size: 16px;
+  --studio-ui-dialog-title-weight: 500;
 }
 
 .studio-workbench-rename-dialog dialog {
-  inline-size: min(410px, calc(100% - 30px));
-}
-
-.studio-workbench-rename-dialog h2 {
-  font-size: 16px;
-  font-weight: 500;
+  inline-size: min(410px, calc(100% - 50px));
+  max-block-size: calc(100dvh - 50px);
 }
 
 .studio-workbench-rename-label {
@@ -137,11 +139,19 @@
 }
 
 .studio-workbench-rename-actions {
+  --studio-ui-accent: var(--workbench-text);
+  --studio-ui-accent-text: var(--workbench-surface);
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 9px;
   margin-top: 22px;
+}
+
+.studio-workbench-rename-actions > button {
+  padding: 7px 12px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .studio-workbench-main {

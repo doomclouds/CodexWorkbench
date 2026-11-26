@@ -111,7 +111,10 @@ test('declares the typed unary methods for archive receipts, board catalog, and 
         'GetCatalogCommandReceipt',
       ],
     ],
-    ['WhiteboardService', ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt']],
+    [
+      'WhiteboardService',
+      ['GetBoardScene', 'GetObjectPayloads', 'MoveObjects', 'GetCommandReceipt', 'ExportBoard'],
+    ],
   ]);
   assert.deepEqual(services.map(({ name }) => name).sort(), [...methodsByService.keys()]);
 

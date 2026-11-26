@@ -620,3 +620,102 @@ it('keeps an expanded document mounted and releases clean inline content', async
   expect(onRetentionChange).toHaveBeenLastCalledWith(false);
   expect(request).not.toHaveBeenCalled();
 });
+
+it('opens the registered document through the whiteboard presentation action', async () => {
+  const View = documentExtension.View;
+  if (!View) {
+    throw new Error('Missing registered document view');
+  }
+
+  const geometry = { x: 10, y: 20, width: 680, height: 480, rotation: 0 };
+  const request = vi.fn();
+  const onOpenPresentation = vi.fn();
+  fixture.render(
+    <View
+      object={{ kind: 'document', label: documentName, geometry }}
+      geometry={geometry}
+      payload={{ version: initial.version, value: initial }}
+      selected
+      interactive
+      readOnly
+      zoom={1}
+      request={request}
+      onOpenPresentation={onOpenPresentation}
+    />,
+  );
+
+  await act(async () => button('放大阅读').click());
+
+  expect(onOpenPresentation).toHaveBeenCalledOnce();
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(readRegion(fixture.host).textContent).toContain(first);
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('uses one title and a keyboard-accessible outline in focused reading', () => {
+  render();
+  const inline = readRegion(fixture.host);
+  act(() => {
+    inline.scrollTop = 135;
+    inline.dispatchEvent(new Event('scroll'));
+  });
+
+  render({ focusedReading: true });
+
+  const focused = query('[data-document-focused-reading]', fixture.host);
+  const reading = readRegion(focused);
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(
+    Array.from(focused.querySelectorAll('.studio-document-title'), (node) => node.textContent),
+  ).toEqual([documentName]);
+  const find = query<HTMLInputElement>('input[type="search"]', focused);
+  expect(find.value).toBe('');
+  expect(reading.scrollTop).toBe(0);
+  updateInput(find, second);
+  expect(query('[data-document-current]', focused).textContent).toBe(second);
+  updateInput(find, '');
+
+  const toggle = button('切换文档目录');
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  click('切换文档目录');
+  const heading = query<HTMLButtonElement>('nav[aria-label="文档目录"] button', focused);
+  expect(heading.textContent).toBe(first);
+  act(() => heading.click());
+
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  act(() => {
+    heading.dispatchEvent(escape);
+  });
+  expect(escape.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+
+  act(() => {
+    reading.scrollTop = 350;
+    reading.dispatchEvent(new Event('scroll'));
+  });
+  render();
+  expect(readRegion(fixture.host).scrollTop).toBe(135);
+  render({ focusedReading: true });
+  expect(readRegion(fixture.host).scrollTop).toBe(350);
+});
+
+it.each([
+  { scheme: 'light', fill: '#efefef' },
+  { scheme: 'dark', fill: '#1c1d1e' },
+] as const)(
+  'places the $scheme paper return action inside the focused document header',
+  (paper) => {
+    const onClosePresentation = vi.fn();
+    render({ focusedReading: true, paper, onClosePresentation });
+
+    const focused = query('[data-document-focused-reading]', fixture.host);
+    const back = button('返回白板');
+    expect(back.closest('header')).toBe(button('切换文档目录').closest('header'));
+    expect(back.closest('[data-canvas-presentation-exit]')).not.toBeNull();
+    expect(focused.style.getPropertyValue('--studio-document-paper')).toBe(paper.fill);
+    expect(focused.dataset.paperScheme).toBe(paper.scheme);
+    click('返回白板');
+    expect(onClosePresentation).toHaveBeenCalledOnce();
+  },
+);

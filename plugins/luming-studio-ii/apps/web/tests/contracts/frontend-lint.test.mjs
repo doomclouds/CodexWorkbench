@@ -24,6 +24,8 @@ const routes = 'src/app/routes.ts';
 const appShell = 'src/app/shell/AppShell.tsx';
 const operationNotice = 'src/app/shell/operation-notice/OperationNoticeSlot.tsx';
 const recycleBin = 'src/surfaces/recycle-bin/RecycleBinSurface.tsx';
+const viewer = 'src/surfaces/whiteboard-viewing/WhiteboardViewingSurface.tsx';
+const exportPanel = 'src/surfaces/whiteboard-export/WhiteboardExportSurface.tsx';
 const actualPages = [
   "import { WhiteboardPage } from '../pages/whiteboard/index.js';",
   "import { WorkbenchPage } from '../pages/workbench/index.js';",
@@ -32,6 +34,10 @@ const actualPages = [
 ].join('\n');
 
 const accepted = [
+  [page, "import { WhiteboardViewingSurface } from '../../surfaces/whiteboard-viewing/index.js';"],
+  [page, "import { WhiteboardExportSurface } from '../../surfaces/whiteboard-export/index.js';"],
+  [viewer, "import type { CanvasViewport } from '../../ui/domain/canvas/index.js';"],
+  [exportPanel, "import type { ExportBoard } from '../../data/whiteboard/index.js';"],
   [
     'src/app/StudioApp.tsx',
     "import type { ArchiveClient } from '../data/archive-import/index.js';",
@@ -95,6 +101,31 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'the viewing surface reaches the whiteboard write service',
+    viewer,
+    "import { createWhiteboardService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'the export surface constructs its own board service',
+    exportPanel,
+    "import { createWhiteboardExportService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'the export surface reaches browser download internals',
+    exportPanel,
+    "import { downloadBoardFile } from '../../platform/browser/index.js';",
+  ],
+  [
+    'the viewing surface reaches a private canvas handler',
+    viewer,
+    "import { useCanvasInput } from '../../ui/domain/canvas/canvas-input.js';",
+  ],
+  [
+    'the viewing surface reaches the export surface',
+    viewer,
+    "import { WhiteboardExportSurface } from '../whiteboard-export/index.js';",
+  ],
   [
     'Recycle Bin decodes the generated catalogue protocol',
     recycleBin,

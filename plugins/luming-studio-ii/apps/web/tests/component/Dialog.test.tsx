@@ -92,7 +92,10 @@ it('presents the public name and description without an imperative DOM ref', () 
 it('requests Escape and close-button dismissal without changing the controlled open state', () => {
   const { dialog, onRequestClose } = renderDialog();
   const event = dispatchCancel(dialog);
-  act(() => dialog.querySelector('button')?.click());
+  const closeButton = dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+  expect(closeButton?.querySelector('svg')).not.toBeNull();
+  expect(closeButton?.textContent).toBe('');
+  act(() => closeButton?.click());
 
   expect(event.defaultPrevented).toBe(true);
   expect(onRequestClose.mock.calls).toEqual([['escape'], ['close-button']]);

@@ -121,6 +121,9 @@
 }
 
 .whiteboard-editor__viewport-tools {
+  --studio-ui-surface: var(--board-float, Canvas);
+  --studio-ui-border: var(--board-float-border, #d9d9d9);
+  --studio-ui-radius: 9px;
   inset-block-start: 12px;
   inset-inline-end: 14px;
   padding: 2px 5px;
@@ -181,16 +184,9 @@
 }
 
 .whiteboard-editor__zoom-menu {
-  position: absolute;
-  inset-block-start: calc(100% + 8px);
-  inset-inline-end: 0;
-  inline-size: 225px;
-  box-sizing: border-box;
-  padding: 7px;
-  border: 1px solid var(--board-float-border, #d9d9d9);
-  border-radius: 9px;
-  background: var(--board-float, Canvas);
-  box-shadow: 0 8px 26px #0002;
+  inline-size: min(200px, calc(100vw - 3rem));
+  max-block-size: min(570px, max(4rem, calc(100dvh - 165px)));
+  overflow-y: auto;
   font-size: 12px;
 }
 
@@ -199,6 +195,24 @@
   justify-content: flex-start;
   gap: 9px;
   padding-inline: 9px;
+}
+
+.whiteboard-editor__zoom-menu hr {
+  margin-block: 6px;
+  border: 0;
+  border-block-start: 1px solid var(--board-float-border, #d9d9d9);
+}
+
+.whiteboard-editor__zoom-menu summary {
+  padding: 9px;
+  cursor: pointer;
+}
+
+.whiteboard-editor__zoom-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
 }
 
 .whiteboard-editor__zoom-steps {

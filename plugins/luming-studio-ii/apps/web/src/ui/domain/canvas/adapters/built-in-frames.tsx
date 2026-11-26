@@ -16,6 +16,8 @@ export interface CanvasPrimitiveFrameProps {
 }
 
 const sectionHitWidth = 8;
+const connectorCaptionFontSize = 13;
+const minimumConnectorCaptionPixels = 8;
 
 export function CanvasShapeFrame({
   object,
@@ -125,6 +127,7 @@ export function CanvasInkFrame({
 export function CanvasConnectorFrame({
   object,
   connectorRoute,
+  zoom,
   content,
   showCaption,
   selected,
@@ -134,14 +137,17 @@ export function CanvasConnectorFrame({
   }
 
   const { labelPosition, geometry } = connectorRoute;
-  const customCaption = showCaption && content != null;
-  const defaultCaption = showCaption && !customCaption ? object.label : '';
+  const readableCaption =
+    showCaption && connectorCaptionFontSize * zoom >= minimumConnectorCaptionPixels;
+  const customCaption = readableCaption && content != null;
+  const defaultCaption = readableCaption && !customCaption ? object.label : '';
 
   return (
     <>
       <CanvasConnectorPath
         route={connectorRoute}
         connection={object.connection}
+        zoom={zoom}
         label={defaultCaption}
         stroke={selected ? 'var(--studio-ui-accent, #eb6c36)' : object.stroke}
         dashed={object.dashed}

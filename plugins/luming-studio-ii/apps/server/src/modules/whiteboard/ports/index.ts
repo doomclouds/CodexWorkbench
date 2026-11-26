@@ -1,5 +1,6 @@
 import type {
   BoardAccess,
+  BoardExportAsset,
   BoardHeader,
   BoardObject,
   PayloadRecord,
@@ -23,12 +24,21 @@ export type {
   StoredReceipt,
 } from '../domain/index.js';
 
+export type ExportAssetRead =
+  | { readonly kind: 'asset'; readonly asset: BoardExportAsset }
+  | { readonly kind: 'tooLarge' };
+
 export interface WhiteboardReader {
   getAccess(boardId: string, actorId: string): BoardAccess | undefined;
   getBoard(boardId: string): BoardHeader | undefined;
-  listObjects(boardId: string): readonly BoardObject[];
+  listObjects(boardId: string, limit?: number): readonly BoardObject[];
   getObjects(boardId: string, objectIds: readonly string[]): readonly BoardObject[];
   getPayloads(boardId: string, objectIds: readonly string[]): readonly PayloadRecord[];
+  getExportAsset?(
+    boardId: string,
+    assetId: string,
+    maximumBytes: number,
+  ): ExportAssetRead | undefined;
   getReceipt(boardId: string, actorId: string, commandId: string): StoredReceipt | undefined;
 }
 

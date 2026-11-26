@@ -4,13 +4,9 @@ import { createPortal } from 'react-dom';
 import { Dialog, ScrollRegion, StatusText } from '../../../base/index.js';
 import type { SearchFieldHandle } from '../../../base/index.js';
 import type { DocumentActivity, DocumentObjectProps } from './contracts.js';
+import { DocumentReadingLayout } from './DocumentFocusedReading.js';
 import { DocumentReadView } from './DocumentReadView.js';
-import {
-  DocumentComparison,
-  DocumentReaderTools,
-  DocumentTitle,
-  DocumentToolbar,
-} from './DocumentToolbar.js';
+import { DocumentComparison, DocumentTitle, DocumentToolbar } from './DocumentToolbar.js';
 import { untitledDocument } from './model.js';
 import { useDocumentDraft } from './useDocumentDraft.js';
 import { useDocumentPan } from './useDocumentPan.js';
@@ -42,6 +38,7 @@ function panelPresentation(
   const surface = {
     ...shell,
     backgroundColor: paper?.backdrop ?? backgroundColor,
+    '--studio-document-paper': backgroundColor,
     '--document-ui-scale': inline && Math.min(1 / inline.zoom, 1.5),
     '--document-canvas-scale': inline?.zoom,
   } as CSSProperties;
@@ -121,12 +118,27 @@ function notifyMode(
   onActivity?.({ mode, dirty, saving, composing });
 }
 
+function documentPhase(
+  mode: DocumentActivity['mode'],
+  focused: boolean,
+  readOnly: boolean,
+  composing: boolean,
+): DocumentActivity['mode'] {
+  const blockedEditor = mode === 'edit' && readOnly && !composing;
+
+  return focused || blockedEditor ? 'read' : mode;
+}
+
 export function DocumentObject({
   value,
-  readOnly = false,
+  interactive = true,
+  readOnly: readOnlyDocument = false,
   theme = 'light',
   paper,
   canvas,
+  focusedReading = false,
+  onOpenPresentation,
+  onClosePresentation,
   editRequest,
   onChange,
   onCommit,
@@ -143,9 +155,10 @@ export function DocumentObject({
   const [exportOpen, setExportOpen] = useState(false);
   const [comparing, setComparing] = useState(false);
   const searchField = useRef<SearchFieldHandle>(null);
+  const readOnly = readOnlyDocument || focusedReading;
   const draft = useDocumentDraft({ value, readOnly, composing, onCommit, onChange });
   const { dirty, saving } = draft;
-  const phase = view.mode === 'edit' && readOnly && !composing ? 'read' : view.mode;
+  const phase = documentPhase(view.mode, focusedReading, readOnly, composing);
   const viewport = useDocumentViewport(phase, draft.draft.document, draft.confirmed.version);
   const {
     scroll,
@@ -219,7 +232,22 @@ export function DocumentObject({
   }
 
   function handleOpen() {
-    setView({ mode: 'read' });
+    if (!onOpenPresentation) {
+      setView({ mode: 'read' });
+      return;
+    }
+    if (composing) {
+      return;
+    }
+
+    draft
+      .prepareExit()
+      .then((ready) => {
+        if (ready) {
+          onOpenPresentation();
+        }
+      })
+      .catch(draft.reportFailure);
   }
 
   function handleDoubleClick(event: MouseEvent<HTMLDivElement>) {
@@ -291,11 +319,50 @@ export function DocumentObject({
       onCompare={() => setComparing(true)}
     />
   );
+  const content = (
+    <ScrollRegion label="文档正文" axis="both" contain ref={scroll} onScroll={handleScroll}>
+      <div
+        ref={paperNode}
+        className="studio-document-paper"
+        data-canvas-drag-surface={expanded ? undefined : 'background'}
+        style={shell}
+        onDoubleClick={handleDoubleClick}
+        onPointerUp={captureSelection}
+        onKeyUp={captureSelection}
+      >
+        {editing ? (
+          <Suspense
+            fallback={<StatusText message="正在打开文档编辑器" busy announcement="polite" />}
+          >
+            <DocumentEditor
+              value={draft.draft.document}
+              editable={!readOnly || composing}
+              theme={shell.colorScheme}
+              focusBlockId={view.focusBlockId}
+              resolveImage={resolveImage}
+              uploadImage={uploadImage}
+              onChange={(document) => draft.change({ document })}
+              onCompositionChange={setComposing}
+            />
+          </Suspense>
+        ) : (
+          <DocumentReadView
+            value={draft.draft.document}
+            resolveImage={resolveImage}
+            matchingIds={matchingIds}
+            selectedId={currentId}
+          />
+        )}
+      </div>
+    </ScrollRegion>
+  );
   const body = (
     <div
       className="studio-document-surface"
       data-document-view={phase}
       data-document-layout={layout}
+      data-document-focused-reading={focusedReading || undefined}
+      data-canvas-native={focusedReading ? '' : undefined}
       data-paper-scheme={shell.colorScheme}
       style={surface}
       onKeyDownCapture={handleKeyDownCapture}
@@ -307,50 +374,33 @@ export function DocumentObject({
       onPointerUp={pan.handlePointerEnd}
       onPointerCancel={pan.handlePointerEnd}
     >
-      <div className="studio-document-top">
-        <DocumentCanvasHeading visible={layout !== undefined} />
-        <DocumentTitle draft={draft} editing={editing} readOnly={readOnly} inline={!expanded} />
-        {actions}
-        {expanded && <DocumentReaderTools viewport={viewport} searchField={searchField} />}
-      </div>
-      <ScrollRegion label="文档正文" axis="both" contain ref={scroll} onScroll={handleScroll}>
-        <div
-          ref={paperNode}
-          className="studio-document-paper"
-          data-canvas-drag-surface={expanded ? undefined : 'background'}
-          style={shell}
-          onDoubleClick={handleDoubleClick}
-          onPointerUp={captureSelection}
-          onKeyUp={captureSelection}
-        >
-          {editing ? (
-            <Suspense
-              fallback={<StatusText message="正在打开文档编辑器" busy announcement="polite" />}
-            >
-              <DocumentEditor
-                value={draft.draft.document}
-                editable={!readOnly || composing}
-                theme={shell.colorScheme}
-                focusBlockId={view.focusBlockId}
-                resolveImage={resolveImage}
-                uploadImage={uploadImage}
-                onChange={(document) => draft.change({ document })}
-                onCompositionChange={setComposing}
-              />
-            </Suspense>
-          ) : (
-            <DocumentReadView
-              value={draft.draft.document}
-              resolveImage={resolveImage}
-              matchingIds={matchingIds}
-              selectedId={currentId}
+      <DocumentReadingLayout
+        focused={focusedReading}
+        onBack={onClosePresentation}
+        title={draft.draft.title}
+        viewport={viewport}
+        searchField={searchField}
+        expanded={expanded}
+        interactive={interactive}
+        heading={
+          <>
+            <DocumentCanvasHeading visible={layout !== undefined} />
+            <DocumentTitle draft={draft} editing={editing} readOnly={readOnly} inline={!expanded} />
+            {actions}
+          </>
+        }
+        comparison={
+          comparing && (
+            <DocumentComparison
+              model={draft}
+              readOnly={readOnly}
+              onClose={() => setComparing(false)}
             />
-          )}
-        </div>
-      </ScrollRegion>
-      {comparing && (
-        <DocumentComparison model={draft} readOnly={readOnly} onClose={() => setComparing(false)} />
-      )}
+          )
+        }
+      >
+        {content}
+      </DocumentReadingLayout>
     </div>
   );
 
@@ -361,7 +411,7 @@ export function DocumentObject({
       className="studio-document-object"
       data-theme={theme}
     >
-      {expanded && portal
+      {expanded && !focusedReading && portal
         ? createPortal(
             <Dialog
               open

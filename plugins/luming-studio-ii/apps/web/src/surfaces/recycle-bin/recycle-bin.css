@@ -11,6 +11,7 @@
   --recycle-danger: #be4247;
   --recycle-focus: #7962ba;
   --recycle-grid: #e7e8e9;
+  --recycle-shadow: 0 10px 36px #171a2020;
   --studio-ui-border: var(--recycle-border);
   --studio-ui-control-radius: 8px;
   --studio-ui-button-background: var(--recycle-surface);
@@ -52,6 +53,7 @@
   --recycle-danger: #ff9397;
   --recycle-focus: #bba5f2;
   --recycle-grid: #2b2f33;
+  --recycle-shadow: 0 12px 40px #0006;
   color-scheme: dark;
 }
 
@@ -438,14 +440,38 @@
   color: var(--recycle-muted);
 }
 
-.studio-recycle-purge-target {
+.studio-recycle-bin dialog:has(.studio-recycle-purge-actions) {
+  --studio-ui-dialog-padding: 21px;
+  --studio-ui-dialog-gap: 0;
+  --studio-ui-dialog-shadow: var(--recycle-shadow);
+  --studio-ui-dialog-header-space: 20px;
+  --studio-ui-dialog-title-size: 16px;
+  --studio-ui-dialog-title-weight: 500;
+  --studio-ui-dialog-description-color: currentColor;
+  --studio-ui-hover: var(--recycle-hover);
+  --studio-ui-radius: 13px;
+  --studio-ui-backdrop: #090d1566;
+  inline-size: min(410px, calc(100% - 50px));
+  max-block-size: calc(100dvh - 50px);
+}
+
+.studio-recycle-bin .studio-recycle-purge-target {
+  margin-block-start: 10px;
   overflow-wrap: anywhere;
 }
 
 .studio-recycle-purge-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 9px;
+  margin-block-start: 22px;
+}
+
+.studio-recycle-purge-actions button {
+  padding: 7px 12px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .studio-recycle-destructive {

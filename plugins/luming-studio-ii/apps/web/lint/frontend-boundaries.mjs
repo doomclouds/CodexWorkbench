@@ -38,8 +38,12 @@ const whiteboardData = resolve(sourceRoot, 'data/whiteboard');
 const catalogData = resolve(sourceRoot, 'data/catalog');
 const archiveImportData = resolve(sourceRoot, 'data/archive-import');
 const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
+const viewingSurface = resolve(sourceRoot, 'surfaces/whiteboard-viewing');
+const exportSurface = resolve(sourceRoot, 'surfaces/whiteboard-export');
 const iconSurfaces = new Set([
   workbenchSurface,
+  viewingSurface,
+  exportSurface,
   resolve(sourceRoot, 'surfaces/whiteboard-editor'),
   resolve(sourceRoot, 'surfaces/recycle-bin'),
 ]);
@@ -135,6 +139,12 @@ function allowedLocal(owner, target, targetOwner, typeOnly) {
   }
   if (owner.layer === 'pages' && targetOwner.layer === 'data') {
     return typeOnly && publicEntry(target, targetOwner);
+  }
+  if (targetOwner.layer === 'data' && owner.root === viewingSurface) {
+    return false;
+  }
+  if (targetOwner.layer === 'data' && owner.root === exportSurface) {
+    return targetOwner.root === whiteboardData && typeOnly && publicEntry(target, targetOwner);
   }
 
   return publicEntry(target, targetOwner);

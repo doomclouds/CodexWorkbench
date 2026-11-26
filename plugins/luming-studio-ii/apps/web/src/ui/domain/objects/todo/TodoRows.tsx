@@ -278,6 +278,7 @@ export function TodoRows(props: TodoRowsProps) {
     <div
       ref={wrapper}
       className="studio-object-todo__body"
+      inert={!active && !annotating}
       onKeyDown={active ? stopBodyKey : undefined}
       onDoubleClick={active ? (event) => event.stopPropagation() : undefined}
     >

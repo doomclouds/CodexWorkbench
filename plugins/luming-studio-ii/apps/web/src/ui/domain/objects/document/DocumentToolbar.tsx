@@ -229,10 +229,33 @@ export function DocumentToolbar({
 interface DocumentReaderToolsProps {
   readonly viewport: ReturnType<typeof useDocumentViewport>;
   readonly searchField: Ref<SearchFieldHandle>;
+  readonly showOutline?: boolean;
 }
 
-export function DocumentReaderTools({ viewport, searchField }: DocumentReaderToolsProps) {
-  const { headings, find, matches, matchIndex, handleFind, advance, reveal } = viewport;
+function outlineOptions(headings: ReturnType<typeof useDocumentViewport>['headings']) {
+  return [
+    { id: '', label: '跳到标题' },
+    ...headings.map((block) => ({ id: block.id, label: blockText(block) || untitledDocument })),
+  ];
+}
+
+export function DocumentOutlineSelect({ viewport }: Pick<DocumentReaderToolsProps, 'viewport'>) {
+  return (
+    <Select
+      label="文档目录"
+      value=""
+      options={outlineOptions(viewport.headings)}
+      onValueChange={viewport.reveal}
+    />
+  );
+}
+
+export function DocumentReaderTools({
+  viewport,
+  searchField,
+  showOutline = true,
+}: DocumentReaderToolsProps) {
+  const { headings, find, matches, matchIndex, handleFind, advance } = viewport;
 
   function handleSearchKey(event: KeyboardEvent<HTMLDivElement>) {
     const searchInput = event.target instanceof HTMLInputElement;
@@ -265,20 +288,7 @@ export function DocumentReaderTools({ viewport, searchField }: DocumentReaderToo
           <Button label="下一处" variant="ghost" onActivate={() => advance(1)} />
         </>
       )}
-      {headings.length > 0 && (
-        <Select
-          label="文档目录"
-          value=""
-          options={[
-            { id: '', label: '跳到标题' },
-            ...headings.map((block) => ({
-              id: block.id,
-              label: blockText(block) || untitledDocument,
-            })),
-          ]}
-          onValueChange={reveal}
-        />
-      )}
+      {showOutline && headings.length > 0 && <DocumentOutlineSelect viewport={viewport} />}
     </div>
   );
 }

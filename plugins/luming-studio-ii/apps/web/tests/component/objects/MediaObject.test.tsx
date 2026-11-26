@@ -300,7 +300,7 @@ describe('imageExtension', () => {
     });
     expect(element('[role="alert"]').textContent).toBe('图片版本已变化');
     expect(onRetentionChange.mock.calls).toEqual([[true]]);
-    act(() => button('关闭裁剪').click());
+    act(() => element<HTMLButtonElement>('dialog button[aria-label="关闭裁剪"]').click());
     expect(fixture.host.querySelector('dialog')).toBeNull();
     expect(onRetentionChange.mock.calls).toEqual([[true], [false]]);
 

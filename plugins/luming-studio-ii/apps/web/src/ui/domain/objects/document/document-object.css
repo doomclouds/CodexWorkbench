@@ -49,9 +49,15 @@
   --studio-document-background-pink: #67354e;
 }
 
-.studio-document-surface > .studio-ui-scroll-region {
+.studio-document-body {
+  display: flex;
   flex: 1 1 auto;
   min-block-size: 0;
+}
+
+.studio-document-body > .studio-ui-scroll-region {
+  flex: 1 1 auto;
+  min-inline-size: 0;
 }
 
 .studio-document-top {
@@ -177,7 +183,7 @@
   padding: 20px 24px;
 }
 
-.studio-document-surface[data-document-layout] > .studio-ui-scroll-region {
+.studio-document-surface[data-document-layout] .studio-document-body > .studio-ui-scroll-region {
   scrollbar-width: thin;
   scrollbar-gutter: stable;
 }
@@ -279,6 +285,176 @@
 
 .studio-document-reading [data-document-current] {
   outline: 1px solid var(--studio-document-text-yellow);
+}
+
+.studio-document-surface[data-document-focused-reading] {
+  --document-focus-rule: color-mix(in srgb, currentColor 30%, transparent);
+  --document-focus-hover: color-mix(in srgb, currentColor 8%, transparent);
+  --studio-ui-text: currentColor;
+  overflow: hidden;
+  font:
+    14px/1.7 Arial,
+    'Microsoft YaHei',
+    sans-serif;
+}
+
+.studio-document-focused-heading {
+  display: flex;
+  box-sizing: border-box;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 46px;
+  padding: 7px 10px;
+  border-block-end: 1px solid var(--document-focus-rule);
+}
+
+.studio-document-focused-back {
+  --studio-ui-button-background: var(--studio-document-paper);
+  --studio-ui-button-foreground: currentColor;
+  --studio-ui-border: #a8b0bd;
+  --studio-ui-control-radius: 8px;
+  flex: none;
+}
+
+[data-paper-scheme='dark'] .studio-document-focused-back {
+  --studio-ui-border: #667285;
+}
+
+.studio-document-focused-back .studio-ui-button {
+  gap: 7px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.studio-document-focused-heading .studio-document-title {
+  flex: 1;
+  min-inline-size: 0;
+  padding: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.studio-document-focused-toggle {
+  display: grid;
+  flex: none;
+  place-items: center;
+  inline-size: 28px;
+  block-size: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.studio-document-focused-toggle:is(:hover, [aria-expanded='true']),
+.studio-document-focused-outline button:hover {
+  background: var(--document-focus-hover);
+}
+
+.studio-document-focused-toggle svg {
+  inline-size: 17px;
+  block-size: 17px;
+}
+
+.studio-document-focused-find {
+  flex: none;
+  padding: 7px 16px;
+  border-block-end: 1px solid var(--document-focus-rule);
+}
+
+.studio-document-focused-find .studio-ui-search-field {
+  flex: 1;
+  min-inline-size: 70px;
+}
+
+.studio-document-focused-find .studio-ui-field {
+  position: relative;
+}
+
+.studio-document-focused-find .studio-ui-field__label {
+  position: absolute;
+  inset-inline-start: 8px;
+  inset-block-start: 5px;
+  pointer-events: none;
+  font-weight: 400;
+  opacity: 0.65;
+}
+
+.studio-document-focused-find .studio-ui-field:has(input:focus) .studio-ui-field__label,
+.studio-document-focused-find .studio-ui-search-field:has(button) .studio-ui-field__label {
+  clip-path: inset(50%);
+}
+
+.studio-document-focused-find input[type='search'] {
+  min-block-size: 28px;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+}
+
+.studio-document-focused-outline {
+  box-sizing: border-box;
+  flex: 0 0 190px;
+  overflow: auto;
+  padding: 24px 12px;
+  border-inline-end: 1px solid var(--document-focus-rule);
+}
+
+.studio-document-focused-outline strong {
+  display: block;
+  margin-block-end: 12px;
+}
+
+.studio-document-focused-outline button {
+  display: block;
+  overflow: hidden;
+  max-inline-size: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font:
+    12px/1.5 Arial,
+    'Microsoft YaHei',
+    sans-serif;
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.studio-document-focused-mobile-outline {
+  display: none;
+}
+
+.studio-document-surface[data-document-focused-reading] .studio-document-paper {
+  padding: 30px 24px;
+}
+
+.studio-document-surface[data-document-focused-reading] .studio-document-reading {
+  max-inline-size: 820px;
+  margin-inline: auto;
+  line-height: 1.7;
+}
+
+@media (max-width: 700px) {
+  .studio-document-focused-outline {
+    display: none;
+  }
+
+  .studio-document-focused-mobile-outline {
+    display: block;
+    flex: none;
+    padding: 7px 12px;
+  }
+
+  .studio-document-surface[data-document-focused-reading] .studio-document-paper {
+    padding: 20px 16px;
+  }
 }
 
 .studio-ui-dialog:has(.studio-document-surface) {
