@@ -195,7 +195,7 @@ export function BoardHeader({
           <button
             className="whiteboard-chrome__action whiteboard-chrome__back"
             type="button"
-            aria-label="返回 Luming Studio"
+            aria-label="返回 Luming Studio II"
             onClick={onBack}
           >
             <ArrowLeft size={20} />

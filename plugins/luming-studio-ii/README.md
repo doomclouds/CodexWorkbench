@@ -196,6 +196,9 @@ Web 根路径进入工作台。搜索、排序和分页从 `BoardCatalogService`
 ```sh
 pnpm --filter @codexworkbench/luming-studio-ii exec playwright install chromium --only-shell
 pnpm --filter @codexworkbench/luming-studio-ii test:e2e recycle-bin
+pnpm --filter @codexworkbench/luming-studio-ii test:e2e workbench
 ```
 
-截图、失败 trace 和 Playwright JSON 报告写入 `artifacts/luming-studio-ii/v1.0.0/e2e/run/`。回收站离线对照报告位于同一版本的 `e2e/recycle-bin/`。
+工作台按浏览与导航、展示与偏好、新建白板、作品管理、复制分享链接和文件导入六个业务区验收。两版分别断言工作台的版本名称，再比较操作和保存结果。导入回执丢失的用例会分别断言初代和 Studio II 的恢复路径，并检查同一归档只导入一份。
+
+指定分组的截图、失败 trace 和 Playwright JSON 写入 `artifacts/luming-studio-ii/v1.0.0/e2e/<分组>/run/`。离线对照报告保存在对应分组的 `report.html`。

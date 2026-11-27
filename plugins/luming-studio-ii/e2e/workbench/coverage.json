@@ -1,0 +1,273 @@
+{
+  "casePrefix": "WB-",
+  "cases": [
+    {
+      "id": "WB-BROWSE-01",
+      "steps": ["从根地址打开工作台", "查看空目录", "筛选已固定", "点击左上返回"],
+      "expected": "初次打开可新建白板。已固定范围显示专属空状态，返回后显示空工作台。"
+    },
+    {
+      "id": "WB-BROWSE-02",
+      "steps": ["展开搜索并键入带空格的 ALPHA", "输入不存在的标题", "用 Esc 和清除按钮分别退出"],
+      "expected": "搜索忽略大小写和外侧空格。搜索无结果时有对应空状态。清除后恢复列表并回焦。"
+    },
+    {
+      "id": "WB-BROWSE-03",
+      "steps": ["选择已固定", "搜索 Alpha", "从菜单切回最近再进入已固定", "点击已固定页左上返回"],
+      "expected": "菜单切换保留当前搜索。已固定页的返回按钮恢复默认目录范围。",
+      "observations": {
+        "parity-browse-pinned-return": "从已固定页返回后的搜索开关、查询和可见标题"
+      }
+    },
+    {
+      "id": "WB-BROWSE-04",
+      "steps": ["准备时间较早的固定板和普通板", "再加入最新普通板", "刷新后查看列表顺序"],
+      "expected": "固定板优先。普通板按更新时间从新到旧排列。"
+    },
+    {
+      "id": "WB-BROWSE-05",
+      "steps": ["打开包含 62 条作品的目录", "逐次加载更多直到最后一批", "核对顺序与去重"],
+      "expected": "首批获知有后续页。继续加载保留已读条目，最终包含全部 62 件作品。",
+      "observations": { "parity-browse-page-totals": "每次加载后的累计作品数" }
+    },
+    {
+      "id": "WB-BROWSE-06",
+      "steps": [
+        "从卡片点击打开白板",
+        "浏览器后退和前进",
+        "顶栏返回并切换列表",
+        "用 Enter 打开另一板再返回"
+      ],
+      "expected": "两种布局都能打开正确白板。浏览器导航和应用返回均可用，列表偏好得以保留。"
+    },
+    {
+      "id": "WB-BROWSE-07",
+      "steps": [
+        "在已固定范围搜索 Alpha 并打开白板",
+        "浏览器后退并记录目录状态",
+        "前进后从白板顶栏返回并再记录"
+      ],
+      "expected": "分别核对浏览器后退和应用返回后的查询、范围与作品。",
+      "observations": { "parity-browse-board-return": "两种返回方式的工作台状态" }
+    },
+    {
+      "id": "WB-BROWSE-08",
+      "steps": ["打开可分页目录", "受控中断一次续页请求并点加载更多", "确认已有作品", "点击重试"],
+      "expected": "续页失败保留已经读到的作品。重试接续读取并得到完整、不重复的 62 条结果。"
+    },
+    {
+      "id": "WB-BROWSE-09",
+      "steps": ["在含 Élodie 标题的目录输入 élodie", "核对匹配结果"],
+      "expected": "用实际可见标题核对重音字母的大小写匹配。",
+      "observations": { "parity-browse-unicode-search": "小写重音查询匹配到的标题" }
+    },
+    {
+      "id": "WB-DISPLAY-01",
+      "steps": ["在 1366×820 视口查看两张卡片", "切换列表", "刷新并检查布局"],
+      "expected": "卡片横排、列表纵排。实际元素尺寸、间距及跨刷新偏好可核对。",
+      "observations": { "parity-display-layout": "桌面卡片与列表的尺寸、间距及排列" }
+    },
+    {
+      "id": "WB-DISPLAY-02",
+      "steps": ["以亮色系统偏好打开工作台", "系统切暗", "手动切亮", "系统仍为暗色时刷新"],
+      "expected": "初次跟随系统主题变化。手动选择的亮色主题在刷新后保留。"
+    },
+    {
+      "id": "WB-DISPLAY-03",
+      "steps": ["调整到 390×760 窗口并查看网格", "切到列表", "核对作品、布局与管理入口的边界"],
+      "expected": "两种布局都容纳在窄窗内，布局开关及管理入口可达。",
+      "observations": { "parity-narrow-card-size": "窄窗卡片和列表项的实际尺寸" }
+    },
+    {
+      "id": "WB-DISPLAY-04",
+      "steps": ["打开含空白板和有内容板的工作台", "等待两张真实封面解码", "切换到列表"],
+      "expected": "空白板显示 960×540 SVG，内边距为 14px。有内容的卡片显示已保存的内容，列表不挂载封面。",
+      "notes": ["内容板封面保留两版各自的静态缩略渲染。截图可对照显示效果。"],
+      "observations": { "parity-saved-cover": "空白板封面的解码状态、像素尺寸及内边距" }
+    },
+    {
+      "id": "WB-DISPLAY-05",
+      "steps": ["受控暂缓首张封面响应", "检查等待画面后放行", "刷新并替换一次已授权响应的图像字节"],
+      "expected": "等待时是待加载状态，放行后显示封面。坏图降级时只显示一个可见失败提示。",
+      "observations": { "parity-cover-waiting": "封面请求被持有时的状态" }
+    },
+    {
+      "id": "WB-DISPLAY-06",
+      "steps": ["在暗色网格中观察管理按钮", "悬浮、移开指针并聚焦卡片", "切换到列表"],
+      "expected": "网格中的管理按钮随悬浮和焦点显隐。列表中的入口持续可见。",
+      "observations": {
+        "parity-manage-hover-colors": "暗色网格悬浮时管理按钮的可见性及前景和背景色"
+      }
+    },
+    {
+      "id": "WB-CREATE-01",
+      "steps": ["点击「新建白板」大卡", "检查空板", "返回工作台并刷新重开"],
+      "expected": "大卡只创建一个可编辑空板，刷新后重开同一白板 ID。",
+      "observations": { "parity-created-board-persisted": "空板、作品总数和刷新后的作品身份" }
+    },
+    {
+      "id": "WB-CREATE-02",
+      "steps": [
+        "用方向键展开加号菜单",
+        "确认「白板」及「导入作品」入口",
+        "按 Enter 创建白板",
+        "返回、刷新并重开"
+      ],
+      "expected": "键盘可从新建菜单创建唯一白板，刷新重开仍是同一白板。",
+      "observations": { "parity-created-board-persisted": "空板、作品总数和刷新后的作品身份" }
+    },
+    {
+      "id": "WB-CREATE-03",
+      "steps": ["发起真实创建并持有回包", "尝试重复触发两个新建入口", "放行回包", "刷新后重开"],
+      "expected": "确认前保持在工作台。两个入口都拦截重复操作，确认后只出现一个可重开的新板。",
+      "observations": {
+        "parity-creation-receipt-gate": "等待回包与两个入口是否阻止重复点击",
+        "parity-created-board-persisted": "空板、作品总数和刷新后的作品身份"
+      }
+    },
+    {
+      "id": "WB-CREATE-04",
+      "steps": ["在创建写入前中断一次请求", "在工作台点击重试", "刷新后重新打开"],
+      "expected": "失败时保持工作台并呈现重试入口，重试后只产生一个新作品。",
+      "observations": {
+        "parity-creation-retry": "创建失败后是否保留工作台并允许重试",
+        "parity-created-board-persisted": "空板、作品总数和刷新后的作品身份"
+      }
+    },
+    {
+      "id": "WB-CREATE-05",
+      "steps": [
+        "发起创建并持有回包",
+        "先打开另一个白板",
+        "放行并在当前板核对通知",
+        "返回工作台打开新板"
+      ],
+      "expected": "迟到的创建回执保留用户正在看的白板。工作台出现一个可以正常打开的新板。",
+      "observations": { "parity-creation-late-receipt": "迟到回执时的所在白板、通知和新作品数" }
+    },
+    {
+      "id": "WB-MANAGE-01",
+      "steps": ["从三点菜单固定一块白板", "进入已固定并刷新", "取消固定并回到最近范围"],
+      "expected": "已固定范围只显示固定作品，刷新后保留。取消后作品回到普通目录。"
+    },
+    {
+      "id": "WB-MANAGE-02",
+      "steps": [
+        "从卡片打开重命名",
+        "分别用取消和 Esc 退出草稿",
+        "确认空白名称不可提交",
+        "保存新名称并刷新重开"
+      ],
+      "expected": "取消及 Esc 保留原名。有效名称持久化，重开时白板 ID 保持原值。"
+    },
+    {
+      "id": "WB-MANAGE-03",
+      "steps": [
+        "从三点菜单复制含正文和图片的白板",
+        "检查副本及本机访问",
+        "编辑副本后刷新",
+        "重开原件"
+      ],
+      "expected": "副本有独立 ID 和可编辑权限，保留保存正文、图片并能写入新版本。副本编辑与原件隔离。"
+    },
+    {
+      "id": "WB-MANAGE-04",
+      "steps": ["从工作台三点菜单移入回收站", "检查回收站与保留的活动板", "房主用原地址查看原白板"],
+      "expected": "作品退出活动目录，回收站保留对应记录和恢复入口，房主原地址可查看同一白板。"
+    },
+    {
+      "id": "WB-LINK-01",
+      "steps": ["确认目标板初始未分享", "从卡片复制查看链接", "在独立访客会话填写昵称并进入"],
+      "expected": "默认按本机查看权限建立邀请，访客以只读方式打开正确白板及保存内容。",
+      "observations": { "parity-default-viewer-link": "默认邀请的范围、角色及访客访问结果" }
+    },
+    {
+      "id": "WB-LINK-02",
+      "steps": ["复制本机查看邀请", "重新打开工作台", "两次复制同一板链接", "在独立会话打开"],
+      "expected": "工作台刷新后仍使用已保存的本机查看邀请，统一指向同一白板。",
+      "observations": { "parity-existing-viewer-link": "链接复用、复制次数和网络权限范围" }
+    },
+    {
+      "id": "WB-LINK-03",
+      "steps": [
+        "复制第一块白板的邀请并以访客打开",
+        "检查第二块白板的分享状态",
+        "复制第二块的邀请并另开访客"
+      ],
+      "expected": "两张板的邀请和访客会话各自独立。",
+      "observations": { "parity-independent-viewer-links": "邀请独立性及两个访客访问的目标白板" }
+    },
+    {
+      "id": "WB-IMPORT-01",
+      "steps": [
+        "从工作台加号选择 V4 ZIP",
+        "检查自动打开的白板",
+        "返回工作台并分别确认源板和导入板"
+      ],
+      "expected": "真实文件导入保留正文和图片，导入记录有独立 ID，可以重开。",
+      "observations": { "parity-v4-import-opened": "导入后的标题、正文、图片名称及白板身份" }
+    },
+    {
+      "id": "WB-IMPORT-02",
+      "steps": ["取消文件选择", "选择无效 ZIP", "在工作台检查失败提示", "重新选择有效 V4 ZIP"],
+      "expected": "取消回到新建入口，无效包有明确提示，重新选择有效包可完成导入。",
+      "observations": {
+        "parity-archive-invalid": "无效文件的实际提示与工作台状态",
+        "parity-archive-reselected": "取消、出错和更换有效包后的行为"
+      },
+      "notes": [
+        "初代对这个坏包报告文件目录无效。Studio II 为无效归档使用统一提示。两版都保留工作台，且可更换文件。"
+      ],
+      "versionExpectations": {
+        "parity-archive-invalid": {
+          "initial": { "error": "备份 ZIP 文件目录无效。", "workbenchStayedOpen": true },
+          "ii": { "error": "无法读取此作品备份。", "workbenchStayedOpen": true }
+        }
+      }
+    },
+    {
+      "id": "WB-IMPORT-03",
+      "steps": ["受控中断一次导入请求", "核对工作台和未产生记录", "显式再次选择同一 V4 文件"],
+      "expected": "请求失败时保留当前工作台，显式重试后只有一个导入结果。",
+      "observations": {
+        "parity-archive-request-failed": "请求失败提示和重试前的导入数量",
+        "parity-archive-retry-saved": "显式重试方式及导入结果数"
+      },
+      "notes": [
+        "初代提示服务连接失败。Studio II 提醒先检查工作台，因为上传中断后可能尚未获得服务端回执。测试同时核对两版显式重试后都只有一份作品。"
+      ],
+      "versionExpectations": {
+        "parity-archive-request-failed": {
+          "initial": {
+            "error": "无法连接作品服务，请重试或重新打开页面。",
+            "importedBeforeRetry": 0
+          },
+          "ii": { "error": "暂未确认导入结果，请先检查工作台。", "importedBeforeRetry": 0 }
+        }
+      }
+    },
+    {
+      "id": "WB-IMPORT-04",
+      "steps": [
+        "上传 V4 文件并持有响应",
+        "打开已有白板",
+        "放行后检查提示和当前位置",
+        "回工作台查看导入记录"
+      ],
+      "expected": "导入回执迟到时保留用户当前白板，导入结果仍可从工作台找到。",
+      "observations": { "parity-archive-late-result-in-list": "迟到回执时当前白板和工作台导入记录" }
+    },
+    {
+      "id": "WB-IMPORT-05",
+      "steps": ["向实际后端上传 V4", "在服务端完成写入后丢弃回执", "按各版本恢复流程查看工作台"],
+      "expected": "两版都只持久化一次。初代通过刷新找回作品，Studio II 自动核对原回执并打开作品。",
+      "observations": { "parity-archive-receipt-saved-once": "回执丢失后的恢复方式和实际保存次数" },
+      "versionExpectations": {
+        "parity-archive-receipt-saved-once": {
+          "initial": { "uploadsPersisted": 1, "recovery": "刷新工作台看到已导入作品" },
+          "ii": { "uploadsPersisted": 1, "recovery": "自动核对回执并打开作品" }
+        }
+      }
+    }
+  ]
+}

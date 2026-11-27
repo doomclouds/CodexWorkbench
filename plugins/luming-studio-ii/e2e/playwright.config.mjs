@@ -7,10 +7,13 @@ const manifest = JSON.parse(readFileSync(new URL("../plugin.json", import.meta.u
 const artifacts = fileURLToPath(
   new URL(`../../../artifacts/luming-studio-ii/v${manifest.version}/e2e/`, import.meta.url),
 );
-const run = join(artifacts, "run");
+const group = process.env.LUMING_STUDIO_E2E_GROUP ?? "";
+const scoped = /^[a-z][a-z0-9-]{0,49}$/u.test(group);
+const groupRoot = scoped ? join(artifacts, group) : artifacts;
+const run = join(groupRoot, "run");
 
 export default defineConfig({
-  testDir: ".",
+  testDir: scoped ? "./" + group : ".",
   testMatch: "**/*.spec.mjs",
   outputDir: join(run, "evidence"),
   fullyParallel: true,

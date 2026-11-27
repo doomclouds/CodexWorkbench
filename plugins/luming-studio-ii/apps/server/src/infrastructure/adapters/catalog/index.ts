@@ -121,13 +121,15 @@ function listRows(
   ordering: CatalogOrdering,
 ): SqliteRow[] {
   const { actorId, query, limit, after } = lookup;
+  const titleFilter = query ? 'AND instr(studio_unicode_lower(b.title), ?) > 0' : '';
+  const search = query ? [query.toLocaleLowerCase()] : [];
   const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : '';
   const values = after ? ordering.values(after) : [];
   const statement = connection.prepare(`
     WITH visible AS (
       SELECT ${catalogColumns}, b.revision AS preview_revision
       ${catalogTables}
-      WHERE m.actor_id = ? AND instr(lower(b.title), lower(?)) > 0 AND ${condition}
+      WHERE m.actor_id = ? ${titleFilter} AND ${condition}
     )
     SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage,
       trashed_at_millis, preview_revision
@@ -138,7 +140,7 @@ function listRows(
   `);
   statement.setReadBigInts(true);
 
-  return statement.all(actorId, query, ...values, limit);
+  return statement.all(actorId, ...search, ...values, limit);
 }
 
 function listBoards(connection: SqliteConnection, lookup: CatalogLookup): CatalogBoardSummary[] {

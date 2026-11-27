@@ -2289,10 +2289,11 @@ function renderOverview(scene, projection2, detailed) {
     `<svg xmlns="http://www.w3.org/2000/svg" width="${imageWidth}" height="${imageHeight}" viewBox="0 0 ${imageWidth} ${imageHeight}"><rect width="100%" height="100%" fill="${paper}"/>${content}</svg>`
   );
 }
-function renderCatalogThumbnail(scene) {
+function renderCatalogThumbnail(scene, trashed) {
   if (scene.objects.length === 0) {
+    const trashStyle = trashed ? "<style>rect{fill:#fafafa}@media(prefers-color-scheme:dark){rect{fill:#848586}}</style>" : "";
     const content2 = new TextEncoder().encode(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540"><style>rect{fill:#fafafa}@media(prefers-color-scheme:dark){rect{fill:#848586}}</style><rect width="100%" height="100%" fill="#f5f5f5"/></svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">' + trashStyle + '<rect width="100%" height="100%" fill="#f5f5f5"/></svg>'
     );
     return { revision: scene.revision, mimeType: "image/svg+xml", content: content2 };
   }
@@ -2327,9 +2328,9 @@ function catalogTimestamp(now) {
 
 // src/modules/catalog/application/catalog-thumbnail.ts
 var previewCacheEntries = 24;
-function keep(cache, boardId, thumbnail) {
-  cache.delete(boardId);
-  cache.set(boardId, thumbnail);
+function keep(cache, key, thumbnail) {
+  cache.delete(key);
+  cache.set(key, thumbnail);
   if (cache.size > previewCacheEntries) {
     const oldest = cache.keys().next().value;
     if (oldest !== void 0) {
@@ -2340,19 +2341,20 @@ function keep(cache, boardId, thumbnail) {
 function createCatalogThumbnailReader(repository) {
   const cache = /* @__PURE__ */ new Map();
   return (actorId2, request) => {
-    const { boardId } = request;
-    const result = repository.readThumbnail({ ...request, actorId: actorId2 }, cache.get(boardId));
+    const { boardId, trashed } = request;
+    const key = JSON.stringify([boardId, trashed]);
+    const result = repository.readThumbnail({ ...request, actorId: actorId2 }, cache.get(key));
     if (result.kind !== "scene") {
       if (result.kind === "thumbnail") {
-        keep(cache, boardId, result.thumbnail);
+        keep(cache, key, result.thumbnail);
       }
       return result;
     }
-    const thumbnail = renderCatalogThumbnail(result.scene);
+    const thumbnail = renderCatalogThumbnail(result.scene, trashed);
     if (!thumbnail) {
       return { kind: "unavailable" };
     }
-    keep(cache, boardId, thumbnail);
+    keep(cache, key, thumbnail);
     return { kind: "thumbnail", thumbnail };
   };
 }
@@ -25405,6 +25407,11 @@ function transaction(connection, begin, work) {
 }
 function openSqliteDatabase(filename) {
   const connection = new DatabaseSync(filename, { enableForeignKeyConstraints: true });
+  connection.function(
+    "studio_unicode_lower",
+    { deterministic: true, directOnly: true },
+    (value) => typeof value === "string" ? value.toLocaleLowerCase() : null
+  );
   return {
     read: (work) => transaction(connection, "BEGIN", work),
     write: (work) => transaction(connection, "BEGIN IMMEDIATE", work),
@@ -37813,10 +37820,10 @@ function readCatalogThumbnail(connection, lookup, cached) {
   }
   const bounds = readBounds(connection, boardId);
   if (!bounds) {
-    return lookup.trashed ? {
+    return {
       kind: "scene",
       scene: { revision, left: 0, top: 0, right: 0, bottom: 0, objects: [] }
-    } : { kind: "unavailable" };
+    };
   }
   const objects = readRows2(connection, boardId, bounds.total).map(readObject2);
   return {
@@ -37911,13 +37918,15 @@ function readListSummary(row) {
 }
 function listRows(connection, lookup, condition, ordering) {
   const { actorId: actorId2, query, limit, after } = lookup;
+  const titleFilter = query ? "AND instr(studio_unicode_lower(b.title), ?) > 0" : "";
+  const search = query ? [query.toLocaleLowerCase()] : [];
   const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : "";
   const values = after ? ordering.values(after) : [];
   const statement = connection.prepare(`
     WITH visible AS (
       SELECT ${catalogColumns}, b.revision AS preview_revision
       ${catalogTables}
-      WHERE m.actor_id = ? AND instr(lower(b.title), lower(?)) > 0 AND ${condition}
+      WHERE m.actor_id = ? ${titleFilter} AND ${condition}
     )
     SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage,
       trashed_at_millis, preview_revision
@@ -37927,7 +37936,7 @@ function listRows(connection, lookup, condition, ordering) {
     LIMIT ?
   `);
   statement.setReadBigInts(true);
-  return statement.all(actorId2, query, ...values, limit);
+  return statement.all(actorId2, ...search, ...values, limit);
 }
 function listBoards2(connection, lookup) {
   const condition = lookup.pinnedOnly ? activePinnedBoards : activeBoards;

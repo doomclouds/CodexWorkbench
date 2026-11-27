@@ -107,7 +107,7 @@ test("[TRASH-FLOW-01] 重启后恢复同一白板、固定状态和保存内容"
 
   await restoreButton(page, board.title).click();
   await expect(page.getByRole("heading", { name: "回收站为空", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "返回 Luming Studio", exact: true }).click();
+  await page.getByRole("button", { name: studio.workbenchBackLabel, exact: true }).click();
   await openBoardMenu(page, board.title);
   await expect(page.getByRole("menuitem", { name: "取消固定", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -156,7 +156,7 @@ test("[TRASH-FLOW-02] 永久删除所选作品并保留未选与工作台作品"
   await expect(restoreButton(page, right.title)).toHaveCount(0);
   await expectBoardUnavailable(page, studio, left);
   await screenshot(page, testInfo, "selected-deletion-after-restart");
-  await page.getByRole("button", { name: "返回 Luming Studio", exact: true }).click();
+  await page.getByRole("button", { name: studio.workbenchBackLabel, exact: true }).click();
   await expect(boardButton(page, active.title)).toBeVisible();
 });
 

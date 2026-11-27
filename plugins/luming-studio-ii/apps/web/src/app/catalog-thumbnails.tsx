@@ -17,6 +17,7 @@ function VisibleThumbnail({
   const mount = useRef<HTMLSpanElement>(null);
   const [source, setSource] = useState<string>();
   const [failure, setFailure] = useState<string>();
+  const [pending, setPending] = useState(true);
 
   useEffect(() => {
     const element = mount.current;
@@ -40,11 +41,13 @@ function VisibleThumbnail({
         .then((next) => {
           if (!signal.aborted) {
             setSource(next);
+            setPending(false);
           }
         })
         .catch((error: unknown) => {
           if (!signal.aborted) {
             setFailure(error instanceof Error ? error.message : '读取缩略图失败。');
+            setPending(false);
           }
         });
     }
@@ -74,6 +77,7 @@ function VisibleThumbnail({
       className="studio-catalog-thumbnail"
       aria-hidden="true"
       title={failure}
+      data-preview-pending={pending || undefined}
       data-preview-failed={Boolean(failure) || undefined}
     >
       {source && !failure && (

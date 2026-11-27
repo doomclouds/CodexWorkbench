@@ -83,7 +83,9 @@ async function trash(board: BoardSummary) {
 
 test('renders a bounded SVG of the saved scene and replaces it only at a new revision', async () => {
   const { boardId } = await create();
-  expect((await readThumbnail(boardId, 0n)).thumbnail).toBeUndefined();
+  const empty = readSvg(await readThumbnail(boardId, 0n));
+  expect(empty).toContain('viewBox="0 0 960 540"');
+  expect(empty).toContain('<rect width="100%" height="100%" fill="#f5f5f5"/>');
   await draw(boardId);
   expect((await list()).previewRevision).toBe(1n);
   const before = await readThumbnail(boardId, 1n);
@@ -156,10 +158,10 @@ test('authorizes every cached preview against the current active or owner trash 
   expect(ambiguous.status).toBe(400);
 });
 
-test('renders blank paper for an empty board only in the authorized trash view', async () => {
+test('renders theme-aware blank paper for an empty board in the authorized trash view', async () => {
   const { boardId } = await create();
   grantCatalogEditor(server.databasePath, boardId, editor);
-  expect((await readThumbnail(boardId, 0n)).thumbnail).toBeUndefined();
+  expect(readSvg(await readThumbnail(boardId, 0n))).not.toContain('prefers-color-scheme');
 
   await trash(await list());
   const { boards } = await callWhiteboard(server.address, owner, listTrashedBoards, {

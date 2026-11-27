@@ -144,6 +144,8 @@ test("compares JSON values structurally and writes a report before returning str
           spec("C", [observation(null)], []),
           spec("D", [], []),
           spec("E", [{ ...observation(null), body: "this is not JSON" }], [observation(null)]),
+          spec("F", [observation({ saved: true })], [observation({ verified: true })]),
+          spec("G", [observation({ saved: true })], [observation({ verified: false })]),
         ],
       },
     ],
@@ -156,7 +158,15 @@ test("compares JSON values structurally and writes a report before returning str
       { project: "initial", label: "初代", result: "results.json" },
       { project: "ii", label: "Studio II", result: "results.json" },
     ],
-    cases: [{ id: "D", observations: { "parity-other": "待补观测" } }],
+    cases: [
+      { id: "D", observations: { "parity-other": "待补观测" } },
+      ...["F", "G"].map((id) => ({
+        id,
+        versionExpectations: {
+          "parity-page": { initial: { saved: true }, ii: { verified: true } },
+        },
+      })),
+    ],
   };
   await Promise.all([
     writeFile(join(directory, "results.json"), JSON.stringify(results)),
@@ -180,10 +190,12 @@ test("compares JSON values structurally and writes a report before returning str
   assert.equal(byId.get("C").statusText, "观测待验");
   assert.equal(byId.get("D").statusText, "观测待验");
   assert.equal(byId.get("E").statusText, "观测待验");
+  assert.equal(byId.get("F").statusText, "版本预期通过");
+  assert.equal(byId.get("G").statusText, "差异待修");
   assert.match(
     byId.get("B").details.paragraphs.join(" "),
     /初代 · \{"page":60\} Studio II · \{"page":30\}/u,
   );
   assert.match(report.summary, /^一致性验收未通过。/u);
-  assert.match(report.summary, /发现差异 1 项，待验或有冲突 3 项/u);
+  assert.match(report.summary, /发现差异 2 项，待验或有冲突 3 项/u);
 });

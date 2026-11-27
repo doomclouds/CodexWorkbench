@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import type {
   BoardCatalogService,
   CatalogCreateRequest,
   CatalogDuplicateRequest,
   CatalogReceipt,
   CatalogRejectionReason,
-} from '../../data/catalog/index.js';
+} from '../../../data/catalog/index.js';
+import type { studioPages } from '../../routes.js';
 
-type CreationAction = 'create' | 'duplicate';
+type WorkbenchPageProps = ComponentProps<(typeof studioPages)['workbench']>;
+type CreationState = WorkbenchPageProps['creation']['state'];
+type CreationAction = Exclude<CreationState, { kind: 'idle' }>['action'];
 
 type CreationIntent =
   | { readonly action: 'create' }
@@ -20,17 +23,8 @@ type CreationCommand =
 interface CreationAttempt {
   readonly command: CreationCommand;
   readonly controller: AbortController;
-  readonly routeGeneration?: number;
+  readonly routeGeneration: number;
 }
-
-type CreationState =
-  | { readonly kind: 'idle' }
-  | { readonly kind: 'creating' | 'checking'; readonly action: CreationAction }
-  | {
-      readonly kind: 'rejected' | 'unknown';
-      readonly action: CreationAction;
-      readonly detail: string;
-    };
 
 type AttemptResult = { readonly receipt: CatalogReceipt } | { readonly detail: string };
 
@@ -38,8 +32,8 @@ interface BoardCreationOptions {
   readonly service: BoardCatalogService;
   readonly createCommandId: () => string;
   readonly onOpenBoard: (boardId: string) => void;
-  readonly readRouteGeneration?: () => number;
-  readonly onDuplicateConfirmed: () => void;
+  readonly readRouteGeneration: () => number;
+  readonly onLateConfirmation: (action: CreationAction) => void;
 }
 
 const defaultBoardTitle = '未命名白板';
@@ -149,7 +143,7 @@ export function useBoardCreation({
   createCommandId,
   onOpenBoard,
   readRouteGeneration,
-  onDuplicateConfirmed,
+  onLateConfirmation,
 }: BoardCreationOptions) {
   const [state, setState] = useState<CreationState>({ kind: 'idle' });
   const pending = useRef<CreationAttempt | undefined>(undefined);
@@ -194,10 +188,10 @@ export function useBoardCreation({
     }
 
     setState({ kind: 'idle' });
-    if (attempt.routeGeneration === readRouteGeneration?.()) {
+    if (attempt.routeGeneration === readRouteGeneration()) {
       onOpenBoard(result.receipt.board.boardId);
-    } else if (action === 'duplicate') {
-      onDuplicateConfirmed();
+    } else {
+      onLateConfirmation(action);
     }
   }
 
@@ -230,7 +224,7 @@ export function useBoardCreation({
     const attempt = {
       command: pendingCommand(intent, commandId),
       controller: new AbortController(),
-      routeGeneration: readRouteGeneration?.(),
+      routeGeneration: readRouteGeneration(),
     };
     pending.current = attempt;
     run(attempt, 'creating');

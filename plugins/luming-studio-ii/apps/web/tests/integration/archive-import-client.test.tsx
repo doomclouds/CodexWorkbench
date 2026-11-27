@@ -109,6 +109,27 @@ it('preserves the transport failure when the result is unconfirmed', async () =>
   });
 });
 
+it('asks the user to check the workbench when the upload and its receipt lookup both fail', async () => {
+  const upload = new Error('Upload connection interrupted');
+  const lookup = new Error('Receipt connection interrupted');
+  let uploads = 0;
+  const service = createArchiveImportService(
+    () => {
+      uploads++;
+
+      return Promise.reject(upload);
+    },
+    () => Promise.reject(lookup),
+  );
+
+  await expect(service.importArchive(command)).rejects.toMatchObject({
+    message: '无法确认导入结果，请先检查工作台。',
+    errors: [upload, lookup],
+    cause: lookup,
+  });
+  expect(uploads).toBe(1);
+});
+
 it('preserves cancellation when the upload is in progress', async () => {
   const controller = new AbortController();
   const cancellation = new Error('Page closed');

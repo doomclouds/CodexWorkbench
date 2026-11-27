@@ -125,6 +125,7 @@ function appMock() {
   const lookup: string[] = [];
   const opened: string[] = [];
   let currentBoard: string | undefined;
+  let historyChanged: (() => void) | undefined;
   const props: StudioAppProps = {
     catalog: {
       listBoards: () => Promise.resolve({ boards: [existingBoard] }),
@@ -167,7 +168,12 @@ function appMock() {
       write(location) {
         currentBoard = location.kind === 'whiteboard' ? location.boardId : undefined;
       },
-      subscribe: () => () => undefined,
+      subscribe(listener) {
+        historyChanged = listener;
+        return () => {
+          historyChanged = undefined;
+        };
+      },
     },
     preferences: {
       layout: 'grid',
@@ -178,7 +184,12 @@ function appMock() {
     createCommandId: () => 'create-release-board',
   };
 
-  return { props, attempts, lookup, opened };
+  function goBackToWorkbench() {
+    currentBoard = undefined;
+    historyChanged?.();
+  }
+
+  return { props, attempts, lookup, opened, goBackToWorkbench };
 }
 
 describe('legacy Workbench creation through the Studio app', () => {
@@ -270,7 +281,7 @@ describe('legacy Workbench creation through the Studio app', () => {
         fixture.render(<StudioApp {...props} />);
       });
 
-      expect(fixture.host.querySelector('h1')?.textContent).toBe('Luming Studio');
+      expect(fixture.host.querySelector('h1')?.textContent).toBe('Luming Studio II');
       expect(
         fixture.host.querySelector('button[aria-label="打开白板：产品发布工作台"]'),
       ).not.toBeNull();
@@ -307,7 +318,7 @@ describe('legacy Workbench creation through the Studio app', () => {
       });
 
       await click(fixture.host, '加载更多');
-      expect(requests.at(-1)).toMatchObject({ cursor: 'next', order: 'recent' });
+      expect(requests.at(-1)).toMatchObject({ cursor: 'next', order: 'recent', pageSize: 60 });
       expect(fixture.host.textContent).toContain('产品发布工作台');
       expect(fixture.host.textContent).toContain('交付复盘');
 
@@ -316,7 +327,7 @@ describe('legacy Workbench creation through the Studio app', () => {
       expect(requests.at(-1)).toMatchObject({ order: 'recent', pinnedOnly: true });
       expect(fixture.host.querySelector('h1')?.textContent).toBe('已固定');
       expect(fixture.host.textContent).toContain('还没有固定作品');
-      await click(fixture.host, '返回 Luming Studio');
+      await click(fixture.host, '返回 Luming Studio II');
       expect(document.activeElement?.getAttribute('aria-label')).toBe('筛选作品');
       expect(requests.at(-1)?.pinnedOnly).toBeUndefined();
 
@@ -336,38 +347,46 @@ describe('legacy Workbench creation through the Studio app', () => {
     }
   });
 
-  it('restores search and the pinned scope when returning from a board', async () => {
-    const { props, opened } = appMock();
-    const requests: ListRequest[] = [];
-    const catalog: BoardCatalogService = {
-      ...props.catalog,
-      listBoards(request) {
-        requests.push(request);
-        return Promise.resolve({ boards: [{ ...existingBoard, pinned: true }] });
-      },
-    };
-    const fixture = createControlFixture();
+  it.each(['board button', 'browser history'] as const)(
+    'restores the search and shows recent works when returning from a board via %s',
+    async (entry) => {
+      const { props, opened, goBackToWorkbench } = appMock();
+      const requests: ListRequest[] = [];
+      const catalog: BoardCatalogService = {
+        ...props.catalog,
+        listBoards(request) {
+          requests.push(request);
+          return Promise.resolve({ boards: [{ ...existingBoard, pinned: true }] });
+        },
+      };
+      const fixture = createControlFixture();
 
-    try {
-      await act(async () => fixture.render(<StudioApp {...props} catalog={catalog} />));
-      await click(fixture.host, '筛选作品');
-      await click(fixture.host, '已固定');
-      await click(fixture.host, '搜索作品');
-      await enterSearch(fixture.host, '产品发布');
-      await click(fixture.host, '打开白板：产品发布工作台');
-      expect(opened).toEqual([existingBoard.boardId]);
+      try {
+        await act(async () => fixture.render(<StudioApp {...props} catalog={catalog} />));
+        await click(fixture.host, '筛选作品');
+        await click(fixture.host, '已固定');
+        await click(fixture.host, '搜索作品');
+        await enterSearch(fixture.host, '产品发布');
+        await click(fixture.host, '打开白板：产品发布工作台');
+        expect(opened).toEqual([existingBoard.boardId]);
 
-      await click(fixture.host, '返回 Luming Studio');
-      expect(fixture.host.querySelector('h1')?.textContent).toBe('已固定');
-      expect(fixture.host.querySelector('input[aria-label="搜索作品名称"]')).toHaveProperty(
-        'value',
-        '产品发布',
-      );
-      expect(requests.at(-1)).toMatchObject({ query: '产品发布', pinnedOnly: true });
-    } finally {
-      fixture.dispose();
-    }
-  });
+        if (entry === 'board button') {
+          await click(fixture.host, '返回 Luming Studio II');
+        } else {
+          await act(async () => goBackToWorkbench());
+        }
+        expect(fixture.host.querySelector('h1')?.textContent).toBe('Luming Studio II');
+        expect(fixture.host.querySelector('input[aria-label="搜索作品名称"]')).toHaveProperty(
+          'value',
+          '产品发布',
+        );
+        expect(requests.at(-1)).toMatchObject({ query: '产品发布', order: 'recent' });
+        expect(requests.at(-1)?.pinnedOnly).toBeUndefined();
+      } finally {
+        fixture.dispose();
+      }
+    },
+  );
 
   it('shares the directory search across history navigation and resets it only on recycle-bin return', async () => {
     const { props } = appMock();
@@ -443,8 +462,8 @@ describe('legacy Workbench creation through the Studio app', () => {
 
       await click(fixture.host, '切换为列表视图');
       await click(fixture.host, '切换为暗色主题');
-      await click(fixture.host, '返回 Luming Studio');
-      expect(fixture.host.querySelector('h1')?.textContent).toBe('Luming Studio');
+      await click(fixture.host, '返回 Luming Studio II');
+      expect(fixture.host.querySelector('h1')?.textContent).toBe('Luming Studio II');
       expect(workbenchSearch()).toHaveProperty('value', '');
       expect(requests.at(-1)).toMatchObject({ query: '', order: 'recent' });
       expect(requests.at(-1)?.pinnedOnly).toBeUndefined();

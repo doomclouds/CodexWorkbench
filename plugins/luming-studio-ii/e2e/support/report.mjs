@@ -5,7 +5,7 @@ import { isDeepStrictEqual, parseArgs, stripVTControlCharacters } from "node:uti
 const usage = `Usage: node report.mjs [--strict] <manifest.json> <report.json>
 Manifest: { project, version?, title, date?, scope, delivery?, targets, caseFile?, cases?, casePrefix? }
 Each target is { project, label, result } and names a Playwright project and JSON report.
-Each case is { id, title?, expected?, steps?, notes?, observations? }.
+Each case is { id, title?, expected?, steps?, notes?, observations?, versionExpectations? }.
 Test titles start with [id]. Map parity-* attachment names to labels in observations.
 Case files contain { cases, casePrefix? }. Their paths and results are relative to the manifest.`;
 
@@ -251,9 +251,19 @@ function observedText(value) {
   return safeJson.length > 960 ? safeJson.slice(0, 960) + "…" : safeJson;
 }
 
-function observationState(values) {
+function observationState(values, targets, expectedByProject) {
   if (!values.every((variant) => variant.length === 1 && variant[0] !== undefined)) {
     return "incomplete";
+  }
+
+  if (expectedByProject !== undefined) {
+    const expected = expectedByProject ?? {};
+    const matched = targets.every(
+      ({ project }, index) =>
+        Object.hasOwn(expected, project) && isDeepStrictEqual(values[index][0], expected[project]),
+    );
+
+    return matched ? "expected" : "different";
   }
 
   return values.every(([value]) => isDeepStrictEqual(value, values[0][0]))
@@ -263,13 +273,19 @@ function observationState(values) {
 
 function compareObservations(item, evidence, targets) {
   const labels = item.observations ?? {};
+  const expectations = item.versionExpectations ?? {};
   const allKeys = evidence.flatMap(({ observations }) => [...observations.keys()]);
-  const names = [...new Set([...Object.keys(labels), ...allKeys])];
+  const names = [...new Set([...Object.keys(labels), ...Object.keys(expectations), ...allKeys])];
   return names.map((name) => {
     const values = evidence.map(({ observations }) => observations.get(name) ?? []);
-    const state = observationState(values);
+    const state = observationState(values, targets, expectations[name]);
     const label = labels[name] ?? publicText(name);
-    const status = { matching: "一致", different: "已证实差异", incomplete: "待验或有冲突" }[state];
+    const status = {
+      matching: "一致",
+      different: "已证实差异",
+      incomplete: "待验或有冲突",
+      expected: "各版结果符合已声明的预期",
+    }[state];
     const paragraphs = [
       label + " · " + status,
       ...targets.map((target, index) => {
@@ -330,8 +346,11 @@ function statusFor(outcomes, observations) {
   if (observations.some(({ state }) => state === "incomplete")) {
     return { status: "pending", statusText: "观测待验" };
   }
+
   if (outcomes.every((outcome) => outcome === "passed")) {
-    return { status: "done", statusText: "对照通过" };
+    const versionBehavior = observations.some(({ state }) => state === "expected");
+
+    return { status: "done", statusText: versionBehavior ? "版本预期通过" : "对照通过" };
   }
 
   return { status: "pending", statusText: "尚未覆盖全部版本" };
@@ -496,6 +515,7 @@ async function writeReport(manifestPath, outputPath) {
   const summary = statistics.map(({ label, value }) => label + " " + value + "。").join("");
   const different = compared.filter(({ state }) => state === "different").length;
   const incomplete = compared.filter(({ state }) => state === "incomplete").length;
+  const expected = compared.filter(({ state }) => state === "expected").length;
   const comparisonSummary = compared.length
     ? "跨版观测 " +
       compared.length +
@@ -506,7 +526,10 @@ async function writeReport(manifestPath, outputPath) {
       " 项。"
     : "";
   const accepted = sections.every(({ status }) => status === "done");
-  const verdict = accepted ? "一致性验收通过。" : "一致性验收未通过。";
+  let verdict = accepted ? "一致性验收通过。" : "一致性验收未通过。";
+  if (accepted && expected > 0) {
+    verdict = "共同流程与版本预期验收通过。已验证 " + expected + " 项版本预期差异。";
+  }
   const report = {
     project: input.project,
     version: input.version,

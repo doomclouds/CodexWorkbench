@@ -105,6 +105,25 @@ test('filters and pages the authenticated catalog with an opaque cursor', async 
   expect(secondPage.nextCursor).toBeUndefined();
 });
 
+test('matches Unicode title casing before splitting the authenticated catalog into pages', async () => {
+  await addBoard('accent-1', 'Élodie 需求板');
+  await addBoard('accent-2', 'ÉLODIE 复盘');
+  await addBoard('plain', 'Elodie 无重音');
+  await addBoard('foreign-accent', 'Élodie 他人作品', otherActorId);
+
+  const query = { query: '  élodie  ', order: BoardSortOrder.RECENT, pageSize: 1 };
+  const first = await callProtobuf(server.address, actorId, listBoards, query);
+  assert.ok(first.nextCursor);
+  const second = await callProtobuf(server.address, actorId, listBoards, {
+    ...query,
+    cursor: first.nextCursor,
+  });
+  expect([...first.boards, ...second.boards].map(({ title }) => title).sort()).toEqual(
+    ['Élodie 需求板', 'ÉLODIE 复盘'].sort(),
+  );
+  expect(second.nextCursor).toBeUndefined();
+});
+
 test('filters pins before pagination and keeps the default cursor on its original scope', async () => {
   await addPinnedBoard('pinned-beta', 'Design Beta');
   await addPinnedBoard('pinned-alpha', 'Design Alpha');

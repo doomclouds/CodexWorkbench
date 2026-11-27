@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from 'react';
 import type { ArchiveImportService } from '../data/archive-import/index.js';
 import type { BoardCatalogService, CatalogManagementService } from '../data/catalog/index.js';
 import { createCatalogBoardRename, createCatalogDirectory } from '../data/catalog/index.js';
@@ -12,6 +20,7 @@ import { studioPages } from './routes.js';
 import { AppShell } from './shell/index.js';
 import { RoomWhiteboard, type CreateRoomSession } from './WhiteboardApp.js';
 import { useArchiveImport } from './workflows/archive-import/useArchiveImport.js';
+import { useBoardCreation } from './workflows/board-creation/useBoardCreation.js';
 
 type StudioLayout = 'list' | 'grid';
 type StudioTheme = 'light' | 'dark';
@@ -172,16 +181,33 @@ export function StudioApp({
     readRouteGeneration: () => routeGeneration.current,
     onOpenBoard: handleOpenBoard,
   });
+  const [creationNotice, setCreationNotice] = useState<ComponentProps<typeof AppShell>['notice']>();
+  const dismissCreationNotice = useCallback(() => setCreationNotice(undefined), []);
+  const creation = useBoardCreation({
+    service: catalog,
+    createCommandId,
+    onOpenBoard: handleOpenBoard,
+    readRouteGeneration: () => routeGeneration.current,
+    onLateConfirmation(action) {
+      directory.reload();
+      if (action === 'create') {
+        setCreationNotice({ kind: 'success', message: '作品已创建，可从 Luming Studio II 打开。' });
+      }
+    },
+  });
 
-  useEffect(
-    () =>
-      navigation.subscribe(() => {
-        shareEntry.current = undefined;
-        routeGeneration.current += 1;
-        setRoute({ location: navigation.read(), guestEntry: guest?.readEntry() });
-      }),
-    [guest, navigation],
-  );
+  const handleHistoryNavigation = useEffectEvent(() => {
+    const next = navigation.read();
+    if (location.kind === 'whiteboard' && next.kind === 'workbench') {
+      directory.setPinnedOnly(false);
+    }
+
+    shareEntry.current = undefined;
+    routeGeneration.current += 1;
+    setRoute({ location: next, guestEntry: guest?.readEntry() });
+  });
+
+  useEffect(() => navigation.subscribe(() => handleHistoryNavigation()), [navigation]);
 
   useEffect(() => subscribeTheme?.(setTheme), [subscribeTheme]);
 
@@ -223,6 +249,11 @@ export function StudioApp({
     navigate({ kind: 'workbench' });
   }
 
+  function handleReturnFromBoard() {
+    directory.setPinnedOnly(false);
+    openWorkbench();
+  }
+
   function openRecycleBin() {
     navigate({ kind: 'recycle-bin' });
   }
@@ -256,7 +287,7 @@ export function StudioApp({
           fitOnMount
           initialBoardView={navigation.readBoardView?.()}
           onViewContext={onViewContext}
-          onBack={openWorkbench}
+          onBack={handleReturnFromBoard}
           exportBoard={exportBoard}
           downloadExport={downloadExport}
           downloadObjectFile={downloadObjectFile}
@@ -313,7 +344,7 @@ export function StudioApp({
         onOpenBoard={handleOpenBoard}
         copyBoardLink={copyBoardLink}
         onOpenSharing={handleOpenBoardSharing}
-        readRouteGeneration={() => routeGeneration.current}
+        creation={creation}
         onOpenTrash={catalogManagement ? openRecycleBin : undefined}
         archiveImport={importFlow.workbench}
         preferences={pagePreferences}
@@ -375,8 +406,8 @@ export function StudioApp({
   return (
     <AppShell
       resolvedTheme={resolvedTheme}
-      notice={importFlow.feedback}
-      onDismissNotice={importFlow.dismissFeedback}
+      notice={importFlow.feedback ?? creationNotice}
+      onDismissNotice={importFlow.feedback ? importFlow.dismissFeedback : dismissCreationNotice}
       guest={guestShell}
     >
       {!guestEntry && renderPage()}

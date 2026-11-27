@@ -104,7 +104,7 @@ function BoardPreview({
         <span />
         <span />
       </div>
-      <span>暂无预览</span>
+      <span className="studio-workbench-preview-placeholder">暂无预览</span>
       {previewRevision !== undefined &&
         renderThumbnail?.({ boardId, revision: previewRevision, trashed: false })}
     </div>

@@ -108,7 +108,7 @@ export function useArchiveImport({
           kind: 'success',
           message: currentRoute
             ? '作品已导入，原作品保持完整。'
-            : '作品已导入，可从 Luming Studio 打开。',
+            : '作品已导入，可从 Luming Studio II 打开。',
         });
         releaseImport(request);
       })

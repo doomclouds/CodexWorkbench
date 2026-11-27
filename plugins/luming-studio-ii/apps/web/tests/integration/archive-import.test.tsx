@@ -263,7 +263,7 @@ describe('legacy archive import through Studio AppMock', () => {
 
         await click(app.host, '打开白板：' + destination.title);
         if (returned) {
-          await click(app.host, '返回 Luming Studio');
+          await click(app.host, '返回 Luming Studio II');
           expect(button(app.host, '新建作品').disabled).toBe(true);
         }
 
@@ -271,9 +271,9 @@ describe('legacy archive import through Studio AppMock', () => {
         await app.confirm(upload);
         const expected = returned ? [destination.boardId, undefined] : [destination.boardId];
         expect(app.opened).toEqual(expected);
-        expect(app.host.textContent).toContain('作品已导入，可从 Luming Studio 打开。');
+        expect(app.host.textContent).toContain('作品已导入，可从 Luming Studio II 打开。');
         if (!returned) {
-          await click(app.host, '返回 Luming Studio');
+          await click(app.host, '返回 Luming Studio II');
         }
 
         expect(button(app.host, '打开白板：' + imported.title)).toBeDefined();

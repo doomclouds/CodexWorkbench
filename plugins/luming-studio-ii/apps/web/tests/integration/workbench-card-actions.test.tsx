@@ -130,6 +130,15 @@ function workbench(loseFirstReply = false) {
       fixture.render(
         <WorkbenchSurface
           catalog={catalog}
+          creation={{
+            state: { kind: 'idle' },
+            createBusy: false,
+            blocked: false,
+            create: () => undefined,
+            duplicate: () => undefined,
+            retry: () => undefined,
+            query: () => undefined,
+          }}
           createCommandId={() => 'manage-' + ++commandNumber}
           onOpenBoard={() => undefined}
           onOpenTrash={() => navigation.push('trash')}

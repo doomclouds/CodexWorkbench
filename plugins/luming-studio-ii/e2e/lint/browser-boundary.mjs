@@ -4,9 +4,26 @@ import { fileURLToPath } from "node:url";
 const fixtureSpecifier = "../support/studio.mjs";
 const fixturePath = fileURLToPath(new URL(fixtureSpecifier, import.meta.url));
 const fixtureImports = new Set(["expect", "focused", "observe", "screenshot", "test"]);
-const recycleRetrySpec = fileURLToPath(new URL("../recycle-bin/retry.spec.mjs", import.meta.url));
-const scopedFixtureImports = new Map([["failNextRecycleBinRead", recycleRetrySpec]]);
+const scopedFixtureImports = new Map(
+  [
+    ["failNextRecycleBinRead", "recycle-bin/retry"],
+    ["failNextWorkbenchRead", "workbench/browse"],
+    ["interceptNextBoardCreation", "workbench/create"],
+    ["controlNextThumbnail", "workbench/display"],
+    ["readCardCover", "workbench/display"],
+    ["readControlPresentation", "workbench/display"],
+    ["chooseArchive", "workbench/import"],
+    ["failNextArchiveImport", "workbench/import"],
+    ["holdNextArchiveImport", "workbench/import"],
+    ["imageLoaded", "workbench/import"],
+    ["workbenchLinkProbe", "workbench/link"],
+  ].map(([helper, spec]) => [
+    helper,
+    fileURLToPath(new URL("../" + spec + ".spec.mjs", import.meta.url)),
+  ]),
+);
 const testModes = new Set(["only", "skip", "fixme", "fail", "failOnly"]);
+const pageFactories = new Set(["newPage", "openGuest"]);
 const browserFactories = new Set([
   "context",
   "filter",
@@ -53,6 +70,8 @@ const browserInternals = new Set([
   "routeWebSocket",
   "setContent",
   "setExtraHTTPHeaders",
+  "setFiles",
+  "setInputFiles",
   "storageState",
   "unroute",
   "unrouteAll",
@@ -82,14 +101,14 @@ const rawPageActions = new Set([
   "press",
   "selectOption",
   "setChecked",
-  "setInputFiles",
   "tap",
   "textContent",
   "type",
   "uncheck",
 ]);
 const eventMethods = new Set(["waitForEvent", "on", "once", "addListener"]);
-const networkEvents = new Set([
+const privateBrowserEvents = new Set([
+  "filechooser",
   "request",
   "requestfailed",
   "requestfinished",
@@ -139,7 +158,7 @@ function isPage(source, receiver, visited = new Set()) {
   const node = unwrapped(receiver);
   if (node?.type === "CallExpression") {
     const callee = node.callee;
-    return callee.type === "MemberExpression" && propertyName(callee) === "newPage";
+    return callee.type === "MemberExpression" && pageFactories.has(propertyName(callee));
   }
   if (node?.type !== "Identifier") {
     return false;
@@ -288,7 +307,7 @@ const userFlowBoundary = {
     messages: {
       fixture: "Import the test runner, assertions and evidence helper from ../support/studio.mjs.",
       browserInternal:
-        "Exercise the application through visible browser actions. Keep browser internals and network calls in the fixture.",
+        "Exercise the application through visible browser actions. Keep browser internals, network calls and local file selection in the fixture.",
       selector: "Locate controls with getByRole, getByText, getByLabel or getByTestId.",
       navigation: "Navigate using studio.url, a seeded board URL or browser history.",
       screenshot: "Attach screenshots with the screenshot helper from the Studio fixture.",
@@ -307,15 +326,22 @@ const userFlowBoundary = {
         context.report({ node, messageId: restricted });
         return;
       }
+
+      const call = node.parent;
+      const directCall = call.type === "CallExpression" && call.callee === node;
       if (name === "goto") {
-        const call = node.parent;
-        const directCall = call.type === "CallExpression" && call.callee === node;
         if (!directCall || !fixtureUrl(source, call.arguments[0])) {
           context.report({ node, messageId: "navigation" });
         }
         return;
       }
       if (name === "newPage" && !isCurrentContext(source, receiver)) {
+        context.report({ node, messageId: "browserInternal" });
+        return;
+      }
+
+      const aliasedListener = eventMethods.has(name) && !directCall;
+      if (aliasedListener && isBrowserReceiver(source, receiver)) {
         context.report({ node, messageId: "browserInternal" });
         return;
       }
@@ -330,13 +356,13 @@ const userFlowBoundary = {
       }
     }
 
-    function inspectNetworkListener(node) {
+    function inspectBrowserListener(node) {
       const { callee, arguments: args } = node;
       if (callee.type === "MemberExpression" && eventMethods.has(propertyName(callee))) {
         const event = args[0];
-        const networkEvent = event?.type === "Literal" && networkEvents.has(event.value);
+        const privateEvent = event?.type === "Literal" && privateBrowserEvents.has(event.value);
         const computedEvent = event?.type !== "Literal" && isBrowserReceiver(source, callee.object);
-        if (networkEvent || computedEvent) {
+        if (privateEvent || computedEvent) {
           context.report({ node, messageId: "browserInternal" });
         }
       }
@@ -362,7 +388,7 @@ const userFlowBoundary = {
       "ObjectPattern > Property"(node) {
         inspectOperation(node, node.parent.parent.init);
       },
-      CallExpression: inspectNetworkListener,
+      CallExpression: inspectBrowserListener,
     };
   },
 };

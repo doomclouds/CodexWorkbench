@@ -54,6 +54,9 @@ function transaction<T>(
 
 export function openSqliteDatabase(filename: string): SqliteDatabase {
   const connection = new DatabaseSync(filename, { enableForeignKeyConstraints: true });
+  connection.function('studio_unicode_lower', { deterministic: true, directOnly: true }, (value) =>
+    typeof value === 'string' ? value.toLocaleLowerCase() : null,
+  );
 
   return {
     read: (work) => transaction(connection, 'BEGIN', work),

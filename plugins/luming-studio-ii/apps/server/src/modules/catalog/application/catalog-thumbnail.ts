@@ -10,11 +10,11 @@ const previewCacheEntries = 24;
 
 function keep(
   cache: Map<string, CatalogThumbnail>,
-  boardId: string,
+  key: string,
   thumbnail: CatalogThumbnail,
 ): void {
-  cache.delete(boardId);
-  cache.set(boardId, thumbnail);
+  cache.delete(key);
+  cache.set(key, thumbnail);
   if (cache.size > previewCacheEntries) {
     const oldest = cache.keys().next().value;
     if (oldest !== undefined) {
@@ -27,22 +27,23 @@ export function createCatalogThumbnailReader(repository: CatalogRepository) {
   const cache = new Map<string, CatalogThumbnail>();
 
   return (actorId: string, request: CatalogThumbnailRequest): CatalogThumbnailResult => {
-    const { boardId } = request;
-    const result = repository.readThumbnail({ ...request, actorId }, cache.get(boardId));
+    const { boardId, trashed } = request;
+    const key = JSON.stringify([boardId, trashed]);
+    const result = repository.readThumbnail({ ...request, actorId }, cache.get(key));
     if (result.kind !== 'scene') {
       if (result.kind === 'thumbnail') {
-        keep(cache, boardId, result.thumbnail);
+        keep(cache, key, result.thumbnail);
       }
 
       return result;
     }
 
-    const thumbnail = renderCatalogThumbnail(result.scene);
+    const thumbnail = renderCatalogThumbnail(result.scene, trashed);
     if (!thumbnail) {
       return { kind: 'unavailable' };
     }
 
-    keep(cache, boardId, thumbnail);
+    keep(cache, key, thumbnail);
 
     return { kind: 'thumbnail', thumbnail };
   };

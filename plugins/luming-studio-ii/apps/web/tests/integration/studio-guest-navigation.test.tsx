@@ -313,7 +313,7 @@ test.each([
         await act(async () => guestButton(guest.host, '打开白板').click());
         await afterCameraFrame();
         expect(readCamera(guest.host)).toBe(ownerCamera);
-        expect(guest.host.querySelector('[aria-label="返回 Luming Studio"]')).toBeNull();
+        expect(guest.host.querySelector('[aria-label="返回 Luming Studio II"]')).toBeNull();
 
         await resetCameraZoom(guest.host);
         const manualCamera = readCamera(guest.host);
@@ -414,7 +414,7 @@ test('joins an explicit invitation, strips the token and resumes only the guest 
     expect(app.guestBoard.sceneReads).toEqual([sampleBoardId]);
     expect(app.host.querySelector('[data-canvas-root]')).not.toBeNull();
     expect(app.host.querySelector('.studio-app-page[data-guest-invitation]')).toBeNull();
-    expect(app.host.querySelector('[aria-label="返回 Luming Studio"]')).toBeNull();
+    expect(app.host.querySelector('[aria-label="返回 Luming Studio II"]')).toBeNull();
     expect(app.host.querySelector('[aria-label="白板名称"]')).toHaveProperty('readOnly', true);
     expect(app.host.querySelector('[aria-label="备注"]')).toHaveProperty('disabled', false);
 

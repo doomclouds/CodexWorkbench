@@ -106,7 +106,7 @@ test.describe("回收站界面", () => {
     await expect(button(page, "打开白板：活动白板")).toBeEnabled();
     await page.goForward();
     await expect(row(page, alpha)).toBeVisible();
-    await button(page, "返回 Luming Studio").click();
+    await button(page, studio.workbenchBackLabel).click();
     await expect(button(page, "打开白板：活动白板")).toBeEnabled();
   });
 
@@ -259,12 +259,13 @@ test.describe("回收站双版本一致性", () => {
       .allTextContents();
     await screenshot(page, testInfo, "recycle-navigation-scope");
 
-    await button(page, "返回 Luming Studio").click();
+    await button(page, studio.workbenchBackLabel).click();
     await expect(button(page, "打开白板：Alpha 已固定的活动板")).toBeEnabled();
     await expect(recycleRegion(page)).toHaveCount(0);
+    const heading = await page.getByRole("heading", { level: 1 }).textContent();
     const navigation = {
       workbench: {
-        heading: await page.getByRole("heading", { level: 1 }).textContent(),
+        scope: heading === studio.workbenchTitle ? "recent" : heading,
         ...(await searchState(workbenchSearch)),
         unpinnedVisible: await button(page, "打开白板：Beta 未固定的活动板").isVisible(),
       },
@@ -273,7 +274,7 @@ test.describe("回收站双版本一致性", () => {
     await observe(testInfo, "navigation-scope", navigation);
 
     expect(navigation).toEqual({
-      workbench: { heading: "Luming Studio", expanded: true, query: "", unpinnedVisible: true },
+      workbench: { scope: "recent", expanded: true, query: "", unpinnedVisible: true },
       trash: { expanded: true, query: "Alpha", visibleTitles: [alpha] },
     });
   });

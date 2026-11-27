@@ -7,7 +7,7 @@
   "scripts": {
     "build:runtime": "pnpm --filter @codexworkbench/luming-studio-ii-server check && pnpm --filter @codexworkbench/luming-studio-ii-web check && node ../../tooling/build-luming-studio-ii.mjs",
     "check:e2e": "eslint --config e2e/eslint.config.mjs --max-warnings 0 e2e && oxfmt --check e2e && node --test \"e2e/lint/*.test.mjs\" \"e2e/support/*.test.mjs\"",
-    "test:e2e": "pnpm check:e2e && pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && playwright test --config e2e/playwright.config.mjs"
+    "test:e2e": "pnpm check:e2e && pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && node e2e/run.mjs"
   },
   "license": "MIT",
   "engines": {

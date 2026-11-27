@@ -26,7 +26,6 @@ import {
 import { ManagementStatus, RenameBoardDialog } from './WorkbenchManagement.js';
 import { WorkbenchToolbar, type WorkbenchSearchExpansion } from './WorkbenchToolbar.js';
 import type { WorkbenchPreferences } from './preferences.js';
-import { useBoardCreation } from './useBoardCreation.js';
 import { useBoardManagement } from './useBoardManagement.js';
 import { useCopyBoardLink, type BoardLinkNotice, type CopyBoardLink } from './useCopyBoardLink.js';
 import './workbench.css';
@@ -42,6 +41,7 @@ export interface WorkbenchSurfaceProps {
   readonly directory?: CatalogDirectory;
   readonly createCommandId: () => string;
   readonly onOpenBoard: (boardId: string) => void;
+  readonly creation: BoardCreation;
   readonly preferences: WorkbenchPreferences;
   readonly searchExpansion?: WorkbenchSearchExpansion;
   readonly archiveImport?: WorkbenchArchiveImport;
@@ -50,10 +50,26 @@ export interface WorkbenchSurfaceProps {
   readonly copyBoardLink?: CopyBoardLink;
   readonly onOpenSharing?: (boardId: string) => void;
   readonly renderThumbnail?: RenderWorkbenchThumbnail;
-  readonly readRouteGeneration?: () => number;
 }
 
-type BoardCreation = ReturnType<typeof useBoardCreation>;
+type CreationAction = 'create' | 'duplicate';
+
+interface BoardCreation {
+  readonly state:
+    | { readonly kind: 'idle' }
+    | { readonly kind: 'creating' | 'checking'; readonly action: CreationAction }
+    | {
+        readonly kind: 'rejected' | 'unknown';
+        readonly action: CreationAction;
+        readonly detail: string;
+      };
+  readonly createBusy: boolean;
+  readonly blocked: boolean;
+  readonly create: () => void;
+  readonly duplicate: (sourceBoardId: string) => void;
+  readonly retry: () => void;
+  readonly query: () => void;
+}
 
 interface CatalogResultsProps {
   readonly snapshot: CatalogDirectorySnapshot;
@@ -306,15 +322,15 @@ function WorkbenchTitle({
         <button
           type="button"
           className="studio-workbench-icon-button"
-          aria-label="返回 Luming Studio"
-          title="返回 Luming Studio"
+          aria-label="返回 Luming Studio II"
+          title="返回 Luming Studio II"
           disabled={busy}
           onClick={onBack}
         >
           <ArrowLeft size={21} />
         </button>
       )}
-      <h1>{pinnedOnly ? '已固定' : 'Luming Studio'}</h1>
+      <h1>{pinnedOnly ? '已固定' : 'Luming Studio II'}</h1>
     </div>
   );
 }
@@ -324,6 +340,7 @@ export function WorkbenchSurface({
   directory: providedDirectory,
   createCommandId,
   onOpenBoard,
+  creation,
   preferences,
   searchExpansion,
   archiveImport,
@@ -332,20 +349,12 @@ export function WorkbenchSurface({
   copyBoardLink,
   onOpenSharing,
   renderThumbnail,
-  readRouteGeneration,
 }: WorkbenchSurfaceProps) {
   const directory = useMemo(
     () => providedDirectory ?? createCatalogDirectory(catalog),
     [catalog, providedDirectory],
   );
   const snapshot = useSyncExternalStore(directory.subscribe, directory.getSnapshot);
-  const creation = useBoardCreation({
-    service: catalog,
-    createCommandId,
-    onOpenBoard,
-    readRouteGeneration,
-    onDuplicateConfirmed: directory.reload,
-  });
   const archiveInput = useRef<HTMLInputElement>(null);
   const filterButton = useRef<HTMLButtonElement>(null);
   const duplicateTrigger = useRef<HTMLButtonElement | undefined>(undefined);
@@ -457,7 +466,7 @@ export function WorkbenchSurface({
       <CreationStatus creation={creation} />
       {!rename && <ManagementStatus management={controls} />}
       <LinkCopyStatus notice={linkCopy.notice} dismiss={linkCopy.dismiss} />
-      <main className="studio-workbench-main" aria-label="Luming Studio">
+      <main className="studio-workbench-main" aria-label="Luming Studio II">
         <header className="studio-workbench-header">
           <WorkbenchTitle
             pinnedOnly={snapshot.pinnedOnly}

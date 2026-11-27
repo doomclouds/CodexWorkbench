@@ -324,7 +324,8 @@ function allowedRoute({ pathname }, method, legacy) {
 
     return (
       method === "POST" &&
-      (legacyTools.test(pathname) || ["/api/presence", "/api/room"].includes(pathname))
+      (legacyTools.test(pathname) ||
+        ["/api/presence", "/api/room", "/api/import"].includes(pathname))
     );
   }
   if (method === "GET" || method === "HEAD") {

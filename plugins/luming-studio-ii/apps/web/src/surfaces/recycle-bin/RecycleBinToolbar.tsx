@@ -93,8 +93,8 @@ export function RecycleBinToolbar({
         <button
           type="button"
           className="studio-recycle-icon"
-          aria-label="返回 Luming Studio"
-          title="返回 Luming Studio"
+          aria-label="返回 Luming Studio II"
+          title="返回 Luming Studio II"
           disabled={busy}
           onClick={onBack}
         >

@@ -27,7 +27,7 @@ export interface CatalogDirectory {
   readonly reload: () => void;
 }
 
-const pageSize = 30;
+const pageSize = 60;
 const searchDelayMs = 180;
 
 function loading(

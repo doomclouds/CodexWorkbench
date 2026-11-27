@@ -230,7 +230,7 @@ test('opens the share settings for a stopped viewer link without turning it on',
 
     await act(async () => button(app.host, '关闭分享').click());
     expect(app.host.querySelector('[role="dialog"][aria-label="分享"]')).toBeNull();
-    await act(async () => button(app.host, '返回 Luming Studio').click());
+    await act(async () => button(app.host, '返回 Luming Studio II').click());
     await act(async () => button(app.host, '打开白板：发布白板').click());
     expect(app.host.querySelector('[role="dialog"][aria-label="分享"]')).toBeNull();
   } finally {

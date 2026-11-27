@@ -133,7 +133,7 @@ test('shows the original title bar actions and places export under the sharing e
     const controls = [...header.querySelectorAll('button')].map((item) =>
       item.getAttribute('aria-label'),
     );
-    expect(controls).toEqual(['返回 Luming Studio', '版本历史', '分享', '备注', '备注列表']);
+    expect(controls).toEqual(['返回 Luming Studio II', '版本历史', '分享', '备注', '备注列表']);
 
     const history = button(header, '版本历史');
     await act(async () => history.click());
@@ -156,7 +156,7 @@ test('shows the original title bar actions and places export under the sharing e
     await act(async () => annotate.click());
     expect(annotate.getAttribute('aria-pressed')).toBe('true');
 
-    await act(async () => button(header, '返回 Luming Studio').click());
+    await act(async () => button(header, '返回 Luming Studio II').click());
     expect(backCount()).toBe(1);
   } finally {
     fixture.dispose();
@@ -239,7 +239,7 @@ test('leaves history and the discussion list accessible without write access', a
       },
     });
     expect(nameField(header).readOnly).toBe(true);
-    expect(header.querySelector('button[aria-label="返回 Luming Studio"]')).toBeNull();
+    expect(header.querySelector('button[aria-label="返回 Luming Studio II"]')).toBeNull();
     expect(header.querySelector('.whiteboard-chrome__guest')).not.toBeNull();
     expect(button(header, '备注').disabled).toBe(true);
     expect(button(header, '备注列表').disabled).toBe(false);

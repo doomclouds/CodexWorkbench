@@ -316,7 +316,7 @@ describe('recycle bin through the Studio app', () => {
         expect(document.activeElement).toBe(button(app.host, '清空回收站'));
         await click(app.host, '恢复作品：可以恢复的作品');
         expect(app.host.textContent).toContain('回收站为空');
-        await click(app.host, '返回 Luming Studio');
+        await click(app.host, '返回 Luming Studio II');
         expect(app.locations).toEqual([{ kind: 'workbench' }]);
         expect(app.host.textContent).toContain('可以恢复的作品');
       } finally {

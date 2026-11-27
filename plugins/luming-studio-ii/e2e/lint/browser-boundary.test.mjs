@@ -87,6 +87,85 @@ test("allows the one-shot read interruption in the dedicated Recycle Bin case", 
   assert.deepEqual(await messages(text, "recycle-bin/retry.spec.mjs"), []);
 });
 
+const workbenchFixtures = [
+  ["browse", ["failNextWorkbenchRead"]],
+  ["create", ["interceptNextBoardCreation"]],
+  ["display", ["controlNextThumbnail", "readCardCover", "readControlPresentation"]],
+  ["import", ["chooseArchive", "failNextArchiveImport", "holdNextArchiveImport", "imageLoaded"]],
+  ["link", ["workbenchLinkProbe"]],
+];
+
+function importFixture(names, source = "../support/studio.mjs") {
+  return "import { " + names.join(", ") + " } from '" + source + "';";
+}
+
+for (const [name, helpers] of workbenchFixtures) {
+  const file = "workbench/" + name + ".spec.mjs";
+  test("allows the dedicated workbench fixture helpers in " + file, async () => {
+    assert.deepEqual(await messages(importFixture(helpers), file), []);
+  });
+
+  for (const helper of helpers) {
+    test("keeps " + helper + " inside its own scenario and fixture entry", async () => {
+      const impostor = importFixture([helper], "../support/runtime.mjs");
+      const results = await Promise.all([
+        messages(importFixture([helper]), spec),
+        messages(importFixture([helper]), "workbench/other.spec.mjs"),
+        messages(impostor, file),
+      ]);
+
+      for (const reports of results) {
+        assert.ok(
+          reports.some(({ ruleId, messageId }) => ruleId === boundary && messageId === "fixture"),
+          JSON.stringify(reports),
+        );
+      }
+    });
+  }
+}
+
+test("allows semantic controls on the isolated guest page", async () => {
+  const text =
+    importFixture(["expect", "test", "workbenchLinkProbe"]) +
+    "\n\n" +
+    "test('uses the guest page', async ({ page, browser, studio }) => {\n" +
+    "  const probe = await workbenchLinkProbe({ page, browser, studio });\n" +
+    "  const guest = await probe.openGuest();\n" +
+    "  await expect(guest.getByRole('heading', { name: 'Whiteboard' })).toBeVisible();\n" +
+    "});\n";
+  assert.deepEqual(await messages(text, "workbench/link.spec.mjs"), []);
+});
+
+test("applies the ordinary browser boundary to a guest page", async () => {
+  const text =
+    importFixture(["test", "workbenchLinkProbe"]) +
+    "\n\n" +
+    "test('uses the guest page', async ({ page, browser, studio }) => {\n" +
+    "  const probe = await workbenchLinkProbe({ page, browser, studio });\n" +
+    "  const guest = await probe.openGuest();\n" +
+    "  await guest.click('.board');\n" +
+    "  await guest.goto('https://example.com/');\n" +
+    "});\n";
+  assert.deepEqual(
+    (await messages(text, "workbench/link.spec.mjs")).map(({ messageId }) => messageId),
+    ["selector", "navigation"],
+  );
+});
+
+test("archive scenarios still reject direct use of the native file chooser", async () => {
+  const text = scenario(
+    "  const chooser = await page.waitForEvent('filechooser');\n" +
+      "  await chooser.setFiles('/outside/test.zip');\n" +
+      "  await page.getByLabel('Import').setInputFiles('/outside/test.zip');\n" +
+      "  const waitFor = page.waitForEvent.bind(page);\n" +
+      "  await waitFor('filechooser');",
+  );
+  assert.deepEqual(
+    (await messages(text, "workbench/import.spec.mjs")).map(({ messageId }) => messageId),
+    ["browserInternal", "browserInternal", "browserInternal", "browserInternal"],
+  );
+});
+
 const disallowedImports = [
   "import { test } from '@playwright/test';",
   "import fs from 'node:fs';",
