@@ -149,6 +149,45 @@ function workbench(loseFirstReply = false) {
 }
 
 describe('Workbench management through the public Surface', () => {
+  it('keeps the filter trigger focused on keyboard open and enters the menu with Tab', async () => {
+    const fixture = workbench();
+    try {
+      await fixture.mount();
+      const { host } = fixture;
+      const filter = findButton(host, '筛选作品');
+      await act(async () => filter.focus());
+
+      async function press(target: HTMLElement, key: string) {
+        await act(async () => {
+          target.dispatchEvent(
+            new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+          );
+        });
+      }
+
+      await press(filter, 'ArrowDown');
+      const recent = findButton(host, '最近作品');
+      const trash = findButton(host, '回收站');
+      expect(document.activeElement).toBe(filter);
+      await press(filter, 'End');
+      expect(document.activeElement).toBe(filter);
+      await press(filter, 'Tab');
+      expect(document.activeElement).toBe(recent);
+      await press(recent, 'End');
+      expect(document.activeElement).toBe(trash);
+      await press(trash, 'Escape');
+      expect(host.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(filter);
+
+      await press(filter, 'ArrowDown');
+      await press(filter, 'Escape');
+      expect(host.querySelector('[role="menu"]')).toBeNull();
+      expect(document.activeElement).toBe(filter);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
   it('opens the recycle bin from the filter menu and returns focus to its trigger', async () => {
     const fixture = workbench();
     try {

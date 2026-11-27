@@ -431,7 +431,13 @@ function renderOverview(scene: CatalogThumbnailScene, projection: Projection, de
 
 export function renderCatalogThumbnail(scene: CatalogThumbnailScene): CatalogThumbnail | undefined {
   if (scene.objects.length === 0) {
-    return undefined;
+    const content = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">' +
+        '<style>rect{fill:#fafafa}@media(prefers-color-scheme:dark){rect{fill:#848586}}</style>' +
+        '<rect width="100%" height="100%" fill="#f5f5f5"/></svg>',
+    );
+
+    return { revision: scene.revision, mimeType: 'image/svg+xml', content };
   }
 
   const projection = projectScene(scene);

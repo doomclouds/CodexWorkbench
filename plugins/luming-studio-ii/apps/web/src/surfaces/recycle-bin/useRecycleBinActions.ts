@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CatalogManagementService } from '../../data/catalog/index.js';
+import type { CatalogManagementService, TrashedBoardSummary } from '../../data/catalog/index.js';
 import {
   collectPurgeScope,
   describePurgeRejection,
@@ -19,22 +19,39 @@ interface RecycleNotice {
 }
 
 interface RecycleActionsOptions {
+  readonly boards: readonly TrashedBoardSummary[];
   readonly management: CatalogManagementService;
   readonly createCommandId: () => string;
   readonly refresh: (removedIds?: readonly string[]) => void;
 }
 
+function selectionWithin(
+  boards: readonly TrashedBoardSummary[],
+  selected: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const visible = boards.filter(({ board }) => board.canManage && selected.has(board.boardId));
+
+  return new Set(visible.map(({ board }) => board.boardId));
+}
+
 export function useRecycleBinActions({
+  boards,
   management,
   createCommandId,
   refresh,
 }: RecycleActionsOptions) {
-  const [selected, setSelected] = useState<ReadonlyMap<string, RecycleTarget>>(() => new Map());
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [previousBoards, setPreviousBoards] = useState(boards);
   const [confirmation, setConfirmation] = useState<PurgeScope>();
   const [failures, setFailures] = useState<readonly PurgeFailure[]>([]);
   const [notice, setNotice] = useState<RecycleNotice>();
   const [activity, setActivity] = useState<RecycleActivity>();
   const pending = useRef<AbortController>(undefined);
+
+  if (boards !== previousBoards) {
+    setPreviousBoards(boards);
+    setSelected(selectionWithin(boards, selected));
+  }
 
   useEffect(
     () => () => {
@@ -71,12 +88,12 @@ export function useRecycleBinActions({
 
   function toggleSelection(targets: readonly RecycleTarget[], checked: boolean) {
     setSelected((previous) => {
-      const next = new Map(previous);
-      for (const target of targets) {
+      const next = new Set(previous);
+      for (const { boardId } of targets) {
         if (checked) {
-          next.set(target.boardId, target);
+          next.add(boardId);
         } else {
-          next.delete(target.boardId);
+          next.delete(boardId);
         }
       }
 
@@ -85,7 +102,7 @@ export function useRecycleBinActions({
   }
 
   function clearSelection() {
-    setSelected(new Map());
+    setSelected(new Set());
   }
 
   function resetQueryState() {

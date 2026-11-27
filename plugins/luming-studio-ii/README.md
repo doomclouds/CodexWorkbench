@@ -179,6 +179,23 @@ Web 根路径进入工作台。搜索、排序和分页从 `BoardCatalogService`
 
 ### 作品管理与回收站
 
-作品所有者可从工作台卡片或列表菜单重命名、固定和移入回收站。通过「筛选作品 → 回收站」进入 `?view=trash`，可以搜索、恢复，或者确认后清理所选作品。恢复沿用原白板 ID、内容和固定状态。
+作品所有者可从工作台卡片或列表菜单重命名、固定和移入回收站。通过「筛选作品 → 回收站」进入 `?view=trash` 时沿用当前搜索。点左上返回可回到最近作品并清空查询。回收站可搜索、恢复，也可确认后清理可见的所选作品。列表刷新会清除已不可见的选择。
+
+作品移入回收站后，房主可以用原白板地址只读查看。移入和恢复分别记录一个版次。恢复沿用原白板 ID、内容、素材和固定状态。
 
 `BoardCatalogService` 提供 `ListTrashedBoards`、`ManageBoard` 和 `PurgeBoards`。写入校验目录条目版本，通过原命令 ID 查询回执。清空先收齐确认时的作品和版本，每批最多提交 100 项。服务端逐项检查所有者、回收状态和版本，并在 SQLite 事务中保存批次结果。
+
+## 两代产品 E2E
+
+`e2e/` 按用户流程组织。每组在 `initial` 和 `ii` 两个 Playwright 项目中分别启动仓库内的初代与 Studio II 运行包。每个用例有单独的浏览器上下文、本机端口和临时数据目录。回收站组从工作台入口开始，覆盖浏览、选择、恢复、永久删除、清空和重启验证。
+
+`e2e/support/` 管理运行时、测试数据和截图。用例通过共享夹具创建合成白板，再使用可访问名称操作页面。两代通过同名观测记录实际表现，报告根据观测和测试结果判断一致性。
+
+`check:e2e` 纳入仓库 `pnpm check`。用例直接访问数据库或业务 API、改写浏览器内部状态、硬编码导航目标或跳过用例都会触发错误。共享夹具可在重试用例中中断一次目录读取，后续请求和页面反馈由真实运行包处理。
+
+```sh
+pnpm --filter @codexworkbench/luming-studio-ii exec playwright install chromium --only-shell
+pnpm --filter @codexworkbench/luming-studio-ii test:e2e recycle-bin
+```
+
+截图、失败 trace 和 Playwright JSON 报告写入 `artifacts/luming-studio-ii/v1.0.0/e2e/run/`。回收站离线对照报告位于同一版本的 `e2e/recycle-bin/`。

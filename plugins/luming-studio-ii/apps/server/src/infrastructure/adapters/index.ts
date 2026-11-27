@@ -11,7 +11,7 @@ import type {
   StoredReceipt,
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../platform/index.js';
-import { readBoardAccess } from './authorization/index.js';
+import { isTrashedBoardOwner, readBoardAccess } from './authorization/index.js';
 import { readBackupDetails, readBackupMetadata } from './board-backup-metadata.js';
 import {
   advanceBoardRevision,
@@ -21,7 +21,7 @@ import {
 } from './board-edit-storage.js';
 import { readEditReceipt, saveEditReceipt } from './board-edit-receipts.js';
 import {
-  boardHistorySchema,
+  initializeBoardHistory,
   publishBoardVersion,
   readBoardVersion,
   readBoardVersions,
@@ -46,6 +46,8 @@ import {
   createSuggestionMutations,
   createSuggestionQueries,
 } from './board-suggestions.js';
+
+export { recordBoardLifecycleVersion } from './board-history-storage.js';
 
 const sceneFields = `
   SELECT o.object_id, o.kind, o.label, o.x, o.y, o.width, o.height, o.rotation,
@@ -356,6 +358,7 @@ function createReader(connection: SqliteConnection): BoardEditReader {
 
       return access && { canEdit: access.canEdit };
     },
+    isTrashedOwner: (boardId, actorId) => isTrashedBoardOwner(connection, boardId, actorId),
     getBoard: (boardId) => readBoard(connection, boardId),
     getBackupMetadata: (boardId, actorId) => readBackupMetadata(connection, boardId, actorId),
     getBackupDetails: (boardId) => readBackupDetails(connection, boardId),
@@ -464,7 +467,7 @@ export function createWhiteboardRepository(database: SqliteDatabase): BoardEditR
   database.write((connection) => {
     connection.exec(whiteboardSchema);
     connection.exec(boardEditSchema);
-    connection.exec(boardHistorySchema);
+    initializeBoardHistory(connection);
   });
 
   return {

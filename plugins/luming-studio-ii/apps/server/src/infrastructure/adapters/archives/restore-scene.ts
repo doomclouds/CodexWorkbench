@@ -95,6 +95,18 @@ function versionKind(value: unknown): VersionKind {
   }
 }
 
+function archivedVersionKind(kind: unknown, lifecycleKind: unknown): VersionKind {
+  const legacyKind = versionKind(kind);
+  if (lifecycleKind === undefined) {
+    return legacyKind;
+  }
+  if (legacyKind === 'content' && (lifecycleKind === 'trash' || lifecycleKind === 'restoreTrash')) {
+    return lifecycleKind;
+  }
+
+  throw new ArchiveObjectError('Invalid archived lifecycle version kind.');
+}
+
 function projection(object: ArchiveSceneObject, layerIndex: number): ArchiveHistoryObject {
   return {
     ...object,
@@ -322,7 +334,7 @@ function parseVersion(entry: ArchiveData, artifact: ArchiveData, native: boolean
     data ? data.sourceRevision : source?.[1],
     'source revision',
   );
-  const kind = versionKind(data ? data.kind : entry.summary);
+  const kind = archivedVersionKind(data ? data.kind : entry.summary, data?.lifecycleKind);
   const missingActorOrDate = actorId === undefined || savedAtMillis === undefined;
   const unknownCommit = kind !== 'baseline' && missingActorOrDate;
   const invalidSource = sourceRevision !== undefined && sourceRevision >= revision;

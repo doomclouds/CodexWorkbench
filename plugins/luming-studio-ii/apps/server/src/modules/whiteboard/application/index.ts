@@ -10,7 +10,12 @@ import type {
   PayloadResult,
 } from '../domain/index.js';
 import type { WhiteboardRepository } from '../ports/index.js';
-import { payloadResult, requireAccess, WhiteboardAccessError } from './board-read.js';
+import {
+  payloadResult,
+  requireAccess,
+  requireBoardContentAccess,
+  WhiteboardAccessError,
+} from './board-read.js';
 import { executeBoardExport } from './export-board.js';
 import { renderExportPng, type SvgPngRenderer } from './export-png.js';
 import { executeMove } from './move-objects.js';
@@ -85,11 +90,12 @@ export {
 export { WhiteboardAccessError } from './board-read.js';
 
 export interface WhiteboardApplication {
-  getBoardScene(actor: Actor, boardId: string): BoardScene;
+  getBoardScene(actor: Actor, boardId: string, allowTrashedOwner?: boolean): BoardScene;
   getObjectPayloads(
     actor: Actor,
     boardId: string,
     objectIds: readonly string[],
+    allowTrashedOwner?: boolean,
   ): readonly PayloadResult[];
   moveObjects(actor: Actor, command: MoveCommand): CommandReceipt;
   getCommandReceipt(actor: Actor, boardId: string, commandId: string): CommandReceipt | undefined;
@@ -122,9 +128,9 @@ export function createWhiteboardApplication(
   }
 
   return {
-    getBoardScene(actor, boardId) {
+    getBoardScene(actor, boardId, allowTrashedOwner = false) {
       return repository.read((reader) => {
-        const access = requireAccess(reader, actor, boardId);
+        const access = requireBoardContentAccess(reader, actor, boardId, allowTrashedOwner);
         const board = reader.getBoard(boardId);
         if (!board) {
           throw new WhiteboardAccessError();
@@ -133,9 +139,9 @@ export function createWhiteboardApplication(
         return { board, access, objects: reader.listObjects(boardId) };
       });
     },
-    getObjectPayloads(actor, boardId, objectIds) {
+    getObjectPayloads(actor, boardId, objectIds, allowTrashedOwner = false) {
       return repository.read((reader) => {
-        requireAccess(reader, actor, boardId);
+        requireBoardContentAccess(reader, actor, boardId, allowTrashedOwner);
         if (!objectIds.length) {
           return [];
         }

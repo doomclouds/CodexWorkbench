@@ -145,6 +145,7 @@ export function StudioApp({
   const { location, guestEntry } = route;
   const [layout, setLayout] = useState(preferences.layout);
   const [resolvedTheme, setTheme] = useState(preferences.resolvedTheme);
+  const [searchExpanded, setSearchExpanded] = useState(false);
   const subscribeTheme = preferences.subscribeTheme;
   const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
   const routeGeneration = useRef(0);
@@ -226,6 +227,11 @@ export function StudioApp({
     navigate({ kind: 'recycle-bin' });
   }
 
+  function handleReturnFromRecycleBin() {
+    directory.setPinnedOnly(false, true);
+    openWorkbench();
+  }
+
   function changeLayout(next: StudioLayout) {
     preferences.rememberLayout(next);
     setLayout(next);
@@ -237,6 +243,7 @@ export function StudioApp({
   }
 
   const theme = { resolvedTheme, onThemeChange: changeTheme };
+  const searchExpansion = { expanded: searchExpanded, onExpandedChange: setSearchExpanded };
 
   function renderPage() {
     if (location.kind === 'whiteboard') {
@@ -287,8 +294,11 @@ export function StudioApp({
           management={catalogManagement}
           renderThumbnail={renderThumbnail}
           createCommandId={createCommandId}
-          onBack={openWorkbench}
+          onBack={handleReturnFromRecycleBin}
           preferences={pagePreferences}
+          initialQuery={directory.getSnapshot().query}
+          onQueryChange={directory.setQuery}
+          searchExpansion={searchExpansion}
         />
       );
     }
@@ -307,6 +317,7 @@ export function StudioApp({
         onOpenTrash={catalogManagement ? openRecycleBin : undefined}
         archiveImport={importFlow.workbench}
         preferences={pagePreferences}
+        searchExpansion={searchExpansion}
       />
     );
   }

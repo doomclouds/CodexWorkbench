@@ -117,3 +117,20 @@ export function readBoardAccess(
     };
   }
 }
+
+export function isTrashedBoardOwner(
+  connection: SqliteConnection,
+  boardId: string,
+  actorId: string,
+): boolean {
+  const row = connection
+    .prepare(`
+    SELECT 1
+    FROM board_lifecycle AS l
+    JOIN board_members AS m ON m.board_id = l.board_id AND m.actor_id = l.owner_actor_id
+    WHERE l.board_id = ? AND l.owner_actor_id = ? AND l.trashed_at_millis IS NOT NULL
+  `)
+    .get(boardId, actorId);
+
+  return row !== undefined;
+}

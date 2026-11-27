@@ -50,7 +50,7 @@ const stranger = 'sharing-stranger';
 const type = 'application/protobuf';
 const timeout = 5_000;
 const { createBoard, listBoards, manageBoard } = BoardCatalogService.method;
-const { getBoardScene } = WhiteboardService.method;
+const { getBoardScene, getObjectPayloads } = WhiteboardService.method;
 const { applyFeedback, listThreads } = FeedbackService.method;
 const { attachBoardImage } = BoardEditService.method;
 const share = BoardSharingService.method;
@@ -696,4 +696,58 @@ test('restores only previously published scopes on live boards after database re
   expect(receipt?.outcome.case).toBe('changed');
   await server.restart();
   expect(server.activeSharingScopes()).toEqual(['local']);
+});
+
+test('denies old guest invitations and Agent reads when the owner can preview a trashed board', async () => {
+  const boardId = await board('Trashed board guest boundaries');
+  expect((await addImage(boardId)).receipt?.outcome.case).toBe('applied');
+  await update(boardId, 'publish-trashed-preview', 0n, scopeOperation(SharingScope.LAN));
+  const link = (await view(boardId)).links.find(({ role }) => role === SharingRole.VIEWER);
+  assert.ok(link?.url);
+  const invitationToken = tokenFrom(link.url);
+  const { cookie } = await join(boardId, invitationToken, 'Former viewer');
+  expect((await guestScene(boardId, cookie)).status).toBe(200);
+  expect((await guestImage(boardId, cookie)).status).toBe(200);
+
+  const { boards } = await callWhiteboard(server.owner, owner, listBoards, { pageSize: 10 });
+  const entry = boards.find((item) => item.boardId === boardId);
+  assert.ok(entry?.entryVersion !== undefined);
+  const { receipt } = await callWhiteboard(server.owner, owner, manageBoard, {
+    boardId,
+    commandId: 'trash-shared-preview',
+    expectedEntryVersion: entry.entryVersion,
+    operation: { case: 'lifecycle', value: BoardLifecycleAction.TRASH },
+  });
+  expect(receipt?.outcome.case).toBe('changed');
+
+  const ownerScene = await callWhiteboard(server.owner, owner, getBoardScene, { boardId });
+  expect(ownerScene.scene?.access).toMatchObject({ canEdit: false, trashed: true });
+  expect((await guestScene(boardId, cookie)).status).toBe(403);
+  expect((await guestImage(boardId, cookie)).status).toBe(403);
+  const payloads = { boardId, objectIds: ['drawing'] };
+  expect((await sendGuest('lan', getObjectPayloads, payloads, { cookie })).status).toBe(403);
+  const invitation = await sendGuest('lan', share.inspectBoardInvitation, {
+    boardId,
+    invitationToken,
+  });
+  expect((await decodeGuest(invitation, share.inspectBoardInvitation.output)).rejection).toBe(
+    SharingRejectionReason.INVITATION_UNAVAILABLE,
+  );
+  const agent = agentPrincipalPrefix + owner;
+  expect(
+    (await sendWhiteboardRequest(server.owner, agent, getBoardScene, { boardId })).status,
+  ).toBe(403);
+  expect(
+    (await sendWhiteboardRequest(server.owner, agent, getObjectPayloads, payloads)).status,
+  ).toBe(403);
+
+  const missing = await board('Another empty board');
+  const asset = (id: string, actor: string) =>
+    fetch(new URL(`/studio-archive-assets/${id}/image-drawing`, server.owner), {
+      headers: { [actorHeader]: actor },
+      signal: AbortSignal.timeout(timeout),
+    });
+  expect((await asset(boardId, agent)).status).toBe(403);
+  expect((await asset(boardId, owner)).status).toBe(200);
+  expect((await asset(missing, owner)).status).toBe(404);
 });

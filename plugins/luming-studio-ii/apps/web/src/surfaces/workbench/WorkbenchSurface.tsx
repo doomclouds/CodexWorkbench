@@ -24,7 +24,7 @@ import {
   type WorkbenchBoardAction,
 } from './WorkbenchCards.js';
 import { ManagementStatus, RenameBoardDialog } from './WorkbenchManagement.js';
-import { WorkbenchToolbar } from './WorkbenchToolbar.js';
+import { WorkbenchToolbar, type WorkbenchSearchExpansion } from './WorkbenchToolbar.js';
 import type { WorkbenchPreferences } from './preferences.js';
 import { useBoardCreation } from './useBoardCreation.js';
 import { useBoardManagement } from './useBoardManagement.js';
@@ -43,6 +43,7 @@ export interface WorkbenchSurfaceProps {
   readonly createCommandId: () => string;
   readonly onOpenBoard: (boardId: string) => void;
   readonly preferences: WorkbenchPreferences;
+  readonly searchExpansion?: WorkbenchSearchExpansion;
   readonly archiveImport?: WorkbenchArchiveImport;
   readonly management?: CatalogManagementService;
   readonly onOpenTrash?: () => void;
@@ -324,6 +325,7 @@ export function WorkbenchSurface({
   createCommandId,
   onOpenBoard,
   preferences,
+  searchExpansion,
   archiveImport,
   management,
   onOpenTrash,
@@ -464,6 +466,7 @@ export function WorkbenchSurface({
           />
           <WorkbenchToolbar
             query={snapshot.query}
+            searchExpansion={searchExpansion}
             pinnedOnly={snapshot.pinnedOnly}
             preferences={preferences}
             createBusy={creation.createBusy}

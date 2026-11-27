@@ -2,6 +2,7 @@ import type {
   CatalogBoardSummary,
   CatalogCreatedReceipt,
   CatalogDuplicateFailure,
+  CatalogLifecycleChange,
   CatalogLookup,
   CatalogManagedBoard,
   CatalogOrder,
@@ -42,11 +43,7 @@ const catalogOrderings: Readonly<Record<CatalogOrder, CatalogOrdering>> = {
 };
 
 const trashOrderings: Readonly<Record<CatalogOrder, CatalogOrdering>> = {
-  recent: {
-    columns: '-trashed_at_millis, board_id',
-    parameters: '-?, ?',
-    values: ({ trashedAtMillis, boardId }) => [trashedAtMillis ?? null, boardId],
-  },
+  recent: catalogOrderings.recent,
   title: {
     columns: 'lower(title), board_id',
     parameters: 'lower(?), ?',
@@ -229,7 +226,21 @@ function getManagedBoard(
   };
 }
 
-function changeBoard(connection: SqliteConnection, change: CatalogManagedBoard): void {
+type RecordLifecycleVersion = (
+  connection: SqliteConnection,
+  change: CatalogLifecycleChange & {
+    readonly boardId: string;
+    readonly title: string;
+    readonly savedAtMillis: number;
+  },
+) => void;
+
+function changeBoard(
+  connection: SqliteConnection,
+  change: CatalogManagedBoard,
+  recordLifecycleVersion: RecordLifecycleVersion,
+  lifecycle?: CatalogLifecycleChange,
+): void {
   const { board, trashedAtMillis } = change;
   const { boardId, title, updatedAtMillis, entryVersion, pinned } = board;
   if (updatedAtMillis === undefined) {
@@ -237,6 +248,15 @@ function changeBoard(connection: SqliteConnection, change: CatalogManagedBoard):
   }
 
   connection.prepare('UPDATE boards SET title = ? WHERE board_id = ?').run(title, boardId);
+  if (lifecycle) {
+    recordLifecycleVersion(connection, {
+      ...lifecycle,
+      boardId,
+      title,
+      savedAtMillis: Number(updatedAtMillis),
+    });
+  }
+
   connection
     .prepare(`
       INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
@@ -313,7 +333,10 @@ function saveDuplicatedBoard(
   return undefined;
 }
 
-export function createCatalogRepository(database: SqliteDatabase): CatalogRepository {
+export function createCatalogRepository(
+  database: SqliteDatabase,
+  recordLifecycleVersion: RecordLifecycleVersion,
+): CatalogRepository {
   database.write((connection) => connection.exec(catalogSchema));
 
   return {
@@ -332,7 +355,8 @@ export function createCatalogRepository(database: SqliteDatabase): CatalogReposi
           duplicateBoard: (actorId, sourceBoardId, receipt) =>
             saveDuplicatedBoard(connection, actorId, sourceBoardId, receipt),
           getManagedBoard: (actorId, boardId) => getManagedBoard(connection, actorId, boardId),
-          changeBoard: (board) => changeBoard(connection, board),
+          changeBoard: (board, lifecycle) =>
+            changeBoard(connection, board, recordLifecycleVersion, lifecycle),
           deleteBoard: (boardId) => deleteBoard(connection, boardId),
           saveManagementReceipt: (actorId, signature, receipt) =>
             saveManagementReceipt(connection, actorId, signature, receipt),

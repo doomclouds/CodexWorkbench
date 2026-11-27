@@ -301,7 +301,12 @@
 }
 
 .studio-recycle-preview {
-  --catalog-thumbnail-background: var(--recycle-soft);
+  --catalog-thumbnail-background: color-mix(
+    in srgb,
+    var(--recycle-soft) 48%,
+    var(--recycle-surface)
+  );
+  --catalog-thumbnail-padding: 14px;
   position: relative;
   display: grid;
   place-content: center;
@@ -388,9 +393,12 @@
 
 .studio-recycle-card-copy p {
   margin-top: 2px;
+  overflow: hidden;
   color: var(--recycle-muted);
   font-size: 12px;
   line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .studio-recycle-cards[data-layout='list'] .studio-recycle-card-copy {
@@ -402,7 +410,6 @@
 
 .studio-recycle-cards[data-layout='list'] .studio-recycle-card-copy p {
   margin-top: 0;
-  white-space: nowrap;
 }
 
 .studio-recycle-card-actions {

@@ -147,12 +147,14 @@ export function readObjects(objects: readonly ObjectMetadata[]): readonly Whiteb
 export function readScene(source: BoardScene | undefined, boardId: string): WhiteboardScene {
   const scene = requireField(source, 'scene');
   matchIdentity(scene.boardId, boardId, 'board ID');
+  const access = requireField(scene.access, 'board access');
 
   return {
     boardId,
     title: scene.title,
     revision: requireField(scene.boardRevision, 'board revision'),
-    canEdit: requireField(scene.access, 'board access').canEdit,
+    canEdit: access.canEdit && !access.trashed,
+    ...(access.trashed ? { trashed: true } : {}),
     objects: readObjects(scene.objects),
   };
 }

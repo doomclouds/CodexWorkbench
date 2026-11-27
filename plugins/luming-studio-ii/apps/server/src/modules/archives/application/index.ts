@@ -37,12 +37,12 @@ export function createArchiveImportApplication(
     getReceipt(actorId: string, commandId: string) {
       return port.getReceipt(actorId, requireCommandId(commandId));
     },
-    getAsset(actorId: string, boardId: string, assetId: string) {
+    getAsset(actorId: string, boardId: string, assetId: string, allowTrashedOwner = false) {
       if (!isArchiveIdentifier(boardId) || !isArchiveIdentifier(assetId)) {
         throw new ArchiveRequestError('Invalid imported asset identifier.');
       }
 
-      return port.getAsset(actorId, boardId, assetId);
+      return port.getAsset(actorId, boardId, assetId, allowTrashedOwner);
     },
   };
 }

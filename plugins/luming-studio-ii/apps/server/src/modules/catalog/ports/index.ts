@@ -51,6 +51,11 @@ export type CatalogThumbnailRead =
 
 export type CatalogDuplicateFailure = 'stateChanged' | 'invalidCommand';
 
+export interface CatalogLifecycleChange {
+  readonly actorId: string;
+  readonly action: 'trash' | 'restore';
+}
+
 export interface CatalogWriter {
   getReceipt(actorId: string, commandId: string): StoredCatalogReceipt | undefined;
   saveBoard(actorId: string, receipt: CatalogCreatedReceipt): void;
@@ -60,7 +65,7 @@ export interface CatalogWriter {
     receipt: CatalogCreatedReceipt,
   ): CatalogDuplicateFailure | undefined;
   getManagedBoard(actorId: string, boardId: string): CatalogManagedBoard | undefined;
-  changeBoard(board: CatalogManagedBoard): void;
+  changeBoard(board: CatalogManagedBoard, lifecycle?: CatalogLifecycleChange): void;
   deleteBoard(boardId: string): void;
   saveManagementReceipt(
     actorId: string,

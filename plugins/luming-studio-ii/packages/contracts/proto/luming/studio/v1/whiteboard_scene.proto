@@ -12,6 +12,7 @@ message BoardScene {
 
 message BoardAccess {
   bool can_edit = 1;
+  bool trashed = 2;
 }
 
 message ObjectMetadata {

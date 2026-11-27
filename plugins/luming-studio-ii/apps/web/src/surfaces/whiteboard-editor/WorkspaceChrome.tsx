@@ -149,6 +149,7 @@ interface WorkspaceHeaderProps {
   readonly annotationActive: boolean;
   readonly unresolvedFeedback: boolean;
   readonly writeAccess: boolean;
+  readonly trashed?: boolean;
   readonly moving: boolean;
   readonly move: WorkspaceMove;
   readonly geometry: WorkspaceGeometry;
@@ -243,7 +244,7 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
     <div hidden={watching}>
       <BoardHeader
         title={title}
-        canManage={props.writeAccess && Boolean(onBack || titleEditor)}
+        canManage={(props.trashed || props.writeAccess) && Boolean(onBack || titleEditor)}
         onBack={onBack}
         titleEditor={historyPreview ? undefined : titleEditor}
         status={boardStatus(props)}

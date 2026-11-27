@@ -174,6 +174,37 @@ function roomApp(overrides: Partial<WhiteboardService> = {}, editService?: White
   };
 }
 
+test('opens a trashed owner preview without joining the active collaboration room', async () => {
+  const app = roomApp({
+    async getScene(boardId) {
+      return {
+        boardId,
+        title: '回收中的白板',
+        revision: 1n,
+        objects: [shape],
+        canEdit: false,
+        trashed: true,
+      };
+    },
+  });
+
+  try {
+    await app.open();
+    await act(async () => app.room.revoke());
+
+    const title = app.host.querySelector<HTMLInputElement>('[aria-label="白板名称"]');
+    expect(title?.value).toBe('回收中的白板');
+    expect(title?.readOnly).toBe(true);
+    expect(app.host.textContent).toContain('只读');
+    expect(app.host.textContent).not.toContain('白板访问已撤销');
+    expect(app.views).toEqual([]);
+    expect(app.accessLoss).toEqual([]);
+    expect(app.room.updates).toEqual([]);
+  } finally {
+    app.dispose();
+  }
+});
+
 async function click(label: string) {
   const button = [...document.querySelectorAll('button')].find(
     (control) => control.ariaLabel === label || control.textContent?.trim() === label,

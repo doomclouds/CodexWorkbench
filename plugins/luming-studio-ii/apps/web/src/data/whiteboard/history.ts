@@ -26,7 +26,14 @@ import { readPayloads } from './protocol/payload.js';
 import { readScene } from './protocol/scene.js';
 import { matchIdentity, requireField } from './protocol/values.js';
 
-type HistoryVersionKind = 'baseline' | 'geometry' | 'content' | 'image' | 'restore';
+type HistoryVersionKind =
+  | 'baseline'
+  | 'geometry'
+  | 'content'
+  | 'image'
+  | 'restore'
+  | 'trash'
+  | 'restoreTrash';
 
 export interface BoardHistoryVersion {
   readonly revision: bigint;
@@ -98,6 +105,8 @@ const versionKinds = new Map<BoardVersionKind, HistoryVersionKind>([
   [BoardVersionKind.CONTENT, 'content'],
   [BoardVersionKind.IMAGE, 'image'],
   [BoardVersionKind.RESTORE, 'restore'],
+  [BoardVersionKind.TRASH, 'trash'],
+  [BoardVersionKind.RESTORE_TRASH, 'restoreTrash'],
 ]);
 const pageSize = 30;
 const maxDateMillis = 8_640_000_000_000_000n;

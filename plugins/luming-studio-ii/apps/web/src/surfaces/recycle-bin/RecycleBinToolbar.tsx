@@ -8,8 +8,14 @@ export interface RecycleBinPreferences {
   readonly onThemeChange: (theme: RecycleBinPreferences['resolvedTheme']) => void;
 }
 
+export interface RecycleSearchExpansion {
+  readonly expanded: boolean;
+  readonly onExpandedChange: (expanded: boolean) => void;
+}
+
 interface RecycleBinToolbarProps {
   readonly query: string;
+  readonly searchExpansion?: RecycleSearchExpansion;
   readonly busy: boolean;
   readonly available: boolean;
   readonly preferences: RecycleBinPreferences;
@@ -21,6 +27,7 @@ interface RecycleBinToolbarProps {
 
 export function RecycleBinToolbar({
   query,
+  searchExpansion,
   busy,
   available,
   preferences,
@@ -30,7 +37,10 @@ export function RecycleBinToolbar({
   onEmpty,
 }: RecycleBinToolbarProps) {
   const { layout, resolvedTheme, onLayoutChange, onThemeChange } = preferences;
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [localSearchOpen, setLocalSearchOpen] = useState(false);
+  const searchOpen = searchExpansion?.expanded ?? localSearchOpen;
+  const setSearchOpen = searchExpansion?.onExpandedChange ?? setLocalSearchOpen;
+  const focusSearchOnOpen = useRef(false);
   const searchButton = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const searchGroup = useRef<HTMLDivElement>(null);
@@ -41,7 +51,8 @@ export function RecycleBinToolbar({
   const themeLabel = dark ? '切换为明亮主题' : '切换为暗色主题';
 
   useEffect(() => {
-    if (searchOpen) {
+    if (searchOpen && focusSearchOnOpen.current) {
+      focusSearchOnOpen.current = false;
       searchInput.current?.focus();
     }
   }, [searchOpen]);
@@ -52,6 +63,7 @@ export function RecycleBinToolbar({
       return;
     }
 
+    focusSearchOnOpen.current = true;
     setSearchOpen(true);
   }
 

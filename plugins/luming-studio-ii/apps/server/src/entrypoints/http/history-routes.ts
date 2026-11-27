@@ -26,6 +26,8 @@ const versionKind: Record<BoardVersionSummary['kind'], BoardVersionKind> = {
   content: BoardVersionKind.CONTENT,
   image: BoardVersionKind.IMAGE,
   restore: BoardVersionKind.RESTORE,
+  trash: BoardVersionKind.TRASH,
+  restoreTrash: BoardVersionKind.RESTORE_TRASH,
 };
 const maxPayloadIds = 500;
 

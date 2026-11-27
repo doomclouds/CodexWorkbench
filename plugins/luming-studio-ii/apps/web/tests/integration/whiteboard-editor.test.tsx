@@ -139,11 +139,15 @@ test('clears a conflicting preview and reloads the confirmed scene', async () =>
   }
 });
 
-test('keeps the canvas navigable on a read-only board without submitting a move', async () => {
-  const rpc = createWhiteboardRpcMock({ canEdit: false });
+test.each([
+  { kind: 'read-only', options: { canEdit: false } },
+  { kind: 'trashed', options: { trashed: true } },
+])('keeps the canvas readable on a $kind board without submitting a move', async ({ options }) => {
+  const rpc = createWhiteboardRpcMock(options);
   const app = createAppMock(rpc.post);
   try {
     await app.open(sampleBoardId);
+    expect(app.canvas().textContent).toContain('从服务读取的正文');
     await app.drag(from, to);
 
     expect(app.host.textContent).toContain('只读');

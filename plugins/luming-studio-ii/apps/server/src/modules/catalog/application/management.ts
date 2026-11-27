@@ -118,7 +118,11 @@ function manage(
     entryVersion: managed.board.entryVersion + 1n,
   };
   const trashedAtMillis = operation.kind === 'trash' ? updatedAtMillis : undefined;
-  writer.changeBoard({ board, trashedAtMillis });
+  const lifecycle = operation.kind === 'trash' || operation.kind === 'restore';
+  writer.changeBoard(
+    { board, trashedAtMillis },
+    lifecycle ? { actorId, action: operation.kind } : undefined,
+  );
 
   return { kind: 'changed', commandId, board };
 }

@@ -18,5 +18,10 @@ export interface ArchiveImportCommand {
 export interface ArchiveImportPort {
   importCurrent(command: ArchiveImportCommand): Promise<ArchiveImportReceipt>;
   getReceipt(actorId: string, commandId: string): ArchiveImportReceipt | undefined;
-  getAsset(actorId: string, boardId: string, assetId: string): ImportedArchiveAsset | undefined;
+  getAsset(
+    actorId: string,
+    boardId: string,
+    assetId: string,
+    allowTrashedOwner: boolean,
+  ): ImportedArchiveAsset | undefined;
 }

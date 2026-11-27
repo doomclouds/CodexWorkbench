@@ -10,6 +10,7 @@ export interface BoardHeader {
 
 export interface BoardAccess {
   readonly canEdit: boolean;
+  readonly trashed?: boolean;
 }
 
 export interface Point {

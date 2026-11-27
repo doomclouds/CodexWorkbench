@@ -10,7 +10,7 @@ import { toCommandReceipt, toMoveCommand } from './receipt.js';
 import { requireId } from './request.js';
 import type { ObserveMove } from './room-changes.js';
 import { toBoardScene } from './scene.js';
-import { unaryRoute, type RouteEntry } from './unary-route.js';
+import { canReadTrashedBoard, unaryRoute, type RouteEntry } from './unary-route.js';
 
 type ReceiptResponseInit = MessageInitShape<typeof GetCommandReceiptResponseSchema>;
 
@@ -24,11 +24,18 @@ export function createWhiteboardRoutes(
   return [
     createExportRoute(application),
     unaryRoute(getBoardScene, (actor, request) => ({
-      scene: toBoardScene(application.getBoardScene(actor, requireId(request.boardId))),
+      scene: toBoardScene(
+        application.getBoardScene(actor, requireId(request.boardId), canReadTrashedBoard(actor)),
+      ),
     })),
     unaryRoute(getObjectPayloads, (actor, request) => {
       const boardId = requireId(request.boardId);
-      const results = application.getObjectPayloads(actor, boardId, request.objectIds);
+      const results = application.getObjectPayloads(
+        actor,
+        boardId,
+        request.objectIds,
+        canReadTrashedBoard(actor),
+      );
 
       return { boardId, results: results.map(toPayloadResult) };
     }),

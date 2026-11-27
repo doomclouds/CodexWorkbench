@@ -32,10 +32,17 @@ type ToolbarMenu = 'filter' | 'create';
 interface OpenMenu {
   readonly kind: ToolbarMenu;
   readonly anchor: HTMLButtonElement;
+  readonly keepTriggerFocus?: boolean;
+}
+
+export interface WorkbenchSearchExpansion {
+  readonly expanded: boolean;
+  readonly onExpandedChange: (expanded: boolean) => void;
 }
 
 interface WorkbenchToolbarProps {
   readonly query: string;
+  readonly searchExpansion?: WorkbenchSearchExpansion;
   readonly pinnedOnly: boolean;
   readonly preferences: WorkbenchPreferences;
   readonly createBusy: boolean;
@@ -54,8 +61,31 @@ const scopeOptions = [
 ] as const;
 const unsupported = '当前阶段暂不支持';
 
+function useWorkbenchSearch(query: string, expansion: WorkbenchSearchExpansion | undefined) {
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = expansion?.expanded ?? localOpen;
+  const setOpen = expansion?.onExpandedChange ?? setLocalOpen;
+  const input = useRef<HTMLInputElement>(null);
+  const focusOnOpen = useRef(false);
+
+  useEffect(() => {
+    if (open && focusOnOpen.current) {
+      focusOnOpen.current = false;
+      input.current?.focus();
+    }
+  }, [open]);
+
+  function expand() {
+    focusOnOpen.current = true;
+    setOpen(true);
+  }
+
+  return { searchVisible: open || !!query, searchInput: input, setSearchOpen: setOpen, expand };
+}
+
 export function WorkbenchToolbar({
   query,
+  searchExpansion,
   pinnedOnly,
   preferences,
   createBusy,
@@ -67,21 +97,16 @@ export function WorkbenchToolbar({
   onOpenTrash,
   filterButton,
 }: WorkbenchToolbarProps) {
-  const [searchOpen, setSearchOpen] = useState(false);
+  const { searchVisible, searchInput, setSearchOpen, expand } = useWorkbenchSearch(
+    query,
+    searchExpansion,
+  );
   const [menu, setMenu] = useState<OpenMenu>();
   const searchButton = useRef<HTMLButtonElement>(null);
-  const searchInput = useRef<HTMLInputElement>(null);
   const searchGroup = useRef<HTMLDivElement>(null);
-  const searchVisible = searchOpen || !!query;
   const { layout, resolvedTheme } = preferences;
   const layoutAction = layout === 'grid' ? '切换为列表视图' : '切换为卡片视图';
   const themeAction = resolvedTheme === 'dark' ? '切换为明亮主题' : '切换为暗色主题';
-
-  useEffect(() => {
-    if (searchOpen) {
-      searchInput.current?.focus();
-    }
-  }, [searchOpen]);
 
   function closeMenu() {
     setMenu(undefined);
@@ -100,7 +125,7 @@ export function WorkbenchToolbar({
   function openMenuFromKeyboard(event: KeyboardEvent<HTMLButtonElement>, kind: ToolbarMenu) {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setMenu({ kind, anchor: event.currentTarget });
+      setMenu({ kind, anchor: event.currentTarget, keepTriggerFocus: kind === 'filter' });
     }
   }
 
@@ -111,7 +136,7 @@ export function WorkbenchToolbar({
       return;
     }
 
-    setSearchOpen(true);
+    expand();
   }
 
   function handleSearchBlur(event: FocusEvent<HTMLInputElement>) {
@@ -247,7 +272,13 @@ export function WorkbenchToolbar({
         {createBusy ? <Loader2 className="studio-workbench-spin" size={19} /> : <Plus size={21} />}
       </button>
       {menu?.kind === 'filter' && (
-        <WorkbenchMenu anchor={menu.anchor} label="作品范围" toolbar onClose={closeMenu}>
+        <WorkbenchMenu
+          anchor={menu.anchor}
+          label="作品范围"
+          initialFocus={menu.keepTriggerFocus ? 'trigger' : undefined}
+          toolbar
+          onClose={closeMenu}
+        >
           {scopeOptions.map(({ pinned, label, icon: Icon }) => (
             <button
               type="button"

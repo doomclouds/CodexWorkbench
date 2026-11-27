@@ -14,7 +14,7 @@ interface DirectoryRequest {
   readonly delay?: number;
 }
 
-const pageSize = 30;
+const pageSize = 60;
 const searchDelay = 180;
 
 function mergeBoards(
@@ -29,8 +29,8 @@ function mergeBoards(
   return [...byId.values()];
 }
 
-export function useRecycleBinDirectory(management: CatalogManagementService) {
-  const [request, setRequest] = useState<DirectoryRequest>({ query: '' });
+export function useRecycleBinDirectory(management: CatalogManagementService, initialQuery = '') {
+  const [request, setRequest] = useState<DirectoryRequest>(() => ({ query: initialQuery }));
   const [snapshot, setSnapshot] = useState<DirectorySnapshot>({ boards: [], status: 'loading' });
 
   useEffect(() => {

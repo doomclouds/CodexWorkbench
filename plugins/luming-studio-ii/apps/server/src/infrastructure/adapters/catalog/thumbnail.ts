@@ -254,7 +254,12 @@ export function readCatalogThumbnail(
 
   const bounds = readBounds(connection, boardId);
   if (!bounds) {
-    return { kind: 'unavailable' };
+    return lookup.trashed
+      ? {
+          kind: 'scene',
+          scene: { revision, left: 0, top: 0, right: 0, bottom: 0, objects: [] },
+        }
+      : { kind: 'unavailable' };
   }
 
   const objects = readRows(connection, boardId, bounds.total).map(readObject);

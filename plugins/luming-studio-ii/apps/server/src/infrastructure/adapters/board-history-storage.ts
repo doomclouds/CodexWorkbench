@@ -13,7 +13,11 @@ import { decodePayload, storedText, storedVersion } from './stored-values.js';
 const retainedVersions = 200;
 const defaultPageSize = 50;
 
-export const boardHistorySchema = `
+const lifecycleColumn = `lifecycle_kind TEXT CHECK (
+  lifecycle_kind IS NULL OR (kind = 'content' AND lifecycle_kind IN ('trash', 'restoreTrash'))
+)`;
+
+const boardHistorySchema = `
   CREATE TABLE IF NOT EXISTS board_versions (
     board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
     revision INTEGER NOT NULL CHECK (revision >= 0),
@@ -23,6 +27,7 @@ export const boardHistorySchema = `
     saved_at_millis INTEGER CHECK (saved_at_millis >= 0),
     source_revision INTEGER CHECK (source_revision >= 0),
     changed_object_count INTEGER NOT NULL CHECK (changed_object_count >= 0),
+    ${lifecycleColumn},
     CHECK (kind = 'baseline' OR (actor_id IS NOT NULL AND saved_at_millis IS NOT NULL)),
     PRIMARY KEY (board_id, revision)
   ) STRICT;
@@ -85,8 +90,20 @@ const objectColumns = [
 ] as const;
 const versionColumns =
   'revision, title, actor_id, kind, saved_at_millis, source_revision, changed_object_count';
+const readVersionColumns = `
+  revision, title, actor_id, COALESCE(lifecycle_kind, kind) AS kind,
+  saved_at_millis, source_revision, changed_object_count
+`;
 const requestedObjects = 'requested AS (SELECT DISTINCT value AS object_id FROM json_each(?3))';
 const requestedOnly = 'AND object_id IN (SELECT object_id FROM requested)';
+
+export function initializeBoardHistory(connection: SqliteConnection): void {
+  connection.exec(boardHistorySchema);
+  const columns = connection.prepare('PRAGMA table_info(board_versions)').all();
+  if (!columns.some(({ name }) => name === 'lifecycle_kind')) {
+    connection.exec(`ALTER TABLE board_versions ADD COLUMN ${lifecycleColumn}`);
+  }
+}
 
 function objectProjection(alias: string): string {
   return objectColumns.map((column) => `${alias}.${column}`).join(', ');
@@ -167,6 +184,7 @@ export function publishBoardVersion(
 
   const { boardId, title } = before;
   const { actorId, kind, savedAtMillis, sourceRevision, changedObjectCount } = commit;
+  const lifecycleKind = kind === 'trash' || kind === 'restoreTrash' ? kind : null;
   retainBackupGuest(connection, boardId, actorId);
   connection
     .prepare(`
@@ -177,20 +195,46 @@ export function publishBoardVersion(
     .run(boardId, before.revision, title);
   connection
     .prepare(`
-    INSERT INTO board_versions (board_id, ${versionColumns})
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO board_versions (board_id, ${versionColumns}, lifecycle_kind)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
     .run(
       boardId,
       after,
       title,
       actorId,
-      kind,
+      lifecycleKind ? 'content' : kind,
       savedAtMillis,
       sourceRevision ?? null,
       changedObjectCount,
+      lifecycleKind,
     );
   pruneBoardVersions(connection, boardId);
+}
+
+interface BoardLifecycleVersion {
+  readonly boardId: string;
+  readonly title: string;
+  readonly actorId: string;
+  readonly action: 'trash' | 'restore';
+  readonly savedAtMillis: number;
+}
+
+export function recordBoardLifecycleVersion(
+  connection: SqliteConnection,
+  { boardId, title, actorId, action, savedAtMillis }: BoardLifecycleVersion,
+): void {
+  const advance = connection.prepare(`
+    UPDATE boards SET revision = revision + 1 WHERE board_id = ? RETURNING revision
+  `);
+  advance.setReadBigInts(true);
+  const revision = storedVersion(advance.get(boardId)?.revision, 'revision');
+  publishBoardVersion(connection, { boardId, title, revision: revision - 1n }, revision, {
+    kind: action === 'trash' ? 'trash' : 'restoreTrash',
+    actorId,
+    savedAtMillis,
+    changedObjectCount: 0,
+  });
 }
 
 function versionKind(value: unknown): BoardVersionSummary['kind'] {
@@ -200,6 +244,8 @@ function versionKind(value: unknown): BoardVersionSummary['kind'] {
     case 'content':
     case 'image':
     case 'restore':
+    case 'trash':
+    case 'restoreTrash':
       return value;
     default:
       throw new Error('Invalid stored board version kind.');
@@ -283,7 +329,7 @@ export function readBoardVersions(
 ): readonly BoardVersionSummary[] {
   const cutoff = before === undefined ? '' : 'AND revision < ?3';
   const query = connection.prepare(`
-    SELECT ${versionColumns} FROM board_versions
+    SELECT ${readVersionColumns} FROM board_versions
     WHERE board_id = ?1 ${cutoff} ORDER BY revision DESC LIMIT ?2
   `);
   query.setReadBigInts(true);
@@ -298,7 +344,7 @@ export function readBoardVersion(
   revision: bigint,
 ): BoardVersionSummary | undefined {
   const query = connection.prepare(`
-    SELECT ${versionColumns} FROM board_versions WHERE board_id = ? AND revision = ?
+    SELECT ${readVersionColumns} FROM board_versions WHERE board_id = ? AND revision = ?
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, revision);

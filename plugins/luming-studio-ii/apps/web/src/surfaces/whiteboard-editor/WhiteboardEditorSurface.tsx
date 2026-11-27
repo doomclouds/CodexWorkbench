@@ -1224,6 +1224,7 @@ function BoardWorkspace({
           annotationActive={annotationActive}
           unresolvedFeedback={unresolvedFeedback}
           writeAccess={board.canEdit}
+          trashed={board.trashed}
           moving={moving}
           move={move}
           geometry={geometry}
@@ -1503,8 +1504,19 @@ function LoadedBoard({
     );
   }
 
+  const visibleFeatures: WhiteboardEditorFeatures = state.scene.trashed
+    ? {
+        Viewing: features.Viewing,
+        fitOnMount: features.fitOnMount,
+        initialBoardView: features.initialBoardView,
+        readDocumentAsset: features.readDocumentAsset,
+        clipboard: features.clipboard,
+      }
+    : features;
+
   return (
     <BoardWorkspace
+      key={state.scene.trashed ? 'trashed' : 'active'}
       state={state}
       session={session}
       service={service}
@@ -1512,7 +1524,7 @@ function LoadedBoard({
       createCommandId={createCommandId}
       onBack={onBack}
       renameBoard={renameBoard}
-      features={features}
+      features={visibleFeatures}
     />
   );
 }

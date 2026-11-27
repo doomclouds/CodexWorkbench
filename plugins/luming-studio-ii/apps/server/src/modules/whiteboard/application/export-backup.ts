@@ -91,6 +91,11 @@ function artifact(
   };
 }
 
+const lifecycleSummaries: Partial<Record<BoardVersionSummary['kind'], string>> = {
+  trash: '移入回收站',
+  restoreTrash: '恢复作品',
+};
+
 function historyEntry(
   version: BoardVersionSummary,
   actor: BoardBackupActor,
@@ -99,19 +104,21 @@ function historyEntry(
   changedIds: readonly string[],
 ) {
   const { actorId, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version;
+  const lifecycleKind = kind === 'trash' || kind === 'restoreTrash' ? kind : undefined;
 
   return {
     id: 'revision-' + revision,
     revision: numericVersion(revision),
     createdAt: formatTime(savedAtMillis ?? metadata.createdAtMillis ?? metadata.updatedAtMillis),
     actor,
-    summary: kind,
+    summary: lifecycleSummaries[kind] ?? kind,
     changedIds,
     restoredFrom: sourceRevision !== undefined ? 'revision-' + sourceRevision : undefined,
     studioII: {
       actorId,
       savedAtMillis,
-      kind,
+      kind: lifecycleKind ? 'content' : kind,
+      lifecycleKind,
       sourceRevision: sourceRevision?.toString(),
       changedObjectCount,
     },

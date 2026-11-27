@@ -197,7 +197,9 @@ export function createArchiveImportRepository(
     importCurrent: (command) => importCurrent(database, command, validate),
     getReceipt: (actorId, commandId) =>
       database.read((connection) => readReceipt(connection, actorId, commandId)?.receipt),
-    getAsset: (actorId, boardId, assetId) =>
-      database.read((connection) => readPublishedAsset(connection, actorId, boardId, assetId)),
+    getAsset: (actorId, boardId, assetId, allowTrashedOwner) =>
+      database.read((connection) =>
+        readPublishedAsset(connection, actorId, boardId, assetId, allowTrashedOwner),
+      ),
   };
 }

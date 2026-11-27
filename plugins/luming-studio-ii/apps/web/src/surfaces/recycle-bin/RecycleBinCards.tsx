@@ -14,7 +14,7 @@ export type RenderRecycleThumbnail = (request: CatalogThumbnailRequest) => React
 
 interface RecycleSelectionProps {
   readonly visible: readonly RecycleTarget[];
-  readonly selected: ReadonlyMap<string, RecycleTarget>;
+  readonly selected: ReadonlySet<string>;
   readonly busy: boolean;
   readonly onSelect: (targets: readonly RecycleTarget[], checked: boolean) => void;
   readonly onClear: () => void;
@@ -23,7 +23,7 @@ interface RecycleSelectionProps {
 
 interface RecycleCardsProps {
   readonly boards: readonly TrashedBoardSummary[];
-  readonly selected: ReadonlyMap<string, RecycleTarget>;
+  readonly selected: ReadonlySet<string>;
   readonly layout: RecycleBinPreferences['layout'];
   readonly busy: boolean;
   readonly onSelect: RecycleSelectionProps['onSelect'];

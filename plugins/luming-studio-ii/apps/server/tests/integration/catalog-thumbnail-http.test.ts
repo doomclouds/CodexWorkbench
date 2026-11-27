@@ -142,14 +142,44 @@ test('authorizes every cached preview against the current active or owner trash 
   const { boards } = await callWhiteboard(server.address, owner, listTrashedBoards, {
     pageSize: 10,
   });
-  expect(boards[0]?.board).toMatchObject({ boardId, previewRevision: 1n });
-  const inTrash = await readThumbnail(boardId, 1n, owner, true);
-  expect(inTrash.thumbnail).toEqual(editorPreview.thumbnail);
+  const trashed = boards[0]?.board;
+  expect(trashed?.boardId).toBe(boardId);
+  const revision = trashed?.previewRevision;
+  assert.ok(revision !== undefined);
+  const inTrash = await readThumbnail(boardId, revision, owner, true);
+  expect(inTrash.thumbnail?.revision).toBe(revision);
+  expect(inTrash.thumbnail?.content).toEqual(editorPreview.thumbnail?.content);
   const ambiguous = await sendWhiteboardRequest(server.address, owner, getBoardThumbnail, {
     boardId,
     trashed: true,
   });
   expect(ambiguous.status).toBe(400);
+});
+
+test('renders blank paper for an empty board only in the authorized trash view', async () => {
+  const { boardId } = await create();
+  grantCatalogEditor(server.databasePath, boardId, editor);
+  expect((await readThumbnail(boardId, 0n)).thumbnail).toBeUndefined();
+
+  await trash(await list());
+  const { boards } = await callWhiteboard(server.address, owner, listTrashedBoards, {
+    pageSize: 10,
+  });
+  const revision = boards[0]?.board?.previewRevision;
+  assert.ok(revision !== undefined);
+  const preview = await readThumbnail(boardId, revision, owner, true);
+  expect(preview.thumbnail?.revision).toBe(revision);
+  expect(readSvg(preview)).toContain('viewBox="0 0 960 540"');
+  expect(readSvg(preview)).toContain('<rect width="100%" height="100%" fill="#f5f5f5"/>');
+  expect(readSvg(preview)).toContain('@media(prefers-color-scheme:dark){rect{fill:#848586}}');
+  expect((await readThumbnail(boardId, revision + 1n, owner, true)).thumbnail).toBeUndefined();
+
+  const foreign = await sendWhiteboardRequest(server.address, editor, getBoardThumbnail, {
+    boardId,
+    revision,
+    trashed: true,
+  });
+  expect(foreign.status).toBe(403);
 });
 
 test('uses a representative bounded sample once a saved scene exceeds the preview object budget', async () => {

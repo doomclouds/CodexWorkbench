@@ -18,6 +18,7 @@ const timestamp = 1_794_657_600_000n;
 
 function showModal(this: HTMLDialogElement) {
   this.open = true;
+  this.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 }
 
 function closeModal(this: HTMLDialogElement) {
@@ -101,6 +102,7 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
   let current: Location = { kind: 'recycle-bin' };
   let loseReply = false;
   let loseRead = false;
+  let nextRead: Promise<void> | undefined;
   let count = 0;
 
   function purgeItem({
@@ -123,6 +125,11 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
   const management: CatalogManagementService = {
     async listTrashedBoards(request) {
       listRequests.push(request);
+      if (nextRead) {
+        const waiting = nextRead;
+        nextRead = undefined;
+        await waiting;
+      }
       if (loseRead) {
         loseRead = false;
         throw new Error('回收站读取中断。');
@@ -226,6 +233,15 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
     loseRead = true;
   }
 
+  function pauseNextRead() {
+    let resume: () => void = () => undefined;
+    nextRead = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+
+    return resume;
+  }
+
   return {
     ...fixture,
     mount,
@@ -238,6 +254,7 @@ function recycleApp(entries: readonly TrashedBoardSummary[]) {
     receiptRequests,
     interruptReply,
     interruptRead,
+    pauseNextRead,
   };
 }
 
@@ -251,6 +268,7 @@ describe('recycle bin through the Studio app', () => {
 
       try {
         await app.mount(layout);
+        expect(app.listRequests[0]?.pageSize).toBe(60);
         expect(app.host.querySelector('h1')?.textContent).toBe('回收站');
         expect(
           app.host.querySelector('[aria-label="筛选作品"], [aria-label="新建作品"]'),
@@ -268,16 +286,34 @@ describe('recycle bin through the Studio app', () => {
         });
         expect(dialog(app.host).textContent).toContain('永久删除 1 项作品，此操作无法恢复。');
         expect(app.purgeRequests).toEqual([]);
-        expect(document.activeElement).toBe(button(dialog(app.host), '取消'));
+        expect(document.activeElement).toBe(button(dialog(app.host), '关闭弹窗'));
         await click(dialog(app.host), '取消');
         expect(app.trash.size).toBe(2);
         expect(document.activeElement).toBe(deleteTrigger);
+
+        await click(app.host, '永久删除作品：可删除的作品');
+        await act(async () => {
+          dialog(app.host).dispatchEvent(new Event('cancel', { cancelable: true }));
+        });
+        expect(app.host.querySelector('dialog[open]')).toBeNull();
+        expect(document.activeElement).toBe(deleteTrigger);
+
+        await click(app.host, '永久删除作品：可删除的作品');
+        await act(async () => {
+          const backdrop = dialog(app.host);
+          backdrop.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+          backdrop.click();
+        });
+        expect(app.host.querySelector('dialog[open]')).toBeNull();
+        expect(document.activeElement).not.toBe(deleteTrigger);
+        expect(app.purgeRequests).toEqual([]);
 
         await click(app.host, '永久删除作品：可删除的作品');
         await click(dialog(app.host), '永久删除');
         expect(app.purgeRequests[0]?.targets).toEqual([
           { boardId: 'remove', expectedEntryVersion: 2n },
         ]);
+        expect(document.activeElement).toBe(button(app.host, '清空回收站'));
         await click(app.host, '恢复作品：可以恢复的作品');
         expect(app.host.textContent).toContain('回收站为空');
         await click(app.host, '返回 Luming Studio');
@@ -340,6 +376,28 @@ describe('recycle bin through the Studio app', () => {
     }
   });
 
+  it('waits for replacement rows before offering permanent deletion of a selection', async () => {
+    const app = recycleApp([trashBoard('restore', '待恢复作品'), trashBoard('keep', '保留作品')]);
+    try {
+      await app.mount();
+      await selectAll(app.host);
+      const resume = app.pauseNextRead();
+      try {
+        await click(app.host, '恢复作品：待恢复作品');
+        expect(button(app.host, '永久删除所选作品').disabled).toBe(true);
+      } finally {
+        await act(async () => {
+          resume();
+        });
+      }
+
+      expect(button(app.host, '永久删除所选作品').disabled).toBe(false);
+      expect(app.purgeRequests).toEqual([]);
+    } finally {
+      app.dispose();
+    }
+  });
+
   it('shows a retry after a refresh fails while other rows remain', async () => {
     const app = recycleApp([trashBoard('restore', '待恢复作品'), trashBoard('keep', '保留作品')]);
     try {
@@ -394,7 +452,8 @@ describe('recycle bin through the Studio app', () => {
       ).toEqual(entries.map(({ board }) => board.boardId));
       expect([...app.trash.keys()]).toEqual(['later']);
       expect(app.host.textContent).toContain('作品已不在回收站。');
-      expect(app.host.textContent).toContain('1 项已选');
+      expect(app.host.textContent).toContain('1 项作品未删除。');
+      expect(app.host.querySelector('[aria-label="永久删除所选作品"]:not(:disabled)')).toBeNull();
     } finally {
       app.dispose();
     }

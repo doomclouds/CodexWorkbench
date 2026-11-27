@@ -17,6 +17,10 @@ export interface HttpActor {
   readonly authorizeRead?: (boardId: string) => void;
 }
 
+export function canReadTrashedBoard(actor: HttpActor): boolean {
+  return actor.kind !== 'agent' && actor.guestScope === undefined;
+}
+
 export type ProtobufRoute = (
   actor: HttpActor,
   body: Uint8Array,

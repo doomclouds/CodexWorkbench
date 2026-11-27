@@ -8,7 +8,7 @@ import {
   type StagedCurrentArchive,
 } from '../../platform/archives/index.js';
 import type { SqliteConnection } from '../../platform/index.js';
-import { readBoardAccess } from '../authorization/index.js';
+import { isTrashedBoardOwner, readBoardAccess } from '../authorization/index.js';
 import { writeArchiveHistory, type ArchiveHistoryObject } from './history.js';
 import { prepareArchiveScene, type ValidateNativeObject } from './restore-scene.js';
 import { prepareRestoredMetadata, writeRestoredMetadata } from './restored-metadata.js';
@@ -210,8 +210,10 @@ export function readPublishedAsset(
   actorId: string,
   boardId: string,
   assetId: string,
+  allowTrashedOwner: boolean,
 ): ImportedArchiveAsset | undefined {
-  if (!readBoardAccess(connection, boardId, actorId)) {
+  const access = readBoardAccess(connection, boardId, actorId);
+  if (!access && !(allowTrashedOwner && isTrashedBoardOwner(connection, boardId, actorId))) {
     return undefined;
   }
 

@@ -223,6 +223,27 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+test('shows both recycle-bin lifecycle actions with their saved times', async () => {
+  const service = historyMock();
+  const trashedAt = Date.parse('2026-08-05T09:15:00Z');
+  const restoredAt = Date.parse('2026-08-05T09:17:00Z');
+  service.listVersions.mockResolvedValueOnce({
+    currentRevision: latestRevision,
+    versions: [
+      { ...version(3n), kind: 'restoreTrash', changedObjectCount: 0, savedAtMillis: restoredAt },
+      { ...version(2n), kind: 'trash', changedObjectCount: 0, savedAtMillis: trashedAt },
+    ],
+  });
+  await mount(service);
+
+  const restored = button('展开版本 3');
+  const trashed = button('展开版本 2');
+  expect(restored.textContent).toContain('恢复作品');
+  expect(trashed.textContent).toContain('移入回收站');
+  expect(restored.querySelector('time')?.dateTime).toBe(new Date(restoredAt).toISOString());
+  expect(trashed.querySelector('time')?.dateTime).toBe(new Date(trashedAt).toISOString());
+});
+
 test('pages versions and previews the chosen saved scene without changing the live board', async () => {
   const service = historyMock();
   service.listVersions

@@ -13,14 +13,25 @@ import {
   type BoardSummary,
   type ManageBoardRequest,
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
-import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
+import {
+  BoardHistoryService,
+  BoardVersionKind,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
+import {
+  BoardExportFormat,
+  MoveRejectionReason,
+  WhiteboardService,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import { archiveRowCounts, retainedArchiveChunks } from '../support/archive-database.js';
 import {
   clearLifecycleRows,
   grantCatalogEditor,
+  installLegacyBoardVersions,
   managementReceiptWriteFailure,
+  readLegacyBoardVersionKinds,
   rejectCatalogManagementReceiptInserts,
+  setCatalogTrashTimes,
 } from '../support/catalog-lifecycle-database.js';
 import {
   actorHeader,
@@ -38,7 +49,8 @@ const {
   manageBoard,
   purgeBoards,
 } = BoardCatalogService.method;
-const { getBoardScene, getObjectPayloads } = WhiteboardService.method;
+const { exportBoard, getBoardScene, getObjectPayloads, moveObjects } = WhiteboardService.method;
+const { getBoardVersionScene, listBoardVersions } = BoardHistoryService.method;
 const ownerId = 'lifecycle-owner';
 const editorId = 'lifecycle-editor';
 const archivePath = '/' + BoardArchiveService.typeName + '/ImportBoardArchive';
@@ -96,7 +108,7 @@ function lookup(commandId: string, actorId = ownerId) {
   return callProtobuf(server.address, actorId, getCatalogCommandReceipt, { commandId });
 }
 
-async function importBoard(commandId: string) {
+async function importBoard(commandId: string, content?: Uint8Array<ArrayBuffer>) {
   const response = await fetch(new URL(archivePath, server.address), {
     method: 'POST',
     headers: {
@@ -104,7 +116,7 @@ async function importBoard(commandId: string) {
       'content-type': 'application/zip',
       'x-studio-command-id': commandId,
     },
-    body: await readFile(archiveFixture),
+    body: content ?? (await readFile(archiveFixture)),
     signal: AbortSignal.timeout(requestTimeoutMs),
   });
   assert.equal(response.status, 200);
@@ -120,6 +132,10 @@ async function importBoard(commandId: string) {
 
 function scene(boardId: string) {
   return callProtobuf(server.address, ownerId, getBoardScene, { boardId });
+}
+
+function history(boardId: string) {
+  return callProtobuf(server.address, ownerId, listBoardVersions, { boardId, limit: 20 });
 }
 
 function payloads(boardId: string) {
@@ -138,21 +154,21 @@ function imageSource(response: Awaited<ReturnType<typeof payloads>>) {
   return src;
 }
 
-function loadAsset(path: string) {
+function loadAsset(path: string, actorId = ownerId) {
   return fetch(new URL(path, server.address), {
-    headers: { [actorHeader]: ownerId },
+    headers: { [actorHeader]: actorId },
     signal: AbortSignal.timeout(requestTimeoutMs),
   });
 }
 
-async function expectHiddenBoard(boardId: string, assetPath: string) {
+async function expectHiddenBoard(boardId: string, assetPath: string, actorId = ownerId) {
   const [oldScene, oldPayload, oldAsset] = await Promise.all([
-    sendProtobuf(server.address, ownerId, getBoardScene, { boardId }),
-    sendProtobuf(server.address, ownerId, getObjectPayloads, {
+    sendProtobuf(server.address, actorId, getBoardScene, { boardId }),
+    sendProtobuf(server.address, actorId, getObjectPayloads, {
       boardId,
       objectIds: [imageObjectId],
     }),
-    loadAsset(assetPath),
+    loadAsset(assetPath, actorId),
   ]);
 
   expect(oldScene.status).toBe(403);
@@ -224,7 +240,7 @@ test('adopts existing ownership from Stage 3 create and import receipts on resta
   ]);
 });
 
-test('restores a pinned archive with the original scene, payload, and media after hiding its routes', async () => {
+test('lets only the owner preview a trashed archive and restores its original scene and media', async () => {
   const adopted = await importBoard('import-owned');
   expect(adopted.canManage).toBe(true);
   const renamed = await change(adopted, 'rename-import', {
@@ -233,7 +249,9 @@ test('restores a pinned archive with the original scene, payload, and media afte
   });
   const pinned = await change(renamed, 'pin-import', { case: 'pinned', value: true });
   const { boardId } = pinned;
+  grantCatalogEditor(server.databasePath, boardId, editorId);
   const beforeScene = await scene(boardId);
+  assert.ok(beforeScene.scene?.boardRevision !== undefined);
   const beforePayload = await payloads(boardId);
   const assetPath = imageSource(beforePayload);
   const asset = await loadAsset(assetPath);
@@ -245,8 +263,35 @@ test('restores a pinned archive with the original scene, payload, and media afte
   expect(await activeBoards()).toEqual([]);
   expect(await trashedBoards()).toMatchObject([{ board: trashed }]);
   expect(await trashedBoards(editorId)).toEqual([]);
-  await expectHiddenBoard(boardId, assetPath);
+  await expectHiddenBoard(boardId, assetPath, editorId);
+  expect((await scene(boardId)).scene).toMatchObject({
+    boardId,
+    access: { canEdit: false, trashed: true },
+    objects: beforeScene.scene.objects,
+  });
+  expect(await payloads(boardId)).toEqual(beforePayload);
+  const trashedAsset = await loadAsset(assetPath);
+  expect(trashedAsset.status).toBe(200);
+  expect(await trashedAsset.text()).toBe(beforeAsset);
+  const moved = await callProtobuf(server.address, ownerId, moveObjects, {
+    boardId,
+    commandId: 'move-trashed-image',
+    delta: { dx: 1, dy: 1 },
+    targets: [{ objectId: imageObjectId, expectedGeometryVersion: 0n }],
+  });
+  expect(moved.receipt?.outcome).toEqual({
+    case: 'rejected',
+    value: expect.objectContaining({ reason: MoveRejectionReason.FORBIDDEN }),
+  });
 
+  await server.restart();
+  expect((await scene(boardId)).scene?.access).toMatchObject({ canEdit: false, trashed: true });
+  const retriedTrash = await manage({
+    ...target(pinned),
+    commandId: 'trash-import',
+    operation: trash,
+  });
+  expect(retriedTrash.receipt?.outcome).toEqual({ case: 'changed', value: trashed });
   const restored = await change(trashed, 'restore-import', restore);
 
   expect(restored).toMatchObject({
@@ -255,13 +300,157 @@ test('restores a pinned archive with the original scene, payload, and media afte
     pinned: true,
     canManage: true,
   });
-  expect(await activeBoards()).toEqual([{ ...restored, previewRevision: 0n }]);
+  const restoredRevision = beforeScene.scene.boardRevision + 2n;
+  expect(await activeBoards()).toEqual([{ ...restored, previewRevision: restoredRevision }]);
   expect(await trashedBoards()).toEqual([]);
-  expect(await scene(boardId)).toEqual(beforeScene);
+  expect((await scene(boardId)).scene).toEqual({
+    ...beforeScene.scene,
+    boardRevision: restoredRevision,
+  });
   expect(await payloads(boardId)).toEqual(beforePayload);
+  expect(await history(boardId)).toMatchObject({
+    currentRevision: restoredRevision,
+    versions: [
+      {
+        revision: restoredRevision,
+        kind: BoardVersionKind.RESTORE_TRASH,
+        actorId: ownerId,
+        savedAtMillis: restored.updatedAtMillis,
+        changedObjectCount: 0,
+      },
+      {
+        revision: restoredRevision - 1n,
+        kind: BoardVersionKind.TRASH,
+        actorId: ownerId,
+        savedAtMillis: trashed.updatedAtMillis,
+        changedObjectCount: 0,
+      },
+      { revision: beforeScene.scene.boardRevision },
+    ],
+  });
+  const archived = await callProtobuf(server.address, ownerId, getBoardVersionScene, {
+    boardId,
+    revision: restoredRevision - 1n,
+  });
+  expect(archived.scene?.objects).toEqual(beforeScene.scene.objects);
   const restoredAsset = await loadAsset(assetPath);
   expect(restoredAsset.status).toBe(200);
   expect(await restoredAsset.text()).toBe(beforeAsset);
+});
+
+test('preserves lifecycle version kinds, dates and actor through a backup and reimport', async () => {
+  const created = await addBoard('create-lifecycle-backup', 'Lifecycle backup');
+  const trashed = await change(created, 'trash-lifecycle-backup', trash);
+  await change(trashed, 'restore-lifecycle-backup', restore);
+  const before = await history(created.boardId);
+  const { result } = await callProtobuf(server.address, ownerId, exportBoard, {
+    boardId: created.boardId,
+    expectedRevision: 2n,
+    format: BoardExportFormat.ZIP,
+    scope: { case: 'whole', value: {} },
+  });
+  assert.ok(result.case === 'file');
+
+  const copied = await importBoard('import-lifecycle-backup', new Uint8Array(result.value.content));
+  expect(copied.boardId).not.toBe(created.boardId);
+  expect(await history(copied.boardId)).toEqual(before);
+});
+
+test('rolls back the catalog and lifecycle version when the management receipt cannot be written', async () => {
+  const created = await addBoard('create-trash-rollback', 'Keep active with original history');
+  const before = await history(created.boardId);
+  const active = await activeBoards();
+  rejectCatalogManagementReceiptInserts(server.databasePath);
+  const commandId = 'trash-with-failing-receipt';
+  const response = await sendProtobuf(server.address, ownerId, manageBoard, {
+    ...target(created),
+    commandId,
+    operation: trash,
+  });
+  expect(response.status).toBe(500);
+  expect(server.errors[0]).toMatchObject({ message: managementReceiptWriteFailure });
+  expect(await history(created.boardId)).toEqual(before);
+  expect(await activeBoards()).toEqual(active);
+  expect(await trashedBoards()).toEqual([]);
+  expect((await lookup(commandId)).result.case).toBe('notRecorded');
+});
+
+test('upgrades the previous history constraint without losing saved versions', async () => {
+  const created = await addBoard('create-legacy-history', 'Legacy history');
+  installLegacyBoardVersions(server.databasePath, created.boardId, ownerId);
+  expect(readLegacyBoardVersionKinds(server.databasePath, created.boardId)).toEqual([
+    'content',
+    'baseline',
+  ]);
+  await server.restart();
+  const before = await history(created.boardId);
+  expect(before.versions).toMatchObject([
+    {
+      revision: 1n,
+      title: created.title,
+      kind: BoardVersionKind.CONTENT,
+      actorId: ownerId,
+      savedAtMillis: 10n,
+    },
+    { revision: 0n, title: created.title, kind: BoardVersionKind.BASELINE },
+  ]);
+
+  const trashed = await change(created, 'trash-legacy-history', trash);
+  await change(trashed, 'restore-legacy-history', restore);
+  const after = await history(created.boardId);
+  expect(after.currentRevision).toBe(3n);
+  expect(readLegacyBoardVersionKinds(server.databasePath, created.boardId)).toEqual([
+    'content',
+    'content',
+    'content',
+    'baseline',
+  ]);
+  expect(after.versions.slice(-2)).toEqual(before.versions);
+});
+
+test('pages trashed boards by pin and last update time, using board ID to break ties', async () => {
+  const cases = [
+    { key: 'first', pinned: true, updatedAtMillis: 300, trashedAtMillis: 100 },
+    { key: 'second', pinned: true, updatedAtMillis: 300, trashedAtMillis: 200 },
+    { key: 'older', pinned: true, updatedAtMillis: 200, trashedAtMillis: 500 },
+    { key: 'latest', pinned: false, updatedAtMillis: 600, trashedAtMillis: 300 },
+    { key: 'early', pinned: false, updatedAtMillis: 400, trashedAtMillis: 700 },
+  ];
+  const entries = [];
+  for (const item of cases) {
+    const created = await addBoard('create-' + item.key, item.key);
+    const prepared = item.pinned
+      ? await change(created, 'pin-' + item.key, { case: 'pinned', value: true })
+      : created;
+    const trashed = await change(prepared, 'trash-' + item.key, trash);
+    entries.push({ ...item, boardId: trashed.boardId });
+  }
+  setCatalogTrashTimes(server.databasePath, entries);
+
+  const expected = [
+    ...entries.slice(0, 2).sort((first, second) => first.boardId.localeCompare(second.boardId)),
+    ...entries.slice(2),
+  ];
+  let cursor: string | undefined;
+  for (const item of expected) {
+    const page = await callProtobuf(server.address, ownerId, listTrashedBoards, {
+      ...listing,
+      pageSize: 1,
+      cursor,
+    });
+    expect(page.boards).toMatchObject([
+      {
+        board: {
+          boardId: item.boardId,
+          pinned: item.pinned,
+          updatedAtMillis: BigInt(item.updatedAtMillis),
+        },
+        trashedAtMillis: BigInt(item.trashedAtMillis),
+      },
+    ]);
+    cursor = page.nextCursor;
+  }
+  expect(cursor).toBeUndefined();
 });
 
 test('purges only matching trash snapshots and preserves restored and retrash copies', async () => {
@@ -313,7 +502,7 @@ test('purges only matching trash snapshots and preserves restored and retrash co
       },
     },
   ]);
-  expect(await activeBoards()).toEqual([{ ...restored, previewRevision: 0n }]);
+  expect(await activeBoards()).toEqual([{ ...restored, previewRevision: 2n }]);
   expect(await trashedBoards()).toMatchObject([{ board: retrash }]);
   await expectHiddenBoard(purgeable.boardId, assetPath);
   expect(retainedArchiveChunks(server.databasePath, purgeable.boardId)).toHaveLength(0);

@@ -16,7 +16,7 @@ import {
 import { readArchivedSvgImage } from '../../modules/whiteboard/application/index.js';
 import { HttpRequestError, mediaType } from './request.js';
 import { sendProtobuf, sendStatus } from './response.js';
-import { unaryRoute, type HttpActor } from './unary-route.js';
+import { canReadTrashedBoard, unaryRoute, type HttpActor } from './unary-route.js';
 
 const archiveImportPath = '/' + BoardArchiveService.typeName + '/ImportBoardArchive';
 const archiveAssetPrefix = '/studio-archive-assets/';
@@ -110,7 +110,7 @@ function serveArchiveAsset(
   }
 
   actor.authorize?.({ boardId });
-  const asset = application.getAsset(actor.id, boardId, assetId);
+  const asset = application.getAsset(actor.id, boardId, assetId, canReadTrashedBoard(actor));
   if (!asset) {
     sendStatus(response, 404);
     return;

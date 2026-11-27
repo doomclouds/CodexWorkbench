@@ -37,6 +37,7 @@ const distant = {
 
 interface Options {
   readonly canEdit?: boolean;
+  readonly trashed?: boolean;
   readonly shapeAppearance?: MessageInitShape<typeof ObjectMetadataSchema>['appearance'];
   readonly move?: (
     request: MoveObjectsRequest,
@@ -92,7 +93,12 @@ export function conflicted(request: MoveObjectsRequest): CommandReceipt {
   });
 }
 
-export function createWhiteboardRpcMock({ canEdit = true, move, shapeAppearance }: Options = {}) {
+export function createWhiteboardRpcMock({
+  canEdit = true,
+  move,
+  shapeAppearance,
+  trashed,
+}: Options = {}) {
   const moves: MoveObjectsRequest[] = [];
   const payloadReads: string[][] = [];
   const receiptReads: string[] = [];
@@ -111,7 +117,7 @@ export function createWhiteboardRpcMock({ canEdit = true, move, shapeAppearance 
             boardId: request.boardId,
             title: '一期测试白板',
             boardRevision: 0n,
-            access: { canEdit },
+            access: { canEdit, trashed },
             objects: [{ ...shape, appearance: shapeAppearance }, caption, distant],
           },
         }),

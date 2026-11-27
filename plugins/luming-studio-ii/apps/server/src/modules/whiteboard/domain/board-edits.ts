@@ -77,7 +77,13 @@ export interface StoredBoardEditReceipt {
   readonly advancedRevision?: boolean;
 }
 
-export type BoardVersionKind = 'geometry' | 'content' | 'image' | 'restore';
+export type BoardVersionKind =
+  | 'geometry'
+  | 'content'
+  | 'image'
+  | 'restore'
+  | 'trash'
+  | 'restoreTrash';
 
 export interface BoardVersionCommit {
   readonly actorId: string;

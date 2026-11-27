@@ -1,7 +1,11 @@
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import { StudioApp, type StudioAppProps } from '../../src/app/index.js';
-import type { BoardCatalogService, CatalogBoardSummary } from '../../src/data/catalog/index.js';
+import type {
+  BoardCatalogService,
+  CatalogBoardSummary,
+  CatalogManagementService,
+} from '../../src/data/catalog/index.js';
 import { createControlFixture } from '../support/render-control.js';
 
 type CreateCommand = Parameters<BoardCatalogService['createBoard']>[0];
@@ -80,8 +84,8 @@ function click(host: HTMLElement, label: string) {
   });
 }
 
-function enterSearch(host: HTMLElement, query: string) {
-  const input = host.querySelector<HTMLInputElement>('input[aria-label="搜索作品名称"]');
+function enterSearch(host: HTMLElement, query: string, label = '搜索作品名称') {
+  const input = host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
   const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
   if (!input || !descriptor?.set) {
     throw new Error('缺少已展开的搜索输入框');
@@ -360,6 +364,94 @@ describe('legacy Workbench creation through the Studio app', () => {
         '产品发布',
       );
       expect(requests.at(-1)).toMatchObject({ query: '产品发布', pinnedOnly: true });
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  it('shares the directory search across history navigation and resets it only on recycle-bin return', async () => {
+    const { props } = appMock();
+    const { catalog, requests } = catalogFixture(props.catalog);
+    const trashedRequests: ListRequest[] = [];
+    const catalogManagement: CatalogManagementService = {
+      async listTrashedBoards(request) {
+        trashedRequests.push(request);
+        return { boards: [] };
+      },
+      manageBoard: async () => {
+        throw new Error('Unexpected board management');
+      },
+      purgeBoards: async () => {
+        throw new Error('Unexpected board purge');
+      },
+      getReceipt: async () => undefined,
+    };
+    type Location = ReturnType<StudioAppProps['navigation']['read']>;
+    let location: Location = { kind: 'workbench' };
+    let historyChanged: (() => void) | undefined;
+    const navigation: StudioAppProps['navigation'] = {
+      read: () => location,
+      write: (next) => {
+        location = next;
+      },
+      subscribe(listener) {
+        historyChanged = listener;
+        return () => {
+          historyChanged = undefined;
+        };
+      },
+    };
+    const fixture = createControlFixture();
+
+    async function visitHistory(target: Location) {
+      await act(async () => {
+        location = target;
+        historyChanged?.();
+      });
+    }
+
+    try {
+      await act(async () =>
+        fixture.render(
+          <StudioApp
+            {...props}
+            catalog={catalog}
+            catalogManagement={catalogManagement}
+            navigation={navigation}
+          />,
+        ),
+      );
+      await click(fixture.host, '筛选作品');
+      await click(fixture.host, '已固定');
+      await click(fixture.host, '搜索作品');
+      await enterSearch(fixture.host, 'Alpha');
+      await click(fixture.host, '筛选作品');
+      await click(fixture.host, '回收站');
+
+      const trashSearch = () => fixture.host.querySelector('input[aria-label="搜索回收站名称"]');
+      const workbenchSearch = () => fixture.host.querySelector('input[aria-label="搜索作品名称"]');
+      expect(trashSearch()).toHaveProperty('value', 'Alpha');
+      expect(trashSearch()).not.toBe(document.activeElement);
+      expect(trashedRequests.at(-1)).toMatchObject({ query: 'Alpha' });
+
+      await enterSearch(fixture.host, 'Beta', '搜索回收站名称');
+      await visitHistory({ kind: 'workbench' });
+      expect(workbenchSearch()).toHaveProperty('value', 'Beta');
+      expect(requests.at(-1)).toMatchObject({ query: 'Beta', pinnedOnly: true });
+      await visitHistory({ kind: 'recycle-bin' });
+      expect(trashSearch()).toHaveProperty('value', 'Beta');
+
+      await click(fixture.host, '切换为列表视图');
+      await click(fixture.host, '切换为暗色主题');
+      await click(fixture.host, '返回 Luming Studio');
+      expect(fixture.host.querySelector('h1')?.textContent).toBe('Luming Studio');
+      expect(workbenchSearch()).toHaveProperty('value', '');
+      expect(requests.at(-1)).toMatchObject({ query: '', order: 'recent' });
+      expect(requests.at(-1)?.pinnedOnly).toBeUndefined();
+      expect(
+        fixture.host.querySelector('.studio-workbench[data-studio-theme="dark"]'),
+      ).not.toBeNull();
+      expect(fixture.host.querySelector('.studio-workbench-cards-list')).not.toBeNull();
     } finally {
       fixture.dispose();
     }

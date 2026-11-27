@@ -1652,11 +1652,11 @@ function createArchiveImportApplication(port, dependencies) {
     getReceipt(actorId2, commandId) {
       return port.getReceipt(actorId2, requireCommandId(commandId));
     },
-    getAsset(actorId2, boardId, assetId) {
+    getAsset(actorId2, boardId, assetId, allowTrashedOwner = false) {
       if (!isArchiveIdentifier(boardId) || !isArchiveIdentifier(assetId)) {
         throw new ArchiveRequestError("Invalid imported asset identifier.");
       }
-      return port.getAsset(actorId2, boardId, assetId);
+      return port.getAsset(actorId2, boardId, assetId, allowTrashedOwner);
     }
   };
 }
@@ -2291,7 +2291,10 @@ function renderOverview(scene, projection2, detailed) {
 }
 function renderCatalogThumbnail(scene) {
   if (scene.objects.length === 0) {
-    return void 0;
+    const content2 = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540"><style>rect{fill:#fafafa}@media(prefers-color-scheme:dark){rect{fill:#848586}}</style><rect width="100%" height="100%" fill="#f5f5f5"/></svg>'
+    );
+    return { revision: scene.revision, mimeType: "image/svg+xml", content: content2 };
   }
   const projection2 = projectScene(scene);
   const detailed = renderOverview(scene, projection2, true);
@@ -2524,7 +2527,11 @@ function manage(writer2, actorId2, command, now) {
     entryVersion: managed.board.entryVersion + 1n
   };
   const trashedAtMillis = operation.kind === "trash" ? updatedAtMillis : void 0;
-  writer2.changeBoard({ board, trashedAtMillis });
+  const lifecycle = operation.kind === "trash" || operation.kind === "restore";
+  writer2.changeBoard(
+    { board, trashedAtMillis },
+    lifecycle ? { actorId: actorId2, action: operation.kind } : void 0
+  );
   return { kind: "changed", commandId, board };
 }
 function manageSignature(command) {
@@ -8155,6 +8162,16 @@ function requireAccess3(reader2, actor, boardId) {
   }
   return access;
 }
+function requireBoardContentAccess(reader2, actor, boardId, allowTrashedOwner) {
+  const access = reader2.getAccess(boardId, actor.id);
+  if (access) {
+    return access;
+  }
+  if (allowTrashedOwner && reader2.isTrashedOwner?.(boardId, actor.id)) {
+    return { canEdit: false, trashed: true };
+  }
+  throw new WhiteboardAccessError();
+}
 function payloadResult(objectId, payload) {
   if (!payload) {
     return { kind: "unavailable", objectId, reason: "notFound" };
@@ -8574,20 +8591,26 @@ function artifact(board, metadata, formatTime, version2) {
     sharing: false
   };
 }
+var lifecycleSummaries = {
+  trash: "\u79FB\u5165\u56DE\u6536\u7AD9",
+  restoreTrash: "\u6062\u590D\u4F5C\u54C1"
+};
 function historyEntry(version2, actor, metadata, formatTime, changedIds) {
   const { actorId: actorId2, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version2;
+  const lifecycleKind = kind === "trash" || kind === "restoreTrash" ? kind : void 0;
   return {
     id: "revision-" + revision,
     revision: numericVersion(revision),
     createdAt: formatTime(savedAtMillis ?? metadata.createdAtMillis ?? metadata.updatedAtMillis),
     actor,
-    summary: kind,
+    summary: lifecycleSummaries[kind] ?? kind,
     changedIds,
     restoredFrom: sourceRevision !== void 0 ? "revision-" + sourceRevision : void 0,
     studioII: {
       actorId: actorId2,
       savedAtMillis,
-      kind,
+      kind: lifecycleKind ? "content" : kind,
+      lifecycleKind,
       sourceRevision: sourceRevision?.toString(),
       changedObjectCount
     }
@@ -12083,9 +12106,9 @@ function createWhiteboardApplication(repository, now, files = {}) {
     });
   }
   return {
-    getBoardScene(actor, boardId) {
+    getBoardScene(actor, boardId, allowTrashedOwner = false) {
       return repository.read((reader2) => {
-        const access = requireAccess3(reader2, actor, boardId);
+        const access = requireBoardContentAccess(reader2, actor, boardId, allowTrashedOwner);
         const board = reader2.getBoard(boardId);
         if (!board) {
           throw new WhiteboardAccessError();
@@ -12093,9 +12116,9 @@ function createWhiteboardApplication(repository, now, files = {}) {
         return { board, access, objects: reader2.listObjects(boardId) };
       });
     },
-    getObjectPayloads(actor, boardId, objectIds) {
+    getObjectPayloads(actor, boardId, objectIds, allowTrashedOwner = false) {
       return repository.read((reader2) => {
-        requireAccess3(reader2, actor, boardId);
+        requireBoardContentAccess(reader2, actor, boardId, allowTrashedOwner);
         if (!objectIds.length) {
           return [];
         }
@@ -18233,6 +18256,9 @@ function sendProtobuf(response, result) {
 }
 
 // src/entrypoints/http/unary-route.ts
+function canReadTrashedBoard(actor) {
+  return actor.kind !== "agent" && actor.guestScope === void 0;
+}
 function unaryRoute(method4, handle) {
   const path3 = `/${method4.parent.typeName}/${method4.name}`;
   return [
@@ -18327,7 +18353,7 @@ function serveArchiveAsset(application, actor, path3, response) {
     return;
   }
   actor.authorize?.({ boardId });
-  const asset = application.getAsset(actor.id, boardId, assetId);
+  const asset = application.getAsset(actor.id, boardId, assetId, canReadTrashedBoard(actor));
   if (!asset) {
     sendStatus(response, 404);
     return;
@@ -18537,7 +18563,7 @@ function createCatalogRoutes(application) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_scene_pb.js
-var file_luming_studio_v1_whiteboard_scene = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2NlbmUucHJvdG8SEGx1bWluZy5zdHVkaW8udjEivwEKCkJvYXJkU2NlbmUSEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARIxCgdvYmplY3RzGAQgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRItCgZhY2Nlc3MYBSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQWNjZXNzQhEKD19ib2FyZF9yZXZpc2lvbiIfCgtCb2FyZEFjY2VzcxIQCghjYW5fZWRpdBgBIAEoCCLJBAoOT2JqZWN0TWV0YWRhdGESEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGFiZWwYAyABKAkSLAoIZ2VvbWV0cnkYBCABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5Eh0KEGdlb21ldHJ5X3ZlcnNpb24YBSABKARIAYgBARIcCg9wYXlsb2FkX3ZlcnNpb24YBiABKARIAogBARIOCgZsb2NrZWQYByABKAgSFgoJcGFyZW50X2lkGAggASgJSAOIAQESFQoIZ3JvdXBfaWQYCSABKAlIBIgBARI2CgphcHBlYXJhbmNlGAogASgLMiIubHVtaW5nLnN0dWRpby52MS5PYmplY3RBcHBlYXJhbmNlEjAKBXNoYXBlGAsgASgLMh8ubHVtaW5nLnN0dWRpby52MS5TaGFwZUdlb21ldHJ5SAASNAoHc2VjdGlvbhgMIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuU2VjdGlvbkdlb21ldHJ5SAASLAoDaW5rGA0gASgLMh0ubHVtaW5nLnN0dWRpby52MS5JbmtHZW9tZXRyeUgAEjgKCWNvbm5lY3RvchgOIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yR2VvbWV0cnlIAEIRCg9nZW9tZXRyeV9kZXRhaWxCEwoRX2dlb21ldHJ5X3ZlcnNpb25CEgoQX3BheWxvYWRfdmVyc2lvbkIMCgpfcGFyZW50X2lkQgsKCV9ncm91cF9pZCJRCghHZW9tZXRyeRIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBEhAKCHJvdGF0aW9uGAUgASgBIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASKaAQoQT2JqZWN0QXBwZWFyYW5jZRIRCgRmaWxsGAEgASgJSACIAQESEwoGc3Ryb2tlGAIgASgJSAGIAQESGQoMc3Ryb2tlX3dpZHRoGAMgASgBSAKIAQESDgoGZGFzaGVkGAQgASgIEg4KBmhvbGxvdxgFIAEoCEIHCgVfZmlsbEIJCgdfc3Ryb2tlQg8KDV9zdHJva2Vfd2lkdGgiIAoNU2hhcGVHZW9tZXRyeRIPCgdvdXRsaW5lGAEgASgJIiYKD1NlY3Rpb25HZW9tZXRyeRITCgt0cmFuc3BhcmVudBgBIAEoCCIcCgtJbmtHZW9tZXRyeRINCgV3aWR0aBgBIAEoASLxAgoRQ29ubmVjdG9yR2VvbWV0cnkSMgoFc3RhcnQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvckVuZHBvaW50EjAKA2VuZBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yRW5kcG9pbnQSJgoFYmVuZHMYAyADKAsyFy5sdW1pbmcuc3R1ZGlvLnYxLlBvaW50EjcKDnJlbGF0aXZlX2JlbmRzGAQgASgLMh8ubHVtaW5nLnN0dWRpby52MS5SZWxhdGl2ZUJlbmRzEi0KDGxhYmVsX29mZnNldBgFIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSMwoKc3RhcnRfaGVhZBgGIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZBIxCghlbmRfaGVhZBgHIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZCJ2ChFDb25uZWN0b3JFbmRwb2ludBImCgVwb2ludBgBIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSOQoKYXR0YWNobWVudBgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yQXR0YWNobWVudCJXChNDb25uZWN0b3JBdHRhY2htZW50EhEKCW9iamVjdF9pZBgBIAEoCRItCgRwb3J0GAIgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0IlAKDVJlbGF0aXZlQmVuZHMSLgoKZmlyc3RfYXhpcxgBIAEoDjIaLmx1bWluZy5zdHVkaW8udjEuQmVuZEF4aXMSDwoHb2Zmc2V0cxgCIAMoASqVAQoNQ29ubmVjdG9yUG9ydBIeChpDT05ORUNUT1JfUE9SVF9VTlNQRUNJRklFRBAAEhYKEkNPTk5FQ1RPUl9QT1JUX1RPUBABEhkKFUNPTk5FQ1RPUl9QT1JUX0JPVFRPTRACEhcKE0NPTk5FQ1RPUl9QT1JUX0xFRlQQAxIYChRDT05ORUNUT1JfUE9SVF9SSUdIVBAEKn0KDUNvbm5lY3RvckhlYWQSHgoaQ09OTkVDVE9SX0hFQURfVU5TUEVDSUZJRUQQABIXChNDT05ORUNUT1JfSEVBRF9OT05FEAESGAoUQ09OTkVDVE9SX0hFQURfQVJST1cQAhIZChVDT05ORUNUT1JfSEVBRF9DSVJDTEUQAypXCghCZW5kQXhpcxIZChVCRU5EX0FYSVNfVU5TUEVDSUZJRUQQABIYChRCRU5EX0FYSVNfSE9SSVpPTlRBTBABEhYKEkJFTkRfQVhJU19WRVJUSUNBTBACYgZwcm90bzM");
+var file_luming_studio_v1_whiteboard_scene = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2NlbmUucHJvdG8SEGx1bWluZy5zdHVkaW8udjEivwEKCkJvYXJkU2NlbmUSEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARIxCgdvYmplY3RzGAQgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRItCgZhY2Nlc3MYBSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQWNjZXNzQhEKD19ib2FyZF9yZXZpc2lvbiIwCgtCb2FyZEFjY2VzcxIQCghjYW5fZWRpdBgBIAEoCBIPCgd0cmFzaGVkGAIgASgIIskECg5PYmplY3RNZXRhZGF0YRIRCglvYmplY3RfaWQYASABKAkSDAoEa2luZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIsCghnZW9tZXRyeRgEIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnkSHQoQZ2VvbWV0cnlfdmVyc2lvbhgFIAEoBEgBiAEBEhwKD3BheWxvYWRfdmVyc2lvbhgGIAEoBEgCiAEBEg4KBmxvY2tlZBgHIAEoCBIWCglwYXJlbnRfaWQYCCABKAlIA4gBARIVCghncm91cF9pZBgJIAEoCUgEiAEBEjYKCmFwcGVhcmFuY2UYCiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdEFwcGVhcmFuY2USMAoFc2hhcGUYCyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXBlR2VvbWV0cnlIABI0CgdzZWN0aW9uGAwgASgLMiEubHVtaW5nLnN0dWRpby52MS5TZWN0aW9uR2VvbWV0cnlIABIsCgNpbmsYDSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLklua0dlb21ldHJ5SAASOAoJY29ubmVjdG9yGA4gASgLMiMubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JHZW9tZXRyeUgAQhEKD2dlb21ldHJ5X2RldGFpbEITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uQgwKCl9wYXJlbnRfaWRCCwoJX2dyb3VwX2lkIlEKCEdlb21ldHJ5EgkKAXgYASABKAESCQoBeRgCIAEoARINCgV3aWR0aBgDIAEoARIOCgZoZWlnaHQYBCABKAESEAoIcm90YXRpb24YBSABKAEiHQoFUG9pbnQSCQoBeBgBIAEoARIJCgF5GAIgASgBIpoBChBPYmplY3RBcHBlYXJhbmNlEhEKBGZpbGwYASABKAlIAIgBARITCgZzdHJva2UYAiABKAlIAYgBARIZCgxzdHJva2Vfd2lkdGgYAyABKAFIAogBARIOCgZkYXNoZWQYBCABKAgSDgoGaG9sbG93GAUgASgIQgcKBV9maWxsQgkKB19zdHJva2VCDwoNX3N0cm9rZV93aWR0aCIgCg1TaGFwZUdlb21ldHJ5Eg8KB291dGxpbmUYASABKAkiJgoPU2VjdGlvbkdlb21ldHJ5EhMKC3RyYW5zcGFyZW50GAEgASgIIhwKC0lua0dlb21ldHJ5Eg0KBXdpZHRoGAEgASgBIvECChFDb25uZWN0b3JHZW9tZXRyeRIyCgVzdGFydBgBIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yRW5kcG9pbnQSMAoDZW5kGAIgASgLMiMubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JFbmRwb2ludBImCgViZW5kcxgDIAMoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNwoOcmVsYXRpdmVfYmVuZHMYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlJlbGF0aXZlQmVuZHMSLQoMbGFiZWxfb2Zmc2V0GAUgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBIzCgpzdGFydF9oZWFkGAYgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JIZWFkEjEKCGVuZF9oZWFkGAcgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JIZWFkInYKEUNvbm5lY3RvckVuZHBvaW50EiYKBXBvaW50GAEgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI5CgphdHRhY2htZW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JBdHRhY2htZW50IlcKE0Nvbm5lY3RvckF0dGFjaG1lbnQSEQoJb2JqZWN0X2lkGAEgASgJEi0KBHBvcnQYAiABKA4yHy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvclBvcnQiUAoNUmVsYXRpdmVCZW5kcxIuCgpmaXJzdF9heGlzGAEgASgOMhoubHVtaW5nLnN0dWRpby52MS5CZW5kQXhpcxIPCgdvZmZzZXRzGAIgAygBKpUBCg1Db25uZWN0b3JQb3J0Eh4KGkNPTk5FQ1RPUl9QT1JUX1VOU1BFQ0lGSUVEEAASFgoSQ09OTkVDVE9SX1BPUlRfVE9QEAESGQoVQ09OTkVDVE9SX1BPUlRfQk9UVE9NEAISFwoTQ09OTkVDVE9SX1BPUlRfTEVGVBADEhgKFENPTk5FQ1RPUl9QT1JUX1JJR0hUEAQqfQoNQ29ubmVjdG9ySGVhZBIeChpDT05ORUNUT1JfSEVBRF9VTlNQRUNJRklFRBAAEhcKE0NPTk5FQ1RPUl9IRUFEX05PTkUQARIYChRDT05ORUNUT1JfSEVBRF9BUlJPVxACEhkKFUNPTk5FQ1RPUl9IRUFEX0NJUkNMRRADKlcKCEJlbmRBeGlzEhkKFUJFTkRfQVhJU19VTlNQRUNJRklFRBAAEhgKFEJFTkRfQVhJU19IT1JJWk9OVEFMEAESFgoSQkVORF9BWElTX1ZFUlRJQ0FMEAJiBnByb3RvMw");
 var BoardSceneSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_scene, 0);
 var ObjectMetadataSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_scene, 2);
 var ConnectorPortSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_scene, 0);
@@ -19576,7 +19602,7 @@ function createFeedbackRoutes(application) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_history_pb.js
-var file_luming_studio_v1_whiteboard_history = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfaGlzdG9yeS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJtChhMaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSHAoPYmVmb3JlX3JldmlzaW9uGAIgASgESACIAQESDQoFbGltaXQYAyABKA1CEgoQX2JlZm9yZV9yZXZpc2lvbiLEAQoZTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRIdChBjdXJyZW50X3JldmlzaW9uGAEgASgESACIAQESNwoIdmVyc2lvbnMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvblN1bW1hcnkSIQoUbmV4dF9iZWZvcmVfcmV2aXNpb24YAyABKARIAYgBAUITChFfY3VycmVudF9yZXZpc2lvbkIXChVfbmV4dF9iZWZvcmVfcmV2aXNpb24ijgIKE0JvYXJkVmVyc2lvblN1bW1hcnkSFQoIcmV2aXNpb24YASABKARIAIgBARINCgV0aXRsZRgCIAEoCRIcCg9zYXZlZF9hdF9taWxsaXMYAyABKARIAYgBARIQCghhY3Rvcl9pZBgEIAEoCRIwCgRraW5kGAUgASgOMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFZlcnNpb25LaW5kEhwKFGNoYW5nZWRfb2JqZWN0X2NvdW50GAYgASgNEhwKD3NvdXJjZV9yZXZpc2lvbhgHIAEoBEgCiAEBQgsKCV9yZXZpc2lvbkISChBfc2F2ZWRfYXRfbWlsbGlzQhIKEF9zb3VyY2VfcmV2aXNpb24iUwobR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQFCCwoJX3JldmlzaW9uIksKHEdldEJvYXJkVmVyc2lvblNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiagoeR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQESEgoKb2JqZWN0X2lkcxgDIAMoCUILCglfcmV2aXNpb24ipAEKH0dldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARI2CgdyZXN1bHRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhMKC3VuYXZhaWxhYmxlGAQgASgIQgsKCV9yZXZpc2lvbiKnAgoaUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIVCghyZXZpc2lvbhgDIAEoBEgBiAEBEiYKGWV4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24YBCABKARIAogBARIzCgV3aG9sZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IAEIHCgVzY29wZUILCglfcmV2aXNpb25CHAoaX2V4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24iUgobUmVzdG9yZUJvYXJkVmVyc2lvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQigQIKGUV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAYgBARIzCgV3aG9sZRgDIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IABIzCgZmb3JtYXQYBSABKA4yIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0Rm9ybWF0QgcKBXNjb3BlQgsKCV9yZXZpc2lvbiLrAQoaRXhwb3J0Qm9hcmRWZXJzaW9uUmVzcG9uc2USMQoEZmlsZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRGaWxlSAASOQoIcmVqZWN0ZWQYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABIVCgt1bmF2YWlsYWJsZRgDIAEoCEgAEj4KC2Jyb3dzZXJfcG5nGAQgASgLMicubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZEJyb3dzZXJQbmdIAEIICgZyZXN1bHQq1gEKEEJvYXJkVmVyc2lvbktpbmQSIgoeQk9BUkRfVkVSU0lPTl9LSU5EX1VOU1BFQ0lGSUVEEAASHwobQk9BUkRfVkVSU0lPTl9LSU5EX0JBU0VMSU5FEAESHwobQk9BUkRfVkVSU0lPTl9LSU5EX0dFT01FVFJZEAISHgoaQk9BUkRfVkVSU0lPTl9LSU5EX0NPTlRFTlQQAxIcChhCT0FSRF9WRVJTSU9OX0tJTkRfSU1BR0UQBBIeChpCT0FSRF9WRVJTSU9OX0tJTkRfUkVTVE9SRRAFMt8EChNCb2FyZEhpc3RvcnlTZXJ2aWNlEmwKEUxpc3RCb2FyZFZlcnNpb25zEioubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFZlcnNpb25zUmVzcG9uc2USdQoUR2V0Qm9hcmRWZXJzaW9uU2NlbmUSLS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVmVyc2lvblNjZW5lUmVxdWVzdBouLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXNwb25zZRJ+ChdHZXRCb2FyZFZlcnNpb25QYXlsb2FkcxIwLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0GjEubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25QYXlsb2Fkc1Jlc3BvbnNlEnIKE1Jlc3RvcmVCb2FyZFZlcnNpb24SLC5sdW1pbmcuc3R1ZGlvLnYxLlJlc3RvcmVCb2FyZFZlcnNpb25SZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5SZXN0b3JlQm9hcmRWZXJzaW9uUmVzcG9uc2USbwoSRXhwb3J0Qm9hcmRWZXJzaW9uEisubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFZlcnNpb25SZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFZlcnNpb25SZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var file_luming_studio_v1_whiteboard_history = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfaGlzdG9yeS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJtChhMaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSHAoPYmVmb3JlX3JldmlzaW9uGAIgASgESACIAQESDQoFbGltaXQYAyABKA1CEgoQX2JlZm9yZV9yZXZpc2lvbiLEAQoZTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRIdChBjdXJyZW50X3JldmlzaW9uGAEgASgESACIAQESNwoIdmVyc2lvbnMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvblN1bW1hcnkSIQoUbmV4dF9iZWZvcmVfcmV2aXNpb24YAyABKARIAYgBAUITChFfY3VycmVudF9yZXZpc2lvbkIXChVfbmV4dF9iZWZvcmVfcmV2aXNpb24ijgIKE0JvYXJkVmVyc2lvblN1bW1hcnkSFQoIcmV2aXNpb24YASABKARIAIgBARINCgV0aXRsZRgCIAEoCRIcCg9zYXZlZF9hdF9taWxsaXMYAyABKARIAYgBARIQCghhY3Rvcl9pZBgEIAEoCRIwCgRraW5kGAUgASgOMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFZlcnNpb25LaW5kEhwKFGNoYW5nZWRfb2JqZWN0X2NvdW50GAYgASgNEhwKD3NvdXJjZV9yZXZpc2lvbhgHIAEoBEgCiAEBQgsKCV9yZXZpc2lvbkISChBfc2F2ZWRfYXRfbWlsbGlzQhIKEF9zb3VyY2VfcmV2aXNpb24iUwobR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQFCCwoJX3JldmlzaW9uIksKHEdldEJvYXJkVmVyc2lvblNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiagoeR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQESEgoKb2JqZWN0X2lkcxgDIAMoCUILCglfcmV2aXNpb24ipAEKH0dldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARI2CgdyZXN1bHRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhMKC3VuYXZhaWxhYmxlGAQgASgIQgsKCV9yZXZpc2lvbiKnAgoaUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIVCghyZXZpc2lvbhgDIAEoBEgBiAEBEiYKGWV4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24YBCABKARIAogBARIzCgV3aG9sZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IAEIHCgVzY29wZUILCglfcmV2aXNpb25CHAoaX2V4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24iUgobUmVzdG9yZUJvYXJkVmVyc2lvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQigQIKGUV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAYgBARIzCgV3aG9sZRgDIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IABIzCgZmb3JtYXQYBSABKA4yIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0Rm9ybWF0QgcKBXNjb3BlQgsKCV9yZXZpc2lvbiLrAQoaRXhwb3J0Qm9hcmRWZXJzaW9uUmVzcG9uc2USMQoEZmlsZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRGaWxlSAASOQoIcmVqZWN0ZWQYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABIVCgt1bmF2YWlsYWJsZRgDIAEoCEgAEj4KC2Jyb3dzZXJfcG5nGAQgASgLMicubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZEJyb3dzZXJQbmdIAEIICgZyZXN1bHQqmgIKEEJvYXJkVmVyc2lvbktpbmQSIgoeQk9BUkRfVkVSU0lPTl9LSU5EX1VOU1BFQ0lGSUVEEAASHwobQk9BUkRfVkVSU0lPTl9LSU5EX0JBU0VMSU5FEAESHwobQk9BUkRfVkVSU0lPTl9LSU5EX0dFT01FVFJZEAISHgoaQk9BUkRfVkVSU0lPTl9LSU5EX0NPTlRFTlQQAxIcChhCT0FSRF9WRVJTSU9OX0tJTkRfSU1BR0UQBBIeChpCT0FSRF9WRVJTSU9OX0tJTkRfUkVTVE9SRRAFEhwKGEJPQVJEX1ZFUlNJT05fS0lORF9UUkFTSBAGEiQKIEJPQVJEX1ZFUlNJT05fS0lORF9SRVNUT1JFX1RSQVNIEAcy3wQKE0JvYXJkSGlzdG9yeVNlcnZpY2USbAoRTGlzdEJvYXJkVmVyc2lvbnMSKi5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFZlcnNpb25zUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRJ1ChRHZXRCb2FyZFZlcnNpb25TY2VuZRItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25TY2VuZVJlc3BvbnNlEn4KF0dldEJvYXJkVmVyc2lvblBheWxvYWRzEjAubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25QYXlsb2Fkc1JlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2UScgoTUmVzdG9yZUJvYXJkVmVyc2lvbhIsLmx1bWluZy5zdHVkaW8udjEuUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLlJlc3RvcmVCb2FyZFZlcnNpb25SZXNwb25zZRJvChJFeHBvcnRCb2FyZFZlcnNpb24SKy5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QaLC5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
 var BoardVersionKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_history, 0);
 var BoardVersionKind = /* @__PURE__ */ tsEnum(BoardVersionKindSchema);
 var BoardHistoryService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_history, 0);
@@ -19662,7 +19688,9 @@ var versionKind = {
   geometry: BoardVersionKind.GEOMETRY,
   content: BoardVersionKind.CONTENT,
   image: BoardVersionKind.IMAGE,
-  restore: BoardVersionKind.RESTORE
+  restore: BoardVersionKind.RESTORE,
+  trash: BoardVersionKind.TRASH,
+  restoreTrash: BoardVersionKind.RESTORE_TRASH
 };
 var maxPayloadIds = 500;
 function requireRevision(revision) {
@@ -24049,11 +24077,18 @@ function createWhiteboardRoutes(application, observe) {
   return [
     createExportRoute(application),
     unaryRoute(getBoardScene, (actor, request) => ({
-      scene: toBoardScene(application.getBoardScene(actor, requireId(request.boardId)))
+      scene: toBoardScene(
+        application.getBoardScene(actor, requireId(request.boardId), canReadTrashedBoard(actor))
+      )
     })),
     unaryRoute(getObjectPayloads, (actor, request) => {
       const boardId = requireId(request.boardId);
-      const results = application.getObjectPayloads(actor, boardId, request.objectIds);
+      const results = application.getObjectPayloads(
+        actor,
+        boardId,
+        request.objectIds,
+        canReadTrashedBoard(actor)
+      );
       return { boardId, results: results.map(toPayloadResult) };
     }),
     unaryRoute(moveObjects, (actor, request) => {
@@ -26608,6 +26643,15 @@ function readBoardAccess(connection, boardId, actorId2) {
     };
   }
 }
+function isTrashedBoardOwner(connection, boardId, actorId2) {
+  const row = connection.prepare(`
+    SELECT 1
+    FROM board_lifecycle AS l
+    JOIN board_members AS m ON m.board_id = l.board_id AND m.actor_id = l.owner_actor_id
+    WHERE l.board_id = ? AND l.owner_actor_id = ? AND l.trashed_at_millis IS NOT NULL
+  `).get(boardId, actorId2);
+  return row !== void 0;
+}
 
 // src/infrastructure/adapters/archives/history.ts
 var objectColumns = [
@@ -26654,8 +26698,9 @@ function samePayload2(before, after) {
 function historyWriter(connection, boardId) {
   const insertVersion = connection.prepare(`
     INSERT INTO board_versions (
-      board_id, revision, title, actor_id, kind, saved_at_millis, source_revision, changed_object_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      board_id, revision, title, actor_id, kind, saved_at_millis, source_revision,
+      changed_object_count, lifecycle_kind
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertObject = connection.prepare(`
     INSERT INTO board_history_objects (
@@ -26672,15 +26717,18 @@ function historyWriter(connection, boardId) {
   `);
   return {
     version(snapshot) {
+      const { kind } = snapshot;
+      const lifecycleKind = kind === "trash" || kind === "restoreTrash" ? kind : null;
       insertVersion.run(
         boardId,
         snapshot.revision,
         snapshot.title,
         snapshot.actorId ?? null,
-        snapshot.kind,
+        lifecycleKind ? "content" : kind,
         snapshot.savedAtMillis ?? null,
         snapshot.sourceRevision ?? null,
-        snapshot.changedObjectCount
+        snapshot.changedObjectCount,
+        lifecycleKind
       );
     },
     object(revision, objectId, before) {
@@ -27287,6 +27335,16 @@ function versionKind2(value) {
       throw new ArchiveObjectError("Invalid archived version kind.");
   }
 }
+function archivedVersionKind(kind, lifecycleKind) {
+  const legacyKind = versionKind2(kind);
+  if (lifecycleKind === void 0) {
+    return legacyKind;
+  }
+  if (legacyKind === "content" && (lifecycleKind === "trash" || lifecycleKind === "restoreTrash")) {
+    return lifecycleKind;
+  }
+  throw new ArchiveObjectError("Invalid archived lifecycle version kind.");
+}
 function projection(object3, layerIndex) {
   return {
     ...object3,
@@ -27457,7 +27515,7 @@ function parseVersion(entry, artifact2, native) {
     data ? data.sourceRevision : source?.[1],
     "source revision"
   );
-  const kind = versionKind2(data ? data.kind : entry.summary);
+  const kind = archivedVersionKind(data ? data.kind : entry.summary, data?.lifecycleKind);
   const missingActorOrDate = actorId2 === void 0 || savedAtMillis === void 0;
   const unknownCommit = kind !== "baseline" && missingActorOrDate;
   const invalidSource = sourceRevision !== void 0 && sourceRevision >= revision;
@@ -27950,8 +28008,9 @@ function writePublication(connection, command, archive, publication) {
   }
   retainSource(connection, boardId, archive);
 }
-function readPublishedAsset(connection, actorId2, boardId, assetId) {
-  if (!readBoardAccess(connection, boardId, actorId2)) {
+function readPublishedAsset(connection, actorId2, boardId, assetId, allowTrashedOwner) {
+  const access = readBoardAccess(connection, boardId, actorId2);
+  if (!access && !(allowTrashedOwner && isTrashedBoardOwner(connection, boardId, actorId2))) {
     return void 0;
   }
   const row = connection.prepare(`
@@ -28123,7 +28182,9 @@ function createArchiveImportRepository(database, validate) {
   return {
     importCurrent: (command) => importCurrent(database, command, validate),
     getReceipt: (actorId2, commandId) => database.read((connection) => readReceipt(connection, actorId2, commandId)?.receipt),
-    getAsset: (actorId2, boardId, assetId) => database.read((connection) => readPublishedAsset(connection, actorId2, boardId, assetId))
+    getAsset: (actorId2, boardId, assetId, allowTrashedOwner) => database.read(
+      (connection) => readPublishedAsset(connection, actorId2, boardId, assetId, allowTrashedOwner)
+    )
   };
 }
 
@@ -37752,7 +37813,10 @@ function readCatalogThumbnail(connection, lookup, cached) {
   }
   const bounds = readBounds(connection, boardId);
   if (!bounds) {
-    return { kind: "unavailable" };
+    return lookup.trashed ? {
+      kind: "scene",
+      scene: { revision, left: 0, top: 0, right: 0, bottom: 0, objects: [] }
+    } : { kind: "unavailable" };
   }
   const objects = readRows2(connection, boardId, bounds.total).map(readObject2);
   return {
@@ -37783,11 +37847,7 @@ var catalogOrderings = {
   }
 };
 var trashOrderings = {
-  recent: {
-    columns: "-trashed_at_millis, board_id",
-    parameters: "-?, ?",
-    values: ({ trashedAtMillis, boardId }) => [trashedAtMillis ?? null, boardId]
-  },
+  recent: catalogOrderings.recent,
   title: {
     columns: "lower(title), board_id",
     parameters: "lower(?), ?",
@@ -37923,13 +37983,21 @@ function getManagedBoard(connection, actorId2, boardId) {
     trashedAtMillis: row.trashed_at_millis === null ? void 0 : readUnsigned(row.trashed_at_millis, "trashed_at_millis")
   };
 }
-function changeBoard(connection, change) {
+function changeBoard(connection, change, recordLifecycleVersion, lifecycle) {
   const { board, trashedAtMillis } = change;
   const { boardId, title, updatedAtMillis, entryVersion, pinned } = board;
   if (updatedAtMillis === void 0) {
     throw new Error("Catalog changes require an update timestamp.");
   }
   connection.prepare("UPDATE boards SET title = ? WHERE board_id = ?").run(title, boardId);
+  if (lifecycle) {
+    recordLifecycleVersion(connection, {
+      ...lifecycle,
+      boardId,
+      title,
+      savedAtMillis: Number(updatedAtMillis)
+    });
+  }
   connection.prepare(`
       INSERT INTO catalog_entries (board_id, updated_at_millis, pinned, entry_version)
       VALUES (?, ?, ?, ?)
@@ -37978,7 +38046,7 @@ function saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt) {
   ).run(actorId2, receipt.commandId, sourceBoardId);
   return void 0;
 }
-function createCatalogRepository(database) {
+function createCatalogRepository(database, recordLifecycleVersion) {
   database.write((connection) => connection.exec(catalogSchema));
   return {
     listBoards: (lookup) => database.read((connection) => listBoards2(connection, lookup)),
@@ -37991,7 +38059,7 @@ function createCatalogRepository(database) {
         saveBoard: (actorId2, receipt) => saveBoard(connection, actorId2, receipt),
         duplicateBoard: (actorId2, sourceBoardId, receipt) => saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt),
         getManagedBoard: (actorId2, boardId) => getManagedBoard(connection, actorId2, boardId),
-        changeBoard: (board) => changeBoard(connection, board),
+        changeBoard: (board, lifecycle) => changeBoard(connection, board, recordLifecycleVersion, lifecycle),
         deleteBoard: (boardId) => deleteBoard(connection, boardId),
         saveManagementReceipt: (actorId2, signature, receipt) => saveManagementReceipt(connection, actorId2, signature, receipt)
       })
@@ -38936,6 +39004,9 @@ function decodeReceiptObject(value) {
 // src/infrastructure/adapters/board-history-storage.ts
 var retainedVersions = 200;
 var defaultPageSize3 = 50;
+var lifecycleColumn = `lifecycle_kind TEXT CHECK (
+  lifecycle_kind IS NULL OR (kind = 'content' AND lifecycle_kind IN ('trash', 'restoreTrash'))
+)`;
 var boardHistorySchema = `
   CREATE TABLE IF NOT EXISTS board_versions (
     board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
@@ -38946,6 +39017,7 @@ var boardHistorySchema = `
     saved_at_millis INTEGER CHECK (saved_at_millis >= 0),
     source_revision INTEGER CHECK (source_revision >= 0),
     changed_object_count INTEGER NOT NULL CHECK (changed_object_count >= 0),
+    ${lifecycleColumn},
     CHECK (kind = 'baseline' OR (actor_id IS NOT NULL AND saved_at_millis IS NOT NULL)),
     PRIMARY KEY (board_id, revision)
   ) STRICT;
@@ -39006,8 +39078,19 @@ var objectColumns2 = [
   "detail_json"
 ];
 var versionColumns = "revision, title, actor_id, kind, saved_at_millis, source_revision, changed_object_count";
+var readVersionColumns = `
+  revision, title, actor_id, COALESCE(lifecycle_kind, kind) AS kind,
+  saved_at_millis, source_revision, changed_object_count
+`;
 var requestedObjects = "requested AS (SELECT DISTINCT value AS object_id FROM json_each(?3))";
 var requestedOnly = "AND object_id IN (SELECT object_id FROM requested)";
+function initializeBoardHistory(connection) {
+  connection.exec(boardHistorySchema);
+  const columns = connection.prepare("PRAGMA table_info(board_versions)").all();
+  if (!columns.some(({ name }) => name === "lifecycle_kind")) {
+    connection.exec(`ALTER TABLE board_versions ADD COLUMN ${lifecycleColumn}`);
+  }
+}
 function objectProjection(alias) {
   return objectColumns2.map((column) => `${alias}.${column}`).join(", ");
 }
@@ -39060,6 +39143,7 @@ function publishBoardVersion(connection, before, after, commit) {
   }
   const { boardId, title } = before;
   const { actorId: actorId2, kind, savedAtMillis, sourceRevision, changedObjectCount } = commit;
+  const lifecycleKind = kind === "trash" || kind === "restoreTrash" ? kind : null;
   retainBackupGuest(connection, boardId, actorId2);
   connection.prepare(`
     INSERT INTO board_versions (board_id, ${versionColumns})
@@ -39067,19 +39151,33 @@ function publishBoardVersion(connection, before, after, commit) {
     WHERE NOT EXISTS (SELECT 1 FROM board_versions WHERE board_id = ?1)
   `).run(boardId, before.revision, title);
   connection.prepare(`
-    INSERT INTO board_versions (board_id, ${versionColumns})
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO board_versions (board_id, ${versionColumns}, lifecycle_kind)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     boardId,
     after,
     title,
     actorId2,
-    kind,
+    lifecycleKind ? "content" : kind,
     savedAtMillis,
     sourceRevision ?? null,
-    changedObjectCount
+    changedObjectCount,
+    lifecycleKind
   );
   pruneBoardVersions(connection, boardId);
+}
+function recordBoardLifecycleVersion(connection, { boardId, title, actorId: actorId2, action, savedAtMillis }) {
+  const advance = connection.prepare(`
+    UPDATE boards SET revision = revision + 1 WHERE board_id = ? RETURNING revision
+  `);
+  advance.setReadBigInts(true);
+  const revision = storedVersion(advance.get(boardId)?.revision, "revision");
+  publishBoardVersion(connection, { boardId, title, revision: revision - 1n }, revision, {
+    kind: action === "trash" ? "trash" : "restoreTrash",
+    actorId: actorId2,
+    savedAtMillis,
+    changedObjectCount: 0
+  });
 }
 function versionKind3(value) {
   switch (value) {
@@ -39088,6 +39186,8 @@ function versionKind3(value) {
     case "content":
     case "image":
     case "restore":
+    case "trash":
+    case "restoreTrash":
       return value;
     default:
       throw new Error("Invalid stored board version kind.");
@@ -39146,7 +39246,7 @@ function withCreationVersion(connection, boardId, row) {
 function readBoardVersions(connection, boardId, before, limit = defaultPageSize3) {
   const cutoff = before === void 0 ? "" : "AND revision < ?3";
   const query = connection.prepare(`
-    SELECT ${versionColumns} FROM board_versions
+    SELECT ${readVersionColumns} FROM board_versions
     WHERE board_id = ?1 ${cutoff} ORDER BY revision DESC LIMIT ?2
   `);
   query.setReadBigInts(true);
@@ -39155,7 +39255,7 @@ function readBoardVersions(connection, boardId, before, limit = defaultPageSize3
 }
 function readBoardVersion(connection, boardId, revision) {
   const query = connection.prepare(`
-    SELECT ${versionColumns} FROM board_versions WHERE board_id = ? AND revision = ?
+    SELECT ${readVersionColumns} FROM board_versions WHERE board_id = ? AND revision = ?
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, revision);
@@ -40481,6 +40581,7 @@ function createReader2(connection) {
       const access = readBoardAccess(connection, boardId, actorId2);
       return access && { canEdit: access.canEdit };
     },
+    isTrashedOwner: (boardId, actorId2) => isTrashedBoardOwner(connection, boardId, actorId2),
     getBoard: (boardId) => readBoard2(connection, boardId),
     getBackupMetadata: (boardId, actorId2) => readBackupMetadata(connection, boardId, actorId2),
     getBackupDetails: (boardId) => readBackupDetails(connection, boardId),
@@ -40563,7 +40664,7 @@ function createWhiteboardRepository(database) {
   database.write((connection) => {
     connection.exec(whiteboardSchema);
     connection.exec(boardEditSchema);
-    connection.exec(boardHistorySchema);
+    initializeBoardHistory(connection);
   });
   return {
     read: (work) => database.read((connection) => work(createReader2(connection))),
@@ -41176,7 +41277,7 @@ function createWhiteboardServer(options) {
         toPayloadResult({ kind: "payload", payload });
       }
     });
-    const catalog = createCatalogRepository(database);
+    const catalog = createCatalogRepository(database, recordBoardLifecycleVersion);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
       now: Date.now

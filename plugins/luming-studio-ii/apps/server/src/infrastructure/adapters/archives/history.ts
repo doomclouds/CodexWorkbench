@@ -28,7 +28,14 @@ export interface ArchiveHistoryObject {
 export interface ArchiveHistorySnapshot {
   readonly revision: bigint;
   readonly title: string;
-  readonly kind: 'baseline' | 'geometry' | 'content' | 'image' | 'restore';
+  readonly kind:
+    | 'baseline'
+    | 'geometry'
+    | 'content'
+    | 'image'
+    | 'restore'
+    | 'trash'
+    | 'restoreTrash';
   readonly actorId?: string;
   readonly savedAtMillis?: number;
   readonly sourceRevision?: bigint;
@@ -111,8 +118,9 @@ function samePayload(
 function historyWriter(connection: SqliteConnection, boardId: string) {
   const insertVersion = connection.prepare(`
     INSERT INTO board_versions (
-      board_id, revision, title, actor_id, kind, saved_at_millis, source_revision, changed_object_count
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      board_id, revision, title, actor_id, kind, saved_at_millis, source_revision,
+      changed_object_count, lifecycle_kind
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertObject = connection.prepare(`
     INSERT INTO board_history_objects (
@@ -130,15 +138,18 @@ function historyWriter(connection: SqliteConnection, boardId: string) {
 
   return {
     version(snapshot: ArchiveHistorySnapshot) {
+      const { kind } = snapshot;
+      const lifecycleKind = kind === 'trash' || kind === 'restoreTrash' ? kind : null;
       insertVersion.run(
         boardId,
         snapshot.revision,
         snapshot.title,
         snapshot.actorId ?? null,
-        snapshot.kind,
+        lifecycleKind ? 'content' : kind,
         snapshot.savedAtMillis ?? null,
         snapshot.sourceRevision ?? null,
         snapshot.changedObjectCount,
+        lifecycleKind,
       );
     },
     object(revision: bigint, objectId: string, before?: ArchiveHistoryObject) {

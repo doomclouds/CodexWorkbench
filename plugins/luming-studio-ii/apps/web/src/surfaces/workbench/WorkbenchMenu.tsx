@@ -1,11 +1,17 @@
-import { useEffectEvent, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 interface WorkbenchMenuProps {
   readonly id?: string;
   readonly anchor: HTMLButtonElement;
   readonly label: string;
-  readonly initialFocus?: 'first' | 'last' | 'selected';
+  readonly initialFocus?: 'first' | 'last' | 'selected' | 'trigger';
   readonly onClose: () => void;
   readonly children: ReactNode;
   readonly toolbar?: boolean;
@@ -124,14 +130,34 @@ export function WorkbenchMenu({
       }
     };
 
+    const handleTriggerKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        requestClose();
+        return;
+      }
+
+      const forwardTab = event.key === 'Tab' && !event.shiftKey;
+      if (forwardTab) {
+        event.preventDefault();
+        focusMenu(menu, 'first');
+      }
+    };
+
     positionMenu(menu, anchor.getBoundingClientRect(), host, view);
-    focusMenu(menu, initialFocus);
+    if (initialFocus === 'trigger') {
+      anchor.addEventListener('keydown', handleTriggerKeys);
+    } else {
+      focusMenu(menu, initialFocus);
+    }
     doc.addEventListener('pointerdown', dismissOutside, true);
     doc.addEventListener('focusin', dismissOutside, true);
     doc.addEventListener('scroll', reposition, true);
     view.addEventListener('resize', reposition);
 
     return () => {
+      anchor.removeEventListener('keydown', handleTriggerKeys);
       doc.removeEventListener('pointerdown', dismissOutside, true);
       doc.removeEventListener('focusin', dismissOutside, true);
       doc.removeEventListener('scroll', reposition, true);
@@ -139,7 +165,7 @@ export function WorkbenchMenu({
     };
   }, [anchor, host, initialFocus]);
 
-  function handleKeys(event: KeyboardEvent<HTMLDivElement>) {
+  function handleKeys(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopPropagation();
@@ -148,6 +174,9 @@ export function WorkbenchMenu({
       return;
     }
     if (event.key === 'Tab') {
+      if (initialFocus === 'trigger') {
+        anchor.focus();
+      }
       onClose();
       return;
     }

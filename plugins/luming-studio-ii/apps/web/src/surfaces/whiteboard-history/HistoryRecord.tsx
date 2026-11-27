@@ -17,6 +17,8 @@ const versionLabels = {
   content: '正文编辑',
   image: '插入图片',
   restore: '恢复版本',
+  trash: '移入回收站',
+  restoreTrash: '恢复作品',
 };
 
 const savedAtFormat = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' });

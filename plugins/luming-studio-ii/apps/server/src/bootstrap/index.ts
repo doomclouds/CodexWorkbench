@@ -17,6 +17,7 @@ import {
   createBoardSuggestionRepository,
   createWhiteboardRepository,
   decodeImportedPayload,
+  recordBoardLifecycleVersion,
 } from '../infrastructure/adapters/index.js';
 import { createRoomsRepository } from '../infrastructure/adapters/rooms/index.js';
 import { createSharingRepository } from '../infrastructure/adapters/sharing/index.js';
@@ -148,7 +149,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
         toPayloadResult({ kind: 'payload', payload });
       }
     });
-    const catalog = createCatalogRepository(database);
+    const catalog = createCatalogRepository(database, recordBoardLifecycleVersion);
     const catalogApplication = createCatalogApplication(catalog, {
       newBoardId: randomUUID,
       now: Date.now,
