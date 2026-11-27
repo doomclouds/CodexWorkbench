@@ -6,6 +6,8 @@ export interface BoardCreationAttachment {
   readonly sourcePort: ConnectorPort;
   readonly targetPort: ConnectorPort;
   readonly connectorId: string;
+  readonly stroke?: string;
+  readonly strokeWidth?: number;
 }
 
 const oppositePort: Readonly<Record<ConnectorPort, ConnectorPort>> = {
@@ -18,7 +20,7 @@ const oppositePort: Readonly<Record<ConnectorPort, ConnectorPort>> = {
 export function adjacentShapeConnector(
   source: BoardObject,
   target: BoardObject,
-  { sourcePort, targetPort, connectorId }: BoardCreationAttachment,
+  { sourcePort, targetPort, connectorId, stroke, strokeWidth }: BoardCreationAttachment,
 ): BoardObject | undefined {
   if (
     source.kind !== 'shape' ||
@@ -74,6 +76,8 @@ export function adjacentShapeConnector(
     },
     locked: false,
     geometryVersion: 0n,
+    appearance:
+      stroke === undefined && strokeWidth === undefined ? undefined : { stroke, strokeWidth },
     detail: {
       ...detail,
       start: { ...detail.start, point: first },

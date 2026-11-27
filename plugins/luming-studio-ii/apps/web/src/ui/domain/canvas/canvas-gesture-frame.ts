@@ -8,7 +8,7 @@ import {
   resolveCanvasConnection,
 } from './canvas-creation.js';
 import type { CanvasProjection, InkGesture } from './canvas-creation.js';
-import { translateConnection } from './connectors/geometry.js';
+import { rotateConnection, translateConnection } from './connectors/geometry.js';
 import type {
   CanvasConnection,
   CanvasConnectionEndpoint,
@@ -23,7 +23,7 @@ import type {
 import { getMoveSnapBounds, previewTransform, snapMove } from './gestures/index.js';
 import type { TransformGesture, TransformModifiers } from './gestures/index.js';
 import { scaleInk, snapInkPoint } from './ink/geometry.js';
-import { queryScene } from './scene/index.js';
+import { projectObject, queryScene } from './scene/index.js';
 import {
   getObjectBounds,
   getViewportBounds,
@@ -84,6 +84,7 @@ interface FrameProjection extends CanvasProjection {
 }
 
 const dragThreshold = 4;
+const moveThreshold = 5;
 const placementThreshold = 5;
 const snappingOverscan = 12;
 
@@ -93,6 +94,12 @@ function offset(start: CanvasPoint, end: CanvasPoint) {
 
 function distance(start: CanvasPoint, end: CanvasPoint) {
   return Math.hypot(end.x - start.x, end.y - start.y);
+}
+
+function dragThresholdFor(action: PointerAction) {
+  const moving = action.kind === 'transform' && action.transform.kind === 'move';
+
+  return moving ? moveThreshold : dragThreshold;
 }
 
 function marqueeBetween(start: CanvasPoint, end: CanvasPoint) {
@@ -120,6 +127,38 @@ function changeGeometry(
   return change;
 }
 
+function rotationChanges(changes: readonly CanvasObjectChange[], view: FrameProjection) {
+  if (!changes.some(({ id }) => view.index.get(id)?.kind === 'connector')) {
+    return changes;
+  }
+
+  const pending = new Map(view.pending);
+  for (const change of changes) {
+    pending.set(change.id, change);
+  }
+  const next = { ...view, pending };
+
+  return changes.map((change) => {
+    const current = projectObject(view.index, view.pending, change.id);
+    if (current?.object.kind !== 'connector' || !current.connectorRoute) {
+      return change;
+    }
+
+    const connection = rotateConnection(
+      current.object.connection,
+      current.geometry,
+      change.geometry,
+      current.connectorRoute.points,
+    );
+    const { geometry } = resolveCanvasConnection(connection, next);
+    return {
+      ...change,
+      connection,
+      geometry: { ...geometry, rotation: current.object.geometry.rotation },
+    };
+  });
+}
+
 function transformFrame(
   action: TransformAction,
   point: CanvasPoint,
@@ -137,7 +176,11 @@ function transformFrame(
     return { viewport };
   }
 
-  const changes = intent.changes.map((change) => changeGeometry(change, intent, view));
+  const changes =
+    intent.kind === 'rotate'
+      ? rotationChanges(intent.changes, view)
+      : intent.changes.map((change) => changeGeometry(change, intent, view));
+
   if (action.duplicate && intent.kind === 'move') {
     const { interactionId, delta } = intent;
 
@@ -255,13 +298,19 @@ export function gestureFrame(
 
     return { viewport, draft: { kind: 'create', interactionId: action.interactionId, object } };
   }
-  if (travel < dragThreshold) {
+  if (travel < dragThresholdFor(action)) {
     if (final && action.kind === 'create-connection' && action.sourceVersion !== undefined) {
       const from = action.start.attachment;
       if (from?.port) {
         return {
           viewport,
-          draft: placementFromPort(view, from.objectId, from.port, action.interactionId),
+          draft: placementFromPort(
+            view,
+            from.objectId,
+            from.port,
+            action.interactionId,
+            action.style,
+          ),
         };
       }
     }

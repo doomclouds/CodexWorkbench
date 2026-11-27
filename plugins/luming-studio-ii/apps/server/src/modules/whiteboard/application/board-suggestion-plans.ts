@@ -80,6 +80,7 @@ function geometryTargets(operation: GeometryOperation): readonly string[] {
     case 'create':
       return operation.attachment ? [operation.attachment.source.objectId] : [];
     case 'paste':
+    case 'removeCustomColor':
       return [];
     case 'transform':
       return operation.objects.map(({ target }) => target.objectId);
@@ -105,11 +106,17 @@ export function operationFitsSource(
   if (request.kind === 'content') {
     return sourceIds.has(request.operation.objectId);
   }
-  if (request.operation.kind === 'paste') {
+
+  const operation = request.operation;
+  const writesPalette =
+    operation.kind === 'removeCustomColor' ||
+    (operation.kind === 'style' && operation.rememberColor !== undefined);
+
+  if (operation.kind === 'paste' || writesPalette) {
     return false;
   }
 
-  return geometryTargets(request.operation).every((id) => sourceIds.has(id));
+  return geometryTargets(operation).every((id) => sourceIds.has(id));
 }
 
 export function planSuggestion(

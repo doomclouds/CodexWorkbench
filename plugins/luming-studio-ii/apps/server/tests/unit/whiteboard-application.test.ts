@@ -37,6 +37,7 @@ describe('Whiteboard queries', () => {
     expect(board.getBoardScene(viewer, boardId)).toEqual({
       access: { canEdit: false },
       board: { boardId, title: 'Unit board', revision: 10n },
+      customColors: [],
       objects: [note],
     });
     expect(repository.payloadQueries).toEqual([]);

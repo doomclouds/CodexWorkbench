@@ -63,7 +63,7 @@ describe('registered canvas text objects', () => {
     expect(sectionExtension.capabilities).toMatchObject({ rotate: false, connect: true });
     expect(connectorExtension.capabilities).toMatchObject({
       resize: false,
-      rotate: false,
+      rotate: true,
       connect: false,
     });
     expect(connectorExtension.placement).toBeUndefined();

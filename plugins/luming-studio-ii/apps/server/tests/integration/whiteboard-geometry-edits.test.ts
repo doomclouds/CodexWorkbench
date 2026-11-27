@@ -13,7 +13,12 @@ import type {
   ObjectPayloadSchema,
   TableGridSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/payload';
-import { ConnectorPort } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
+import {
+  BendAxis,
+  ConnectorHead,
+  ConnectorPort,
+  type ConnectorGeometrySchema,
+} from '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
 import {
   MoveRejectionReason,
   WhiteboardService,
@@ -84,6 +89,7 @@ function createAdjacent(
   sourceId: string,
   expectedVersion = 0n,
   connectorId = 'port-arrow',
+  stroke = '#2F7CC4',
 ): Operation {
   const { value } = createShape('port-shape', { ...box, x: 240 });
 
@@ -96,6 +102,8 @@ function createAdjacent(
         sourcePort: ConnectorPort.RIGHT,
         targetPort: ConnectorPort.LEFT,
         connectorId,
+        stroke,
+        strokeWidth: 3,
       }),
     },
   };
@@ -210,6 +218,7 @@ test('creates a shape and its attached arrow in one durable, reversible edit', a
         objectId: 'port-arrow',
         kind: 'connector',
         geometry: { x: 164, y: 80, width: 76, height: 0 },
+        appearance: { stroke: '#2F7CC4', strokeWidth: 3 },
         geometryDetail: {
           case: 'connector',
           value: {
@@ -258,6 +267,15 @@ test('leaves the board unchanged for attachment conflicts, locks, invalid IDs or
   applied((await edit('place-protected-port', createShape(sourceId))).receipt);
   const duplicate = await edit('attach-reused-id', createAdjacent(sourceId, 0n, sourceId));
   expect(duplicate.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.INVALID_EDIT },
+  });
+
+  const invalidPaint = await edit(
+    'attach-invalid-paint',
+    createAdjacent(sourceId, 0n, 'port-arrow', 'invalid paint'),
+  );
+  expect(invalidPaint.receipt?.outcome).toMatchObject({
     case: 'rejected',
     value: { reason: BoardEditRejectionReason.INVALID_EDIT },
   });
@@ -465,6 +483,187 @@ test('rejects a mixed rotation atomically when one object has a fixed orientatio
     boardRevision: 1n,
     changedObjects: [{ objectId: shapeId, geometryVersion: 1n, geometry: { rotation: 45 } }],
   });
+});
+
+const rotationConnectorId = 'rotation-connector';
+const boundStart = {
+  point: { x: 116, y: 32 },
+  attachment: { objectId: shapeId, port: ConnectorPort.RIGHT },
+};
+const connectorBeforeRotation = {
+  start: boundStart,
+  end: { point: { x: 200, y: 72 } },
+  relativeBends: { firstAxis: BendAxis.HORIZONTAL, offsets: [94] },
+  labelOffset: { x: 12, y: 4 },
+  startHead: ConnectorHead.CIRCLE,
+  endHead: ConnectorHead.ARROW,
+} satisfies MessageInitShape<typeof ConnectorGeometrySchema>;
+const rotatedConnector = {
+  start: boundStart,
+  end: { point: { x: 76, y: 116 } },
+  bends: [
+    { x: 116, y: 76 },
+    { x: 76, y: 76 },
+  ],
+  labelOffset: { x: -4, y: 12 },
+  startHead: ConnectorHead.CIRCLE,
+  endHead: ConnectorHead.ARROW,
+} satisfies MessageInitShape<typeof ConnectorGeometrySchema>;
+const rotatedShape = { x: 66, y: -58, width: 100, height: 80, rotation: 90 };
+const rotatedConnectorBounds = { x: 76, y: 32, width: 40, height: 84, rotation: 0 };
+
+async function seedRotationConnector() {
+  applied(
+    (
+      await edit('seed-rotation-connector', {
+        case: 'create',
+        value: {
+          object: {
+            objectId: rotationConnectorId,
+            kind: 'connector',
+            label: 'Manual connection',
+            geometry: { x: 116, y: 32, width: 84, height: 40, rotation: 0 },
+            geometryDetail: { case: 'connector', value: connectorBeforeRotation },
+          },
+        },
+      })
+    ).receipt,
+  );
+}
+
+function rotationOfSelection(
+  connector: MessageInitShape<typeof ConnectorGeometrySchema> = rotatedConnector,
+  connectorVersion = 0n,
+  shapeVersion = 0n,
+) {
+  return {
+    case: 'transform',
+    value: {
+      kind: BoardTransformKind.ROTATE,
+      objects: [
+        { target: target(shapeId, shapeVersion), geometry: rotatedShape },
+        {
+          target: target(rotationConnectorId, connectorVersion),
+          geometry: rotatedConnectorBounds,
+          connector,
+        },
+      ],
+    },
+  } satisfies Operation;
+}
+
+test('rotates mixed shape and connector geometry atomically without changing the binding or heads', async () => {
+  await seedRotationConnector();
+  const operation = rotationOfSelection();
+  const response = await edit('rotate-connected-selection', operation);
+  const saved = applied(response.receipt);
+  expect(saved).toMatchObject({
+    boardRevision: 2n,
+    changedObjects: [
+      { objectId: shapeId, geometryVersion: 1n, geometry: rotatedShape },
+      {
+        objectId: rotationConnectorId,
+        geometryVersion: 1n,
+        geometry: rotatedConnectorBounds,
+        geometryDetail: {
+          case: 'connector',
+          value: rotatedConnector,
+        },
+      },
+    ],
+    changedPayloads: [],
+  });
+  const detail = saved.changedObjects[1]?.geometryDetail;
+  assert.equal(detail?.case, 'connector');
+  expect(detail.value.relativeBends).toBeUndefined();
+
+  const persisted = await currentScene();
+  expect(persisted.objects.find(({ objectId }) => objectId === rotationConnectorId)).toMatchObject({
+    geometry: rotatedConnectorBounds,
+    geometryDetail: { case: 'connector', value: rotatedConnector },
+  });
+  const stale = await edit(
+    'rotate-selection-with-stale-connector',
+    rotationOfSelection(rotatedConnector, 0n, 1n),
+  );
+  expect(stale.receipt?.outcome).toMatchObject({
+    case: 'conflict',
+    value: { boardRevision: 2n },
+  });
+  expect(await currentScene()).toEqual(persisted);
+});
+
+const invalidConnectorRotations = [
+  {
+    reason: 'an altered attachment',
+    connector: {
+      ...rotatedConnector,
+      end: { ...rotatedConnector.end, attachment: { objectId: documentId } },
+    },
+  },
+  {
+    reason: 'an altered port',
+    connector: {
+      ...rotatedConnector,
+      start: {
+        ...boundStart,
+        attachment: { ...boundStart.attachment, port: ConnectorPort.BOTTOM },
+      },
+    },
+  },
+  {
+    reason: 'an altered attached fallback point',
+    connector: { ...rotatedConnector, start: { ...boundStart, point: { x: 80, y: 32 } } },
+  },
+  {
+    reason: 'an altered head',
+    connector: { ...rotatedConnector, endHead: ConnectorHead.NONE },
+  },
+  {
+    reason: 'a free endpoint outside the board coordinate range',
+    connector: { ...rotatedConnector, end: { point: { x: 10_000_001, y: 32 } } },
+  },
+];
+
+test.each(invalidConnectorRotations)(
+  'rejects mixed rotation with $reason before applying any geometry',
+  async ({ connector }) => {
+    await seedRotationConnector();
+    const before = await currentScene();
+    const response = await edit('malformed-rotation', rotationOfSelection(connector));
+    expect(response.receipt?.outcome).toMatchObject({
+      case: 'rejected',
+      value: { reason: BoardEditRejectionReason.INVALID_EDIT },
+    });
+    expect(await currentScene()).toEqual(before);
+  },
+);
+
+test('rejects direct connector rotation and mixed rotation when the connector is locked', async () => {
+  await seedRotationConnector();
+  const before = await currentScene();
+  const { value } = rotationOfSelection();
+  const connectorOnly = await edit('rotate-connector-directly', {
+    case: 'transform',
+    value: { ...value, objects: value.objects.slice(1) },
+  });
+  expect(connectorOnly.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.INVALID_EDIT },
+  });
+  expect(await currentScene()).toEqual(before);
+
+  applied((await edit('lock-rotation-connector', lock(rotationConnectorId, 0n, true))).receipt);
+  const locked = await currentScene();
+  const rejected = await edit(
+    'rotate-with-locked-connector',
+    rotationOfSelection(rotatedConnector, 1n),
+  );
+  expect(rejected.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.GEOMETRY_LOCKED },
+  });
+  expect(await currentScene()).toEqual(locked);
 });
 
 test('resizes an ink stroke by changing stroke width without replacing its normalized path', async () => {

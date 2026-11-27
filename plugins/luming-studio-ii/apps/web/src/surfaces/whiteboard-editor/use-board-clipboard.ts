@@ -142,7 +142,7 @@ export function useBoardClipboard(options: ClipboardOptions) {
           }
         : undefined,
       paste:
-        canEdit && remembered
+        canEdit && (clipboard || remembered)
           ? () => {
               void menuAction('paste').catch(report);
             }

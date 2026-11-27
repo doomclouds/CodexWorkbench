@@ -30,10 +30,13 @@ export function CanvasInkPath({
 
   const strokeWidth = renderedInkWidth(ink, zoom);
   const dot = ink.points.length === 1;
-  const style = stroke === undefined ? inkStyle : { ...inkStyle, color: stroke };
+  const style =
+    stroke === undefined
+      ? inkStyle
+      : { ...inkStyle, color: 'var(--studio-ui-canvas-stroke, ' + stroke + ')' };
 
   return (
-    <svg width="100%" height="100%" aria-hidden="true" style={style}>
+    <svg width="100%" height="100%" aria-hidden="true" style={style} data-canvas-stroke={stroke}>
       {dot ? (
         <circle
           cx={first.x * width}

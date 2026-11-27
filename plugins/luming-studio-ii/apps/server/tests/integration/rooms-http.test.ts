@@ -8,6 +8,7 @@ import {
   type BoardRoomEvent,
   type ChangeBoardTimerRequestSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
 import {
@@ -395,6 +396,48 @@ test('publishes one confirmed metadata delta after the whiteboard transaction', 
         },
       },
     });
+  } finally {
+    await stream.close();
+  }
+});
+
+test('refreshes another room view after sharing or removing a custom ink', async () => {
+  const stream = await openRoom(viewerId, 'watch-board-palette');
+  const { editBoardGeometry } = BoardEditService.method;
+  const { getBoardScene } = WhiteboardService.method;
+  const color = '#3864A2';
+  try {
+    await stream.next();
+    const styled = await callWhiteboard(server.address, editorId, editBoardGeometry, {
+      ...scope,
+      commandId: 'publish-room-ink',
+      operation: {
+        case: 'style',
+        value: {
+          targets: [{ target: { objectId: shapeId, expectedGeometryVersion: 0n } }],
+          patch: { stroke: color },
+          rememberColor: color,
+        },
+      },
+    });
+    expect(styled.receipt?.outcome.case).toBe('applied');
+    expect(await stream.next()).toMatchObject({
+      payload: { case: 'contentChanged', value: { boardRevision: 1n, refreshScene: true } },
+    });
+    const shared = await callWhiteboard(server.address, viewerId, getBoardScene, scope);
+    expect(shared.scene?.customColors?.colors).toEqual([color]);
+
+    const removed = await callWhiteboard(server.address, editorId, editBoardGeometry, {
+      ...scope,
+      commandId: 'remove-room-ink',
+      operation: { case: 'removeCustomColor', value: { color } },
+    });
+    expect(removed.receipt?.outcome.case).toBe('applied');
+    expect(await stream.next()).toMatchObject({
+      payload: { case: 'contentChanged', value: { boardRevision: 2n, refreshScene: true } },
+    });
+    const reopened = await callWhiteboard(server.address, viewerId, getBoardScene, scope);
+    expect(reopened.scene?.customColors?.colors ?? []).toEqual([]);
   } finally {
     await stream.close();
   }

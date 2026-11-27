@@ -81,12 +81,13 @@ export function seedWhiteboardDatabase(path: string) {
   }
 }
 
-export function rejectReceiptInserts(path: string) {
+export function rejectReceiptInserts(path: string, kind: 'move' | 'edit' = 'move') {
   const database = openSqliteDatabase(path);
+  const table = kind === 'move' ? 'command_receipts' : 'board_edit_receipts';
   try {
     database.write((connection) => {
       connection.exec(
-        `CREATE TRIGGER reject_receipt_inserts BEFORE INSERT ON command_receipts
+        `CREATE TRIGGER reject_receipt_inserts BEFORE INSERT ON ${table}
          BEGIN
            SELECT RAISE(ABORT, 'Injected receipt write failure');
          END`,

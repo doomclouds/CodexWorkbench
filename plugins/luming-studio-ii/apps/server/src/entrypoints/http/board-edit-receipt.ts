@@ -72,6 +72,7 @@ export function toBoardEditReceipt({
         objectOrder: outcome.order ? [...outcome.order] : [],
         changedPayloads,
         detailsExpired: outcome.detailsExpired,
+        customColors: outcome.customColors && { colors: [...outcome.customColors] },
       },
     },
   };

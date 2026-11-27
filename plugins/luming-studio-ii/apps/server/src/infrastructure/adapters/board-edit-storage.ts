@@ -7,6 +7,7 @@ import type {
   PayloadRecord,
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection } from '../platform/index.js';
+import { readBoardCustomColors, writeBoardCustomColors } from './board-custom-colors.js';
 import {
   publishBoardVersion,
   recordObjectHistory,
@@ -400,6 +401,7 @@ export function applyBoardChanges(
     order,
     layerPlacement,
     assets,
+    customColors,
   } = changes;
 
   saveAssets(connection, boardId, assets);
@@ -411,8 +413,13 @@ export function applyBoardChanges(
   });
   const orderedIds = writeLayerOrder(connection, boardId, order, layerPlacement);
   const changed = new Set([...metadataIds, ...normalizedLayerIds, ...orderedIds]);
+  const previousCustomColors = customColors && readBoardCustomColors(connection, boardId);
+  if (customColors) {
+    writeBoardCustomColors(connection, boardId, customColors);
+  }
+
   let boardRevision = board.revision;
-  if (changed.size) {
+  if (changed.size || customColors) {
     boardRevision = advanceBoardRevision(connection, boardId);
     publishBoardVersion(connection, board, boardRevision, {
       ...commit,
@@ -429,5 +436,7 @@ export function applyBoardChanges(
     removedPayloadObjectIds,
     order,
     layerChangedObjectIds: orderedIds,
+    customColors,
+    previousCustomColors,
   };
 }

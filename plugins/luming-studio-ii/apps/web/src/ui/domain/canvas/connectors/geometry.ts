@@ -402,3 +402,34 @@ export function translateConnection(connection: CanvasConnection, delta: CanvasP
     ...(connection.bends && { bends: connection.bends.map((point) => offsetPoint(point, delta)) }),
   };
 }
+
+export function rotateConnection(
+  connection: CanvasConnection,
+  before: CanvasGeometry,
+  after: CanvasGeometry,
+  points: readonly CanvasPoint[],
+): CanvasConnection {
+  const from = geometryCenter(before);
+  const to = geometryCenter(after);
+  const angle = rotationAngle(after.rotation - before.rotation);
+  const { start, end, labelOffset, relativeBends, bends } = connection;
+  const fixedRoute = Boolean(bends?.length || relativeBends?.offsets.length);
+
+  function turnPoint(point: CanvasPoint) {
+    const offset = { x: point.x - from.x, y: point.y - from.y };
+    return offsetPoint(rotateVector(offset, angle), to);
+  }
+
+  function turnEndpoint(endpoint: CanvasConnectionEndpoint) {
+    return endpoint.attachment ? endpoint : { point: turnPoint(endpoint.point) };
+  }
+
+  return {
+    ...connection,
+    start: turnEndpoint(start),
+    end: turnEndpoint(end),
+    bends: fixedRoute ? points.slice(1, -1).map(turnPoint) : undefined,
+    relativeBends: undefined,
+    labelOffset: labelOffset && rotateVector(labelOffset, angle),
+  };
+}

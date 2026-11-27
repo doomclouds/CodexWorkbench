@@ -32,6 +32,7 @@ import type {
   CanvasFitScope,
   CanvasObjectChange,
   CanvasObjectKind,
+  CanvasNudgeScope,
   CanvasObjectNavigation,
   CanvasObjectRegistry,
   CanvasPoint,
@@ -53,10 +54,24 @@ import {
 import { panViewport, screenToBoard, zoomViewport } from './viewport/index.js';
 import type { CanvasViewportSize } from './viewport/index.js';
 
-type PointerSample = Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerId'>;
+type PointerSample = Pick<PointerEvent, 'clientX' | 'clientY' | 'pointerId'> &
+  Partial<Pick<PointerEvent, 'target'>>;
 type TargetSample = Pick<ReactMouseEvent, 'clientX' | 'clientY' | 'target'>;
 type TransformHandle = ResizeHandle | 'rotate';
 type EditChanges = ReadonlyMap<string, CanvasObjectChange>;
+
+interface QueuedNudges extends CanvasNudgeScope {
+  readonly steps: CanvasPoint[];
+  lastSubmittedAt?: number;
+}
+
+function sameIds(first: readonly string[], second: readonly string[]) {
+  return first.length === second.length && first.every((id, index) => id === second[index]);
+}
+
+interface CapturedPointerSession extends PointerSession {
+  readonly captureTarget: Element;
+}
 
 interface CanvasInputOptions {
   root: RefObject<HTMLDivElement | null>;
@@ -137,7 +152,8 @@ export function useCanvasInput({
   props,
   fitScene,
 }: CanvasInputOptions) {
-  const active = useRef<PointerSession | null>(null);
+  const active = useRef<CapturedPointerSession | null>(null);
+  const nudges = useRef<QueuedNudges | undefined>(undefined);
   const [pointerAction, setPointerAction] = useState<PointerAction['kind']>();
   const spaceHeld = useRef(false);
   const [spaceActive, setSpaceActive] = useState(false);
@@ -193,31 +209,51 @@ export function useCanvasInput({
     return viewId + ':' + instanceId + ':' + nextInteraction.current;
   }
 
+  function captureOwner(container: HTMLDivElement, sample: PointerSample, action: PointerAction) {
+    if (action.kind !== 'transform' || action.transform.kind !== 'move') {
+      return container;
+    }
+
+    const { target } = sample;
+    const ElementType = container.ownerDocument.defaultView?.Element;
+    if (!ElementType || !(target instanceof ElementType)) {
+      return container;
+    }
+
+    const native = canvasNativeId(target, container);
+    const object = native ? index.get(native) : undefined;
+    const extension = object && registry.get(object.kind);
+
+    return extension?.capturePointerTargetOnBodyDrag ? target : container;
+  }
+
   function begin(
     container: HTMLDivElement,
     sample: PointerSample,
     origin: CanvasPoint,
     action: PointerAction,
   ) {
+    const captureTarget = captureOwner(container, sample, action);
     active.current = {
       pointerId: sample.pointerId,
+      captureTarget,
       origin,
       start: relativePoint(sample, origin),
       viewport: read().viewport,
       tool: currentTool(),
       action,
     };
-    container.setPointerCapture?.(sample.pointerId);
+    captureTarget.setPointerCapture?.(sample.pointerId);
     objectNavigation.stop();
     setPointerAction(action.kind);
   }
 
-  function end(session: PointerSession) {
+  function end(session: CapturedPointerSession) {
     active.current = null;
     setPointerAction(undefined);
-    const element = root.current;
-    if (element?.hasPointerCapture?.(session.pointerId)) {
-      element.releasePointerCapture(session.pointerId);
+    const { captureTarget, pointerId } = session;
+    if (captureTarget.hasPointerCapture?.(pointerId)) {
+      captureTarget.releasePointerCapture(pointerId);
     }
   }
 
@@ -329,6 +365,10 @@ export function useCanvasInput({
   }
 
   function canStartTransform(kind: TransformGesture['kind'], ids: readonly string[]) {
+    if (kind === 'rotate' && ids.length === 1 && index.get(ids[0]!)?.kind === 'connector') {
+      return false;
+    }
+
     return (
       canEdit || (kind === 'resize' && ids.length === 1 && ids[0] === props.pendingResizeObjectId)
     );
@@ -601,6 +641,7 @@ export function useCanvasInput({
       kind: 'create-connection',
       interactionId: interactionId(),
       start,
+      style: penStyle,
       sourceVersion: object?.version,
       clickOnly: object && registry.get(object.kind)?.portClick === 'place',
     });
@@ -631,7 +672,7 @@ export function useCanvasInput({
     });
   }
 
-  function complete(session: PointerSession, next: CanvasFrame) {
+  function complete(session: CapturedPointerSession, next: CanvasFrame) {
     end(session);
     update({ viewport: next.viewport }, 'now');
     if (session.action.kind === 'marquee' && next.marquee) {
@@ -649,7 +690,7 @@ export function useCanvasInput({
   }
 
   function sampleGesture(
-    session: PointerSession,
+    session: CapturedPointerSession,
     event: ReactPointerEvent<HTMLDivElement>,
     final: boolean,
   ) {
@@ -759,6 +800,12 @@ export function useCanvasInput({
   function escapeCanvas(event: ReactKeyboardEvent<HTMLDivElement>) {
     props.onViewportNavigation?.('escape');
     const toolNow = currentTool();
+    if (active.current?.action.kind === 'place') {
+      event.preventDefault();
+      cancel();
+      return;
+    }
+
     const drawingTool = toolNow !== 'select' && toolNow !== 'pan';
     if (active.current || objectNavigation.panning || drawingTool) {
       event.preventDefault();
@@ -844,6 +891,95 @@ export function useCanvasInput({
     return handleViewportKey(event) || command;
   }
 
+  function submitNudge(delta: CanvasPoint, expectedTargets?: readonly string[]) {
+    const targets = transformTargets('move', selection);
+    if (
+      expectedTargets &&
+      !sameIds(
+        expectedTargets,
+        targets.map(({ id }) => id),
+      )
+    ) {
+      return false;
+    }
+
+    const intent = previewTransform(
+      { kind: 'move', interactionId: interactionId(), start: { x: 0, y: 0 }, targets },
+      delta,
+      {},
+    );
+
+    if (intent?.kind !== 'move') {
+      return false;
+    }
+
+    const changes = intent.changes.map((change) => {
+      const object = index.get(change.id);
+      return object?.kind === 'connector'
+        ? { ...change, connection: translateConnection(object.connection, intent.delta) }
+        : change;
+    });
+    onEditIntent({ ...intent, changes, ...(props.nudgeSave && { nudgeSelection: selection }) });
+    return true;
+  }
+
+  function queueNudge(scope: CanvasNudgeScope, step: CanvasPoint) {
+    if (!sameIds(selection, scope.selection)) {
+      return;
+    }
+
+    const batch = nudges.current;
+    if (
+      batch &&
+      sameIds(batch.selection, scope.selection) &&
+      sameIds(batch.targets, scope.targets)
+    ) {
+      batch.steps.push(step);
+    } else {
+      nudges.current = { ...scope, steps: [step] };
+    }
+  }
+
+  const flushNudges = useEffectEvent(() => {
+    const batch = nudges.current;
+    const saved = props.nudgeSave;
+    if (!batch) {
+      return;
+    }
+
+    const validScope = sameIds(batch.selection, selection) && !props.presentation;
+    const valid = saved && saved.kind !== 'idle' && validScope;
+    if (!valid) {
+      nudges.current = undefined;
+      return;
+    }
+    if (saved.kind !== 'confirmed' || props.scene.revision < saved.revision) {
+      return;
+    }
+    if (batch.lastSubmittedAt === saved.revision) {
+      return;
+    }
+
+    const step = batch.steps.shift();
+    const canSubmit = canEdit && !active.current && step;
+    batch.lastSubmittedAt = saved.revision;
+    const submitted = canSubmit && submitNudge(step, batch.targets);
+    if (!submitted || batch.steps.length === 0) {
+      nudges.current = undefined;
+    }
+  });
+  useLayoutEffect(() => {
+    flushNudges();
+  }, [
+    canEdit,
+    index,
+    pending,
+    props.nudgeSave,
+    props.presentation,
+    props.scene.revision,
+    selection,
+  ]);
+
   function handleArrowKey(event: ReactKeyboardEvent<HTMLDivElement>) {
     const direction = keyboardDirections.get(event.key);
     if (!direction || props.presentation || active.current) {
@@ -853,25 +989,18 @@ export function useCanvasInput({
     event.preventDefault();
     const step = event.shiftKey ? keyboardFastStep : 1;
     const delta = { x: direction.x * step, y: direction.y * step };
-    if (selection.length > 0 && (canEdit || pending.size > 0)) {
-      const targets = transformTargets('move', selection);
-      if (canEdit && targets.length > 0) {
-        const gesture = {
-          kind: 'move' as const,
-          interactionId: interactionId(),
-          start: { x: 0, y: 0 },
-          targets,
-        };
-        const intent = previewTransform(gesture, delta, {});
-        if (intent?.kind === 'move') {
-          const changes = intent.changes.map((change) => {
-            const object = index.get(change.id);
-            return object?.kind === 'connector'
-              ? { ...change, connection: translateConnection(object.connection, intent.delta) }
-              : change;
-          });
-          onEditIntent({ ...intent, changes });
-        }
+    const saving = props.nudgeSave;
+    const hasSelection = selection.length > 0;
+    const waitingForScene = saving?.kind === 'confirmed' && props.scene.revision < saving.revision;
+    if (hasSelection && saving?.kind === 'saving') {
+      queueNudge(saving, delta);
+    } else if (hasSelection && waitingForScene) {
+      if (saving.scope) {
+        queueNudge(saving.scope, delta);
+      }
+    } else if (hasSelection && (canEdit || pending.size > 0)) {
+      if (canEdit) {
+        submitNudge(delta);
       }
     } else {
       props.onViewportNavigation?.('pan');
@@ -960,6 +1089,13 @@ export function useCanvasInput({
     cancel();
   });
 
+  const onDocumentCaptureLost = useEffectEvent(({ pointerId }: PointerEvent) => {
+    const session = active.current;
+    if (session?.pointerId === pointerId && !session.captureTarget.isConnected) {
+      cancel();
+    }
+  });
+
   useEffect(() => {
     const element = root.current;
     if (!element) {
@@ -967,20 +1103,26 @@ export function useCanvasInput({
     }
 
     const container = element;
-    const view = element.ownerDocument.defaultView;
+    const owner = element.ownerDocument;
+    const view = owner.defaultView;
     function handleWheel(event: WheelEvent) {
       onWheel(event, container);
     }
     function handleWindowBlur() {
       onWindowBlur();
     }
+    function handleCaptureLost(event: PointerEvent) {
+      onDocumentCaptureLost(event);
+    }
 
     element.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     view?.addEventListener('blur', handleWindowBlur);
+    owner.addEventListener('lostpointercapture', handleCaptureLost, true);
 
     return () => {
       element.removeEventListener('wheel', handleWheel, true);
       view?.removeEventListener('blur', handleWindowBlur);
+      owner.removeEventListener('lostpointercapture', handleCaptureLost, true);
     };
   }, [root]);
 

@@ -115,6 +115,7 @@ function versionPage(
 function readonlySnapshotReader(reader: BoardEditReader, revision: bigint): WhiteboardReader {
   return {
     getAccess: (boardId, actorId) => reader.getAccess(boardId, actorId),
+    getBoardCustomColors: () => [],
     getBoard(boardId) {
       const version = readVersion(reader, currentBoard(reader, boardId), revision);
       if (!version) {

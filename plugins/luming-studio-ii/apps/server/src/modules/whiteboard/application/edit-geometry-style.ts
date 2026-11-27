@@ -1,5 +1,7 @@
 import {
   canAdvanceVersion,
+  maximumBoardCustomColors,
+  normalizeBoardCustomColor,
   objectAllowsStyle,
   styleChangesObjectKind,
   styledObject,
@@ -8,6 +10,8 @@ import {
   styleTouchesText,
   validStylePatch,
   type BoardEditDecision,
+  type BoardChanges,
+  type BoardEditRejected,
   type BoardObject,
   type GeometryOperation,
   type PayloadRecord,
@@ -17,6 +21,28 @@ import type { GeometryToolsScope } from './edit-geometry-tools.js';
 type Style = Extract<GeometryOperation, { kind: 'style' }>;
 
 const textKinds = new Set(['text', 'note', 'shape', 'section', 'connector']);
+
+function rememberedColor(
+  scope: GeometryToolsScope,
+  { patch, rememberColor }: Style,
+): BoardChanges | BoardEditRejected {
+  if (rememberColor === undefined) {
+    return { kind: 'changes' };
+  }
+
+  const color = normalizeBoardCustomColor(rememberColor);
+  const inks = [patch.stroke?.toUpperCase(), patch.textColor?.toUpperCase()];
+  if (!color || !inks.includes(color)) {
+    return { kind: 'rejected', reason: 'invalidEdit' };
+  }
+
+  const current = scope.writer.getBoardCustomColors(scope.board.boardId);
+  const customColors = current.includes(color)
+    ? undefined
+    : [...current, color].slice(-maximumBoardCustomColors);
+
+  return { kind: 'changes', customColors };
+}
 
 function textPayloads(
   scope: GeometryToolsScope,
@@ -130,5 +156,10 @@ export function applyBoardStyle(
     return payloads;
   }
 
-  return { kind: 'changes', objects: styleObjects(selected, payloads, patch), payloads };
+  const palette = rememberedColor(scope, operation);
+  if (palette.kind === 'rejected') {
+    return palette;
+  }
+
+  return { ...palette, objects: styleObjects(selected, payloads, patch), payloads };
 }

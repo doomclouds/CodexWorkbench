@@ -246,6 +246,8 @@ function readCreationAttachment(value: WireCreationAttachment): BoardCreationAtt
     sourcePort: requireField(ports.get(value.sourcePort), 'Source port'),
     targetPort: requireField(ports.get(value.targetPort), 'Target port'),
     connectorId: requireId(value.connectorId),
+    stroke: value.stroke,
+    strokeWidth: value.strokeWidth,
   };
 }
 
@@ -364,11 +366,14 @@ export function readGeometryOperation({ operation }: EditBoardGeometryRequest): 
       return {
         kind: 'style',
         patch: readStyle(operation.value.patch),
+        rememberColor: operation.value.rememberColor,
         targets: operation.value.targets.map(({ target, expectedPayloadVersion }) => ({
           target: readTarget(target),
           expectedPayloadVersion,
         })),
       };
+    case 'removeCustomColor':
+      return { kind: 'removeCustomColor', color: operation.value.color };
     case 'paste': {
       const { sourceBoardId, sourceRevision, targets, delta } = operation.value;
       const { dx, dy } = requireField(delta, 'Paste offset');

@@ -8,6 +8,11 @@ message BoardScene {
   optional uint64 board_revision = 3;
   repeated ObjectMetadata objects = 4;
   BoardAccess access = 5;
+  BoardCustomColors custom_colors = 6;
+}
+
+message BoardCustomColors {
+  repeated string colors = 1;
 }
 
 message BoardAccess {

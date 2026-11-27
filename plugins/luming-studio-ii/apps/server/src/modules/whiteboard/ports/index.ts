@@ -53,6 +53,7 @@ export interface WhiteboardReader {
   getAccess(boardId: string, actorId: string): BoardAccess | undefined;
   isTrashedOwner?(boardId: string, actorId: string): boolean;
   getBoard(boardId: string): BoardHeader | undefined;
+  getBoardCustomColors(boardId: string): readonly string[];
   listObjects(boardId: string, limit?: number): readonly BoardObject[];
   getObjects(boardId: string, objectIds: readonly string[]): readonly BoardObject[];
   getPayloads(boardId: string, objectIds: readonly string[]): readonly PayloadRecord[];

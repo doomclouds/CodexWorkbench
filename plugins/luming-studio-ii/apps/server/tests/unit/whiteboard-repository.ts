@@ -65,6 +65,10 @@ export class TestWhiteboardRepository implements WhiteboardRepository, Whiteboar
     return id === boardId ? { boardId, title: 'Unit board', revision: this.revision } : undefined;
   }
 
+  getBoardCustomColors() {
+    return [];
+  }
+
   listObjects(_boardId: string): readonly BoardObject[] {
     this.sceneReads += 1;
 

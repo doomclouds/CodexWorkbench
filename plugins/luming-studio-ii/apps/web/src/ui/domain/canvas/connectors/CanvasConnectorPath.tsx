@@ -106,7 +106,10 @@ export function CanvasConnectorPath({
       <svg
         className="studio-ui-canvas-connector"
         data-canvas-connector-preview={preview || undefined}
-        style={{ color: stroke }}
+        data-canvas-stroke={stroke}
+        style={{
+          color: stroke === undefined ? undefined : `var(--studio-ui-canvas-stroke, ${stroke})`,
+        }}
         viewBox={`${x} ${y} ${width} ${height}`}
         aria-hidden="true"
       >

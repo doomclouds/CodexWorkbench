@@ -155,6 +155,8 @@ interface WhiteboardCreationAttachment {
   readonly sourcePort: WhiteboardPort;
   readonly targetPort: WhiteboardPort;
   readonly connectorId: string;
+  readonly stroke?: string;
+  readonly strokeWidth?: number;
 }
 
 export type EditBoardGeometryOperation =
@@ -207,7 +209,9 @@ export type EditBoardGeometryOperation =
       readonly kind: 'style';
       readonly targets: readonly WhiteboardStyleTarget[];
       readonly patch: WhiteboardStylePatch;
+      readonly rememberColor?: string;
     }
+  | { readonly kind: 'removeCustomColor'; readonly color: string }
   | {
       readonly kind: 'paste';
       readonly sourceBoardId: string;
@@ -325,6 +329,7 @@ export type BoardEditRejection =
 interface BoardEditApplied extends BoardEditIdentity {
   readonly kind: 'applied';
   readonly revision: bigint;
+  readonly customColors?: readonly string[];
   readonly objects: readonly WhiteboardObject[];
   readonly removedIds: readonly string[];
   readonly order: readonly string[];

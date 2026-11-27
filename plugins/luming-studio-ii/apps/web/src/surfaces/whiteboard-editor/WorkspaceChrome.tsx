@@ -84,6 +84,7 @@ interface WorkspaceSelectionBarProps {
   readonly onRenameSection?: GeometryActionContext['onRenameSection'];
   readonly clipboard?: GeometryActionContext['clipboard'];
   readonly textStyleById?: Parameters<typeof GeometrySelectionObjectControls>[0]['textStyleById'];
+  readonly customColors?: readonly string[];
   readonly onFormatObject?: Parameters<typeof GeometrySelectionObjectControls>[0]['onFormatObject'];
 }
 
@@ -102,6 +103,7 @@ export function WorkspaceSelectionBar({
   onRenameSection,
   clipboard,
   textStyleById,
+  customColors,
   onFormatObject,
 }: WorkspaceSelectionBarProps) {
   return (
@@ -116,6 +118,7 @@ export function WorkspaceSelectionBar({
             selectedHtmlId={selectedHtmlId}
             onAction={onAction}
             textStyleById={textStyleById}
+            customColors={customColors}
             onFormatObject={onFormatObject}
           />
           <GeometrySelectionActions

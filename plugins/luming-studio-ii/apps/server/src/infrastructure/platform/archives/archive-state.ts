@@ -14,6 +14,7 @@ const DELTA_CODEC_VERSION = 2;
 const MAX_HISTORY = 200;
 const MAX_PROPERTIES = 64;
 const MAX_UNITS = 4_000;
+const legacyCustomInks = /^[\da-f]{6}(?:,[\da-f]{6}){0,63}$/iu;
 const MAX_JSON_DEPTH = 204;
 const MAX_JSON_STRUCTURE = 2_000_000;
 export const MAX_ARCHIVE_BOARD_BYTES = 16 * 1024 * 1024;
@@ -41,6 +42,7 @@ export interface CurrentArchiveState {
   readonly title: string;
   readonly objects: readonly unknown[];
   readonly assets: Record<string, unknown>;
+  readonly customColors?: readonly string[];
   readonly restoration?: ArchiveRestoration;
 }
 
@@ -227,7 +229,7 @@ function readHistory(value: unknown, contentCount: number, payloadCount: number)
 
 type ReadPayload = (reference: number, budget: ArchiveValueBudget) => unknown;
 
-function readScene(value: ArchiveContent, readPayload: ReadPayload): readonly unknown[] {
+function readScene(value: ArchiveContent, readPayload: ReadPayload) {
   const budget: ArchiveValueBudget = { maximum: MAX_ARCHIVE_BOARD_BYTES, bytes: 0, nodes: 0 };
   if (typeof value === 'number') {
     const content = archiveRecord(readPayload(value, budget));
@@ -236,7 +238,7 @@ function readScene(value: ArchiveContent, readPayload: ReadPayload): readonly un
       throw archiveTooLarge();
     }
 
-    return elements;
+    return { objects: elements, style: content.style };
   }
 
   const fields = archiveRecord(readPayload(value.fields, budget));
@@ -244,7 +246,25 @@ function readScene(value: ArchiveContent, readPayload: ReadPayload): readonly un
     throw invalidArchive('Duplicate archive object list');
   }
 
-  return value.units.map((reference) => readPayload(reference, budget));
+  return {
+    objects: value.units.map((reference) => readPayload(reference, budget)),
+    style: fields.style,
+  };
+}
+
+function currentSceneFields({ objects, style }: ReturnType<typeof readScene>) {
+  if (!style || typeof style !== 'object' || !('nativeInks' in style)) {
+    return { objects };
+  }
+
+  const { nativeInks } = style;
+  if (typeof nativeInks !== 'string' || !legacyCustomInks.test(nativeInks)) {
+    return { objects };
+  }
+
+  const customColors = [...new Set(nativeInks.split(',').map((ink) => '#' + ink.toUpperCase()))];
+
+  return { objects, customColors };
 }
 
 function cachedPayload(reader: ArchiveValueReader, total: ArchiveValueBudget): ReadPayload {
@@ -338,13 +358,15 @@ function projectState(
   if (!restore) {
     return {
       title,
-      objects: readScene(current, (reference, allowance) => reader.payload(reference, allowance)),
+      ...currentSceneFields(
+        readScene(current, (reference, allowance) => reader.payload(reference, allowance)),
+      ),
       assets,
     };
   }
 
   const readPayload = cachedPayload(reader, budget);
-  const scenes = new Map<number, readonly unknown[]>();
+  const scenes = new Map<number, ReturnType<typeof readScene>>();
   function scene(index: number) {
     const existing = scenes.get(index);
     if (existing) {
@@ -360,12 +382,12 @@ function projectState(
   const restoredHistory = history.map(({ entry, artifact, content }) => ({
     entry: archiveRecord(reader.payload(entry, budget)),
     artifact: archiveRecord(reader.payload(artifact, budget)),
-    objects: scene(content),
+    objects: scene(content).objects,
   }));
 
   return {
     title,
-    objects: scene(currentIndex),
+    ...currentSceneFields(scene(currentIndex)),
     assets,
     restoration: { artifact: board, details, history: restoredHistory },
   };

@@ -71,6 +71,7 @@ export interface WhiteboardScene {
   readonly revision: bigint;
   readonly canEdit: boolean;
   readonly trashed?: boolean;
+  readonly customColors?: readonly string[];
   readonly objects: readonly WhiteboardObject[];
 }
 

@@ -4,6 +4,8 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type SubmitEvent,
 } from 'react';
@@ -98,7 +100,11 @@ interface FormatPaletteProps {
   readonly kind: PaletteKind;
   readonly value?: string;
   readonly theme?: Theme;
-  readonly onSelect: (color: string) => void;
+  readonly onSelect: (color: string, rememberColor?: string) => void;
+  readonly shared?: {
+    readonly colors: readonly string[];
+    readonly remove: (color: string) => void;
+  };
   readonly onClear?: () => void;
   readonly disabled?: boolean;
 }
@@ -139,7 +145,18 @@ function CustomColor({ value, onSelect, onClose, disabled }: CustomColorProps) {
   }
 
   return (
-    <form className="geometry-format-custom-editor" aria-label="自定义颜色" onSubmit={handleSubmit}>
+    <form
+      className="geometry-format-custom-editor"
+      aria-label="自定义颜色"
+      onSubmit={handleSubmit}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+    >
       <input
         type="color"
         aria-label="取色器"
@@ -187,6 +204,7 @@ export function FormatPalette({
   onSelect,
   onClear,
   disabled,
+  shared,
 }: FormatPaletteProps) {
   const [customOpen, setCustomOpen] = useState(false);
   const custom = useRef<HTMLButtonElement>(null);
@@ -197,6 +215,18 @@ export function FormatPalette({
   function handleCloseCustom() {
     setCustomOpen(false);
     custom.current?.focus({ preventScroll: true });
+  }
+
+  function removeColor(
+    color: string,
+    event: KeyboardEvent<HTMLButtonElement> | MouseEvent<HTMLButtonElement>,
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!disabled) {
+      custom.current?.focus({ preventScroll: true });
+      shared?.remove(color);
+    }
   }
 
   return (
@@ -213,6 +243,27 @@ export function FormatPalette({
           onClick={() => onSelect(light)}
         >
           {current === light && <Check size={13} />}
+        </button>
+      ))}
+      {shared?.colors.map((color) => (
+        <button
+          key={color}
+          type="button"
+          aria-label={'自定义颜色 ' + color}
+          aria-keyshortcuts="Delete"
+          title={color + ' · 右键或 Delete 移除'}
+          aria-pressed={current === color.toUpperCase()}
+          disabled={disabled}
+          style={{ background: color }}
+          onClick={() => onSelect(color)}
+          onContextMenu={(event) => removeColor(color, event)}
+          onKeyDown={(event) => {
+            if (event.key === 'Delete') {
+              removeColor(color, event);
+            }
+          }}
+        >
+          {current === color.toUpperCase() && <Check size={13} />}
         </button>
       ))}
       <button
@@ -240,7 +291,7 @@ export function FormatPalette({
       {customOpen && (
         <CustomColor
           value={value}
-          onSelect={onSelect}
+          onSelect={(color) => onSelect(color, shared ? color : undefined)}
           onClose={handleCloseCustom}
           disabled={disabled}
         />

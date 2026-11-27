@@ -4,7 +4,12 @@ import type {
   WhiteboardMoveReceipt,
   createWhiteboardSession,
 } from '../../data/whiteboard/index.js';
-import type { CanvasEditIntent, CanvasMoveIntent } from '../../ui/domain/canvas/index.js';
+import type {
+  CanvasEditIntent,
+  CanvasMoveIntent,
+  CanvasNudgeScope,
+  CanvasProps,
+} from '../../ui/domain/canvas/index.js';
 
 type WhiteboardSession = ReturnType<typeof createWhiteboardSession>;
 
@@ -14,7 +19,8 @@ interface PendingMove {
 }
 
 type MoveState =
-  | { readonly kind: 'idle' | 'saved' }
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'saved'; readonly revision: bigint; readonly scope?: CanvasNudgeScope }
   | { readonly kind: 'saving' | 'checking'; readonly move: PendingMove }
   | { readonly kind: 'unknown'; readonly move: PendingMove; readonly detail: string }
   | { readonly kind: 'conflict' | 'rejected' | 'unsupported'; readonly detail: string };
@@ -38,10 +44,16 @@ function requestError(error: unknown): string {
   return typeof error === 'string' ? error : '请求失败。';
 }
 
-function reportReceipt(receipt: WhiteboardMoveReceipt): MoveState {
+function nudgeScope(edit?: CanvasMoveIntent): CanvasNudgeScope | undefined {
+  if (edit?.nudgeSelection) {
+    return { selection: edit.nudgeSelection, targets: edit.changes.map(({ id }) => id) };
+  }
+}
+
+function reportReceipt(receipt: WhiteboardMoveReceipt, edit?: CanvasMoveIntent): MoveState {
   switch (receipt.kind) {
     case 'applied':
-      return { kind: 'saved' };
+      return { kind: 'saved', revision: receipt.revision, scope: nudgeScope(edit) };
     case 'conflict':
       return {
         kind: 'conflict',
@@ -123,7 +135,7 @@ export function useMoveSession(
     }
 
     pending.current = undefined;
-    setState(reportReceipt(result.receipt));
+    setState(reportReceipt(result.receipt, move.edits[0]));
     onReceipt?.(result.receipt);
     if (result.receipt.kind === 'conflict') {
       session.reload();
@@ -193,5 +205,16 @@ export function useMoveSession(
 
   const pendingEdits = 'move' in state ? state.move.edits : emptyEdits;
 
-  return { state, pendingEdits, handleEdit, retryMove, checkReceipt, canRetry: canEdit };
+  const nudgeSave = nudgeSaveFor(state);
+
+  return { state, pendingEdits, handleEdit, retryMove, checkReceipt, canRetry: canEdit, nudgeSave };
+}
+
+function nudgeSaveFor(state: MoveState): CanvasProps['nudgeSave'] {
+  if (state.kind === 'saved') {
+    return { kind: 'confirmed', revision: Number(state.revision), scope: state.scope };
+  }
+
+  const scope = state.kind === 'saving' ? nudgeScope(state.move.edits[0]) : undefined;
+  return scope ? { kind: 'saving', ...scope } : { kind: 'idle' };
 }

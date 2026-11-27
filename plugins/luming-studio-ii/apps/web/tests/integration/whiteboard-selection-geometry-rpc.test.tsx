@@ -35,13 +35,17 @@ function reply(receipt: GeometryResponse['receipt']) {
   return toBinary(editBoardGeometry.output, create(editBoardGeometry.output, { receipt }));
 }
 
-function applied(changedObjects: readonly { readonly objectId: string; readonly kind: string }[]) {
+function applied(
+  changedObjects: readonly { readonly objectId: string; readonly kind: string }[],
+  customColors?: string[],
+) {
   return reply({
     ...identity,
     outcome: {
       case: 'applied',
       value: {
         boardRevision: revision,
+        customColors: customColors && { colors: customColors },
         changedObjects: changedObjects.map((object) => ({
           ...object,
           geometry,
@@ -183,6 +187,7 @@ test('keeps style fields optional and encodes explicit false and independent pay
             { target: wireTargets[0], expectedPayloadVersion: 0n },
             { target: wireTargets[1] },
           ],
+          rememberColor: style.stroke,
           patch: {
             ...style,
             textAlign: TextAlignment.CENTER,
@@ -200,12 +205,30 @@ test('keeps style fields optional and encodes explicit false and independent pay
     kind: 'style',
     targets: [{ target: first, expectedPayloadVersion: 0n }, { target: second }],
     patch: style,
+    rememberColor: style.stroke,
   } as const satisfies EditBoardGeometryOperation;
   await expect(service.editGeometry({ ...identity, operation })).resolves.toEqual({
     ...identity,
     kind: 'rejected',
     reason: 'invalidEdit',
   });
+});
+
+test('removes the board color without object targets and decodes an explicitly empty palette', async () => {
+  const color = '#3864A2';
+  const service = createWhiteboardEditService(async (path, bytes) => {
+    expect(path).toBe(route);
+    expect(fromBinary(editBoardGeometry.input, bytes)).toMatchObject({
+      ...identity,
+      operation: { case: 'removeCustomColor', value: { color } },
+    });
+
+    return applied([], []);
+  });
+
+  await expect(
+    service.editGeometry({ ...identity, operation: { kind: 'removeCustomColor', color } }),
+  ).resolves.toMatchObject({ kind: 'applied', customColors: [], objects: [], revision });
 });
 
 test('requests paste by source IDs and saved version without transferring object bodies', async () => {

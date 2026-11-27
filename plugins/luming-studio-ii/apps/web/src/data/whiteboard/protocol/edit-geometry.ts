@@ -176,6 +176,8 @@ function writeGeometryOperation(
             sourcePort: ports[attachment.sourcePort],
             targetPort: ports[attachment.targetPort],
             connectorId: attachment.connectorId,
+            stroke: attachment.stroke,
+            strokeWidth: attachment.strokeWidth,
           },
         },
       };
@@ -250,8 +252,11 @@ function writeGeometryOperation(
             expectedPayloadVersion,
           })),
           patch: writeStylePatch(operation.patch),
+          rememberColor: operation.rememberColor,
         },
       };
+    case 'removeCustomColor':
+      return { case: 'removeCustomColor', value: { color: operation.color } };
     case 'paste':
       return {
         case: 'paste',

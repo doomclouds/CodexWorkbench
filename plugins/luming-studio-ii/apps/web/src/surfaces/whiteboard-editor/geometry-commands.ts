@@ -23,7 +23,12 @@ export type GeometrySelectionAction =
   | { readonly kind: 'ungroup' }
   | { readonly kind: 'createSection' }
   | { readonly kind: 'arrange'; readonly preset: WhiteboardArrangePreset }
-  | { readonly kind: 'style'; readonly patch: WhiteboardStylePatch }
+  | {
+      readonly kind: 'style';
+      readonly patch: WhiteboardStylePatch;
+      readonly rememberColor?: string;
+    }
+  | { readonly kind: 'removeCustomColor'; readonly color: string }
   | {
       readonly kind: 'connectorHead';
       readonly end: 'start' | 'end';
@@ -197,6 +202,8 @@ export function geometryOperation(
           sourcePort: link.source.port,
           targetPort: link.target.port,
           connectorId: commandId + '-connector',
+          stroke: persistedPaint(link.style?.stroke),
+          strokeWidth: link.style?.width,
         },
       };
     }
@@ -233,6 +240,10 @@ export function selectionOperation(
   commandId: string,
   payloadVersion: (objectId: string) => bigint | undefined,
 ): EditBoardGeometryOperation | undefined {
+  if (action.kind === 'removeCustomColor') {
+    return action;
+  }
+
   const targets = [];
   for (const id of new Set(ids)) {
     const object = objectsById.get(id);

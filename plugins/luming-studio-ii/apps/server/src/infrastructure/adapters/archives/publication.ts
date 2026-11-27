@@ -194,6 +194,12 @@ export function writePublication(
 ): void {
   const { boardId } = command;
   writeBoard(connection, command, archive.title, publication);
+  if (archive.customColors?.length) {
+    connection
+      .prepare('INSERT INTO board_custom_colors (board_id, colors_json) VALUES (?, ?)')
+      .run(boardId, JSON.stringify(archive.customColors));
+  }
+
   writeScene(connection, boardId, publication.objects);
   writeAssets(connection, boardId, archive, publication.assetIds);
   if (publication.history.length) {

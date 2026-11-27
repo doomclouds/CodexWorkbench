@@ -163,9 +163,10 @@ export function useGeometryEdits({
     switch (receipt.kind) {
       case 'applied': {
         setState({ kind: 'saved' });
+        const placementKind = edit.placement?.kind;
         onApplied(receipt, selectionForOperation(edit.command.operation), {
           selectionCurrent,
-          editText: edit.placement?.kind === 'text' && !resize,
+          editText: (placementKind === 'text' || placementKind === 'note') && !resize,
         });
         const placed = receipt.objects.find(({ id }) => id === edit.placement?.id);
         if (placed && resize && canWriteCurrent.current) {

@@ -160,6 +160,153 @@ describe('Canvas legacy interaction parity', () => {
     return { region, onSelectionChange, onEditIntent, onViewportChange, onVisibleObjectsChange };
   }
 
+  it('resumes queued keyboard nudges one per confirmed revision against the current scene', () => {
+    const onEditIntent = vi.fn<(intent: CanvasEditIntent) => void>();
+    const selection = ['card'];
+    const saving = { kind: 'saving', selection, targets: selection } as const;
+    const initial = renderCanvas({ canEdit: false, selection, nudgeSave: saving, onEditIntent });
+    act(() => {
+      key(initial.region, 'ArrowDown', { shiftKey: true });
+      key(initial.region, 'ArrowLeft');
+    });
+    const confirmed = { kind: 'confirmed', revision: 6 } as const;
+    renderCanvas({ selection, nudgeSave: confirmed, onEditIntent });
+    expect(onEditIntent).not.toHaveBeenCalled();
+
+    function sceneAt(revision: number, x: number, y: number): CanvasScene {
+      const objects = board.objects.map((object) =>
+        object.id === 'card'
+          ? { ...object, version: revision - 2, geometry: { ...object.geometry, x, y } }
+          : object,
+      );
+
+      return { ...board, revision, objects };
+    }
+
+    renderCanvas({ scene: sceneAt(6, 81, 80), selection, nudgeSave: confirmed, onEditIntent });
+    expect(onEditIntent).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        kind: 'move',
+        delta: { x: 0, y: 10 },
+        changes: [
+          expect.objectContaining({
+            id: 'card',
+            expectedVersion: 4,
+            geometry: expect.objectContaining({ x: 81, y: 90 }),
+          }),
+        ],
+      }),
+    );
+    renderCanvas({ scene: sceneAt(6, 81, 80), selection, nudgeSave: confirmed, onEditIntent });
+    expect(onEditIntent).toHaveBeenCalledTimes(1);
+    renderCanvas({
+      canEdit: false,
+      scene: sceneAt(6, 81, 80),
+      selection,
+      nudgeSave: saving,
+      onEditIntent,
+    });
+    renderCanvas({
+      scene: sceneAt(7, 81, 90),
+      selection,
+      nudgeSave: { kind: 'confirmed', revision: 7 },
+      onEditIntent,
+    });
+    expect(onEditIntent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: 'move',
+        delta: { x: -1, y: 0 },
+        changes: [
+          expect.objectContaining({
+            id: 'card',
+            expectedVersion: 5,
+            geometry: expect.objectContaining({ x: 80, y: 90 }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('retains the first follow-up nudge between a skipped revision receipt and the refreshed scene', () => {
+    const onEditIntent = vi.fn<(intent: CanvasEditIntent) => void>();
+    const selection = ['card'];
+    const nudgeSave = {
+      kind: 'confirmed',
+      revision: 7,
+      scope: { selection, targets: selection },
+    } as const;
+    const stale = renderCanvas({ selection, nudgeSave, onEditIntent });
+    act(() => {
+      key(stale.region, 'ArrowDown', { shiftKey: true });
+    });
+    expect(onEditIntent).not.toHaveBeenCalled();
+
+    const objects = board.objects.map((object) =>
+      object.id === 'card'
+        ? { ...object, version: 4, geometry: { ...object.geometry, x: 81 } }
+        : object,
+    );
+    renderCanvas({ scene: { ...board, revision: 7, objects }, selection, nudgeSave, onEditIntent });
+    expect(onEditIntent).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        delta: { x: 0, y: 10 },
+        changes: [
+          expect.objectContaining({
+            id: 'card',
+            expectedVersion: 4,
+            geometry: expect.objectContaining({ x: 81, y: 90 }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('does not queue for a different selection while waiting for the confirmed scene', () => {
+    const onEditIntent = vi.fn<(intent: CanvasEditIntent) => void>();
+    const selection = ['card'];
+    const nudgeSave = {
+      kind: 'confirmed',
+      revision: 7,
+      scope: { selection, targets: selection },
+    } as const;
+    const stale = renderCanvas({ selection: ['remote'], nudgeSave, onEditIntent });
+    act(() => {
+      key(stale.region, 'ArrowDown');
+    });
+    renderCanvas({
+      scene: { ...board, revision: 7 },
+      selection,
+      nudgeSave,
+      onEditIntent,
+    });
+    expect(onEditIntent).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['changed selection', { selection: ['remote'] }],
+    ['changed board', { viewId: 'another-view' }],
+    ['failed save', { nudgeSave: { kind: 'idle' } }],
+    ['lost edit access', { nudgeSave: undefined }],
+  ] satisfies readonly (readonly [string, Partial<CanvasProps>])[])(
+    'discards buffered keyboard nudges after %s',
+    (_, interrupted) => {
+      const onEditIntent = vi.fn<(intent: CanvasEditIntent) => void>();
+      const selection = ['card'];
+      const saving = { kind: 'saving', selection, targets: selection } as const;
+      const initial = renderCanvas({ canEdit: false, selection, nudgeSave: saving, onEditIntent });
+      act(() => {
+        key(initial.region, 'ArrowRight');
+      });
+      renderCanvas({ canEdit: false, selection, nudgeSave: saving, onEditIntent, ...interrupted });
+      renderCanvas({
+        selection,
+        nudgeSave: { kind: 'confirmed', revision: board.revision },
+        onEditIntent,
+      });
+      expect(onEditIntent).not.toHaveBeenCalled();
+    },
+  );
+
   it('navigates from a middle press before native content stops bubbling', () => {
     const content = (
       <button

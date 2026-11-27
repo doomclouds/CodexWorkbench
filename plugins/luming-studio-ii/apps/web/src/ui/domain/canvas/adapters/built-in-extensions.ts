@@ -31,7 +31,6 @@ const embeddedBox: CanvasObjectCapabilities = Object.freeze({ ...passiveBox, con
 const connectorCapabilities: CanvasObjectCapabilities = Object.freeze({
   ...detachedBox,
   resize: false,
-  rotate: false,
 });
 
 function placementDefinition(placement: CanvasPlacement, capabilities: CanvasObjectCapabilities) {

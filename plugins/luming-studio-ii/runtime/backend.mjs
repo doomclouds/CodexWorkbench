@@ -5983,7 +5983,7 @@ function scaleInkWidth(width, before, after) {
   return Math.min(maximumInkWidth, Math.max(minimumInkWidth, width * averageScale));
 }
 function nextDetail(object3, { geometry, connector: connector2 }, transform) {
-  if (transform === "connect") {
+  if (connector2) {
     return connector2;
   }
   const { detail } = object3;
@@ -5992,19 +5992,35 @@ function nextDetail(object3, { geometry, connector: connector2 }, transform) {
   }
   return detail;
 }
-function validTransformFields(object3, { geometry, connector: connector2, ink: ink2 }, transform) {
-  const detailKind = object3.detail?.kind;
-  if (transform === "connect") {
-    return detailKind === "connector" && connector2 !== void 0 && hasValidConnectorGeometry(connector2) && geometry.rotation === object3.geometry.rotation && !ink2;
+function preservesAttachment(before, after) {
+  const { attachment, point: point2 } = before;
+  const next = after.attachment;
+  const sameTarget = attachment?.objectId === next?.objectId && attachment?.port === next?.port;
+  const samePoint = point2.x === after.point.x && point2.y === after.point.y;
+  return sameTarget && (!attachment || samePoint);
+}
+function preservesConnectorBinding(before, after) {
+  const sameHeads = before.startHead === after.startHead && before.endHead === after.endHead;
+  return sameHeads && preservesAttachment(before.start, after.start) && preservesAttachment(before.end, after.end);
+}
+function validConnectorTransform(previous, connector2, transform) {
+  if (!connector2 || !hasValidConnectorGeometry(connector2)) {
+    return false;
   }
-  if (connector2 || detailKind === "connector") {
+  return transform === "connect" || transform === "rotate" && preservesConnectorBinding(previous, connector2);
+}
+function validTransformFields(object3, { geometry, connector: connector2, ink: ink2 }, transform) {
+  const { detail, geometry: previous } = object3;
+  if (detail?.kind === "connector") {
+    return !ink2 && geometry.rotation === previous.rotation && validConnectorTransform(detail, connector2, transform);
+  }
+  if (connector2 || transform === "connect") {
     return false;
   }
   const invalidPoints = ink2 !== void 0 && ink2.length > 0 && !hasValidEditInk(ink2);
-  if (ink2 && (detailKind !== "ink" || invalidPoints)) {
+  if (ink2 && (detail?.kind !== "ink" || invalidPoints)) {
     return false;
   }
-  const previous = object3.geometry;
   if (transform === "resize") {
     return geometry.rotation === previous.rotation && geometry.width > 0 && geometry.height > 0;
   }
@@ -6368,7 +6384,7 @@ var oppositePort = {
   bottom: "top",
   left: "right"
 };
-function adjacentShapeConnector(source, target2, { sourcePort, targetPort, connectorId }) {
+function adjacentShapeConnector(source, target2, { sourcePort, targetPort, connectorId, stroke, strokeWidth }) {
   if (source.kind !== "shape" || target2.kind !== "shape" || oppositePort[sourcePort] !== targetPort) {
     return void 0;
   }
@@ -6415,6 +6431,7 @@ function adjacentShapeConnector(source, target2, { sourcePort, targetPort, conne
     },
     locked: false,
     geometryVersion: 0n,
+    appearance: stroke === void 0 && strokeWidth === void 0 ? void 0 : { stroke, strokeWidth },
     detail: {
       ...detail,
       start: { ...detail.start, point: first },
@@ -8150,6 +8167,12 @@ function clipboardObject(source, objectId, scope2) {
   return hasValidConnectorGeometry(next) ? { ...copy, detail: next } : void 0;
 }
 
+// src/modules/whiteboard/domain/custom-colors.ts
+var maximumBoardCustomColors = 64;
+function normalizeBoardCustomColor(value) {
+  return /^#[0-9a-f]{6}$/iu.test(value) ? value.toUpperCase() : void 0;
+}
+
 // src/modules/whiteboard/application/board-read.ts
 var WhiteboardAccessError = class extends Error {
   constructor() {
@@ -8805,12 +8828,13 @@ function capture(reader2, actor, command, formatTime, ownerName) {
       reviewSources: details?.reviewSources ?? { sources: [], targetSnapshots: [] }
     }
   };
+  const nativeInks = reader2.getBoardCustomColors(boardId).map((color2) => color2.slice(1)).join(",");
   return {
     board,
     archive: {
       boardId,
       properties,
-      contentFields: { style: legacyStyle },
+      contentFields: { style: { ...legacyStyle, ...nativeInks && { nativeInks } } },
       elements: elements2,
       history,
       assets: builder.assets
@@ -9088,6 +9112,19 @@ function createSuggestionOverlay(base, boardId, pinClocks) {
 
 // src/modules/whiteboard/application/edit-geometry-style.ts
 var textKinds = /* @__PURE__ */ new Set(["text", "note", "shape", "section", "connector"]);
+function rememberedColor(scope2, { patch, rememberColor }) {
+  if (rememberColor === void 0) {
+    return { kind: "changes" };
+  }
+  const color2 = normalizeBoardCustomColor(rememberColor);
+  const inks = [patch.stroke?.toUpperCase(), patch.textColor?.toUpperCase()];
+  if (!color2 || !inks.includes(color2)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const current = scope2.writer.getBoardCustomColors(scope2.board.boardId);
+  const customColors = current.includes(color2) ? void 0 : [...current, color2].slice(-maximumBoardCustomColors);
+  return { kind: "changes", customColors };
+}
 function textPayloads(scope2, objects, { targets: targets2, patch }) {
   const ids = objects.map(({ objectId }) => objectId);
   const current = scope2.writer.getPayloads(scope2.board.boardId, ids);
@@ -9174,7 +9211,11 @@ function applyBoardStyle(scope2, selected, operation) {
   if ("kind" in payloads) {
     return payloads;
   }
-  return { kind: "changes", objects: styleObjects(selected, payloads, patch), payloads };
+  const palette2 = rememberedColor(scope2, operation);
+  if (palette2.kind === "rejected") {
+    return palette2;
+  }
+  return { ...palette2, objects: styleObjects(selected, payloads, patch), payloads };
 }
 
 // src/modules/whiteboard/application/edit-geometry-tools.ts
@@ -9500,6 +9541,10 @@ function transformObjects(scope2, operation) {
   if (targets2.kind !== "targets") {
     return targets2;
   }
+  const singleConnector = targets2.objects.length === 1 && targets2.objects[0]?.kind === "connector";
+  if (operation.transform === "rotate" && singleConnector) {
+    return reject("invalidEdit");
+  }
   const { writer: writer2, board } = scope2;
   const ids = targets2.objects.map(({ objectId }) => objectId);
   const related = operation.transform === "connect" ? [] : writer2.listRelatedConnectors(board.boardId, ids);
@@ -9796,6 +9841,15 @@ function planGeometryEdit(writer2, board, operation) {
     case "arrange":
     case "style":
       return planSelectionEdit(scope2, operation);
+    case "removeCustomColor": {
+      const color2 = normalizeBoardCustomColor(operation.color);
+      if (!color2) {
+        return reject("invalidEdit");
+      }
+      const current = writer2.getBoardCustomColors(board.boardId);
+      const customColors = current.includes(color2) ? current.filter((entry) => entry !== color2) : void 0;
+      return { kind: "changes", customColors };
+    }
     case "paste":
       return reject("unsupportedKind");
   }
@@ -10066,6 +10120,7 @@ function geometryTargets(operation) {
     case "create":
       return operation.attachment ? [operation.attachment.source.objectId] : [];
     case "paste":
+    case "removeCustomColor":
       return [];
     case "transform":
       return operation.objects.map(({ target: target2 }) => target2.objectId);
@@ -10087,10 +10142,12 @@ function operationFitsSource(request, sourceIds) {
   if (request.kind === "content") {
     return sourceIds.has(request.operation.objectId);
   }
-  if (request.operation.kind === "paste") {
+  const operation = request.operation;
+  const writesPalette = operation.kind === "removeCustomColor" || operation.kind === "style" && operation.rememberColor !== void 0;
+  if (operation.kind === "paste" || writesPalette) {
     return false;
   }
-  return geometryTargets(request.operation).every((id) => sourceIds.has(id));
+  return geometryTargets(operation).every((id) => sourceIds.has(id));
 }
 function planSuggestion(reader2, board, request) {
   return request.kind === "geometry" ? planGeometryEdit(reader2, board, request.operation) : planContentEdit(reader2, board, request.operation);
@@ -11674,13 +11731,18 @@ function confirmedChange(reader2, boardId, actorId2, source) {
   if (!stored?.advancedRevision || result?.kind !== "applied" || result.detailsExpired) {
     return void 0;
   }
+  const { customColors: after, previousCustomColors: before } = result;
+  if (after === void 0 !== (before === void 0)) {
+    return void 0;
+  }
   return {
     revision: result.boardRevision,
     targets: [
       .../* @__PURE__ */ new Set([...result.objects.map(({ objectId }) => objectId), ...result.removedObjectIds])
     ],
     ordered: result.order !== void 0,
-    layerTargets: result.layerChangedObjectIds
+    layerTargets: result.layerChangedObjectIds,
+    palette: after && before ? { before, after } : void 0
   };
 }
 function needsPayload({ before, after, current }) {
@@ -11854,6 +11916,9 @@ function readReverseOrder(reader2, boardId, source, current, next) {
   });
   return order && new Set(order).size === next.size ? order : void 0;
 }
+function samePalette(current, expected) {
+  return current.length === expected.length && current.every((color2, index) => color2 === expected[index]);
+}
 function planBoardReverse(reader2, board, actor, command) {
   const { boardId } = board;
   const source = confirmedChange(reader2, boardId, actor.id, command);
@@ -11867,6 +11932,13 @@ function planBoardReverse(reader2, board, actor, command) {
   }
   if (source.targets.length > maxTargets) {
     return { kind: "rejected", reason: "tooLarge" };
+  }
+  const { palette: palette2 } = source;
+  if (palette2 && !samePalette(reader2.getBoardCustomColors(boardId), palette2.after)) {
+    return { kind: "conflict", boardRevision: board.revision };
+  }
+  if (palette2 && !source.ordered && source.targets.length === 0) {
+    return { kind: "changes", customColors: palette2.before };
   }
   const before = byId2(reader2.listVersionObjects(boardId, prior, source.targets));
   const after = byId2(reader2.listVersionObjects(boardId, source.revision, source.targets));
@@ -11886,10 +11958,9 @@ function planBoardReverse(reader2, board, actor, command) {
   if (!changes) {
     return { kind: "conflict", boardRevision: board.revision, objects: [...live.values()] };
   }
-  if (!source.ordered && targets2.length > 0 && targets2.every(translationOnly)) {
-    return reverseTranslation(reader2, board, [...live.values()], changes);
-  }
-  return reverseScene(reader2, board, source, changes);
+  const translation = !source.ordered && targets2.length > 0 && targets2.every(translationOnly);
+  const decision = translation ? reverseTranslation(reader2, board, [...live.values()], changes) : reverseScene(reader2, board, source, changes);
+  return decision.kind === "changes" && palette2 ? { ...decision, customColors: palette2.before } : decision;
 }
 
 // src/modules/whiteboard/application/board-editor.ts
@@ -11979,6 +12050,7 @@ function versionPage(reader2, board, before, limit) {
 function readonlySnapshotReader(reader2, revision) {
   return {
     getAccess: (boardId, actorId2) => reader2.getAccess(boardId, actorId2),
+    getBoardCustomColors: () => [],
     getBoard(boardId) {
       const version2 = readVersion(reader2, currentBoard(reader2, boardId), revision);
       if (!version2) {
@@ -12115,7 +12187,12 @@ function createWhiteboardApplication(repository, now, files = {}) {
         if (!board) {
           throw new WhiteboardAccessError();
         }
-        return { board, access, objects: reader2.listObjects(boardId) };
+        return {
+          board,
+          access,
+          objects: reader2.listObjects(boardId),
+          customColors: reader2.getBoardCustomColors(boardId)
+        };
       });
     },
     getObjectPayloads(actor, boardId, objectIds, allowTrashedOwner = false) {
@@ -18565,9 +18642,9 @@ function createCatalogRoutes(application) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_scene_pb.js
-var file_luming_studio_v1_whiteboard_scene = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2NlbmUucHJvdG8SEGx1bWluZy5zdHVkaW8udjEivwEKCkJvYXJkU2NlbmUSEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARIxCgdvYmplY3RzGAQgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRItCgZhY2Nlc3MYBSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQWNjZXNzQhEKD19ib2FyZF9yZXZpc2lvbiIwCgtCb2FyZEFjY2VzcxIQCghjYW5fZWRpdBgBIAEoCBIPCgd0cmFzaGVkGAIgASgIIskECg5PYmplY3RNZXRhZGF0YRIRCglvYmplY3RfaWQYASABKAkSDAoEa2luZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIsCghnZW9tZXRyeRgEIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnkSHQoQZ2VvbWV0cnlfdmVyc2lvbhgFIAEoBEgBiAEBEhwKD3BheWxvYWRfdmVyc2lvbhgGIAEoBEgCiAEBEg4KBmxvY2tlZBgHIAEoCBIWCglwYXJlbnRfaWQYCCABKAlIA4gBARIVCghncm91cF9pZBgJIAEoCUgEiAEBEjYKCmFwcGVhcmFuY2UYCiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdEFwcGVhcmFuY2USMAoFc2hhcGUYCyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXBlR2VvbWV0cnlIABI0CgdzZWN0aW9uGAwgASgLMiEubHVtaW5nLnN0dWRpby52MS5TZWN0aW9uR2VvbWV0cnlIABIsCgNpbmsYDSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLklua0dlb21ldHJ5SAASOAoJY29ubmVjdG9yGA4gASgLMiMubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JHZW9tZXRyeUgAQhEKD2dlb21ldHJ5X2RldGFpbEITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uQgwKCl9wYXJlbnRfaWRCCwoJX2dyb3VwX2lkIlEKCEdlb21ldHJ5EgkKAXgYASABKAESCQoBeRgCIAEoARINCgV3aWR0aBgDIAEoARIOCgZoZWlnaHQYBCABKAESEAoIcm90YXRpb24YBSABKAEiHQoFUG9pbnQSCQoBeBgBIAEoARIJCgF5GAIgASgBIpoBChBPYmplY3RBcHBlYXJhbmNlEhEKBGZpbGwYASABKAlIAIgBARITCgZzdHJva2UYAiABKAlIAYgBARIZCgxzdHJva2Vfd2lkdGgYAyABKAFIAogBARIOCgZkYXNoZWQYBCABKAgSDgoGaG9sbG93GAUgASgIQgcKBV9maWxsQgkKB19zdHJva2VCDwoNX3N0cm9rZV93aWR0aCIgCg1TaGFwZUdlb21ldHJ5Eg8KB291dGxpbmUYASABKAkiJgoPU2VjdGlvbkdlb21ldHJ5EhMKC3RyYW5zcGFyZW50GAEgASgIIhwKC0lua0dlb21ldHJ5Eg0KBXdpZHRoGAEgASgBIvECChFDb25uZWN0b3JHZW9tZXRyeRIyCgVzdGFydBgBIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yRW5kcG9pbnQSMAoDZW5kGAIgASgLMiMubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JFbmRwb2ludBImCgViZW5kcxgDIAMoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNwoOcmVsYXRpdmVfYmVuZHMYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlJlbGF0aXZlQmVuZHMSLQoMbGFiZWxfb2Zmc2V0GAUgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBIzCgpzdGFydF9oZWFkGAYgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JIZWFkEjEKCGVuZF9oZWFkGAcgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JIZWFkInYKEUNvbm5lY3RvckVuZHBvaW50EiYKBXBvaW50GAEgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI5CgphdHRhY2htZW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JBdHRhY2htZW50IlcKE0Nvbm5lY3RvckF0dGFjaG1lbnQSEQoJb2JqZWN0X2lkGAEgASgJEi0KBHBvcnQYAiABKA4yHy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvclBvcnQiUAoNUmVsYXRpdmVCZW5kcxIuCgpmaXJzdF9heGlzGAEgASgOMhoubHVtaW5nLnN0dWRpby52MS5CZW5kQXhpcxIPCgdvZmZzZXRzGAIgAygBKpUBCg1Db25uZWN0b3JQb3J0Eh4KGkNPTk5FQ1RPUl9QT1JUX1VOU1BFQ0lGSUVEEAASFgoSQ09OTkVDVE9SX1BPUlRfVE9QEAESGQoVQ09OTkVDVE9SX1BPUlRfQk9UVE9NEAISFwoTQ09OTkVDVE9SX1BPUlRfTEVGVBADEhgKFENPTk5FQ1RPUl9QT1JUX1JJR0hUEAQqfQoNQ29ubmVjdG9ySGVhZBIeChpDT05ORUNUT1JfSEVBRF9VTlNQRUNJRklFRBAAEhcKE0NPTk5FQ1RPUl9IRUFEX05PTkUQARIYChRDT05ORUNUT1JfSEVBRF9BUlJPVxACEhkKFUNPTk5FQ1RPUl9IRUFEX0NJUkNMRRADKlcKCEJlbmRBeGlzEhkKFUJFTkRfQVhJU19VTlNQRUNJRklFRBAAEhgKFEJFTkRfQVhJU19IT1JJWk9OVEFMEAESFgoSQkVORF9BWElTX1ZFUlRJQ0FMEAJiBnByb3RvMw");
+var file_luming_studio_v1_whiteboard_scene = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2NlbmUucHJvdG8SEGx1bWluZy5zdHVkaW8udjEi+wEKCkJvYXJkU2NlbmUSEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARIxCgdvYmplY3RzGAQgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRItCgZhY2Nlc3MYBSABKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQWNjZXNzEjoKDWN1c3RvbV9jb2xvcnMYBiABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQ3VzdG9tQ29sb3JzQhEKD19ib2FyZF9yZXZpc2lvbiIjChFCb2FyZEN1c3RvbUNvbG9ycxIOCgZjb2xvcnMYASADKAkiMAoLQm9hcmRBY2Nlc3MSEAoIY2FuX2VkaXQYASABKAgSDwoHdHJhc2hlZBgCIAEoCCLJBAoOT2JqZWN0TWV0YWRhdGESEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSDQoFbGFiZWwYAyABKAkSLAoIZ2VvbWV0cnkYBCABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5Eh0KEGdlb21ldHJ5X3ZlcnNpb24YBSABKARIAYgBARIcCg9wYXlsb2FkX3ZlcnNpb24YBiABKARIAogBARIOCgZsb2NrZWQYByABKAgSFgoJcGFyZW50X2lkGAggASgJSAOIAQESFQoIZ3JvdXBfaWQYCSABKAlIBIgBARI2CgphcHBlYXJhbmNlGAogASgLMiIubHVtaW5nLnN0dWRpby52MS5PYmplY3RBcHBlYXJhbmNlEjAKBXNoYXBlGAsgASgLMh8ubHVtaW5nLnN0dWRpby52MS5TaGFwZUdlb21ldHJ5SAASNAoHc2VjdGlvbhgMIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuU2VjdGlvbkdlb21ldHJ5SAASLAoDaW5rGA0gASgLMh0ubHVtaW5nLnN0dWRpby52MS5JbmtHZW9tZXRyeUgAEjgKCWNvbm5lY3RvchgOIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yR2VvbWV0cnlIAEIRCg9nZW9tZXRyeV9kZXRhaWxCEwoRX2dlb21ldHJ5X3ZlcnNpb25CEgoQX3BheWxvYWRfdmVyc2lvbkIMCgpfcGFyZW50X2lkQgsKCV9ncm91cF9pZCJRCghHZW9tZXRyeRIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBEhAKCHJvdGF0aW9uGAUgASgBIh0KBVBvaW50EgkKAXgYASABKAESCQoBeRgCIAEoASKaAQoQT2JqZWN0QXBwZWFyYW5jZRIRCgRmaWxsGAEgASgJSACIAQESEwoGc3Ryb2tlGAIgASgJSAGIAQESGQoMc3Ryb2tlX3dpZHRoGAMgASgBSAKIAQESDgoGZGFzaGVkGAQgASgIEg4KBmhvbGxvdxgFIAEoCEIHCgVfZmlsbEIJCgdfc3Ryb2tlQg8KDV9zdHJva2Vfd2lkdGgiIAoNU2hhcGVHZW9tZXRyeRIPCgdvdXRsaW5lGAEgASgJIiYKD1NlY3Rpb25HZW9tZXRyeRITCgt0cmFuc3BhcmVudBgBIAEoCCIcCgtJbmtHZW9tZXRyeRINCgV3aWR0aBgBIAEoASLxAgoRQ29ubmVjdG9yR2VvbWV0cnkSMgoFc3RhcnQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvckVuZHBvaW50EjAKA2VuZBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yRW5kcG9pbnQSJgoFYmVuZHMYAyADKAsyFy5sdW1pbmcuc3R1ZGlvLnYxLlBvaW50EjcKDnJlbGF0aXZlX2JlbmRzGAQgASgLMh8ubHVtaW5nLnN0dWRpby52MS5SZWxhdGl2ZUJlbmRzEi0KDGxhYmVsX29mZnNldBgFIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSMwoKc3RhcnRfaGVhZBgGIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZBIxCghlbmRfaGVhZBgHIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZCJ2ChFDb25uZWN0b3JFbmRwb2ludBImCgVwb2ludBgBIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSOQoKYXR0YWNobWVudBgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yQXR0YWNobWVudCJXChNDb25uZWN0b3JBdHRhY2htZW50EhEKCW9iamVjdF9pZBgBIAEoCRItCgRwb3J0GAIgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0IlAKDVJlbGF0aXZlQmVuZHMSLgoKZmlyc3RfYXhpcxgBIAEoDjIaLmx1bWluZy5zdHVkaW8udjEuQmVuZEF4aXMSDwoHb2Zmc2V0cxgCIAMoASqVAQoNQ29ubmVjdG9yUG9ydBIeChpDT05ORUNUT1JfUE9SVF9VTlNQRUNJRklFRBAAEhYKEkNPTk5FQ1RPUl9QT1JUX1RPUBABEhkKFUNPTk5FQ1RPUl9QT1JUX0JPVFRPTRACEhcKE0NPTk5FQ1RPUl9QT1JUX0xFRlQQAxIYChRDT05ORUNUT1JfUE9SVF9SSUdIVBAEKn0KDUNvbm5lY3RvckhlYWQSHgoaQ09OTkVDVE9SX0hFQURfVU5TUEVDSUZJRUQQABIXChNDT05ORUNUT1JfSEVBRF9OT05FEAESGAoUQ09OTkVDVE9SX0hFQURfQVJST1cQAhIZChVDT05ORUNUT1JfSEVBRF9DSVJDTEUQAypXCghCZW5kQXhpcxIZChVCRU5EX0FYSVNfVU5TUEVDSUZJRUQQABIYChRCRU5EX0FYSVNfSE9SSVpPTlRBTBABEhYKEkJFTkRfQVhJU19WRVJUSUNBTBACYgZwcm90bzM");
 var BoardSceneSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_scene, 0);
-var ObjectMetadataSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_scene, 2);
+var ObjectMetadataSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_scene, 3);
 var ConnectorPortSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_scene, 0);
 var ConnectorPort = /* @__PURE__ */ tsEnum(ConnectorPortSchema);
 var ConnectorHeadSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_scene, 1);
@@ -18601,8 +18678,8 @@ var MoveRejectionReason = /* @__PURE__ */ tsEnum(MoveRejectionReasonSchema);
 var WhiteboardService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_service, 0);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_edits_pb.js
-var file_luming_studio_v1_whiteboard_edits = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfZWRpdHMucHJvdG8SEGx1bWluZy5zdHVkaW8udjEikQYKGEVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjUKBmNyZWF0ZRgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRPYmplY3RIABI8Cgl0cmFuc2Zvcm0YBCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0c0gAEj4KC2NoYW5nZV9sb2NrGAUgASgLMicubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZE9iamVjdExvY2tIABI2CgZkZWxldGUYBiABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkRlbGV0ZUJvYXJkT2JqZWN0c0gAEjgKB3Jlb3JkZXIYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlJlb3JkZXJCb2FyZE9iamVjdHNIABI8CglkdXBsaWNhdGUYCCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkT2JqZWN0c0gAEjQKBWdyb3VwGAkgASgLMiMubHVtaW5nLnN0dWRpby52MS5Hcm91cEJvYXJkT2JqZWN0c0gAEjgKB3VuZ3JvdXAYCiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlVuZ3JvdXBCb2FyZE9iamVjdHNIABJCCg5jcmVhdGVfc2VjdGlvbhgLIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlU2VsZWN0aW9uU2VjdGlvbkgAEjgKB2FycmFuZ2UYDCABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFycmFuZ2VCb2FyZE9iamVjdHNIABI5CgVzdHlsZRgNIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRPYmplY3RTdHlsZUgAEjQKBXBhc3RlGA4gASgLMiMubHVtaW5nLnN0dWRpby52MS5QYXN0ZUJvYXJkT2JqZWN0c0gAQgsKCW9wZXJhdGlvbiK+AQoRQ3JlYXRlQm9hcmRPYmplY3QSMAoGb2JqZWN0GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRI4Cg9pbml0aWFsX3BheWxvYWQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWQSPQoKYXR0YWNobWVudBgDIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRDcmVhdGlvbkF0dGFjaG1lbnQizgEKF0JvYXJkQ3JlYXRpb25BdHRhY2htZW50EjEKBnNvdXJjZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjQKC3NvdXJjZV9wb3J0GAIgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0EjQKC3RhcmdldF9wb3J0GAMgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0EhQKDGNvbm5lY3Rvcl9pZBgEIAEoCSJqCg9FZGl0Qm9hcmRUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBAUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiLaAQoUVHJhbnNmb3JtQm9hcmRPYmplY3QSMQoGdGFyZ2V0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSLAoIZ2VvbWV0cnkYAiABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5EjYKCWNvbm5lY3RvchgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yR2VvbWV0cnkSKQoDaW5rGAQgASgLMhwubHVtaW5nLnN0dWRpby52MS5JbmtQYXlsb2FkIoQBChVUcmFuc2Zvcm1Cb2FyZE9iamVjdHMSMgoEa2luZBgBIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUcmFuc2Zvcm1LaW5kEjcKB29iamVjdHMYAiADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0IlsKFUNoYW5nZUJvYXJkT2JqZWN0TG9jaxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSDgoGbG9ja2VkGAIgASgIIkgKEkRlbGV0ZUJvYXJkT2JqZWN0cxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQixQEKE1Jlb3JkZXJCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjgKCWRpcmVjdGlvbhgCIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRMYXllckRpcmVjdGlvbhIkChdleHBlY3RlZF9ib2FyZF9yZXZpc2lvbhgDIAEoBEgAiAEBQhoKGF9leHBlY3RlZF9ib2FyZF9yZXZpc2lvbiJgChREdXBsaWNhdGVCb2FyZE9iamVjdBIxCgZzb3VyY2UYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIVCg1uZXdfb2JqZWN0X2lkGAIgASgJInwKFUR1cGxpY2F0ZUJvYXJkT2JqZWN0cxI3Cgd0YXJnZXRzGAEgAygLMiYubHVtaW5nLnN0dWRpby52MS5EdXBsaWNhdGVCb2FyZE9iamVjdBIqCgVkZWx0YRgCIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuTW92ZURlbHRhIlkKEUdyb3VwQm9hcmRPYmplY3RzEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIQCghncm91cF9pZBgCIAEoCSJJChNVbmdyb3VwQm9hcmRPYmplY3RzEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldCJ+ChZDcmVhdGVTZWxlY3Rpb25TZWN0aW9uEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBISCgpzZWN0aW9uX2lkGAIgASgJEhIKBXRpdGxlGAMgASgJSACIAQFCCAoGX3RpdGxlIn8KE0FycmFuZ2VCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjQKBnByZXNldBgCIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRBcnJhbmdlUHJlc2V0Io8BChZCb2FyZE9iamVjdFN0eWxlVGFyZ2V0EjEKBnRhcmdldBgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EiUKGGV4cGVjdGVkX3BheWxvYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhsKGV9leHBlY3RlZF9wYXlsb2FkX3ZlcnNpb24ikAUKFUJvYXJkT2JqZWN0U3R5bGVQYXRjaBIRCgRmaWxsGAEgASgJSACIAQESEwoGc3Ryb2tlGAIgASgJSAGIAQESGQoMc3Ryb2tlX3dpZHRoGAMgASgBSAKIAQESEwoGZGFzaGVkGAQgASgISAOIAQESEwoGaG9sbG93GAUgASgISASIAQESFwoKdGV4dF9jb2xvchgGIAEoCUgFiAEBEhgKC2ZvbnRfZmFtaWx5GAcgASgJSAaIAQESFgoJZm9udF9zaXplGAggASgBSAeIAQESOAoKdGV4dF9hbGlnbhgJIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuVGV4dEFsaWdubWVudEgIiAEBEhcKCnNoYXBlX2Zvcm0YCiABKAlICYgBARI4CgpzdGFydF9oZWFkGAsgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JIZWFkSAqIAQESNgoIZW5kX2hlYWQYDCABKA4yHy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvckhlYWRIC4gBARISCgVsYWJlbBgNIAEoCUgMiAEBEhEKBGJvbGQYDiABKAhIDYgBARITCgZpdGFsaWMYDyABKAhIDogBAUIHCgVfZmlsbEIJCgdfc3Ryb2tlQg8KDV9zdHJva2Vfd2lkdGhCCQoHX2Rhc2hlZEIJCgdfaG9sbG93Qg0KC190ZXh0X2NvbG9yQg4KDF9mb250X2ZhbWlseUIMCgpfZm9udF9zaXplQg0KC190ZXh0X2FsaWduQg0KC19zaGFwZV9mb3JtQg0KC19zdGFydF9oZWFkQgsKCV9lbmRfaGVhZEIICgZfbGFiZWxCBwoFX2JvbGRCCQoHX2l0YWxpYyKLAQoWQ2hhbmdlQm9hcmRPYmplY3RTdHlsZRI5Cgd0YXJnZXRzGAEgAygLMigubHVtaW5nLnN0dWRpby52MS5Cb2FyZE9iamVjdFN0eWxlVGFyZ2V0EjYKBXBhdGNoGAIgASgLMicubHVtaW5nLnN0dWRpby52MS5Cb2FyZE9iamVjdFN0eWxlUGF0Y2giPwoQUGFzdGVCb2FyZE9iamVjdBIYChBzb3VyY2Vfb2JqZWN0X2lkGAEgASgJEhEKCW9iamVjdF9pZBgCIAEoCSK/AQoRUGFzdGVCb2FyZE9iamVjdHMSFwoPc291cmNlX2JvYXJkX2lkGAEgASgJEhwKD3NvdXJjZV9yZXZpc2lvbhgCIAEoBEgAiAEBEjMKB3RhcmdldHMYAyADKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlBhc3RlQm9hcmRPYmplY3QSKgoFZGVsdGEYBCABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVEZWx0YUISChBfc291cmNlX3JldmlzaW9uIlAKGUVkaXRCb2FyZEdlb21ldHJ5UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCKvBQoYRWRpdE9iamVjdENvbnRlbnRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJb2JqZWN0X2lkGAMgASgJEiUKGGV4cGVjdGVkX3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEjUKCGRvY3VtZW50GAUgASgLMiEubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudFBheWxvYWRIABIrCgR0b2RvGAYgASgLMhsubHVtaW5nLnN0dWRpby52MS5Ub2RvRWRpdHNIABItCgR0ZXh0GAcgASgLMh0ubHVtaW5nLnN0dWRpby52MS5UZXh0UGF5bG9hZEgAEjMKBXRhYmxlGAggASgLMiIubHVtaW5nLnN0dWRpby52MS5TYXZlVGFibGVDb250ZW50SAASOQoMZW1iZWRfc291cmNlGAkgASgLMiEubHVtaW5nLnN0dWRpby52MS5TYXZlRW1iZWRTb3VyY2VIABI3CgtlbWJlZF9zdGF0ZRgKIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuU2F2ZUVtYmVkU3RhdGVIABI5CgdzdGlja2VyGAsgASgLMiYubHVtaW5nLnN0dWRpby52MS5TZWxlY3RTdGlja2VyQ29udGVudEgAEjAKBGNyb3AYDCABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkNyb3BCb2FyZEltYWdlSAASLwoEbGluaxgNIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuU2F2ZUJvYXJkTGlua0gAEh4KEWRlbGV0ZV9lbXB0eV90ZXh0GA4gASgISAKIAQFCBgoEZWRpdEIbChlfZXhwZWN0ZWRfcGF5bG9hZF92ZXJzaW9uQhQKEl9kZWxldGVfZW1wdHlfdGV4dCIsCg1TYXZlQm9hcmRMaW5rEg0KBXRpdGxlGAEgASgJEgwKBGhyZWYYAiABKAkiewoQU2F2ZVRhYmxlQ29udGVudBItCgV0YWJsZRgBIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuVGFibGVQYXlsb2FkEjgKDHdpZHRoX2NoYW5nZRgCIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuVGFibGVXaWR0aENoYW5nZSI5ChBUYWJsZVdpZHRoQ2hhbmdlEhYKDmV4cGVjdGVkX3dpZHRoGAEgASgBEg0KBXdpZHRoGAIgASgBInIKD1NhdmVFbWJlZFNvdXJjZRINCgV0aXRsZRgBIAEoCRIMCgRodG1sGAIgASgJEiUKGGV4cGVjdGVkX3NvdXJjZV9yZXZpc2lvbhgDIAEoBEgAiAEBQhsKGV9leHBlY3RlZF9zb3VyY2VfcmV2aXNpb24iNwoOU2F2ZUVtYmVkU3RhdGUSJQoFc3RhdGUYASABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWUiTgoUU2VsZWN0U3RpY2tlckNvbnRlbnQSEgoKc3RpY2tlcl9pZBgBIAEoCRIVCghmYWxsYmFjaxgCIAEoCUgAiAEBQgsKCV9mYWxsYmFjayJuCg5Dcm9wQm9hcmRJbWFnZRIpCgRjcm9wGAEgASgLMhsubHVtaW5nLnN0dWRpby52MS5JbWFnZUNyb3ASMQoMbmF0dXJhbF9zaXplGAIgASgLMhsubHVtaW5nLnN0dWRpby52MS5JbWFnZVNpemUiNgoJVG9kb0VkaXRzEikKBWVkaXRzGAEgAygLMhoubHVtaW5nLnN0dWRpby52MS5Ub2RvRWRpdCLbAQoIVG9kb0VkaXQSEAoGcmVuYW1lGAEgASgJSAASMgoGaW5zZXJ0GAIgASgLMiAubHVtaW5nLnN0dWRpby52MS5JbnNlcnRUb2RvSXRlbUgAEjIKBnVwZGF0ZRgDIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlVG9kb0l0ZW1IABIYCg5kZWxldGVfaXRlbV9pZBgEIAEoCUgAEi4KBG1vdmUYBSABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVUb2RvSXRlbUgAQgsKCW9wZXJhdGlvbiJXCg1Ub2RvUGxhY2VtZW50Eg8KBWZpcnN0GAEgASgISAASEAoGYXBwZW5kGAIgASgISAASFwoNYWZ0ZXJfaXRlbV9pZBgDIAEoCUgAQgoKCHBvc2l0aW9uIm4KDkluc2VydFRvZG9JdGVtEigKBGl0ZW0YASABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9JdGVtEjIKCXBsYWNlbWVudBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuVG9kb1BsYWNlbWVudCK/AQoOVXBkYXRlVG9kb0l0ZW0SDwoHaXRlbV9pZBgBIAEoCRIRCgR0ZXh0GAIgASgJSAGIAQESFAoHY2hlY2tlZBgDIAEoCEgCiAEBEjUKCnNvdXJjZV9yZWYYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9Tb3VyY2VSZWZIABIWCgxjbGVhcl9zb3VyY2UYBSABKAhIAEIPCg1zb3VyY2VfY2hhbmdlQgcKBV90ZXh0QgoKCF9jaGVja2VkIlMKDE1vdmVUb2RvSXRlbRIPCgdpdGVtX2lkGAEgASgJEjIKCXBsYWNlbWVudBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuVG9kb1BsYWNlbWVudCJQChlFZGl0T2JqZWN0Q29udGVudFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQipwEKF0F0dGFjaEJvYXJkSW1hZ2VSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJb2JqZWN0X2lkGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRIsCghnZW9tZXRyeRgFIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnkSDwoHY29udGVudBgGIAEoDCJPChhBdHRhY2hCb2FyZEltYWdlUmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCK7AQoXQXR0YWNoQm9hcmRWaWRlb1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIRCglvYmplY3RfaWQYAyABKAkSFAoMZGlzcGxheV9uYW1lGAQgASgJEiwKCGdlb21ldHJ5GAUgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeRIPCgdjb250ZW50GAYgASgMEhIKCm1lZGlhX3R5cGUYByABKAkiTwoYQXR0YWNoQm9hcmRWaWRlb1Jlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQiawofVXBsb2FkQm9hcmREb2N1bWVudEltYWdlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhEKCW9iamVjdF9pZBgDIAEoCRIPCgdjb250ZW50GAQgASgMIn0KIFVwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZVJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQSFgoJYXNzZXRfdXJsGAIgASgJSACIAQFCDAoKX2Fzc2V0X3VybCJ/ChdSZXZlcnNlQm9hcmRFZGl0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhkKD2VkaXRfY29tbWFuZF9pZBgDIAEoCUgAEhkKD21vdmVfY29tbWFuZF9pZBgEIAEoCUgAQggKBnNvdXJjZSJPChhSZXZlcnNlQm9hcmRFZGl0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCLsAQoQQm9hcmRFZGl0UmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjUKB2FwcGxpZWQYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdEFwcGxpZWRIABI3Cghjb25mbGljdBgEIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0Q29uZmxpY3RIABI3CghyZWplY3RlZBgFIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0ZWRIAEIJCgdvdXRjb21lIokCChBCb2FyZEVkaXRBcHBsaWVkEhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESOQoPY2hhbmdlZF9vYmplY3RzGAIgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRIaChJyZW1vdmVkX29iamVjdF9pZHMYAyADKAkSFAoMb2JqZWN0X29yZGVyGAQgAygJEj8KEGNoYW5nZWRfcGF5bG9hZHMYBSADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRSZXN1bHQSFwoPZGV0YWlsc19leHBpcmVkGAYgASgIQhEKD19ib2FyZF9yZXZpc2lvbiK/AQoRQm9hcmRFZGl0Q29uZmxpY3QSGwoOYm9hcmRfcmV2aXNpb24YASABKARIAIgBARI5Cg9jdXJyZW50X29iamVjdHMYAiADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhEj8KEGN1cnJlbnRfcGF5bG9hZHMYAyADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRSZXN1bHRCEQoPX2JvYXJkX3JldmlzaW9uIk8KEUJvYXJkRWRpdFJlamVjdGVkEjoKBnJlYXNvbhgBIAEoDjIqLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0aW9uUmVhc29uIkIKGkdldEJvYXJkRWRpdFJlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiUgobR2V0Qm9hcmRFZGl0UmVjZWlwdFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQqngEKEkJvYXJkVHJhbnNmb3JtS2luZBIkCiBCT0FSRF9UUkFOU0ZPUk1fS0lORF9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1RSQU5TRk9STV9LSU5EX1JFU0laRRABEh8KG0JPQVJEX1RSQU5TRk9STV9LSU5EX1JPVEFURRACEiAKHEJPQVJEX1RSQU5TRk9STV9LSU5EX0NPTk5FQ1QQAyrEAQoTQm9hcmRMYXllckRpcmVjdGlvbhIlCiFCT0FSRF9MQVlFUl9ESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIhCh1CT0FSRF9MQVlFUl9ESVJFQ1RJT05fRk9SV0FSRBABEiIKHkJPQVJEX0xBWUVSX0RJUkVDVElPTl9CQUNLV0FSRBACEh8KG0JPQVJEX0xBWUVSX0RJUkVDVElPTl9GUk9OVBADEh4KGkJPQVJEX0xBWUVSX0RJUkVDVElPTl9CQUNLEAQqmwIKEkJvYXJkQXJyYW5nZVByZXNldBIkCiBCT0FSRF9BUlJBTkdFX1BSRVNFVF9VTlNQRUNJRklFRBAAEh0KGUJPQVJEX0FSUkFOR0VfUFJFU0VUX1RJRFkQARIdChlCT0FSRF9BUlJBTkdFX1BSRVNFVF9MRUZUEAISIAocQk9BUkRfQVJSQU5HRV9QUkVTRVRfSENFTlRFUhADEh4KGkJPQVJEX0FSUkFOR0VfUFJFU0VUX1JJR0hUEAQSHAoYQk9BUkRfQVJSQU5HRV9QUkVTRVRfVE9QEAUSIAocQk9BUkRfQVJSQU5HRV9QUkVTRVRfVkNFTlRFUhAGEh8KG0JPQVJEX0FSUkFOR0VfUFJFU0VUX0JPVFRPTRAHKqUEChhCb2FyZEVkaXRSZWplY3Rpb25SZWFzb24SKwonQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKQolQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEiwKKEJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0VESVQQAhIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fT0JKRUNUX05PVF9GT1VORBADEi8KK0JPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9HRU9NRVRSWV9MT0NLRUQQBBIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAFEjAKLEJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9VTlNVUFBPUlRFRF9LSU5EEAYSMwovQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fVU5BVkFJTEFCTEUQBxIpCiVCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fVE9PX0xBUkdFEAgSLQopQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfSU1BR0UQCRItCilCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9WSURFTxAKMqcGChBCb2FyZEVkaXRTZXJ2aWNlEmwKEUVkaXRCb2FyZEdlb21ldHJ5EioubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZEdlb21ldHJ5UmVzcG9uc2USbAoRRWRpdE9iamVjdENvbnRlbnQSKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuRWRpdE9iamVjdENvbnRlbnRSZXNwb25zZRJpChBBdHRhY2hCb2FyZEltYWdlEikubHVtaW5nLnN0dWRpby52MS5BdHRhY2hCb2FyZEltYWdlUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQXR0YWNoQm9hcmRJbWFnZVJlc3BvbnNlEmkKEEF0dGFjaEJvYXJkVmlkZW8SKS5sdW1pbmcuc3R1ZGlvLnYxLkF0dGFjaEJvYXJkVmlkZW9SZXF1ZXN0GioubHVtaW5nLnN0dWRpby52MS5BdHRhY2hCb2FyZFZpZGVvUmVzcG9uc2USgQEKGFVwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZRIxLmx1bWluZy5zdHVkaW8udjEuVXBsb2FkQm9hcmREb2N1bWVudEltYWdlUmVxdWVzdBoyLmx1bWluZy5zdHVkaW8udjEuVXBsb2FkQm9hcmREb2N1bWVudEltYWdlUmVzcG9uc2USaQoQUmV2ZXJzZUJvYXJkRWRpdBIpLmx1bWluZy5zdHVkaW8udjEuUmV2ZXJzZUJvYXJkRWRpdFJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLlJldmVyc2VCb2FyZEVkaXRSZXNwb25zZRJyChNHZXRCb2FyZEVkaXRSZWNlaXB0EiwubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRFZGl0UmVjZWlwdFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_struct, file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
-var SaveEmbedStateSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_edits, 26);
+var file_luming_studio_v1_whiteboard_edits = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfZWRpdHMucHJvdG8SEGx1bWluZy5zdHVkaW8udjEi2gYKGEVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjUKBmNyZWF0ZRgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRPYmplY3RIABI8Cgl0cmFuc2Zvcm0YBCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0c0gAEj4KC2NoYW5nZV9sb2NrGAUgASgLMicubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZE9iamVjdExvY2tIABI2CgZkZWxldGUYBiABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkRlbGV0ZUJvYXJkT2JqZWN0c0gAEjgKB3Jlb3JkZXIYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlJlb3JkZXJCb2FyZE9iamVjdHNIABI8CglkdXBsaWNhdGUYCCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkT2JqZWN0c0gAEjQKBWdyb3VwGAkgASgLMiMubHVtaW5nLnN0dWRpby52MS5Hcm91cEJvYXJkT2JqZWN0c0gAEjgKB3VuZ3JvdXAYCiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlVuZ3JvdXBCb2FyZE9iamVjdHNIABJCCg5jcmVhdGVfc2VjdGlvbhgLIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlU2VsZWN0aW9uU2VjdGlvbkgAEjgKB2FycmFuZ2UYDCABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFycmFuZ2VCb2FyZE9iamVjdHNIABI5CgVzdHlsZRgNIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRPYmplY3RTdHlsZUgAEjQKBXBhc3RlGA4gASgLMiMubHVtaW5nLnN0dWRpby52MS5QYXN0ZUJvYXJkT2JqZWN0c0gAEkcKE3JlbW92ZV9jdXN0b21fY29sb3IYDyABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLlJlbW92ZUJvYXJkQ3VzdG9tQ29sb3JIAEILCglvcGVyYXRpb24ivgEKEUNyZWF0ZUJvYXJkT2JqZWN0EjAKBm9iamVjdBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESOAoPaW5pdGlhbF9wYXlsb2FkGAIgASgLMh8ubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkEj0KCmF0dGFjaG1lbnQYAyABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkQ3JlYXRpb25BdHRhY2htZW50IpoCChdCb2FyZENyZWF0aW9uQXR0YWNobWVudBIxCgZzb3VyY2UYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBI0Cgtzb3VyY2VfcG9ydBgCIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yUG9ydBI0Cgt0YXJnZXRfcG9ydBgDIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yUG9ydBIUCgxjb25uZWN0b3JfaWQYBCABKAkSEwoGc3Ryb2tlGAUgASgJSACIAQESGQoMc3Ryb2tlX3dpZHRoGAYgASgBSAGIAQFCCQoHX3N0cm9rZUIPCg1fc3Ryb2tlX3dpZHRoImoKD0VkaXRCb2FyZFRhcmdldBIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBQhwKGl9leHBlY3RlZF9nZW9tZXRyeV92ZXJzaW9uItoBChRUcmFuc2Zvcm1Cb2FyZE9iamVjdBIxCgZ0YXJnZXQYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIsCghnZW9tZXRyeRgCIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnkSNgoJY29ubmVjdG9yGAMgASgLMiMubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JHZW9tZXRyeRIpCgNpbmsYBCABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLklua1BheWxvYWQihAEKFVRyYW5zZm9ybUJvYXJkT2JqZWN0cxIyCgRraW5kGAEgASgOMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRyYW5zZm9ybUtpbmQSNwoHb2JqZWN0cxgCIAMoCzImLmx1bWluZy5zdHVkaW8udjEuVHJhbnNmb3JtQm9hcmRPYmplY3QiWwoVQ2hhbmdlQm9hcmRPYmplY3RMb2NrEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIOCgZsb2NrZWQYAiABKAgiSAoSRGVsZXRlQm9hcmRPYmplY3RzEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldCLFAQoTUmVvcmRlckJvYXJkT2JqZWN0cxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSOAoJZGlyZWN0aW9uGAIgASgOMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZExheWVyRGlyZWN0aW9uEiQKF2V4cGVjdGVkX2JvYXJkX3JldmlzaW9uGAMgASgESACIAQFCGgoYX2V4cGVjdGVkX2JvYXJkX3JldmlzaW9uImAKFER1cGxpY2F0ZUJvYXJkT2JqZWN0EjEKBnNvdXJjZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EhUKDW5ld19vYmplY3RfaWQYAiABKAkifAoVRHVwbGljYXRlQm9hcmRPYmplY3RzEjcKB3RhcmdldHMYASADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkT2JqZWN0EioKBWRlbHRhGAIgASgLMhsubHVtaW5nLnN0dWRpby52MS5Nb3ZlRGVsdGEiWQoRR3JvdXBCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EhAKCGdyb3VwX2lkGAIgASgJIkkKE1VuZ3JvdXBCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0In4KFkNyZWF0ZVNlbGVjdGlvblNlY3Rpb24SMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EhIKCnNlY3Rpb25faWQYAiABKAkSEgoFdGl0bGUYAyABKAlIAIgBAUIICgZfdGl0bGUifwoTQXJyYW5nZUJvYXJkT2JqZWN0cxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSNAoGcHJlc2V0GAIgASgOMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZEFycmFuZ2VQcmVzZXQijwEKFkJvYXJkT2JqZWN0U3R5bGVUYXJnZXQSMQoGdGFyZ2V0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSJQoYZXhwZWN0ZWRfcGF5bG9hZF92ZXJzaW9uGAIgASgESACIAQFCGwoZX2V4cGVjdGVkX3BheWxvYWRfdmVyc2lvbiKQBQoVQm9hcmRPYmplY3RTdHlsZVBhdGNoEhEKBGZpbGwYASABKAlIAIgBARITCgZzdHJva2UYAiABKAlIAYgBARIZCgxzdHJva2Vfd2lkdGgYAyABKAFIAogBARITCgZkYXNoZWQYBCABKAhIA4gBARITCgZob2xsb3cYBSABKAhIBIgBARIXCgp0ZXh0X2NvbG9yGAYgASgJSAWIAQESGAoLZm9udF9mYW1pbHkYByABKAlIBogBARIWCglmb250X3NpemUYCCABKAFIB4gBARI4Cgp0ZXh0X2FsaWduGAkgASgOMh8ubHVtaW5nLnN0dWRpby52MS5UZXh0QWxpZ25tZW50SAiIAQESFwoKc2hhcGVfZm9ybRgKIAEoCUgJiAEBEjgKCnN0YXJ0X2hlYWQYCyABKA4yHy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvckhlYWRICogBARI2CghlbmRfaGVhZBgMIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9ySGVhZEgLiAEBEhIKBWxhYmVsGA0gASgJSAyIAQESEQoEYm9sZBgOIAEoCEgNiAEBEhMKBml0YWxpYxgPIAEoCEgOiAEBQgcKBV9maWxsQgkKB19zdHJva2VCDwoNX3N0cm9rZV93aWR0aEIJCgdfZGFzaGVkQgkKB19ob2xsb3dCDQoLX3RleHRfY29sb3JCDgoMX2ZvbnRfZmFtaWx5QgwKCl9mb250X3NpemVCDQoLX3RleHRfYWxpZ25CDQoLX3NoYXBlX2Zvcm1CDQoLX3N0YXJ0X2hlYWRCCwoJX2VuZF9oZWFkQggKBl9sYWJlbEIHCgVfYm9sZEIJCgdfaXRhbGljIrsBChZDaGFuZ2VCb2FyZE9iamVjdFN0eWxlEjkKB3RhcmdldHMYASADKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkT2JqZWN0U3R5bGVUYXJnZXQSNgoFcGF0Y2gYAiABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkT2JqZWN0U3R5bGVQYXRjaBIbCg5yZW1lbWJlcl9jb2xvchgDIAEoCUgAiAEBQhEKD19yZW1lbWJlcl9jb2xvciInChZSZW1vdmVCb2FyZEN1c3RvbUNvbG9yEg0KBWNvbG9yGAEgASgJIj8KEFBhc3RlQm9hcmRPYmplY3QSGAoQc291cmNlX29iamVjdF9pZBgBIAEoCRIRCglvYmplY3RfaWQYAiABKAkivwEKEVBhc3RlQm9hcmRPYmplY3RzEhcKD3NvdXJjZV9ib2FyZF9pZBgBIAEoCRIcCg9zb3VyY2VfcmV2aXNpb24YAiABKARIAIgBARIzCgd0YXJnZXRzGAMgAygLMiIubHVtaW5nLnN0dWRpby52MS5QYXN0ZUJvYXJkT2JqZWN0EioKBWRlbHRhGAQgASgLMhsubHVtaW5nLnN0dWRpby52MS5Nb3ZlRGVsdGFCEgoQX3NvdXJjZV9yZXZpc2lvbiJQChlFZGl0Qm9hcmRHZW9tZXRyeVJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQirwUKGEVkaXRPYmplY3RDb250ZW50UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhEKCW9iamVjdF9pZBgDIAEoCRIlChhleHBlY3RlZF9wYXlsb2FkX3ZlcnNpb24YBCABKARIAYgBARI1Cghkb2N1bWVudBgFIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRG9jdW1lbnRQYXlsb2FkSAASKwoEdG9kbxgGIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuVG9kb0VkaXRzSAASLQoEdGV4dBgHIAEoCzIdLmx1bWluZy5zdHVkaW8udjEuVGV4dFBheWxvYWRIABIzCgV0YWJsZRgIIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuU2F2ZVRhYmxlQ29udGVudEgAEjkKDGVtYmVkX3NvdXJjZRgJIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuU2F2ZUVtYmVkU291cmNlSAASNwoLZW1iZWRfc3RhdGUYCiABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLlNhdmVFbWJlZFN0YXRlSAASOQoHc3RpY2tlchgLIAEoCzImLmx1bWluZy5zdHVkaW8udjEuU2VsZWN0U3RpY2tlckNvbnRlbnRIABIwCgRjcm9wGAwgASgLMiAubHVtaW5nLnN0dWRpby52MS5Dcm9wQm9hcmRJbWFnZUgAEi8KBGxpbmsYDSABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNhdmVCb2FyZExpbmtIABIeChFkZWxldGVfZW1wdHlfdGV4dBgOIAEoCEgCiAEBQgYKBGVkaXRCGwoZX2V4cGVjdGVkX3BheWxvYWRfdmVyc2lvbkIUChJfZGVsZXRlX2VtcHR5X3RleHQiLAoNU2F2ZUJvYXJkTGluaxINCgV0aXRsZRgBIAEoCRIMCgRocmVmGAIgASgJInsKEFNhdmVUYWJsZUNvbnRlbnQSLQoFdGFibGUYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLlRhYmxlUGF5bG9hZBI4Cgx3aWR0aF9jaGFuZ2UYAiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlRhYmxlV2lkdGhDaGFuZ2UiOQoQVGFibGVXaWR0aENoYW5nZRIWCg5leHBlY3RlZF93aWR0aBgBIAEoARINCgV3aWR0aBgCIAEoASJyCg9TYXZlRW1iZWRTb3VyY2USDQoFdGl0bGUYASABKAkSDAoEaHRtbBgCIAEoCRIlChhleHBlY3RlZF9zb3VyY2VfcmV2aXNpb24YAyABKARIAIgBAUIbChlfZXhwZWN0ZWRfc291cmNlX3JldmlzaW9uIjcKDlNhdmVFbWJlZFN0YXRlEiUKBXN0YXRlGAEgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlIk4KFFNlbGVjdFN0aWNrZXJDb250ZW50EhIKCnN0aWNrZXJfaWQYASABKAkSFQoIZmFsbGJhY2sYAiABKAlIAIgBAUILCglfZmFsbGJhY2sibgoOQ3JvcEJvYXJkSW1hZ2USKQoEY3JvcBgBIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuSW1hZ2VDcm9wEjEKDG5hdHVyYWxfc2l6ZRgCIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuSW1hZ2VTaXplIjYKCVRvZG9FZGl0cxIpCgVlZGl0cxgBIAMoCzIaLmx1bWluZy5zdHVkaW8udjEuVG9kb0VkaXQi2wEKCFRvZG9FZGl0EhAKBnJlbmFtZRgBIAEoCUgAEjIKBmluc2VydBgCIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuSW5zZXJ0VG9kb0l0ZW1IABIyCgZ1cGRhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZVRvZG9JdGVtSAASGAoOZGVsZXRlX2l0ZW1faWQYBCABKAlIABIuCgRtb3ZlGAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Nb3ZlVG9kb0l0ZW1IAEILCglvcGVyYXRpb24iVwoNVG9kb1BsYWNlbWVudBIPCgVmaXJzdBgBIAEoCEgAEhAKBmFwcGVuZBgCIAEoCEgAEhcKDWFmdGVyX2l0ZW1faWQYAyABKAlIAEIKCghwb3NpdGlvbiJuCg5JbnNlcnRUb2RvSXRlbRIoCgRpdGVtGAEgASgLMhoubHVtaW5nLnN0dWRpby52MS5Ub2RvSXRlbRIyCglwbGFjZW1lbnQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9QbGFjZW1lbnQivwEKDlVwZGF0ZVRvZG9JdGVtEg8KB2l0ZW1faWQYASABKAkSEQoEdGV4dBgCIAEoCUgBiAEBEhQKB2NoZWNrZWQYAyABKAhIAogBARI1Cgpzb3VyY2VfcmVmGAQgASgLMh8ubHVtaW5nLnN0dWRpby52MS5Ub2RvU291cmNlUmVmSAASFgoMY2xlYXJfc291cmNlGAUgASgISABCDwoNc291cmNlX2NoYW5nZUIHCgVfdGV4dEIKCghfY2hlY2tlZCJTCgxNb3ZlVG9kb0l0ZW0SDwoHaXRlbV9pZBgBIAEoCRIyCglwbGFjZW1lbnQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9QbGFjZW1lbnQiUAoZRWRpdE9iamVjdENvbnRlbnRSZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRSZWNlaXB0IqcBChdBdHRhY2hCb2FyZEltYWdlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhEKCW9iamVjdF9pZBgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSLAoIZ2VvbWV0cnkYBSABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5Eg8KB2NvbnRlbnQYBiABKAwiTwoYQXR0YWNoQm9hcmRJbWFnZVJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQiuwEKF0F0dGFjaEJvYXJkVmlkZW9SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJb2JqZWN0X2lkGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRIsCghnZW9tZXRyeRgFIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnkSDwoHY29udGVudBgGIAEoDBISCgptZWRpYV90eXBlGAcgASgJIk8KGEF0dGFjaEJvYXJkVmlkZW9SZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRSZWNlaXB0ImsKH1VwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIRCglvYmplY3RfaWQYAyABKAkSDwoHY29udGVudBgEIAEoDCJ9CiBVcGxvYWRCb2FyZERvY3VtZW50SW1hZ2VSZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRSZWNlaXB0EhYKCWFzc2V0X3VybBgCIAEoCUgAiAEBQgwKCl9hc3NldF91cmwifwoXUmV2ZXJzZUJvYXJkRWRpdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIZCg9lZGl0X2NvbW1hbmRfaWQYAyABKAlIABIZCg9tb3ZlX2NvbW1hbmRfaWQYBCABKAlIAEIICgZzb3VyY2UiTwoYUmV2ZXJzZUJvYXJkRWRpdFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQi7AEKEEJvYXJkRWRpdFJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI1CgdhcHBsaWVkGAMgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRBcHBsaWVkSAASNwoIY29uZmxpY3QYBCABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdENvbmZsaWN0SAASNwoIcmVqZWN0ZWQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlamVjdGVkSABCCQoHb3V0Y29tZSLFAgoQQm9hcmRFZGl0QXBwbGllZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjkKD2NoYW5nZWRfb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhQKDG9iamVjdF9vcmRlchgEIAMoCRI/ChBjaGFuZ2VkX3BheWxvYWRzGAUgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhcKD2RldGFpbHNfZXhwaXJlZBgGIAEoCBI6Cg1jdXN0b21fY29sb3JzGAcgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZEN1c3RvbUNvbG9yc0IRCg9fYm9hcmRfcmV2aXNpb24ivwEKEUJvYXJkRWRpdENvbmZsaWN0EhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESOQoPY3VycmVudF9vYmplY3RzGAIgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRI/ChBjdXJyZW50X3BheWxvYWRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0QhEKD19ib2FyZF9yZXZpc2lvbiJPChFCb2FyZEVkaXRSZWplY3RlZBI6CgZyZWFzb24YASABKA4yKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlamVjdGlvblJlYXNvbiJCChpHZXRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIlIKG0dldEJvYXJkRWRpdFJlY2VpcHRSZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRSZWNlaXB0Kp4BChJCb2FyZFRyYW5zZm9ybUtpbmQSJAogQk9BUkRfVFJBTlNGT1JNX0tJTkRfVU5TUEVDSUZJRUQQABIfChtCT0FSRF9UUkFOU0ZPUk1fS0lORF9SRVNJWkUQARIfChtCT0FSRF9UUkFOU0ZPUk1fS0lORF9ST1RBVEUQAhIgChxCT0FSRF9UUkFOU0ZPUk1fS0lORF9DT05ORUNUEAMqxAEKE0JvYXJkTGF5ZXJEaXJlY3Rpb24SJQohQk9BUkRfTEFZRVJfRElSRUNUSU9OX1VOU1BFQ0lGSUVEEAASIQodQk9BUkRfTEFZRVJfRElSRUNUSU9OX0ZPUldBUkQQARIiCh5CT0FSRF9MQVlFUl9ESVJFQ1RJT05fQkFDS1dBUkQQAhIfChtCT0FSRF9MQVlFUl9ESVJFQ1RJT05fRlJPTlQQAxIeChpCT0FSRF9MQVlFUl9ESVJFQ1RJT05fQkFDSxAEKpsCChJCb2FyZEFycmFuZ2VQcmVzZXQSJAogQk9BUkRfQVJSQU5HRV9QUkVTRVRfVU5TUEVDSUZJRUQQABIdChlCT0FSRF9BUlJBTkdFX1BSRVNFVF9USURZEAESHQoZQk9BUkRfQVJSQU5HRV9QUkVTRVRfTEVGVBACEiAKHEJPQVJEX0FSUkFOR0VfUFJFU0VUX0hDRU5URVIQAxIeChpCT0FSRF9BUlJBTkdFX1BSRVNFVF9SSUdIVBAEEhwKGEJPQVJEX0FSUkFOR0VfUFJFU0VUX1RPUBAFEiAKHEJPQVJEX0FSUkFOR0VfUFJFU0VUX1ZDRU5URVIQBhIfChtCT0FSRF9BUlJBTkdFX1BSRVNFVF9CT1RUT00QByqlBAoYQm9hcmRFZGl0UmVqZWN0aW9uUmVhc29uEisKJ0JPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEikKJUJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QARIsCihCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9FRElUEAISMAosQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX09CSkVDVF9OT1RfRk9VTkQQAxIvCitCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fR0VPTUVUUllfTE9DS0VEEAQSMAosQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0NPTU1BTkRfSURfUkVVU0UQBRIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fVU5TVVBQT1JURURfS0lORBAGEjMKL0JPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9WRVJTSU9OX1VOQVZBSUxBQkxFEAcSKQolQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1RPT19MQVJHRRAIEi0KKUJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0lNQUdFEAkSLQopQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfVklERU8QCjKnBgoQQm9hcmRFZGl0U2VydmljZRJsChFFZGl0Qm9hcmRHZW9tZXRyeRIqLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkR2VvbWV0cnlSZXF1ZXN0GisubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlc3BvbnNlEmwKEUVkaXRPYmplY3RDb250ZW50EioubHVtaW5nLnN0dWRpby52MS5FZGl0T2JqZWN0Q29udGVudFJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVzcG9uc2USaQoQQXR0YWNoQm9hcmRJbWFnZRIpLmx1bWluZy5zdHVkaW8udjEuQXR0YWNoQm9hcmRJbWFnZVJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLkF0dGFjaEJvYXJkSW1hZ2VSZXNwb25zZRJpChBBdHRhY2hCb2FyZFZpZGVvEikubHVtaW5nLnN0dWRpby52MS5BdHRhY2hCb2FyZFZpZGVvUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQXR0YWNoQm9hcmRWaWRlb1Jlc3BvbnNlEoEBChhVcGxvYWRCb2FyZERvY3VtZW50SW1hZ2USMS5sdW1pbmcuc3R1ZGlvLnYxLlVwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZVJlcXVlc3QaMi5sdW1pbmcuc3R1ZGlvLnYxLlVwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZVJlc3BvbnNlEmkKEFJldmVyc2VCb2FyZEVkaXQSKS5sdW1pbmcuc3R1ZGlvLnYxLlJldmVyc2VCb2FyZEVkaXRSZXF1ZXN0GioubHVtaW5nLnN0dWRpby52MS5SZXZlcnNlQm9hcmRFZGl0UmVzcG9uc2UScgoTR2V0Qm9hcmRFZGl0UmVjZWlwdBIsLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRFZGl0UmVjZWlwdFJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkRWRpdFJlY2VpcHRSZXNwb25zZWIGcHJvdG8z", [file_google_protobuf_struct, file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var SaveEmbedStateSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_edits, 27);
 var BoardTransformKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 0);
 var BoardTransformKind = /* @__PURE__ */ tsEnum(BoardTransformKindSchema);
 var BoardLayerDirectionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 1);
@@ -18708,7 +18785,8 @@ function toBoardScene(scene) {
     title: scene.board.title,
     boardRevision: scene.board.revision,
     access: scene.access,
-    objects: scene.objects.map(toObjectMetadata)
+    objects: scene.objects.map(toObjectMetadata),
+    customColors: scene.customColors && { colors: [...scene.customColors] }
   });
 }
 
@@ -18769,7 +18847,8 @@ function toBoardEditReceipt({
         removedObjectIds: [...outcome.removedObjectIds],
         objectOrder: outcome.order ? [...outcome.order] : [],
         changedPayloads,
-        detailsExpired: outcome.detailsExpired
+        detailsExpired: outcome.detailsExpired,
+        customColors: outcome.customColors && { colors: [...outcome.customColors] }
       }
     }
   };
@@ -19145,7 +19224,9 @@ function readCreationAttachment(value) {
     source: readTarget(value.source),
     sourcePort: requireField(ports.get(value.sourcePort), "Source port"),
     targetPort: requireField(ports.get(value.targetPort), "Target port"),
-    connectorId: requireId(value.connectorId)
+    connectorId: requireId(value.connectorId),
+    stroke: value.stroke,
+    strokeWidth: value.strokeWidth
   };
 }
 function readCreate(value) {
@@ -19252,11 +19333,14 @@ function readGeometryOperation({ operation }) {
       return {
         kind: "style",
         patch: readStyle(operation.value.patch),
+        rememberColor: operation.value.rememberColor,
         targets: operation.value.targets.map(({ target: target2, expectedPayloadVersion }) => ({
           target: readTarget(target2),
           expectedPayloadVersion
         }))
       };
+    case "removeCustomColor":
+      return { kind: "removeCustomColor", color: operation.value.color };
     case "paste": {
       const { sourceBoardId, sourceRevision, targets: targets2, delta } = operation.value;
       const { dx, dy } = requireField(delta, "Paste offset");
@@ -20804,7 +20888,8 @@ function observeRoomChange(rooms, reportError) {
     try {
       const orderChanged = "order" in receipt && Boolean(receipt.order);
       const expired = "detailsExpired" in receipt && receipt.detailsExpired;
-      const refreshScene = orderChanged || expired || receipt.objects.length > 64;
+      const colorsChanged = "customColors" in receipt && receipt.customColors !== void 0;
+      const refreshScene = orderChanged || expired || colorsChanged || receipt.objects.length > 64;
       if (refreshScene) {
         rooms.publishContentChange({
           boardId: outcome.boardId,
@@ -25571,6 +25656,7 @@ var DELTA_CODEC_VERSION = 2;
 var MAX_HISTORY = 200;
 var MAX_PROPERTIES = 64;
 var MAX_UNITS = 4e3;
+var legacyCustomInks = /^[\da-f]{6}(?:,[\da-f]{6}){0,63}$/iu;
 var MAX_JSON_DEPTH = 204;
 var MAX_JSON_STRUCTURE = 2e6;
 var MAX_ARCHIVE_BOARD_BYTES = 16 * 1024 * 1024;
@@ -25729,13 +25815,27 @@ function readScene(value, readPayload) {
     if (elements2.length > MAX_UNITS) {
       throw archiveTooLarge();
     }
-    return elements2;
+    return { objects: elements2, style: content.style };
   }
   const fields = archiveRecord(readPayload(value.fields, budget));
   if (Object.hasOwn(fields, "elements")) {
     throw invalidArchive("Duplicate archive object list");
   }
-  return value.units.map((reference) => readPayload(reference, budget));
+  return {
+    objects: value.units.map((reference) => readPayload(reference, budget)),
+    style: fields.style
+  };
+}
+function currentSceneFields({ objects, style }) {
+  if (!style || typeof style !== "object" || !("nativeInks" in style)) {
+    return { objects };
+  }
+  const { nativeInks } = style;
+  if (typeof nativeInks !== "string" || !legacyCustomInks.test(nativeInks)) {
+    return { objects };
+  }
+  const customColors = [...new Set(nativeInks.split(",").map((ink2) => "#" + ink2.toUpperCase()))];
+  return { objects, customColors };
 }
 function cachedPayload(reader2, total) {
   const cache = /* @__PURE__ */ new Map();
@@ -25802,7 +25902,9 @@ function projectState(header, contents, reader2, artifactId, history) {
   if (!restore) {
     return {
       title,
-      objects: readScene(current, (reference, allowance) => reader2.payload(reference, allowance)),
+      ...currentSceneFields(
+        readScene(current, (reference, allowance) => reader2.payload(reference, allowance))
+      ),
       assets
     };
   }
@@ -25820,11 +25922,11 @@ function projectState(header, contents, reader2, artifactId, history) {
   const restoredHistory = history.map(({ entry, artifact: artifact2, content }) => ({
     entry: archiveRecord(reader2.payload(entry, budget)),
     artifact: archiveRecord(reader2.payload(artifact2, budget)),
-    objects: scene(content)
+    objects: scene(content).objects
   }));
   return {
     title,
-    objects: scene(currentIndex),
+    ...currentSceneFields(scene(currentIndex)),
     assets,
     restoration: { artifact: board, details, history: restoredHistory }
   };
@@ -26543,6 +26645,7 @@ async function stageCurrentArchive(chunks) {
       sourceBoardId,
       title: state.title,
       objects: state.objects,
+      customColors: state.customColors,
       restoration: state.restoration,
       assets,
       archivePath,
@@ -28005,6 +28108,9 @@ function retainSource(connection, boardId, archive) {
 function writePublication(connection, command, archive, publication) {
   const { boardId } = command;
   writeBoard(connection, command, archive.title, publication);
+  if (archive.customColors?.length) {
+    connection.prepare("INSERT INTO board_custom_colors (board_id, colors_json) VALUES (?, ?)").run(boardId, JSON.stringify(archive.customColors));
+  }
   writeScene(connection, boardId, publication.objects);
   writeAssets(connection, boardId, archive, publication.assetIds);
   if (publication.history.length) {
@@ -28482,6 +28588,9 @@ function copyCurrentScene(connection, scope2) {
   ).run(destinationBoardId, sourceBoardId);
   connection.prepare(
     "INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json) SELECT ?, object_id, 0, body_kind, body_json FROM object_payloads WHERE board_id = ?"
+  ).run(destinationBoardId, sourceBoardId);
+  connection.prepare(
+    "INSERT INTO board_custom_colors (board_id, colors_json) SELECT ?, colors_json FROM board_custom_colors WHERE board_id = ?"
   ).run(destinationBoardId, sourceBoardId);
 }
 function applyPayloadRewrites(connection, plan) {
@@ -38880,6 +38989,36 @@ function decodePayload(text3) {
   return storedRecord(decodeJson(text3, "body_json"), "body_json");
 }
 
+// src/infrastructure/adapters/board-custom-colors.ts
+var storedColor = /^#[0-9A-F]{6}$/u;
+function validateBoardCustomColors(colors) {
+  const bounded2 = colors.length <= 64;
+  const canonical = colors.every((color2) => storedColor.test(color2));
+  if (!bounded2 || !canonical || new Set(colors).size !== colors.length) {
+    throw new Error("Invalid board custom colors.");
+  }
+}
+function decodeBoardCustomColors(raw) {
+  const colors = storedArray(raw, "custom colors").map((value) => storedText(value, "color"));
+  validateBoardCustomColors(colors);
+  return colors;
+}
+function readBoardCustomColors(connection, boardId) {
+  const row = connection.prepare("SELECT colors_json FROM board_custom_colors WHERE board_id = ?").get(boardId);
+  return row ? decodeBoardCustomColors(decodeJson(row.colors_json, "colors_json")) : [];
+}
+function writeBoardCustomColors(connection, boardId, colors) {
+  validateBoardCustomColors(colors);
+  if (colors.length === 0) {
+    connection.prepare("DELETE FROM board_custom_colors WHERE board_id = ?").run(boardId);
+    return;
+  }
+  connection.prepare(`
+      INSERT INTO board_custom_colors (board_id, colors_json) VALUES (?, ?)
+      ON CONFLICT (board_id) DO UPDATE SET colors_json = excluded.colors_json
+    `).run(boardId, JSON.stringify(colors));
+}
+
 // src/infrastructure/adapters/board-object-storage.ts
 function decodePoint(value) {
   const { x, y } = storedRecord(value, "point");
@@ -39634,7 +39773,8 @@ function applyBoardChanges(connection, board, changes, commit, getObjects) {
     removedPayloadObjectIds = [],
     order,
     layerPlacement,
-    assets
+    assets,
+    customColors
   } = changes;
   saveAssets(connection, boardId, assets);
   const { metadataIds, normalizedLayerIds } = persistChanges(connection, boardId, {
@@ -39645,8 +39785,12 @@ function applyBoardChanges(connection, board, changes, commit, getObjects) {
   });
   const orderedIds = writeLayerOrder(connection, boardId, order, layerPlacement);
   const changed = /* @__PURE__ */ new Set([...metadataIds, ...normalizedLayerIds, ...orderedIds]);
+  const previousCustomColors = customColors && readBoardCustomColors(connection, boardId);
+  if (customColors) {
+    writeBoardCustomColors(connection, boardId, customColors);
+  }
   let boardRevision = board.revision;
-  if (changed.size) {
+  if (changed.size || customColors) {
     boardRevision = advanceBoardRevision(connection, boardId);
     publishBoardVersion(connection, board, boardRevision, {
       ...commit,
@@ -39661,7 +39805,9 @@ function applyBoardChanges(connection, board, changes, commit, getObjects) {
     payloads,
     removedPayloadObjectIds,
     order,
-    layerChangedObjectIds: orderedIds
+    layerChangedObjectIds: orderedIds,
+    customColors,
+    previousCustomColors
   };
 }
 
@@ -39729,6 +39875,9 @@ function readReceiptDetails(connection, boardId, revision, snapshot) {
 function storedIds(raw, field) {
   return storedArray(raw, field).map((id) => storedText(id, field));
 }
+function optionalCustomColors(raw) {
+  return raw === void 0 ? void 0 : decodeBoardCustomColors(raw);
+}
 function readEditReceipt(connection, boardId, actorId2, commandId) {
   const row = connection.prepare(`
     SELECT signature, receipt_json FROM board_edit_receipts
@@ -39750,6 +39899,8 @@ function readEditReceipt(connection, boardId, actorId2, commandId) {
         boardRevision,
         objects: storedArray(value.objects, "objects").map(decodeReceiptObject),
         ...readReceiptDetails(connection, boardId, boardRevision, value),
+        customColors: optionalCustomColors(value.customColors),
+        previousCustomColors: optionalCustomColors(value.previousCustomColors),
         removedObjectIds: storedIds(value.removedObjectIds, "removedObjectIds"),
         layerChangedObjectIds: value.layerChangedObjectIds === void 0 ? void 0 : storedIds(value.layerChangedObjectIds, "layerChangedObjectIds"),
         removedPayloadObjectIds: storedIds(
@@ -39777,7 +39928,9 @@ function saveEditReceipt(connection, actorId2, { signature, receipt, advancedRev
     removedObjectIds: outcome.removedObjectIds,
     removedPayloadObjectIds: outcome.removedPayloadObjectIds ?? [],
     hasOrder: outcome.order !== void 0,
-    layerChangedObjectIds: outcome.layerChangedObjectIds
+    layerChangedObjectIds: outcome.layerChangedObjectIds,
+    customColors: outcome.customColors,
+    previousCustomColors: outcome.previousCustomColors
   });
   connection.prepare(`
     INSERT INTO board_edit_receipts (board_id, actor_id, command_id, signature, receipt_json)
@@ -39798,6 +39951,14 @@ var whiteboardSchema = `
     actor_id TEXT NOT NULL,
     can_edit INTEGER NOT NULL CHECK (can_edit IN (0, 1)),
     PRIMARY KEY (board_id, actor_id)
+  ) STRICT;
+
+  CREATE TABLE IF NOT EXISTS board_custom_colors (
+    board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
+    colors_json TEXT NOT NULL CHECK (
+      json_valid(colors_json) AND json_type(colors_json) = 'array'
+      AND json_array_length(colors_json) BETWEEN 1 AND 64
+    )
   ) STRICT;
 
   CREATE TABLE IF NOT EXISTS board_lifecycle (
@@ -40592,6 +40753,7 @@ function createReader2(connection) {
     },
     isTrashedOwner: (boardId, actorId2) => isTrashedBoardOwner(connection, boardId, actorId2),
     getBoard: (boardId) => readBoard2(connection, boardId),
+    getBoardCustomColors: (boardId) => readBoardCustomColors(connection, boardId),
     getBackupMetadata: (boardId, actorId2) => readBackupMetadata(connection, boardId, actorId2),
     getBackupDetails: (boardId) => readBackupDetails(connection, boardId),
     getBackupAsset: (boardId, assetId, maximumBytes) => readBackupAsset(connection, boardId, assetId, maximumBytes),

@@ -327,7 +327,7 @@ export function GeometryToolbar({
     closePalette();
   }
 
-  function handleActivatePalette(kind: PaletteKind) {
+  function handleActivatePalette(kind: PaletteKind, showChoices = true) {
     if (kind === 'draw') {
       onToolChange(drawTool);
       closePalette();
@@ -337,7 +337,7 @@ export function GeometryToolbar({
     const object = kind === 'shape' ? shapePlacement(shape) : stickerPlacement(sticker);
     if (object) {
       onToolChange(nextPlacementTool(object));
-      setPalette(open === kind ? undefined : kind);
+      setPalette(showChoices && open !== kind ? kind : undefined);
     }
   }
 
@@ -359,7 +359,7 @@ export function GeometryToolbar({
 
     const picker = palettes.find((option) => option.key === key);
     if (picker) {
-      handleActivatePalette(picker.kind);
+      handleActivatePalette(picker.kind, false);
       return true;
     }
 
@@ -367,12 +367,15 @@ export function GeometryToolbar({
   }
 
   function handlePaletteDismiss(reason: AnchoredPopoverCloseReason) {
-    if (reason === 'escape') {
+    if (reason === 'escape' && open === 'draw') {
       cancelPalette();
       return;
     }
     if (open !== 'draw') {
       closePalette();
+      if (reason === 'escape') {
+        onCanvasFocus?.();
+      }
     }
   }
 

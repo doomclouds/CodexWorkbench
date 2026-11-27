@@ -226,7 +226,7 @@ function nextDetail(
   { geometry, connector }: GeometryObjectChange,
   transform: GeometryTransformKind,
 ): BoardObject['detail'] {
-  if (transform === 'connect') {
+  if (connector) {
     return connector;
   }
 
@@ -238,31 +238,61 @@ function nextDetail(
   return detail;
 }
 
+function preservesAttachment(before: ConnectorEndpoint, after: ConnectorEndpoint): boolean {
+  const { attachment, point } = before;
+  const next = after.attachment;
+  const sameTarget = attachment?.objectId === next?.objectId && attachment?.port === next?.port;
+  const samePoint = point.x === after.point.x && point.y === after.point.y;
+
+  return sameTarget && (!attachment || samePoint);
+}
+
+function preservesConnectorBinding(before: ConnectorDetail, after: ConnectorDetail): boolean {
+  const sameHeads = before.startHead === after.startHead && before.endHead === after.endHead;
+
+  return (
+    sameHeads &&
+    preservesAttachment(before.start, after.start) &&
+    preservesAttachment(before.end, after.end)
+  );
+}
+
+function validConnectorTransform(
+  previous: ConnectorDetail,
+  connector: ConnectorDetail | undefined,
+  transform: GeometryTransformKind,
+): boolean {
+  if (!connector || !hasValidConnectorGeometry(connector)) {
+    return false;
+  }
+
+  return (
+    transform === 'connect' ||
+    (transform === 'rotate' && preservesConnectorBinding(previous, connector))
+  );
+}
+
 function validTransformFields(
   object: BoardObject,
   { geometry, connector, ink }: GeometryObjectChange,
   transform: GeometryTransformKind,
 ): boolean {
-  const detailKind = object.detail?.kind;
-  if (transform === 'connect') {
+  const { detail, geometry: previous } = object;
+  if (detail?.kind === 'connector') {
     return (
-      detailKind === 'connector' &&
-      connector !== undefined &&
-      hasValidConnectorGeometry(connector) &&
-      geometry.rotation === object.geometry.rotation &&
-      !ink
+      !ink &&
+      geometry.rotation === previous.rotation &&
+      validConnectorTransform(detail, connector, transform)
     );
   }
-  if (connector || detailKind === 'connector') {
+  if (connector || transform === 'connect') {
     return false;
   }
 
   const invalidPoints = ink !== undefined && ink.length > 0 && !hasValidEditInk(ink);
-  if (ink && (detailKind !== 'ink' || invalidPoints)) {
+  if (ink && (detail?.kind !== 'ink' || invalidPoints)) {
     return false;
   }
-
-  const previous = object.geometry;
   if (transform === 'resize') {
     return geometry.rotation === previous.rotation && geometry.width > 0 && geometry.height > 0;
   }

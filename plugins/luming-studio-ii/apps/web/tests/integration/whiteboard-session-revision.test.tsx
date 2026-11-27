@@ -50,6 +50,46 @@ function nextSnapshot(session: WhiteboardSession): Promise<WhiteboardSnapshot> {
   });
 }
 
+test('projects the palette changes and distinguishes a cleared palette from an absent receipt field', async () => {
+  const object = documentObject('正文', 0n, 0n);
+  const original = '#3864A2';
+  const session = createWhiteboardSession(
+    {
+      async getScene() {
+        return { ...boardScene(0n, object), customColors: [original] };
+      },
+      async getPayloads() {
+        return [];
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    expect(await opened).toMatchObject({ scene: { customColors: [original] } });
+    const applied = {
+      boardId,
+      kind: 'applied' as const,
+      commandId: 'palette-receipt',
+      objects: [],
+      removedIds: [],
+      order: [],
+      payloads: [],
+    };
+    session.acceptEdit({ ...applied, revision: 1n });
+    expect(session.getSnapshot()).toMatchObject({
+      scene: { revision: 1n, customColors: [original] },
+    });
+    session.acceptEdit({ ...applied, revision: 1n, customColors: [] });
+    expect(session.getSnapshot()).toMatchObject({
+      scene: { revision: 1n, customColors: [], objects: [object] },
+    });
+  } finally {
+    close();
+  }
+});
+
 test('keeps authoritative conflict details until a complete scene reaches that revision', async () => {
   const initial = documentObject('初始标题', 1n, 5n);
   const stale = documentObject('旧回执标题', 2n, 5n);
@@ -147,69 +187,78 @@ test('keeps authoritative conflict details until a complete scene reaches that r
   }
 });
 
-test('applies room metadata in order and refetches only changed visible payload versions', async () => {
-  const unedited = documentObject('原版正文', 0n, 0n);
-  const edited = documentObject('远端改动', 0n, 1n);
-  let latest = unedited;
-  let sceneReads = 0;
-  const payloadReads: (readonly string[])[] = [];
-  const session = createWhiteboardSession(
-    {
-      async getScene() {
-        sceneReads++;
-        return boardScene(0n, unedited);
-      },
-      async getPayloads(_board, ids) {
-        payloadReads.push(ids);
-        return [
-          {
-            kind: 'loaded',
-            payload: {
-              id: objectId,
-              version: latest.payloadVersion,
-              body: { kind: 'document', value: { title: latest.label } },
+test.each(['document', 'table'] as const)(
+  'keeps confirmed %s content during the room refresh',
+  async (kind) => {
+    const unedited = { ...documentObject('原版正文', 0n, 0n), kind };
+    const edited = { ...documentObject('远端改动', 0n, 1n), kind };
+    let latest = unedited;
+    let sceneReads = 0;
+    const payloadReads: (readonly string[])[] = [];
+    const session = createWhiteboardSession(
+      {
+        async getScene() {
+          sceneReads++;
+          return boardScene(0n, unedited);
+        },
+        async getPayloads(_board, ids) {
+          payloadReads.push(ids);
+          return [
+            {
+              kind: 'loaded',
+              payload: {
+                id: objectId,
+                version: latest.payloadVersion,
+                body: { kind, value: { title: latest.label } },
+              },
             },
-          },
-        ];
+          ];
+        },
       },
-    },
-    boardId,
-  );
-  const opened = nextSnapshot(session);
-  const close = session.open();
-  try {
-    await opened;
-    const before = nextSnapshot(session);
-    session.observeVisible([objectId]);
-    await before;
-    latest = edited;
+      boardId,
+    );
+    const opened = nextSnapshot(session);
+    const close = session.open();
+    try {
+      await opened;
+      const before = nextSnapshot(session);
+      session.observeVisible([objectId]);
+      await before;
+      latest = edited;
 
-    session.acceptRoomContent({
-      revision: 1n,
-      changedObjectIds: [objectId],
-      changedObjects: [edited],
-      removedObjectIds: [],
-      refreshScene: false,
-    });
-    expect(session.getSnapshot()).toMatchObject({ kind: 'ready', scene: boardScene(1n, edited) });
-    const reflected = await nextSnapshot(session);
-    expect(reflected.kind === 'ready' && reflected.payloads.get(objectId)?.version).toBe(1n);
+      session.acceptRoomContent({
+        revision: 1n,
+        changedObjectIds: [objectId],
+        changedObjects: [edited],
+        removedObjectIds: [],
+        refreshScene: false,
+      });
+      expect(session.getSnapshot()).toMatchObject({
+        kind: 'ready',
+        scene: boardScene(1n, edited),
+        payloads: new Map([
+          [objectId, { id: objectId, version: 0n, body: { kind, value: { title: '原版正文' } } }],
+        ]),
+      });
+      const reflected = await nextSnapshot(session);
+      expect(reflected.kind === 'ready' && reflected.payloads.get(objectId)?.version).toBe(1n);
 
-    const moved = { ...edited, geometryVersion: 1n, geometry: { ...edited.geometry, x: 36 } };
-    session.acceptRoomContent({
-      revision: 2n,
-      changedObjectIds: [objectId],
-      changedObjects: [moved],
-      removedObjectIds: [],
-      refreshScene: false,
-    });
-    expect(session.getSnapshot()).toMatchObject({ kind: 'ready', scene: boardScene(2n, moved) });
-    expect(sceneReads).toBe(1);
-    expect(payloadReads).toEqual([[objectId], [objectId]]);
-  } finally {
-    close();
-  }
-});
+      const moved = { ...edited, geometryVersion: 1n, geometry: { ...edited.geometry, x: 36 } };
+      session.acceptRoomContent({
+        revision: 2n,
+        changedObjectIds: [objectId],
+        changedObjects: [moved],
+        removedObjectIds: [],
+        refreshScene: false,
+      });
+      expect(session.getSnapshot()).toMatchObject({ kind: 'ready', scene: boardScene(2n, moved) });
+      expect(sceneReads).toBe(1);
+      expect(payloadReads).toEqual([[objectId], [objectId]]);
+    } finally {
+      close();
+    }
+  },
+);
 
 test('coalesces room revision gaps and ordering invalidations while a scene is already fetching', async () => {
   const initial = documentObject('原版正文', 0n, 0n);

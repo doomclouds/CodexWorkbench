@@ -194,6 +194,7 @@ function TableCanvasView({
 
 export const tableExtension: CanvasObjectExtension = {
   kind: 'table',
+  capturePointerTargetOnBodyDrag: true,
   capabilities: {
     content: 'native',
     move: true,

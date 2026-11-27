@@ -29,6 +29,10 @@ interface ConfirmedChange {
   readonly targets: readonly string[];
   readonly ordered: boolean;
   readonly layerTargets?: readonly string[];
+  readonly palette?: {
+    readonly before: readonly string[];
+    readonly after: readonly string[];
+  };
 }
 
 interface ObjectChange {
@@ -83,6 +87,11 @@ function confirmedChange(
     return undefined;
   }
 
+  const { customColors: after, previousCustomColors: before } = result;
+  if ((after === undefined) !== (before === undefined)) {
+    return undefined;
+  }
+
   return {
     revision: result.boardRevision,
     targets: [
@@ -90,6 +99,7 @@ function confirmedChange(
     ],
     ordered: result.order !== undefined,
     layerTargets: result.layerChangedObjectIds,
+    palette: after && before ? { before, after } : undefined,
   };
 }
 
@@ -337,6 +347,12 @@ function readReverseOrder(
   return order && new Set(order).size === next.size ? order : undefined;
 }
 
+function samePalette(current: readonly string[], expected: readonly string[]) {
+  return (
+    current.length === expected.length && current.every((color, index) => color === expected[index])
+  );
+}
+
 export function planBoardReverse(
   reader: BoardEditWriter,
   board: BoardHeader,
@@ -362,6 +378,14 @@ export function planBoardReverse(
     return { kind: 'rejected', reason: 'tooLarge' };
   }
 
+  const { palette } = source;
+  if (palette && !samePalette(reader.getBoardCustomColors(boardId), palette.after)) {
+    return { kind: 'conflict', boardRevision: board.revision };
+  }
+  if (palette && !source.ordered && source.targets.length === 0) {
+    return { kind: 'changes', customColors: palette.before };
+  }
+
   const before = byId(reader.listVersionObjects(boardId, prior, source.targets));
   const after = byId(reader.listVersionObjects(boardId, source.revision, source.targets));
   const live = byId(reader.getObjects(boardId, source.targets));
@@ -381,9 +405,13 @@ export function planBoardReverse(
   if (!changes) {
     return { kind: 'conflict', boardRevision: board.revision, objects: [...live.values()] };
   }
-  if (!source.ordered && targets.length > 0 && targets.every(translationOnly)) {
-    return reverseTranslation(reader, board, [...live.values()], changes);
-  }
 
-  return reverseScene(reader, board, source, changes);
+  const translation = !source.ordered && targets.length > 0 && targets.every(translationOnly);
+  const decision = translation
+    ? reverseTranslation(reader, board, [...live.values()], changes)
+    : reverseScene(reader, board, source, changes);
+
+  return decision.kind === 'changes' && palette
+    ? { ...decision, customColors: palette.before }
+    : decision;
 }

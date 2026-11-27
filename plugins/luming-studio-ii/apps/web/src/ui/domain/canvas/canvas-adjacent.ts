@@ -1,5 +1,11 @@
 import type { CanvasProjection } from './canvas-creation.js';
-import type { CanvasCreateIntent, CanvasObject, CanvasPort, CanvasRect } from './contracts.js';
+import type {
+  CanvasCreateIntent,
+  CanvasObject,
+  CanvasPenStyle,
+  CanvasPort,
+  CanvasRect,
+} from './contracts.js';
 import { getAdjacentGeometry, oppositePort } from './connectors/adjacent.js';
 import { portPoint } from './connectors/geometry.js';
 import { projectedObjectBounds, projectObject, queryScene } from './scene/index.js';
@@ -30,6 +36,7 @@ export function placementFromPort(
   sourceId: string,
   port: CanvasPort,
   interactionId: string,
+  style?: CanvasPenStyle,
 ): CanvasCreateIntent | undefined {
   const source = projectObject(view.index, view.pending, sourceId);
   if (!source) {
@@ -65,6 +72,7 @@ export function placementFromPort(
         point: portPoint(source.geometry, port),
       },
       target: { port: targetPort, point: portPoint(geometry, targetPort) },
+      style,
     },
   };
 }

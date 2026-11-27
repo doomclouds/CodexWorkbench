@@ -13,6 +13,7 @@ import type {
 import type { SqliteConnection, SqliteDatabase } from '../platform/index.js';
 import { isTrashedBoardOwner, readBoardAccess } from './authorization/index.js';
 import { readBackupDetails, readBackupMetadata } from './board-backup-metadata.js';
+import { readBoardCustomColors } from './board-custom-colors.js';
 import {
   advanceBoardRevision,
   applyBoardChanges,
@@ -360,6 +361,7 @@ function createReader(connection: SqliteConnection): BoardEditReader {
     },
     isTrashedOwner: (boardId, actorId) => isTrashedBoardOwner(connection, boardId, actorId),
     getBoard: (boardId) => readBoard(connection, boardId),
+    getBoardCustomColors: (boardId) => readBoardCustomColors(connection, boardId),
     getBackupMetadata: (boardId, actorId) => readBackupMetadata(connection, boardId, actorId),
     getBackupDetails: (boardId) => readBackupDetails(connection, boardId),
     getBackupAsset: (boardId, assetId, maximumBytes) =>

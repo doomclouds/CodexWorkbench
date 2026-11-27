@@ -127,6 +127,7 @@ function applyOperation(
     case 'createSection':
     case 'group':
     case 'paste':
+    case 'removeCustomColor':
     case 'style':
     case 'ungroup':
       throw new Error('Unexpected fixture geometry operation ' + operation.kind);
@@ -166,6 +167,7 @@ interface GeometryFixtureOptions {
   readonly createFailure?: 'conflict' | 'rejected';
   readonly initialObjects?: readonly WhiteboardObject[];
   readonly initialPayloads?: readonly WhiteboardPayload[];
+  readonly readClipboard?: () => Promise<string>;
 }
 
 function geometryFixture({
@@ -175,6 +177,7 @@ function geometryFixture({
   createFailure,
   initialObjects = [baseObject],
   initialPayloads = [],
+  readClipboard,
 }: GeometryFixtureOptions = {}) {
   let objects = new Map(initialObjects.map((object) => [object.id, object]));
   const payloads = new Map(initialPayloads.map((payload) => [payload.id, payload]));
@@ -296,7 +299,11 @@ function geometryFixture({
       return undefined;
     },
   };
-  const app = createAppMock(service, { editService, createCommandId });
+  const app = createAppMock(service, {
+    editService,
+    createCommandId,
+    clipboard: readClipboard && { readText: readClipboard, writeText: unexpected },
+  });
   const placementPoint = { x: 260, y: 170 };
 
   return {
@@ -379,6 +386,36 @@ test('places once and saves geometry, locks and order through the existing white
     await app.open('reopened');
     expect(app.host.querySelector(selector)).toBeNull();
     expect(app.host.querySelector('[data-canvas-object="base-shape"]')).not.toBeNull();
+  } finally {
+    app.dispose();
+  }
+});
+
+test('offers Paste on a fresh board when a clipboard reader is available', async () => {
+  let reads = 0;
+  const app = geometryFixture({
+    async readClipboard() {
+      reads += 1;
+      return '';
+    },
+  });
+
+  try {
+    await app.open();
+    await app.update(() => {
+      app.canvas().dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 320,
+          clientY: 80,
+        }),
+      );
+    });
+    expect(button(app.host, '粘贴 Ctrl/⌘ V').getAttribute('aria-disabled')).not.toBe('true');
+    await app.click('粘贴 Ctrl/⌘ V');
+    expect(reads).toBe(1);
+    expect(app.commands).toHaveLength(0);
   } finally {
     app.dispose();
   }

@@ -26,7 +26,8 @@ export function observeRoomChange(
     try {
       const orderChanged = 'order' in receipt && Boolean(receipt.order);
       const expired = 'detailsExpired' in receipt && receipt.detailsExpired;
-      const refreshScene = orderChanged || expired || receipt.objects.length > 64;
+      const colorsChanged = 'customColors' in receipt && receipt.customColors !== undefined;
+      const refreshScene = orderChanged || expired || colorsChanged || receipt.objects.length > 64;
       if (refreshScene) {
         rooms.publishContentChange({
           boardId: outcome.boardId,

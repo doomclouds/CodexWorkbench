@@ -145,13 +145,32 @@
   padding: 0;
   border: 1px solid var(--board-float-border, #d9d9d9);
   border-radius: 50%;
-  background: var(--geometry-ink-light);
+  background: var(--studio-ui-canvas-stroke, var(--geometry-ink-paint));
   color: white;
 }
 
 .studio-whiteboard-app[data-theme='dark'] .whiteboard-editor__draw-inks button {
-  background: var(--geometry-ink-dark);
   color: #2d3142;
+}
+
+.whiteboard-editor [data-canvas-stroke='#0b0b0b' i] {
+  --studio-ui-canvas-stroke: light-dark(#0b0b0b, #efefef);
+}
+
+.whiteboard-editor [data-canvas-stroke='#d97757' i] {
+  --studio-ui-canvas-stroke: light-dark(#d97757, #f0a77f);
+}
+
+.whiteboard-editor [data-canvas-stroke='#2f7cc4' i] {
+  --studio-ui-canvas-stroke: light-dark(#2f7cc4, #9ccde8);
+}
+
+.whiteboard-editor [data-canvas-stroke='#2e8b57' i] {
+  --studio-ui-canvas-stroke: light-dark(#2e8b57, #b7dfa4);
+}
+
+.whiteboard-editor [data-canvas-stroke='#7c5cbf' i] {
+  --studio-ui-canvas-stroke: light-dark(#7c5cbf, #cdb6ec);
 }
 
 .whiteboard-editor__draw-inks button[aria-pressed='true'] {

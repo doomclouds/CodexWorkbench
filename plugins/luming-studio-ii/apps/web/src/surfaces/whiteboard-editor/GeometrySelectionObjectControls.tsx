@@ -43,6 +43,7 @@ interface SelectionObjectControlsProps {
   readonly disabled?: boolean;
   readonly theme?: 'light' | 'dark';
   readonly textStyleById?: ReadonlyMap<string, SelectionTextStyle>;
+  readonly customColors?: readonly string[];
   readonly onEditObject?: (id: string) => void;
   readonly selectedHtmlId?: string;
   readonly onFormatObject?: (id: string, format: CanvasInlineFormat) => void;
@@ -54,7 +55,8 @@ interface FormatSelection {
   readonly selected?: CanvasObject;
   readonly disabled: boolean;
   readonly theme?: 'light' | 'dark';
-  readonly onStyle: (patch: WhiteboardStylePatch) => void;
+  readonly onStyle: (patch: WhiteboardStylePatch, rememberColor?: string) => void;
+  readonly inks: { readonly colors: readonly string[]; readonly remove: (color: string) => void };
 }
 
 interface TextControlsProps extends FormatSelection {
@@ -217,6 +219,7 @@ function TextControls({
   disabled,
   onStyle,
   theme,
+  inks,
   inlineControls,
 }: TextControlsProps) {
   const styles = selection.map(({ id }) => textStyleById?.get(id));
@@ -298,7 +301,8 @@ function TextControls({
             kind="ink"
             value={color}
             theme={theme}
-            onSelect={(textColor) => onStyle({ textColor })}
+            shared={inks}
+            onSelect={(textColor, rememberColor) => onStyle({ textColor }, rememberColor)}
             disabled={disabled}
           />
         )}
@@ -417,7 +421,7 @@ function StrokeWidth({
   );
 }
 
-function BorderControl({ selection, selected, disabled, theme, onStyle }: FormatSelection) {
+function BorderControl({ selection, selected, disabled, theme, inks, onStyle }: FormatSelection) {
   const kind = sharedValue(selection.map(strokeKind));
   const stroke = sharedValue(selection.map(strokeOf));
   const width = selected?.strokeWidth ?? defaultStrokeWidth(selected);
@@ -453,8 +457,9 @@ function BorderControl({ selection, selected, disabled, theme, onStyle }: Format
             kind="ink"
             theme={theme}
             value={storedColor(stroke)}
+            shared={inks}
             disabled={disabled}
-            onSelect={(color) => onStyle({ stroke: color })}
+            onSelect={(stroke, rememberColor) => onStyle({ stroke }, rememberColor)}
           />
           <StrokeWidth
             key={width}
@@ -635,6 +640,7 @@ export function GeometrySelectionObjectControls({
   disabled = false,
   theme,
   textStyleById,
+  customColors,
   onAction,
   onEditObject,
   selectedHtmlId,
@@ -663,7 +669,12 @@ export function GeometrySelectionObjectControls({
     selected,
     disabled,
     theme,
-    onStyle: (patch: WhiteboardStylePatch) => onAction({ kind: 'style', patch }, ids),
+    inks: {
+      colors: customColors ?? [],
+      remove: (color: string) => onAction({ kind: 'removeCustomColor', color }, []),
+    },
+    onStyle: (patch: WhiteboardStylePatch, rememberColor?: string) =>
+      onAction({ kind: 'style', patch, ...(rememberColor ? { rememberColor } : {}) }, ids),
   };
   const supportsForm = selection.every(({ kind }) => formKinds.has(kind));
   const supportsText = selection.every(({ kind }) => textKinds.has(kind));

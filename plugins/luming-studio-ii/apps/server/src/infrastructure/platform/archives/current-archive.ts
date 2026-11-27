@@ -37,6 +37,7 @@ export interface StagedCurrentArchive {
   readonly sourceBoardId: string;
   readonly title: string;
   readonly objects: readonly unknown[];
+  readonly customColors?: readonly string[];
   readonly restoration?: ArchiveRestoration;
   readonly assets: ReadonlyMap<string, StagedArchiveAsset>;
   readonly archivePath: string;
@@ -207,6 +208,7 @@ export async function stageCurrentArchive(
       sourceBoardId,
       title: state.title,
       objects: state.objects,
+      customColors: state.customColors,
       restoration: state.restoration,
       assets,
       archivePath,

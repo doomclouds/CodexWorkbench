@@ -99,6 +99,11 @@ function copyCurrentScene(connection: SqliteConnection, scope: CopyPayloadScope)
       'INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json) SELECT ?, object_id, 0, body_kind, body_json FROM object_payloads WHERE board_id = ?',
     )
     .run(destinationBoardId, sourceBoardId);
+  connection
+    .prepare(
+      'INSERT INTO board_custom_colors (board_id, colors_json) SELECT ?, colors_json FROM board_custom_colors WHERE board_id = ?',
+    )
+    .run(destinationBoardId, sourceBoardId);
 }
 
 function applyPayloadRewrites(connection: SqliteConnection, plan: CopyPlan): void {

@@ -103,5 +103,6 @@ export function toBoardScene(scene: BoardScene): WireBoardScene {
     boardRevision: scene.board.revision,
     access: scene.access,
     objects: scene.objects.map(toObjectMetadata),
+    customColors: scene.customColors && { colors: [...scene.customColors] },
   });
 }

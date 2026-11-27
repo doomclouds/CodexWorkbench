@@ -25,6 +25,7 @@ const emptyBodyStatuses = new Set([204, 205, 304]);
 const legacyPlaceholder = "isolated-e2e-owner";
 const legacyTools =
   /^\/api\/tools\/artifact_(?:list|manage|read|apply|feedback|share|export|activity)$/u;
+const legacyBoardId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const studioRpc =
   /^\/luming\.studio\.v1\.(?:Whiteboard|BoardCatalog|BoardRoom|BoardEdit|BoardHistory|BoardSharing|BoardSuggestion|BoardArchive|Feedback)Service\/[A-Za-z][A-Za-z0-9]*$/u;
 const hopHeaders = [
@@ -310,7 +311,7 @@ async function serveAsset(request, response, path) {
   }
 }
 
-function allowedRoute({ pathname }, method, legacy) {
+function allowedRoute({ pathname, searchParams }, method, legacy) {
   if (legacy) {
     if (method === "GET") {
       return (
@@ -322,9 +323,15 @@ function allowedRoute({ pathname }, method, legacy) {
       );
     }
 
+    const mediaUpload =
+      pathname === "/api/assets" &&
+      searchParams.size === 1 &&
+      legacyBoardId.test(searchParams.get("artifactId") ?? "");
+
     return (
       method === "POST" &&
-      (legacyTools.test(pathname) ||
+      (mediaUpload ||
+        legacyTools.test(pathname) ||
         ["/api/presence", "/api/room", "/api/import"].includes(pathname))
     );
   }

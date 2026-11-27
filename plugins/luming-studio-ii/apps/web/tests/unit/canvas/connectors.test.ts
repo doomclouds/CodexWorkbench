@@ -16,6 +16,7 @@ import {
   hitConnection,
   portPoint,
   resolveConnection,
+  rotateConnection,
   translateConnection,
 } from '../../../src/ui/domain/canvas/connectors/geometry.js';
 import { connectionPathData } from '../../../src/ui/domain/canvas/connectors/path.js';
@@ -74,6 +75,32 @@ describe('adjacent connector placement', () => {
 });
 
 describe('connector geometry', () => {
+  it('turns free and manually routed geometry around the selection pivot without changing the attachment', () => {
+    const connection: CanvasConnection = {
+      ...line,
+      start: { point: { x: 3, y: 4 }, attachment: { objectId: 'node', port: 'right' } },
+      startHead: 'circle',
+      endHead: 'none',
+      relativeBends: { firstAxis: 'horizontal', offsets: [8, 15] },
+      labelOffset: { x: 12, y: 5 },
+    };
+    const before = { x: 0, y: 0, width: 100, height: 80, rotation: 0 };
+    const after = { ...before, x: 25, y: -20, rotation: 90 };
+    const points = [{ x: 10, y: 20 }, { x: 70, y: 40 }, connection.end.point];
+    const rotated = rotateConnection(connection, before, after, points);
+
+    expect(rotated.start).toEqual(connection.start);
+    expect(rotated.startHead).toBe('circle');
+    expect(rotated.endHead).toBe('none');
+    expect(rotated.relativeBends).toBeUndefined();
+    expect(rotated.end.point.x).toBeCloseTo(35);
+    expect(rotated.end.point.y).toBeCloseTo(70);
+    expect(rotated.bends).toEqual([{ x: 75, y: 40 }]);
+    expect(rotated.labelOffset?.x).toBeCloseTo(-5);
+    expect(rotated.labelOffset?.y).toBeCloseTo(12);
+    expect(rotateConnection(line, before, after, points).bends).toBeUndefined();
+  });
+
   it('rotates an edge port and its outward handle around the object center', () => {
     const rotated = { ...target, rotation: 90 };
     const edge = portPoint(rotated, 'right');

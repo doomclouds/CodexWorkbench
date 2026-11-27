@@ -155,6 +155,7 @@ export function readScene(source: BoardScene | undefined, boardId: string): Whit
     revision: requireField(scene.boardRevision, 'board revision'),
     canEdit: access.canEdit && !access.trashed,
     ...(access.trashed ? { trashed: true } : {}),
+    ...(scene.customColors ? { customColors: scene.customColors.colors } : {}),
     objects: readObjects(scene.objects),
   };
 }

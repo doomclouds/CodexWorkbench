@@ -81,6 +81,7 @@ export interface BoardScene {
   readonly board: BoardHeader;
   readonly access: BoardAccess;
   readonly objects: readonly BoardObject[];
+  readonly customColors?: readonly string[];
 }
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;

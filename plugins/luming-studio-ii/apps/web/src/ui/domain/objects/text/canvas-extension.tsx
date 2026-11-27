@@ -490,7 +490,7 @@ export const sectionExtension: CanvasObjectExtension = {
 
 export const connectorExtension: CanvasObjectExtension = {
   kind: 'connector',
-  capabilities: { ...richLabelCapabilities, resize: false, rotate: false, connect: false },
+  capabilities: { ...richLabelCapabilities, resize: false, connect: false },
   blocksPlacement: false,
   View: CanvasTextView,
 };

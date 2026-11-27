@@ -25,6 +25,7 @@ export type {
   CanvasInlineFormat,
   CanvasInk,
   CanvasMoveIntent,
+  CanvasNudgeScope,
   CanvasNativeSource,
   CanvasNativeSourceRequest,
   CanvasObject,

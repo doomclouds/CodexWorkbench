@@ -78,10 +78,17 @@ function errorDetail(error: unknown) {
   return error instanceof Error ? error.message : '请求失败。';
 }
 
-function editChanged({ objects, removedIds, order, payloads, detailsExpired }: Applied) {
+function editChanged({
+  objects,
+  removedIds,
+  order,
+  payloads,
+  customColors,
+  detailsExpired,
+}: Applied) {
   const footprint = objects.length + removedIds.length + order.length + payloads.length;
 
-  return footprint > 0 && !detailsExpired;
+  return (footprint > 0 || customColors !== undefined) && !detailsExpired;
 }
 
 function changeStacks(

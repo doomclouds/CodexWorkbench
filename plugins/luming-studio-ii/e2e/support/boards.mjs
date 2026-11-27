@@ -11,7 +11,7 @@ const archiveFixture = new URL(
 const fixtureContent = { contentText: "发布准备", contentImage: "发布指标样例" };
 const zipType = "application/zip";
 
-async function initialPost(runtime, path, type, body) {
+export async function initialPost(runtime, path, type, body) {
   const response = await runtime.request(path, {
     method: "POST",
     headers: { "content-type": type },
@@ -20,21 +20,23 @@ async function initialPost(runtime, path, type, body) {
   const result = await response.json();
   assert.ok(response.ok && result.ok, `${path}: ${response.status} ${result.error?.message ?? ""}`);
   assert.ok(result.data?.artifact?.id, `${path}: missing artifact`);
-  return result.data.artifact;
+  return result.data;
 }
 
 async function seedInitialBoard(runtime, { title, pinned, trashed }, archive) {
-  function manage(arguments_) {
-    return initialPost(
+  async function manage(arguments_) {
+    const { artifact } = await initialPost(
       runtime,
       "/api/tools/artifact_manage",
       "application/json",
       JSON.stringify(arguments_),
     );
+
+    return artifact;
   }
 
   let artifact = archive
-    ? await initialPost(runtime, "/api/import", zipType, archive)
+    ? (await initialPost(runtime, "/api/import", zipType, archive)).artifact
     : await manage({ action: "create", type: "whiteboard", title });
 
   function change(action, value) {
@@ -58,15 +60,8 @@ async function seedInitialBoard(runtime, { title, pinned, trashed }, archive) {
   return { id: artifact.id, title: artifact.title };
 }
 
-function iiSeeder(runtime) {
+export function createIiFixtureProtocol(runtime) {
   const { create, fromBinary, toBinary } = requireServer("@bufbuild/protobuf");
-  const { BoardCatalogService, BoardLifecycleAction, BoardSortOrder } = requireServer(
-    "@codexworkbench/luming-studio-ii-contracts/catalog/service",
-  );
-  const { BoardArchiveService, ImportBoardArchiveResponseSchema } = requireServer(
-    "@codexworkbench/luming-studio-ii-contracts/archives/service",
-  );
-  const { createBoard, listBoards, manageBoard } = BoardCatalogService.method;
 
   async function post(path, output, type, body, headers) {
     const response = await runtime.request(path, {
@@ -98,6 +93,19 @@ function iiSeeder(runtime) {
 
     return receipt.value;
   }
+
+  return { post, call, outcome };
+}
+
+function iiSeeder(runtime) {
+  const { BoardCatalogService, BoardLifecycleAction, BoardSortOrder } = requireServer(
+    "@codexworkbench/luming-studio-ii-contracts/catalog/service",
+  );
+  const { BoardArchiveService, ImportBoardArchiveResponseSchema } = requireServer(
+    "@codexworkbench/luming-studio-ii-contracts/archives/service",
+  );
+  const { createBoard, listBoards, manageBoard } = BoardCatalogService.method;
+  const { post, call, outcome } = createIiFixtureProtocol(runtime);
 
   async function importBoard(archive) {
     const imported = await post(

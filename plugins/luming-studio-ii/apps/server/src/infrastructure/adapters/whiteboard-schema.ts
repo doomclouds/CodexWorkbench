@@ -12,6 +12,14 @@ export const whiteboardSchema = `
     PRIMARY KEY (board_id, actor_id)
   ) STRICT;
 
+  CREATE TABLE IF NOT EXISTS board_custom_colors (
+    board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
+    colors_json TEXT NOT NULL CHECK (
+      json_valid(colors_json) AND json_type(colors_json) = 'array'
+      AND json_array_length(colors_json) BETWEEN 1 AND 64
+    )
+  ) STRICT;
+
   CREATE TABLE IF NOT EXISTS board_lifecycle (
     board_id TEXT PRIMARY KEY REFERENCES boards (board_id) ON DELETE CASCADE,
     owner_actor_id TEXT NOT NULL,

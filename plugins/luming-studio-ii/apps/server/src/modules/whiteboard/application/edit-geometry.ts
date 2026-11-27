@@ -7,6 +7,7 @@ import {
   geometryInWorld,
   hasValidConnectorGeometry,
   initialGeometryPayload,
+  normalizeBoardCustomColor,
   supportsGeometryCreation,
   translateObject,
   validateCreatedObject,
@@ -304,6 +305,11 @@ function transformObjects(scope: GeometryScope, operation: Transform): BoardEdit
 
   if (targets.kind !== 'targets') {
     return targets;
+  }
+
+  const singleConnector = targets.objects.length === 1 && targets.objects[0]?.kind === 'connector';
+  if (operation.transform === 'rotate' && singleConnector) {
+    return reject('invalidEdit');
   }
 
   const { writer, board } = scope;
@@ -706,6 +712,19 @@ export function planGeometryEdit(
     case 'arrange':
     case 'style':
       return planSelectionEdit(scope, operation);
+    case 'removeCustomColor': {
+      const color = normalizeBoardCustomColor(operation.color);
+      if (!color) {
+        return reject('invalidEdit');
+      }
+
+      const current = writer.getBoardCustomColors(board.boardId);
+      const customColors = current.includes(color)
+        ? current.filter((entry) => entry !== color)
+        : undefined;
+
+      return { kind: 'changes', customColors };
+    }
     case 'paste':
       return reject('unsupportedKind');
   }

@@ -6,16 +6,17 @@ import type { CanvasTool } from '../../ui/domain/canvas/index.js';
 export type DrawTool = Extract<CanvasTool, 'pen' | 'connector'>;
 
 const inkPresets = [
-  { label: '墨色', light: '#0B0B0B', dark: '#EFEFEF' },
-  { label: '陶土色', light: '#D97757', dark: '#F0A77F' },
-  { label: '蓝色', light: '#2F7CC4', dark: '#9CCDE8' },
-  { label: '绿色', light: '#2E8B57', dark: '#B7DFA4' },
-  { label: '紫色', light: '#7C5CBF', dark: '#CDB6EC' },
+  { label: '墨色', color: '#0B0B0B' },
+  { label: '陶土色', color: '#D97757' },
+  { label: '蓝色', color: '#2F7CC4' },
+  { label: '绿色', color: '#2E8B57' },
+  { label: '紫色', color: '#7C5CBF' },
 ] as const;
 
+export const defaultInkColor = inkPresets[0].color;
+
 type InkStyle = CSSProperties & {
-  readonly '--geometry-ink-light': string;
-  readonly '--geometry-ink-dark': string;
+  readonly '--geometry-ink-paint': string;
 };
 
 interface DrawChoicesProps {
@@ -28,7 +29,7 @@ interface DrawChoicesProps {
 export function GeometryDrawChoices({
   tool,
   onToolChange,
-  penColor = inkPresets[0].light,
+  penColor = defaultInkColor,
   onPenColorChange,
 }: DrawChoicesProps) {
   return (
@@ -55,20 +56,21 @@ export function GeometryDrawChoices({
       </div>
       <span className="whiteboard-editor__tool-divider" aria-hidden="true" />
       <div className="whiteboard-editor__draw-inks" role="group" aria-label="墨色色板">
-        {inkPresets.map(({ label, light, dark }) => {
-          const selected = penColor.toLowerCase() === light.toLowerCase();
-          const style: InkStyle = { '--geometry-ink-light': light, '--geometry-ink-dark': dark };
+        {inkPresets.map(({ label, color }) => {
+          const selected = penColor.toLowerCase() === color.toLowerCase();
+          const style: InkStyle = { '--geometry-ink-paint': color };
 
           return (
             <button
-              key={light}
+              key={color}
               type="button"
               aria-label={'墨色 ' + label}
               aria-pressed={selected}
               title={label}
               disabled={!onPenColorChange}
               style={style}
-              onClick={() => onPenColorChange?.(light)}
+              data-canvas-stroke={color}
+              onClick={() => onPenColorChange?.(color)}
             >
               {selected && <Check size={13} />}
             </button>

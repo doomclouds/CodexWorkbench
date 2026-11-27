@@ -1,0 +1,872 @@
+{
+  "casePrefix": "WB-",
+  "groups": [
+    {
+      "id": "WB-VIEW",
+      "title": "画布视口与工具栏",
+      "entries": [
+        "工作台开板返回、空白引导及标题",
+        "缩放菜单预设、加减和键盘 100% 复位",
+        "窄窗菜单、网格设置和 Escape 焦点",
+        "平移工具、Space＋左键、中键及 Ctrl＋滚轮",
+        "适应白板、适应选区与首对象放置的相机保持",
+        "数字工具快捷键开关、标题输入隔离、无选区方向键与快捷适配"
+      ],
+      "notCovered": ["真实触控板、触屏和对象内滚动。"]
+    },
+    {
+      "id": "WB-PLACE",
+      "title": "画布工具与放置",
+      "entries": [
+        "鼠标工具按钮与文字、便签、分区数字键",
+        "十二种形状轮廓、文字、便签与反向分区放置",
+        "五个画笔预设、保存墨色及贴纸放置",
+        "Esc、切换工具中止与双击空白恢复文字入口"
+      ],
+      "notCovered": []
+    },
+    {
+      "id": "WB-SELECT",
+      "title": "选择与对象菜单",
+      "entries": [
+        "单选、Shift 增减、正反框选、全选与清空",
+        "重叠命中与透明分区内部、边框、标题的命中",
+        "右键与更多操作菜单的选区、窄窗位置和键盘焦点",
+        "标题输入占用全选、删除和方向键"
+      ],
+      "notCovered": ["输入隔离目前验证标题框。各对象的本地编辑器输入法和快捷键需各自复测。"]
+    },
+    {
+      "id": "WB-GEO",
+      "title": "移动、尺寸与旋转",
+      "entries": [
+        "微动阈值、方向键单选和多选",
+        "三档缩放下的鼠标移动、越界拖放",
+        "八个缩放手柄、Shift/Alt、最小尺寸",
+        "自由旋转与 Shift 固定步进",
+        "边缘吸附、重叠、Esc 取消和保存坐标"
+      ],
+      "notCovered": ["触摸手势、指针捕获中断及复杂原生对象的全部手柄组合。"]
+    },
+    {
+      "id": "WB-ORG",
+      "title": "分区、组合与排列",
+      "entries": [
+        "上移、下移、置顶、置底与重叠命中",
+        "编组、解组、六方向对齐和整理",
+        "从选区建分区、改名、拖动分区及子对象",
+        "混合锁定、显式分区成员继承锁与只读访客边界"
+      ],
+      "notCovered": ["层序与对齐在所有对应快捷键入口的重复验证。"]
+    },
+    {
+      "id": "WB-EDGE",
+      "title": "连线、画笔与边缘操作",
+      "entries": [
+        "自由拉线、折点、端点样式与标签",
+        "端口绑定、重绑与解除绑定",
+        "点击端口快建的撤销和重做",
+        "附着目标移动旋转、离屏线段命中",
+        "连线单选与混合选区的旋转能力"
+      ],
+      "notCovered": ["复杂图形的全部端口组合和交叉连线排布。"]
+    },
+    {
+      "id": "WB-OBJECT",
+      "title": "常见对象的操作入口",
+      "entries": [
+        "十二类形状外观和连线样式",
+        "文字、便签、形状文字及画笔",
+        "分区标题、贴纸预设与旧字符贴纸",
+        "表格键盘编辑、行列和列宽",
+        "图片、裁剪、视频播放、独立链接",
+        "板级自定义墨色在边框和文字工具间共享、跨对象复用、移除及撤销和重做"
+      ],
+      "notCovered": [
+        "文档、任务清单、HTML 图解和全屏观看的独立流程。",
+        "文档内素材、表格内链接与批量媒体拖放。",
+        "历史版次的独立色板及按版次恢复流程。"
+      ]
+    },
+    {
+      "id": "WB-SAVE",
+      "title": "保存、回执与撤销",
+      "entries": [
+        "系统剪贴板跨板复制、剪切与粘贴，重复与关系重绑",
+        "删除的撤销重做和跨重启状态",
+        "保存状态、请求未送达重试、已提交回执丢失恢复",
+        "迟到重复与放置回执保留新选区、菜单或画布焦点",
+        "首笔微调待回执时保留下一键，按顺序写入并能逐笔撤销重做"
+      ],
+      "notCovered": ["本机草稿、文档冲突和放置确认前的缩放。"]
+    }
+  ],
+  "cases": [
+    {
+      "id": "WB-VIEW-01",
+      "steps": ["从工作台打开空白板", "在亮色下核对引导及底部工具入口", "从板内返回工作台"],
+      "expected": "初次打开呈现文档与 HTML 引导。返回后能在工作台找到原白板。"
+    },
+    {
+      "id": "WB-VIEW-02",
+      "steps": [
+        "原位修改标题并按 Enter 保存",
+        "返回工作台并打开新标题",
+        "输入另一标题并按 Esc",
+        "刷新确认"
+      ],
+      "expected": "提交后的标题在目录、重开和刷新后保持。Esc 丢弃本次输入。"
+    },
+    {
+      "id": "WB-VIEW-03",
+      "steps": [
+        "打开缩放菜单",
+        "确认无选区时适应选区不可用",
+        "在 75% 来回点击放大和缩小",
+        "按 Shift＋0 回 100%，切换 150% 和 100%"
+      ],
+      "expected": "比例显示跟随实际操作，菜单预设和键盘复位能独立完成。"
+    },
+    {
+      "id": "WB-VIEW-04",
+      "steps": [
+        "以 390×620 暗色窗口打开缩放菜单",
+        "测量菜单边界",
+        "在触发按钮上按 Esc 并核对焦点",
+        "展开视图设置并关闭网格",
+        "从网格复选框按 Esc，再打开恢复网格"
+      ],
+      "expected": "菜单完整留在视口内，网格设置实际生效。分别记录从菜单和复选框按 Esc 的关闭状态与回焦。",
+      "observations": {
+        "parity-viewport-settings-focus": "在网格复选框按 Esc 后的菜单状态与焦点"
+      },
+      "versionExpectations": {
+        "parity-viewport-settings-focus": {
+          "initial": {
+            "settingsStayedOpen": true,
+            "zoomAfterEscape": false
+          },
+          "ii": {
+            "settingsStayedOpen": false,
+            "zoomAfterEscape": true
+          }
+        }
+      },
+      "notes": [
+        "从网格复选框按 Esc，初代仍留在设置。Studio II 关闭菜单并将焦点归还缩放按钮。两代从缩放按钮按 Esc 均可正常关闭。"
+      ]
+    },
+    {
+      "id": "WB-VIEW-05",
+      "steps": [
+        "打开有内容的板并适应整板",
+        "选择平移工具并拖动",
+        "用 Space＋左键临时平移",
+        "拖动鼠标中键并核对持久化对象"
+      ],
+      "expected": "三种手势都移动相机。已保存对象的数据与操作前一致。"
+    },
+    {
+      "id": "WB-VIEW-06",
+      "steps": [
+        "将鼠标放在可见对象的固定相对位置",
+        "按 Ctrl 滚轮放大",
+        "比较缩放前后光标对应的对象位置"
+      ],
+      "expected": "放大生效且光标锚定同一画布位置，坐标误差在像素容许范围内。"
+    },
+    {
+      "id": "WB-VIEW-07",
+      "steps": ["从 150% 适应整板", "确认相距较远的两对象仍完整可见", "选择一个对象并适应选区"],
+      "expected": "整板适配该场景的两对象，选区适配把单个目标放到视口中心。"
+    },
+    {
+      "id": "WB-VIEW-08",
+      "steps": ["在空白板上平移相机", "从形状菜单放置首个矩形", "等待对象写入并读取相机"],
+      "expected": "首个对象写入后，原有平移和缩放保持。",
+      "observations": {
+        "parity-first-object-camera": "首个对象放置后相机的实际保持结果"
+      },
+      "notes": [
+        "本用例从本机放置首对象。另一次 II 双窗口复验观察到，远端首个对象落在视口外时保留本地相机，用户可点「适应白板」定位。"
+      ]
+    },
+    {
+      "id": "WB-VIEW-09",
+      "steps": [
+        "用数字键选择平移工具",
+        "关闭数字工具快捷键并确认数字 1 不切工具",
+        "重新开启后验证数字 1",
+        "在标题输入框键入数字并用方向键编辑"
+      ],
+      "expected": "单键设置即时生效。标题输入框处理数字、方向键和 Backspace，画布相机与工具状态保持。"
+    },
+    {
+      "id": "WB-VIEW-10",
+      "steps": [
+        "空选区按普通方向键和 Shift＋方向键",
+        "用 Ctrl＋0 和 Shift＋1 适应白板",
+        "选中一个对象并按 Shift＋2"
+      ],
+      "expected": "空选区方向键只平移相机。三个键盘入口正常适配视口，实际存储内容保持。"
+    },
+    {
+      "id": "WB-PLACE-01",
+      "steps": [
+        "逐个打开形状选择菜单并选择十二种轮廓",
+        "在画布指定位置放置",
+        "等待各次保存并观察对象数量",
+        "刷新核对保留的对象"
+      ],
+      "expected": "十二种轮廓均有正常放置入口，每个放置动作只创建一个对象。",
+      "observations": {
+        "parity-outline-placement": "放置与重开后的轮廓清单"
+      }
+    },
+    {
+      "id": "WB-PLACE-02",
+      "steps": [
+        "使用底部工具放置文字",
+        "通过数字键进入便签和分区工具",
+        "反向拖出分区后保存",
+        "重开核对三类对象"
+      ],
+      "expected": "工具按钮和数字键可操作，反向拖出的分区获得正尺寸，文字和便签可编辑并保留。",
+      "observations": {
+        "parity-text-note-section": "文字、便签与分区放置结果"
+      }
+    },
+    {
+      "id": "WB-PLACE-03",
+      "steps": ["从数字键打开画笔和贴纸入口", "使用蓝色预设绘制轨迹", "放置爱心贴纸", "刷新后确认"],
+      "expected": "画笔预设与贴纸选择有真实持久化，重开仍能找到两种对象。",
+      "observations": {
+        "parity-ink-and-sticker": "保存并重开的笔迹和贴纸"
+      }
+    },
+    {
+      "id": "WB-PLACE-04",
+      "steps": [
+        "开始放置并以 Esc 取消",
+        "切工具结束另一次放置",
+        "确认两次均未新增对象",
+        "双击空白进入文字编辑并保存"
+      ],
+      "expected": "取消的放置不写入，双击空白恢复文字的快速新建。",
+      "observations": {
+        "parity-aborted-placement": "取消后对象数量和双击创建的类型"
+      }
+    },
+    {
+      "id": "WB-PLACE-05",
+      "steps": [
+        "从画笔菜单核对五个预设",
+        "在暗色下绘制默认墨色",
+        "切陶土色再绘制",
+        "退出并重开，核对选色与两次已保存笔迹"
+      ],
+      "expected": "画笔当前提供五个预设且无自定义入口。暗色中默认笔迹清楚可见，刷新恢复默认选色，两笔仍保留各自保存的颜色。",
+      "observations": {
+        "parity-brush-preset-scope": "预设名称、入口范围、重开选色和已保存墨色"
+      },
+      "notes": ["Studio II 旧默认墨色与暗色画布相同，无法辨认。新默认值按初代墨色和画布主题呈现。"]
+    },
+    {
+      "id": "WB-SELECT-01",
+      "steps": ["单点选中对象", "按 Shift 加选和移除", "Ctrl＋A 全选", "分别用 Esc 与点击空白清空"],
+      "expected": "单选、多选、全选与两种清空方式符合当前可见选区。",
+      "observations": {
+        "parity-selection-gestures": "单选增减、全选与取消的状态"
+      }
+    },
+    {
+      "id": "WB-SELECT-02",
+      "steps": ["对同一区域正反方向框选", "在透明分区内部框选一个对象", "点击该对象与外部空白"],
+      "expected": "正反框选选出同一对对象。记录内部框选是否包含外框与对象的单点选结果。",
+      "observations": {
+        "parity-transparent-marquee": "内部框选是否把未跨越的透明分区加入选区"
+      },
+      "versionExpectations": {
+        "parity-transparent-marquee": {
+          "initial": {
+            "forwardAndReverse": true,
+            "includesUncrossedSection": true
+          },
+          "ii": {
+            "forwardAndReverse": true,
+            "includesUncrossedSection": false
+          }
+        }
+      },
+      "notes": [
+        "原版框选透明分区内部时包含外框。Studio II 只选择框选范围内的对象，避免把未跨越的外框加入选区。"
+      ]
+    },
+    {
+      "id": "WB-SELECT-03",
+      "steps": ["点击重叠对象的交叉区域", "点击透明分区空区", "点击边框和分区标题"],
+      "expected": "重叠位置命中顶层对象，标题与分区边缘仍可选择。比较两代在透明分区空处的实际命中目标。",
+      "observations": {
+        "parity-hit-targets": "重叠、穿透、标题和边缘的命中结果"
+      },
+      "versionExpectations": {
+        "parity-hit-targets": {
+          "initial": {
+            "topmost": "shape-b",
+            "sectionInteriorTarget": "section-transparent",
+            "edgeAndTitle": "section-transparent"
+          },
+          "ii": {
+            "topmost": "shape-b",
+            "sectionInteriorTarget": null,
+            "edgeAndTitle": "section-transparent"
+          }
+        }
+      },
+      "notes": ["原版点透明分区空处会选中外框。Studio II 允许穿透空处，分区边与标题仍可点选。"]
+    },
+    {
+      "id": "WB-SELECT-04",
+      "steps": [
+        "多选后在所选对象上打开右键菜单",
+        "按 Esc 关闭",
+        "在另一对象上打开菜单",
+        "核对关闭焦点与再次 Esc 清空"
+      ],
+      "expected": "右键点击所选对象保留多选，点击其他对象改选目标。关闭菜单时焦点归还到画布。",
+      "observations": {
+        "parity-right-click-selection-and-focus": "右键选区保留、换目标和 Esc 后画布焦点"
+      },
+      "notes": [
+        "工作台验收提交 393a36a 的 Studio II 在右键菜单按 Esc 后没有归还画布焦点。选区专项复测中，两代均归还焦点并保留选区。"
+      ]
+    },
+    {
+      "id": "WB-SELECT-05",
+      "steps": [
+        "在屏边选中对象并检查工具栏和右键菜单",
+        "切换到 390×728 后重开",
+        "用更多操作打开菜单并以 End、Esc 操作"
+      ],
+      "expected": "桌面屏边及窄窗的工具栏和菜单完整可操作，关闭后保留选区。",
+      "observations": {
+        "parity-selection-menu-layout": "桌面边缘、窄窗口菜单边界与 End 焦点"
+      }
+    },
+    {
+      "id": "WB-SELECT-06",
+      "steps": [
+        "在有选区时编辑白板名称",
+        "在标题输入框按 Ctrl＋A、Backspace 和方向键",
+        "核对画布对象、位置与 Esc 后标题"
+      ],
+      "expected": "标题框处理文本快捷键，画布对象和几何均不改变。",
+      "observations": {
+        "parity-editable-keyboard-ownership": "编辑期间的对象和几何状态"
+      }
+    },
+    {
+      "id": "WB-GEO-01",
+      "steps": [
+        "按住形状微动 4 像素后放开",
+        "选中一个形状",
+        "用方向键和 Shift＋方向键移动",
+        "加入第二个形状并微调",
+        "核对移动后的画布坐标",
+        "拖动多选组并核对各自的最终增量"
+      ],
+      "expected": "4 像素微动只选择对象。普通方向键按 1 个画布单位移动，Shift 修饰后按 10 个单位移动。 多选拖动为两个对象加上相同增量。",
+      "observations": {
+        "parity-keyboard-and-group-world-delta": "微动保存结果与单选、多选的最终画布位移"
+      },
+      "notes": [
+        "顺序微调在前一键界面显示已保存后继续。首笔待回执时连续输入在 WB-SAVE-08 独立核对。"
+      ]
+    },
+    {
+      "id": "WB-GEO-02",
+      "steps": [
+        "依次选择三档缩放比例",
+        "按各比例用鼠标移动形状",
+        "读取保存后世界坐标",
+        "刷新核对位置"
+      ],
+      "expected": "不同屏幕比例下相同的画布距离得到相同的保存坐标。",
+      "observations": {
+        "parity-drag-world-delta": "三档缩放下的实际保存位移"
+      }
+    },
+    {
+      "id": "WB-GEO-03",
+      "steps": ["依次拖动四角和四边的缩放手柄", "核对远端边缘不位移", "查看保存结果"],
+      "expected": "八个手柄均能调整对象尺寸，对边维持锚定。",
+      "observations": {
+        "parity-resize-eight-handles": "已逐项操作的八个手柄"
+      }
+    },
+    {
+      "id": "WB-GEO-04",
+      "steps": ["以 Shift 从角部缩放并检查宽高比", "以 Alt 在另一手柄缩放", "检查移动后的中心点"],
+      "expected": "Shift 保持比例，Alt 保持中心。几何结果使用已保存的坐标。",
+      "observations": {
+        "parity-resize-modifier-invariants": "修饰键操作后的宽高比与轴心"
+      }
+    },
+    {
+      "id": "WB-GEO-05",
+      "steps": ["拖外角旋转", "用 Shift 拖动并检查 15° 步进", "刷新后读取旋转与中心坐标"],
+      "expected": "自由旋转和固定步进都能保存，旋转以对象中心为轴心。",
+      "observations": {
+        "parity-rotation-pivot-and-steps": "自由角度、步进角度与中心"
+      }
+    },
+    {
+      "id": "WB-GEO-06",
+      "steps": [
+        "将形状拖近参考对象的边缘与中心",
+        "观察吸附引导线并放开",
+        "再次拖动越过吸附阈值",
+        "检查重叠保存结果"
+      ],
+      "expected": "靠近边缘或中心时能吸附，远离阈值可自由移动并重叠，参考对象位置保持。",
+      "observations": {
+        "parity-snap-and-overlap": "吸附边缘、结果重叠宽度与参考对象状态"
+      }
+    },
+    {
+      "id": "WB-GEO-07",
+      "steps": ["按住形状开始拖动并按 Esc", "再开始手柄缩放并按 Esc", "随后正常移动 1 单位"],
+      "expected": "取消的两种变换不写入，后续正常操作仍能保存。",
+      "observations": {
+        "parity-cancelled-transform": "移动取消、缩放取消与后续移动"
+      }
+    },
+    {
+      "id": "WB-GEO-08",
+      "steps": [
+        "将缩放手柄拉过对边",
+        "确认形状最小正尺寸",
+        "把形状拖出画布再放开",
+        "适应视口后读取实际位置"
+      ],
+      "expected": "缩放越界仍保留正尺寸，拖出窗口的落点使用世界坐标保存。",
+      "observations": {
+        "parity-minimum-size-and-outside-drop": "最小尺寸与越界放开结果"
+      }
+    },
+    {
+      "id": "WB-ORG-01",
+      "steps": ["选择重叠对象", "依次操作四种图层顺序", "读取保存顺序并点击交叉区域", "重开确认"],
+      "expected": "上移、下移、置顶、置底对应持久化层序。重叠位置命中最上层。",
+      "observations": {
+        "parity-saved-order": "保存后图层顺序与交叉处命中对象"
+      }
+    },
+    {
+      "id": "WB-ORG-02",
+      "steps": ["多选两个对象并组合", "拖动其中一个", "取消组合后再单独拖动"],
+      "expected": "组合内的对象一同位移，取消后只移动所拖的对象。",
+      "observations": {
+        "parity-grouped-and-ungrouped": "组内联动与取消后的独立移动"
+      }
+    },
+    {
+      "id": "WB-ORG-03",
+      "steps": ["从当前选区创建分区", "编辑分区标题", "拖动该标题并重开"],
+      "expected": "两代均保存分区名称和带动内部对象的移动结果。重开后按各版归属方式核对成员。",
+      "observations": {
+        "parity-section-ownership": "移动分区及重开后的父子归属"
+      },
+      "versionExpectations": {
+        "parity-section-ownership": {
+          "initial": {
+            "followsSection": true,
+            "persistedParentLinks": []
+          },
+          "ii": {
+            "followsSection": true,
+            "persistedParentLinks": ["shape-a", "shape-b"]
+          }
+        }
+      },
+      "notes": [
+        "初代按对象所在空间确定分区归属。Studio II 保存从选区建立的显式成员，两代移动分区都带动内部对象。"
+      ]
+    },
+    {
+      "id": "WB-ORG-04",
+      "steps": ["构造包含已锁和未锁对象的选区", "统一锁定", "尝试拖动", "解锁后重新拖动"],
+      "expected": "混合选择可统一锁定，锁定时不能改位置，解锁后能移动。",
+      "observations": {
+        "parity-position-lock": "混合锁定、锁定约束与解锁后的移动"
+      }
+    },
+    {
+      "id": "WB-ORG-05",
+      "steps": ["锁定包含对象的分区", "尝试拖动内部对象", "读取分区和子对象的实际坐标"],
+      "expected": "记录锁定分区本体和内部对象各自的几何结果。",
+      "observations": {
+        "parity-locked-parent": "分区与子对象是否保持原位"
+      },
+      "versionExpectations": {
+        "parity-locked-parent": {
+          "initial": {
+            "parentHeld": true,
+            "childHeld": false
+          },
+          "ii": {
+            "parentHeld": true,
+            "childHeld": true
+          }
+        }
+      },
+      "notes": [
+        "初代锁定分区本体，内部对象仍按空间位置归属并可单独移动。Studio II 让显式成员继承父分区锁定，拖动不会改变两个对象的位置。"
+      ]
+    },
+    {
+      "id": "WB-ORG-06",
+      "steps": ["依次选中多个形状", "操作六个对齐方向", "以保存坐标核对边缘与中心"],
+      "expected": "左、水平居中、右、顶、垂直居中、底均落在对应几何坐标。",
+      "observations": {
+        "parity-all-alignment-directions": "已检验的对齐方向"
+      }
+    },
+    {
+      "id": "WB-ORG-07",
+      "steps": ["框选多个离散对象", "执行整理", "核对间距与保存坐标", "重新打开场景"],
+      "expected": "整理形成可重复的网格结构和相同间距，重开还原。",
+      "observations": {
+        "parity-tidy-grid": "已保存的网格坐标和间距"
+      }
+    },
+    {
+      "id": "WB-ORG-08",
+      "steps": ["在独立会话以查看者打开", "尝试组合、调整层序与锁定", "从房主侧核对存储"],
+      "expected": "访客可操作自己的选区，编辑操作不可用。实际白板内容保持。",
+      "observations": {
+        "parity-guest-organization-readonly": "三类写操作被拦截及白板存储状态"
+      }
+    },
+    {
+      "id": "WB-EDGE-01",
+      "steps": ["从箭头工具绘制自由连线", "调整折点、起终点符号和标签", "刷新核对几何和标签"],
+      "expected": "自由端点、折点和标签保存后可重新读取，样式修改跨刷新保留。",
+      "observations": {
+        "parity-free-line": "自由端点、折点、两端样式和标签的实际状态"
+      }
+    },
+    {
+      "id": "WB-EDGE-02",
+      "steps": [
+        "从对象端口拖动连线到另一对象",
+        "拖到新目标顶边内 4 像素，再拖到顶边外 12 像素",
+        "拖至空白解除绑定后刷新"
+      ],
+      "expected": "绑定及重新绑定写入实际线端。解除绑定后，仅移动的一端变成自由端。",
+      "observations": {
+        "parity-endpoint-bindings": "绑定端口、重绑端口和解除后的附着状态"
+      },
+      "versionExpectations": {
+        "parity-endpoint-bindings": {
+          "initial": {
+            "originalTargetPort": "left",
+            "reboundPort": "left",
+            "explicitTopPortAtSameOutsidePoint": false,
+            "releasedEndpointIsFree": true,
+            "preservedSourceBinding": true
+          },
+          "ii": {
+            "originalTargetPort": "left",
+            "reboundPort": "automatic",
+            "explicitTopPortAtSameOutsidePoint": true,
+            "releasedEndpointIsFree": true,
+            "preservedSourceBinding": true
+          }
+        }
+      },
+      "notes": [
+        "使用相同落点。重绑到顶边内侧时，初代沿用旧左端口，II 保存新对象的自动附着。移到顶边外 12 像素时，初代留下自由端点，II 吸附到明确的上端口。"
+      ]
+    },
+    {
+      "id": "WB-EDGE-03",
+      "steps": [
+        "点击对象端口快速建立相邻形状和连线",
+        "核对暗色默认线宽与可见墨色",
+        "执行一次撤销和一次重做",
+        "选择蓝色，再从端口快建并刷新"
+      ],
+      "expected": "形状和连线能在一个动作内撤销、重做。默认 3px 线在暗色中清晰可见，重开保留蓝色快建连线、对象身份及附着关系。",
+      "observations": {
+        "parity-adjacent-shape-undo-redo": "单次历史命令、默认和自选连线外观及重开结果"
+      }
+    },
+    {
+      "id": "WB-EDGE-04",
+      "steps": [
+        "移动已绑定目标",
+        "旋转目标以检查线端跟随",
+        "将其中一个端点移出视口，选中仍可见的线段"
+      ],
+      "expected": "附着对象的移动和旋转更新连线路径，离屏端点不妨碍选择可见线段。",
+      "observations": {
+        "parity-bound-line-follows-target": "实时路径、附着关系和离屏选中结果"
+      }
+    },
+    {
+      "id": "WB-EDGE-05",
+      "steps": [
+        "单选一根连线检查端点手柄",
+        "把连线和图形同时选中",
+        "实际拖动旋转手柄",
+        "刷新后核对绑定、自由端与手动折点"
+      ],
+      "expected": "单根连线仍使用端点手柄。混合选区旋转保留绑定和端点样式，自由端和折点绕共同中心转动并持久化。",
+      "observations": {
+        "parity-connector-rotation-capability": "单根连线、混选旋转以及绑定和自由几何的保存结果"
+      },
+      "notes": [
+        "初代支持混选旋转。Studio II 修复前缺少入口，候选专项复测已实际旋转自由端和折点并保留绑定。"
+      ]
+    },
+    {
+      "id": "WB-OBJECT-01",
+      "steps": [
+        "打开形状样式菜单",
+        "检查轮廓选项并改变形状类型与填充、边框",
+        "刷新后复查类型与虚线"
+      ],
+      "expected": "选区样式写入实际对象，类型和线条状态跨刷新保留。",
+      "observations": {
+        "parity-shape-styles": "形状轮廓项数量、保存类型与线宽"
+      }
+    },
+    {
+      "id": "WB-OBJECT-02",
+      "steps": ["选中文字、便签和形状正文", "编辑中文并应用粗体", "核对重新读取后的正文与格式"],
+      "expected": "三类对象实际保存独立文字格式与中文正文。",
+      "observations": {
+        "parity-inline-bold": "已保存粗体样式的对象数量"
+      }
+    },
+    {
+      "id": "WB-OBJECT-03",
+      "steps": ["选择笔色和线宽", "分别画曲线与直线", "刷新读回笔迹"],
+      "expected": "两笔真实轨迹与同色墨线持久化。",
+      "observations": {
+        "parity-saved-ink": "已保存轨迹数量及笔色结果"
+      }
+    },
+    {
+      "id": "WB-OBJECT-04",
+      "steps": ["选中连线并设置两端样式", "通过对象菜单重命名分区", "核对保存值"],
+      "expected": "起点圆形、终点无装饰和分区标题写入存储。",
+      "observations": {
+        "parity-saved-connector-and-section": "保存的两端样式与分区标题状态"
+      }
+    },
+    {
+      "id": "WB-OBJECT-05",
+      "steps": ["检查贴纸目录", "用搜索放置两个预设贴纸", "编辑归档中的旧字符贴纸"],
+      "expected": "图形贴纸可搜索并放置，旧字符贴纸仍有有效编辑入口。",
+      "observations": {
+        "parity-sticker-catalog-and-legacy": "目录数量、预设放置与旧贴纸编辑"
+      }
+    },
+    {
+      "id": "WB-OBJECT-06",
+      "steps": [
+        "放置表格并等待已保存",
+        "新增行与列，每步都等界面和持久版次确认",
+        "在表格中验证键盘焦点，修改列宽并用 Esc 取消另一次编辑",
+        "重开样板"
+      ],
+      "expected": "行列和列宽跨刷新保留。单元格编辑按确认或取消语义生效。",
+      "observations": {
+        "parity-saved-table": "行列数量、尺寸和取消编辑"
+      }
+    },
+    {
+      "id": "WB-OBJECT-07",
+      "steps": [
+        "上传矢量图片并保存裁剪",
+        "重启后在 680×560 亮色窗口确认标题和关闭按钮完整可见",
+        "用 Esc 结束并确认可再次保存",
+        "尝试无效图片，关闭提示并刷新原图"
+      ],
+      "expected": "裁剪改变显示并跨重启保留。短窗口可看到标题和关闭按钮，键盘能离开弹窗，保存入口可通过滚动到达。坏文件没有写入。",
+      "observations": {
+        "parity-picture-upload-crop": "素材原尺寸、裁剪变更、重启保留和错误处理"
+      },
+      "notes": [
+        "初代在白板留下可移除的错误上传草稿。Studio II 在放置前显示可关闭的校验提示。两代刷新后均只保留原图。"
+      ]
+    },
+    {
+      "id": "WB-OBJECT-08",
+      "steps": [
+        "从媒体选择器插入视频",
+        "在 25% 确认播放器控件隐藏",
+        "切换至 100% 实际播放",
+        "重启后在亮色下再次播放"
+      ],
+      "expected": "视频按默认 480×270 显示，25% 时不挂载原生播放控件。回到常用缩放能播放，重启后也可播放。",
+      "observations": {
+        "parity-video-size-and-playback": "视频本征尺寸、显示尺寸及两次播放状态"
+      }
+    },
+    {
+      "id": "WB-OBJECT-09",
+      "steps": [
+        "打开链接插入弹窗",
+        "输入无效地址后取消",
+        "重新输入合法本机 URL 并保存",
+        "重启后打开链接并核对目标"
+      ],
+      "expected": "无效地址不能保存，取消不新增对象，有效链接跨重启保留并打开预期页面。",
+      "observations": {
+        "parity-standalone-link": "链接校验、取消、重开和导航结果"
+      }
+    },
+    {
+      "id": "WB-OBJECT-10",
+      "steps": [
+        "拒绝无效色值并取消，再为第一对象设置自定义边框色",
+        "刷新后从第二对象的文字与边框工具确认同一色块",
+        "重启后复用色块，右键移除并撤销、重做",
+        "再次重启核对共享色板与两个已应用颜色"
+      ],
+      "expected": "两代都能跨对象复用板级墨色，文字与边框工具使用同一色板。撤销与重做改变色块集合，已经应用到对象的颜色保持。",
+      "notes": ["Studio II 还验证了可在色块上按 Delete 移除。"],
+      "observations": {
+        "parity-shared-custom-ink": "已保存墨色、跨对象复用、文字共享、色块移除与撤销重做"
+      }
+    },
+    {
+      "id": "WB-SAVE-01",
+      "steps": [
+        "先在目的板触发空剪贴板，核对版次与对象列表保持",
+        "从对象菜单复制源板对象并在另一板右键粘贴",
+        "从对象菜单剪切另一对象",
+        "再次跨板粘贴并重启读取"
+      ],
+      "expected": "复制和剪切经系统剪贴板。跨板右键粘贴可读取最近剪贴板，源板与目的板保存准确。 空剪贴板不会写入任何对象或推进版次。"
+    },
+    {
+      "id": "WB-SAVE-02",
+      "steps": ["选定形状及附着连线", "用 Ctrl＋D 重复", "拖动副本并核对两端关系", "重启重开"],
+      "expected": "连线副本只把被复制的一端改绑到副本。源图形和源连线保持。"
+    },
+    {
+      "id": "WB-SAVE-03",
+      "steps": ["删除已选对象", "从缩放菜单撤销再重做", "重启白板"],
+      "expected": "撤销恢复原对象及内容，重做后的删除状态跨重启保存。"
+    },
+    {
+      "id": "WB-SAVE-04",
+      "steps": ["受控中断移动请求并确认没有写入", "从可见的恢复入口恢复", "读取最终版次与位置"],
+      "expected": "两代都显示失败。初代查询原结果后保持原位置，Studio II 使用同一命令重发，成功后只保存一版。",
+      "observations": {
+        "parity-unsubmitted-move-recovery": "未提交后的恢复入口、送出次数与新增版次"
+      },
+      "versionExpectations": {
+        "parity-unsubmitted-move-recovery": {
+          "initial": {
+            "recovery": "核对上次保存",
+            "mutationRequests": 1,
+            "extraRevisions": 0
+          },
+          "ii": {
+            "recovery": "重试原移动",
+            "mutationRequests": 2,
+            "extraRevisions": 1
+          }
+        }
+      },
+      "notes": [
+        "初代「核对上次保存」查询结果。Studio II「重试原移动」复用同一命令编号，成功后只新增一个版次。"
+      ]
+    },
+    {
+      "id": "WB-SAVE-05",
+      "steps": [
+        "由后端完成移动后丢弃回执",
+        "通过该版回执恢复流程继续",
+        "读回版次、命令标识与坐标",
+        "重启检查"
+      ],
+      "expected": "回执恢复后确认移动只写入一次，重启保留结果。",
+      "observations": {
+        "parity-lost-move-receipt-recovery": "已提交但丢回执时的恢复入口、送出次数与新增版次"
+      },
+      "versionExpectations": {
+        "parity-lost-move-receipt-recovery": {
+          "initial": {
+            "recovery": "核对上次保存",
+            "mutationRequests": 1,
+            "extraRevisions": 1
+          },
+          "ii": {
+            "recovery": "自动核对回执",
+            "mutationRequests": 1,
+            "extraRevisions": 1
+          }
+        }
+      },
+      "notes": [
+        "初代需要点击「核对上次保存」。Studio II 自动查回执。两代在服务已经写入时均保持一次提交和一个新增版次。"
+      ]
+    },
+    {
+      "id": "WB-SAVE-06",
+      "steps": [
+        "持住重复命令的回执",
+        "在保存中选另一对象并打开菜单",
+        "放行回执并核对选区、菜单和副本"
+      ],
+      "expected": "重复对象只创建一次。记录迟到回执后选区和菜单是否仍归最近选中的对象。",
+      "notes": [
+        "初代迟到回执重新选中副本并关闭当前菜单。II 保留用户稍后选择的对象和已经打开的菜单。"
+      ],
+      "observations": {
+        "parity-late-duplicate-selection": "重复回执到达后新选择与菜单的保留状态"
+      },
+      "versionExpectations": {
+        "parity-late-duplicate-selection": {
+          "initial": {
+            "selectionRetained": false,
+            "menuRetained": false
+          },
+          "ii": {
+            "selectionRetained": true,
+            "menuRetained": true
+          }
+        }
+      }
+    },
+    {
+      "id": "WB-SAVE-07",
+      "steps": [
+        "从便签工具开始放置并持住回执",
+        "在保存中改选原有形状",
+        "放行回执检查焦点和选区",
+        "按 Delete 证明当前操作对象保持"
+      ],
+      "expected": "新增便签只保存一次。迟到回执后当前选区和画布焦点仍归最近选中的形状。"
+    },
+    {
+      "id": "WB-SAVE-08",
+      "steps": [
+        "先按右方向键并暂扣首个成功回执",
+        "保存中按 Shift＋下方向键，随后放行首个回执",
+        "确认前两笔依次保存，再按左方向键",
+        "对最后一笔执行撤销与重做，重启后读取位置"
+      ],
+      "expected": "首笔待回执时输入的第二键会保留并按顺序保存。三次移动逐笔写入，最后一笔可独立撤销与重做，另一个形状保持原位。",
+      "observations": {
+        "parity-rapid-nudge-receipts": "回执前后连续微调的保存次数与最终坐标"
+      }
+    }
+  ]
+}

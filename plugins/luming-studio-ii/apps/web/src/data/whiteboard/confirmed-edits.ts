@@ -2,8 +2,8 @@ import type { WhiteboardObject, WhiteboardScene } from './contracts.js';
 import type { BoardEditReceipt } from './edits-types.js';
 
 export type AppliedBoardEdit = Extract<BoardEditReceipt, { kind: 'applied' }>;
-type ConfirmedSceneEdit = Pick<AppliedBoardEdit, 'revision' | 'removedIds' | 'objects' | 'order'>;
-type BoardSceneChanges = Omit<ConfirmedSceneEdit, 'revision'>;
+type BoardSceneChanges = Pick<AppliedBoardEdit, 'removedIds' | 'objects' | 'order'>;
+type ConfirmedSceneEdit = BoardSceneChanges & Pick<AppliedBoardEdit, 'revision' | 'customColors'>;
 
 export interface WhiteboardContentChange {
   readonly revision: bigint;
@@ -48,16 +48,22 @@ export function mergeConfirmedEdit(
   scene: WhiteboardScene,
   receipt: ConfirmedSceneEdit,
 ): WhiteboardScene | undefined {
-  if (receipt.revision <= scene.revision) {
+  const { revision, customColors } = receipt;
+  if (revision < scene.revision) {
     return scene;
   }
-  if (receipt.revision !== scene.revision + 1n) {
+
+  const palette = customColors === undefined ? undefined : { customColors };
+  if (revision === scene.revision) {
+    return palette ? { ...scene, ...palette } : scene;
+  }
+  if (revision !== scene.revision + 1n) {
     return undefined;
   }
 
   const next = projectBoardChanges(scene, receipt);
 
-  return next && { ...next, revision: receipt.revision };
+  return next && { ...next, ...palette, revision };
 }
 
 export function projectBoardChanges(

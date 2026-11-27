@@ -90,6 +90,7 @@ const fixtureFiles = [
   authorizationAdapter + 'private.ts',
   'src/infrastructure/adapters/index.ts',
   'src/infrastructure/adapters/board-edit-storage.ts',
+  'src/infrastructure/adapters/board-custom-colors.ts',
   'src/infrastructure/adapters/private.ts',
   'src/infrastructure/platform/index.ts',
   'src/infrastructure/platform/png-renderer.ts',
@@ -135,6 +136,10 @@ async function inspect(filePath, code) {
 }
 
 const permitted = [
+  [
+    'src/infrastructure/adapters/board-custom-colors.ts',
+    "import type { SqliteConnection } from '../platform/index.js';",
+  ],
   [
     'src/entrypoints/http/room-event-stream.ts',
     "import { ConnectError } from '@connectrpc/connect';\nimport { connectNodeAdapter } from '@connectrpc/connect-node';",
@@ -431,6 +436,16 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'whiteboard HTTP reaches palette persistence directly',
+    'src/entrypoints/http/geometry-edits.ts',
+    "import { writeBoardCustomColors } from '../../infrastructure/adapters/board-custom-colors.js';",
+  ],
+  [
+    'whiteboard ports re-export palette domain runtime values',
+    whiteboard + 'ports/index.ts',
+    "export { normalizeBoardCustomColor } from '../domain/index.js';",
+  ],
   [
     'room business logic reaches the HTTP streaming SDK',
     rooms + 'application/private.ts',

@@ -4,6 +4,7 @@ import type {
   StoredBoardEditReceipt,
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection } from '../platform/index.js';
+import { decodeBoardCustomColors } from './board-custom-colors.js';
 import { readVersionObjects, readVersionPayloads } from './board-history-storage.js';
 import { decodeReceiptObject } from './board-object-storage.js';
 import {
@@ -120,6 +121,10 @@ function storedIds(raw: unknown, field: string): readonly string[] {
   return storedArray(raw, field).map((id) => storedText(id, field));
 }
 
+function optionalCustomColors(raw: unknown) {
+  return raw === undefined ? undefined : decodeBoardCustomColors(raw);
+}
+
 export function readEditReceipt(
   connection: SqliteConnection,
   boardId: string,
@@ -151,6 +156,8 @@ export function readEditReceipt(
         boardRevision,
         objects: storedArray(value.objects, 'objects').map(decodeReceiptObject),
         ...readReceiptDetails(connection, boardId, boardRevision, value),
+        customColors: optionalCustomColors(value.customColors),
+        previousCustomColors: optionalCustomColors(value.previousCustomColors),
         removedObjectIds: storedIds(value.removedObjectIds, 'removedObjectIds'),
         layerChangedObjectIds:
           value.layerChangedObjectIds === undefined
@@ -188,6 +195,8 @@ export function saveEditReceipt(
     removedPayloadObjectIds: outcome.removedPayloadObjectIds ?? [],
     hasOrder: outcome.order !== undefined,
     layerChangedObjectIds: outcome.layerChangedObjectIds,
+    customColors: outcome.customColors,
+    previousCustomColors: outcome.previousCustomColors,
   });
 
   connection

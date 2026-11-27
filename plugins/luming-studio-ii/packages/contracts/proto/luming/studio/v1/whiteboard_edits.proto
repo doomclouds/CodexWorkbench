@@ -33,6 +33,7 @@ message EditBoardGeometryRequest {
     ArrangeBoardObjects arrange = 12;
     ChangeBoardObjectStyle style = 13;
     PasteBoardObjects paste = 14;
+    RemoveBoardCustomColor remove_custom_color = 15;
   }
 }
 
@@ -47,6 +48,8 @@ message BoardCreationAttachment {
   ConnectorPort source_port = 2;
   ConnectorPort target_port = 3;
   string connector_id = 4;
+  optional string stroke = 5;
+  optional double stroke_width = 6;
 }
 
 message EditBoardTarget {
@@ -163,6 +166,11 @@ message BoardObjectStylePatch {
 message ChangeBoardObjectStyle {
   repeated BoardObjectStyleTarget targets = 1;
   BoardObjectStylePatch patch = 2;
+  optional string remember_color = 3;
+}
+
+message RemoveBoardCustomColor {
+  string color = 1;
 }
 
 message PasteBoardObject {
@@ -350,6 +358,7 @@ message BoardEditApplied {
   repeated string object_order = 4;
   repeated ObjectPayloadResult changed_payloads = 5;
   bool details_expired = 6;
+  BoardCustomColors custom_colors = 7;
 }
 
 message BoardEditConflict {

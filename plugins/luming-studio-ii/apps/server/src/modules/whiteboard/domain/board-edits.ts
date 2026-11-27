@@ -37,6 +37,7 @@ export interface BoardChanges {
   readonly order?: readonly string[];
   readonly layerPlacement?: BoardLayerPlacement;
   readonly assets?: readonly BoardEditAsset[];
+  readonly customColors?: readonly string[];
 }
 
 export interface BoardEditApplied {
@@ -49,6 +50,8 @@ export interface BoardEditApplied {
   readonly order?: readonly string[];
   readonly detailsExpired?: boolean;
   readonly layerChangedObjectIds?: readonly string[];
+  readonly customColors?: readonly string[];
+  readonly previousCustomColors?: readonly string[];
 }
 
 export const boardWritePayloadLimit = 32n * 1024n * 1024n;

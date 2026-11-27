@@ -43,7 +43,12 @@ function readEditPayloads(results: readonly ObjectPayloadResult[], resolveAsset:
 
 type BoardChangeMessage = Pick<
   BoardEditApplied,
-  'boardRevision' | 'changedObjects' | 'removedObjectIds' | 'objectOrder' | 'changedPayloads'
+  | 'boardRevision'
+  | 'changedObjects'
+  | 'removedObjectIds'
+  | 'objectOrder'
+  | 'changedPayloads'
+  | 'customColors'
 > & { readonly detailsExpired?: boolean };
 
 export function readBoardEditChanges(value: BoardChangeMessage, resolveAsset: AssetResolver) {
@@ -67,6 +72,7 @@ export function readBoardEditChanges(value: BoardChangeMessage, resolveAsset: As
     removedIds,
     order,
     payloads,
+    ...(value.customColors ? { customColors: value.customColors.colors } : {}),
     ...(value.detailsExpired ? { detailsExpired: true } : {}),
   };
 }

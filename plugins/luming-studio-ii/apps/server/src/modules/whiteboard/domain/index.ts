@@ -158,3 +158,4 @@ export {
   validStylePatch,
 } from './geometry-style.js';
 export { clipboardObject } from './clipboard-geometry.js';
+export { maximumBoardCustomColors, normalizeBoardCustomColor } from './custom-colors.js';

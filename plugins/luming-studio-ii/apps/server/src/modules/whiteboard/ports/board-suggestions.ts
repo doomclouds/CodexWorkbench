@@ -10,6 +10,7 @@ export type BoardEditPlanningReader = Pick<
   BoardEditWriter,
   | 'getAccess'
   | 'getBoard'
+  | 'getBoardCustomColors'
   | 'getObjects'
   | 'listObjects'
   | 'getPayloads'

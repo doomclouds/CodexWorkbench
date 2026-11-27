@@ -1,4 +1,9 @@
-import { ActionMenu, type ActionMenuAnchor, type ActionMenuItem } from '../../ui/base/index.js';
+import {
+  ActionMenu,
+  type ActionMenuAnchor,
+  type ActionMenuCloseReason,
+  type ActionMenuItem,
+} from '../../ui/base/index.js';
 import type { CanvasObject } from '../../ui/domain/canvas/index.js';
 import type { GeometrySelectionAction } from './geometry-commands.js';
 
@@ -167,6 +172,14 @@ export function GeometryBoardMenu(props: BoardMenuProps) {
     }
   }
 
+  function handleClose(reason: ActionMenuCloseReason) {
+    if (reason === 'escape') {
+      returnFocus?.();
+    }
+
+    onRequestClose();
+  }
+
   return (
     <div className="whiteboard-editor__geometry-menu">
       <ActionMenu
@@ -176,7 +189,7 @@ export function GeometryBoardMenu(props: BoardMenuProps) {
         items={boardMenuItems(props)}
         announceShortcuts
         onAction={handleAction}
-        onRequestClose={onRequestClose}
+        onRequestClose={handleClose}
         returnFocus={returnFocus}
       />
     </div>

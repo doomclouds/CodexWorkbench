@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Dialog, Range, StatusText } from '../../../base/index.js';
-import type { ButtonHandle } from '../../../base/index.js';
 import type { ImageCrop, MediaSize, SaveImageCrop } from './contracts.js';
 import { ImagePreview } from './ImagePreview.js';
 import { centeredCrop, normalizeCrop, validMediaSize } from './media-geometry.js';
@@ -37,7 +36,6 @@ export function ImageCropDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const savePending = useRef(false);
-  const cancel = useRef<ButtonHandle>(null);
   const natural = decodedSize ?? naturalSize;
   const previewScale = Math.min(
     1,
@@ -91,7 +89,6 @@ export function ImageCropDialog({
       closeLabel="关闭裁剪"
       dismissPolicy={{ escape: !busy }}
       onRequestClose={handleClose}
-      initialFocus={() => cancel.current?.focus()}
       restoreFocus={onRestoreFocus}
     >
       <div className="luming-image-crop" data-canvas-native="">
@@ -142,7 +139,7 @@ export function ImageCropDialog({
         {error && <StatusText message={error} tone="error" announcement="assertive" />}
         <div className="luming-image-crop__actions">
           <Button label="居中重置" disabled={busy} onActivate={() => setCrop(centeredCrop)} />
-          <Button ref={cancel} label="取消" disabled={busy} onActivate={handleClose} />
+          <Button label="取消" disabled={busy} onActivate={handleClose} />
           <Button
             label={busy ? '正在保存…' : '保存裁剪'}
             variant="primary"

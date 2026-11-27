@@ -289,6 +289,7 @@ export interface CanvasObjectExtension {
   readonly portClick?: 'place' | 'connect';
   readonly blocksPlacement?: boolean;
   readonly activateOnDoubleClick?: boolean;
+  readonly capturePointerTargetOnBodyDrag?: boolean;
   readonly bounds?: (context: CanvasObjectGeometryContext) => CanvasRect;
   readonly hitTest?: (context: CanvasObjectHitContext) => boolean;
   readonly View?: ComponentType<CanvasObjectViewProps>;
@@ -346,6 +347,7 @@ export interface CanvasCreateLink {
     readonly point: CanvasPoint;
   };
   readonly target: { readonly port: CanvasPort; readonly point: CanvasPoint };
+  readonly style?: CanvasPenStyle;
 }
 
 export interface CanvasDuplicateIntent {
@@ -363,6 +365,12 @@ interface CanvasEdit {
 export interface CanvasMoveIntent extends CanvasEdit {
   readonly kind: 'move';
   readonly delta: CanvasPoint;
+  readonly nudgeSelection?: readonly string[];
+}
+
+export interface CanvasNudgeScope {
+  readonly selection: readonly string[];
+  readonly targets: readonly string[];
 }
 
 export interface CanvasTransformIntent extends CanvasEdit {
@@ -409,6 +417,10 @@ export interface CanvasProps {
   readonly selectionActions?: ReactNode;
   readonly pendingEdits?: readonly CanvasEditIntent[];
   readonly pendingResizeObjectId?: string;
+  readonly nudgeSave?:
+    | { readonly kind: 'idle' }
+    | { readonly kind: 'confirmed'; readonly revision: number; readonly scope?: CanvasNudgeScope }
+    | (CanvasNudgeScope & { readonly kind: 'saving' });
   readonly objectExtensions?: readonly CanvasObjectExtension[];
   readonly payloadById?: ReadonlyMap<string, CanvasObjectPayload>;
   readonly contentById?: ReadonlyMap<string, ReactNode>;

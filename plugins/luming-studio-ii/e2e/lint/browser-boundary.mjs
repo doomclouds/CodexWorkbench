@@ -4,23 +4,39 @@ import { fileURLToPath } from "node:url";
 const fixtureSpecifier = "../support/studio.mjs";
 const fixturePath = fileURLToPath(new URL(fixtureSpecifier, import.meta.url));
 const fixtureImports = new Set(["expect", "focused", "observe", "screenshot", "test"]);
+const whiteboardFixtureSpecs = new Set(
+  [
+    "viewport",
+    "placement",
+    "selection",
+    "geometry",
+    "organization",
+    "connectors",
+    "objects",
+    "objects-media",
+    "persistence",
+  ].map((spec) => pathOfSpec("whiteboard-basics/" + spec)),
+);
+const whiteboardFixtureMethods = new Set(["readBoard", "seedBasicBoard"]);
+const boardSeedMethods = new Set(["seedBoards", "seedBasicBoard"]);
 const scopedFixtureImports = new Map(
   [
-    ["failNextRecycleBinRead", "recycle-bin/retry"],
-    ["failNextWorkbenchRead", "workbench/browse"],
-    ["interceptNextBoardCreation", "workbench/create"],
-    ["controlNextThumbnail", "workbench/display"],
-    ["readCardCover", "workbench/display"],
-    ["readControlPresentation", "workbench/display"],
-    ["chooseArchive", "workbench/import"],
-    ["failNextArchiveImport", "workbench/import"],
-    ["holdNextArchiveImport", "workbench/import"],
-    ["imageLoaded", "workbench/import"],
-    ["workbenchLinkProbe", "workbench/link"],
-  ].map(([helper, spec]) => [
-    helper,
-    fileURLToPath(new URL("../" + spec + ".spec.mjs", import.meta.url)),
-  ]),
+    ["recycle-bin/retry", ["failNextRecycleBinRead"]],
+    ["workbench/browse", ["failNextWorkbenchRead"]],
+    ["workbench/create", ["interceptNextBoardCreation"]],
+    ["workbench/display", ["controlNextThumbnail", "readCardCover", "readControlPresentation"]],
+    [
+      "workbench/import",
+      ["chooseArchive", "failNextArchiveImport", "holdNextArchiveImport", "imageLoaded"],
+    ],
+    ["workbench/link", ["workbenchLinkProbe"]],
+    ["whiteboard-basics/organization", ["workbenchLinkProbe"]],
+    [
+      "whiteboard-basics/objects-media",
+      ["chooseBoardMedia", "imageLoaded", "mediaDisplaySize", "mediaPlaying"],
+    ],
+    ["whiteboard-basics/persistence", ["controlNextCanvasSave", "enableCanvasClipboard"]],
+  ].map(([spec, helpers]) => [pathOfSpec(spec), new Set(helpers)]),
 );
 const testModes = new Set(["only", "skip", "fixme", "fail", "failOnly"]);
 const pageFactories = new Set(["newPage", "openGuest"]);
@@ -125,6 +141,10 @@ function propertyName({ computed, property, key }) {
   return name?.type === "Literal" ? name.value : undefined;
 }
 
+function pathOfSpec(spec) {
+  return fileURLToPath(new URL("../" + spec + ".spec.mjs", import.meta.url));
+}
+
 function definitionOf(source, identifier) {
   for (let scope = source.getScope(identifier); scope; scope = scope.upper) {
     const definitions = scope.set.get(identifier.name)?.defs;
@@ -154,11 +174,39 @@ function unwrapped(node) {
   return node;
 }
 
+function variableInitializer(definition) {
+  const { id, init } = definition.node;
+  const call = unwrapped(init);
+  if (id.type !== "ArrayPattern" || call?.type !== "CallExpression") {
+    return init;
+  }
+
+  const { callee } = call;
+  if (callee.type !== "MemberExpression") {
+    return init;
+  }
+
+  const promiseAll = callee.object.name === "Promise" && propertyName(callee) === "all";
+  const items = call.arguments[0];
+  if (!promiseAll || items?.type !== "ArrayExpression") {
+    return init;
+  }
+
+  const index = id.elements.indexOf(definition.name);
+  return items.elements[index];
+}
+
 function isPage(source, receiver, visited = new Set()) {
   const node = unwrapped(receiver);
   if (node?.type === "CallExpression") {
     const callee = node.callee;
-    return callee.type === "MemberExpression" && pageFactories.has(propertyName(callee));
+    if (callee.type !== "MemberExpression") {
+      return false;
+    }
+
+    const method = propertyName(callee);
+    const popup = method === "waitForEvent" && node.arguments[0]?.value === "popup";
+    return pageFactories.has(method) || popup;
   }
   if (node?.type !== "Identifier") {
     return false;
@@ -179,7 +227,7 @@ function isPage(source, receiver, visited = new Set()) {
     );
   }
 
-  return definition.type === "Variable" && isPage(source, definition.node.init, visited);
+  return definition.type === "Variable" && isPage(source, variableInitializer(definition), visited);
 }
 
 function isBrowserReceiver(source, receiver, visited = new Set()) {
@@ -238,7 +286,7 @@ function isFixtureReference(source, receiver, kind) {
 
     return (
       callee?.type === "MemberExpression" &&
-      propertyName(callee) === "seedBoards" &&
+      boardSeedMethods.has(propertyName(callee)) &&
       isFixtureReference(source, callee.object, "studio")
     );
   }
@@ -295,7 +343,11 @@ function validFixtureImport(node, file) {
       }
 
       const { name } = entry.imported;
-      return fixtureImports.has(name) || scopedFixtureImports.get(name) === file;
+      return (
+        fixtureImports.has(name) ||
+        scopedFixtureImports.get(file)?.has(name) ||
+        (name === "readCanvas" && whiteboardFixtureSpecs.has(file))
+      );
     })
   );
 }
@@ -306,6 +358,8 @@ const userFlowBoundary = {
     schema: [],
     messages: {
       fixture: "Import the test runner, assertions and evidence helper from ../support/studio.mjs.",
+      fixtureMethod:
+        "Call the declared whiteboard capability directly on the Studio fixture from its assigned scenario.",
       browserInternal:
         "Exercise the application through visible browser actions. Keep browser internals, network calls and local file selection in the fixture.",
       selector: "Locate controls with getByRole, getByText, getByLabel or getByTestId.",
@@ -318,6 +372,13 @@ const userFlowBoundary = {
   },
   create(context) {
     const source = context.sourceCode;
+    const whiteboardScenario = whiteboardFixtureSpecs.has(context.physicalFilename);
+
+    function inspectFixtureMethod(node, receiver, directCall) {
+      if (!whiteboardScenario || !directCall || !isFixtureReference(source, receiver, "studio")) {
+        context.report({ node, messageId: "fixtureMethod" });
+      }
+    }
 
     function inspectOperation(node, receiver) {
       const name = propertyName(node);
@@ -329,6 +390,10 @@ const userFlowBoundary = {
 
       const call = node.parent;
       const directCall = call.type === "CallExpression" && call.callee === node;
+      if (whiteboardFixtureMethods.has(name)) {
+        inspectFixtureMethod(node, receiver, directCall);
+        return;
+      }
       if (name === "goto") {
         if (!directCall || !fixtureUrl(source, call.arguments[0])) {
           context.report({ node, messageId: "navigation" });
@@ -350,8 +415,11 @@ const userFlowBoundary = {
         context.report({ node, messageId: "selector" });
       }
 
-      const computedOperation = node.computed && name === undefined;
-      if (computedOperation && isBrowserReceiver(source, receiver)) {
+      if (!node.computed || name !== undefined) {
+        return;
+      }
+
+      if (isBrowserReceiver(source, receiver) || isFixtureReference(source, receiver, "studio")) {
         context.report({ node, messageId: "computed" });
       }
     }

@@ -53,6 +53,12 @@ export interface GeometryStyleOperation {
   readonly kind: 'style';
   readonly targets: readonly BoardObjectStyleTarget[];
   readonly patch: BoardObjectStylePatch;
+  readonly rememberColor?: string;
+}
+
+interface GeometryRemoveCustomColorOperation {
+  readonly kind: 'removeCustomColor';
+  readonly color: string;
 }
 
 export interface BoardPasteTarget {
@@ -74,4 +80,5 @@ export type GeometryParityOperation =
   | GeometrySectionOperation
   | GeometryArrangeOperation
   | GeometryStyleOperation
+  | GeometryRemoveCustomColorOperation
   | GeometryPasteOperation;

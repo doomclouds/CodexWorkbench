@@ -357,13 +357,17 @@ function capture(
       reviewSources: details?.reviewSources ?? { sources: [], targetSnapshots: [] },
     },
   };
+  const nativeInks = reader
+    .getBoardCustomColors(boardId)
+    .map((color) => color.slice(1))
+    .join(',');
 
   return {
     board,
     archive: {
       boardId,
       properties,
-      contentFields: { style: legacyStyle },
+      contentFields: { style: { ...legacyStyle, ...(nativeInks && { nativeInks }) } },
       elements,
       history,
       assets: builder.assets,

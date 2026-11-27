@@ -319,6 +319,74 @@ test('recovers available history from a Studio II v4 backup predating the native
   expect(after.scene?.objects).toMatchObject([{ objectId: 'box', label: 'Current' }]);
 });
 
+test('carries the current shared ink palette through both copying and archive restoration', async () => {
+  const sourceId = await createSourceBoard();
+  const objectId = 'palette-shape';
+  const color = '#3864A2';
+  const created = await callWhiteboard(server.address, editorId, editBoardGeometry, {
+    boardId: sourceId,
+    commandId: 'create-palette-shape',
+    operation: {
+      case: 'create',
+      value: {
+        object: {
+          objectId,
+          kind: 'shape',
+          label: 'Palette sample',
+          geometry,
+          geometryDetail: { case: 'shape', value: { outline: 'rect' } },
+        },
+      },
+    },
+  });
+  assert.equal(created.receipt?.outcome.case, 'applied');
+
+  const painted = await callWhiteboard(server.address, editorId, editBoardGeometry, {
+    boardId: sourceId,
+    commandId: 'register-palette-ink',
+    operation: {
+      case: 'style',
+      value: {
+        targets: [{ target: { objectId, expectedGeometryVersion: 0n } }],
+        patch: { stroke: color },
+        rememberColor: color,
+      },
+    },
+  });
+  assert.equal(painted.receipt?.outcome.case, 'applied');
+
+  const { result } = await callWhiteboard(server.address, editorId, exportBoard, {
+    boardId: sourceId,
+    expectedRevision: painted.receipt.outcome.value.boardRevision,
+    format: BoardExportFormat.ZIP,
+    scope: whole,
+  });
+  assert.equal(result.case, 'file');
+  const restoredId = await upload(result.value.content, 'restore-ink-palette');
+  const copy = await callWhiteboard(
+    server.address,
+    editorId,
+    BoardCatalogService.method.duplicateBoard,
+    {
+      sourceBoardId: sourceId,
+      commandId: 'duplicate-ink-palette',
+    },
+  );
+  assert.equal(copy.receipt?.outcome.case, 'created');
+  const copiedId = copy.receipt.outcome.value.boardId;
+
+  await server.restart();
+  for (const [boardId, actorId] of [
+    [restoredId, outsiderId],
+    [copiedId, editorId],
+  ] as const) {
+    const restored = await callWhiteboard(server.address, actorId, getBoardScene, { boardId });
+    expect(restored.scene?.customColors?.colors).toEqual([color]);
+    const shape = restored.scene?.objects.find((object) => object.objectId === objectId);
+    expect(shape?.appearance?.stroke).toBe(color);
+  }
+});
+
 test('records an incompatible receipt before an invalid native payload can publish a board', async () => {
   const content = await invalidNativeBackup();
   assert.ok(content);

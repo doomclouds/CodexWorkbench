@@ -1,9 +1,11 @@
 import { expect, test as base } from "@playwright/test";
+import { createBoardFixtures } from "./board-fixtures.mjs";
 import { seedBoards } from "./boards.mjs";
 import { launchStudio } from "./runtime.mjs";
 import { registerWorkbenchLinkRuntime } from "./workbench-link.mjs";
 
 export { workbenchLinkProbe } from "./workbench-link.mjs";
+export { chooseBoardMedia, mediaDisplaySize, mediaPlaying } from "./media.mjs";
 
 export {
   chooseArchive,
@@ -25,6 +27,7 @@ export const test = base.extend({
             url: runtime.url,
             workbenchTitle,
             workbenchBackLabel: "返回 " + workbenchTitle,
+            ...createBoardFixtures(edition, runtime),
             seedBoards: (descriptors) => seedBoards(edition, runtime, descriptors),
             restart: () => runtime.restart(),
           },
@@ -144,3 +147,5 @@ export async function interceptNextBoardCreation(page, studio, mode) {
 
 export { readCardCover, readControlPresentation } from "./card-presentation.mjs";
 export { controlNextThumbnail } from "./thumbnails.mjs";
+export { readCanvas } from "./canvas-presentation.mjs";
+export { controlNextCanvasSave, enableCanvasClipboard } from "./canvas-persistence.mjs";

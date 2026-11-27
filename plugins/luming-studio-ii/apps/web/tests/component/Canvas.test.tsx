@@ -291,7 +291,7 @@ describe('Canvas', () => {
     expect(onToolChange).toHaveBeenCalledExactlyOnceWith('select');
   });
 
-  it('clears a placement preview on Escape and accepts a new request after cancellation', async () => {
+  it('cancels the placement preview on Escape and exits the tool on a second press', async () => {
     const onEditIntent = vi.fn<(intent: CanvasEditIntent) => void>();
     const { root, onToolChange } = renderCanvas({ tool: placement, onEditIntent });
     const start = { x: 470, y: 240 };
@@ -308,6 +308,15 @@ describe('Canvas', () => {
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
       );
       pointer(root, 'pointerup', end);
+    });
+    expect(onEditIntent).not.toHaveBeenCalled();
+    expect(onToolChange).not.toHaveBeenCalled();
+    expect(root.querySelector('[data-canvas-draft]')).toBeNull();
+
+    act(() => {
+      root.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+      );
     });
     drag(root, start, start);
     expect(onEditIntent).not.toHaveBeenCalled();
@@ -789,6 +798,54 @@ describe('Canvas', () => {
     });
 
     expect(canvas.onEditIntent).not.toHaveBeenCalled();
+  });
+
+  it('cancels body dragging when the captured content is replaced', async () => {
+    const onEditIntent = vi.fn<(intent: CanvasEditIntent) => void>();
+    const onGesturePreviewChange = vi.fn<(gesture: CanvasGesturePreview | undefined) => void>();
+    const options: Partial<CanvasProps> = {
+      selection: ['native'],
+      objectExtensions: [
+        {
+          kind: 'native',
+          capabilities: {
+            move: true,
+            resize: true,
+            rotate: true,
+            connect: true,
+            content: 'native',
+          },
+          capturePointerTargetOnBodyDrag: true,
+        },
+      ],
+      onGesturePreviewChange,
+      onEditIntent,
+    };
+    const body = <span data-canvas-drag-surface="body">可移动内容</span>;
+    const { root } = renderCanvas({ ...options, contentById: new Map([['native', body]]) });
+    const captured = root.querySelector('[data-canvas-drag-surface="body"]');
+    if (!captured) {
+      throw new Error('Expected an editable body drag surface.');
+    }
+
+    const release = { x: 470, y: 110 };
+    act(() => {
+      pointer(captured, 'pointerdown', { x: 410, y: 90 });
+      pointer(captured, 'pointermove', release);
+    });
+    await flushFrame();
+    expect(onGesturePreviewChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'move' }),
+    );
+
+    renderCanvas(options);
+    expect(captured.isConnected).toBe(false);
+    act(() => {
+      pointer(root.ownerDocument, 'lostpointercapture', release);
+      pointer(root, 'pointerup', release);
+    });
+    expect(onGesturePreviewChange).toHaveBeenLastCalledWith(undefined);
+    expect(onEditIntent).not.toHaveBeenCalled();
   });
 
   it('reconciles pending geometry after rejection and ignores edits based on an older object version', () => {

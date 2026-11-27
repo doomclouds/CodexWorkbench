@@ -18,6 +18,36 @@ async function* bytes(content: Uint8Array): AsyncIterable<Uint8Array> {
   yield content;
 }
 
+test.each([
+  { nativeInks: '3864a2,3864A2,D97757', colors: ['#3864A2', '#D97757'] },
+  { nativeInks: 'invalid legacy inks', colors: undefined },
+])(
+  'restores the current scene with legacy native inks $nativeInks',
+  async ({ nativeInks, colors }) => {
+    const elements = [{ id: 'shape', type: 'shape', x: 40, stroke: '#3864A2' }];
+    const archive = await writeBoardArchive(
+      {
+        boardId,
+        properties: { artifact: metadata, assets: {} },
+        contentFields: { style: { nativeInks } },
+        elements,
+        history: [],
+        assets: new Map(),
+      },
+      maximumBytes,
+    );
+    assert.ok(archive);
+
+    const staged = await stageCurrentArchive(bytes(archive));
+    try {
+      expect(staged.objects).toEqual(elements);
+      expect(staged.customColors).toEqual(colors);
+    } finally {
+      await staged.dispose();
+    }
+  },
+);
+
 test('writes a v4 state with retained history, shared rich text, geometry deltas and the exact latest scene', async () => {
   const unchanged = Array.from({ length: 20 }, (_, position) => ({
     id: 'shape-' + position,

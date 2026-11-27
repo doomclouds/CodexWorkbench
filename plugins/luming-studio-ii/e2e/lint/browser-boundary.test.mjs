@@ -166,6 +166,138 @@ test("archive scenarios still reject direct use of the native file chooser", asy
   );
 });
 
+const canvasSpec = "whiteboard-basics/objects.spec.mjs";
+
+const whiteboardScopedFixtures = [
+  ["organization", ["workbenchLinkProbe"]],
+  ["objects-media", ["chooseBoardMedia", "imageLoaded", "mediaDisplaySize", "mediaPlaying"]],
+  ["persistence", ["controlNextCanvasSave", "enableCanvasClipboard"]],
+];
+
+for (const [name, helpers] of whiteboardScopedFixtures) {
+  const file = "whiteboard-basics/" + name + ".spec.mjs";
+  test("limits the whiteboard scenario helpers to " + file, async () => {
+    const content = importFixture(helpers);
+    assert.deepEqual(await messages(content, file), []);
+  });
+
+  for (const helper of helpers) {
+    test("keeps the whiteboard helper " + helper + " in its declared fixture path", async () => {
+      const probes = await Promise.all([
+        messages(importFixture([helper]), canvasSpec),
+        messages(importFixture([helper]), "workbench/manage.spec.mjs"),
+        messages(importFixture([helper], "../support/runtime.mjs"), file),
+      ]);
+
+      assert.deepEqual(
+        probes.map((reports) => reports.map(({ messageId }) => messageId)),
+        [["fixture"], ["fixture"], ["fixture"]],
+      );
+    });
+  }
+}
+
+const whiteboardActions = [
+  "  const board = await studio.seedBasicBoard('basic');",
+  "  await page.goto(board.url);",
+  "  const canvas = page.getByRole('application', { name: board.title });",
+  "  const bounds = await canvas.boundingBox();",
+  "  await page.keyboard.down('Shift');",
+  "  await page.mouse.move(bounds.x, bounds.y);",
+  "  await page.mouse.down();",
+  "  await page.mouse.move(bounds.x + 40, bounds.y + 45, { steps: 6 });",
+  "  await page.mouse.up();",
+  "  await page.keyboard.up('Shift');",
+  "  const visible = await readCanvas(page, studio);",
+  "  const saved = await studio.readBoard(board);",
+  "  expect(visible).toBeDefined();",
+  "  expect(saved).toBeDefined();",
+];
+
+const whiteboardFiles = [
+  "viewport",
+  "placement",
+  "selection",
+  "geometry",
+  "organization",
+  "connectors",
+  "objects",
+  "objects-media",
+  "persistence",
+];
+
+for (const name of whiteboardFiles) {
+  test(
+    "allows semantic canvas and persisted-state assertions in the " + name + " scenario",
+    async () => {
+      const text = importFixture(["readCanvas"]) + "\n" + scenario(whiteboardActions.join("\n"));
+      assert.deepEqual(await messages(text, "whiteboard-basics/" + name + ".spec.mjs"), []);
+    },
+  );
+}
+
+test("rejects the whiteboard capabilities in an unrelated feature", async () => {
+  const text =
+    importFixture(["readCanvas"]) +
+    "\n" +
+    scenario(
+      "  const board = await studio.seedBasicBoard();\n" +
+        "  await studio.readBoard(board);\n" +
+        "  await studio['read' + 'Board'](board);",
+    );
+
+  for (const file of ["workbench/browse.spec.mjs", "whiteboard-basics/other.spec.mjs"]) {
+    assert.deepEqual(
+      (await messages(text, file)).map(({ messageId }) => messageId),
+      ["fixture", "fixtureMethod", "fixtureMethod", "computed"],
+    );
+  }
+});
+
+test("blocks canvas implementation and storage inspection inside a whiteboard scenario", async () => {
+  const text =
+    "import { DatabaseSync } from 'node:sqlite';\n" +
+    "import { readCanvas } from '../support/canvas.mjs';\n" +
+    scenario(
+      "  await page.evaluate(inspectCanvas);\n" +
+        "  await page.locator('[data-private-id]').click();\n" +
+        "  await page.goto('https://example.com/');\n" +
+        "  await page.route('/api/*', callback);\n" +
+        "  await studio.request('/api/debug');\n" +
+        "  const { readBoard } = studio;\n" +
+        "  await readBoard(arbitraryBoard);",
+    );
+  assert.deepEqual(
+    (await messages(text, canvasSpec)).map(({ messageId }) => messageId),
+    [
+      "fixture",
+      "fixture",
+      "browserInternal",
+      "selector",
+      "navigation",
+      "browserInternal",
+      "browserInternal",
+      "fixtureMethod",
+    ],
+  );
+});
+
+test("keeps semantic selector rules on a native media link popup", async () => {
+  const openPopup =
+    "  const open = page.getByRole('link', { name: 'Open' });\n" +
+    "  const [target] = await Promise.all([page.waitForEvent('popup'), open.click()]);\n";
+  const allowed = scenario(
+    openPopup + "  await expect(target.getByRole('heading')).toBeVisible();",
+  );
+  const rejected = scenario(openPopup + "  await target.click('.hidden-control');");
+  const file = "whiteboard-basics/objects-media.spec.mjs";
+  assert.deepEqual(await messages(allowed, file), []);
+  assert.deepEqual(
+    (await messages(rejected, file)).map(({ messageId }) => messageId),
+    ["selector"],
+  );
+});
+
 const disallowedImports = [
   "import { test } from '@playwright/test';",
   "import fs from 'node:fs';",

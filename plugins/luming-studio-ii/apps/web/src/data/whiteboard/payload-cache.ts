@@ -103,12 +103,11 @@ export function visiblePayloads(
     const object = objects.get(id);
     const version = object?.payloadVersion;
     const current = version !== undefined && entry.version >= version;
-    const awaitingDocument =
-      version !== undefined &&
-      object?.kind === 'document' &&
-      entry.payload?.body.kind === 'document';
+    const keepBody = object?.kind === 'document' || object?.kind === 'table';
+    const awaitingBody =
+      version !== undefined && keepBody && entry.payload?.body.kind === object?.kind;
 
-    if (entry.payload && (current || awaitingDocument)) {
+    if (entry.payload && (current || awaitingBody)) {
       projected.set(id, entry.payload);
     }
   }

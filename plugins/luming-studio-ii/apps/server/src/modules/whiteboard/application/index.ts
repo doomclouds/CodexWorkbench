@@ -136,7 +136,12 @@ export function createWhiteboardApplication(
           throw new WhiteboardAccessError();
         }
 
-        return { board, access, objects: reader.listObjects(boardId) };
+        return {
+          board,
+          access,
+          objects: reader.listObjects(boardId),
+          customColors: reader.getBoardCustomColors(boardId),
+        };
       });
     },
     getObjectPayloads(actor, boardId, objectIds, allowTrashedOwner = false) {

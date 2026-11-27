@@ -81,7 +81,7 @@ function draftsForIntent(intent: CanvasEditIntent, view: CanvasProjection) {
       return [draft];
     }
 
-    const { source, target } = intent.link;
+    const { source, target, style } = intent.link;
     const link = connectorDraft(
       {
         start: {
@@ -91,6 +91,7 @@ function draftsForIntent(intent: CanvasEditIntent, view: CanvasProjection) {
         end: { point: target.point },
       },
       view,
+      style,
     );
 
     return [draft, viewOfDraft(intent.interactionId + ':connector', link, geometryForId)];

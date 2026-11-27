@@ -53,6 +53,7 @@ import type {
 } from './board-features.js';
 import { projectPayloads, projectScene, projectTextStyles } from './canvas-projection.js';
 import { GeometryBoardMenu } from './geometry-controls.js';
+import { defaultInkColor } from './GeometryDrawChoices.js';
 import { adjacentTextDraft, clipboardTextDraft } from './geometry-commands.js';
 import { useGeometryEdits } from './geometry-session.js';
 import { readBoardDraftCurrent } from './local-board-drafts.js';
@@ -121,6 +122,7 @@ const movable = {
   connect: false,
 } as const;
 const newLink = { title: '链接', href: '' } as const;
+const canvasPenWidth = 3;
 const nativeDropTypes = new Set(['image', 'video']);
 const adjacentTextKinds = new Set(['text', 'note', 'shape', 'section']);
 
@@ -399,6 +401,7 @@ function BoardWorkspace({
   features,
 }: BoardWorkspaceProps) {
   const board = state.scene;
+  const [hasOpeningObjects] = useState(() => board.objects.length > 0);
   const initial = initialWorkspaceView({ state, projection, features });
   const canvasRef = useRef<CanvasHandle>(null);
   const mediaUploadRef = useRef<BoardMediaUpload | undefined>(undefined);
@@ -411,7 +414,7 @@ function BoardWorkspace({
   const [tool, setTool] = useState<BoardTool>('select');
   const [showGrid, setShowGrid] = useState(true);
   const [singleKeys, setSingleKeys] = useState(true);
-  const [penColor, setPenColor] = useState('#2d3142');
+  const [penColor, setPenColor] = useState<string>(defaultInkColor);
   const [annotationActive, setAnnotationActive] = useState(false);
   const [unresolvedFeedback, setUnresolvedFeedback] = useState(false);
   const [lanSharing, setLanSharing] = useState(false);
@@ -615,19 +618,19 @@ function BoardWorkspace({
     session.acceptEdit(receipt);
     undo.recordEdit(receipt);
     if (ids) {
-      const insertedText = receipt.objects.find(
+      const insertedLabel = receipt.objects.find(
         ({ id, kind, payloadVersion }) =>
-          kind === 'text' && payloadVersion === 0n && ids.includes(id),
+          (kind === 'text' || kind === 'note') && payloadVersion === 0n && ids.includes(id),
       );
 
-      if (insertedText) {
-        newTextIds.current.add(insertedText.id);
+      if (insertedLabel?.kind === 'text') {
+        newTextIds.current.add(insertedLabel.id);
       }
       if (context?.selectionCurrent !== false) {
         setMenuAnchor(null);
         setSelected(ids);
-        if (context?.editText && insertedText) {
-          editObject(insertedText.id);
+        if (context?.editText && insertedLabel) {
+          editObject(insertedLabel.id);
         }
       }
       creation.complete(receipt, ids);
@@ -1046,6 +1049,7 @@ function BoardWorkspace({
       onRenameSection={onRenameSection}
       clipboard={clipboard.menu}
       textStyleById={textStyleById}
+      customColors={board.customColors}
       onFormatObject={handleFormatObject}
     />
   );
@@ -1075,8 +1079,8 @@ function BoardWorkspace({
           scene: viewOnly ? projected.scene : canvasScene,
           selection: canvasSelection,
           tool,
-          penStyle: { stroke: penColor },
-          fitOnMount: features.fitOnMount,
+          penStyle: { stroke: penColor, width: canvasPenWidth },
+          fitOnMount: hasOpeningObjects && features.fitOnMount,
           initialViewport: initial.viewport,
           viewportRequest,
           showGrid,
@@ -1084,6 +1088,7 @@ function BoardWorkspace({
           selectionActions,
           canEdit,
           pendingResizeObjectId: online && !annotationActive ? pendingPlacement?.id : undefined,
+          nudgeSave: online && !annotationActive ? move.nudgeSave : undefined,
           canEditExpandedObject: canEditExpanded,
           pendingEdits,
           objectExtensions: editService ? studioObjectExtensions : moveExtensions,
