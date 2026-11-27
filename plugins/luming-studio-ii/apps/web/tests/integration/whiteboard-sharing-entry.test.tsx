@@ -93,7 +93,11 @@ function fixtureService(overrides: Partial<BoardSharingService>): BoardSharingSe
   };
 }
 
-function appFixture(sharingService: BoardSharingService, exportBoard?: ExportBoard) {
+function appFixture(
+  sharingService: BoardSharingService,
+  exportBoard?: ExportBoard,
+  copyLink?: (url: string) => Promise<void>,
+) {
   const fixture = createControlFixture();
   const service = createWhiteboardService(createWhiteboardRpcMock().post);
   const copied: string[] = [];
@@ -109,6 +113,7 @@ function appFixture(sharingService: BoardSharingService, exportBoard?: ExportBoa
           createCommandId={() => 'sharing-' + ++nextCommand}
           sharingService={sharingService}
           copyShareLink={async (url) => {
+            await copyLink?.(url);
             copied.push(url);
           }}
           exportBoard={exportBoard}
@@ -171,7 +176,7 @@ test('opens local invitation copying and uses the same panel for the existing re
     expect(app.copied).toEqual([localLink]);
 
     await click(button(app.host, '导出'));
-    await click(button(app.host, 'SVG 图片SVG'));
+    await click(button(app.host, 'SVG 图片'));
     expect(exports).toEqual([
       [
         { boardId: sampleBoardId, expectedRevision: 0n, format: 'svg', scope: { kind: 'whole' } },
@@ -217,12 +222,36 @@ test('keeps the original command across panel reopen and queries its receipt on 
   }
 });
 
+test('offers the exact invitation URL for manual copying when the clipboard is unavailable', async () => {
+  const current = { ...owner, enabled: true, links: [viewerLink] };
+  const service = fixtureService({ getBoardSharing: () => Promise.resolve(current) });
+  const app = appFixture(service, undefined, () => Promise.reject(new Error('剪贴板受限')));
+
+  try {
+    await app.open();
+    const trigger = button(app.host, '复制仅查看链接');
+    await click(trigger);
+    const input = app.host.querySelector<HTMLInputElement>('dialog[open] input');
+    expect(input?.value).toBe(localLink);
+    expect(input?.readOnly).toBe(true);
+    expect(input?.selectionStart).toBe(0);
+    expect(input?.selectionEnd).toBe(localLink.length);
+    expect(document.activeElement).toBe(input);
+
+    await click(button(app.host, '关闭'));
+    expect(document.activeElement).toBe(trigger);
+    expect(app.copied).toEqual([]);
+  } finally {
+    app.dispose();
+  }
+});
+
 test('cancels invite reset with its focus restored, then applies member changes by revision', async () => {
   let sharing: BoardSharingState = {
     ...owner,
     enabled: true,
     version: 3n,
-    links: [viewerLink],
+    links: [viewerLink, { role: 'commenter', enabled: true }],
     members: [
       { actorId: 'member-a', role: 'viewer', name: '访客甲', active: true, removed: false },
     ],
@@ -246,7 +275,7 @@ test('cancels invite reset with its focus restored, then applies member changes 
 
   try {
     await app.open();
-    const invite = provideAnchor(button(app.host, '仅查看邀请链接选项'));
+    const invite = provideAnchor(button(app.host, '仅查看链接更多操作'));
     await click(invite);
     await click(button(app.host, '重置此链接'));
     expect(app.host.querySelector('dialog[open]')?.textContent).toContain('重置邀请链接？');
@@ -287,8 +316,10 @@ test('keeps viewer sharing limited to server-authorized links', async () => {
   try {
     await app.open();
     expect(app.host.textContent).not.toContain('一般访问权限');
-    expect(app.host.textContent).not.toContain('有权访问的人');
-    expect(app.host.querySelector('[aria-label="仅查看邀请链接选项"]')).toBeNull();
+    expect(
+      [...app.host.querySelectorAll('h3')].map(({ textContent }) => textContent),
+    ).not.toContain('有权访问的人');
+    expect(app.host.querySelector('[aria-label="仅查看链接更多操作"]')).toBeNull();
     await click(button(app.host, '复制仅查看链接'));
     expect(app.copied).toEqual([localLink]);
   } finally {

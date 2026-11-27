@@ -3,13 +3,14 @@ import {
   BoardExportFormat,
   BoardExportRejectionReason,
   WhiteboardService as wireService,
+  type ExportBoardBrowserPng,
   type ExportBoardFile as WireExportBoardFile,
   type ExportBoardRequestSchema,
   type ExportBoardResponse,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import type { WhiteboardPost } from './contracts.js';
 
-export type ExportBoardFormat = 'json' | 'svg';
+export type ExportBoardFormat = 'png' | 'svg' | 'html' | 'json' | 'zip';
 
 export type ExportBoardScope =
   | { readonly kind: 'whole' }
@@ -24,7 +25,7 @@ export interface ExportBoardRequest {
 
 export interface ExportBoardFile {
   readonly filename: string;
-  readonly mimeType: 'application/json' | 'image/svg+xml';
+  readonly mimeType: (typeof formats)[ExportBoardFormat]['mimeType'];
   readonly revision: bigint;
   readonly content: Uint8Array;
 }
@@ -45,14 +46,28 @@ export type ExportBoard = (
   signal?: AbortSignal,
 ) => Promise<ExportBoardResult>;
 
-const formatTypes = {
-  json: 'application/json',
-  svg: 'image/svg+xml',
+type BrowserVectorFormat = Extract<ExportBoardFormat, 'png' | 'svg'>;
+
+export type RenderBrowserVectorExport = (
+  source: ExportBoardBrowserPng,
+  format: BrowserVectorFormat,
+  signal?: AbortSignal,
+) => Promise<Uint8Array>;
+
+const formats = {
+  png: { mimeType: 'image/png', suffix: '.png' },
+  svg: { mimeType: 'image/svg+xml', suffix: '.svg' },
+  html: { mimeType: 'text/html', suffix: '.html' },
+  json: { mimeType: 'application/json', suffix: '.json' },
+  zip: { mimeType: 'application/zip', suffix: '.studio.zip' },
 } as const;
 
 export const wireFormats = {
+  png: BoardExportFormat.PNG,
+  html: BoardExportFormat.HTML,
   json: BoardExportFormat.JSON,
   svg: BoardExportFormat.SVG,
+  zip: BoardExportFormat.ZIP,
 };
 
 const rejectionReasons = new Map<BoardExportRejectionReason, ExportBoardRejection>([
@@ -64,6 +79,7 @@ const rejectionReasons = new Map<BoardExportRejectionReason, ExportBoardRejectio
 
 const exportMethod = wireService.method.exportBoard;
 const exportPath = '/' + wireService.typeName + '/' + exportMethod.name;
+const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
 export function writeExportScope(
   scope: ExportBoardScope,
@@ -78,11 +94,11 @@ export function readExportFile(
   expectedRevision: bigint,
   format: ExportBoardFormat,
 ): ExportBoardFile {
-  const expectedMimeType = formatTypes[format];
+  const expected = formats[format];
   if (revision !== expectedRevision) {
     throw new Error('导出文件版次与请求不一致。');
   }
-  if (mimeType !== expectedMimeType || !filename.endsWith('.' + format)) {
+  if (mimeType !== expected.mimeType || !filename.endsWith(expected.suffix)) {
     throw new Error('导出文件格式与请求不一致。');
   }
   if (content.byteLength === 0) {
@@ -101,13 +117,56 @@ export function readExportRejection(value: BoardExportRejectionReason): ExportBo
   return reason;
 }
 
-function readExport(
+export async function readBrowserVectorFile(
+  source: ExportBoardBrowserPng,
+  expectedRevision: bigint,
+  format: ExportBoardFormat,
+  render: RenderBrowserVectorExport | undefined,
+  signal?: AbortSignal,
+): Promise<ExportBoardFile> {
+  const { filename, revision, svgTemplate, regions } = source;
+  if (revision !== expectedRevision) {
+    throw new Error('导出文件版次与请求不一致。');
+  }
+
+  const vectorFormat = format === 'png' || format === 'svg';
+  if (!vectorFormat || !filename.endsWith('.' + format)) {
+    throw new Error('导出文件格式与请求不一致。');
+  }
+  if (!svgTemplate || !regions.length) {
+    throw new Error('导出服务未提供完整的图片排版内容。');
+  }
+  if (!render) {
+    throw new Error('当前打开方式无法渲染此图片。请在浏览器打开或导出 HTML。');
+  }
+
+  signal?.throwIfAborted();
+  const content = await render(source, format, signal);
+  signal?.throwIfAborted();
+  if (format === 'png' && !pngSignature.every((byte, index) => byte === content[index])) {
+    throw new Error('浏览器未返回有效的 PNG 图片。');
+  }
+  if (format === 'svg' && !new TextDecoder().decode(content.subarray(0, 256)).startsWith('<svg ')) {
+    throw new Error('浏览器未返回有效的 SVG 图片。');
+  }
+
+  return { filename, mimeType: formats[format].mimeType, revision, content };
+}
+
+async function readExport(
   { result }: ExportBoardResponse,
   { expectedRevision, format }: ExportBoardRequest,
-): ExportBoardResult {
+  render: RenderBrowserVectorExport | undefined,
+  signal?: AbortSignal,
+): Promise<ExportBoardResult> {
   switch (result.case) {
     case 'file':
       return { kind: 'file', file: readExportFile(result.value, expectedRevision, format) };
+    case 'browserPng':
+      return {
+        kind: 'file',
+        file: await readBrowserVectorFile(result.value, expectedRevision, format, render, signal),
+      };
     case 'stale':
       return { kind: 'stale', revision: result.value.revision };
     case 'rejected':
@@ -117,7 +176,10 @@ function readExport(
   }
 }
 
-export function createWhiteboardExportService(post: WhiteboardPost): ExportBoard {
+export function createWhiteboardExportService(
+  post: WhiteboardPost,
+  render?: RenderBrowserVectorExport,
+): ExportBoard {
   return async (request, signal) => {
     const { boardId, expectedRevision, format, scope } = request;
     const body = toBinary(
@@ -135,6 +197,8 @@ export function createWhiteboardExportService(post: WhiteboardPost): ExportBoard
     return readExport(
       fromBinary(exportMethod.output, response, { readUnknownFields: false }),
       request,
+      render,
+      signal,
     );
   };
 }

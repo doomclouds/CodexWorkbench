@@ -72,6 +72,7 @@ const iconSurfaces = new Set([
   exportSurface,
   ...extraWhiteboardSurfaces,
   editorSurface,
+  guestJoinSurface,
   resolve(sourceRoot, 'surfaces/recycle-bin'),
 ]);
 const surfaceDataValues = new Map([
@@ -291,15 +292,20 @@ function isPortalImport(node) {
   );
 }
 
-function allowedLibrary(owner, specifier, node) {
+function allowedLibrary(owner, specifier, node, file) {
   if (mcpSdkLibraries.has(specifier)) {
     return owner.root === mcpPlatform;
   }
   if (specifier === 'lucide-react') {
     return iconSurfaces.has(owner.root);
   }
-  if (owner.root === workbenchSurface && specifier === 'react-dom') {
-    return isPortalImport(node);
+
+  if (specifier === 'react-dom' && owner.layer !== 'app') {
+    const portalsAllowed =
+      owner.root === workbenchSurface ||
+      file === resolve(suggestionsSurface, 'BoardSuggestionsSurface.tsx');
+
+    return portalsAllowed && isPortalImport(node);
   }
 
   switch (owner.layer) {
@@ -387,7 +393,7 @@ const contractBoundary = {
     }
 
     function packageProblem(node, specifier, reexport) {
-      if (governed && !allowedLibrary(owner, specifier, node)) {
+      if (governed && !allowedLibrary(owner, specifier, node, file)) {
         return 'dependency';
       }
 

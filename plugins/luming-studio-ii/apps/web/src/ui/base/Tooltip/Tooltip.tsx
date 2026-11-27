@@ -191,6 +191,7 @@ export function Tooltip({ anchor, text, delay = defaultDelay, placement = 'top' 
     anchor,
     placement,
     persistent: true,
+    escapeWithinLayer: false,
     priority: -1,
     onRequestClose: () => dismiss.current?.(),
   });

@@ -1,8 +1,10 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Copy, FileCode2, MoreHorizontal, Pin, Plus, Share2, Trash2 } from 'lucide-react';
-import type { CatalogBoardSummary } from '../../data/catalog/index.js';
+import type { CatalogBoardSummary, CatalogThumbnailRequest } from '../../data/catalog/index.js';
 import { WorkbenchMenu } from './WorkbenchMenu.js';
 import type { WorkbenchLayout } from './preferences.js';
+
+export type RenderWorkbenchThumbnail = (request: CatalogThumbnailRequest) => ReactNode;
 
 interface BoardCardProps {
   readonly board: CatalogBoardSummary;
@@ -16,6 +18,7 @@ interface BoardCardProps {
   ) => void;
   readonly onDuplicate?: (board: CatalogBoardSummary, trigger: HTMLButtonElement) => void;
   readonly onCopyLink?: (boardId: string) => void;
+  readonly renderThumbnail?: RenderWorkbenchThumbnail;
 }
 
 export type WorkbenchBoardAction = 'rename' | 'pin' | 'trash';
@@ -88,7 +91,12 @@ export function NewBoardCard({
   );
 }
 
-function BoardPreview() {
+function BoardPreview({
+  board,
+  renderThumbnail,
+}: Pick<BoardCardProps, 'board' | 'renderThumbnail'>) {
+  const { boardId, previewRevision } = board;
+
   return (
     <div className="studio-workbench-preview studio-workbench-blank-preview" aria-hidden="true">
       <div className="studio-workbench-preview-paper">
@@ -97,6 +105,8 @@ function BoardPreview() {
         <span />
       </div>
       <span>暂无预览</span>
+      {previewRevision !== undefined &&
+        renderThumbnail?.({ boardId, revision: previewRevision, trashed: false })}
     </div>
   );
 }
@@ -114,6 +124,7 @@ function BoardCardMenu({
   onCopyLink,
 }: BoardCardMenuProps) {
   const [anchor, setAnchor] = useState<CardMenuAnchor>();
+  const menuId = useId();
   const { title, pinned, canManage } = board;
   const label = '管理作品：' + title;
   const actionsAvailable = canManage === true && onAction !== undefined;
@@ -173,6 +184,7 @@ function BoardCardMenu({
           aria-label={label}
           aria-haspopup="menu"
           aria-expanded={anchor !== undefined}
+          aria-controls={anchor ? menuId : undefined}
           disabled={managementBlocked}
           onClick={(event) => {
             const button = event.currentTarget;
@@ -186,6 +198,7 @@ function BoardCardMenu({
       {anchor && canManage !== false && (
         <WorkbenchMenu
           anchor={anchor.button}
+          id={menuId}
           label={label}
           initialFocus={anchor.focus}
           onClose={() => setAnchor(undefined)}
@@ -233,6 +246,7 @@ export function BoardCard({
   onAction,
   onDuplicate,
   onCopyLink,
+  renderThumbnail,
 }: BoardCardProps) {
   return (
     <article className="studio-workbench-card">
@@ -242,7 +256,7 @@ export function BoardCard({
         aria-label={'打开白板：' + board.title}
         onClick={() => onOpen(board.boardId)}
       >
-        {layout === 'grid' && <BoardPreview />}
+        {layout === 'grid' && <BoardPreview board={board} renderThumbnail={renderThumbnail} />}
         <div className="studio-workbench-card-details">
           <span className="studio-workbench-card-icon">
             <Share2 size={19} />

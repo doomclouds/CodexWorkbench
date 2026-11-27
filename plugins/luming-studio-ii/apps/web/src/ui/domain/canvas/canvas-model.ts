@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { canConnectTo } from './canvas-creation.js';
 import type { CanvasFrame } from './canvas-frame.js';
+import { applyGesturePreviews } from './canvas-gesture-preview.js';
 import type {
   CanvasObjectChange,
   CanvasObjectKind,
@@ -159,7 +160,7 @@ function useVisitedBodies(
 }
 
 export function useCanvasModel(
-  { scene, pendingEdits, selection, canEdit, payloadById }: CanvasProps,
+  { scene, pendingEdits, selection, canEdit, payloadById, remoteGesturePreviews }: CanvasProps,
   frame: CanvasFrame,
   size: CanvasViewportSize,
   retainedId: string | undefined,
@@ -182,6 +183,17 @@ export function useCanvasModel(
 
     return queryScene(index, bounds, changes);
   }, [index, viewport, size, changes]);
+  const displayChanges = useMemo(
+    () => applyGesturePreviews(index, changes, remoteGesturePreviews),
+    [index, changes, remoteGesturePreviews],
+  );
+  const displayWindow = useMemo(
+    () =>
+      displayChanges === changes
+        ? windowed
+        : queryScene(index, getViewportBounds(viewport, size, viewOverscan), displayChanges),
+    [index, viewport, size, changes, displayChanges, windowed],
+  );
   const visitedBodies = useVisitedBodies(windowed, index, registry, payloadById);
   const visibleIds = useMemo(() => {
     const bounds = getViewportBounds(viewport, size);
@@ -201,7 +213,7 @@ export function useCanvasModel(
   );
   const painted = useMemo(() => {
     if (!retainedId && retainedIds.size === 0 && visitedBodies.size === 0) {
-      return windowed;
+      return displayWindow;
     }
 
     const ids = new Set(retainedIds);
@@ -209,7 +221,7 @@ export function useCanvasModel(
       ids.add(retainedId);
     }
 
-    const windowIds = new Set(windowed.map(({ object }) => object.id));
+    const windowIds = new Set(displayWindow.map(({ object }) => object.id));
     for (const id of windowIds) {
       ids.delete(id);
     }
@@ -220,19 +232,21 @@ export function useCanvasModel(
     }
 
     const additions = [...ids].flatMap((id) => {
-      const projected = projectObject(index, changes, id);
+      const projected = projectObject(index, displayChanges, id);
 
       return projected ? [projected] : [];
     });
 
     if (additions.length === 0) {
-      return windowed;
+      return displayWindow;
     }
 
     const layerOf = ({ object }: ProjectedCanvasObject) => index.getEntry(object.id)?.layer ?? 0;
 
-    return [...windowed, ...additions].sort((first, second) => layerOf(first) - layerOf(second));
-  }, [windowed, retainedId, retainedIds, visitedBodies, index, changes]);
+    return [...displayWindow, ...additions].sort(
+      (first, second) => layerOf(first) - layerOf(second),
+    );
+  }, [displayWindow, retainedId, retainedIds, visitedBodies, index, displayChanges]);
 
   return { index, pending, selected, painted, visibleIds };
 }

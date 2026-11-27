@@ -1,6 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { BoardSharingService, BoardSharingState } from '../../data/sharing/index.js';
-import { GuestAccessLostSurface, GuestJoinSurface } from '../../surfaces/guest-join/index.js';
+import {
+  GuestAccessLostSurface,
+  GuestJoinSurface,
+  GuestSessionPendingSurface,
+} from '../../surfaces/guest-join/index.js';
 
 import { OperationNoticeSlot, type ShellOperationNotice } from './operation-notice/index.js';
 
@@ -59,6 +63,7 @@ function GuestBoard({
 }: GuestBoardProps) {
   const [access, setAccess] = useState<GuestAccessState>({ kind: 'checking' });
   const [accessCheck, setAccessCheck] = useState(0);
+  const [displayedBoard, setDisplayedBoard] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -81,6 +86,7 @@ function GuestBoard({
         return;
       }
 
+      setDisplayedBoard(true);
       setAccess({ kind: 'ready', access: next });
     }
 
@@ -131,20 +137,15 @@ function GuestBoard({
     return renderBoard(boardId, access.access, handleRecheckFromRoom);
   }
   if (access.kind === 'lost') {
-    return <GuestAccessLostSurface onExit={onExit} />;
+    return <GuestAccessLostSurface activeSession={displayedBoard} onExit={onExit} />;
   }
 
   return (
-    <main className="guest-access">
-      <section className="guest-access__card">
-        <h1>打开白板</h1>
-        {access.kind === 'failed' ? (
-          <p role="alert">{access.message} 正在重新连接。</p>
-        ) : (
-          <p role="status">正在验证白板访问权限…</p>
-        )}
-      </section>
-    </main>
+    <GuestSessionPendingSurface
+      activeSession={displayedBoard}
+      message={access.kind === 'failed' ? access.message : undefined}
+      onRetry={handleRecheckFromRoom}
+    />
   );
 }
 

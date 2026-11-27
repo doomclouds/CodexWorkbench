@@ -5,6 +5,7 @@ import {
   Canvas,
   type CanvasCreateIntent,
   type CanvasEditIntent,
+  type CanvasGesturePreview,
   type CanvasHandle,
   type CanvasMoveIntent,
   type CanvasPlacementTool,
@@ -166,6 +167,60 @@ describe('Canvas', () => {
       onVisibleObjectsChange,
     };
   }
+
+  it('emits only temporary geometry while dragging then clears it on cancel', async () => {
+    const preview = vi.fn<(gesture: CanvasGesturePreview | undefined) => void>();
+    const { root, onEditIntent } = renderCanvas({ onGesturePreviewChange: preview });
+    act(() => {
+      pointer(root, 'pointerdown', { x: 110, y: 90 });
+      pointer(root, 'pointermove', { x: 155, y: 125 });
+    });
+    await flushFrame();
+
+    expect(preview).toHaveBeenLastCalledWith({
+      kind: 'move',
+      changes: [
+        { id: 'front', expectedVersion: 5, geometry: expect.objectContaining({ width: 160 }) },
+      ],
+    });
+    expect(onEditIntent).not.toHaveBeenCalled();
+
+    act(() => {
+      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(preview).toHaveBeenLastCalledWith(undefined);
+    expect(onEditIntent).not.toHaveBeenCalled();
+  });
+
+  it('paints a peer resize on a read-only canvas until the committed version supersedes it', () => {
+    const gesture = {
+      kind: 'resize',
+      changes: [
+        {
+          id: 'front',
+          expectedVersion: 5,
+          geometry: { x: 80, y: 70, width: 400, height: 260, rotation: 0 },
+        },
+      ],
+    } as const satisfies CanvasGesturePreview;
+    const initial = renderCanvas({ canEdit: false, remoteGesturePreviews: [gesture] });
+    const dimensions = () =>
+      fixture.host.querySelector<HTMLElement>('[data-canvas-object="front"]')?.style.width;
+    expect(dimensions()).toBe('400px');
+    expect(initial.onEditIntent).not.toHaveBeenCalled();
+
+    const committed = {
+      ...scene,
+      revision: scene.revision + 1,
+      objects: scene.objects.map((object) =>
+        object.id === 'front'
+          ? { ...object, version: 6, geometry: { ...object.geometry, width: 440 } }
+          : object,
+      ),
+    };
+    renderCanvas({ scene: committed, canEdit: false, remoteGesturePreviews: [gesture] });
+    expect(dimensions()).toBe('440px');
+  });
 
   it('selects the topmost object at an overlapping point without submitting an edit', () => {
     const canvas = renderCanvas();
@@ -669,7 +724,13 @@ describe('Canvas', () => {
         );
       const contentById = new Map([[card.id, body]]);
       const selection = [card.id];
-      const { root, onEditIntent } = renderCanvas({ scene: withCard, contentById, selection });
+      const onGesturePreviewChange = vi.fn<(preview: CanvasGesturePreview | undefined) => void>();
+      const { root, onEditIntent } = renderCanvas({
+        scene: withCard,
+        contentById,
+        selection,
+        onGesturePreviewChange,
+      });
       const control = root.querySelector<HTMLElement>('textarea, input');
       const handle = root.querySelector('[data-canvas-handle="e"]');
       if (!control || !handle) {
@@ -685,6 +746,16 @@ describe('Canvas', () => {
       const cardView = root.querySelector<HTMLElement>('[data-canvas-object="card"]');
       expect(cardView?.style.width).toBe('268px');
       expect(onEditIntent).not.toHaveBeenCalled();
+      expect(onGesturePreviewChange).toHaveBeenLastCalledWith({
+        kind: 'resize',
+        changes: [
+          {
+            id: card.id,
+            expectedVersion: card.version,
+            geometry: { ...card.geometry, width: 268 },
+          },
+        ],
+      });
       expect(root.querySelector('textarea, input')).toBe(control);
 
       act(() => {
@@ -692,6 +763,7 @@ describe('Canvas', () => {
         control.focus();
       });
       const resize = onEditIntent.mock.lastCall?.[0];
+      expect(onGesturePreviewChange).toHaveBeenLastCalledWith(undefined);
       if (resize?.kind !== 'resize') {
         throw new Error('Expected resize to emit an editable object change on release.');
       }

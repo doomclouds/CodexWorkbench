@@ -59,6 +59,7 @@ export interface BoardSuggestion {
   readonly options: readonly BoardSuggestionOption[];
   readonly acceptedOptionId?: string;
   readonly acceptedBoardRevision?: bigint;
+  readonly activeOptionIds: readonly string[];
   readonly rejected: boolean;
 }
 

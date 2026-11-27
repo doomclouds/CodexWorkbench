@@ -1,4 +1,5 @@
 import type { BoardChanges, BoardEditAsset, BoardEditRejected } from './board-edits.js';
+import { readGifSize } from './gif-image.js';
 import { geometryInWorld } from './geometry-edits.js';
 import type { Geometry } from './model.js';
 
@@ -403,6 +404,17 @@ function inspectImage(content: Uint8Array) {
   return undefined;
 }
 
+function inspectCanvasImage(content: Uint8Array) {
+  const raster = inspectImage(content);
+  if (raster) {
+    return raster;
+  }
+
+  const size = readGifSize(content);
+
+  return size && validDimensions(size) ? { mimeType: 'image/gif', size } : undefined;
+}
+
 function validImagePlacement(boardId: string, assetId: string, operation: ImageOperation): boolean {
   const { objectId, displayName, geometry } = operation;
   const idsFitPath = [boardId, objectId, assetId].every((id) => pathSegment.test(id));
@@ -410,6 +422,30 @@ function validImagePlacement(boardId: string, assetId: string, operation: ImageO
   const positiveSize = geometry.width > 0 && geometry.height > 0;
 
   return idsFitPath && validName && positiveSize && geometryInWorld(geometry);
+}
+
+export function archiveImageSource(boardId: string, assetId: string): string {
+  return archiveAssetPath + boardId + '/' + assetId;
+}
+
+export function planDocumentImageAsset(
+  boardId: string,
+  assetId: string,
+  content: Uint8Array,
+): ImageChanges | BoardEditRejected {
+  if (content.byteLength > maximumImageBytes) {
+    return { kind: 'rejected', reason: 'tooLarge' };
+  }
+  if (!pathSegment.test(boardId) || !pathSegment.test(assetId)) {
+    return { kind: 'rejected', reason: 'invalidEdit' };
+  }
+
+  const image = inspectImage(content);
+  if (!image?.size) {
+    return { kind: 'rejected', reason: 'invalidImage' };
+  }
+
+  return { kind: 'changes', assets: [{ assetId, mimeType: image.mimeType, bytes: content }] };
 }
 
 export function planImageChanges(
@@ -425,7 +461,7 @@ export function planImageChanges(
     return { kind: 'rejected', reason: 'invalidEdit' };
   }
 
-  const image = inspectImage(content);
+  const image = inspectCanvasImage(content);
   if (!image?.size) {
     return { kind: 'rejected', reason: 'invalidImage' };
   }
@@ -449,7 +485,7 @@ export function planImageChanges(
         bodyKind: 'image',
         payloadVersion: 0n,
         data: {
-          src: archiveAssetPath + boardId + '/' + assetId,
+          src: archiveImageSource(boardId, assetId),
           naturalSize: { ...image.size },
         },
       },

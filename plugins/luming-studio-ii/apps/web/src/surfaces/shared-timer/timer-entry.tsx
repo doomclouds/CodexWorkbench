@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent } from 'react';
+import type { ChangeEvent, ClipboardEvent, FocusEvent, KeyboardEvent, SyntheticEvent } from 'react';
 import { digitPair, maxSeconds, minute, timerDigits, type Digits } from './timer-display.js';
 
 type Field = 0 | 1;
@@ -23,6 +23,13 @@ function readPastedTime(value: string): Digits | undefined {
 
 function adjacentField(field: Field): Field {
   return field === 0 ? 1 : 0;
+}
+
+function handleDigitSelect(event: SyntheticEvent<HTMLInputElement>) {
+  const input = event.currentTarget;
+  if (input.selectionStart !== input.selectionEnd) {
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
 }
 
 function spinDigits(digits: Digits, field: Field, direction: number): Digits {
@@ -57,12 +64,14 @@ export function useTimerEntry(seconds: number, onDuration: (duration: number) =>
   }
 
   function finish(publish = true) {
+    firstDigit.current = true;
     if (!draft) {
       return seconds;
     }
 
     const next = durationFrom(draft);
     if (next < 1 || next > maxSeconds) {
+      setDraft(undefined);
       setMessage('计时时长至少为 1 秒。');
       return;
     }
@@ -265,6 +274,7 @@ export function TimerEntry({
             }}
             onFocus={entry.restartDigits}
             onPointerDown={entry.restartDigits}
+            onSelect={handleDigitSelect}
             onBlur={(event) => entry.handleBlur(field, event)}
           />
         ))}

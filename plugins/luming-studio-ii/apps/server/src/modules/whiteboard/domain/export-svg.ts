@@ -1,8 +1,10 @@
 import { exportConnector, finitePoint, geometryCorners } from './export-geometry.js';
+import { embedMarkup } from './export-html-content.js';
 import { escapeXml, svgContent, svgLabel } from './export-svg-content.js';
 import { svgColor, svgShape, svgStrokeWidth } from './export-svg-shapes.js';
 import {
   maxExportFileBytes,
+  type BoardExportPngRegion,
   type BoardExportRejection,
   type BoardExportSnapshot,
 } from './export-types.js';
@@ -13,7 +15,7 @@ interface Markup {
   readonly bounds: readonly Point[];
 }
 
-interface ExportFrame {
+export interface ExportFrame {
   readonly left: number;
   readonly top: number;
   readonly right: number;
@@ -37,7 +39,7 @@ function frameFrom(points: readonly Point[]): ExportFrame {
   return { left, top, right, bottom };
 }
 
-function expandFrame(frame: ExportFrame | undefined, points: readonly Point[]): ExportFrame {
+export function expandFrame(frame: ExportFrame | undefined, points: readonly Point[]): ExportFrame {
   const bounds = frameFrom(points);
   if (!frame) {
     return bounds;
@@ -144,11 +146,12 @@ function objectMarkup(
   return svgContent(object, payload, assets);
 }
 
-function positionedMarkup(
+export function positionedSvgMarkup(
   object: BoardObject,
   index: number,
   snapshot: BoardExportSnapshot,
   payload: PayloadRecord | undefined,
+  richMarkup?: string,
 ): Markup | undefined {
   if (object.kind === 'connector') {
     return connectorMarkup(object, snapshot.geometry);
@@ -160,7 +163,7 @@ function positionedMarkup(
     return undefined;
   }
 
-  const markup = objectMarkup(object, payload, snapshot.assets);
+  const markup = richMarkup ?? objectMarkup(object, payload, snapshot.assets);
   if (markup === undefined) {
     return undefined;
   }
@@ -177,15 +180,21 @@ function positionedMarkup(
   return { value: `<g transform="${transform}">${clip}${body}</g>`, bounds: points };
 }
 
+export function exportViewport(frame: ExportFrame | undefined) {
+  const x = (frame?.left ?? 0) - pad;
+  const y = (frame?.top ?? 0) - pad;
+  const width = (frame ? frame.right - frame.left : 1) + pad * 2;
+  const height = (frame ? frame.bottom - frame.top : 1) + pad * 2;
+
+  return { x, y, width, height };
+}
+
 function svgDocument(
   snapshot: BoardExportSnapshot,
   frame: ExportFrame | undefined,
   body: string,
 ): string {
-  const x = (frame?.left ?? 0) - pad;
-  const y = (frame?.top ?? 0) - pad;
-  const width = (frame ? frame.right - frame.left : 1) + pad * 2;
-  const height = (frame ? frame.bottom - frame.top : 1) + pad * 2;
+  const { x, y, width, height } = exportViewport(frame);
   const title = escapeXml(snapshot.board.title);
   const revision = snapshot.board.revision.toString();
   const description = `白板版本 ${revision}，包含 ${snapshot.objects.length} 个对象。`;
@@ -193,26 +202,63 @@ function svgDocument(
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}" role="img" font-family="sans-serif"><title>${title}</title><desc>${description}</desc><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f5f5f5"/>${body}</svg>\n`;
 }
 
-export function renderExportSvg(snapshot: BoardExportSnapshot): string | BoardExportRejection {
+function richRegion(
+  object: BoardObject,
+  index: number,
+  payload: PayloadRecord | undefined,
+  snapshot: BoardExportSnapshot,
+) {
+  const { width, height } = object.geometry;
+  if (payload?.bodyKind !== 'embed' || !(width > 0 && height > 0)) {
+    return undefined;
+  }
+
+  return { index, width, height, html: embedMarkup(payload.data, snapshot.assets, false) };
+}
+
+function richMarkup({ index, width, height }: BoardExportPngRegion) {
+  return `<foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${index}"></div></foreignObject>`;
+}
+
+export function renderExportSvg(snapshot: BoardExportSnapshot) {
   const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
   const layers: string[] = [];
+  const regions: BoardExportPngRegion[] = [];
+  const utf8 = new TextEncoder();
   let length = 0;
   let frame: ExportFrame | undefined;
 
   for (const [index, object] of snapshot.objects.entries()) {
-    const markup = positionedMarkup(object, index, snapshot, payloads.get(object.objectId));
+    const payload = payloads.get(object.objectId);
+    const region = richRegion(object, index, payload, snapshot);
+    const markup = positionedSvgMarkup(
+      object,
+      index,
+      snapshot,
+      payload,
+      region && richMarkup(region),
+    );
+
     if (!markup) {
-      return { kind: 'rejected', reason: 'unsupported' };
+      return { kind: 'rejected', reason: 'unsupported' } satisfies BoardExportRejection;
     }
 
-    length += markup.value.length;
+    length += utf8.encode(markup.value).byteLength;
+    if (region) {
+      regions.push(region);
+      length += utf8.encode(region.html).byteLength;
+    }
     if (length > maxExportFileBytes) {
-      return { kind: 'rejected', reason: 'tooLarge' };
+      return { kind: 'rejected', reason: 'tooLarge' } satisfies BoardExportRejection;
     }
 
     layers.push(markup.value);
     frame = expandFrame(frame, markup.bounds);
   }
 
-  return svgDocument(snapshot, frame, layers.join(''));
+  return {
+    svg: svgDocument(snapshot, frame, layers.join('')),
+    regions,
+    viewport: exportViewport(frame),
+  };
 }

@@ -6,6 +6,7 @@ export interface DismissableLayer {
   priority: number;
   openingOrder: number;
   persistent: boolean;
+  escapeWithinLayer: boolean;
   dismiss: (reason: LayerDismissReason) => void;
 }
 
@@ -54,13 +55,21 @@ function takesPriority(layer: DismissableLayer, previous: DismissableLayer | und
   return layer.openingOrder > previous.openingOrder;
 }
 
-function topLayer(layers: Set<DismissableLayer>, target: Element | null) {
+function topLayer(
+  layers: Set<DismissableLayer>,
+  target: Element | null,
+  reason: LayerDismissReason,
+) {
   const modal = modalOf(target);
   let top: DismissableLayer | undefined;
   for (const layer of layers) {
     const sameScope = modalOf(layer.root) === modal;
     const higher = takesPriority(layer, top);
-    if (sameScope && higher && available(layer.root)) {
+    const acceptsTarget =
+      reason !== 'escape' || !layer.escapeWithinLayer || layer.root.contains(target);
+    const eligible = sameScope && acceptsTarget;
+
+    if (eligible && higher && available(layer.root)) {
       top = layer;
     }
   }
@@ -76,7 +85,7 @@ function createScope(document: Document): DismissScope {
       return;
     }
 
-    const layer = topLayer(layers, eventElement(document, event.target));
+    const layer = topLayer(layers, eventElement(document, event.target), 'escape');
     if (!layer) {
       return;
     }
@@ -88,7 +97,7 @@ function createScope(document: Document): DismissScope {
 
   function handlePointerDown(event: PointerEvent) {
     const target = eventElement(document, event.target);
-    const layer = topLayer(layers, target);
+    const layer = topLayer(layers, target, 'outside-press');
     if (!layer || layer.persistent || event.defaultPrevented) {
       return;
     }

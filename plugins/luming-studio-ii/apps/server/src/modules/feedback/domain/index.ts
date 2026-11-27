@@ -1,4 +1,5 @@
 export { freezeFeedbackAnchor } from './anchor.js';
+export { hasFeedbackContent, validFeedbackContentUnit } from './content.js';
 export type {
   FeedbackActor,
   FeedbackAnchor,
@@ -6,6 +7,9 @@ export type {
   FeedbackAnchorTarget,
   FeedbackApplied,
   FeedbackBoardAccess,
+  FeedbackContentSource,
+  FeedbackContentTarget,
+  FeedbackContentUnit,
   FeedbackFrozenObject,
   FeedbackMessage,
   FeedbackMessageView,

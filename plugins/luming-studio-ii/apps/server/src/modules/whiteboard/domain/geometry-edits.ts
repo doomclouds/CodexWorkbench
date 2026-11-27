@@ -8,6 +8,8 @@ import type {
   PayloadRecord,
   Point,
 } from './model.js';
+import type { GeometryParityOperation } from './geometry-parity.js';
+import type { BoardCreationAttachment } from './geometry-attachments.js';
 import { canAdvanceVersion } from './movement.js';
 
 export type GeometryTransformKind = 'resize' | 'rotate' | 'connect';
@@ -24,6 +26,7 @@ interface CreateOperation {
   readonly kind: 'create';
   readonly object: BoardObject;
   readonly payload?: PayloadRecord;
+  readonly attachment?: BoardCreationAttachment;
 }
 
 interface TransformOperation {
@@ -67,7 +70,8 @@ export type GeometryOperation =
   | LockOperation
   | DeleteOperation
   | ReorderOperation
-  | DuplicateOperation;
+  | DuplicateOperation
+  | GeometryParityOperation;
 
 const worldLimit = 10_000_000;
 const rotationLimit = 360;

@@ -1,15 +1,23 @@
 import { createElement, Fragment } from 'react';
 import type { ReactNode } from 'react';
-import { Checkbox } from '../../../base/index.js';
 import type { DocumentBlock, DocumentContent, DocumentObjectProps } from './contracts.js';
 import { DocumentImage } from './DocumentImage.js';
-import { blockText, isRecord, safeDocumentLink, tableRows } from './model.js';
+import {
+  blockText,
+  documentCellSpan,
+  documentHeadingLevel,
+  documentListStart,
+  isRecord,
+  safeDocumentLink,
+  tableRows,
+} from './model.js';
 
 interface DocumentReadViewProps {
   readonly value: DocumentContent;
   readonly resolveImage?: DocumentObjectProps['resolveImage'];
   readonly selectedId?: string;
   readonly matchingIds?: ReadonlySet<string>;
+  readonly annotation?: boolean;
 }
 
 type ChildViewOptions = Omit<DocumentReadViewProps, 'value'>;
@@ -103,7 +111,15 @@ function ReadTable({ block }: { readonly block: DocumentBlock }) {
             {row.map((cell, position) => {
               const Cell = index < headerRows ? 'th' : 'td';
 
-              return <Cell key={position}>{inline(tableCell(cell))}</Cell>;
+              return (
+                <Cell
+                  key={position}
+                  colSpan={documentCellSpan(cell, 'colspan')}
+                  rowSpan={documentCellSpan(cell, 'rowspan')}
+                >
+                  {inline(tableCell(cell))}
+                </Cell>
+              );
             })}
           </tr>
         ))}
@@ -122,7 +138,7 @@ function BlockBody({
   const body = inline(block.content);
   switch (block.type) {
     case 'heading': {
-      const heading = headingTags.at(Number(block.props.level || 1) - 1) ?? 'h2';
+      const heading = headingTags[documentHeadingLevel(block) - 1] ?? 'h1';
 
       return createElement(heading, null, body);
     }
@@ -142,12 +158,10 @@ function BlockBody({
       return <ReadTable block={block} />;
     case 'checkListItem':
       return (
-        <Checkbox
-          label={blockText(block)}
-          checked={block.props.checked === true}
-          disabled
-          onCheckedChange={() => undefined}
-        />
+        <label className="studio-document-checklist">
+          <input type="checkbox" checked={block.props.checked === true} disabled />
+          <span>{body}</span>
+        </label>
       );
     case 'paragraph':
     case 'numberedListItem':
@@ -156,7 +170,10 @@ function BlockBody({
   }
 }
 
-function blockAttributes(block: DocumentBlock, { selectedId, matchingIds }: ChildViewOptions) {
+function blockAttributes(
+  block: DocumentBlock,
+  { selectedId, matchingIds, annotation }: ChildViewOptions,
+) {
   const textAlignment = block.props.textAlignment;
   const align =
     typeof textAlignment === 'string' && textAlignments.has(textAlignment)
@@ -165,8 +182,10 @@ function blockAttributes(block: DocumentBlock, { selectedId, matchingIds }: Chil
 
   return {
     'data-document-read-block': block.id,
+    'data-document-annotation-target': annotation || undefined,
     'data-document-match': matchingIds?.has(block.id) || undefined,
     'data-document-current': selectedId === block.id || undefined,
+    tabIndex: annotation ? 0 : undefined,
     style: { textAlign: align },
   };
 }
@@ -200,17 +219,39 @@ function ReadList({
   readonly group: ReadBlockGroup;
   readonly options: ChildViewOptions;
 }) {
-  const List = group.type === 'numberedListItem' ? 'ol' : 'ul';
+  const ordered = group.type === 'numberedListItem';
+  const first = group.blocks[0];
+  const start = ordered && first ? documentListStart(first) : undefined;
+  const items = [];
+  let nextNumber = start ?? 1;
+  for (const [index, block] of group.blocks.entries()) {
+    const restart = ordered && index > 0 ? documentListStart(block) : undefined;
+    const number = restart ?? nextNumber;
+    nextNumber = number + 1;
 
-  return (
-    <List>
-      {group.blocks.map((block) => (
-        <li key={block.id} {...blockAttributes(block, options)}>
-          {inline(block.content)}
-          <ReadBlocks blocks={block.children ?? []} options={options} />
-        </li>
-      ))}
-    </List>
+    items.push(
+      <li key={block.id} value={restart} {...blockAttributes(block, options)}>
+        <div className="studio-document-list-line">
+          <span className="studio-document-list-marker" aria-hidden="true">
+            {ordered ? `${number}.` : '•'}
+          </span>
+          <div>{inline(block.content)}</div>
+        </div>
+        {block.children?.length ? (
+          <div className="studio-document-list-children">
+            <ReadBlocks blocks={block.children} options={options} />
+          </div>
+        ) : undefined}
+      </li>,
+    );
+  }
+
+  return ordered ? (
+    <ol start={start} role="list">
+      {items}
+    </ol>
+  ) : (
+    <ul role="list">{items}</ul>
   );
 }
 

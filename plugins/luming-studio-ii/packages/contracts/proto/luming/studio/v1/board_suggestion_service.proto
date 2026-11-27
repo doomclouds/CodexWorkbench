@@ -59,6 +59,14 @@ message BoardSuggestionOptionInput {
     EditBoardGeometryRequest geometry = 4;
     EditObjectContentRequest content = 5;
   }
+  repeated BoardSuggestionEditInput operations = 6;
+}
+
+message BoardSuggestionEditInput {
+  oneof edit {
+    EditBoardGeometryRequest geometry = 1;
+    EditObjectContentRequest content = 2;
+  }
 }
 
 message SubmitBoardSuggestionRequest {
@@ -85,6 +93,7 @@ message BoardSuggestion {
   optional string accepted_option_id = 7;
   optional uint64 accepted_board_revision = 8;
   bool rejected = 9;
+  repeated string active_option_ids = 10;
 }
 
 message SubmitBoardSuggestionResponse {

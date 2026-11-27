@@ -192,6 +192,13 @@ const portLayers = new Set([
 ]);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
 const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
+const roomsProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+const mcpActivity = 'src/entrypoints/mcp/agent-activity';
+const mcpActivityTest = 'tests/integration/mcp-agent-activity.test';
+const mcpTestLibraries = new Set([
+  '@modelcontextprotocol/sdk/client/index.js',
+  '@modelcontextprotocol/sdk/inMemory.js',
+]);
 const mcpRuntime = 'src/infrastructure/platform/mcp-runtime';
 const mcpRuntimeBuiltins = new Set(['child_process', 'readline', 'process']);
 const protocols = new Set([
@@ -208,7 +215,7 @@ const httpProtocols = new Set([
   '@codexworkbench/luming-studio-ii-contracts/archives/service',
   '@codexworkbench/luming-studio-ii-contracts/feedback/service',
   '@codexworkbench/luming-studio-ii-contracts/sharing/service',
-  '@codexworkbench/luming-studio-ii-contracts/rooms/service',
+  roomsProtocol,
   '@codexworkbench/luming-studio-ii-contracts/suggestions/service',
 ]);
 const mcpLibraries = new Set([
@@ -269,12 +276,15 @@ function layerOf(path) {
   return [...layers].find(([prefix]) => path?.startsWith(prefix))?.[1];
 }
 
-function allowsLocal(sourceLayer, targetPath, typeOnly) {
+function allowsLocal(sourceLayer, targetPath, typeOnly, from) {
   const targetLayer = layerOf(targetPath);
   if (!targetLayer) {
     return false;
   }
   if (sourceLayer === targetLayer) {
+    return true;
+  }
+  if (from === mcpActivityTest && targetPath === entries.get('mcp')) {
     return true;
   }
   if (!dependencies.get(sourceLayer)?.includes(targetLayer)) {
@@ -288,12 +298,16 @@ function allowsLocal(sourceLayer, targetPath, typeOnly) {
 }
 
 function allowsLibrary(layer, specifier, from) {
+  if (mcpTestLibraries.has(specifier)) {
+    return from === mcpActivityTest;
+  }
   if (mcpLibraries.has(specifier)) {
     return layer === 'mcp';
   }
   if (httpProtocols.has(specifier)) {
     return layer === 'mcp'
-      ? specifier === catalogProtocol && from === entries.get('mcp')
+      ? (specifier === catalogProtocol && from === entries.get('mcp')) ||
+          (specifier === roomsProtocol && from === mcpActivity)
       : protocolLayers.has(layer);
   }
   if (protocols.has(specifier)) {
@@ -310,6 +324,12 @@ function allowsLibrary(layer, specifier, from) {
   }
   if (specifier === 'proper-lockfile') {
     return from === mcpRuntime;
+  }
+  if (specifier === '@resvg/resvg-wasm') {
+    return from === 'src/infrastructure/platform/png-renderer';
+  }
+  if (specifier === 'parse5') {
+    return from === feedbackAdapters + 'content-source';
   }
   if (specifier === 'eslint') {
     return from === 'tests/contracts/server-lint.test';
@@ -386,7 +406,7 @@ const contractBoundary = {
       const targetPath = local && projectPath(root, local.file);
       const typeOnly = usesTypesOnly(node);
       const approved = local
-        ? allowsLocal(layer, targetPath, typeOnly)
+        ? allowsLocal(layer, targetPath, typeOnly, from)
         : allowsLibrary(layer, specifier, from);
 
       if (!approved) {

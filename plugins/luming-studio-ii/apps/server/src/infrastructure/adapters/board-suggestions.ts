@@ -3,6 +3,7 @@ import type {
   BoardReviewTarget,
   BoardSuggestion,
   BoardSuggestionCommandReceipt,
+  BoardSuggestionEdit,
   BoardSuggestionOptionRecord,
   BoardSuggestionQueries,
   BoardSuggestionWriter,
@@ -11,8 +12,13 @@ import type {
 import type { SqliteConnection, SqliteRow } from '../platform/index.js';
 import { readBoardAccess } from './authorization/index.js';
 import {
+  decodeSuggestionReview,
+  encodeSuggestionReview,
+} from './board-suggestion-review-storage.js';
+import {
   decodeJson,
   storedArray,
+  storedBool,
   storedDecimalVersion,
   storedNumber,
   storedRecord,
@@ -71,6 +77,24 @@ export const boardSuggestionsSchema = `
     planned_fingerprint TEXT NOT NULL,
     PRIMARY KEY (board_id, proposal_id, option_id),
     UNIQUE (board_id, proposal_id, position),
+    FOREIGN KEY (board_id, proposal_id)
+      REFERENCES board_suggestions (board_id, proposal_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS board_suggestion_option_plans (
+    board_id TEXT NOT NULL,
+    proposal_id TEXT NOT NULL,
+    option_id TEXT NOT NULL,
+    plan_json TEXT NOT NULL CHECK (json_valid(plan_json)),
+    PRIMARY KEY (board_id, proposal_id, option_id),
+    FOREIGN KEY (board_id, proposal_id, option_id)
+      REFERENCES board_suggestion_options (board_id, proposal_id, option_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS board_suggestion_review_states (
+    board_id TEXT NOT NULL,
+    proposal_id TEXT NOT NULL,
+    review_json TEXT NOT NULL CHECK (json_valid(review_json)),
+    active_ids_json TEXT NOT NULL CHECK (json_valid(active_ids_json)),
+    PRIMARY KEY (board_id, proposal_id),
     FOREIGN KEY (board_id, proposal_id)
       REFERENCES board_suggestions (board_id, proposal_id) ON DELETE CASCADE
   ) STRICT;
@@ -155,18 +179,26 @@ function readSource(
 }
 
 function metadataFromRow(row: SqliteRow) {
+  const acceptedOptionId = optionalText(row.accepted_option_id, 'accepted_option_id');
+  const fallbackActiveIds = acceptedOptionId ? [acceptedOptionId] : [];
+  const activeOptionIds =
+    row.active_ids_json === null
+      ? fallbackActiveIds
+      : readStoredIds(decodeJson(row.active_ids_json, 'active_ids_json'), 'active_option_ids');
+
   return {
     proposalId: storedText(row.proposal_id, 'proposal_id'),
     sourceId: storedText(row.source_id, 'source_id'),
     observation: storedText(row.observation, 'observation'),
     proposalVersion: storedVersion(row.proposal_version, 'proposal_version'),
     expiresAtMillis: storedVersion(row.expires_at_millis, 'expires_at_millis'),
-    acceptedOptionId: optionalText(row.accepted_option_id, 'accepted_option_id'),
+    acceptedOptionId,
     acceptedBoardRevision:
       row.accepted_board_revision === null
         ? undefined
         : storedVersion(row.accepted_board_revision, 'accepted_board_revision'),
     rejected: storedSqliteBool(row.rejected, 'rejected'),
+    activeOptionIds,
   };
 }
 
@@ -178,10 +210,53 @@ function optionMetadata(row: SqliteRow) {
   };
 }
 
+function storedEditKind(value: unknown): BoardSuggestionEdit['kind'] {
+  if (value === 'geometry' || value === 'content') {
+    return value;
+  }
+
+  throw new Error('A saved board suggestion option has an invalid edit kind.');
+}
+
+function decodeAdditionalEdit(value: unknown): BoardSuggestionEdit {
+  const { kind, bytes } = storedRecord(value, 'suggestion_operation');
+
+  return {
+    kind: storedEditKind(kind),
+    bytes: new Uint8Array(Buffer.from(storedText(bytes, 'suggestion_operation'), 'base64')),
+  };
+}
+
+function readStoredIds(value: unknown, field: string): readonly string[] {
+  return storedArray(value, field).map((id) => storedText(id, field));
+}
+
+function decodePlanMeta(value: unknown) {
+  if (value === null) {
+    return undefined;
+  }
+
+  const { footprint, additionalEdits } = storedRecord(
+    decodeJson(value, 'suggestion_plan_json'),
+    'suggestion_plan',
+  );
+  const scope = storedRecord(footprint, 'suggestion_plan_scope');
+
+  return {
+    footprint: {
+      objectIds: readStoredIds(scope.objectIds, 'option_object_ids'),
+      editsOrder: storedBool(scope.editsOrder, 'option_edits_order'),
+    },
+    additionalEdits: storedArray(additionalEdits, 'suggestion_additional_edits').map(
+      decodeAdditionalEdit,
+    ),
+  };
+}
+
 function decodeOption(row: SqliteRow): BoardSuggestionOptionRecord {
-  const kind = storedText(row.edit_kind, 'edit_kind');
+  const kind = storedEditKind(row.edit_kind);
   const bytes = row.edit_bytes;
-  if ((kind !== 'geometry' && kind !== 'content') || !(bytes instanceof Uint8Array)) {
+  if (!(bytes instanceof Uint8Array)) {
     throw new Error('A saved board suggestion option has an invalid typed edit.');
   }
 
@@ -190,6 +265,7 @@ function decodeOption(row: SqliteRow): BoardSuggestionOptionRecord {
     edit: { kind, bytes },
     editFingerprint: storedText(row.edit_fingerprint, 'edit_fingerprint'),
     plannedFingerprint: storedText(row.planned_fingerprint, 'planned_fingerprint'),
+    ...decodePlanMeta(row.plan_json),
   };
 }
 
@@ -199,7 +275,10 @@ function readProposal(
   proposalId: string,
 ): StoredBoardSuggestion | undefined {
   const query = connection.prepare(`
-    SELECT * FROM board_suggestions WHERE board_id = ? AND proposal_id = ?
+    SELECT proposals.*, reviews.review_json, reviews.active_ids_json
+    FROM board_suggestions AS proposals
+    LEFT JOIN board_suggestion_review_states AS reviews USING (board_id, proposal_id)
+    WHERE proposals.board_id = ? AND proposals.proposal_id = ?
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, proposalId);
@@ -209,7 +288,12 @@ function readProposal(
 
   const options = connection
     .prepare(
-      `SELECT * FROM board_suggestion_options WHERE board_id = ? AND proposal_id = ? ORDER BY position`,
+      `
+        SELECT options.*, plans.plan_json
+        FROM board_suggestion_options AS options
+        LEFT JOIN board_suggestion_option_plans AS plans USING (board_id, proposal_id, option_id)
+        WHERE options.board_id = ? AND options.proposal_id = ? ORDER BY options.position
+      `,
     )
     .all(boardId, proposalId)
     .map(decodeOption);
@@ -220,6 +304,7 @@ function readProposal(
     ownerActorId: storedText(row.owner_actor_id, 'owner_actor_id'),
     createdAtMillis: storedVersion(row.created_at_millis, 'created_at_millis'),
     options,
+    reviewState: decodeSuggestionReview(row.review_json),
   };
 }
 
@@ -231,12 +316,14 @@ function listProposals(
   beforeProposalId?: string,
 ): readonly BoardSuggestion[] {
   const query = connection.prepare(`
-    SELECT * FROM board_suggestions
-    WHERE board_id = ? AND expires_at_millis > ?
-      AND (? IS NULL OR (created_at_millis, proposal_id) <
+    SELECT proposals.*, reviews.active_ids_json
+    FROM board_suggestions AS proposals
+    LEFT JOIN board_suggestion_review_states AS reviews USING (board_id, proposal_id)
+    WHERE proposals.board_id = ? AND expires_at_millis > ? AND rejected = 0
+      AND (? IS NULL OR (created_at_millis, proposals.proposal_id) <
         (SELECT created_at_millis, proposal_id FROM board_suggestions
           WHERE board_id = ? AND proposal_id = ?))
-    ORDER BY created_at_millis DESC, proposal_id DESC LIMIT ?
+    ORDER BY created_at_millis DESC, proposals.proposal_id DESC LIMIT ?
   `);
   query.setReadBigInts(true);
   const cursor = beforeProposalId ?? null;
@@ -341,6 +428,11 @@ function insertOptions(connection: SqliteConnection, proposal: StoredBoardSugges
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
+  const planInsert = connection.prepare(`
+    INSERT INTO board_suggestion_option_plans (board_id, proposal_id, option_id, plan_json)
+    VALUES (?, ?, ?, ?)
+  `);
+
   for (const [position, option] of proposal.options.entries()) {
     insert.run(
       proposal.boardId,
@@ -354,6 +446,17 @@ function insertOptions(connection: SqliteConnection, proposal: StoredBoardSugges
       option.editFingerprint,
       option.plannedFingerprint,
     );
+
+    if (option.footprint) {
+      const planJson = JSON.stringify({
+        footprint: option.footprint,
+        additionalEdits: (option.additionalEdits ?? []).map(({ kind, bytes }) => ({
+          kind,
+          bytes: Buffer.from(bytes).toString('base64'),
+        })),
+      });
+      planInsert.run(proposal.boardId, proposal.proposalId, option.optionId, planJson);
+    }
   }
 }
 
@@ -395,6 +498,24 @@ function updateProposal(connection: SqliteConnection, proposal: StoredBoardSugge
 
   if (Number(result.changes) !== 1) {
     throw new Error('The whiteboard suggestion state changed before it could be saved.');
+  }
+
+  if (proposal.reviewState) {
+    const ids = proposal.reviewState.applications.map(({ optionId }) => optionId);
+    connection
+      .prepare(`
+        INSERT INTO board_suggestion_review_states (board_id, proposal_id, review_json, active_ids_json)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (board_id, proposal_id) DO UPDATE SET
+          review_json = excluded.review_json,
+          active_ids_json = excluded.active_ids_json
+      `)
+      .run(
+        proposal.boardId,
+        proposal.proposalId,
+        encodeSuggestionReview(proposal.reviewState),
+        JSON.stringify(ids),
+      );
   }
 }
 

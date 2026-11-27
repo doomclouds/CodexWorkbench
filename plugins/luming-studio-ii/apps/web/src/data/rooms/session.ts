@@ -9,6 +9,7 @@ import type {
   BoardRoomTimer,
   BoardRoomTimerReply,
 } from './contracts.js';
+import type { BoardRoomAgentWorkspaceTarget } from './agent-workspaces.js';
 import { createPresencePublisher } from './presence-publisher.js';
 import { createRoomClock } from './room-clock.js';
 import type { BoardRoomContentChange } from './room-message.js';
@@ -171,6 +172,8 @@ export function createBoardRoomSession({
       canEdit: event.canEdit,
       participants: event.participants,
       timer: event.timer,
+      agentWorkspaces: event.agentWorkspaces,
+      canReleaseAgentActivity: event.canReleaseAgentActivity,
     });
 
     if (priorRevision !== event.revision) {
@@ -216,6 +219,9 @@ export function createBoardRoomSession({
         break;
       case 'contentChanged':
         applyContent(connection, event.change);
+        break;
+      case 'agentWorkspaces':
+        setState({ ...state, agentWorkspaces: event.workspaces });
         break;
       case 'accessLost':
         loseAccess(connection);
@@ -336,6 +342,18 @@ export function createBoardRoomSession({
     return receipt;
   }
 
+  async function releaseAgentWorkspace(target: BoardRoomAgentWorkspaceTarget) {
+    const stream = active?.stream;
+    const canRelease = state.status === 'online' && state.canReleaseAgentActivity;
+    if (!stream || !canRelease || typeof service.releaseAgentWorkspace !== 'function') {
+      throw new Error('当前会话无法结束 Agent 工作区。');
+    }
+
+    const { signal } = stream.controller;
+    await service.releaseAgentWorkspace(boardId, target, signal);
+    signal.throwIfAborted();
+  }
+
   return {
     open,
     subscribe(listener) {
@@ -346,7 +364,10 @@ export function createBoardRoomSession({
       };
     },
     getSnapshot: () => state,
-    publishPresence: presence.publish,
+    publishPresence(sample) {
+      const mayPreview = state.status === 'online' && state.canEdit;
+      presence.publish(mayPreview ? sample : { ...sample, gesture: undefined });
+    },
     async changeTimer(command, signal) {
       if (!state.canEdit) {
         throw new Error('当前房间会话不可编辑共享计时。');
@@ -366,6 +387,8 @@ export function createBoardRoomSession({
     getTimerReceipt: (commandId, signal) =>
       timerRequest((scope) => service.getTimerReceipt(boardId, commandId, scope), signal),
     now: roomClock.now,
+    releaseAgentWorkspace:
+      typeof service.releaseAgentWorkspace === 'function' ? releaseAgentWorkspace : undefined,
     schedule: clock.schedule,
   };
 }

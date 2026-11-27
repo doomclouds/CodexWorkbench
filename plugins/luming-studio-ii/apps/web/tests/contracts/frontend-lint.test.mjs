@@ -79,6 +79,7 @@ const accepted = [
   ],
   [page, "import { BoardSuggestionsSurface } from '../../surfaces/board-suggestions/index.js';"],
   [suggestions, "import type { SuggestionService } from '../../data/suggestions/index.js';"],
+  [suggestions, "import { createPortal } from 'react-dom';"],
   [suggestionsData, `import { BoardSuggestionsService } from '${suggestionsProtocol}';`],
   ['src/app/main.tsx', "import { createSuggestionService } from '../data/suggestions/index.js';"],
   [mcpMain, "import { createSuggestionService } from '../data/suggestions/index.js';"],
@@ -111,6 +112,7 @@ const accepted = [
   [appShell, "import type { GuestAccess } from '../../data/sharing/index.js';"],
   [sharing, "import type { SharingService } from '../../data/sharing/index.js';"],
   [guestJoin, "import type { GuestAccess } from '../../data/sharing/index.js';"],
+  [guestJoin, "import { ShieldAlert, WifiOff } from 'lucide-react';"],
   [guestJoin, 'const source = new URL(inviteUrl);'],
   [guestJoin, 'const location = new URL(inviteUrl);\n\nconst source = location.href;'],
   [
@@ -150,6 +152,8 @@ const accepted = [
   [feedback, "import type { FeedbackClient } from '../../data/feedback/index.js';"],
   [feedback, "import type { CanvasPoint } from '../../ui/domain/canvas/index.js';"],
   [media, "import type { AttachBoardImage } from '../../data/whiteboard/index.js';"],
+  [media, "import type { AttachBoardVideoCommand } from '../../data/whiteboard/index.js';"],
+  [media, 'const video = await prepareVideo(file);'],
   [media, 'const image = event.currentTarget.files?.[0];'],
   [media, 'const image = await prepareImage(file);'],
   [media, 'const data = image.bytes;'],
@@ -238,6 +242,17 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'video placement reads the uploaded file outside the platform port',
+    media,
+    'const video = await file.arrayBuffer();',
+    'no-restricted-syntax',
+  ],
+  [
+    'video placement encodes its own generated protocol',
+    media,
+    `import type { AttachBoardVideoRequest } from '${editsProtocol}';`,
+  ],
   [
     'the suggestions adapter also constructs the whiteboard writer',
     suggestionsData,
@@ -1072,6 +1087,17 @@ const rejected = [
   ],
   ['a portal outside Workbench', surface, "import { createPortal } from 'react-dom';"],
   ['a portal in the Workbench page', workbenchPage, "import { createPortal } from 'react-dom';"],
+  ['a portal in the note list owner', feedback, "import { createPortal } from 'react-dom';"],
+  [
+    'a portal outside the suggestions layout',
+    'src/surfaces/board-suggestions/SuggestionCard.tsx',
+    "import { createPortal } from 'react-dom';",
+  ],
+  [
+    'an extra React DOM method in the suggestions layout',
+    suggestions,
+    "import { createPortal, flushSync } from 'react-dom';",
+  ],
   ['a React DOM namespace in Workbench', workbench, "import * as renderer from 'react-dom';"],
   [
     'mixed portal and React DOM runtime imports',

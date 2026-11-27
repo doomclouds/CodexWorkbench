@@ -30,9 +30,13 @@ import {
   planDraftOptions,
   proposalLifetimeMillis,
   publicSuggestion,
-  reviewChoice,
   suggestionIdentifier,
 } from './board-suggestion-plans.js';
+import {
+  finishSuggestionDecision,
+  prepareSuggestionDecision,
+  type SuggestionReviewDraft,
+} from './board-suggestion-review.js';
 import { runBoardEditInTransaction } from './run-board-edit.js';
 
 export { BoardSuggestionError } from './board-suggestion-plans.js';
@@ -249,15 +253,36 @@ function rejectPending(
   if (!proposal || proposal.expiresAtMillis <= now) {
     throw new BoardSuggestionError(404, '建议不存在或已过期。');
   }
-  if (
-    proposal.rejected ||
-    proposal.acceptedOptionId ||
-    proposal.proposalVersion !== request.expectedProposalVersion
-  ) {
+  if (proposal.rejected || proposal.proposalVersion !== request.expectedProposalVersion) {
     throw new BoardSuggestionError(409, '建议状态已变化，请重新查看。');
   }
 
   return { ...proposal, proposalVersion: proposal.proposalVersion + 1n, rejected: true };
+}
+
+function reviewChoice(
+  reader: BoardSuggestionReader,
+  board: BoardHeader,
+  proposed: StoredBoardSuggestion | undefined,
+  choice: BoardSuggestionChoice,
+  decodeEdit: DecodeBoardSuggestionEdit,
+  time: number,
+  digest: (input: string) => string,
+  applying: boolean,
+): ReturnType<typeof prepareSuggestionDecision> {
+  if (!proposed || proposed.expiresAtMillis <= BigInt(time)) {
+    return { decision: { kind: 'rejected', reason: 'versionUnavailable' } };
+  }
+
+  return prepareSuggestionDecision({
+    reader,
+    board,
+    proposal: proposed,
+    choice,
+    decodeEdit,
+    digest,
+    applying,
+  });
 }
 
 function acceptPending(
@@ -272,34 +297,44 @@ function acceptPending(
   const { boardId, commandId, signature, proposalId, optionId } = request;
   const proposal = writer.getSuggestion(boardId, proposalId);
   const option = proposal?.options.find((entry) => entry.optionId === optionId);
-  let appliesNow = false;
+  let review: SuggestionReviewDraft | undefined;
   const edit = runBoardEditInTransaction(
     writer,
     actor,
     { boardId, commandId },
     { signature, savedAtMillis: timeMillis, kind: option?.edit.kind ?? 'geometry' },
     () => {
-      const decision = reviewChoice(
+      const prepared = reviewChoice(
         writer,
         board,
         proposal,
         request,
         decodeEdit,
-        BigInt(timeMillis),
+        timeMillis,
         digest,
+        true,
       );
-      appliesNow = decision.kind === 'changes';
+      review = prepared.review;
 
-      return decision;
+      return prepared.decision;
     },
   );
 
-  if (appliesNow && proposal && edit.outcome.kind === 'applied') {
+  if (review && proposal && edit.outcome.kind === 'applied') {
+    const state = finishSuggestionDecision(
+      writer,
+      boardId,
+      edit.outcome.boardRevision,
+      review,
+      digest,
+    );
+    const accepted = state.applications.at(-1);
     writer.decideSuggestion({
       ...proposal,
-      acceptedOptionId: optionId,
-      acceptedBoardRevision: edit.outcome.boardRevision,
+      acceptedOptionId: accepted?.optionId,
+      acceptedBoardRevision: accepted?.boardRevision,
       proposalVersion: proposal.proposalVersion + 1n,
+      reviewState: state,
     });
   }
 
@@ -398,15 +433,8 @@ export function createBoardSuggestionApplication(
 
         return {
           boardRevision: board.revision,
-          decision: reviewChoice(
-            reader,
-            board,
-            proposal,
-            choice,
-            decodeEdit,
-            BigInt(now()),
-            digest,
-          ),
+          decision: reviewChoice(reader, board, proposal, choice, decodeEdit, now(), digest, false)
+            .decision,
         };
       });
     },

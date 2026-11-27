@@ -14,6 +14,13 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import { FeedbackService } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
 import {
+  AgentActivityEndReason,
+  AgentActivityPhase,
+  AgentActivityRejection,
+  BoardRoomService,
+  type ChangeAgentActivityRequestSchema,
+} from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+import {
   BoardSharingService,
   SharingRejectionReason,
   SharingRole,
@@ -30,7 +37,7 @@ import {
   callWhiteboard,
   sendWhiteboardRequest,
 } from '../support/whiteboard-client.js';
-import { useSharingTestServer } from './sharing-test-server.js';
+import { agentPrincipalPrefix, useSharingTestServer } from './sharing-test-server.js';
 
 type Scope = 'local' | 'lan';
 type SharingOperation = NonNullable<
@@ -47,6 +54,8 @@ const { getBoardScene } = WhiteboardService.method;
 const { applyFeedback } = FeedbackService.method;
 const { attachBoardImage } = BoardEditService.method;
 const share = BoardSharingService.method;
+const { updateBoardPresence, leaveBoardPresence } = BoardRoomService.method;
+const { changeAgentActivity, getBoardRoom } = BoardRoomService.method;
 
 async function board(label: string, actor = owner) {
   const { receipt } = await callWhiteboard(server.owner, actor, createBoard, {
@@ -387,6 +396,161 @@ test('revokes active sessions, rejects old links, and persists membership across
     SharingRejectionReason.INVITATION_UNAVAILABLE,
   );
   expect((await guestScene(boardId, cookie)).status).toBe(403);
+});
+
+test('restores only the authenticated member of a valid invitation in the current board', async () => {
+  const boardId = await board('Known browser');
+  const foreignBoard = await board('Other known browser');
+  await update(boardId, 'publish', 0n, scopeOperation(SharingScope.LAN));
+  await update(foreignBoard, 'publish', 0n, scopeOperation(SharingScope.LAN));
+  const invitationToken = await invitation(boardId, SharingRole.VIEWER);
+  const { session, cookie } = await join(boardId, invitationToken, 'Known guest');
+  const method = share.inspectBoardInvitation;
+  const request = { boardId, invitationToken };
+  const returning = await sendGuest('lan', method, request, { cookie });
+  expect(returning.headers.get('set-cookie')).toBeNull();
+  const restored = await decodeGuest(returning, method.output);
+  expect(restored.session).toEqual(session);
+  expect(restored.invitation).toBeUndefined();
+
+  const foreign = {
+    boardId: foreignBoard,
+    invitationToken: await invitation(foreignBoard, SharingRole.VIEWER),
+  };
+  const other = await decodeGuest(
+    await sendGuest('lan', method, foreign, { cookie }),
+    method.output,
+  );
+  expect(other.invitation?.boardId).toBe(foreignBoard);
+  expect(other.session).toBeUndefined();
+
+  await update(boardId, 'rotate', 1n, {
+    case: 'resetInvitation',
+    value: { role: SharingRole.VIEWER },
+  });
+  const stale = await decodeGuest(
+    await sendGuest('lan', method, request, { cookie }),
+    method.output,
+  );
+  expect(stale.session).toBeUndefined();
+  expect(stale.rejection).toBe(SharingRejectionReason.INVITATION_UNAVAILABLE);
+});
+
+test('keeps sharing membership and room presence distinct in the owner projection', async () => {
+  const boardId = await board('Sharing presence');
+  await update(boardId, 'publish', 0n, scopeOperation(SharingScope.LAN));
+  const { cookie, session } = await join(
+    boardId,
+    await invitation(boardId, SharingRole.VIEWER),
+    'Online guest',
+  );
+  expect(await view(boardId)).toMatchObject({
+    ownerDisplayName: 'Studio Test Owner',
+    members: [{ actorId: session.actorId, active: true, online: false }],
+  });
+
+  const viewId = 'guest-view';
+  const joined = await sendGuest(
+    'lan',
+    updateBoardPresence,
+    { boardId, viewId, sequence: 1n },
+    { cookie },
+  );
+  expect((await decodeGuest(joined, updateBoardPresence.output)).accepted).toBe(true);
+  expect((await view(boardId)).members).toMatchObject([{ actorId: session.actorId, online: true }]);
+
+  const guest = await sendGuest('lan', share.getBoardSharing, { boardId }, { cookie });
+  const guestSharing = (await decodeGuest(guest, share.getBoardSharing.output)).sharing;
+  expect(guestSharing?.ownerDisplayName).toBeUndefined();
+  expect(guestSharing?.members).toEqual([]);
+
+  const left = await sendGuest(
+    'lan',
+    leaveBoardPresence,
+    { boardId, viewId, sequence: 2n },
+    { cookie },
+  );
+  expect((await decodeGuest(left, leaveBoardPresence.output)).accepted).toBe(true);
+  expect((await view(boardId)).members).toMatchObject([{ active: true, online: false }]);
+});
+
+test('authorizes Agent activity separately from viewing and exposes only the scoped temporary projection', async () => {
+  const boardId = await board('Agent workspace');
+  await update(boardId, 'publish', 0n, scopeOperation(SharingScope.LAN));
+  const { cookie } = await join(
+    boardId,
+    await invitation(boardId, SharingRole.EDITOR),
+    'Guest editor',
+  );
+  const agentActor = agentPrincipalPrefix + owner;
+  const target = { boardId, agentId: 'agent-tool-connection', taskId: 'sketch' };
+  const bounds = { x: 400, y: 200, width: 3000, height: 2400 };
+  const begin: MessageInitShape<typeof ChangeAgentActivityRequestSchema> = {
+    ...target,
+    action: {
+      case: 'begin',
+      value: { label: '整理方案', scope: { target: { case: 'area', value: bounds } } },
+    },
+  };
+  expect(
+    (await sendWhiteboardRequest(server.owner, owner, changeAgentActivity, begin)).status,
+  ).toBe(403);
+  expect(
+    (
+      await sendWhiteboardRequest(
+        server.owner,
+        agentPrincipalPrefix + stranger,
+        changeAgentActivity,
+        begin,
+      )
+    ).status,
+  ).toBe(403);
+  expect(
+    (await sendWhiteboardRequest(server.owner, agentActor, getBoardScene, { boardId })).status,
+  ).toBe(403);
+  expect((await sendGuest('lan', changeAgentActivity, begin, { cookie })).status).toBe(404);
+
+  const opened = await callWhiteboard(server.owner, agentActor, changeAgentActivity, begin);
+  assert.ok(opened.result.case === 'workspace');
+  const { generation } = opened.result.value;
+  expect(opened.result.value).toMatchObject({
+    agentId: target.agentId,
+    taskId: target.taskId,
+    phase: AgentActivityPhase.PREPARING,
+    areas: [{ id: '@area', bounds }],
+  });
+
+  const ownerRoom = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  expect(ownerRoom.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { canReleaseAgentActivity: true, agentWorkspaces: [{ generation }] },
+  });
+  const guestRoom = await sendGuest('lan', getBoardRoom, { boardId }, { cookie });
+  expect((await decodeGuest(guestRoom, getBoardRoom.output)).event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { canEdit: true, canReleaseAgentActivity: false, agentWorkspaces: [{ generation }] },
+  });
+
+  const release = { ...target, action: { case: 'release' as const, value: { generation } } };
+  expect(
+    (await sendWhiteboardRequest(server.owner, agentActor, changeAgentActivity, release)).status,
+  ).toBe(403);
+  const ended = await callWhiteboard(server.owner, owner, changeAgentActivity, release);
+  expect(ended.result).toMatchObject({
+    case: 'ended',
+    value: { generation, reason: AgentActivityEndReason.RELEASED },
+  });
+
+  const late = await callWhiteboard(server.owner, agentActor, changeAgentActivity, begin);
+  expect(late.result).toEqual({
+    case: 'rejected',
+    value: AgentActivityRejection.WORKSPACE_RELEASED,
+  });
+  const current = await callWhiteboard(server.owner, owner, getBoardRoom, { boardId });
+  expect(current.event?.payload).toMatchObject({
+    case: 'snapshot',
+    value: { agentWorkspaces: [], boardRevision: 0n },
+  });
 });
 
 test('leaves sharing state unchanged if the listener or receipt write fails', async () => {

@@ -1,4 +1,9 @@
-import type { BoardFeedbackService, FeedbackPoint } from '../../data/feedback/index.js';
+import type { ReactNode } from 'react';
+import type {
+  BoardFeedbackService,
+  FeedbackContentTarget,
+  FeedbackPoint,
+} from '../../data/feedback/index.js';
 
 export interface FeedbackCanvasObject {
   readonly id: string;
@@ -13,6 +18,20 @@ export interface FeedbackCanvasObject {
 
 export interface FeedbackViewport extends FeedbackPoint {
   readonly zoom: number;
+  readonly zoomY?: number;
+}
+
+export interface FeedbackAttachmentRequest {
+  readonly boardId: string;
+  readonly threadId: string;
+  readonly commandId: string;
+  readonly signal: AbortSignal;
+}
+
+export interface FeedbackSuggestionsFrame {
+  readonly outlet: HTMLElement | null;
+  readonly showCards: boolean;
+  readonly onCardsVisibleChange: (visible: boolean) => void;
 }
 
 export interface WhiteboardFeedbackSurfaceProps {
@@ -33,5 +52,21 @@ export interface WhiteboardFeedbackSurfaceProps {
   readonly onAnnotationActiveChange?: (active: boolean) => void;
   readonly onUnresolvedChange?: (unresolved: boolean) => void;
   readonly onReviewThread?: (threadId: string) => void;
-  readonly annotationRequest?: { readonly objectId: string; readonly sequence: number };
+  readonly onAttachThread?: (request: FeedbackAttachmentRequest) => Promise<void>;
+  readonly attachmentMode?: 'context' | 'copy';
+  readonly annotationRequest?: {
+    readonly objectId: string;
+    readonly sequence: number;
+    readonly u?: number;
+    readonly v?: number;
+  };
+  readonly pointAnnotationRequest?: { readonly sequence: number; readonly point: FeedbackPoint };
+  readonly hostPicking?: boolean;
+  readonly focusedObjectId?: string;
+  readonly contentAnnotationRequest?: {
+    readonly sequence: number;
+    readonly target: FeedbackContentTarget;
+  };
+  readonly contentPoints?: ReadonlyMap<string, FeedbackPoint>;
+  readonly renderSuggestions?: (frame: FeedbackSuggestionsFrame) => ReactNode;
 }

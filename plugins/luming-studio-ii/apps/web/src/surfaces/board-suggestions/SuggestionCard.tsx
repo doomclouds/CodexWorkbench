@@ -1,105 +1,94 @@
-import { Check, Lightbulb } from 'lucide-react';
+import { Check, Lightbulb, RotateCcw, X } from 'lucide-react';
 import { useId } from 'react';
 import type { BoardSuggestion, BoardSuggestionOption } from '../../data/suggestions/index.js';
 import { Button } from '../../ui/base/index.js';
 
 interface SuggestionCardProps {
   readonly suggestion: BoardSuggestion;
-  readonly chosenOption?: string;
   readonly busy: boolean;
-  readonly previewEnabled: boolean;
-  readonly onSelect: (optionId: string) => void;
-  readonly onPreview: (optionId: string) => void;
-  readonly onAccept: (optionId: string) => void;
-  readonly onReject: () => void;
+  readonly onPreview?: (optionId: string) => void;
+  readonly onEndPreview: () => void;
+  readonly onChoose: (optionId?: string) => void;
 }
 
-function SuggestionChoice({
-  option,
-  chosen,
-  busy,
-  onSelect,
-}: {
+interface SuggestionOptionProps extends Omit<SuggestionCardProps, 'suggestion'> {
   readonly option: BoardSuggestionOption;
-  readonly chosen: boolean;
-  readonly busy: boolean;
-  readonly onSelect: (optionId: string) => void;
-}) {
+  readonly active: boolean;
+}
+
+function SuggestionOption({
+  option,
+  active,
+  busy,
+  onPreview,
+  onEndPreview,
+  onChoose,
+}: SuggestionOptionProps) {
   const descriptionId = useId();
-  const Icon = chosen ? Check : Lightbulb;
+  const Icon = active ? Check : Lightbulb;
+  const preview = !active && !busy && onPreview ? () => onPreview(option.optionId) : undefined;
 
   return (
     <button
       type="button"
       className="board-suggestion-option"
-      aria-pressed={chosen}
+      aria-label={option.label}
+      aria-pressed={active}
       aria-describedby={option.description ? descriptionId : undefined}
       disabled={busy}
-      onClick={() => onSelect(option.optionId)}
+      onMouseEnter={preview}
+      onMouseLeave={onEndPreview}
+      onFocus={preview}
+      onBlur={onEndPreview}
+      onClick={() => onChoose(option.optionId)}
     >
-      <span className="board-suggestion-option__label">
-        <Icon size={14} aria-hidden="true" />
-        {option.label}
+      <Icon size={15} aria-hidden="true" />
+      <span className="board-suggestion-option__content">
+        <strong>{option.label}</strong>
+        {option.description && <small id={descriptionId}>{option.description}</small>}
       </span>
-      {option.description && <span id={descriptionId}>{option.description}</span>}
+      {active && <RotateCcw size={14} aria-label="再次点击可安全撤回" />}
     </button>
   );
 }
 
-export function SuggestionCard({
-  suggestion,
-  chosenOption,
-  busy,
-  previewEnabled,
-  onSelect,
-  onPreview,
-  onAccept,
-  onReject,
-}: SuggestionCardProps) {
-  const accepted = suggestion.options.find(
-    ({ optionId }) => optionId === suggestion.acceptedOptionId,
-  );
-  const resolved = suggestion.rejected || Boolean(suggestion.acceptedOptionId);
-  const option = suggestion.options.find(({ optionId }) => optionId === chosenOption);
+export function SuggestionCard({ suggestion, ...interactions }: SuggestionCardProps) {
+  const { busy, onChoose, onPreview } = interactions;
+  if (suggestion.rejected) {
+    return null;
+  }
 
   return (
     <article className="board-suggestion-card" aria-label="私人建议">
+      <header className="board-suggestion-card__header">
+        <strong>
+          <Lightbulb size={15} aria-hidden="true" />
+          私人建议
+        </strong>
+        <Button
+          iconOnly
+          icon={<X size={15} />}
+          label="清除建议，保留已应用内容"
+          disabled={busy}
+          onActivate={() => onChoose()}
+        />
+      </header>
       <p className="board-suggestion-card__observation">{suggestion.observation}</p>
-      {resolved ? (
-        <p className="board-suggestion-card__state">
-          {suggestion.rejected ? '已拒绝' : '已采用 ' + (accepted?.label ?? '所选方案')}
-        </p>
-      ) : (
-        <>
-          <div className="board-suggestion-options" role="group" aria-label="选择建议方案">
-            {suggestion.options.map((choice) => (
-              <SuggestionChoice
-                key={choice.optionId}
-                option={choice}
-                chosen={chosenOption === choice.optionId}
-                busy={busy}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-          <div className="board-suggestion-card__actions">
-            {previewEnabled && (
-              <Button
-                label="预览所选方案"
-                disabled={busy || !option}
-                onActivate={option ? () => onPreview(option.optionId) : undefined}
-              />
-            )}
-            <Button label="拒绝建议" disabled={busy} onActivate={onReject} />
-            <Button
-              label="接受所选方案"
-              variant="primary"
-              disabled={busy || !option}
-              onActivate={option ? () => onAccept(option.optionId) : undefined}
-            />
-          </div>
-        </>
-      )}
+      <div className="board-suggestion-options" role="group" aria-label="选择建议方案">
+        {suggestion.options.map((option) => (
+          <SuggestionOption
+            key={option.optionId}
+            option={option}
+            active={suggestion.activeOptionIds.includes(option.optionId)}
+            {...interactions}
+          />
+        ))}
+      </div>
+      <small className="board-suggestion-card__hint">
+        {onPreview
+          ? '仅自己可见 · 悬停预览，点击应用，再次点击安全撤回'
+          : '仅自己可见 · 点击应用，再次点击安全撤回'}
+      </small>
     </article>
   );
 }

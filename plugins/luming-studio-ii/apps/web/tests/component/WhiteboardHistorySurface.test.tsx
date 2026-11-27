@@ -333,6 +333,29 @@ test('uses the original grouped record, inspected change, back, preview and rest
   expect(fixture.host.querySelector('[aria-label="历史版本预览"]')).toBeNull();
 });
 
+test('shows stored titles for current and initial revisions and preserves the real initial time', async () => {
+  const service = historyMock();
+  const createdAt = '2020-01-01T04:05:00.000Z';
+  service.listVersions.mockResolvedValue({
+    currentRevision: latestRevision,
+    versions: [
+      { ...version(latestRevision), title: '当前白板标题' },
+      {
+        ...version(0n),
+        title: '初始白板标题',
+        kind: 'baseline',
+        savedAtMillis: Date.parse(createdAt),
+      },
+    ],
+  });
+  await mount(service);
+
+  expect(button('展开版本 3').textContent).toContain('当前白板标题');
+  expect(button('展开版本 0').textContent).toContain('初始白板标题');
+  expect(button('展开版本 0').querySelector('time')?.dateTime).toBe(createdAt);
+  expect(button('展开版本 3').querySelector('time')).toBeNull();
+});
+
 test('confirms an inspected change as the single object restore scope', async () => {
   const service = changedHistoryMock();
   await mount(service);
@@ -352,6 +375,34 @@ test('confirms an inspected change as the single object restore scope', async ()
     },
     expect.any(AbortSignal),
   );
+});
+
+test('shows the changed HTML line without quoting or truncating the entire body', async () => {
+  const service = changedHistoryMock();
+  const retained = '<p>' + '不变的内容'.repeat(410) + '</p>';
+  service.getVersionScene.mockImplementation(async (_id, revision) => ({
+    ...scene,
+    revision,
+    objects: [{ ...archivedObject(10, 0n), kind: 'embed', payloadVersion: revision }],
+  }));
+  service.getVersionPayloads.mockImplementation(async (_id, revision) => {
+    const html = retained + (revision === 0n ? '\n<p>旧行</p>' : '\n<p>新行</p>');
+
+    return [
+      {
+        kind: 'loaded',
+        payload: { id: objectId, version: revision, body: { kind: 'embed', value: { html } } },
+      },
+    ];
+  });
+  await mount(service);
+  await selectButton('展开版本 1');
+  await selectButton('看改动');
+
+  const diff = fixture.host.querySelector('[aria-label="逐行改动"]');
+  expect(diff?.querySelector('[data-kind="-"]')?.textContent).toContain('<p>旧行</p>');
+  expect(diff?.querySelector('[data-kind="+"]')?.textContent).toContain('<p>新行</p>');
+  expect(diff?.querySelector('p')).toBeNull();
 });
 
 test('freezes the selected restore range and expected current revision at confirmation', async () => {
@@ -378,6 +429,28 @@ test('freezes the selected restore range and expected current revision at confir
   );
   expect(surface.onRestored).toHaveBeenCalledExactlyOnceWith(confirmed);
   expect(fixture.host.querySelector('[aria-label="历史版本预览"]')).toBeNull();
+});
+
+test('exports a historical PNG selection and always uses the whole revision for HTML', async () => {
+  const service = historyMock();
+  await mount(service);
+  await openPreview();
+  await selectButton('选择历史对象');
+  act(chooseSelection);
+  await selectButton('导出 PNG');
+  await selectButton('导出整板 HTML');
+
+  const commands = service.exportVersion.mock.calls.map(([request]) => request);
+  expect(commands).toEqual([
+    {
+      boardId,
+      revision: sourceRevision,
+      format: 'png',
+      scope: { kind: 'selection', objectIds: [objectId] },
+    },
+    { boardId, revision: sourceRevision, format: 'html', scope: { kind: 'whole' } },
+  ]);
+  expect(fixture.host.textContent).toContain('所选历史版本已无法导出。');
 });
 
 test('checks the original restore receipt before retrying a transport failure', async () => {

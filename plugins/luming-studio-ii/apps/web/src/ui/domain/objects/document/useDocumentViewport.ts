@@ -6,6 +6,7 @@ import type {
   DocumentBlock,
   DocumentContent,
   DocumentNoteSource,
+  DocumentObjectProps,
 } from './contracts.js';
 import { blockText, flattenBlocks } from './model.js';
 
@@ -28,6 +29,41 @@ function blockSearch(blocks: readonly DocumentBlock[], find: string) {
     : [];
 }
 
+function notePosition(root: HTMLElement, first: HTMLElement, requested?: { x: number; y: number }) {
+  const owner = root.closest('.studio-document-surface') ?? root;
+  const bounds = owner.getBoundingClientRect();
+  const block = first.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    return undefined;
+  }
+
+  const unit = (value: number) => Math.max(0, Math.min(1, value));
+  const point = requested ?? { x: block.right, y: block.top + Math.min(6, block.height / 2) };
+
+  return {
+    u: unit((point.x - bounds.left) / bounds.width),
+    v: unit((point.y - bounds.top) / bounds.height),
+  };
+}
+
+function selectionBlocks(root: HTMLElement, range: Range) {
+  const blocks = new Map<string, HTMLElement>();
+  const sequence = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let text = sequence.nextNode(); text; text = sequence.nextNode()) {
+    if (!text.textContent?.trim() || !range.intersectsNode(text)) {
+      continue;
+    }
+
+    const block = text.parentElement?.closest<HTMLElement>('[data-document-read-block]');
+    const id = block?.dataset.documentReadBlock;
+    if (block && id) {
+      blocks.set(id, block);
+    }
+  }
+
+  return blocks;
+}
+
 function documentSelection(root: HTMLElement, version: number): DocumentNoteSource | undefined {
   const selection = root.ownerDocument.getSelection();
   if (!selection?.rangeCount || selection.isCollapsed) {
@@ -39,24 +75,26 @@ function documentSelection(root: HTMLElement, version: number): DocumentNoteSour
     return undefined;
   }
 
-  const items = root.querySelectorAll<HTMLElement>('[data-document-read-block]');
-  const blockIds = Array.from(items)
-    .filter((item) => range.intersectsNode(item))
-    .map((item) => item.dataset.documentReadBlock ?? '');
+  const selected = selectionBlocks(root, range);
+  const first = selected.values().next().value;
+  const point = first && notePosition(root, first);
+  const blockIds = Array.from(selected.keys());
   const quote = selection.toString().trim();
 
-  return blockIds.length && quote ? { blockIds, quote, version } : undefined;
+  return blockIds.length && quote && point ? { blockIds, quote, version, ...point } : undefined;
 }
 
 export function useDocumentViewport(
   mode: DocumentActivity['mode'],
   value: DocumentContent,
   version: number,
+  nativeBlockRequest?: DocumentObjectProps['nativeBlockRequest'],
 ) {
   const body = useRef<HTMLDivElement>(null);
   const scroll = useRef<ScrollRegionHandle>(null);
   const position = useRef({ inline: emptyPosition, expanded: emptyPosition });
   const selection = useRef<DocumentNoteSource | undefined>(undefined);
+  const [selectionVersion, setSelectionVersion] = useState<number>();
   const [find, setFind] = useState('');
   const [index, setIndex] = useState(0);
   const blocks = flattenBlocks(value.blocks);
@@ -64,6 +102,14 @@ export function useDocumentViewport(
   const selected = matches.at(index % Math.max(1, matches.length));
   const currentId = selected?.id;
   const expanded = mode !== 'inline';
+  const selectedSource = nativeBlockRequest?.id;
+  const sourceSequence = nativeBlockRequest?.sequence;
+
+  useLayoutEffect(() => {
+    if (selectedSource && sourceSequence !== undefined && body.current) {
+      blockAt(body.current, selectedSource)?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [selectedSource, sourceSequence]);
 
   useLayoutEffect(() => {
     const saved = position.current[expanded ? 'expanded' : 'inline'];
@@ -101,10 +147,27 @@ export function useDocumentViewport(
   function captureSelection() {
     const element = body.current;
     selection.current = element ? documentSelection(element, version) : undefined;
+    setSelectionVersion(selection.current?.version);
   }
 
   function readSelection() {
-    return selection.current;
+    return selection.current?.version === version ? selection.current : undefined;
+  }
+
+  function noteForBlock(
+    id: string,
+    requested?: { x: number; y: number },
+  ): DocumentNoteSource | undefined {
+    const root = body.current;
+    const node = root && blockAt(root, id);
+    const block = blocks.find((candidate) => candidate.id === id);
+    if (!root || !node || !block) {
+      return undefined;
+    }
+
+    const point = notePosition(root, node, requested);
+
+    return point && { blockIds: [id], quote: blockText(block), version, ...point };
   }
 
   function handleSelectAll(event: KeyboardEvent<HTMLDivElement>) {
@@ -136,6 +199,8 @@ export function useDocumentViewport(
     body,
     scroll,
     readSelection,
+    noteForBlock,
+    canAnnotate: selectionVersion === version,
     find,
     matches,
     currentId,

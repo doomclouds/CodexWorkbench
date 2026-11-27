@@ -73,6 +73,7 @@ function readSuggestion(value: WireSuggestion): BoardSuggestion {
     options,
     acceptedOptionId,
     acceptedBoardRevision,
+    activeOptionIds,
     rejected,
   } = value;
   const optionIds = readIdentifiers(
@@ -80,8 +81,9 @@ function readSuggestion(value: WireSuggestion): BoardSuggestion {
     '方案 ID',
   );
 
-  if (acceptedOptionId !== undefined && (rejected || !optionIds.includes(acceptedOptionId))) {
-    throw new Error('建议服务返回的接受状态与方案不匹配。');
+  const active = readIdentifiers(activeOptionIds, '已应用方案 ID');
+  if (active.some((optionId) => !optionIds.includes(optionId))) {
+    throw new Error('建议服务返回的应用状态与方案不匹配。');
   }
 
   return {
@@ -98,6 +100,7 @@ function readSuggestion(value: WireSuggestion): BoardSuggestion {
     rejected,
     acceptedOptionId,
     acceptedBoardRevision,
+    activeOptionIds: active,
   };
 }
 

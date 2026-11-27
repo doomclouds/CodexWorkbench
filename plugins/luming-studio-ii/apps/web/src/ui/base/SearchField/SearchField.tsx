@@ -12,6 +12,7 @@ export interface SearchFieldProps {
   value: string;
   onValueChange: (value: string) => void;
   label: string;
+  placeholder?: string;
   clearLabel: string;
   clearable?: boolean;
   disabled?: boolean;
@@ -22,6 +23,7 @@ export function SearchField({
   value,
   onValueChange,
   label,
+  placeholder,
   clearLabel,
   clearable = true,
   disabled,
@@ -50,6 +52,7 @@ export function SearchField({
         <TextField
           ref={input}
           label={label}
+          placeholder={placeholder}
           type="search"
           value={value}
           disabled={disabled}

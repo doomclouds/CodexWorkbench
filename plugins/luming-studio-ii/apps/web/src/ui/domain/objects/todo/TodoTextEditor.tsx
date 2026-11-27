@@ -1,7 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { ClipboardEvent, KeyboardEvent } from 'react';
-import { TextField } from '../../../base/index.js';
-import type { TextFieldHandle } from '../../../base/index.js';
 import { maxTodoTextBytes, maxTodoTitleLength } from './todo-edit.js';
 import type { TodoEditorSession } from './useTodoEditor.js';
 
@@ -15,13 +13,13 @@ function plainKey(event: KeyboardEvent) {
 }
 
 export function TodoTextEditor({ label, session }: TodoTextEditorProps) {
-  const input = useRef<TextFieldHandle>(null);
+  const input = useRef<HTMLInputElement>(null);
   useLayoutEffect(() => {
-    input.current?.focus();
+    input.current?.focus({ preventScroll: true });
     input.current?.select();
   }, []);
 
-  function handleKey(event: KeyboardEvent<HTMLDivElement>) {
+  function handleKey(event: KeyboardEvent<HTMLInputElement>) {
     if (event.nativeEvent.isComposing || event.key === 'Process') {
       return;
     }
@@ -37,17 +35,12 @@ export function TodoTextEditor({ label, session }: TodoTextEditorProps) {
     }
   }
 
-  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+  function handlePaste(event: ClipboardEvent<HTMLInputElement>) {
     if (session.draft?.target.kind !== 'new') {
       return;
     }
 
-    const field = event.target;
-    const Input = event.currentTarget.ownerDocument.defaultView?.HTMLInputElement;
-    if (!Input || !(field instanceof Input)) {
-      return;
-    }
-
+    const field = event.currentTarget;
     const pasted = event.clipboardData.getData('text/plain');
     if (!/[\r\n]/u.test(pasted)) {
       return;
@@ -62,12 +55,21 @@ export function TodoTextEditor({ label, session }: TodoTextEditorProps) {
   }
 
   const title = session.draft?.target.kind === 'title';
+  const adding = session.draft?.target.kind === 'new';
   const maximum = title ? maxTodoTitleLength : maxTodoTextBytes;
   const text = session.draft?.text ?? '';
 
   return (
-    <div
+    <input
+      ref={input}
+      type="text"
       className="studio-object-todo__editor"
+      aria-label={label}
+      placeholder={adding ? '输入任务' : undefined}
+      maxLength={maximum}
+      value={text}
+      readOnly={!session.writable}
+      onChange={(event) => session.setText(event.currentTarget.value)}
       onKeyDown={handleKey}
       onPaste={handlePaste}
       onFocus={() => session.trackFocus(true)}
@@ -75,14 +77,6 @@ export function TodoTextEditor({ label, session }: TodoTextEditorProps) {
         session.trackFocus(false);
         session.commit();
       }}
-    >
-      <TextField
-        label={label}
-        value={text}
-        readOnly={!session.writable}
-        onValueChange={(value) => session.setText(value.slice(0, maximum))}
-        ref={input}
-      />
-    </div>
+    />
   );
 }

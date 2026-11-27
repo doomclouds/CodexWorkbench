@@ -75,6 +75,11 @@ function TodoCanvasBody({
   expanded: expandedOnBoard = false,
   locked,
   onOpenPresentation,
+  onOpenNativeSource,
+  nativeSourceLabel,
+  nativeSourceRequest,
+  annotationActive,
+  onAnnotateContent,
   object,
   geometry,
   zoom,
@@ -124,10 +129,18 @@ function TodoCanvasBody({
   const appearance = { paper: object.fill ?? todoPaper, uiScale: focusedReading ? 1 : 1 / zoom };
   const overview = isTodoOverview(geometry.width * zoom, geometry.height * zoom);
   const open = onOpenPresentation ?? (() => setExpanded(true));
+  const nativeControls = {
+    onOpenSource: onOpenNativeSource,
+    sourceLabel: nativeSourceLabel,
+    sourceRequest: nativeSourceRequest,
+    annotationActive,
+    onAnnotateContent,
+  };
 
   return (
     <>
       <TodoObject
+        {...nativeControls}
         value={value}
         interactive={interactive}
         readOnly={readOnly}
@@ -151,6 +164,7 @@ function TodoCanvasBody({
         >
           {keepExpanded && (
             <TodoObject
+              {...nativeControls}
               value={value}
               readOnly={readOnly}
               appearance={appearance}

@@ -18,13 +18,27 @@ import {
 import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
 const server = useWhiteboardTestServer();
-const { listBoards, createBoard, getCatalogCommandReceipt } = BoardCatalogService.method;
+const { listBoards, createBoard, getCatalogCommandReceipt, manageBoard } =
+  BoardCatalogService.method;
 const { getBoardScene } = WhiteboardService.method;
 const actorId = 'catalog-editor';
 const otherActorId = 'catalog-outsider';
 
 function addBoard(commandId: string, title: string, owner = actorId) {
   return callProtobuf(server.address, owner, createBoard, { commandId, title });
+}
+
+async function addPinnedBoard(commandId: string, title: string, owner = actorId) {
+  const { receipt } = await addBoard(commandId, title, owner);
+  assert.equal(receipt?.outcome.case, 'created');
+  const { boardId, entryVersion } = receipt.outcome.value;
+  const pinned = await callProtobuf(server.address, owner, manageBoard, {
+    commandId: 'pin-' + commandId,
+    boardId,
+    expectedEntryVersion: entryVersion,
+    operation: { case: 'pinned', value: true },
+  });
+  assert.equal(pinned.receipt?.outcome.case, 'changed');
 }
 
 test('creates an editable empty board and replays its catalog receipt after restart', async () => {
@@ -69,7 +83,7 @@ test('creates an editable empty board and replays its catalog receipt after rest
     value: { reason: CatalogRejectionReason.COMMAND_ID_REUSE },
   });
   expect(foreign.result).toMatchObject({ case: 'notRecorded', value: { commandId } });
-  expect(directory.boards).toEqual([board]);
+  expect(directory.boards).toEqual([{ ...board, previewRevision: 0n }]);
 });
 
 test('filters and pages the authenticated catalog with an opaque cursor', async () => {
@@ -89,6 +103,46 @@ test('filters and pages the authenticated catalog with an opaque cursor', async 
   expect(firstPage.boards.map(({ title }) => title)).toEqual(['Design Alpha']);
   expect(secondPage.boards.map(({ title }) => title)).toEqual(['Design Beta']);
   expect(secondPage.nextCursor).toBeUndefined();
+});
+
+test('filters pins before pagination and keeps the default cursor on its original scope', async () => {
+  await addPinnedBoard('pinned-beta', 'Design Beta');
+  await addPinnedBoard('pinned-alpha', 'Design Alpha');
+  await addBoard('unpinned', 'Design Unpinned');
+  await addPinnedBoard('foreign-pin', 'Design Foreign', otherActorId);
+
+  const query = { query: 'Design', order: BoardSortOrder.TITLE, pageSize: 1 };
+  const first = await callProtobuf(server.address, actorId, listBoards, {
+    ...query,
+    pinnedOnly: true,
+  });
+  assert.ok(first.nextCursor);
+  const second = await callProtobuf(server.address, actorId, listBoards, {
+    ...query,
+    pinnedOnly: true,
+    cursor: first.nextCursor,
+  });
+  expect(first.boards.map(({ title }) => title)).toEqual(['Design Alpha']);
+  expect(second.boards.map(({ title }) => title)).toEqual(['Design Beta']);
+  expect(second.nextCursor).toBeUndefined();
+
+  const changedFilter = await sendProtobufRequest(server.address, actorId, listBoards, {
+    ...query,
+    cursor: first.nextCursor,
+  });
+  expect(changedFilter.status).toBe(400);
+  const unfiltered = await callProtobuf(server.address, actorId, listBoards, {
+    ...query,
+    pageSize: 2,
+  });
+  assert.ok(unfiltered.nextCursor);
+  expect(unfiltered.nextCursor).not.toContain('pinnedOnly');
+  const remaining = await callProtobuf(server.address, actorId, listBoards, {
+    ...query,
+    pinnedOnly: false,
+    cursor: unfiltered.nextCursor,
+  });
+  expect(remaining.boards.map(({ title }) => title)).toEqual(['Design Unpinned']);
 });
 
 test('requires authentication and maps invalid directory requests to HTTP 400', async () => {

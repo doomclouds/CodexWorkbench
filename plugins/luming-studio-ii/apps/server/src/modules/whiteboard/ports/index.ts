@@ -1,5 +1,6 @@
 import type {
   BoardAccess,
+  BoardBackupMetadata,
   BoardChanges,
   BoardEditApplied,
   BoardExportAsset,
@@ -15,6 +16,7 @@ import type {
 export type {
   Appearance,
   BoardAccess,
+  BoardBackupMetadata,
   BoardChanges,
   BoardEditApplied,
   BoardEditReceipt,
@@ -68,6 +70,7 @@ export interface WhiteboardRepository {
 }
 
 export interface BoardEditReader extends WhiteboardReader {
+  getBackupMetadata?(boardId: string, actorId: string): BoardBackupMetadata | undefined;
   payloadByteSize?(boardId: string, objectIds: readonly string[], revision?: bigint): bigint;
   getEditReceipt(
     boardId: string,
@@ -115,7 +118,13 @@ export type {
   BoardReviewSource,
   BoardReviewTarget,
   BoardSuggestion,
+  BoardSuggestionApplicationState,
+  BoardSuggestionClock,
   BoardSuggestionCommandReceipt,
+  BoardSuggestionEdit,
+  BoardSuggestionFootprint,
+  BoardSuggestionObjectClocks,
   BoardSuggestionOptionRecord,
+  BoardSuggestionReviewState,
   StoredBoardSuggestion,
 } from '../domain/index.js';

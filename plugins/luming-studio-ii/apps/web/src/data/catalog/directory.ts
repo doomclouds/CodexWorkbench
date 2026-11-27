@@ -9,6 +9,7 @@ export interface CatalogDirectorySnapshot {
   readonly kind: 'loading' | 'ready' | 'failed';
   readonly query: string;
   readonly order: CatalogSortOrder;
+  readonly pinnedOnly: boolean;
   readonly boards: readonly CatalogBoardSummary[];
   readonly loadingMore: boolean;
   readonly nextCursor?: string;
@@ -21,6 +22,7 @@ export interface CatalogDirectory {
   readonly open: () => () => void;
   readonly setQuery: (query: string) => void;
   readonly setOrder: (order: CatalogSortOrder) => void;
+  readonly setPinnedOnly: (pinnedOnly: boolean, clearQuery?: boolean) => void;
   readonly loadMore: () => void;
   readonly reload: () => void;
 }
@@ -28,8 +30,12 @@ export interface CatalogDirectory {
 const pageSize = 30;
 const searchDelayMs = 180;
 
-function loading(query: string, order: CatalogSortOrder): CatalogDirectorySnapshot {
-  return { kind: 'loading', query, order, boards: [], loadingMore: false };
+function loading(
+  query: string,
+  order: CatalogSortOrder,
+  pinnedOnly: boolean,
+): CatalogDirectorySnapshot {
+  return { kind: 'loading', query, order, pinnedOnly, boards: [], loadingMore: false };
 }
 
 function mergeBoards(
@@ -39,7 +45,7 @@ function mergeBoards(
   const byId = new Map(prior.map((board) => [board.boardId, board]));
   for (const board of page) {
     const known = byId.get(board.boardId);
-    if (!known || known.entryVersion < board.entryVersion) {
+    if (!known || known.entryVersion <= board.entryVersion) {
       byId.set(board.boardId, board);
     }
   }
@@ -49,7 +55,7 @@ function mergeBoards(
 
 export function createCatalogDirectory(service: BoardCatalogService): CatalogDirectory {
   const listeners = new Set<() => void>();
-  let snapshot = loading('', 'recent');
+  let snapshot = loading('', 'recent', false);
   let owner: symbol | undefined;
   let active: AbortController | undefined;
   let scheduled: ReturnType<typeof setTimeout> | undefined;
@@ -128,12 +134,16 @@ export function createCatalogDirectory(service: BoardCatalogService): CatalogDir
     start();
   }
 
-  function replace(query: string, order: CatalogSortOrder, delay = 0) {
-    startRead(loading(query, order), { query, order, pageSize }, delay);
+  function replace(query: string, order: CatalogSortOrder, pinnedOnly: boolean, delay = 0) {
+    const input = { query, order, pageSize, ...(pinnedOnly ? { pinnedOnly: true } : {}) };
+    startRead(loading(query, order, pinnedOnly), input, delay);
   }
 
   function reload() {
-    replace(snapshot.query, snapshot.order);
+    const { query, order, pinnedOnly } = snapshot;
+    const next = { ...loading(query, order, pinnedOnly), boards: snapshot.boards };
+    const input = { query, order, pageSize, ...(pinnedOnly ? { pinnedOnly: true } : {}) };
+    startRead(next, input, 0);
   }
 
   return {
@@ -159,23 +169,29 @@ export function createCatalogDirectory(service: BoardCatalogService): CatalogDir
     },
     setQuery(query) {
       if (query !== snapshot.query) {
-        replace(query, snapshot.order, query.trim() ? searchDelayMs : 0);
+        replace(query, snapshot.order, snapshot.pinnedOnly, query.trim() ? searchDelayMs : 0);
       }
     },
     setOrder(order) {
       if (order !== snapshot.order) {
-        replace(snapshot.query, order);
+        replace(snapshot.query, order, snapshot.pinnedOnly);
+      }
+    },
+    setPinnedOnly(pinnedOnly, clearQuery = false) {
+      const query = clearQuery ? '' : snapshot.query;
+      if (pinnedOnly !== snapshot.pinnedOnly || query !== snapshot.query) {
+        replace(query, 'recent', pinnedOnly);
       }
     },
     loadMore() {
-      const { kind, loadingMore, nextCursor, query, order } = snapshot;
+      const { kind, loadingMore, nextCursor, query, order, pinnedOnly } = snapshot;
       if (kind !== 'ready' || loadingMore || nextCursor === undefined) {
         return;
       }
 
       startRead(
         { ...snapshot, loadingMore: true, error: undefined },
-        { query, order, pageSize, cursor: nextCursor },
+        { query, order, pageSize, cursor: nextCursor, ...(pinnedOnly ? { pinnedOnly: true } : {}) },
         0,
       );
     },

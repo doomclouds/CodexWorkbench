@@ -10,6 +10,7 @@ service BoardRoomService {
   rpc LeaveBoardPresence(LeaveBoardPresenceRequest) returns (LeaveBoardPresenceResponse);
   rpc ChangeBoardTimer(ChangeBoardTimerRequest) returns (ChangeBoardTimerResponse);
   rpc GetBoardTimerReceipt(GetBoardTimerReceiptRequest) returns (GetBoardTimerReceiptResponse);
+  rpc ChangeAgentActivity(ChangeAgentActivityRequest) returns (ChangeAgentActivityResponse);
 }
 
 message GetBoardRoomRequest {
@@ -33,6 +34,24 @@ message BoardRoomParticipantKey {
   string view_id = 2;
 }
 
+enum BoardRoomGestureKind {
+  BOARD_ROOM_GESTURE_KIND_UNSPECIFIED = 0;
+  BOARD_ROOM_GESTURE_KIND_MOVE = 1;
+  BOARD_ROOM_GESTURE_KIND_RESIZE = 2;
+  BOARD_ROOM_GESTURE_KIND_ROTATE = 3;
+}
+
+message BoardRoomGestureGeometry {
+  string object_id = 1;
+  optional uint64 expected_geometry_version = 2;
+  Geometry geometry = 3;
+}
+
+message BoardRoomGesturePreview {
+  BoardRoomGestureKind kind = 1;
+  repeated BoardRoomGestureGeometry changes = 2;
+}
+
 message BoardRoomParticipant {
   BoardRoomParticipantKey key = 1;
   string display_name = 2;
@@ -42,6 +61,8 @@ message BoardRoomParticipant {
   Point cursor = 6;
   BoardRoomViewport viewport = 7;
   bool following = 8;
+  BoardRoomGesturePreview gesture = 9;
+  optional uint64 gesture_expires_at_unix_ms = 10;
 }
 
 message UpdateBoardPresenceRequest {
@@ -51,6 +72,7 @@ message UpdateBoardPresenceRequest {
   Point cursor = 4;
   BoardRoomViewport viewport = 5;
   bool following = 6;
+  BoardRoomGesturePreview gesture = 7;
 }
 
 message UpdateBoardPresenceResponse {
@@ -73,6 +95,8 @@ message BoardRoomSnapshot {
   optional uint64 board_revision = 3;
   repeated BoardRoomParticipant participants = 4;
   BoardRoomTimer timer = 5;
+  repeated RoomAgentWorkspace agent_workspaces = 6;
+  bool can_release_agent_activity = 7;
 }
 
 message BoardRoomParticipants {
@@ -101,6 +125,7 @@ message BoardRoomEvent {
     BoardRoomTimer timer = 7;
     BoardRoomContentChanged content_changed = 8;
     BoardRoomAccessLost access_lost = 9;
+    RoomAgentWorkspaceList agent_workspaces = 10;
   }
 }
 
@@ -178,4 +203,115 @@ message GetBoardTimerReceiptRequest {
 message GetBoardTimerReceiptResponse {
   BoardTimerReceipt receipt = 1;
   optional uint64 server_time_unix_ms = 2;
+}
+
+enum AgentActivityPhase {
+  AGENT_ACTIVITY_PHASE_UNSPECIFIED = 0;
+  AGENT_ACTIVITY_PHASE_PREPARING = 1;
+  AGENT_ACTIVITY_PHASE_WRITING = 2;
+  AGENT_ACTIVITY_PHASE_VERIFYING = 3;
+}
+
+enum AgentActivityRejection {
+  AGENT_ACTIVITY_REJECTION_UNSPECIFIED = 0;
+  AGENT_ACTIVITY_REJECTION_INVALID = 1;
+  AGENT_ACTIVITY_REJECTION_OVERLAP = 2;
+  AGENT_ACTIVITY_REJECTION_CAPACITY = 3;
+  AGENT_ACTIVITY_REJECTION_NOT_FOUND = 4;
+  AGENT_ACTIVITY_REJECTION_GENERATION_CHANGED = 5;
+  AGENT_ACTIVITY_REJECTION_WORKSPACE_RELEASED = 6;
+}
+
+message AgentActivityBounds {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+message AgentActivityObjectScope {
+  repeated string object_ids = 1;
+}
+
+message AgentActivityScope {
+  oneof target {
+    AgentActivityObjectScope objects = 1;
+    AgentActivityBounds area = 2;
+  }
+}
+
+message AgentActivityBegin {
+  AgentActivityScope scope = 1;
+  string label = 2;
+  string previous_generation = 3;
+}
+
+message AgentActivityUpdate {
+  string generation = 1;
+  AgentActivityPhase phase = 2;
+  repeated string active_object_ids = 3;
+}
+
+message AgentActivityEnd {
+  string generation = 1;
+}
+
+message AgentActivityStatus {}
+
+message AgentActivityRelease {
+  string generation = 1;
+}
+
+message ChangeAgentActivityRequest {
+  string board_id = 1;
+  string agent_id = 2;
+  string task_id = 3;
+  oneof action {
+    AgentActivityBegin begin = 4;
+    AgentActivityUpdate update = 5;
+    AgentActivityEnd end = 6;
+    AgentActivityStatus status = 7;
+    AgentActivityRelease release = 8;
+  }
+}
+
+message RoomAgentWorkspaceArea {
+  string id = 1;
+  AgentActivityBounds bounds = 2;
+  bool active = 3;
+}
+
+message RoomAgentWorkspace {
+  string agent_id = 1;
+  string task_id = 2;
+  string generation = 3;
+  string label = 4;
+  AgentActivityPhase phase = 5;
+  repeated RoomAgentWorkspaceArea areas = 6;
+  optional uint64 expires_at_unix_ms = 7;
+  AgentActivityScope scope = 8;
+}
+
+message RoomAgentWorkspaceList {
+  repeated RoomAgentWorkspace workspaces = 1;
+}
+
+enum AgentActivityEndReason {
+  AGENT_ACTIVITY_END_REASON_UNSPECIFIED = 0;
+  AGENT_ACTIVITY_END_REASON_COMPLETED = 1;
+  AGENT_ACTIVITY_END_REASON_RELEASED = 2;
+  AGENT_ACTIVITY_END_REASON_EXPIRED = 3;
+}
+
+message AgentActivityEnded {
+  string generation = 1;
+  AgentActivityEndReason reason = 2;
+}
+
+message ChangeAgentActivityResponse {
+  oneof result {
+    RoomAgentWorkspace workspace = 1;
+    AgentActivityEnded ended = 2;
+    AgentActivityRejection rejected = 3;
+  }
 }

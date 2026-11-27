@@ -1,8 +1,8 @@
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent, MouseEvent, PointerEvent, ReactNode } from 'react';
 
-import { Button, Checkbox, ScrollRegion } from '../../../base/index.js';
-import type { TodoObjectItem, TodoObjectProps } from './contracts.js';
+import { Button, ScrollRegion } from '../../../base/index.js';
+import type { TodoObjectItem, TodoObjectProps, TodoPoint } from './contracts.js';
 import { TodoControlIcon } from './TodoControlIcon.js';
 import { TodoTextEditor } from './TodoTextEditor.js';
 import { maxTodoItems, taskLabel } from './todo-edit.js';
@@ -11,7 +11,12 @@ import type { TodoEditorSession } from './useTodoEditor.js';
 
 interface TodoRowsProps extends Pick<
   TodoObjectProps,
-  'onOpenSource' | 'sourceLabel' | 'onAnnotateItem' | 'renderItemAdornment'
+  | 'onOpenSource'
+  | 'sourceLabel'
+  | 'sourceRequest'
+  | 'onAnnotateContent'
+  | 'onAnnotateItem'
+  | 'renderItemAdornment'
 > {
   session: TodoEditorSession;
   active: boolean;
@@ -36,6 +41,19 @@ function hasModifier(event: KeyboardEvent) {
   return event.ctrlKey || event.metaKey || event.shiftKey;
 }
 
+function rowPosition(bounds: DOMRect, point: TodoPoint | undefined) {
+  if (!(bounds.width > 0 && bounds.height > 0)) {
+    return undefined;
+  }
+
+  const x = point?.x ?? bounds.right - 8;
+  const y = point?.y ?? bounds.bottom - 4;
+  const u = Math.min(1, Math.max(0, (x - bounds.left) / bounds.width));
+  const v = Math.min(1, Math.max(0, (y - bounds.top) / bounds.height));
+
+  return { u, v };
+}
+
 function sourceBadge(item: TodoObjectItem, props: TodoRowsProps) {
   const source = item.sourceRef;
   if (!source) {
@@ -46,18 +64,16 @@ function sourceBadge(item: TodoObjectItem, props: TodoRowsProps) {
   const onOpen = props.active ? props.onOpenSource : undefined;
 
   return onOpen ? (
-    <Button
-      label={'打开任务来源：' + label}
-      variant="ghost"
-      icon={
-        <span className="studio-object-todo__source">
-          <TodoControlIcon icon="link" size={15} />
-          <span>{label}</span>
-        </span>
-      }
-      iconOnly
-      onActivate={() => onOpen(source)}
-    />
+    <button
+      className="studio-object-todo__source"
+      type="button"
+      title={label}
+      aria-label={'打开任务来源：' + label}
+      onClick={() => onOpen(source)}
+    >
+      <TodoControlIcon icon="link" size={15} />
+      <span>{label}</span>
+    </button>
   ) : (
     <span className="studio-object-todo__source" title={label}>
       <TodoControlIcon icon="link" size={15} />
@@ -122,12 +138,48 @@ function handleAnnotationPointerDown(event: PointerEvent<HTMLLIElement>) {
   }
 }
 
+function useSourceRow(
+  list: { current: HTMLUListElement | null },
+  active: boolean,
+  sourceRequest: TodoObjectProps['sourceRequest'],
+  objectId: string,
+  items: readonly TodoObjectItem[],
+) {
+  const lastSequence = useRef<number | undefined>(undefined);
+  useLayoutEffect(() => {
+    if (!active || !sourceRequest || sourceRequest.sequence === lastSequence.current) {
+      return;
+    }
+
+    const { elementId, itemId } = sourceRequest.source;
+    if (elementId !== objectId || !itemId) {
+      return;
+    }
+
+    const rows = list.current?.querySelectorAll<HTMLElement>('[data-todo-item-id]') ?? [];
+    const row = Array.from(rows).find(({ dataset }) => dataset.todoItemId === itemId);
+    if (row) {
+      lastSequence.current = sourceRequest.sequence;
+      row.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [active, sourceRequest, objectId, items, list]);
+}
+
 export function TodoRows(props: TodoRowsProps) {
-  const { session, active, editable, annotating, onAnnotateItem, renderItemAdornment } = props;
+  const {
+    session,
+    active,
+    editable,
+    annotating,
+    onAnnotateContent,
+    onAnnotateItem,
+    renderItemAdornment,
+  } = props;
   const items = session.projection.items;
   const [drag, setDrag] = useState<RowDrag>();
   const wrapper = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLUListElement>(null);
+  useSourceRow(list, active, props.sourceRequest, session.projection.id, items);
   const adornments = useMemo(
     () => rowAdornments(items, renderItemAdornment),
     [items, renderItemAdornment],
@@ -163,7 +215,7 @@ export function TodoRows(props: TodoRowsProps) {
     }
   }
 
-  function startDrag(event: DragEvent<HTMLSpanElement>, id: string) {
+  function startDrag(event: DragEvent<HTMLButtonElement>, id: string) {
     if (!canReorder) {
       event.preventDefault();
       return;
@@ -212,6 +264,15 @@ export function TodoRows(props: TodoRowsProps) {
   function annotate(event: MouseEvent<HTMLLIElement>, id: string) {
     event.stopPropagation();
     const point = event.detail ? { x: event.clientX, y: event.clientY } : undefined;
+    if (onAnnotateContent) {
+      const position = rowPosition(event.currentTarget.getBoundingClientRect(), point);
+      if (position) {
+        onAnnotateContent({ target: { kind: 'todo', itemId: id }, ...position });
+      }
+
+      return;
+    }
+
     onAnnotateItem?.(id, point);
   }
 
@@ -231,30 +292,31 @@ export function TodoRows(props: TodoRowsProps) {
         onClick={annotating ? (event) => annotate(event, id) : undefined}
       >
         {editable && (
-          <span
+          <button
+            type="button"
             draggable={canReorder}
             className="studio-object-todo__grip"
+            aria-label={'调整顺序：' + label}
+            title="调整顺序，可用方向键"
+            disabled={!canReorder}
             onDragStart={(event) => startDrag(event, id)}
             onDragEnd={handleDragEnd}
             onKeyDown={(event) => reorderKey(event, id, index)}
           >
-            <Button
-              label={'调整顺序：' + label}
-              icon={<TodoControlIcon icon="grip" />}
-              iconOnly
-              variant="ghost"
-              disabled={!canReorder}
-            />
-          </span>
+            <TodoControlIcon icon="grip" />
+          </button>
         )}
         <span className="studio-object-todo__checked">
           {editable ? (
-            <Checkbox
-              label={'完成任务：' + label}
+            <input
+              type="checkbox"
+              aria-label={'完成任务：' + label}
               checked={checked}
               disabled={!session.writable}
-              onCheckedChange={(checked) =>
-                session.changeRows([{ op: 'update', id, changes: { checked } }])
+              onChange={(event) =>
+                session.changeRows([
+                  { op: 'update', id, changes: { checked: event.currentTarget.checked } },
+                ])
               }
             />
           ) : (
@@ -268,16 +330,16 @@ export function TodoRows(props: TodoRowsProps) {
         </div>
         {sourceBadge(item, props)}
         {editable && (
-          <span className="studio-object-todo__remove">
-            <Button
-              label={'删除任务：' + label}
-              icon={<TodoControlIcon icon="remove" />}
-              iconOnly
-              variant="ghost"
-              disabled={!session.writable}
-              onActivate={() => session.changeRows([{ op: 'delete', id }])}
-            />
-          </span>
+          <button
+            type="button"
+            className="studio-object-todo__remove"
+            aria-label={'删除任务：' + label}
+            title="删除任务"
+            disabled={!session.writable}
+            onClick={() => session.changeRows([{ op: 'delete', id }])}
+          >
+            <TodoControlIcon icon="remove" />
+          </button>
         )}
       </li>
     );
@@ -287,6 +349,7 @@ export function TodoRows(props: TodoRowsProps) {
     <div
       ref={wrapper}
       className="studio-object-todo__body"
+      data-todo-active={active || undefined}
       inert={!active && !annotating}
       onKeyDown={active ? stopBodyKey : undefined}
       onDoubleClick={active ? (event) => event.stopPropagation() : undefined}
@@ -296,15 +359,23 @@ export function TodoRows(props: TodoRowsProps) {
           {items.map(renderItem)}
         </ul>
         {orphaned && <TodoTextEditor label="任务文字" session={session} />}
-        {adding && <TodoTextEditor label="新增任务" session={session} />}
-        {editable && !adding && (
-          <Button
-            label="添加任务"
-            icon={<TodoControlIcon icon="add" />}
-            variant="ghost"
-            disabled={!session.writable || items.length >= maxTodoItems}
-            onActivate={() => session.start({ kind: 'new' }, '')}
-          />
+        {(adding || editable) && (
+          <div className="studio-object-todo__add">
+            {adding ? (
+              <>
+                <TodoControlIcon icon="add" size={18} />
+                <TodoTextEditor label="新增任务" session={session} />
+              </>
+            ) : (
+              <Button
+                label="添加任务"
+                icon={<TodoControlIcon icon="add" size={18} />}
+                variant="ghost"
+                disabled={!session.writable || items.length >= maxTodoItems}
+                onActivate={() => session.start({ kind: 'new' }, '')}
+              />
+            )}
+          </div>
         )}
       </ScrollRegion>
       <div className="studio-object-todo__adornments">

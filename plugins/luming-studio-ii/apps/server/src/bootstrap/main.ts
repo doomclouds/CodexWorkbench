@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, userInfo } from 'node:os';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { createGuestWeb } from '../entrypoints/http/index.js';
@@ -67,6 +67,15 @@ function reportFailure(error: unknown) {
   process.stderr.write('Whiteboard request failed (' + name + ').\n');
 }
 
+function readOwnerDisplayName() {
+  try {
+    return userInfo().username;
+  } catch (error) {
+    reportFailure(error);
+    return undefined;
+  }
+}
+
 const guestWeb = createGuestWeb({
   loadAssets: () =>
     loadGuestWebAssets(
@@ -101,6 +110,7 @@ const runtime: ReturnType<typeof createWhiteboardServer> = createWhiteboardServe
   sharing: {
     inviteOrigin: guestWeb.origin,
     activateScope: guestWeb.activate,
+    ownerDisplayName: readOwnerDisplayName(),
   },
 });
 

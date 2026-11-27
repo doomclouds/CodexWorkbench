@@ -1,17 +1,26 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AttachBoardImageCommand, BoardEditReceipt } from '../../src/data/whiteboard/index.js';
+import type {
+  AttachBoardImageCommand,
+  AttachBoardVideoCommand,
+  BoardEditReceipt,
+} from '../../src/data/whiteboard/index.js';
 import {
   WhiteboardMediaSurface,
   type PreparedBoardImage,
+  type PreparedBoardVideo,
+  type UploadBoardMedia,
   type WhiteboardMediaSurfaceProps,
 } from '../../src/surfaces/whiteboard-media/index.js';
 import { createControlFixture } from '../support/render-control.js';
 
 type AppliedReceipt = Extract<BoardEditReceipt, { kind: 'applied' }>;
 
-function appliedImage(command: AttachBoardImageCommand): AppliedReceipt {
+function appliedImage(
+  command: AttachBoardImageCommand,
+  kind: 'image' | 'video' = 'image',
+): AppliedReceipt {
   return {
     boardId: command.boardId,
     commandId: command.commandId,
@@ -20,7 +29,7 @@ function appliedImage(command: AttachBoardImageCommand): AppliedReceipt {
     objects: [
       {
         id: command.objectId,
-        kind: 'image',
+        kind,
         label: command.displayName,
         geometry: command.geometry,
         geometryVersion: 1n,
@@ -115,10 +124,9 @@ describe('WhiteboardMediaSurface', () => {
     );
   }
 
-  async function pickImage() {
+  async function pickImage(file = new File(['fake image'], '流程图.png', { type: 'image/png' })) {
     act(() => button('上传图片').click());
     const input = required(fixture.host.querySelector<HTMLInputElement>('input[type=file]'));
-    const file = new File(['fake image'], '流程图.png', { type: 'image/png' });
     Object.defineProperty(input, 'files', { configurable: true, value: [file] });
 
     await act(async () => {
@@ -131,6 +139,37 @@ describe('WhiteboardMediaSurface', () => {
       new MouseEvent('click', { bubbles: true, detail: 1, clientX: 400, clientY: 200 }),
     );
   }
+
+  it('offers GIF and SVG and places an SVG without displaying its source', async () => {
+    const file = new File(['<svg width="32" height="18"/>'], '流程图.svg', {
+      type: 'image/svg+xml',
+    });
+    const prepared = {
+      ...preparedImage(),
+      displayName: file.name,
+      content: new Uint8Array(await file.arrayBuffer()),
+      previewUrl: undefined,
+    };
+    const prepareImage = vi.fn().mockResolvedValue(prepared);
+    const board = setup({ prepareImage });
+    const picker = required(fixture.host.querySelector<HTMLInputElement>('input[type=file]'));
+    expect(picker.accept.split(',')).toEqual(
+      expect.arrayContaining(['image/gif', 'image/svg+xml']),
+    );
+
+    await pickImage(file);
+    expect(prepareImage).toHaveBeenCalledWith(file, expect.any(AbortSignal));
+    expect(fixture.host.querySelector('.whiteboard-media__preview')).toBeNull();
+
+    await act(async () => {
+      dispatchPlacement(button('将图片放到白板'));
+    });
+
+    expect(board.attachImage).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: file.name, content: prepared.content }),
+      expect.any(AbortSignal),
+    );
+  });
 
   it('shows a proportional preview and confirms placement once at the selected world point', async () => {
     const test = setup();
@@ -174,6 +213,58 @@ describe('WhiteboardMediaSurface', () => {
     expect(test.attachImage).not.toHaveBeenCalled();
     expect(test.image.dispose).toHaveBeenCalledTimes(1);
     expect(test.onExitPlacement).toHaveBeenCalledTimes(1);
+  });
+
+  it('uploads mixed media from one selection at the supplied board point without a placement click', async () => {
+    const commands: AttachBoardImageCommand[] = [];
+    const video: PreparedBoardVideo = {
+      ...preparedImage(),
+      displayName: '演示.webm',
+      width: 480,
+      height: 270,
+      mediaType: 'video/webm',
+      previewUrl: 'blob:video-preview',
+    };
+    const attachVideo = vi.fn(async (command: AttachBoardVideoCommand) => {
+      commands.push(command);
+      return appliedImage(command, 'video');
+    });
+    const attachImage = vi.fn(async (command: AttachBoardImageCommand) => {
+      commands.push(command);
+      return appliedImage(command);
+    });
+    let upload: UploadBoardMedia | undefined;
+    const board = setup({
+      prepareVideo: async () => video,
+      onUploadReady: (next) => {
+        upload = next;
+      },
+      service: { attachImage, attachVideo, getReceipt: async () => undefined },
+    });
+    expect(button('上传图片或视频').disabled).toBe(false);
+    expect(
+      required(fixture.host.querySelector<HTMLInputElement>('input[type=file]')).multiple,
+    ).toBe(true);
+
+    const files = [
+      new File(['video'], '演示.webm', { type: 'video/webm' }),
+      new File(['image'], '流程图.png', { type: 'image/png' }),
+    ];
+    await act(async () => upload?.(files, { x: 400, y: 200 }));
+
+    expect(commands).toEqual([
+      expect.objectContaining({
+        mediaType: 'video/webm',
+        geometry: { x: -65, y: -72.5, width: 480, height: 270, rotation: 0 },
+      }),
+      expect.objectContaining({
+        displayName: '流程图.png',
+        geometry: { x: -41, y: -33.5, width: 480, height: 240, rotation: 0 },
+      }),
+    ]);
+    expect(board.onApplied).toHaveBeenCalledTimes(2);
+    expect(video.dispose).toHaveBeenCalledTimes(1);
+    expect(fixture.host.querySelector('[aria-label="将视频放到白板"]')).toBeNull();
   });
 
   it('looks up an uncertain receipt and retries the exact command if still unrecorded', async () => {

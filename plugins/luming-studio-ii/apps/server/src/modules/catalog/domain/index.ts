@@ -1,5 +1,14 @@
 export type CatalogOrder = 'recent' | 'title';
 
+export { renderCatalogThumbnail } from './thumbnail.js';
+export type {
+  CatalogThumbnail,
+  CatalogThumbnailObject,
+  CatalogThumbnailRequest,
+  CatalogThumbnailResult,
+  CatalogThumbnailScene,
+} from './thumbnail.js';
+
 export interface CatalogBoardSummary {
   readonly boardId: string;
   readonly title: string;
@@ -7,6 +16,7 @@ export interface CatalogBoardSummary {
   readonly pinned: boolean;
   readonly entryVersion: bigint;
   readonly canManage: boolean;
+  readonly previewRevision?: bigint;
 }
 
 export interface CatalogManagedBoard {
@@ -72,6 +82,7 @@ export interface CatalogScope {
   readonly query: string;
   readonly order: CatalogOrder;
   readonly view?: 'trash';
+  readonly pinnedOnly?: boolean;
 }
 
 const maxTitleLength = 200;

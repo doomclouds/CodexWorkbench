@@ -43,6 +43,9 @@ const paths = new Map<string, Access>([
   [path(BoardEditService.method.editBoardGeometry), 'edit'],
   [path(BoardEditService.method.editObjectContent), 'edit'],
   [path(BoardEditService.method.attachBoardImage), 'edit'],
+  [path(BoardEditService.method.attachBoardVideo), 'edit'],
+  [path(BoardEditService.method.uploadBoardDocumentImage), 'edit'],
+  [path(BoardEditService.method.reverseBoardEdit), 'edit'],
   [path(BoardEditService.method.getBoardEditReceipt), 'edit'],
   [path(BoardHistoryService.method.listBoardVersions), 'read'],
   [path(BoardHistoryService.method.getBoardVersionScene), 'read'],
@@ -145,17 +148,34 @@ export function resolveGuestActor(
     return undefined;
   }
 
+  const requireGuestAccess = (boardId: string, action: Access) => {
+    const session = options.application.guestAccess(boardId, actorId, guest.scope);
+    if (!session || !permits(session, action)) {
+      throw new SharingAccessError('Guest access to this board is unavailable.');
+    }
+  };
+
   return {
     id: actorId,
     guestScope: guest.scope,
-    authorize(value) {
-      const boardId = boardIdIn(value);
-      const session = options.application.guestAccess(boardId, actorId, guest.scope);
-      if (!session || !permits(session, access)) {
-        throw new SharingAccessError('Guest access to this board is unavailable.');
-      }
-    },
+    authorize: (value) => requireGuestAccess(boardIdIn(value), access),
+    authorizeRead: (boardId) => requireGuestAccess(requireId(boardId), 'read'),
   };
+}
+
+function existingInvitationSession(
+  request: IncomingMessage,
+  { application }: SharingRoutesOptions,
+  boardId: string,
+  scope: SharingScope,
+  role: GuestSession['role'],
+) {
+  const token = readBrowserToken(request);
+  const actorId = token ? application.browserActor(token) : undefined;
+  const session = actorId ? application.guestAccess(boardId, actorId, scope) : undefined;
+  if (session?.role === role) {
+    return { ...session, role: wireRoles[session.role] };
+  }
 }
 
 function inspectInvitation(
@@ -172,18 +192,24 @@ function inspectInvitation(
     scope: guest.scope,
   });
 
-  if ('value' in result) {
-    const browser = stagedToken(request, options);
-    if (browser.fresh) {
-      setCookie(response, browser.token, guest);
-    }
+  const schema = inspectBoardInvitation.output;
+  if ('rejection' in result) {
+    sendProtobuf(
+      response,
+      toBinary(schema, create(schema, { rejection: wireRejection[result.rejection] })),
+    );
+
+    return;
   }
 
-  const value =
-    'value' in result
-      ? { invitation: { ...result.value, role: wireRoles[result.value.role] } }
-      : { rejection: wireRejection[result.rejection] };
-  const schema = inspectBoardInvitation.output;
+  const { role } = result.value;
+  const session = existingInvitationSession(request, options, boardId, guest.scope, role);
+  const browser = stagedToken(request, options);
+  if (browser.fresh) {
+    setCookie(response, browser.token, guest);
+  }
+
+  const value = session ? { session } : { invitation: { ...result.value, role: wireRoles[role] } };
   sendProtobuf(response, toBinary(schema, create(schema, value)));
 }
 

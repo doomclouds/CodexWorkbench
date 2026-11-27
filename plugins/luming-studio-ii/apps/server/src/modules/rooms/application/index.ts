@@ -3,6 +3,8 @@ import {
   timerView,
   validPresence,
   validViewId,
+  type AgentActivityOperation,
+  type AgentActivityResult,
   type ParticipantKey,
   type PresenceInput,
   type RoomAccess,
@@ -13,10 +15,25 @@ import {
   type TimerCommandKey,
 } from '../domain/index.js';
 import type { RoomClock, RoomRepository } from '../ports/index.js';
+import {
+  createAgentActivity,
+  type AgentActivityOptions,
+  type AgentActivityPrincipal,
+  type ReleaseAgentActivity,
+} from './agent-activity.js';
 import { RoomMemory, type RoomListener } from './room-memory.js';
 import { executeTimerChange } from './timer-commands.js';
 
 export type {
+  AgentActivityArea,
+  AgentActivityBounds,
+  AgentActivityEndReason,
+  AgentActivityOperation,
+  AgentActivityPhase,
+  AgentActivityResult,
+  AgentActivityScope,
+  AgentWorkspace,
+  GesturePreview,
   Participant,
   ParticipantKey,
   RoomAccess,
@@ -31,6 +48,13 @@ export type {
   TimerCommandKey,
   TimerRejection,
 } from '../domain/index.js';
+export type {
+  AgentActivity,
+  AgentActivityOptions,
+  AgentActivityPrincipal,
+  ReleaseAgentActivity,
+} from './agent-activity.js';
+export { createAgentActivity } from './agent-activity.js';
 
 const maxRooms = 128;
 const maxChangedIds = 512;
@@ -49,6 +73,7 @@ interface RoomTimerReply {
 
 export interface RoomsApplication {
   snapshot(boardId: string, actorId: string): RoomEvent;
+  onlineActorIds(boardId: string): ReadonlySet<string>;
   access(boardId: string, actorId: string): RoomAccess | undefined;
   publishPresence(boardId: string, actorId: string, input: PresenceInput): boolean;
   leavePresence(boardId: string, key: ParticipantKey, sequence: bigint): boolean;
@@ -58,6 +83,11 @@ export interface RoomsApplication {
   revokeView(boardId: string, key: ParticipantKey): void;
   changeTimer(actorId: string, command: TimerCommand): RoomTimerReply;
   timerReceipt(actorId: string, key: TimerCommandKey): RoomTimerReply;
+  changeAgentActivity(
+    principal: AgentActivityPrincipal,
+    operation: AgentActivityOperation,
+  ): AgentActivityResult;
+  releaseAgentActivity(request: ReleaseAgentActivity): AgentActivityResult;
   publishContentChange(change: RoomContentChange): void;
   close(): void;
 }
@@ -99,8 +129,11 @@ export function createRoomsApplication(
   repository: RoomRepository,
   clock: RoomClock,
   instanceId: string,
+  activityOptions?: Omit<AgentActivityOptions, 'now'>,
 ): RoomsApplication {
   const rooms = new Map<string, RoomMemory>();
+  const agentActivity =
+    activityOptions && createAgentActivity({ ...activityOptions, now: () => clock.nowMillis() });
   let instances = 0;
 
   function roomFor(boardId: string, revision: bigint, now: number): RoomMemory {
@@ -132,6 +165,36 @@ export function createRoomsApplication(
     return repository.read((reader) => reader.access(boardId, actorId));
   }
 
+  function syncAgentWorkspaces(boardId: string, room: RoomMemory, now: number) {
+    if (!agentActivity) {
+      return;
+    }
+
+    const workspaces = agentActivity.snapshot(boardId);
+    if (
+      workspaces.length !== room.agentWorkspaces.length ||
+      workspaces.some((workspace, index) => workspace !== room.agentWorkspaces[index])
+    ) {
+      room.agentWorkspaces = workspaces;
+      room.publish({ kind: 'agentWorkspaces', workspaces }, now);
+    }
+  }
+
+  function authorizeAgentActivity(boardId: string, ownerId: string) {
+    if (!agentActivity || access(boardId, ownerId)?.role !== 'owner') {
+      throw new RoomAccessError('Agent workspaces require current board ownership.');
+    }
+
+    return agentActivity;
+  }
+
+  function publishAgentWorkspaces(boardId: string) {
+    const room = rooms.get(boardId);
+    if (room) {
+      syncAgentWorkspaces(boardId, room, clock.nowMillis());
+    }
+  }
+
   function readSnapshot(boardId: string, actorId: string, now: number) {
     const stored = repository.read((reader) => ({
       access: requireAccess(reader.access(boardId, actorId)),
@@ -139,6 +202,7 @@ export function createRoomsApplication(
     }));
     const room = roomFor(boardId, stored.access.boardRevision, now);
     room.sweep(now);
+    syncAgentWorkspaces(boardId, room, now);
 
     const event = room.event(
       {
@@ -147,8 +211,10 @@ export function createRoomsApplication(
           actorId,
           canEdit: stored.access.canEdit,
           boardRevision: stored.access.boardRevision,
-          participants: room.snapshot(),
+          participants: room.currentParticipants(now),
           timer: timerView(stored.timer, now),
+          agentWorkspaces: room.agentWorkspaces,
+          canReleaseAgentActivity: agentActivity !== undefined && stored.access.role === 'owner',
         },
       },
       now,
@@ -169,9 +235,19 @@ export function createRoomsApplication(
 
   return {
     snapshot: (boardId, actorId) => readSnapshot(boardId, actorId, clock.nowMillis()).event,
+    onlineActorIds(boardId) {
+      const now = clock.nowMillis();
+      const participants = rooms.get(boardId)?.snapshot() ?? [];
+      const live = participants.filter(({ expiresAtUnixMs }) => expiresAtUnixMs > now);
+
+      return new Set(live.map(({ key }) => key.actorId));
+    },
     access,
     publishPresence(boardId, actorId, input) {
       const authorized = requireAccess(access(boardId, actorId));
+      if (input.gesture && !authorized.canEdit) {
+        throw new RoomAccessError('Gesture preview requires editing access');
+      }
       if (!validPresence(input)) {
         throw new RoomInputError('Invalid room presence');
       }
@@ -206,6 +282,7 @@ export function createRoomsApplication(
     },
     tick(boardId, boardRevision) {
       rooms.get(boardId)?.sweep(clock.nowMillis());
+      publishAgentWorkspaces(boardId);
       publishContentChange({ boardId, boardRevision, refreshScene: true });
     },
     notifyAccessChanged(boardId) {
@@ -231,6 +308,22 @@ export function createRoomsApplication(
       });
 
       return { receipt, serverTimeUnixMs: clock.nowMillis() };
+    },
+    changeAgentActivity(principal, operation) {
+      const { boardId, ownerId } = principal;
+      const activity = authorizeAgentActivity(boardId, ownerId);
+      const result = activity.change(principal, operation);
+      publishAgentWorkspaces(boardId);
+
+      return result;
+    },
+    releaseAgentActivity(request) {
+      const { boardId, ownerId } = request;
+      const activity = authorizeAgentActivity(boardId, ownerId);
+      const result = activity.release(request);
+      publishAgentWorkspaces(boardId);
+
+      return result;
     },
     publishContentChange,
     close() {

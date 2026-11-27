@@ -102,6 +102,8 @@ export function validateHtmlNavigationMessage(
 
 export type HtmlFrameSelection = HtmlSelection & { point?: HtmlFramePoint };
 
+const invalidTargetCharacter = /\p{Cc}/u;
+
 function readSelectionRect(value: unknown): NonNullable<HtmlSelection['rect']> | null {
   const origin = readPoint(value, -1e7, 1e7);
   if (!origin) {
@@ -121,16 +123,17 @@ function isSelectionText(value: unknown, maxLength: number): value is string {
 }
 
 function isTargetId(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > 160) {
+  if (typeof value !== 'string' || value.length > 192) {
     return false;
   }
 
-  return Array.from(value).every((character) => character.charCodeAt(0) >= 32);
+  return Boolean(value.trim()) && !invalidTargetCharacter.test(value);
 }
 
 export function validateHtmlSelectionMessage(
   value: unknown,
   expected: HtmlFrameIdentity,
+  annotationTargets?: ReadonlySet<string>,
 ): HtmlFrameSelection | null {
   const input = readFrameMessage(value, expected, 'studio-html-selection');
   if (!input) {
@@ -138,9 +141,17 @@ export function validateHtmlSelectionMessage(
   }
   if (
     !Array.isArray(input.targetIds) ||
-    input.targetIds.length > 100 ||
+    input.targetIds.length > 64 ||
     !input.targetIds.every(isTargetId)
   ) {
+    return null;
+  }
+
+  const targetIds = new Set(input.targetIds as string[]);
+  if (targetIds.size !== input.targetIds.length) {
+    return null;
+  }
+  if (annotationTargets && [...targetIds].some((id) => !annotationTargets.has(id))) {
     return null;
   }
 
@@ -161,7 +172,7 @@ export function validateHtmlSelectionMessage(
   return {
     regionId: expected.regionId,
     sourceRevision: expected.sourceRevision,
-    targetIds: [...new Set(input.targetIds as string[])],
+    targetIds: [...targetIds],
     quote,
     excerpt,
     ...(selector !== undefined ? { selector } : {}),

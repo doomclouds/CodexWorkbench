@@ -104,6 +104,7 @@ describe('Canvas Todo presentation', () => {
     expect(fixture.host.querySelector('dialog')).toBeNull();
 
     render({
+      canEdit: false,
       onOpenPresentation,
       onObjectIntent,
       presentation: { objectIds: [id], expandedObjectId: id },
@@ -123,6 +124,41 @@ describe('Canvas Todo presentation', () => {
     render({ onOpenPresentation, onObjectIntent });
     expect(fixture.host.querySelector('[data-todo-expanded]')).toBeNull();
     expect(fixture.host.querySelector('[data-todo-id]')).toBe(original);
+  });
+
+  it('sends the real row edit when the expanded task list has content permission', async () => {
+    const result = { id, title, revision: 2, items: [{ id: 'check', text: task, checked: false }] };
+    const onObjectIntent = vi.fn<NonNullable<CanvasProps['onObjectIntent']>>().mockResolvedValue({
+      ok: true,
+      payload: { version: result.revision, value: result },
+    });
+    render({
+      canEdit: false,
+      canEditExpandedObject: true,
+      onOpenPresentation: vi.fn(),
+      onObjectIntent,
+      presentation: { objectIds: [id], expandedObjectId: id },
+    });
+    const control = fixture.host.querySelector<HTMLInputElement>('[aria-label^="完成任务："]');
+    if (!control) {
+      throw new Error('Expected an editable checkbox in the expanded task list.');
+    }
+
+    await act(async () => control.click());
+
+    expect(onObjectIntent).toHaveBeenCalledExactlyOnceWith({
+      name: 'todo.edit',
+      objectId: id,
+      kind: 'todo',
+      expectedVersion: 1,
+      value: {
+        objectId: id,
+        expectedRevision: 1,
+        changes: [{ op: 'update', id: 'check', changes: { checked: false } }],
+      },
+    });
+    expect(control.checked).toBe(false);
+    expect(fixture.host.querySelector('dialog')).toBeNull();
   });
 
   it('keeps an expanded dialog available when no shared viewer is configured', () => {

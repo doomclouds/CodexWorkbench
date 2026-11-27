@@ -25,6 +25,7 @@ import { gestureFrame } from './canvas-gesture-frame.js';
 import type { PointerAction, PointerSession } from './canvas-gesture-frame.js';
 import { editableTarget, isCurrentEdit } from './canvas-model.js';
 import { useObjectNavigation } from './canvas-object-navigation.js';
+import { translateConnection } from './connectors/geometry.js';
 import { connectionHandleBends } from './connectors/handles.js';
 import type {
   CanvasConnectionEndpoint,
@@ -38,7 +39,7 @@ import type {
   CanvasTool,
   CanvasViewport,
 } from './contracts.js';
-import type { ResizeHandle, TransformGesture } from './gestures/index.js';
+import { previewTransform, type ResizeHandle, type TransformGesture } from './gestures/index.js';
 import { maxInkSamples } from './ink/geometry.js';
 import { projectObject, queryScene } from './scene/index.js';
 import type { SceneIndex } from './scene/index.js';
@@ -71,6 +72,14 @@ interface CanvasInputOptions {
 const primaryButton = 0;
 const middleButton = 1;
 const keyboardZoomFactor = 1.2;
+const keyboardFastStep = 10;
+const keyboardPanFactor = 24;
+const keyboardDirections = new Map<string, CanvasPoint>([
+  ['ArrowUp', { x: 0, y: -1 }],
+  ['ArrowRight', { x: 1, y: 0 }],
+  ['ArrowDown', { x: 0, y: 1 }],
+  ['ArrowLeft', { x: -1, y: 0 }],
+]);
 
 function keyboardFit(event: ReactKeyboardEvent<HTMLDivElement>): CanvasFitScope | undefined {
   if (event.ctrlKey || event.metaKey) {
@@ -91,6 +100,9 @@ function keyboardZoom(event: ReactKeyboardEvent<HTMLDivElement>, zoom: number) {
   const reset = event.shiftKey && event.code === 'Digit0';
   if (reset && !event.ctrlKey && !event.metaKey) {
     return 1 / zoom;
+  }
+  if (!event.ctrlKey && !event.metaKey) {
+    return undefined;
   }
   if (event.key === '+' || event.key === '=') {
     return keyboardZoomFactor;
@@ -292,6 +304,26 @@ export function useCanvasInput({
     cancelStaleSession();
   }, [canEdit, index, pending, key]);
 
+  function transformTargets(
+    kind: TransformGesture['kind'],
+    ids: readonly string[],
+    duplicate = false,
+  ) {
+    const moves = kind === 'move';
+    const candidateIds = moves ? expandMoveIds(index, ids, pending) : ids;
+    return candidateIds.flatMap((id) => {
+      const object = editableTarget(index, pending, id);
+      const projection = object && projectObject(index, pending, id);
+      const canTransform = !moves || duplicate || canMove(index, id);
+      const capable = object && transformAllowed(object.kind, kind);
+      if (!projection || !canTransform || !capable) {
+        return [];
+      }
+
+      return [{ id, expectedVersion: object.version, geometry: projection.geometry }];
+    });
+  }
+
   function beginTransform(
     container: HTMLDivElement,
     sample: ReactPointerEvent<HTMLElement>,
@@ -304,22 +336,9 @@ export function useCanvasInput({
       return;
     }
 
-    const moves = kind === 'move';
-    const duplicate = moves && sample.altKey;
-    const candidateIds = moves ? expandMoveIds(index, ids, pending) : ids;
-    const targets = candidateIds.flatMap((id) => {
-      const object = editableTarget(index, pending, id);
-      const projection = object && projectObject(index, pending, id);
-      const canTransform = !moves || duplicate || canMove(index, id);
-      const capable = object && transformAllowed(object.kind, kind);
-      if (!projection || !canTransform || !capable) {
-        return [];
-      }
-
-      return [{ id, expectedVersion: object.version, geometry: projection.geometry }];
-    });
-
-    if (targets.length === 0 || (!moves && targets.length !== ids.length)) {
+    const duplicate = kind === 'move' && sample.altKey;
+    const targets = transformTargets(kind, ids, duplicate);
+    if (targets.length === 0 || (kind !== 'move' && targets.length !== ids.length)) {
       return;
     }
 
@@ -797,6 +816,43 @@ export function useCanvasInput({
     return handleViewportKey(event) || command;
   }
 
+  function handleArrowKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const direction = keyboardDirections.get(event.key);
+    if (!direction || props.presentation || active.current) {
+      return false;
+    }
+
+    event.preventDefault();
+    const step = event.shiftKey ? keyboardFastStep : 1;
+    const delta = { x: direction.x * step, y: direction.y * step };
+    if (selection.length > 0 && (canEdit || pending.size > 0)) {
+      const targets = transformTargets('move', selection);
+      if (canEdit && targets.length > 0) {
+        const gesture = {
+          kind: 'move' as const,
+          interactionId: interactionId(),
+          start: { x: 0, y: 0 },
+          targets,
+        };
+        const intent = previewTransform(gesture, delta, {});
+        if (intent?.kind === 'move') {
+          const changes = intent.changes.map((change) => {
+            const object = index.get(change.id);
+            return object?.kind === 'connector'
+              ? { ...change, connection: translateConnection(object.connection, intent.delta) }
+              : change;
+          });
+          onEditIntent({ ...intent, changes });
+        }
+      }
+    } else {
+      props.onViewportNavigation?.('pan');
+      const offset = { x: -delta.x * keyboardPanFactor, y: -delta.y * keyboardPanFactor };
+      update({ viewport: panViewport(read().viewport, offset) }, 'now');
+    }
+    return true;
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.key === 'Process') {
       return;
@@ -813,7 +869,7 @@ export function useCanvasInput({
       return;
     }
 
-    if (handleNavigationKey(event)) {
+    if (handleNavigationKey(event) || handleArrowKey(event)) {
       return;
     }
 

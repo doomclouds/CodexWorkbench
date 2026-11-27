@@ -27,10 +27,33 @@ message FeedbackObjectPoint {
   optional uint64 geometry_version = 4;
 }
 
+message FeedbackDocumentAnchor {
+  repeated string block_ids = 1;
+}
+
+message FeedbackHtmlAnchor {
+  repeated string node_ids = 1;
+  optional uint64 source_revision = 2;
+}
+
+message FeedbackContentPoint {
+  string object_id = 1;
+  double u = 2;
+  double v = 3;
+  optional uint64 geometry_version = 4;
+  optional uint64 payload_version = 5;
+  oneof content {
+    FeedbackDocumentAnchor document = 6;
+    string todo_item_id = 7;
+    FeedbackHtmlAnchor html = 8;
+  }
+}
+
 message FeedbackAnchorTarget {
   oneof target {
     FeedbackPoint board_point = 1;
     FeedbackObjectPoint object_point = 2;
+    FeedbackContentPoint content_point = 3;
   }
 }
 
@@ -50,6 +73,7 @@ message FeedbackAnchor {
   FeedbackPoint frozen_point = 3;
   FeedbackFrozenObject frozen_object = 4;
   bool target_missing = 5;
+  optional string frozen_excerpt = 6;
 }
 
 message FeedbackMessage {

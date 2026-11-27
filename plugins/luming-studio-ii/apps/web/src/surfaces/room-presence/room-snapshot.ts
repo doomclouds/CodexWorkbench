@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import type {
+  BoardRoomAgentWorkspace,
   BoardRoomParticipant,
   BoardRoomSession,
   BoardRoomState,
@@ -38,7 +39,8 @@ function sameChromeMember(current: BoardRoomParticipant, next: BoardRoomParticip
 
 function sameCursorMember(current: BoardRoomParticipant, next: BoardRoomParticipant) {
   const samePoint = current.cursor?.x === next.cursor?.x && current.cursor?.y === next.cursor?.y;
-  return samePoint && sameMember(current, next);
+  const samePublishedCursor = !current.cursor || current.expiresAtMillis === next.expiresAtMillis;
+  return samePoint && samePublishedCursor && sameMember(current, next);
 }
 
 function sameMembers(current: BoardRoomState, next: BoardRoomState, match: MatchParticipant) {
@@ -61,9 +63,62 @@ function sameViewer(current: BoardRoomState, next: BoardRoomState) {
   return current.actorId === next.actorId && current.viewId === next.viewId;
 }
 
+type WorkspaceArea = BoardRoomAgentWorkspace['areas'][number];
+
+function sameWorkspaceArea(current: WorkspaceArea, next: WorkspaceArea) {
+  const a = current.bounds;
+  const b = next.bounds;
+  const sameOrigin = a.x === b.x && a.y === b.y;
+  const sameSize = a.width === b.width && a.height === b.height;
+
+  return current.id === next.id && current.active === next.active && sameOrigin && sameSize;
+}
+
+function sameWorkspace(current: BoardRoomAgentWorkspace, next: BoardRoomAgentWorkspace) {
+  const sameOwner = current.agentId === next.agentId && current.taskId === next.taskId;
+  const sameActivity = current.phase === next.phase && current.generation === next.generation;
+  const sameLabel =
+    current.label === next.label && current.expiresAtUnixMs === next.expiresAtUnixMs;
+
+  return (
+    sameOwner &&
+    sameActivity &&
+    sameLabel &&
+    current.areas.length === next.areas.length &&
+    current.areas.every((area, index) => {
+      const candidate = next.areas[index];
+      return candidate !== undefined && sameWorkspaceArea(area, candidate);
+    })
+  );
+}
+
+function sameAgentWorkspaces(current: BoardRoomState, next: BoardRoomState) {
+  const previous = current.agentWorkspaces;
+  const incoming = next.agentWorkspaces;
+  if (previous === incoming) {
+    return true;
+  }
+  if (!previous || !incoming || previous.length !== incoming.length) {
+    return false;
+  }
+
+  return previous.every((workspace, index) => {
+    const candidate = incoming[index];
+    return (
+      candidate !== undefined && (workspace === candidate || sameWorkspace(workspace, candidate))
+    );
+  });
+}
+
 function sameChrome(current: BoardRoomState, next: BoardRoomState) {
   const sameAccess = current.status === next.status && current.canEdit === next.canEdit;
-  return sameAccess && sameViewer(current, next) && sameMembers(current, next, sameChromeMember);
+  return (
+    sameAccess &&
+    current.canReleaseAgentActivity === next.canReleaseAgentActivity &&
+    sameAgentWorkspaces(current, next) &&
+    sameViewer(current, next) &&
+    sameMembers(current, next, sameChromeMember)
+  );
 }
 
 function sameCursors(current: BoardRoomState, next: BoardRoomState) {

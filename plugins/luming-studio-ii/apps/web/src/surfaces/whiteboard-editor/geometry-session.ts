@@ -13,8 +13,10 @@ import {
 } from '../../ui/domain/canvas/index.js';
 import {
   geometryOperation,
+  pasteOperation,
   selectionForOperation,
   selectionOperation,
+  type BoardClipboardSelection,
   type GeometrySelectionAction,
 } from './geometry-commands.js';
 
@@ -29,6 +31,7 @@ interface GeometryOptions {
   readonly createCommandId: () => string;
   readonly service: GeometryService | undefined;
   readonly objectsById: ReadonlyMap<string, CanvasObject>;
+  readonly payloadVersion: (objectId: string) => bigint | undefined;
   readonly onApplied: (receipt: AppliedEdit, selection?: readonly string[]) => void;
   readonly onConflict: (receipt: ConflictEdit) => void;
 }
@@ -59,6 +62,7 @@ const rejectionDetails: Readonly<Record<BoardEditRejection, string>> = {
   versionUnavailable: '请求的版本已不可用。',
   tooLarge: '这次编辑超出白板允许的范围。',
   invalidImage: '图片内容无法使用。',
+  invalidVideo: '视频内容无法使用。',
   unknown: '服务端拒绝了这次编辑。',
 };
 
@@ -98,6 +102,7 @@ export function useGeometryEdits({
   createCommandId,
   service,
   objectsById,
+  payloadVersion,
   onApplied,
   onConflict,
 }: GeometryOptions) {
@@ -150,8 +155,11 @@ export function useGeometryEdits({
     running.current = true;
     setState({ kind, edit });
     const attempt = kind === 'saving' ? submit(service, edit) : readReceipt(service, edit);
-    attempt
-      .then((result) => complete(edit, result))
+    return attempt
+      .then((result) => {
+        complete(edit, result);
+        return result;
+      })
       .catch((error: unknown) => {
         if (pending.current === edit) {
           complete(edit, { detail: errorDetail(error) });
@@ -184,37 +192,59 @@ export function useGeometryEdits({
         edits,
       };
       pending.current = edit;
-      run(edit, 'saving');
+      return run(edit, 'saving');
     } catch (error) {
       setState({ kind: 'rejected', detail: errorDetail(error) });
     }
   }
 
-  function handleEdit(intent: CanvasEditIntent) {
+  function submitEdit(intent: CanvasEditIntent) {
     if (intent.kind !== 'move') {
-      start((commandId) => geometryOperation(intent, commandId), [intent]);
+      return start((commandId) => geometryOperation(intent, commandId), [intent]);
     }
+  }
+
+  function reportEditFailure(error: unknown) {
+    setState({ kind: 'rejected', detail: errorDetail(error) });
+  }
+
+  function handleEdit(intent: CanvasEditIntent) {
+    submitEdit(intent)?.catch(reportEditFailure);
   }
 
   function handleSelectionAction(action: GeometrySelectionAction, ids: readonly string[]) {
-    const targets =
-      action.kind === 'duplicate' ? expandCanvasSelection([...objectsById.values()], ids) : ids;
+    const expand =
+      action.kind === 'duplicate' ||
+      action.kind === 'arrange' ||
+      action.kind === 'group' ||
+      action.kind === 'ungroup' ||
+      action.kind === 'createSection';
+    const targets = expand ? expandCanvasSelection([...objectsById.values()], ids) : ids;
 
     start(
-      (commandId) => selectionOperation(action, targets, objectsById, revision, commandId),
+      (commandId) =>
+        selectionOperation(action, targets, objectsById, revision, commandId, payloadVersion),
       emptyEdits,
-    );
+    )?.catch(reportEditFailure);
+  }
+
+  function handlePaste(source: BoardClipboardSelection) {
+    start((commandId) => pasteOperation(source, commandId), emptyEdits)?.catch(reportEditFailure);
+  }
+
+  function retryWithReceipt() {
+    if (canEdit && pending.current) {
+      return run(pending.current, 'saving');
+    }
   }
 
   function retryEdit() {
-    if (canEdit && pending.current) {
-      run(pending.current, 'saving');
-    }
+    retryWithReceipt()?.catch(reportEditFailure);
   }
 
   function checkReceipt() {
     if (pending.current) {
-      run(pending.current, 'checking');
+      run(pending.current, 'checking')?.catch(reportEditFailure);
     }
   }
 
@@ -223,8 +253,12 @@ export function useGeometryEdits({
     pendingEdits: 'edit' in state ? state.edit.edits : emptyEdits,
     hasPendingEdit: 'edit' in state,
     handleEdit,
+    submitEdit,
+    reportEditFailure,
     handleSelectionAction,
+    handlePaste,
     retryEdit,
+    retryWithReceipt,
     checkReceipt,
     canRetry: canEdit && Boolean(service),
   };

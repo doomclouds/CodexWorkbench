@@ -3,7 +3,6 @@ import {
   type BoardEditDecision,
   type BoardHeader,
   type BoardSuggestion,
-  type BoardSuggestionChoice,
   type BoardSuggestionOperation,
   type BoardSuggestionOptionDraft,
   type BoardSuggestionOptionRecord,
@@ -12,6 +11,7 @@ import {
   type StoredBoardSuggestion,
 } from '../domain/index.js';
 import type { BoardEditPlanningReader, BoardSuggestionReader } from '../ports/index.js';
+import { createSuggestionOverlay } from './board-suggestion-overlay.js';
 import { planContentEdit } from './edit-content.js';
 import { planGeometryEdit } from './edit-geometry.js';
 
@@ -28,6 +28,7 @@ export class BoardSuggestionError extends Error {
 export const proposalLifetimeMillis = 30n * 60_000n;
 export const suggestionIdentifier = /^[A-Za-z0-9_-]{1,128}$/u;
 const maximumProposalBytes = 256 * 1024;
+const maximumOperations = 60;
 
 function validOption(option: BoardSuggestionOptionDraft): boolean {
   const labelLength = option.label.trim().length;
@@ -48,9 +49,16 @@ export function normalizeOptions(
     throw new BoardSuggestionError(400, '请选择两至四条有效方案。');
   }
 
-  const bytes = options.reduce((total, option) => total + option.edit.bytes.byteLength, 0);
+  const operations = options.flatMap(({ edit, additionalEdits }) => [
+    edit,
+    ...(additionalEdits ?? []),
+  ]);
+  const bytes = operations.reduce((total, edit) => total + edit.bytes.byteLength, 0);
   if (bytes > maximumProposalBytes) {
     throw new BoardSuggestionError(400, '建议内容过大。');
+  }
+  if (options.some(({ additionalEdits }) => (additionalEdits?.length ?? 0) >= maximumOperations)) {
+    throw new BoardSuggestionError(400, '建议方案的操作过多。');
   }
 
   const ids = new Set(options.map(({ optionId }) => optionId));
@@ -70,14 +78,22 @@ export function normalizeOptions(
 function geometryTargets(operation: GeometryOperation): readonly string[] {
   switch (operation.kind) {
     case 'create':
+      return operation.attachment ? [operation.attachment.source.objectId] : [];
+    case 'paste':
       return [];
     case 'transform':
       return operation.objects.map(({ target }) => target.objectId);
     case 'duplicate':
       return operation.targets.map(({ source }) => source.objectId);
+    case 'style':
+      return operation.targets.map(({ target }) => target.objectId);
     case 'lock':
     case 'delete':
     case 'reorder':
+    case 'group':
+    case 'ungroup':
+    case 'arrange':
+    case 'createSection':
       return operation.targets.map(({ objectId }) => objectId);
   }
 }
@@ -88,6 +104,9 @@ export function operationFitsSource(
 ): boolean {
   if (request.kind === 'content') {
     return sourceIds.has(request.operation.objectId);
+  }
+  if (request.operation.kind === 'paste') {
+    return false;
   }
 
   return geometryTargets(request.operation).every((id) => sourceIds.has(id));
@@ -103,16 +122,20 @@ export function planSuggestion(
     : planContentEdit(reader, board, request.operation);
 }
 
-function changesFitSource(changes: BoardChanges, sourceIds: ReadonlySet<string>): boolean {
-  const writtenIds = [
-    ...(changes.objects?.map(({ objectId }) => objectId) ?? []),
-    ...(changes.removedObjectIds ?? []),
-    ...(changes.payloads?.map(({ objectId }) => objectId) ?? []),
-    ...(changes.removedPayloadObjectIds ?? []),
-    ...(changes.layerPlacement?.objectIds ?? []),
+export function suggestionWrittenIds(changes: BoardChanges): readonly string[] {
+  return [
+    ...new Set([
+      ...(changes.objects?.map(({ objectId }) => objectId) ?? []),
+      ...(changes.removedObjectIds ?? []),
+      ...(changes.payloads?.map(({ objectId }) => objectId) ?? []),
+      ...(changes.removedPayloadObjectIds ?? []),
+      ...(changes.layerPlacement?.objectIds ?? []),
+    ]),
   ];
+}
 
-  return writtenIds.every((id) => sourceIds.has(id));
+function changesFitSource(changes: BoardChanges, sourceIds: ReadonlySet<string>): boolean {
+  return suggestionWrittenIds(changes).every((id) => sourceIds.has(id));
 }
 
 function planScopedSuggestion(
@@ -141,43 +164,28 @@ export function changeFingerprint(changes: BoardChanges, digest: (input: string)
   );
 }
 
-export function reviewChoice(
-  reader: BoardSuggestionReader,
+export function planSuggestionOption(
+  reader: BoardEditPlanningReader,
   board: BoardHeader,
-  proposal: StoredBoardSuggestion | undefined,
-  choice: BoardSuggestionChoice,
+  option: BoardSuggestionOptionDraft,
+  sourceIds: ReadonlySet<string>,
   decodeEdit: DecodeBoardSuggestionEdit,
-  now: bigint,
-  digest: (input: string) => string,
 ): BoardEditDecision {
-  const option = proposal?.options.find(({ optionId }) => optionId === choice.optionId);
-  if (!proposal || !option || proposal.expiresAtMillis <= now) {
-    return { kind: 'rejected', reason: 'versionUnavailable' };
-  }
-  if (proposal.proposalVersion !== choice.expectedProposalVersion) {
-    return { kind: 'conflict', boardRevision: board.revision };
-  }
-  if (proposal.rejected || proposal.acceptedOptionId) {
-    return { kind: 'rejected', reason: 'invalidEdit' };
+  if (!option.additionalEdits?.length) {
+    return planScopedSuggestion(reader, board, decodeEdit(option.edit), sourceIds);
   }
 
-  const source = reader.getReviewSource(board.boardId, proposal.sourceId);
-  if (!source) {
-    return { kind: 'rejected', reason: 'forbidden' };
+  const staged = createSuggestionOverlay(reader, board.boardId, true);
+  for (const edit of [option.edit, ...option.additionalEdits]) {
+    const decision = planScopedSuggestion(staged.reader, board, decodeEdit(edit), sourceIds);
+    if (decision.kind !== 'changes') {
+      return decision;
+    }
+
+    staged.stage(decision);
   }
 
-  const plan = planScopedSuggestion(
-    reader,
-    board,
-    decodeEdit(option.edit),
-    new Set(source.objectIds),
-  );
-
-  if (plan.kind === 'changes' && changeFingerprint(plan, digest) !== option.plannedFingerprint) {
-    return { kind: 'conflict', boardRevision: board.revision };
-  }
-
-  return plan;
+  return staged.changes();
 }
 
 export function publicSuggestion(proposal: StoredBoardSuggestion): BoardSuggestion {
@@ -198,6 +206,9 @@ export function publicSuggestion(proposal: StoredBoardSuggestion): BoardSuggesti
     acceptedOptionId,
     acceptedBoardRevision,
     rejected,
+    activeOptionIds:
+      proposal.reviewState?.applications.map(({ optionId }) => optionId) ??
+      (acceptedOptionId ? [acceptedOptionId] : []),
   };
 }
 
@@ -208,6 +219,7 @@ export function firstSubmission(proposal: StoredBoardSuggestion): BoardSuggestio
     acceptedOptionId: undefined,
     acceptedBoardRevision: undefined,
     rejected: false,
+    activeOptionIds: [],
   };
 }
 
@@ -220,8 +232,7 @@ export function planDraftOptions(
   digest: (input: string) => string,
 ): readonly BoardSuggestionOptionRecord[] {
   return options.map((option) => {
-    const operation = decodeEdit(option.edit);
-    const decision = planScopedSuggestion(reader, board, operation, sourceIds);
+    const decision = planSuggestionOption(reader, board, option, sourceIds, decodeEdit);
     if (decision.kind === 'rejected' && decision.reason === 'forbidden') {
       throw new BoardSuggestionError(403, '建议操作超出已附加的白板对象。');
     }
@@ -229,6 +240,13 @@ export function planDraftOptions(
       throw new BoardSuggestionError(409, '建议方案的目标、基线或权限已变化。');
     }
 
-    return { ...option, plannedFingerprint: changeFingerprint(decision, digest) };
+    return {
+      ...option,
+      plannedFingerprint: changeFingerprint(decision, digest),
+      footprint: {
+        objectIds: suggestionWrittenIds(decision),
+        editsOrder: !!decision.order || !!decision.removedObjectIds?.length,
+      },
+    };
   });
 }

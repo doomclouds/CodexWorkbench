@@ -1,6 +1,7 @@
 import type {
   BoardExportAsset,
   BoardExportRejection,
+  ExportRenderCommand,
   JsonValue,
   PayloadRecord,
 } from '../domain/index.js';
@@ -51,8 +52,9 @@ function embedAssets(sources: Set<string>, markup: JsonValue | undefined) {
   }
 }
 
-function collectSources(payloads: readonly PayloadRecord[], format: 'json' | 'svg') {
+function collectSources(payloads: readonly PayloadRecord[], format: ExportRenderCommand['format']) {
   const sources = new Set<string>();
+  const fullContent = format === 'json' || format === 'html';
 
   for (const { bodyKind, data } of payloads) {
     switch (bodyKind) {
@@ -61,19 +63,17 @@ function collectSources(payloads: readonly PayloadRecord[], format: 'json' | 'sv
         break;
       case 'video':
         addAssetSource(sources, data.poster);
-        if (format === 'json') {
+        if (fullContent) {
           addAssetSource(sources, data.src);
         }
         break;
       case 'document':
-        if (format === 'json') {
+        if (fullContent) {
           documentAssets(sources, data.blocks);
         }
         break;
       case 'embed':
-        if (format === 'json') {
-          embedAssets(sources, data.html);
-        }
+        embedAssets(sources, data.html);
     }
   }
 
@@ -86,7 +86,7 @@ export function captureExportAssets(
   reader: WhiteboardReader,
   boardId: string,
   payloads: readonly PayloadRecord[],
-  format: 'json' | 'svg',
+  format: ExportRenderCommand['format'],
 ): ExportAssets | BoardExportRejection {
   const assets = new Map<string, BoardExportAsset>();
   let remaining = maxAssetBytes;

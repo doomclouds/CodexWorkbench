@@ -1,11 +1,12 @@
 import type {
   AttachBoardImageCommand,
+  AttachBoardVideoCommand,
   BoardEditReceipt,
   WhiteboardGeometry,
   WhiteboardPoint,
 } from '../../data/whiteboard/index.js';
 import type { CanvasViewport } from '../../ui/domain/canvas/index.js';
-import type { PreparedBoardImage } from './contracts.js';
+import type { PreparedBoardMedia } from './contracts.js';
 
 const maximumBoardWidth = 480;
 const maximumBoardHeight = 360;
@@ -15,28 +16,33 @@ type BoardMediaRejection = Extract<BoardEditReceipt, { kind: 'rejected' }>['reas
 const rejectionMessages: Partial<Record<BoardMediaRejection, string>> = {
   forbidden: '当前没有编辑白板的权限。',
   invalidImage: '白板服务无法读取这张图片。请重新选取文件。',
-  tooLarge: '图片大小或像素尺寸超出白板上限。',
-  commandIdReuse: '图片保存记录冲突，请重新放置后再保存。',
+  invalidVideo: '白板服务无法读取该视频。请重新选取文件。',
+  tooLarge: '媒体大小或图片像素尺寸超出白板上限。',
+  commandIdReuse: '媒体保存记录冲突，请重新放置后再保存。',
 };
 
-type Pending = { readonly image: PreparedBoardImage; readonly command: AttachBoardImageCommand };
+export type AttachMediaCommand = AttachBoardImageCommand | AttachBoardVideoCommand;
+export interface PendingMedia {
+  readonly image: PreparedBoardMedia;
+  readonly command: AttachMediaCommand;
+}
 type MediaSaveFailure = { readonly kind: 'uncertain' | 'rejected'; readonly message: string };
 
 export type BoardMediaState =
   | { readonly kind: 'idle' | 'reading' }
   | { readonly kind: 'readFailed'; readonly message: string }
-  | { readonly kind: 'placing'; readonly image: PreparedBoardImage }
-  | ({ readonly kind: 'saving' } & Pending)
-  | (MediaSaveFailure & Pending);
+  | { readonly kind: 'placing'; readonly image: PreparedBoardMedia }
+  | ({ readonly kind: 'saving' } & PendingMedia)
+  | (MediaSaveFailure & PendingMedia);
 
-export function imageBoardSize(image: PreparedBoardImage) {
+export function imageBoardSize(image: PreparedBoardMedia) {
   const scale = Math.min(1, maximumBoardWidth / image.width, maximumBoardHeight / image.height);
 
   return { width: image.width * scale, height: image.height * scale };
 }
 
 export function worldGeometry(
-  image: PreparedBoardImage,
+  image: PreparedBoardMedia,
   screen: WhiteboardPoint,
   viewport: CanvasViewport,
 ): WhiteboardGeometry {
@@ -54,20 +60,25 @@ export function previewAtGeometry(geometry: WhiteboardGeometry, viewport: Canvas
   };
 }
 
-export function rejectedImageMessage(receipt: Exclude<BoardEditReceipt, { kind: 'applied' }>) {
+export function rejectedMediaMessage(
+  receipt: Exclude<BoardEditReceipt, { kind: 'applied' }>,
+  media: string,
+) {
   return receipt.kind === 'rejected'
-    ? (rejectionMessages[receipt.reason] ?? '这张图片未加入白板。请重新放置后再保存。')
-    : '白板已发生变更。请重新放置图片。';
+    ? (rejectionMessages[receipt.reason] ?? media + '未加入白板。请重新放置后再保存。')
+    : '白板已发生变更。请重新放置' + media + '。';
 }
 
-export function matchesImageReceipt(command: AttachBoardImageCommand, receipt: BoardEditReceipt) {
+export function matchesMediaReceipt(command: AttachMediaCommand, receipt: BoardEditReceipt) {
   if (receipt.boardId !== command.boardId || receipt.commandId !== command.commandId) {
     return false;
   }
 
+  const kind = 'mediaType' in command ? 'video' : 'image';
+
   return (
     receipt.kind !== 'applied' ||
-    receipt.objects.some((object) => object.id === command.objectId && object.kind === 'image')
+    receipt.objects.some((object) => object.id === command.objectId && object.kind === kind)
   );
 }
 

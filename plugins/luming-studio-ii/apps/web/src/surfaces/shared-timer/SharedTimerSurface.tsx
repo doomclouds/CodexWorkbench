@@ -33,9 +33,14 @@ interface TimerControlsProps extends SharedTimerSurfaceProps {
 const statuses = { idle: '待开始', running: '计时中', paused: '已暂停', ended: '已结束' };
 const actions = { idle: '开始', running: '暂停', paused: '继续', ended: '开始' };
 const minuteMs = minute * milliseconds;
+const maxWholeMinuteSeconds = maxSeconds - (maxSeconds % minute);
 
-function isDuration(seconds: number, minimumSeconds = 1) {
-  return seconds >= minimumSeconds && seconds <= maxSeconds;
+function isDuration(seconds: number) {
+  return seconds >= 1 && seconds <= maxSeconds;
+}
+
+function isWholeMinuteDuration(seconds: number) {
+  return seconds >= minute && seconds <= maxWholeMinuteSeconds;
 }
 
 function TimerAdjusters({
@@ -118,80 +123,83 @@ function TimerPopover({
       anchor={anchor}
       open={open}
       label="共享计时器"
+      align="end"
       persistent
       onRequestClose={onDismiss}
     >
-      {timer ? (
-        <div className="whiteboard-shared-timer__layout" data-readonly={!writable || undefined}>
-          {writable && (
-            <button
-              type="button"
-              data-timer-action
-              className="whiteboard-shared-timer__play"
-              aria-label={actions[phase]}
-              disabled={blocked}
-              onClick={onPlay}
-            >
-              {running ? (
-                <Pause size={22} fill="currentColor" />
-              ) : (
-                <Play size={22} fill="currentColor" />
-              )}
-            </button>
-          )}
-          <div className="whiteboard-shared-timer__face">
-            {editable ? (
-              <TimerEntry entry={entry} disabled={blocked} />
-            ) : (
-              <output aria-label="剩余时间">
-                <TimerDigits digits={digits} ended={phase === 'ended'} />
-              </output>
+      <div className="whiteboard-shared-timer__panel">
+        {timer ? (
+          <div className="whiteboard-shared-timer__layout" data-readonly={!writable || undefined}>
+            {writable && (
+              <button
+                type="button"
+                data-timer-action
+                className="whiteboard-shared-timer__play"
+                aria-label={actions[phase]}
+                disabled={blocked}
+                onClick={onPlay}
+              >
+                {running ? (
+                  <Pause size={22} fill="currentColor" />
+                ) : (
+                  <Play size={22} fill="currentColor" />
+                )}
+              </button>
             )}
-          </div>
-          {writable && (
-            <div className="whiteboard-shared-timer__slot">
-              {paused ? (
-                <button
-                  type="button"
-                  data-timer-action
-                  className="whiteboard-shared-timer__reset"
-                  aria-label="重置"
-                  title={'重置为 ' + timerDigits(timer.durationMs / milliseconds).join(':')}
-                  disabled={blocked}
-                  onClick={onReset}
-                >
-                  <RotateCcw size={21} />
-                </button>
+            <div className="whiteboard-shared-timer__face">
+              {editable ? (
+                <TimerEntry entry={entry} disabled={blocked} />
               ) : (
-                <TimerAdjusters
-                  canIncrease={canAdjust(1)}
-                  canDecrease={canAdjust(-1)}
-                  onAdjust={onAdjust}
-                />
+                <output aria-label="剩余时间">
+                  <TimerDigits digits={digits} ended={phase === 'ended'} />
+                </output>
               )}
             </div>
-          )}
-        </div>
-      ) : null}
-      {status !== 'online' && <StatusText message={connectionNotice} announcement="polite" />}
-      {commands.busy && <StatusText message="正在核对计时命令…" announcement="polite" busy />}
-      {commands.notice && (
-        <StatusText message={commands.notice} announcement="polite" tone="error" />
-      )}
-      {commands.recovering && writable && (
-        <div className="whiteboard-shared-timer__recovery">
-          <Button label="核对原回执" disabled={commands.busy} onActivate={commands.handleCheck} />
-          <Button label="重试原命令" disabled={commands.busy} onActivate={commands.handleRetry} />
-        </div>
-      )}
-      {timer && (
-        <span className="whiteboard-shared-timer__status" aria-label="计时状态">
-          {statuses[phase]}
+            {writable && (
+              <div className="whiteboard-shared-timer__slot">
+                {paused ? (
+                  <button
+                    type="button"
+                    data-timer-action
+                    className="whiteboard-shared-timer__reset"
+                    aria-label="重置"
+                    title={'重置为 ' + timerDigits(timer.durationMs / milliseconds).join(':')}
+                    disabled={blocked}
+                    onClick={onReset}
+                  >
+                    <RotateCcw size={21} />
+                  </button>
+                ) : (
+                  <TimerAdjusters
+                    canIncrease={canAdjust(1)}
+                    canDecrease={canAdjust(-1)}
+                    onAdjust={onAdjust}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        ) : null}
+        {status !== 'online' && <StatusText message={connectionNotice} announcement="polite" />}
+        {commands.busy && <StatusText message="正在核对计时命令…" announcement="polite" busy />}
+        {commands.notice && (
+          <StatusText message={commands.notice} announcement="polite" tone="error" />
+        )}
+        {commands.recovering && writable && (
+          <div className="whiteboard-shared-timer__recovery">
+            <Button label="核对原回执" disabled={commands.busy} onActivate={commands.handleCheck} />
+            <Button label="重试原命令" disabled={commands.busy} onActivate={commands.handleRetry} />
+          </div>
+        )}
+        {timer && (
+          <span className="whiteboard-shared-timer__status" aria-label="计时状态">
+            {statuses[phase]}
+          </span>
+        )}
+        <span className="whiteboard-shared-timer__status" aria-live="polite">
+          {entry.message}
         </span>
-      )}
-      <span className="whiteboard-shared-timer__status" aria-live="polite">
-        {entry.message}
-      </span>
+      </div>
     </AnchoredPopover>
   );
 }
@@ -288,7 +296,7 @@ function TimerControls({ session, state, createCommandId }: TimerControlsProps) 
       return isDuration((timerRemaining(timer, now) + direction * minuteMs) / milliseconds);
     }
 
-    return phase === 'idle' && isDuration(adjustedIdleSeconds(seconds, direction), minute);
+    return phase === 'idle' && isWholeMinuteDuration(adjustedIdleSeconds(seconds, direction));
   }
 
   function handleAdjust(direction: number) {
@@ -309,7 +317,7 @@ function TimerControls({ session, state, createCommandId }: TimerControlsProps) 
 
     if (current === 'idle') {
       const duration = adjustedIdleSeconds(timer.durationMs / milliseconds, direction);
-      if (isDuration(duration, minute)) {
+      if (isWholeMinuteDuration(duration)) {
         saveDuration(duration, false);
       }
     }

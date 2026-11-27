@@ -1,10 +1,16 @@
 import {
   BoardRoomService,
+  BoardRoomGestureKind,
   type ChangeBoardTimerRequest,
   type UpdateBoardPresenceRequest,
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
-import type { RoomsApplication, TimerAction } from '../../modules/rooms/application/index.js';
+import type {
+  GesturePreview,
+  RoomsApplication,
+  TimerAction,
+} from '../../modules/rooms/application/index.js';
 import { HttpRequestError, requireId } from './request.js';
+import { agentActivityRoute } from './room-agent-activity.js';
 import { eventWire, receiptWire } from './room-route-wire.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
@@ -51,8 +57,41 @@ function actionOf(action: ChangeBoardTimerRequest['action']): TimerAction {
   }
 }
 
+const gestureKinds = new Map<BoardRoomGestureKind, GesturePreview['kind']>([
+  [BoardRoomGestureKind.MOVE, 'move'],
+  [BoardRoomGestureKind.RESIZE, 'resize'],
+  [BoardRoomGestureKind.ROTATE, 'rotate'],
+]);
+
+function readGesture(wire: UpdateBoardPresenceRequest['gesture']): GesturePreview | undefined {
+  if (!wire) {
+    return;
+  }
+
+  const kind = gestureKinds.get(wire.kind);
+  if (!kind) {
+    throw new HttpRequestError(400, 'Unsupported room gesture');
+  }
+
+  return {
+    kind,
+    changes: wire.changes.map(({ objectId, expectedGeometryVersion, geometry }) => {
+      if (!geometry) {
+        throw new HttpRequestError(400, 'A room gesture requires object geometry');
+      }
+
+      const { x, y, width, height, rotation } = geometry;
+      return {
+        objectId: roomId(objectId),
+        expectedGeometryVersion: requireVersion(expectedGeometryVersion),
+        geometry: { x, y, width, height, rotation },
+      };
+    }),
+  };
+}
+
 function readPresence(request: UpdateBoardPresenceRequest) {
-  const { viewId, sequence, cursor, viewport, following } = request;
+  const { viewId, sequence, cursor, viewport, following, gesture } = request;
 
   return {
     viewId: roomId(viewId),
@@ -66,11 +105,13 @@ function readPresence(request: UpdateBoardPresenceRequest) {
       height: viewport.height,
     },
     following,
+    gesture: readGesture(gesture),
   };
 }
 
 export function createRoomRoutes(application: RoomsApplication): readonly RouteEntry[] {
   return [
+    agentActivityRoute(application),
     unaryRoute(getBoardRoom, (actor, request) => ({
       event: eventWire(application.snapshot(roomId(request.boardId), actor.id)),
     })),

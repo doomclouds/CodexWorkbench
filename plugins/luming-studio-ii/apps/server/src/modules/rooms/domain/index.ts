@@ -1,4 +1,27 @@
 export type {
+  AgentActivityArea,
+  AgentActivityBounds,
+  AgentActivityEndReason,
+  AgentActivityOperation,
+  AgentActivityPhase,
+  AgentActivityResult,
+  AgentActivityScope,
+  AgentWorkspace,
+  BeginAgentActivity,
+  UpdateAgentActivity,
+} from './agent-activity.js';
+export {
+  maxAgentActivityObjects,
+  normalizedActivityScope,
+  overlappingWorkspaces,
+  projectedActivityAreas,
+  sameActivityScope,
+  validActivityObjectIds,
+  validActivityPhase,
+  validAgentActivityId,
+} from './agent-activity.js';
+export type {
+  GesturePreview,
   Participant,
   ParticipantChanges,
   ParticipantKey,

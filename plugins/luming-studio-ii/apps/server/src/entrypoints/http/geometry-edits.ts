@@ -1,7 +1,10 @@
 import { toJson } from '@bufbuild/protobuf';
 import {
+  BoardArrangePreset,
   BoardLayerDirection,
   BoardTransformKind,
+  type BoardCreationAttachment as WireCreationAttachment,
+  type BoardObjectStylePatch,
   type CreateBoardObject,
   type EditBoardGeometryRequest,
   type EditBoardTarget,
@@ -9,6 +12,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import {
   ObjectPayloadSchema,
+  TextAlignment,
   type ObjectPayload,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/payload';
 import {
@@ -22,6 +26,7 @@ import {
   type Point as WirePoint,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
 import type {
+  BoardCreationAttachment,
   BoardObject,
   ConnectorDetail,
   ConnectorEndpoint,
@@ -40,6 +45,23 @@ import type {
 import { HttpRequestError, requireId } from './request.js';
 
 type Axis = NonNullable<ConnectorDetail['relativeBends']>['firstAxis'];
+type Arrange = Extract<GeometryOperation, { kind: 'arrange' }>;
+type Style = Extract<GeometryOperation, { kind: 'style' }>;
+
+const arrangePresets = new Map<BoardArrangePreset, Arrange['preset']>([
+  [BoardArrangePreset.TIDY, 'tidy'],
+  [BoardArrangePreset.LEFT, 'left'],
+  [BoardArrangePreset.HCENTER, 'hcenter'],
+  [BoardArrangePreset.RIGHT, 'right'],
+  [BoardArrangePreset.TOP, 'top'],
+  [BoardArrangePreset.VCENTER, 'vcenter'],
+  [BoardArrangePreset.BOTTOM, 'bottom'],
+]);
+const alignments = new Map<TextAlignment, string>([
+  [TextAlignment.LEFT, 'TEXT_ALIGNMENT_LEFT'],
+  [TextAlignment.CENTER, 'TEXT_ALIGNMENT_CENTER'],
+  [TextAlignment.RIGHT, 'TEXT_ALIGNMENT_RIGHT'],
+]);
 
 const transformKinds = new Map<BoardTransformKind, GeometryTransformKind>([
   [BoardTransformKind.RESIZE, 'resize'],
@@ -218,6 +240,15 @@ function readInitialPayload(
   return { objectId, payloadVersion: value.payloadVersion ?? 0n, bodyKind, data };
 }
 
+function readCreationAttachment(value: WireCreationAttachment): BoardCreationAttachment {
+  return {
+    source: readTarget(value.source),
+    sourcePort: requireField(ports.get(value.sourcePort), 'Source port'),
+    targetPort: requireField(ports.get(value.targetPort), 'Target port'),
+    connectorId: requireId(value.connectorId),
+  };
+}
+
 function readCreate(value: CreateBoardObject): GeometryOperation {
   const object = readCreatedObject(value.object);
 
@@ -225,6 +256,7 @@ function readCreate(value: CreateBoardObject): GeometryOperation {
     kind: 'create',
     object,
     payload: readInitialPayload(object.objectId, value.initialPayload),
+    attachment: value.attachment && readCreationAttachment(value.attachment),
   };
 }
 
@@ -236,6 +268,33 @@ function readTransform(change: TransformBoardObject): GeometryObjectChange {
     geometry: readGeometry(geometry),
     connector: connector && readConnector(connector),
     ink: ink?.points.map(readPoint),
+  };
+}
+
+function readStyle(value: BoardObjectStylePatch | undefined): Style['patch'] {
+  const patch = requireField(value, 'Style patch');
+  const { textAlign, startHead, endHead } = patch;
+
+  return {
+    fill: patch.fill,
+    stroke: patch.stroke,
+    strokeWidth: patch.strokeWidth,
+    dashed: patch.dashed,
+    hollow: patch.hollow,
+    textColor: patch.textColor,
+    fontFamily: patch.fontFamily,
+    fontSize: patch.fontSize,
+    shapeForm: patch.shapeForm,
+    label: patch.label,
+    bold: patch.bold,
+    italic: patch.italic,
+    textAlign:
+      textAlign === undefined
+        ? undefined
+        : requireField(alignments.get(textAlign), 'Text alignment'),
+    startHead:
+      startHead === undefined ? undefined : requireField(heads.get(startHead), 'Start head'),
+    endHead: endHead === undefined ? undefined : requireField(heads.get(endHead), 'End head'),
   };
 }
 
@@ -278,6 +337,51 @@ export function readGeometryOperation({ operation }: EditBoardGeometryRequest): 
           source: readTarget(source),
           newObjectId: requireId(newObjectId),
         })),
+      };
+    }
+    case 'group':
+      return {
+        kind: 'group',
+        groupId: requireId(operation.value.groupId),
+        targets: operation.value.targets.map(readTarget),
+      };
+    case 'ungroup':
+      return { kind: 'ungroup', targets: operation.value.targets.map(readTarget) };
+    case 'createSection':
+      return {
+        kind: 'createSection',
+        sectionId: requireId(operation.value.sectionId),
+        title: operation.value.title,
+        targets: operation.value.targets.map(readTarget),
+      };
+    case 'arrange':
+      return {
+        kind: 'arrange',
+        preset: requireField(arrangePresets.get(operation.value.preset), 'Arrange preset'),
+        targets: operation.value.targets.map(readTarget),
+      };
+    case 'style':
+      return {
+        kind: 'style',
+        patch: readStyle(operation.value.patch),
+        targets: operation.value.targets.map(({ target, expectedPayloadVersion }) => ({
+          target: readTarget(target),
+          expectedPayloadVersion,
+        })),
+      };
+    case 'paste': {
+      const { sourceBoardId, sourceRevision, targets, delta } = operation.value;
+      const { dx, dy } = requireField(delta, 'Paste offset');
+
+      return {
+        kind: 'paste',
+        sourceBoardId: requireId(sourceBoardId),
+        sourceRevision: requireField(sourceRevision, 'Source revision'),
+        targets: targets.map(({ sourceObjectId, objectId }) => ({
+          sourceObjectId: requireId(sourceObjectId),
+          objectId: requireId(objectId),
+        })),
+        delta: { dx, dy },
       };
     }
     case undefined:

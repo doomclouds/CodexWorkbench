@@ -13,6 +13,7 @@ import type {
   EmbedKind,
   EmbedNavigationEvent,
   EmbedObjectValue,
+  EmbedSelection,
   EmbedSourceDraft,
 } from './contracts.js';
 import { isEmbedJson } from './state.js';
@@ -71,6 +72,10 @@ function preferNewer(
   return latestSource >= currentSource ? latest : current;
 }
 
+function fraction(value: number, start: number, size: number) {
+  return size > 0 ? Math.max(0, Math.min(1, (value - start) / size)) : 0.5;
+}
+
 function CanvasEmbedView(props: CanvasObjectViewProps) {
   const {
     object,
@@ -84,6 +89,8 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
     request,
     onNavigation,
     onRetentionChange,
+    annotationActive,
+    onAnnotateContent,
   } = props;
   const known = useMemo(() => readProjection(payload, id), [id, payload]);
   const [accepted, setAccepted] = useState<EmbedProjection>();
@@ -146,18 +153,44 @@ function CanvasEmbedView(props: CanvasObjectViewProps) {
     }
   }
 
+  function handleContentSelection(selection: EmbedSelection) {
+    if (!onAnnotateContent) {
+      return;
+    }
+
+    const bounds = host.current?.getBoundingClientRect();
+    const { screenPoint, sourceRevision, targetIds } = selection;
+    if (targetIds.length === 0 && !screenPoint) {
+      return;
+    }
+
+    const u = bounds && screenPoint ? fraction(screenPoint.x, bounds.left, bounds.width) : 0.5;
+    const v = bounds && screenPoint ? fraction(screenPoint.y, bounds.top, bounds.height) : 0.5;
+    const target =
+      targetIds.length > 0
+        ? { kind: 'html' as const, nodeIds: targetIds, sourceRevision: BigInt(sourceRevision) }
+        : { kind: 'object' as const };
+    onAnnotateContent({
+      target,
+      u,
+      v,
+    });
+  }
+
   return (
     <div className="studio-ui-embed__canvas-view" ref={host}>
       <EmbedObject
         kind={kind}
         value={value}
         interactive={interactive}
+        annotation={Boolean(annotationActive && onAnnotateContent)}
         editRequest={editRequest}
         useCanvasTools
         readHtmlSource={readHtmlSource}
         zoom={zoom}
         preserveScroll
         onNavigation={onNavigation ? handleNavigation : undefined}
+        onSelection={onAnnotateContent ? handleContentSelection : undefined}
         onRetentionChange={onRetentionChange}
         onSaveState={readOnly ? undefined : saveState}
         onSaveSource={readOnly ? undefined : saveSource}

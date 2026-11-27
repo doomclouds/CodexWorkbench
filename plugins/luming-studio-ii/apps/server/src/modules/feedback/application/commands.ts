@@ -1,4 +1,4 @@
-import { freezeFeedbackAnchor } from '../domain/index.js';
+import { freezeFeedbackAnchor, validFeedbackContentUnit } from '../domain/index.js';
 import type {
   FeedbackActor,
   FeedbackAnchorTarget,
@@ -13,7 +13,7 @@ import type {
 import type { FeedbackRepository, FeedbackWriter } from '../ports/index.js';
 import { canDeleteThread, requireWriteAccess } from './access.js';
 
-const maximumTextLength = 4_000;
+const maximumTextLength = 16_000;
 
 type CreateOperation = Extract<FeedbackOperation, { readonly kind: 'create' }>;
 type ReplyOperation = Extract<FeedbackOperation, { readonly kind: 'reply' }>;
@@ -60,6 +60,22 @@ function timestamp(now: () => number, previous = 0n): bigint {
 function anchorSignature(target: FeedbackAnchorTarget): readonly unknown[] {
   if (target.kind === 'board') {
     return [target.kind, String(target.point.x), String(target.point.y)];
+  }
+
+  if (target.kind === 'content') {
+    const unit = target.content;
+    const value =
+      unit.kind === 'html' ? { ...unit, sourceRevision: unit.sourceRevision.toString() } : unit;
+
+    return [
+      target.kind,
+      target.objectId,
+      String(target.u),
+      String(target.v),
+      target.geometryVersion.toString(),
+      target.payloadVersion.toString(),
+      value,
+    ];
   }
 
   return [
@@ -135,8 +151,14 @@ function createThread(context: CommandContext, operation: CreateOperation): Feed
 
   const { writer, boardId, now } = context;
   const target = operation.anchor;
-  const object = target.kind === 'object' ? writer.getObject(boardId, target.objectId) : undefined;
-  const anchor = freezeFeedbackAnchor(writer.getBoardRevision(boardId), target, object);
+  if (target.kind === 'content' && !validFeedbackContentUnit(target.content)) {
+    return { kind: 'rejected', reason: 'invalidAnchor' };
+  }
+
+  const object = target.kind === 'board' ? undefined : writer.getObject(boardId, target.objectId);
+  const content =
+    target.kind === 'content' && object ? writer.getContentSource(boardId, target) : undefined;
+  const anchor = freezeFeedbackAnchor(writer.getBoardRevision(boardId), target, object, content);
   if ('kind' in anchor) {
     return anchor;
   }

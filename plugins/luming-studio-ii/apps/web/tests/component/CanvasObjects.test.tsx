@@ -603,7 +603,7 @@ describe('Canvas object extensions', () => {
       onObjectIntent,
     };
     const { root } = renderCanvas(props);
-    await clickNamedButton(root, '编辑清单标题');
+    await clickNamedButton(root, '编辑清单标题：交付清单');
 
     const title = root.querySelector<HTMLInputElement>('input[type="text"]');
     const value = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');

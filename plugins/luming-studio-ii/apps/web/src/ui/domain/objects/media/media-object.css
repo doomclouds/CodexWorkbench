@@ -57,7 +57,7 @@
   text-align: center;
 }
 
-dialog:has(.luming-image-crop) {
+dialog:has(.luming-image-crop, .luming-link-dialog) {
   --studio-ui-surface: var(--color-background-primary, light-dark(#ffffff, #242528));
   --studio-ui-text: var(--color-text-primary, light-dark(#2d3142, #ecebed));
   --studio-ui-muted: var(--color-text-secondary, light-dark(#707784, #a6a8b0));
@@ -77,6 +77,27 @@ dialog:has(.luming-image-crop) {
   --studio-ui-backdrop: rgb(20 24 33 / 28%);
   inline-size: min(660px, calc(100% - 44px));
   max-block-size: calc(100dvh - 44px);
+}
+
+dialog:has(.luming-link-dialog) {
+  inline-size: min(430px, calc(100% - 44px));
+}
+
+.luming-link-dialog {
+  display: grid;
+  gap: 13px;
+}
+
+.luming-link-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-block-start: 7px;
+}
+
+.luming-link-dialog__actions > button {
+  padding: 8px 13px;
+  font-size: 12px;
 }
 
 .luming-image-crop {

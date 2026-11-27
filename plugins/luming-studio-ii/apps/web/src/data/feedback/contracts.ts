@@ -3,17 +3,36 @@ export interface FeedbackPoint {
   readonly y: number;
 }
 
-export interface FeedbackObjectTarget {
-  readonly kind: 'object';
+interface FeedbackObjectPosition {
   readonly objectId: string;
   readonly u: number;
   readonly v: number;
   readonly geometryVersion: bigint;
 }
 
+export interface FeedbackObjectTarget extends FeedbackObjectPosition {
+  readonly kind: 'object';
+}
+
+export type FeedbackContentUnit =
+  | { readonly kind: 'document'; readonly blockIds: readonly string[] }
+  | { readonly kind: 'todo'; readonly itemId: string }
+  | {
+      readonly kind: 'html';
+      readonly nodeIds: readonly string[];
+      readonly sourceRevision: bigint;
+    };
+
+export interface FeedbackContentTarget extends FeedbackObjectPosition {
+  readonly kind: 'content';
+  readonly payloadVersion: bigint;
+  readonly content: FeedbackContentUnit;
+}
+
 export type FeedbackTarget =
   | { readonly kind: 'board'; readonly point: FeedbackPoint }
-  | FeedbackObjectTarget;
+  | FeedbackObjectTarget
+  | FeedbackContentTarget;
 
 export interface FrozenFeedbackObject extends FeedbackPoint {
   readonly kind: string;
@@ -28,6 +47,7 @@ export interface FeedbackAnchor {
   readonly sourceRevision: bigint;
   readonly frozenPoint: FeedbackPoint;
   readonly frozenObject?: FrozenFeedbackObject;
+  readonly frozenExcerpt?: string;
   readonly targetMissing: boolean;
 }
 

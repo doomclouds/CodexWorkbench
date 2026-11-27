@@ -4,7 +4,9 @@ import {
   BoardSuggestionService,
   type BoardSuggestionSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
+import { act } from 'react';
 import { expect, test } from 'vitest';
+import type { BoardFeedbackService } from '../../src/data/feedback/index.js';
 import {
   createSuggestionService,
   type AttachedReviewSource,
@@ -42,6 +44,48 @@ const frozenTarget = {
   geometry: { x: 40, y: 40, width: 120, height: 80, rotation: 0 },
 };
 
+const notePoint = { x: 50, y: 40 };
+const note = {
+  id: 'owner-note',
+  status: 'open',
+  anchor: {
+    target: { kind: 'board', point: notePoint },
+    sourceRevision: 0n,
+    frozenPoint: notePoint,
+    targetMissing: false,
+  },
+  first: {
+    id: 'owner-message',
+    authorId: 'owner',
+    authoredByViewer: true,
+    text: '作者筛选仍然适用',
+    createdAt: 0,
+    updatedAt: 0,
+    version: 0n,
+    canEdit: true,
+  },
+  version: 0n,
+  updatedAt: 0,
+  replyCount: 0,
+  canResolve: true,
+  canDelete: true,
+} as const;
+
+const feedbackService = {
+  async listThreads() {
+    return { items: [note], canWrite: true };
+  },
+  async getThread() {
+    return { thread: note, items: [], canWrite: true };
+  },
+  async apply() {
+    throw new Error('Unexpected note edit during suggestion review.');
+  },
+  async getReceipt() {
+    return undefined;
+  },
+} satisfies BoardFeedbackService;
+
 function route(method: DescMethodUnary): string {
   return '/' + method.parent.typeName + '/' + method.name;
 }
@@ -63,6 +107,7 @@ function createSuggestionRpc() {
             ...suggestion,
             acceptedOptionId: 'move-right',
             acceptedBoardRevision: 1n,
+            activeOptionIds: ['move-right'],
             proposalVersion: 1n,
           }
         : suggestion;
@@ -143,13 +188,14 @@ function rectangle(stage: ParentNode) {
   return target;
 }
 
-test('opens review from WhiteboardApp, freezes the chosen source, previews and applies the acknowledged change', async () => {
+test('opens suggestions inside the notes panel, filters by author, previews and applies the acknowledged change', async () => {
   const rpc = createSuggestionRpc();
   const editService = createWhiteboardEditService(rpc.post);
   const suggestions = createSuggestionService(rpc.post, editService);
   type Attachment = AttachedReviewSource & { readonly boardId: string };
   const attached: Attachment[] = [];
   const app = createAppMock(rpc.post, {
+    feedbackService,
     suggestions,
     async onAttachReviewSource(reference) {
       attached.push(reference);
@@ -161,8 +207,34 @@ test('opens review from WhiteboardApp, freezes the chosen source, previews and a
     const shape = rectangle(app.canvas());
     expect(shape.style.left).toBe('40px');
     await app.drag({ x: 55, y: 55 }, { x: 55, y: 55 }, shape);
-    await app.click('私人建议');
+    expect(app.host.querySelector('button[aria-label="私人建议"]')).toBeNull();
+    await app.click('备注列表');
+    const panel = app.host.querySelector('[aria-label="所有备注"]');
+    expect(panel?.querySelector('article[aria-label="私人建议"]')).not.toBeNull();
+    expect(panel?.textContent).toContain(note.first.text);
     expect(rpc.calls).not.toContain(route(createBoardReviewSource));
+
+    await app.click('我发起');
+    expect(panel?.querySelector('article[aria-label="私人建议"]')).toBeNull();
+    expect(panel?.textContent).toContain(note.first.text);
+    await app.click('全部');
+    const authorFilter = panel?.querySelector('select');
+    await act(async () => {
+      if (authorFilter) {
+        authorFilter.value = note.first.authorId;
+        authorFilter.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    expect(panel?.querySelector('article[aria-label="私人建议"]')).toBeNull();
+    await act(async () => {
+      if (authorFilter) {
+        authorFilter.value = '';
+        authorFilter.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    const showResolved = panel?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    await act(async () => showResolved?.click());
+    expect(panel?.querySelector('article[aria-label="私人建议"]')).not.toBeNull();
 
     await app.click('附加选区');
     expect(attached).toEqual([
@@ -175,20 +247,24 @@ test('opens review from WhiteboardApp, freezes the chosen source, previews and a
       },
     ]);
 
-    await app.click('右移矩形');
-    await app.click('预览所选方案');
+    const option = app.host.querySelector<HTMLButtonElement>('[aria-label="右移矩形"]');
+    expect(option).not.toBeNull();
+    await act(async () => option?.focus());
     const review = app.host.querySelector('[aria-label="只读方案预览"]');
     expect(review).not.toBeNull();
+    expect(panel?.contains(review)).toBe(false);
     expect(rectangle(review ?? app.host).style.left).toBe('140px');
     expect(rectangle(app.canvas()).style.left).toBe('40px');
     expect(app.canvas().closest('[inert]')).not.toBeNull();
     expect(rpc.calls).not.toContain(route(acceptBoardSuggestion));
 
-    await app.click('接受所选方案');
+    await app.click('右移矩形');
     expect(app.host.querySelector('[aria-label="只读方案预览"]')).toBeNull();
     expect(rectangle(app.canvas()).style.left).toBe('140px');
     expect(rpc.calls.filter((path) => path === route(acceptBoardSuggestion))).toHaveLength(1);
-    expect(app.host.textContent).toContain('已采用 右移矩形');
+    expect(app.host.querySelector('[aria-label="右移矩形"]')?.getAttribute('aria-pressed')).toBe(
+      'true',
+    );
   } finally {
     app.dispose();
   }

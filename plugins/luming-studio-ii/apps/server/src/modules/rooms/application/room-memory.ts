@@ -1,4 +1,5 @@
 import type {
+  AgentWorkspace,
   Participant,
   ParticipantChanges,
   ParticipantKey,
@@ -12,6 +13,8 @@ const maxParticipants = 64;
 const maxPresenceSlots = 256;
 const maxSubscriptions = 64;
 const presenceTtlMs = 18_000;
+const gestureTtlMs = 1200;
+const snapshotGestureBudget = 128;
 const tombstoneTtlMs = 30_000;
 const minimumUpdateGapMs = 40;
 
@@ -51,6 +54,7 @@ export class RoomMemory {
   private delivering = false;
   private sequence = 0n;
   public baselineRevision: bigint;
+  public agentWorkspaces: readonly AgentWorkspace[] = [];
 
   constructor(
     private readonly boardId: string,
@@ -73,6 +77,22 @@ export class RoomMemory {
     }
 
     return participants;
+  }
+
+  currentParticipants(now: number): readonly Participant[] {
+    let budget = snapshotGestureBudget;
+    return this.snapshot().map((participant) => {
+      const { gesture, gestureExpiresAtUnixMs } = participant;
+      if (!gesture || gestureExpiresAtUnixMs === undefined) {
+        return participant;
+      }
+      if (gestureExpiresAtUnixMs <= now || gesture.changes.length > budget) {
+        return { ...participant, gesture: undefined, gestureExpiresAtUnixMs: undefined };
+      }
+
+      budget -= gesture.changes.length;
+      return participant;
+    });
   }
 
   event(payload: RoomEventPayload, now: number): RoomEvent {
@@ -179,6 +199,8 @@ export class RoomMemory {
       cursor: input.cursor,
       viewport: input.viewport,
       following: input.following,
+      gesture: input.gesture,
+      gestureExpiresAtUnixMs: input.gesture && now + gestureTtlMs,
     };
     this.slots.set(id, {
       key,

@@ -12,6 +12,8 @@ export type {
   BoardFeedbackService,
   FeedbackAnchor,
   FeedbackCommand,
+  FeedbackContentTarget,
+  FeedbackContentUnit,
   FeedbackListRequest,
   FeedbackMessage,
   FeedbackObjectTarget,

@@ -1,4 +1,5 @@
 const maximumFileBytes = 8 * 1024 * 1024;
+const maximumSvgBytes = 1024 * 1024;
 const maximumEdge = 16_384;
 const maximumPixels = 32 * 1024 * 1024;
 const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -9,13 +10,13 @@ interface ImageDimensions {
 }
 
 interface ImageHeader extends ImageDimensions {
-  readonly mime: 'image/png' | 'image/jpeg' | 'image/webp';
+  readonly mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
 }
 
 export interface PreparedBoardImage extends ImageDimensions {
   readonly displayName: string;
   readonly content: Uint8Array;
-  readonly previewUrl: string;
+  readonly previewUrl?: string;
   readonly dispose: () => void;
 }
 
@@ -140,10 +141,48 @@ function webpDimensions(view: DataView): ImageDimensions | undefined {
   }
 }
 
+function gifDimensions(view: DataView): ImageDimensions | undefined {
+  if (view.byteLength < 14 || view.getUint32(0) !== 0x47494638) {
+    return undefined;
+  }
+
+  const version = view.getUint16(4);
+  if (version !== 0x3761 && version !== 0x3961) {
+    return undefined;
+  }
+
+  return { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+}
+
+function svgDimensions(buffer: ArrayBuffer): ImageDimensions | undefined {
+  const header = new TextDecoder()
+    .decode(buffer.slice(0, 4096))
+    .replace(/^\s*<\?xml\b[^?]*\?>/u, '')
+    .replace(/<!--[\s\S]*?-->/gu, '');
+  const attributes = /^\s*<svg\b([^>]*)>/u.exec(header)?.[1];
+  if (attributes === undefined) {
+    return undefined;
+  }
+
+  const viewBox = /\sviewBox\s*=\s*(["'])(.*?)\1/u.exec(attributes)?.[2];
+  const bounds = viewBox
+    ?.trim()
+    .split(/[\s,]+/u)
+    .map(Number);
+  const width = /\swidth\s*=\s*(["'])(\d+(?:\.\d+)?|\.\d+)(?:px)?\1/u.exec(attributes)?.[2];
+  const height = /\sheight\s*=\s*(["'])(\d+(?:\.\d+)?|\.\d+)(?:px)?\1/u.exec(attributes)?.[2];
+
+  return {
+    width: Math.ceil(Number(width ?? bounds?.[2] ?? 300)),
+    height: Math.ceil(Number(height ?? bounds?.[3] ?? 150)),
+  };
+}
+
 const imageFormats = [
   ['image/png', pngDimensions],
   ['image/jpeg', jpegDimensions],
   ['image/webp', webpDimensions],
+  ['image/gif', gifDimensions],
 ] as const;
 
 function inspectImage(buffer: ArrayBuffer): ImageHeader {
@@ -155,11 +194,11 @@ function inspectImage(buffer: ArrayBuffer): ImageHeader {
     }
   }
 
-  throw new Error('请选择有效的静态 PNG、JPEG 或 WebP 图片。');
+  throw new Error('请选择有效的 PNG、JPEG、WebP、GIF 或 SVG 图片。');
 }
 
 function verifyDimensions({ width, height }: ImageDimensions): void {
-  if (width <= 0 || height <= 0) {
+  if (!(width > 0 && height > 0)) {
     throw new Error('无法取得图片尺寸。');
   }
   if (width > maximumEdge || height > maximumEdge || width * height > maximumPixels) {
@@ -214,6 +253,22 @@ export async function prepareBoardImage(
   signal?.throwIfAborted();
   const buffer = await file.arrayBuffer();
   signal?.throwIfAborted();
+
+  const svg = svgDimensions(buffer);
+  if (svg) {
+    if (buffer.byteLength > maximumSvgBytes) {
+      throw new Error('SVG 图片大小不能超过 1 MiB。');
+    }
+
+    verifyDimensions(svg);
+
+    return {
+      ...svg,
+      displayName: file.name,
+      content: new Uint8Array(buffer),
+      dispose: () => undefined,
+    };
+  }
 
   const header = inspectImage(buffer);
   verifyDimensions(header);

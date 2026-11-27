@@ -29,6 +29,7 @@ function fixture() {
   }
 
   const repository: CatalogRepository = {
+    readThumbnail: () => ({ kind: 'unavailable' }),
     listBoards,
     listTrashedBoards,
     getReceipt,

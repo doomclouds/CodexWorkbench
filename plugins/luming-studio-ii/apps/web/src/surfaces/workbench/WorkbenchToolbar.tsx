@@ -8,7 +8,6 @@ import {
   type Ref,
 } from 'react';
 import {
-  ArrowDownAZ,
   Check,
   Clock3,
   Import,
@@ -25,11 +24,9 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import type { CatalogDirectorySnapshot } from '../../data/catalog/index.js';
 import { WorkbenchMenu } from './WorkbenchMenu.js';
 import type { WorkbenchPreferences } from './preferences.js';
 
-type CatalogOrder = CatalogDirectorySnapshot['order'];
 type ToolbarMenu = 'filter' | 'create';
 
 interface OpenMenu {
@@ -39,32 +36,32 @@ interface OpenMenu {
 
 interface WorkbenchToolbarProps {
   readonly query: string;
-  readonly order: CatalogOrder;
+  readonly pinnedOnly: boolean;
   readonly preferences: WorkbenchPreferences;
   readonly createBusy: boolean;
   readonly createBlocked: boolean;
   readonly onQueryChange: (query: string) => void;
-  readonly onOrderChange: (order: CatalogOrder) => void;
+  readonly onPinnedOnlyChange: (pinnedOnly: boolean) => void;
   readonly onCreate: () => void;
   readonly onImport?: () => void;
   readonly onOpenTrash?: () => void;
   readonly filterButton?: Ref<HTMLButtonElement>;
 }
 
-const orderOptions = [
-  { value: 'recent', label: '最近作品', icon: Clock3 },
-  { value: 'title', label: '按名称', icon: ArrowDownAZ },
+const scopeOptions = [
+  { pinned: false, label: '最近作品', icon: Clock3 },
+  { pinned: true, label: '已固定', icon: Pin },
 ] as const;
 const unsupported = '当前阶段暂不支持';
 
 export function WorkbenchToolbar({
   query,
-  order,
+  pinnedOnly,
   preferences,
   createBusy,
   createBlocked,
   onQueryChange,
-  onOrderChange,
+  onPinnedOnlyChange,
   onCreate,
   onImport,
   onOpenTrash,
@@ -147,8 +144,8 @@ export function WorkbenchToolbar({
     preferences.onThemeChange(resolvedTheme === 'dark' ? 'light' : 'dark');
   }
 
-  function chooseOrder(value: CatalogOrder) {
-    onOrderChange(value);
+  function chooseScope(pinned: boolean) {
+    onPinnedOnlyChange(pinned);
     finishMenuAction();
   }
 
@@ -211,12 +208,12 @@ export function WorkbenchToolbar({
         title="筛选作品"
         aria-haspopup="menu"
         aria-expanded={menu?.kind === 'filter'}
-        data-active={order !== 'recent' || undefined}
+        data-active={pinnedOnly || undefined}
         onClick={(event) => switchMenu(event, 'filter')}
         onKeyDown={(event) => openMenuFromKeyboard(event, 'filter')}
       >
         <SlidersHorizontal size={18} />
-        {order !== 'recent' && <span className="studio-workbench-filter-dot" />}
+        {pinnedOnly && <span className="studio-workbench-filter-dot" />}
       </button>
       <button
         type="button"
@@ -251,26 +248,23 @@ export function WorkbenchToolbar({
       </button>
       {menu?.kind === 'filter' && (
         <WorkbenchMenu anchor={menu.anchor} label="作品范围" toolbar onClose={closeMenu}>
-          {orderOptions.map(({ value, label, icon: Icon }) => (
+          {scopeOptions.map(({ pinned, label, icon: Icon }) => (
             <button
               type="button"
-              key={value}
+              key={label}
               role="menuitemradio"
-              aria-checked={order === value}
-              onClick={() => chooseOrder(value)}
+              aria-checked={pinnedOnly === pinned}
+              onClick={() => chooseScope(pinned)}
             >
               <Icon size={16} />
               <span>{label}</span>
-              {order === value && <Check size={14} />}
+              {pinnedOnly === pinned && <Check size={14} />}
             </button>
           ))}
-          <button type="button" role="menuitem" title={unsupported} disabled>
-            <Pin size={16} />
-            <span>已固定</span>
-          </button>
           <button
             type="button"
-            role="menuitem"
+            role="menuitemradio"
+            aria-checked={false}
             title={onOpenTrash ? undefined : unsupported}
             disabled={!onOpenTrash}
             onClick={handleOpenTrash}

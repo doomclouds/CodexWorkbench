@@ -8,6 +8,7 @@ import type {
   WhiteboardPayload,
   WhiteboardService,
 } from '../../src/data/whiteboard/index.js';
+import { createBoardDraftStorage, createCommandId } from '../../src/platform/browser/index.js';
 import { createAppMock } from '../support/whiteboard-app-mock.js';
 
 const boardId = 'content-test-board';
@@ -213,10 +214,14 @@ function replaceTitle(input: HTMLInputElement, title: string) {
   });
 }
 
-function mountContent(mock: ReturnType<typeof createContentMock>) {
+function mountContent(
+  mock: ReturnType<typeof createContentMock>,
+  options: Parameters<typeof createAppMock>[1] = {},
+) {
   let completed = 0;
 
   return createAppMock(mock.service, {
+    ...options,
     editService: mock.editService,
     createCommandId: () => (completed++ === 0 ? commandId : 'content-command-' + completed),
   });
@@ -308,11 +313,15 @@ test.each(['toolbar', 'keyboard'] as const)(
         app.host,
         '[data-document-focused-reading][data-document-view="read"]',
       );
-      expect(reading.textContent).toContain('确认正文版本');
+      expect(required(reading, 'input[aria-label="文档标题"]')).toHaveProperty(
+        'value',
+        '确认正文版本',
+      );
+
       if (entry === 'keyboard') {
         await press(required(reading, '[aria-label="文档正文"]'), 'Escape');
       } else {
-        await click(button(reading, '返回白板'));
+        await click(button(reading, '返回画板'));
       }
       expect(app.host.querySelector('[data-document-focused-reading]')).toBeNull();
 
@@ -334,12 +343,12 @@ test('keeps the document focus surface read-only for a viewer', async () => {
       app.host,
       '[data-document-focused-reading][data-document-view="read"]',
     );
-    expect(button(reading, '编辑文档').disabled).toBe(true);
+    expect(button(reading, '阅读文档').disabled).toBe(false);
     const reader = required(reading, '[aria-label="文档正文"]');
     await press(reader, 'F2');
     expect(required(app.host, '[data-document-focused-reading]').dataset.documentView).toBe('read');
     expect(mock.commands).toEqual([]);
-    await click(button(reading, '返回白板'));
+    await click(button(reading, '返回画板'));
     expect(app.host.querySelector('[data-document-focused-reading]')).toBeNull();
   } finally {
     app.dispose();
@@ -483,5 +492,192 @@ test.each(['text', 'note'] as const)('saves and reopens edited %s content', asyn
     expect(app.host.textContent).toContain('已保存文字');
   } finally {
     app.dispose();
+  }
+});
+
+function localTextCandidate(objectId: string, text: string): string {
+  return JSON.stringify({
+    objectId,
+    kind: 'text',
+    name: 'text.commit',
+    expectedVersion: Number(initialVersion),
+    value: { text },
+  });
+}
+
+async function editContentText(app: ReturnType<typeof mountContent>, text: string) {
+  await app.drag(selectPoint, selectPoint);
+  await app.update(() => {
+    app.canvas().dispatchEvent(
+      new MouseEvent('dblclick', {
+        bubbles: true,
+        clientX: selectPoint.x,
+        clientY: selectPoint.y,
+      }),
+    );
+  });
+  const editor = required(app.host, '[role="textbox"][contenteditable="true"]');
+  await app.update(() => {
+    editor.replaceChildren(document.createTextNode(text));
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+}
+
+test('keeps independent local drafts after remount and only applies a manually compared current version', async () => {
+  const objectId = 'saved-text';
+  const actorId = 'local-draft-owner';
+  const scope = JSON.stringify([actorId, boardId]);
+  const otherScope = JSON.stringify([actorId, 'another-board']);
+  const otherIdentity = JSON.stringify(['another-owner', boardId]);
+  const storage = createBoardDraftStorage(createCommandId);
+  storage.write(scope, 'orphan', localTextCandidate('old-object', '保留的另一份草稿'));
+  storage.write(otherScope, 'external-board', localTextCandidate('outside-object', '另一张板草稿'));
+  storage.write(
+    otherIdentity,
+    'different-owner',
+    localTextCandidate('outside-owner', '另一身份草稿'),
+  );
+
+  const mock = createContentMock(
+    {
+      id: objectId,
+      version: initialVersion,
+      body: { kind: 'text', value: { text: '已保存正文' } },
+    },
+    { loseFirstResponse: true },
+  );
+  const copies: string[] = [];
+  const downloads: string[] = [];
+  const app = mountContent(mock, {
+    localDrafts: { actorId, storage },
+    clipboard: {
+      async writeText(text) {
+        copies.push(text);
+      },
+      async readText() {
+        return '';
+      },
+    },
+    downloadObjectFile({ content }) {
+      downloads.push(new TextDecoder().decode(content));
+    },
+  });
+
+  try {
+    await app.open(boardId);
+    await editContentText(app, '未确认正文');
+    expect(mock.commands).toHaveLength(1);
+    const original = storage.list(scope).find(({ id }) => id !== 'orphan');
+    expect(original?.data).toContain('未确认正文');
+    expect(original?.data).not.toContain(commandId);
+
+    await app.open(boardId, 'fresh-board');
+    expect(mock.commands).toHaveLength(1);
+    await app.click('本机草稿');
+    expect(app.host.textContent).not.toContain('outside-object');
+    expect(app.host.textContent).not.toContain('outside-owner');
+    await app.click('文字草稿 · old-object');
+    expect(button(app.host, '应用已比较的草稿').disabled).toBe(true);
+    await app.click('复制草稿');
+    await app.click('下载草稿副本');
+    expect(copies[0]).toContain('保留的另一份草稿');
+    expect(downloads).toEqual(copies);
+    await app.click('放弃上次草稿');
+
+    await app.click('文字草稿 · saved-text');
+    expect(app.host.textContent).toContain('已保存正文');
+    expect(app.host.textContent).toContain('未确认正文');
+    await app.click('应用已比较的草稿');
+    expect(mock.commands).toHaveLength(2);
+    expect(mock.commands[1]?.commandId).not.toBe(commandId);
+    expect(storage.list(scope)).toEqual([]);
+    expect(storage.list(otherScope)).toHaveLength(1);
+    expect(storage.list(otherIdentity)).toHaveLength(1);
+    await app.click('关闭本机草稿提示');
+    expect(
+      Array.from(app.host.querySelectorAll('button')).some(
+        ({ textContent }) => textContent === '本机草稿',
+      ),
+    ).toBe(false);
+  } finally {
+    app.dispose();
+    storage.remove(scope, 'orphan');
+    storage.remove(otherScope, 'external-board');
+    storage.remove(otherIdentity, 'different-owner');
+  }
+});
+
+test('does not expose saved drafts when a freshly opened board is read-only', async () => {
+  const objectId = 'read-only-text';
+  const actorId = 'read-only-draft-owner';
+  const scope = JSON.stringify([actorId, boardId]);
+  const storage = createBoardDraftStorage(createCommandId);
+  storage.write(scope, 'read-only-draft', localTextCandidate(objectId, '仅本机可恢复'));
+  const mock = createContentMock(
+    { id: objectId, version: initialVersion, body: { kind: 'text', value: { text: '当前正文' } } },
+    { canEdit: false },
+  );
+  const app = mountContent(mock, { localDrafts: { actorId, storage } });
+  try {
+    await app.open(boardId);
+    expect(app.host.textContent).toContain('当前正文');
+    expect(app.host.textContent).not.toContain('本机草稿');
+    expect(app.host.textContent).not.toContain('仅本机可恢复');
+    expect(mock.commands).toEqual([]);
+  } finally {
+    app.dispose();
+    storage.remove(scope, 'read-only-draft');
+  }
+});
+
+test('rechecks the current write grant before copying or restoring an already compared draft', async () => {
+  const objectId = 'downgraded-object';
+  const actorId = 'downgraded-owner';
+  const scope = JSON.stringify([actorId, boardId]);
+  const storage = createBoardDraftStorage(createCommandId);
+  storage.write(scope, 'board-draft', localTextCandidate(objectId, '只在获得权限时可见'));
+  const mock = createContentMock({
+    id: objectId,
+    version: initialVersion,
+    body: { kind: 'text', value: { text: '当前授权正文' } },
+  });
+  let editable = true;
+  const service: WhiteboardService = {
+    ...mock.service,
+    async getScene(id, signal) {
+      const scene = await mock.service.getScene(id, signal);
+
+      return { ...scene, canEdit: editable };
+    },
+  };
+  const copied: string[] = [];
+  const app = createAppMock(service, {
+    editService: mock.editService,
+    localDrafts: { actorId, storage },
+    clipboard: {
+      async writeText(text) {
+        copied.push(text);
+      },
+      async readText() {
+        return '';
+      },
+    },
+  });
+
+  try {
+    await app.open(boardId);
+    await app.click('本机草稿');
+    await app.click('文字草稿 · downgraded-object');
+    expect(app.host.textContent).toContain('只在获得权限时可见');
+
+    editable = false;
+    await app.click('复制草稿');
+    expect(copied).toEqual([]);
+    expect(mock.commands).toEqual([]);
+    expect(app.host.textContent).not.toContain('只在获得权限时可见');
+  } finally {
+    app.dispose();
+    storage.remove(scope, 'board-draft');
   }
 });

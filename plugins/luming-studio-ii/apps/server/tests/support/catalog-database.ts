@@ -35,3 +35,31 @@ export function catalogRowCounts(path: string) {
     database.close();
   }
 }
+
+export function seedPreviewScene(path: string, boardId: string, amount: number): void {
+  const database = openSqliteDatabase(path);
+  try {
+    database.write((connection) => {
+      const insert = connection.prepare(`
+        INSERT INTO board_objects
+          (board_id, object_id, kind, label, layer_index, x, y, width, height, detail_json)
+        VALUES (?, ?, 'shape', ?, ?, ?, ?, 18, 18, '{"kind":"shape","outline":"ellipse"}')
+      `);
+
+      for (let index = 0; index < amount; index++) {
+        insert.run(
+          boardId,
+          'preview-shape-' + index,
+          'Shape ' + index,
+          index,
+          (index % 16) * 24,
+          Math.floor(index / 16) * 24,
+        );
+      }
+
+      connection.prepare('UPDATE boards SET revision = 1 WHERE board_id = ?').run(boardId);
+    });
+  } finally {
+    database.close();
+  }
+}

@@ -10,6 +10,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 import { readObjects } from '../whiteboard/index.js';
 import type { WhiteboardObject } from '../whiteboard/index.js';
+import { readAgentWorkspaces } from './agent-workspaces.js';
 import type {
   BoardRoomEvent,
   BoardRoomParticipant,
@@ -19,6 +20,7 @@ import type {
   BoardRoomTimerReceipt,
   BoardRoomViewport,
 } from './contracts.js';
+import { readRoomGesture } from './room-gesture.js';
 
 export interface BoardRoomContentChange {
   readonly revision: bigint;
@@ -112,6 +114,11 @@ function readParticipant(participant: WireParticipant): BoardRoomParticipant {
     cursor: readPoint(participant.cursor),
     viewport: readViewport(participant.viewport),
     following: participant.following,
+    gesture: readRoomGesture(participant.gesture),
+    gestureExpiresAtMillis:
+      participant.gestureExpiresAtUnixMs === undefined
+        ? undefined
+        : readServerTime(participant.gestureExpiresAtUnixMs),
   };
 }
 
@@ -156,7 +163,15 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
 
   switch (payload.case) {
     case 'snapshot': {
-      const { actorId, canEdit, boardRevision, participants, timer } = payload.value;
+      const {
+        actorId,
+        canEdit,
+        boardRevision,
+        participants,
+        timer,
+        agentWorkspaces,
+        canReleaseAgentActivity,
+      } = payload.value;
 
       return {
         ...header,
@@ -166,6 +181,8 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
         revision: required(boardRevision, '白板版次'),
         participants: participants.map(readParticipant),
         timer: readTimer(timer),
+        agentWorkspaces: readAgentWorkspaces(agentWorkspaces),
+        canReleaseAgentActivity,
       };
     }
     case 'participants':
@@ -177,6 +194,12 @@ export function readRoomEvent(event: WireRoomEvent | undefined, boardId: string)
       };
     case 'timer':
       return { ...header, kind: 'timer', timer: readTimer(payload.value) };
+    case 'agentWorkspaces':
+      return {
+        ...header,
+        kind: 'agentWorkspaces',
+        workspaces: readAgentWorkspaces(payload.value.workspaces),
+      };
     case 'contentChanged':
       return {
         ...header,

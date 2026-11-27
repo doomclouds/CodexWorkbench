@@ -4,7 +4,14 @@ export const protobufMediaType = 'application/protobuf';
 export const archiveMediaType = 'application/zip';
 
 const normalRequestBytes = 1024 * 1024;
+const activityRequestBytes = 32 * 1024;
 const imageRequestBytes = 8 * 1024 * 1024 + 32 * 1024;
+const videoRequestBytes = 20 * 1024 * 1024 + 32 * 1024;
+const largeEditRequests = new Map([
+  ['AttachBoardImage', imageRequestBytes],
+  ['UploadBoardDocumentImage', imageRequestBytes],
+  ['AttachBoardVideo', videoRequestBytes],
+]);
 const namespace = 'luming.studio.v1.';
 
 interface Operation {
@@ -21,7 +28,15 @@ const boardMethods = [
   ],
   [
     'BoardEditService',
-    ['EditBoardGeometry', 'EditObjectContent', 'AttachBoardImage', 'GetBoardEditReceipt'],
+    [
+      'EditBoardGeometry',
+      'EditObjectContent',
+      'AttachBoardImage',
+      'AttachBoardVideo',
+      'UploadBoardDocumentImage',
+      'ReverseBoardEdit',
+      'GetBoardEditReceipt',
+    ],
   ],
   [
     'BoardHistoryService',
@@ -53,6 +68,7 @@ const boardMethods = [
       'LeaveBoardPresence',
       'ChangeBoardTimer',
       'GetBoardTimerReceipt',
+      'ChangeAgentActivity',
     ],
   ],
 ] as const;
@@ -63,6 +79,7 @@ const libraryMethods = [
     [
       'ListBoards',
       'ListTrashedBoards',
+      'GetBoardThumbnail',
       'CreateBoard',
       'DuplicateBoard',
       'ManageBoard',
@@ -85,7 +102,10 @@ function registerMethods(methods: readonly ServiceMethods[], boardField?: number
       operations.set(key, {
         route: '/' + key,
         mediaType: protobufMediaType,
-        maximumBytes: name === 'AttachBoardImage' ? imageRequestBytes : normalRequestBytes,
+        maximumBytes:
+          name === 'ChangeAgentActivity'
+            ? activityRequestBytes
+            : (largeEditRequests.get(name) ?? normalRequestBytes),
         boardField,
       });
     }

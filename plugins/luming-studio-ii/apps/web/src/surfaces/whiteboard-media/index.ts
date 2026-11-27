@@ -1,2 +1,7 @@
-export type { PreparedBoardImage, WhiteboardMediaSurfaceProps } from './contracts.js';
+export type {
+  PreparedBoardImage,
+  PreparedBoardVideo,
+  UploadBoardMedia,
+  WhiteboardMediaSurfaceProps,
+} from './contracts.js';
 export { WhiteboardMediaSurface } from './WhiteboardMediaSurface.js';

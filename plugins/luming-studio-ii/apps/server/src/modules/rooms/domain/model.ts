@@ -25,12 +25,30 @@ export interface ParticipantKey {
   readonly viewId: string;
 }
 
+export interface GestureGeometry extends RoomPoint {
+  readonly width: number;
+  readonly height: number;
+  readonly rotation: number;
+}
+
+export interface GestureChange {
+  readonly objectId: string;
+  readonly expectedGeometryVersion: bigint;
+  readonly geometry: GestureGeometry;
+}
+
+export interface GesturePreview {
+  readonly kind: 'move' | 'resize' | 'rotate';
+  readonly changes: readonly GestureChange[];
+}
+
 export interface PresenceInput {
   readonly viewId: string;
   readonly sequence: bigint;
   readonly cursor?: RoomPoint;
   readonly viewport?: RoomViewport;
   readonly following: boolean;
+  readonly gesture?: GesturePreview;
 }
 
 export interface Participant {
@@ -42,6 +60,8 @@ export interface Participant {
   readonly cursor?: RoomPoint;
   readonly viewport?: RoomViewport;
   readonly following: boolean;
+  readonly gesture?: GesturePreview;
+  readonly gestureExpiresAtUnixMs?: number;
 }
 
 export interface ParticipantChanges {
@@ -106,6 +126,8 @@ export interface RoomSnapshot {
   readonly boardRevision: bigint;
   readonly participants: readonly Participant[];
   readonly timer: RoomTimer;
+  readonly agentWorkspaces: readonly AgentWorkspace[];
+  readonly canReleaseAgentActivity: boolean;
 }
 
 export interface RoomContentChange {
@@ -122,6 +144,7 @@ export type RoomEventPayload =
   | { readonly kind: 'participants'; readonly changes: ParticipantChanges }
   | { readonly kind: 'timer'; readonly timer: RoomTimer }
   | { readonly kind: 'contentChanged'; readonly change: RoomContentChange }
+  | { readonly kind: 'agentWorkspaces'; readonly workspaces: readonly AgentWorkspace[] }
   | { readonly kind: 'accessLost' };
 
 export interface RoomEvent {
@@ -131,3 +154,5 @@ export interface RoomEvent {
   readonly serverTimeUnixMs: number;
   readonly payload: RoomEventPayload;
 }
+
+import type { AgentWorkspace } from './agent-activity.js';

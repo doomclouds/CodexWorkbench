@@ -231,6 +231,48 @@ function decodeVersion(row: SqliteRow): BoardVersionSummary {
   };
 }
 
+function readCreationVersion(
+  connection: SqliteConnection,
+  boardId: string,
+): BoardVersionSummary | undefined {
+  const schema = connection
+    .prepare(`
+    SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'catalog_create_receipts'
+  `)
+    .get();
+
+  if (!schema) {
+    return undefined;
+  }
+
+  const query = connection.prepare(`
+    SELECT title, actor_id, updated_at_millis FROM catalog_create_receipts
+    WHERE board_id = ?
+    ORDER BY updated_at_millis, actor_id, command_id LIMIT 1
+  `);
+  query.setReadBigInts(true);
+  const created = query.get(boardId);
+  if (created) {
+    return {
+      revision: 0n,
+      title: storedText(created.title, 'title'),
+      actorId: storedText(created.actor_id, 'actor_id'),
+      kind: 'baseline',
+      savedAtMillis: safeVersionNumber(created.updated_at_millis, 'updated_at_millis'),
+      changedObjectCount: 0,
+    };
+  }
+}
+
+function withCreationVersion(connection: SqliteConnection, boardId: string, row: SqliteRow) {
+  const version = decodeVersion(row);
+  if (version.kind === 'baseline' && version.revision === 0n) {
+    return readCreationVersion(connection, boardId) ?? version;
+  }
+
+  return version;
+}
+
 export function readBoardVersions(
   connection: SqliteConnection,
   boardId: string,
@@ -245,7 +287,7 @@ export function readBoardVersions(
   query.setReadBigInts(true);
   const rows = before === undefined ? query.all(boardId, limit) : query.all(boardId, limit, before);
 
-  return rows.map(decodeVersion);
+  return rows.map((row) => withCreationVersion(connection, boardId, row));
 }
 
 export function readBoardVersion(
@@ -258,8 +300,17 @@ export function readBoardVersion(
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, revision);
+  if (row) {
+    return withCreationVersion(connection, boardId, row);
+  }
 
-  return row && decodeVersion(row);
+  if (revision === 0n) {
+    const initial = connection
+      .prepare('SELECT 1 FROM boards WHERE board_id = ? AND revision = 0')
+      .get(boardId);
+
+    return initial && readCreationVersion(connection, boardId);
+  }
 }
 
 function payloadHistoryJoin(source: string): string {

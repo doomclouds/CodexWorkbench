@@ -1,0 +1,64 @@
+.room-agent-row {
+  align-items: flex-start;
+}
+
+.room-agent-row > .room-presence-link {
+  align-self: center;
+}
+
+.room-agent-identity {
+  min-inline-size: 0;
+}
+
+.room-agent-workspace {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 7px;
+  margin-block-start: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.room-agent-workspace > span {
+  flex: 1 1 64px;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.room-agent-release {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+}
+
+.room-agent-release-button {
+  max-inline-size: 90px;
+  padding: 3px 5px;
+  border: 1px solid var(--room-presence-border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--room-presence-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.room-agent-release-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.room-agent-release-button[aria-busy='true'] {
+  cursor: wait;
+}
+
+.room-agent-release-button:focus-visible {
+  outline: 2px solid var(--room-presence-focus);
+  outline-offset: 2px;
+}
+
+.room-agent-release-error {
+  margin: 5px 0 0;
+  color: var(--room-presence-text);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}

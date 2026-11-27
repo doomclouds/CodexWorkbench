@@ -176,6 +176,17 @@ export function useDocumentDraft(options: DraftOptions) {
     return true;
   }
 
+  async function prepareExport(): Promise<DocumentDraft | undefined> {
+    if (capabilities.current.readOnly) {
+      return latest.current.confirmed;
+    }
+    if (capabilities.current.composing || !(await prepareExit())) {
+      return undefined;
+    }
+
+    return capabilities.current.onCommit ? latest.current.confirmed : latest.current.draft;
+  }
+
   function useCurrent() {
     const current = latest.current;
     const value = current.confirmed;
@@ -209,6 +220,7 @@ export function useDocumentDraft(options: DraftOptions) {
     change,
     save,
     prepareExit,
+    prepareExport,
     useCurrent,
     reportFailure,
   };

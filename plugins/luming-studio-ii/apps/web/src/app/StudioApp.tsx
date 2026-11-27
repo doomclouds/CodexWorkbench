@@ -6,6 +6,7 @@ import type { BoardSharingService } from '../data/sharing/index.js';
 import type { ExportBoard, ExportBoardFile, WhiteboardService } from '../data/whiteboard/index.js';
 import type { StudioLocation } from '../platform/browser/index.js';
 import './app.css';
+import { createCatalogThumbnailRenderer } from './catalog-thumbnails.js';
 import { createWorkbenchBoardLinkCopy } from './copy-workbench-board-link.js';
 import { studioPages } from './routes.js';
 import { AppShell } from './shell/index.js';
@@ -57,6 +58,11 @@ export interface StudioAppProps {
   readonly archiveImport?: ArchiveImportService;
   readonly exportBoard?: ExportBoard;
   readonly downloadExport?: (file: ExportBoardFile) => void;
+  readonly downloadObjectFile?: BoardPageProps['downloadObjectFile'];
+  readonly clipboard?: BoardPageProps['clipboard'];
+  readonly localDrafts?: BoardPageProps['localDrafts'];
+  readonly readDocumentAsset?: BoardPageProps['readDocumentAsset'];
+  readonly readDocumentImageFile?: BoardPageProps['readDocumentImageFile'];
   readonly editService?: BoardPageProps['editService'];
   readonly historyService?: BoardPageProps['historyService'];
   readonly feedbackService?: BoardPageProps['feedbackService'];
@@ -64,6 +70,7 @@ export interface StudioAppProps {
   readonly onAttachReviewSource?: BoardPageProps['onAttachReviewSource'];
   readonly reviewSourceMode?: BoardPageProps['reviewSourceMode'];
   readonly prepareImage?: BoardPageProps['prepareImage'];
+  readonly prepareVideo?: BoardPageProps['prepareVideo'];
   readonly readHtmlSource?: BoardPageProps['readHtmlSource'];
   readonly sharingService?: BoardSharingService;
   readonly copyShareLink?: (url: string) => Promise<void>;
@@ -112,6 +119,11 @@ export function StudioApp({
   archiveImport,
   exportBoard,
   downloadExport,
+  downloadObjectFile,
+  clipboard,
+  localDrafts,
+  readDocumentAsset,
+  readDocumentImageFile,
   editService,
   historyService,
   feedbackService,
@@ -119,6 +131,7 @@ export function StudioApp({
   onAttachReviewSource,
   reviewSourceMode,
   prepareImage,
+  prepareVideo,
   readHtmlSource,
   sharingService,
   copyShareLink,
@@ -145,6 +158,10 @@ export function StudioApp({
         ? createWorkbenchBoardLinkCopy(sharingService, copyShareLink, createCommandId)
         : undefined,
     [sharingService, copyShareLink, createCommandId],
+  );
+  const renderThumbnail = useMemo(
+    () => catalog.getBoardThumbnail && createCatalogThumbnailRenderer(catalog.getBoardThumbnail),
+    [catalog],
   );
   const importFlow = useArchiveImport({
     service: archiveImport,
@@ -229,6 +246,11 @@ export function StudioApp({
           onBack={openWorkbench}
           exportBoard={exportBoard}
           downloadExport={downloadExport}
+          downloadObjectFile={downloadObjectFile}
+          clipboard={clipboard}
+          localDrafts={localDrafts}
+          readDocumentAsset={readDocumentAsset}
+          readDocumentImageFile={readDocumentImageFile}
           editService={editService}
           historyService={historyService}
           feedbackService={feedbackService}
@@ -236,6 +258,7 @@ export function StudioApp({
           onAttachReviewSource={onAttachReviewSource}
           reviewSourceMode={reviewSourceMode}
           prepareImage={prepareImage}
+          prepareVideo={prepareVideo}
           renameBoard={renameBoard}
           readHtmlSource={readHtmlSource}
           sharingService={sharingService}
@@ -256,6 +279,7 @@ export function StudioApp({
       return (
         <RecycleBinPage
           management={catalogManagement}
+          renderThumbnail={renderThumbnail}
           createCommandId={createCommandId}
           onBack={openWorkbench}
           preferences={pagePreferences}
@@ -266,6 +290,7 @@ export function StudioApp({
     return (
       <WorkbenchPage
         catalog={catalog}
+        renderThumbnail={renderThumbnail}
         management={catalogManagement}
         createCommandId={createCommandId}
         onOpenBoard={handleOpenBoard}
@@ -296,10 +321,15 @@ export function StudioApp({
         onViewContext={onViewContext}
         exportBoard={guest.exportBoard}
         downloadExport={downloadExport}
+        downloadObjectFile={downloadObjectFile}
+        clipboard={clipboard}
+        readDocumentAsset={readDocumentAsset}
+        readDocumentImageFile={access.canEdit ? readDocumentImageFile : undefined}
         editService={access.canEdit ? guest.editService : undefined}
         historyService={guest.historyService}
         feedbackService={guest.feedbackService}
         prepareImage={access.canEdit ? prepareImage : undefined}
+        prepareVideo={access.canEdit ? prepareVideo : undefined}
         readHtmlSource={access.canEdit ? readHtmlSource : undefined}
         sharingService={guest.sharingService}
         copyShareLink={copyShareLink}

@@ -84,8 +84,16 @@ export function targetAt(
   return { kind: 'board', point };
 }
 
-export function locateAnchor(anchor: FeedbackAnchor, objects: ObjectIndex): FeedbackPoint {
+export function locateAnchor(
+  anchor: FeedbackAnchor,
+  objects: ObjectIndex,
+  contentPoint?: FeedbackPoint,
+): FeedbackPoint {
   const { target, frozenPoint } = anchor;
+  if (target.kind === 'content') {
+    return anchor.targetMissing ? frozenPoint : (contentPoint ?? frozenPoint);
+  }
+
   if (target.kind === 'object') {
     const object = objects.get(target.objectId);
     return validObject(object) ? objectPoint(object.geometry, target.u, target.v) : frozenPoint;
@@ -107,9 +115,15 @@ export function locateDraft(
 }
 
 export function screenPoint(point: FeedbackPoint, viewport: FeedbackViewport) {
-  return { left: point.x * viewport.zoom + viewport.x, top: point.y * viewport.zoom + viewport.y };
+  return {
+    left: point.x * viewport.zoom + viewport.x,
+    top: point.y * (viewport.zoomY ?? viewport.zoom) + viewport.y,
+  };
 }
 
 export function worldPoint(point: FeedbackPoint, viewport: FeedbackViewport): FeedbackPoint {
-  return { x: (point.x - viewport.x) / viewport.zoom, y: (point.y - viewport.y) / viewport.zoom };
+  return {
+    x: (point.x - viewport.x) / viewport.zoom,
+    y: (point.y - viewport.y) / (viewport.zoomY ?? viewport.zoom),
+  };
 }

@@ -44,6 +44,8 @@ function textPayload(element: ArchiveData, label: string): ArchiveData {
     color: optionalString(element.color, 'text color'),
     fontFamily: optionalString(element.fontFamily, 'font family'),
     fontSize: optionalNumber(element.fontSize, 'font size'),
+    bold: element.bold === undefined ? undefined : booleanValue(element.bold, 'text bold'),
+    italic: element.italic === undefined ? undefined : booleanValue(element.italic, 'text italic'),
     align: textAlignments.get(optionalString(element.textAlign, 'text alignment') ?? ''),
   };
 }

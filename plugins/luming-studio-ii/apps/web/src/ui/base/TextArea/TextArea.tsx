@@ -12,6 +12,7 @@ export interface TextAreaProps {
   value: string;
   onValueChange: (value: string) => void;
   label: string;
+  placeholder?: string;
   id?: string;
   name?: string;
   description?: string;
@@ -20,6 +21,7 @@ export interface TextAreaProps {
   readOnly?: boolean;
   disabled?: boolean;
   rows?: number;
+  spellCheck?: boolean;
   ref?: Ref<TextAreaHandle>;
 }
 
@@ -27,6 +29,7 @@ export function TextArea({
   value,
   onValueChange,
   label,
+  placeholder,
   id,
   name,
   description,
@@ -35,6 +38,7 @@ export function TextArea({
   readOnly,
   disabled,
   rows,
+  spellCheck,
   ref,
 }: TextAreaProps) {
   const area = useRef<HTMLTextAreaElement>(null);
@@ -65,10 +69,12 @@ export function TextArea({
           id={fieldId}
           name={name}
           value={value}
+          placeholder={placeholder}
           required={fieldRequired}
           readOnly={readOnly}
           disabled={disabled}
           rows={rows}
+          spellCheck={spellCheck}
           aria-describedby={describedBy}
           aria-invalid={invalid}
           onChange={(event) => onValueChange(event.currentTarget.value)}

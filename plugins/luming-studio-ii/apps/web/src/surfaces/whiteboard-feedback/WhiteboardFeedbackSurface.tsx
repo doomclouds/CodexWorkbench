@@ -1,7 +1,9 @@
 import { X } from 'lucide-react';
+import { useState } from 'react';
 import type { FeedbackPoint } from '../../data/feedback/index.js';
 import { Button, StatusText } from '../../ui/base/index.js';
 import type { FeedbackViewport, WhiteboardFeedbackSurfaceProps } from './contracts.js';
+import { FeedbackAttachmentNotice } from './FeedbackAttachmentNotice.js';
 import { FeedbackComposer } from './FeedbackComposer.js';
 import { FeedbackList } from './FeedbackList.js';
 import { FeedbackPanel, FeedbackSaveNotice } from './FeedbackPanel.js';
@@ -20,10 +22,59 @@ function layerPoint(point: FeedbackPoint | undefined, viewport: FeedbackViewport
   }
 }
 
+function reviewLink(
+  surface: ReturnType<typeof useFeedbackSurface>,
+  threadId: string,
+  onReviewThread: WhiteboardFeedbackSurfaceProps['onReviewThread'],
+) {
+  const { attachment, queries, blocked } = surface;
+  if (attachment.available || !onReviewThread || queries.detail.page?.thread.id !== threadId) {
+    return null;
+  }
+
+  return (
+    <Button
+      label="使用此批注作为建议来源"
+      disabled={blocked}
+      onActivate={() => onReviewThread(threadId)}
+    />
+  );
+}
+
+function useFeedbackSuggestions(
+  { panelOpen, viewing, renderSuggestions }: WhiteboardFeedbackSurfaceProps,
+  { mine, authorId }: ReturnType<typeof useFeedbackSurface>['queries'],
+) {
+  const [outlet, setOutlet] = useState<HTMLElement | null>(null);
+  const [hasCards, setHasCards] = useState(false);
+  const render = viewing ? undefined : renderSuggestions;
+
+  return {
+    outletRef: render && setOutlet,
+    hasVisibleSuggestions: Boolean(render) && hasCards,
+    contents: render?.({
+      outlet: panelOpen ? outlet : null,
+      showCards: !mine && !authorId,
+      onCardsVisibleChange: setHasCards,
+    }),
+  };
+}
+
 export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps) {
-  const { viewport, anchor, panelOpen, canEdit, viewing, onReviewThread } = props;
+  const {
+    viewport,
+    anchor,
+    panelOpen,
+    canEdit,
+    viewing,
+    onReviewThread,
+    contentPoints,
+    hostPicking,
+    focusedObjectId,
+  } = props;
   const surface = useFeedbackSurface(props);
-  const { stage, queries, command, objectsById, createDraft, activeThreadId } = surface;
+  const { stage, queries, command, attachment, objectsById, createDraft, activeThreadId } = surface;
+  const suggestions = useFeedbackSuggestions(props, queries);
   if (viewing) {
     return null;
   }
@@ -45,14 +96,9 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
         onLocate={surface.handleLocateCurrentThread}
         onClose={surface.handleCloseThread}
         onSubmit={command.submit}
+        attachment={attachment}
       />
-      {onReviewThread && queries.detail.page?.thread.id === activeThreadId && (
-        <Button
-          label="使用此批注作为建议来源"
-          disabled={surface.blocked}
-          onActivate={() => onReviewThread(activeThreadId)}
-        />
-      )}
+      {reviewLink(surface, activeThreadId, onReviewThread)}
     </>
   );
 
@@ -63,8 +109,10 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
         selectedThreadId={activeThreadId}
         draft={surface.draftShown ? createDraft?.target : undefined}
         objects={objectsById}
+        contentPoints={contentPoints}
         viewport={viewport}
-        picking={surface.picking}
+        picking={surface.picking && !hostPicking}
+        focusedObjectId={focusedObjectId}
         onThread={surface.handleOpenThread}
         onPick={surface.handlePickLocation}
         onCancelPicking={surface.stopPicking}
@@ -79,6 +127,7 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
           onRetry={command.retry}
           onCheck={command.check}
         >
+          <FeedbackAttachmentNotice attachment={attachment} />
           <FeedbackList
             threads={queries.list.items}
             authorId={queries.authorId}
@@ -97,9 +146,12 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
             loadMore={queries.list.loadMore}
             error={queries.list.error}
             onRefresh={queries.refresh}
+            suggestionsOutlet={suggestions.outletRef}
+            hasVisibleSuggestions={suggestions.hasVisibleSuggestions}
           />
         </FeedbackPanel>
       )}
+      {suggestions.contents}
       {surface.selectedPin && threadPoint && (
         <FeedbackPopup
           kind="pin"
@@ -115,6 +167,7 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
             onRetry={command.retry}
             onCheck={command.check}
           />
+          <FeedbackAttachmentNotice attachment={attachment} />
           {details}
         </FeedbackPopup>
       )}
@@ -157,7 +210,20 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
             value={createDraft.text}
             onChange={(text) => surface.setCreateDraft({ ...createDraft, text })}
             onSubmit={() =>
-              command.submit({ kind: 'create', anchor: createDraft.target, text: createDraft.text })
+              command.submit(
+                { kind: 'create', anchor: createDraft.target, text: createDraft.text },
+                createDraft.attach,
+              )
+            }
+            attachment={
+              attachment.available
+                ? {
+                    checked: createDraft.attach === true,
+                    label: attachment.mode === 'copy' ? '复制批注引用' : '附加到对话',
+                    disabled: Boolean(attachment.pending),
+                    onChange: (attach) => surface.setCreateDraft({ ...createDraft, attach }),
+                  }
+                : undefined
             }
             onCancel={surface.handleCancelDraft}
             disabled={surface.blocked || !surface.canWrite}

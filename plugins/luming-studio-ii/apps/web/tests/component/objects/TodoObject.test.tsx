@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyTodoObjectEdit,
@@ -100,8 +100,8 @@ function button(label: string, scope: ParentNode = fixture.host) {
 }
 
 function input(label: string) {
-  const found = [...fixture.host.querySelectorAll('input')].find((element) =>
-    [...(element.labels ?? [])].some((node) => node.textContent.trim() === label),
+  const found = [...fixture.host.querySelectorAll('input')].find(
+    (element) => element.getAttribute('aria-label') === label,
   );
 
   if (!found) {
@@ -321,6 +321,34 @@ describe('TodoObject', () => {
     expect(requests()).toEqual([]);
   });
 
+  it('uses the measured row for Canvas annotations and does not send a point for a hidden row', async () => {
+    const annotate = vi.fn<NonNullable<TodoObjectProps['onAnnotateContent']>>();
+    render({ annotationActive: true, movable: true, onAnnotateContent: annotate });
+    const row = required('[data-todo-item-id="limits"]');
+    const measure = vi
+      .spyOn(row, 'getBoundingClientRect')
+      .mockReturnValue(new DOMRect(100, 20, 200, 44));
+    const text = button('备注任务：核对读取上限');
+    expect(fixture.host.querySelector('[aria-label="移动任务清单"]')).toBeNull();
+    expect(fixture.host.querySelector('[aria-label="展开任务清单"]')).toBeNull();
+
+    await act(async () => {
+      text.dispatchEvent(
+        new MouseEvent('click', { detail: 1, clientX: 150, clientY: 53, bubbles: true }),
+      );
+    });
+    const target = { kind: 'todo', itemId: 'limits' };
+    expect(annotate).toHaveBeenNthCalledWith(1, { target, u: 0.25, v: 0.75 });
+
+    await click(text);
+    expect(annotate).toHaveBeenNthCalledWith(2, { target, u: 192 / 200, v: 40 / 44 });
+
+    measure.mockReturnValue(new DOMRect());
+    await click(text);
+    expect(annotate).toHaveBeenCalledTimes(2);
+    expect(requests()).toEqual([]);
+  });
+
   it('keeps pins outside the scroller and aligned to visible row padding boxes', async () => {
     render({ renderItemAdornment: (id) => <span data-task-pin={id} /> });
     const body = required('.studio-object-todo__body');
@@ -377,9 +405,9 @@ describe('TodoObject', () => {
 
   it('renames and deletes through stable edits and cancels a subsequent draft with Escape', async () => {
     render();
-    await click('编辑清单标题');
-    await enterText(input('清单标题'), '  新清单  ');
-    await key(input('清单标题'), 'Enter');
+    await click('编辑清单标题：发布验收');
+    await enterText(input('任务清单标题'), '  新清单  ');
+    await key(input('任务清单标题'), 'Enter');
     expect(required('[data-todo-id]').getAttribute('aria-label')).toBe('新清单');
     await click('删除任务：整理需求');
     expect(rowIds()).toEqual(['limits']);
@@ -391,6 +419,55 @@ describe('TodoObject', () => {
       [{ op: 'rename', title: '新清单' }],
       [{ op: 'delete', id: 'plan' }],
     ]);
+  });
+
+  it('commits an open row when focus leaves the selection but preserves it after permission loss', async () => {
+    render({ editRequest: 1 });
+    const field = input('任务文字');
+    expect(document.activeElement).toBe(field);
+    expect(field.value).toBe('整理需求');
+    await enterText(field, '离开选区时保存');
+    render({ interactive: false });
+    await act(async () => field.blur());
+
+    expect(requests()[0]?.changes).toEqual([
+      { op: 'update', id: 'plan', changes: { text: '离开选区时保存' } },
+    ]);
+
+    render({ interactive: true, editRequest: 2 });
+    const revokedField = input('任务文字');
+    await enterText(revokedField, '只读时保留');
+    render({ readOnly: true });
+    await act(async () => revokedField.blur());
+
+    expect(revokedField.value).toBe('只读时保留');
+    expect(revokedField.readOnly).toBe(true);
+    expect(requests()).toHaveLength(1);
+  });
+
+  it('shows the original add prompt and warns about the UTF-8 row limit before submission', async () => {
+    render();
+    await click('添加任务');
+    const field = input('新增任务');
+    expect(field.placeholder).toBe('输入任务');
+    expect(field.maxLength).toBe(2_000);
+    await enterText(field, '测'.repeat(667));
+
+    expect(required('[role="alert"]').textContent).toBe('任务文字须在 2,000 UTF-8 字节以内。');
+    expect(requests()).toEqual([]);
+
+    await enterText(field, '测'.repeat(666));
+    expect(fixture.host.querySelector('[role="alert"]')).toBeNull();
+    await key(field, 'Escape');
+    expect(requests()).toEqual([]);
+  });
+
+  it('uses the inverse zoom for a tiny checklist in overview even above 100 percent zoom', () => {
+    render({ overview: true, appearance: { paper: '#EFEFEF', uiScale: 0.5 } });
+
+    expect(
+      required('[data-todo-layout="overview"]').style.getPropertyValue('--todo-ui-scale'),
+    ).toBe('0.5');
   });
 });
 
@@ -417,6 +494,9 @@ describe('applyTodoObjectEdit', () => {
 });
 
 describe('todoExtension', () => {
+  type TodoView = NonNullable<typeof todoExtension.View>;
+  type TodoViewProps = ComponentProps<TodoView>;
+
   function extensionView() {
     const View = todoExtension.View;
     if (!View) {
@@ -439,18 +519,63 @@ describe('todoExtension', () => {
       onRetentionChange,
     };
 
-    function render(loaded = true) {
+    function render(loaded = true, changes: Partial<TodoViewProps> = {}) {
       const payload = loaded ? { version: value.revision, value } : undefined;
       const Component = View;
       if (!Component) {
         throw new Error('Todo extension View is missing.');
       }
 
-      fixture.render(<Component {...options} payload={payload} />);
+      fixture.render(<Component {...options} payload={payload} {...changes} />);
     }
 
     return { render, value, request, onRetentionChange };
   }
+
+  it('opens a real source through the Canvas bridge and scrolls only the requested row once', async () => {
+    const { render, value, request } = extensionView();
+    const onOpenNativeSource = vi.fn();
+    const nativeSourceLabel = vi.fn(() => '读取设计');
+    const controls = { onOpenNativeSource, nativeSourceLabel };
+    render(true, controls);
+    await click('打开任务来源：读取设计');
+    expect(onOpenNativeSource).toHaveBeenCalledExactlyOnceWith({
+      elementId: 'api',
+      blockId: 'bounds',
+    });
+
+    const row = required('[data-todo-item-id="limits"]');
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(row, 'scrollIntoView', { value: scrollIntoView });
+    const source = { elementId: value.id, itemId: 'limits' };
+    render(true, { ...controls, nativeSourceRequest: { sequence: 1, source } });
+    expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'nearest', inline: 'nearest' });
+
+    render(true, { ...controls, readOnly: true, nativeSourceRequest: { sequence: 1, source } });
+    render(true, {
+      ...controls,
+      nativeSourceRequest: { sequence: 2, source: { ...source, elementId: 'another' } },
+    });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('requests a row annotation only in Canvas annotation mode', async () => {
+    const { render, request } = extensionView();
+    const onAnnotateContent = vi.fn();
+    render(true, { onAnnotateContent, annotationActive: false });
+    expect(fixture.host.querySelector('[aria-label^="备注任务："]')).toBeNull();
+    render(true, { onAnnotateContent, annotationActive: true, readOnly: true });
+    const row = required('[data-todo-item-id="limits"]');
+    vi.spyOn(row, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 40, 200, 40));
+    await click('备注任务：核对读取上限');
+    expect(onAnnotateContent).toHaveBeenCalledExactlyOnceWith({
+      target: { kind: 'todo', itemId: 'limits' },
+      u: 0.96,
+      v: 0.9,
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
 
   it('keeps a lightweight unloaded view and delegates edits by payload revision', async () => {
     const { render, value, request } = extensionView();

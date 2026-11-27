@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { StatusText } from '../../../base/index.js';
 import type { DocumentBlock, DocumentObjectProps } from './contracts.js';
-import { safeDocumentImage } from './model.js';
+import { isPrivateDocumentAssetSource, safeDocumentImage } from './model.js';
 
 interface DocumentImageProps {
   readonly block: DocumentBlock;
@@ -28,7 +28,8 @@ function readImageLabel(block: DocumentBlock) {
 export function DocumentImage({ block, resolveImage }: DocumentImageProps) {
   const props = block.props;
   const source = typeof props.url === 'string' ? props.url : '';
-  const direct = safeDocumentImage(source);
+  const needsAuthority = resolveImage && isPrivateDocumentAssetSource(source);
+  const direct = needsAuthority ? undefined : safeDocumentImage(source);
   const [resolved, setResolved] = useState<ImageResolution>();
   const needResolve = Boolean(source) && !direct && Boolean(resolveImage);
   const current = resolved?.requested === source ? resolved : undefined;

@@ -2,6 +2,11 @@ import type { BoardObject, MoveTarget } from '../domain/index.js';
 import { canTranslate, sectionContains } from '../domain/index.js';
 import type { WhiteboardWriter } from '../ports/index.js';
 
+type MoveReader = Pick<
+  WhiteboardWriter,
+  'getObjects' | 'listGroupObjects' | 'listChildObjects' | 'listObjects'
+>;
+
 interface MoveScope {
   readonly targets: ReadonlyMap<string, BoardObject | undefined>;
   isLocked(object: BoardObject): boolean;
@@ -41,7 +46,7 @@ function collectObjects(
 }
 
 export function createMoveScope(
-  writer: WhiteboardWriter,
+  writer: MoveReader,
   boardId: string,
   targets: readonly MoveTarget[],
 ): MoveScope {

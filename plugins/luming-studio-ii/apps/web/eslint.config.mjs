@@ -132,6 +132,7 @@ export default defineConfig([
     rules: {
       'base/contract-boundary': 'error',
       'canvas/contract-boundary': 'error',
+      'canvas/object-format-boundary': 'error',
       'frontend/contract-boundary': 'error',
       'objects/contract-boundary': 'error',
       'no-restricted-globals': ['error', { globals: ['require'], checkGlobalObject: true }],

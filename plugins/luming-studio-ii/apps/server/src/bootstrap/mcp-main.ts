@@ -29,13 +29,14 @@ function reportFailure(error: unknown) {
   process.stderr.write('Studio MCP request failed (' + name + ').\n');
 }
 
-const runtime = await loadMcpRuntime({
+const { dispatchAgentActivity, ...runtime } = await loadMcpRuntime({
   runtimeDirectory: fileURLToPath(new URL('.', import.meta.url)),
   dataRoot: dataRoot(),
   actorId: process.env[actorVariable] ?? 'local',
 });
 const server = await connectStudioMcpServer({
   ...runtime,
+  dispatchAgentActivity,
   submitSuggestion: createModelSuggestionSubmitter(runtime.dispatchAgentSuggestion),
   now: Date.now,
   allocateId: randomUUID,

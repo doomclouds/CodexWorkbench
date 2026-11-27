@@ -65,5 +65,9 @@ export function useCopyBoardLink(
       });
   }
 
-  return { notice, copy: copyLink && !busy ? copy : undefined };
+  return {
+    notice,
+    copy: copyLink && !busy ? copy : undefined,
+    dismiss: () => setNotice(undefined),
+  };
 }

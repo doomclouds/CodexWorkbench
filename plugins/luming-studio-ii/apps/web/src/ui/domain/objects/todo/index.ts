@@ -2,6 +2,7 @@ export { todoExtension } from './canvas-extension.js';
 export { TodoObject } from './TodoObject.js';
 export { applyTodoObjectEdit } from './todo-edit.js';
 export type {
+  TodoContentAnnotation,
   TodoObjectAppearance,
   TodoObjectChange,
   TodoObjectEdit,
@@ -11,4 +12,5 @@ export type {
   TodoObjectSnapshot,
   TodoPoint,
   TodoSourceRef,
+  TodoSourceRequest,
 } from './contracts.js';

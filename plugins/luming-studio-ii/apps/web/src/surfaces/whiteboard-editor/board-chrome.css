@@ -22,6 +22,12 @@
   gap: 9px;
 }
 
+.whiteboard-chrome.whiteboard-chrome--document {
+  justify-content: flex-end;
+  block-size: 44px;
+  padding: 3px 12px;
+}
+
 .whiteboard-chrome__name {
   box-sizing: border-box;
   inline-size: clamp(110px, 22vw, 300px);

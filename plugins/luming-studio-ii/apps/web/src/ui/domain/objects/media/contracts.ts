@@ -53,4 +53,5 @@ export interface LinkObjectProps {
   readonly label?: string;
   readonly href?: string;
   readonly interactive?: boolean;
+  readonly showDetails?: boolean;
 }

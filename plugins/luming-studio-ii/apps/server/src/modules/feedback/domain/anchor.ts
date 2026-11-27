@@ -1,7 +1,9 @@
+import { freezeFeedbackContent } from './content.js';
 import type {
   FeedbackAnchor,
   FeedbackAnchorObject,
   FeedbackAnchorTarget,
+  FeedbackContentSource,
   FeedbackPoint,
   FeedbackRejected,
 } from './model.js';
@@ -37,6 +39,7 @@ export function freezeFeedbackAnchor(
   sourceBoardRevision: bigint,
   target: FeedbackAnchorTarget,
   object?: FeedbackAnchorObject,
+  contentSource?: FeedbackContentSource,
 ): FeedbackAnchor | FeedbackRejected {
   if (target.kind === 'board') {
     return validPoint(target.point)
@@ -59,12 +62,19 @@ export function freezeFeedbackAnchor(
   }
 
   const { kind, label, x, y, width, height, rotation } = object;
+  const content =
+    target.kind === 'content' ? freezeFeedbackContent(target, kind, contentSource) : {};
+
+  if ('kind' in content) {
+    return content;
+  }
 
   return {
     target,
     sourceBoardRevision,
     frozenPoint,
     frozenObject: { kind, label, x, y, width, height, rotation },
+    ...content,
     targetMissing: false,
   };
 }

@@ -36,6 +36,7 @@ import {
 import { SharingAccessError } from '../../modules/sharing/application/index.js';
 import { archiveRoute, createArchiveReceiptRoute } from './archive-routes.js';
 import { createCatalogRoutes } from './catalog-routes.js';
+import { boardDocumentImageRoutePath, createDocumentImageRoute } from './document-image-route.js';
 import {
   boardImageRequestLimit,
   boardImageRoutePath,
@@ -53,12 +54,18 @@ import {
 } from './guest-sharing.js';
 import { HttpRequestError, mediaType, readBody } from './request.js';
 import { protobufContentType, sendProtobuf, sendStatus } from './response.js';
+import { agentActivityPath, agentActivityRequestLimit } from './room-agent-activity.js';
 import { observeRoomChange } from './room-changes.js';
 import { createRoomRoutes, roomEventPath, serveRoomEvents } from './room-routes.js';
 import { createWhiteboardRoutes } from './routes.js';
 import { createSharingRoutes, type SharingRoutesOptions } from './share-routes.js';
 import { createBoardSuggestionRoutes } from './suggestion-routes.js';
 import type { HttpActor, ProtobufRoute } from './unary-route.js';
+import {
+  boardVideoRequestLimit,
+  boardVideoRoutePath,
+  createVideoEditRoute,
+} from './video-edits.js';
 
 export type { GuestHttpOptions } from './guest-sharing.js';
 export { createGuestWeb } from './guest-web.js';
@@ -88,6 +95,13 @@ export interface WhiteboardHttpOptions {
 }
 
 type Routes = ReadonlyMap<string, ProtobufRoute>;
+
+const requestLimits = new Map([
+  [boardImageRoutePath, boardImageRequestLimit],
+  [boardDocumentImageRoutePath, boardImageRequestLimit],
+  [boardVideoRoutePath, boardVideoRequestLimit],
+  [agentActivityPath, agentActivityRequestLimit],
+]);
 
 async function handleRequest(
   request: IncomingMessage,
@@ -138,7 +152,7 @@ async function handleRequest(
     sendStatus(response, 401);
     return;
   }
-  if (actor.kind === 'agent' && path !== agentSuggestionPath) {
+  if (actor.kind === 'agent' && path !== agentSuggestionPath && path !== agentActivityPath) {
     sendStatus(response, 403);
     return;
   }
@@ -153,7 +167,7 @@ async function handleRequest(
   }
 
   if (route) {
-    const limit = path === boardImageRoutePath ? boardImageRequestLimit : undefined;
+    const limit = requestLimits.get(path);
     sendProtobuf(response, await route(actor, await readBody(request, limit)));
   }
 }
@@ -256,6 +270,8 @@ export function createWhiteboardRequestHandler(
   const studioRoutes = features
     ? [
         ...createBoardEditRoutes(features.editor, features.digest, observe),
+        createVideoEditRoute(features.editor, features.digest, observe),
+        createDocumentImageRoute(features.editor, features.digest),
         ...createBoardHistoryRoutes(features.history, features.digest, observe),
         ...createFeedbackRoutes(features.feedback),
         ...(features.rooms ? createRoomRoutes(features.rooms) : []),

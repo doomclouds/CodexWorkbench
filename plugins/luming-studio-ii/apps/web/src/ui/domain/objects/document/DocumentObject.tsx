@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 import { Dialog, ScrollRegion, StatusText } from '../../../base/index.js';
 import type { SearchFieldHandle } from '../../../base/index.js';
 import type { DocumentActivity, DocumentObjectProps } from './contracts.js';
+import { plainDocumentInput, useDocumentAnnotations } from './document-annotations.js';
 import { DocumentReadingLayout } from './DocumentFocusedReading.js';
 import { DocumentReadView } from './DocumentReadView.js';
 import { DocumentComparison, DocumentTitle, DocumentToolbar } from './DocumentToolbar.js';
@@ -135,10 +136,6 @@ function blockTarget(target: EventTarget | null) {
   }
 }
 
-function plainDocumentInput(event: KeyboardEvent | MouseEvent): boolean {
-  return ![event.altKey, event.ctrlKey, event.metaKey, event.shiftKey].some(Boolean);
-}
-
 function notifyMode(
   onActivity: DocumentObjectProps['onActivity'],
   mode: DocumentActivity['mode'],
@@ -157,6 +154,8 @@ export function DocumentObject({
   paper,
   canvas,
   focusedReading = false,
+  annotationActive,
+  nativeBlockRequest,
   expandControl,
   locked = false,
   onOpenPresentation,
@@ -190,7 +189,12 @@ export function DocumentObject({
   });
   const draft = useDocumentDraft({ value, readOnly, composing, onCommit, onChange });
   const { dirty, saving } = draft;
-  const viewport = useDocumentViewport(phase, draft.draft.document, draft.confirmed.version);
+  const viewport = useDocumentViewport(
+    phase,
+    draft.draft.document,
+    draft.confirmed.version,
+    nativeBlockRequest,
+  );
   const {
     scroll,
     body: paperNode,
@@ -206,6 +210,15 @@ export function DocumentObject({
   const { layout, shell, surface } = panelPresentation(paper, canvas, expanded);
   const observe = useEffectEvent(() => notifyMode(onActivity, phase, dirty, saving, composing));
   const focusReader = (focusedReading || interactive) && !editing;
+  const annotation = useDocumentAnnotations({
+    active: annotationActive,
+    editing,
+    interactive,
+    focused: focusedReading,
+    onAnnotate,
+    readSelection,
+    noteForBlock: viewport.noteForBlock,
+  });
 
   useEffect(() => observe(), [phase, dirty, saving, composing]);
   useLayoutEffect(() => {
@@ -228,6 +241,10 @@ export function DocumentObject({
 
   function toggleExport() {
     setExportOpen((current) => !current);
+  }
+
+  function closeExport() {
+    setExportOpen(false);
   }
 
   function annotate() {
@@ -270,6 +287,11 @@ export function DocumentObject({
   }
 
   function handleOpen() {
+    if (phase === 'read') {
+      paperNode.current?.parentElement?.focus({ preventScroll: true });
+      return;
+    }
+
     if (!onOpenPresentation) {
       setView({ mode: 'read' });
       return;
@@ -285,7 +307,7 @@ export function DocumentObject({
     if (event.defaultPrevented || editing || readOnly) {
       return;
     }
-    if (!plainDocumentInput(event)) {
+    if (annotationActive || !plainDocumentInput(event)) {
       return;
     }
 
@@ -326,6 +348,10 @@ export function DocumentObject({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (annotation.handleAnnotationKey(event)) {
+      return;
+    }
+
     pan.handleKeyDown(event);
     if (handleReadingShortcut(event)) {
       return;
@@ -363,7 +389,9 @@ export function DocumentObject({
     if (!enterEditor || !plainDocumentInput(event) || !inReader) {
       return false;
     }
-    if (readOnly || editing || target.closest(nativeControl)) {
+
+    const blockedEditor = readOnly || editing || annotationActive;
+    if (blockedEditor || target.closest(nativeControl)) {
       return false;
     }
 
@@ -403,7 +431,9 @@ export function DocumentObject({
         onRead={handleRead}
         onExport={onExport}
         onToggleExport={toggleExport}
+        onCloseExport={closeExport}
         onAnnotate={onAnnotate ? annotate : undefined}
+        canAnnotate={viewport.canAnnotate}
         onCompare={() => setComparing(true)}
       />
     );
@@ -416,6 +446,7 @@ export function DocumentObject({
         data-canvas-drag-surface={expanded ? undefined : 'background'}
         style={shell}
         onDoubleClick={handleDoubleClick}
+        onClickCapture={annotation.handleAnnotationClick}
         onPointerUp={captureSelection}
         onKeyUp={captureSelection}
       >
@@ -440,6 +471,7 @@ export function DocumentObject({
             resolveImage={resolveImage}
             matchingIds={matchingIds}
             selectedId={currentId}
+            annotation={annotation.enabled}
           />
         )}
       </div>
@@ -451,7 +483,7 @@ export function DocumentObject({
       data-document-view={phase}
       data-document-layout={layout}
       data-document-focused-reading={focusedReading || undefined}
-      data-canvas-native={focusedReading ? '' : undefined}
+      data-canvas-native={annotation.useNativeSurface ? '' : undefined}
       data-paper-scheme={shell.colorScheme}
       style={surface}
       onKeyDownCapture={handleKeyDownCapture}
@@ -470,7 +502,7 @@ export function DocumentObject({
         viewport={viewport}
         searchField={searchField}
         expanded={expanded}
-        interactive={interactive}
+        interactive={annotation.allowReadBody}
         heading={
           <>
             <DocumentCanvasHeading
@@ -509,7 +541,7 @@ export function DocumentObject({
             <Dialog
               open
               title={draft.draft.title || untitledDocument}
-              closeLabel="返回白板"
+              closeLabel="返回画板"
               onRequestClose={handleBack}
             >
               {body}

@@ -128,6 +128,79 @@ test('creates stable object IDs and decodes authoritatively ordered changed meta
   });
 });
 
+test('encodes the guarded source port and requires both IDs in an adjacent creation receipt', async () => {
+  const sourceId = 'source-shape';
+  const adjacentId = 'adjacent-shape';
+  const connectorId = 'adjacent-arrow';
+  const command: EditBoardGeometryCommand = {
+    ...identity,
+    operation: {
+      kind: 'create',
+      object: { id: adjacentId, kind: 'shape', label: '', geometry: boardGeometry },
+      attachment: {
+        source: { id: sourceId, expectedGeometryVersion: revision },
+        sourcePort: 'right',
+        targetPort: 'left',
+        connectorId,
+      },
+    },
+  };
+  const shape = {
+    objectId: adjacentId,
+    kind: 'shape',
+    geometry: boardGeometry,
+    geometryVersion: 0n,
+  };
+  const connector = {
+    objectId: connectorId,
+    kind: 'connector',
+    geometry: boardGeometry,
+    geometryVersion: 0n,
+    geometryDetail: {
+      case: 'connector',
+      value: {
+        start: {
+          point: { x: 10, y: 30 },
+          attachment: { objectId: sourceId, port: ConnectorPort.RIGHT },
+        },
+        end: {
+          point: { x: 70, y: 30 },
+          attachment: { objectId: adjacentId, port: ConnectorPort.LEFT },
+        },
+      },
+    },
+  } as const;
+  let changedObjects = [shape, connector];
+  const edits = createWhiteboardEditService(async (_path, bytes) => {
+    const request = fromBinary(editBoardGeometry.input, bytes);
+    expect(request.operation).toMatchObject({
+      case: 'create',
+      value: {
+        attachment: {
+          source: { objectId: sourceId, expectedGeometryVersion: revision },
+          sourcePort: ConnectorPort.RIGHT,
+          targetPort: ConnectorPort.LEFT,
+          connectorId,
+        },
+      },
+    });
+
+    return reply(editBoardGeometry.output, {
+      receipt: {
+        ...identity,
+        outcome: { case: 'applied', value: { boardRevision: revision, changedObjects } },
+      },
+    });
+  });
+
+  await expect(edits.editGeometry(command)).resolves.toMatchObject({
+    kind: 'applied',
+    objects: [{ id: adjacentId }, { id: connectorId }],
+  });
+  changedObjects = [shape];
+  await expect(edits.editGeometry(command)).rejects.toThrow('did not confirm creation');
+});
+
 test('writes an HTML diagram as version-zero embedded source through the geometry API', async () => {
   const diagramId = 'release-html-diagram';
   const title = '图解';

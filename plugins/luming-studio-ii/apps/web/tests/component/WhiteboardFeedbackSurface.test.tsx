@@ -2,6 +2,7 @@ import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
   BoardFeedbackService,
+  FeedbackContentTarget,
   FeedbackThread,
   FeedbackThreadPage,
 } from '../../src/data/feedback/index.js';
@@ -221,6 +222,148 @@ test('creates an anchored note and retains the identical command when the write 
   );
 });
 
+test('saves before attaching, then retries the original attachment without saving again', async () => {
+  const service = testService();
+  service.apply.mockRejectedValueOnce(new Error('保存请求尚未确认'));
+  const onAttachThread = vi.fn<NonNullable<WhiteboardFeedbackSurfaceProps['onAttachThread']>>();
+  onAttachThread.mockRejectedValueOnce(new Error('宿主没有确认附加'));
+  const createCommandId = vi.fn(() => 'attachment-command').mockReturnValueOnce('save-command');
+
+  await render(service, {
+    annotationRequest: { objectId: card.id, sequence: 1 },
+    onAttachThread,
+    createCommandId,
+  });
+  await typeMessage('保存后附加到对话');
+  await act(async () => element<HTMLInputElement>('input[type="checkbox"]').click());
+  await click('保存备注');
+  expect(onAttachThread).not.toHaveBeenCalled();
+
+  await click('重试本次保存');
+  expect(service.apply.mock.calls.map(([command]) => command.commandId)).toEqual([
+    'save-command',
+    'save-command',
+  ]);
+  expect(fixture.host.textContent).toContain('备注已保存，附加失败后可直接重试。');
+  await click('重试附加');
+
+  const attached = { boardId, threadId: sample.id, commandId: 'attachment-command' };
+  expect(onAttachThread.mock.calls).toEqual([
+    [{ ...attached, signal: expect.any(AbortSignal) }],
+    [{ ...attached, signal: expect.any(AbortSignal) }],
+  ]);
+  expect(service.apply).toHaveBeenCalledTimes(2);
+});
+
+test('creates a real document-block anchor and locates its resolved position', async () => {
+  const target = {
+    kind: 'content',
+    objectId: card.id,
+    u: 0.75,
+    v: 0.25,
+    geometryVersion: 7n,
+    payloadVersion: 4n,
+    content: { kind: 'document', blockIds: ['selected-paragraph'] },
+  } satisfies FeedbackContentTarget;
+  const service = testService({
+    ...sample,
+    anchor: { ...sample.anchor, target, frozenExcerpt: '保留选择的原文' },
+  });
+  const focusWorldPoint = vi.fn<(point: { x: number; y: number }) => void>();
+  const contentPoint = { x: 156, y: 64 };
+
+  await render(service, {
+    contentAnnotationRequest: { sequence: 1, target },
+    contentPoints: new Map([[sample.id, contentPoint]]),
+    focusWorldPoint,
+  });
+  expect(fixture.host.textContent).toContain('文档段落');
+  await typeMessage('请核对选中的段落');
+  await click('保存备注');
+  expect(service.apply.mock.calls[0]?.[0].operation).toEqual({
+    kind: 'create',
+    text: '请核对选中的段落',
+    anchor: target,
+  });
+  expect(fixture.host.textContent).toContain('保留选择的原文');
+  await chooseAction('备注操作', '定位备注');
+  expect(focusWorldPoint).toHaveBeenCalledWith(contentPoint);
+});
+
+test('lets the host pick directly, keeps Escape and applies only a new point request', async () => {
+  const service = testService();
+  const onAnnotationActiveChange = vi.fn<(active: boolean) => void>();
+  const point = { x: 150, y: 70 };
+  const options = {
+    hostPicking: true,
+    annotationActive: true,
+    focusedObjectId: card.id,
+    objects: [card, { ...card, id: 'overlapping-hidden', label: '重叠的隐藏对象' }],
+    onAnnotationActiveChange,
+  };
+  await render(service, { ...options, pointAnnotationRequest: { sequence: 1, point } });
+
+  expect(fixture.host.querySelector('[aria-label="在白板选取备注位置"]')).toBeNull();
+  expect(fixture.host.textContent).toContain(card.label);
+  const escape = () =>
+    act(async () =>
+      button('画布').dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+  await escape();
+  expect(fixture.host.querySelector('[aria-label="新建备注"]')).toBeNull();
+  await escape();
+  expect(onAnnotationActiveChange).toHaveBeenLastCalledWith(false);
+
+  await render(service, { ...options, pointAnnotationRequest: { sequence: 1, point } });
+  expect(fixture.host.querySelector('[aria-label="新建备注"]')).toBeNull();
+  await render(service, {
+    ...options,
+    pointAnnotationRequest: { sequence: 2, point: { x: -5, y: -6 } },
+  });
+  expect(fixture.host.textContent).toContain('画板位置');
+  await escape();
+  await render(service, { ...options, pointAnnotationRequest: { sequence: 3, point } });
+  await typeMessage('宿主取得的选择');
+  await click('保存备注');
+  expect(service.apply.mock.calls[0]?.[0].operation).toMatchObject({
+    kind: 'create',
+    anchor: { kind: 'object', objectId: card.id, geometryVersion: 7n, u: 0.5, v: 0.5 },
+  });
+});
+
+test('projects only the focused document pins with independent vertical zoom and keeps other notes listed', async () => {
+  const service = testService();
+  const boardPoint = { x: 10, y: 10 };
+  const boardNote: FeedbackThread = {
+    ...sample,
+    id: 'board-note',
+    anchor: {
+      ...sample.anchor,
+      target: { kind: 'board', point: boardPoint },
+      frozenPoint: boardPoint,
+    },
+    first: { ...sample.first, text: '普通画板上的备注' },
+  };
+  service.listThreads.mockResolvedValue({ items: [sample, boardNote], canWrite: true });
+  await render(service, { focusedObjectId: card.id, viewport: { ...viewport, zoomY: 3 } });
+
+  const pin = element<HTMLButtonElement>('[data-feedback-pin="thread"]');
+  expect(pin.style.left).toBe('340px');
+  expect(pin.style.top).toBe('315px');
+  expect(fixture.host.querySelector('[data-feedback-pin="board-note"]')).toBeNull();
+
+  await click('打开备注');
+  const list = element('[aria-label="备注讨论"]');
+  expect(list.textContent).toContain(sample.first.text);
+  expect(list.textContent).toContain(boardNote.first.text);
+});
+
 test('uses 9 to pick a world coordinate without mutating the Canvas', async () => {
   const service = testService();
   await render(service, { selectedIds: [] });
@@ -325,7 +468,7 @@ test('uses server message and thread versions when editing, replying and reopeni
 
   await chooseAction('备注操作', '编辑');
   await typeMessage('复核后的正文');
-  await click('保存修改');
+  await click('保存');
   expect(service.apply).toHaveBeenLastCalledWith(
     expect.objectContaining({
       operation: {

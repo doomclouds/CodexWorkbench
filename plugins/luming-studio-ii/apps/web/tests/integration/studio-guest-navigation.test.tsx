@@ -31,6 +31,15 @@ const invitationToken = 'commenter.test-token';
 const guestName = '测试来宾';
 const { inspectBoardInvitation, joinBoardInvitation, getBoardSharing } = BoardSharingService.method;
 const version = 1n;
+const guestSession = {
+  boardId: sampleBoardId,
+  actorId: 'guest-1',
+  name: guestName,
+  role: SharingRole.COMMENTER,
+  version,
+  canEdit: false,
+  canComment: true,
+};
 
 function createGuestSharingMock() {
   const calls: string[] = [];
@@ -45,9 +54,18 @@ function createGuestSharingMock() {
         boardId: sampleBoardId,
         invitationToken,
       });
-      const result = create(inspectBoardInvitation.output, {
-        invitation: { boardId: sampleBoardId, title: '来宾白板', role: SharingRole.COMMENTER },
-      });
+      const result = create(
+        inspectBoardInvitation.output,
+        joined && !revoked && canComment
+          ? { session: guestSession }
+          : {
+              invitation: {
+                boardId: sampleBoardId,
+                title: '来宾白板',
+                role: SharingRole.COMMENTER,
+              },
+            },
+      );
 
       return Promise.resolve(toBinary(inspectBoardInvitation.output, result));
     }
@@ -58,17 +76,7 @@ function createGuestSharingMock() {
         name: guestName,
       });
       joined = true;
-      const result = create(joinBoardInvitation.output, {
-        session: {
-          boardId: sampleBoardId,
-          actorId: 'guest-1',
-          name: guestName,
-          role: SharingRole.COMMENTER,
-          version,
-          canEdit: false,
-          canComment: true,
-        },
-      });
+      const result = create(joinBoardInvitation.output, { session: guestSession });
 
       return Promise.resolve(toBinary(joinBoardInvitation.output, result));
     }
@@ -245,11 +253,37 @@ test('joins an explicit invitation, strips the token and resumes only the guest 
     await app.refresh();
 
     expect(app.host.querySelector('[data-canvas-root]')).toBeNull();
-    expect(app.host.textContent).toContain('无权访问');
+    expect(app.host.textContent).toContain('无法访问此白板');
+    expect(document.activeElement).toBe(app.host.querySelector('.guest-session-denied'));
     await act(async () => guestButton(app.host, '退出此白板').click());
     expect(window.location.search).toBe('');
     expect(app.host.textContent).toContain('当前没有打开的白板。');
     expect(app.readCatalogCalls()).toBe(0);
+  } finally {
+    app.dispose();
+  }
+});
+
+test('reopens a valid invitation in a known browser without repeating name entry', async () => {
+  const url = boardUrl + '#invite=' + invitationToken;
+  const app = createGuestAppMock(url);
+  try {
+    await app.open('first-invite');
+    await act(async () => enterName(app.host, guestName));
+    await act(async () => guestButton(app.host, '打开白板').click());
+    window.history.replaceState(null, '', url);
+    await app.open('reopened-invite');
+
+    expect(app.sharing.calls).toEqual([
+      inspectBoardInvitation.name,
+      joinBoardInvitation.name,
+      getBoardSharing.name,
+      inspectBoardInvitation.name,
+      getBoardSharing.name,
+    ]);
+    expect(app.host.querySelector('[data-canvas-root]')).not.toBeNull();
+    expect(app.host.querySelector('input[name="name"]')).toBeNull();
+    expect(window.location.hash).toBe('');
   } finally {
     app.dispose();
   }

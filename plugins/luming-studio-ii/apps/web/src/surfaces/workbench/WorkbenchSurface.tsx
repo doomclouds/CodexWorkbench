@@ -1,12 +1,13 @@
 import {
   useEffect,
+  useEffectEvent,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type ChangeEvent,
 } from 'react';
-import { AlertCircle, LayoutGrid, Loader2, Plus } from 'lucide-react';
+import { AlertCircle, ArrowLeft, LayoutGrid, Loader2, Plus } from 'lucide-react';
 import {
   createCatalogDirectory,
   type BoardCatalogService,
@@ -14,8 +15,13 @@ import {
   type CatalogDirectorySnapshot,
   type CatalogManagementService,
 } from '../../data/catalog/index.js';
-import { Button } from '../../ui/base/index.js';
-import { BoardCard, NewBoardCard, type WorkbenchBoardAction } from './WorkbenchCards.js';
+import { Button, OperationNotice } from '../../ui/base/index.js';
+import {
+  BoardCard,
+  NewBoardCard,
+  type RenderWorkbenchThumbnail,
+  type WorkbenchBoardAction,
+} from './WorkbenchCards.js';
 import { ManagementStatus, RenameBoardDialog } from './WorkbenchManagement.js';
 import { WorkbenchToolbar } from './WorkbenchToolbar.js';
 import type { WorkbenchPreferences } from './preferences.js';
@@ -40,6 +46,7 @@ export interface WorkbenchSurfaceProps {
   readonly onOpenTrash?: () => void;
   readonly copyBoardLink?: CopyBoardLink;
   readonly onOpenSharing?: (boardId: string) => void;
+  readonly renderThumbnail?: RenderWorkbenchThumbnail;
   readonly readRouteGeneration?: () => number;
 }
 
@@ -60,6 +67,7 @@ interface CatalogResultsProps {
   ) => void;
   readonly onDuplicate?: (board: CatalogBoardSummary, trigger: HTMLButtonElement) => void;
   readonly onCopyLink?: (boardId: string) => void;
+  readonly renderThumbnail?: RenderWorkbenchThumbnail;
 }
 
 interface RenameTarget {
@@ -127,36 +135,72 @@ function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
 const createProgressMessages = { creating: '正在创建白板', checking: '正在查询创建回执' };
 const copyProgressMessages = { creating: '正在复制作品', checking: '正在查询复制回执' };
 
-function LinkCopyStatus({ notice }: { readonly notice?: BoardLinkNotice }) {
+function LinkCopyStatus({
+  notice,
+  dismiss,
+}: {
+  readonly notice?: BoardLinkNotice;
+  readonly dismiss: () => void;
+}) {
+  const close = useEffectEvent(dismiss);
+
+  useEffect(() => {
+    if (!notice || notice.error) {
+      return;
+    }
+
+    const timer = setTimeout(close, 6_000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   if (!notice) {
     return null;
   }
+  if (notice.error) {
+    return (
+      <div className="studio-workbench-error" role="alert">
+        {notice.message}
+      </div>
+    );
+  }
 
   return (
-    <div
-      className={notice.error ? 'studio-workbench-error' : 'studio-workbench-copy-progress'}
-      role={notice.error ? 'alert' : 'status'}
-    >
-      {notice.message}
+    <div className="studio-workbench-management-notice">
+      <OperationNotice
+        id="workbench-copied-link"
+        level="success"
+        message={notice.message}
+        presentation="toast"
+        dismissible
+        onDismiss={dismiss}
+      />
     </div>
   );
 }
 
 function EmptyBoards({
   hasQuery,
+  pinnedOnly,
   createBlocked,
   onCreate,
 }: {
   readonly hasQuery: boolean;
+  readonly pinnedOnly: boolean;
   readonly createBlocked: boolean;
   readonly onCreate: () => void;
 }) {
+  const title = pinnedOnly ? '还没有固定作品' : '从第一块白板开始';
+  const detail = pinnedOnly
+    ? '把常用作品固定在这里，方便再次打开。'
+    : '先创建一块空白白板，再与 Codex 一起整理思路。';
+  const canCreate = !hasQuery && !pinnedOnly;
+
   return (
     <div className="studio-workbench-empty">
       <LayoutGrid size={32} />
-      <h3>{hasQuery ? '没有找到匹配的作品' : '从第一块白板开始'}</h3>
-      <p>{hasQuery ? '试试其他名称。' : '先创建一块空白白板，再与 Codex 一起整理思路。'}</p>
-      {!hasQuery && (
+      <h3>{hasQuery ? '没有找到匹配的作品' : title}</h3>
+      <p>{hasQuery ? '试试其他名称。' : detail}</p>
+      {canCreate && (
         <Button
           label="新建白板"
           icon={<Plus size={16} />}
@@ -178,10 +222,13 @@ function CatalogResults({
   onManage,
   onDuplicate,
   onCopyLink,
+  renderThumbnail,
 }: CatalogResultsProps) {
-  const { kind, boards, error, query, nextCursor, loadingMore } = snapshot;
+  const { kind, boards, error, query, nextCursor, loadingMore, pinnedOnly } = snapshot;
   const waiting = kind === 'loading' && boards.length === 0;
   const empty = kind === 'ready' && boards.length === 0 && !error;
+  const retry = nextCursor ? directory.loadMore : directory.reload;
+  const cardThumbnail = kind === 'failed' ? undefined : renderThumbnail;
 
   return (
     <section className="studio-workbench-works" aria-label="作品管理">
@@ -189,7 +236,7 @@ function CatalogResults({
         <div className="studio-workbench-error" role="alert">
           <AlertCircle size={16} />
           <span>{error}</span>
-          <button type="button" onClick={directory.reload}>
+          <button type="button" onClick={retry}>
             重试
           </button>
         </div>
@@ -201,7 +248,12 @@ function CatalogResults({
         </div>
       )}
       {empty && (
-        <EmptyBoards hasQuery={!!query.trim()} createBlocked={createBlocked} onCreate={onCreate} />
+        <EmptyBoards
+          hasQuery={!!query.trim()}
+          pinnedOnly={pinnedOnly}
+          createBlocked={createBlocked}
+          onCreate={onCreate}
+        />
       )}
       {boards.length > 0 && (
         <div
@@ -218,6 +270,7 @@ function CatalogResults({
               onAction={onManage}
               onDuplicate={onDuplicate}
               onCopyLink={onCopyLink}
+              renderThumbnail={cardThumbnail}
             />
           ))}
         </div>
@@ -236,6 +289,34 @@ function CatalogResults({
   );
 }
 
+function WorkbenchTitle({
+  pinnedOnly,
+  busy,
+  onBack,
+}: {
+  readonly pinnedOnly: boolean;
+  readonly busy: boolean;
+  readonly onBack: () => void;
+}) {
+  return (
+    <div className="studio-workbench-title">
+      {pinnedOnly && (
+        <button
+          type="button"
+          className="studio-workbench-icon-button"
+          aria-label="返回 Luming Studio"
+          title="返回 Luming Studio"
+          disabled={busy}
+          onClick={onBack}
+        >
+          <ArrowLeft size={21} />
+        </button>
+      )}
+      <h1>{pinnedOnly ? '已固定' : 'Luming Studio'}</h1>
+    </div>
+  );
+}
+
 export function WorkbenchSurface({
   catalog,
   createCommandId,
@@ -246,6 +327,7 @@ export function WorkbenchSurface({
   onOpenTrash,
   copyBoardLink,
   onOpenSharing,
+  renderThumbnail,
   readRouteGeneration,
 }: WorkbenchSurfaceProps) {
   const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
@@ -296,6 +378,11 @@ export function WorkbenchSurface({
 
   function openArchivePicker() {
     archiveInput.current?.click();
+  }
+
+  function handleBackFromPinned() {
+    directory.setPinnedOnly(false, true);
+    filterButton.current?.focus();
   }
 
   function handleArchiveInput(event: ChangeEvent<HTMLInputElement>) {
@@ -362,18 +449,22 @@ export function WorkbenchSurface({
     <div className="studio-workbench" data-studio-theme={preferences.resolvedTheme}>
       <CreationStatus creation={creation} />
       {!rename && <ManagementStatus management={controls} />}
-      <LinkCopyStatus notice={linkCopy.notice} />
+      <LinkCopyStatus notice={linkCopy.notice} dismiss={linkCopy.dismiss} />
       <main className="studio-workbench-main" aria-label="Luming Studio">
         <header className="studio-workbench-header">
-          <h1>Luming Studio</h1>
+          <WorkbenchTitle
+            pinnedOnly={snapshot.pinnedOnly}
+            busy={createBlocked}
+            onBack={handleBackFromPinned}
+          />
           <WorkbenchToolbar
             query={snapshot.query}
-            order={snapshot.order}
+            pinnedOnly={snapshot.pinnedOnly}
             preferences={preferences}
             createBusy={creation.createBusy}
             createBlocked={createBlocked}
             onQueryChange={directory.setQuery}
-            onOrderChange={directory.setOrder}
+            onPinnedOnlyChange={directory.setPinnedOnly}
             onCreate={creation.create}
             onImport={archiveImport ? openArchivePicker : undefined}
             onOpenTrash={onOpenTrash}
@@ -401,6 +492,7 @@ export function WorkbenchSurface({
           onManage={management ? handleManage : undefined}
           onDuplicate={catalog.duplicateBoard ? handleDuplicate : undefined}
           onCopyLink={linkCopy.copy}
+          renderThumbnail={renderThumbnail}
         />
       </main>
       {rename && (

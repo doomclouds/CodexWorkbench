@@ -35,6 +35,45 @@ export function deleteFeedbackAnchorObject(path: string, boardId: string, object
   );
 }
 
+interface ContentFixture {
+  readonly boardId: string;
+  readonly objectId: string;
+  readonly kind: 'document' | 'todo' | 'html';
+  readonly payloadVersion: bigint;
+  readonly body: object;
+}
+
+export function seedFeedbackContent(path: string, fixture: ContentFixture): void {
+  const { boardId, objectId, kind, payloadVersion, body } = fixture;
+  withDatabase(path, (database) =>
+    database.write((connection) => {
+      connection
+        .prepare(`
+        INSERT INTO board_objects (board_id, object_id, kind, label, x, y, width, height)
+        VALUES (?, ?, ?, ?, 100, 120, 200, 100)
+        ON CONFLICT DO NOTHING
+      `)
+        .run(boardId, objectId, kind, objectId);
+      connection
+        .prepare(`
+        INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (board_id, object_id) DO UPDATE SET
+          payload_version = excluded.payload_version,
+          body_kind = excluded.body_kind,
+          body_json = excluded.body_json
+      `)
+        .run(
+          boardId,
+          objectId,
+          payloadVersion,
+          kind === 'html' ? 'embed' : kind,
+          JSON.stringify(body),
+        );
+    }),
+  );
+}
+
 export function removeFeedbackWritePermission(
   path: string,
   boardId: string,

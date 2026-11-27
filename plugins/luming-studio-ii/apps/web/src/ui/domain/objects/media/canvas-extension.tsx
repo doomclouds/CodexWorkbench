@@ -1,6 +1,6 @@
 import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';
 import type { ImageCrop, ImageCropPatch, MediaObjectStatus, MediaSize } from './contracts.js';
-import { LinkObject } from './LinkObject.js';
+import { LinkView } from './link-view.js';
 import { validMediaSize } from './media-geometry.js';
 import { MediaObject } from './MediaObject.js';
 
@@ -21,6 +21,8 @@ export interface VideoCanvasValue {
 export interface LinkCanvasValue {
   readonly href?: string;
 }
+
+export type LinkCanvasViewProps = CanvasObjectViewProps;
 
 const mediaCapabilities = {
   move: true,
@@ -94,11 +96,16 @@ function ImageView({
   readOnly,
   locked,
   zoom,
+  expanded,
+  focusedReading,
   editRequest,
   request,
   onRetentionChange,
 }: CanvasObjectViewProps) {
   const { src, href, crop, naturalSize, status } = imageValue(payload?.value);
+  const canReadControls =
+    geometry.width * zoom >= minimumControlSize.width &&
+    geometry.height * zoom >= minimumControlSize.height;
 
   async function saveCrop(patch: ImageCropPatch) {
     if (!payload) {
@@ -132,17 +139,20 @@ function ImageView({
       locked={locked}
       editRequest={editRequest}
       showCropControl={false}
-      showLinkControl={
-        geometry.width * zoom >= minimumControlSize.width &&
-        geometry.height * zoom >= minimumControlSize.height
-      }
+      showLinkControl={Boolean(expanded || focusedReading || canReadControls)}
       onCropActivityChange={onRetentionChange}
       onSaveCrop={payload ? saveCrop : undefined}
     />
   );
 }
 
-function VideoView({ object, payload, interactive }: CanvasObjectViewProps) {
+function VideoView({
+  object,
+  payload,
+  interactive,
+  expanded,
+  focusedReading,
+}: CanvasObjectViewProps) {
   const value = isRecord(payload?.value) ? payload.value : {};
 
   return (
@@ -152,15 +162,9 @@ function VideoView({ object, payload, interactive }: CanvasObjectViewProps) {
       src={text(value.src)}
       poster={text(value.poster)}
       status={mediaStatus(value.status)}
-      interactive={interactive}
+      interactive={Boolean(interactive || expanded || focusedReading)}
     />
   );
-}
-
-function LinkView({ object, payload, interactive }: CanvasObjectViewProps) {
-  const value = isRecord(payload?.value) ? payload.value : {};
-
-  return <LinkObject label={object.label} href={text(value.href)} interactive={interactive} />;
 }
 
 export const imageExtension = {
@@ -173,7 +177,7 @@ export const imageExtension = {
 export const videoExtension = {
   kind: 'video',
   capabilities: mediaCapabilities,
-  placement: { kind: 'video', label: '视频', width: 360, height: 240 },
+  placement: { kind: 'video', label: '视频', width: 480, height: 270 },
   View: VideoView,
 } satisfies CanvasObjectExtension;
 

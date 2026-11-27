@@ -13,6 +13,7 @@ interface PresencePort {
 
 const heartbeatMs = 5000;
 const motionIntervalMs = 50;
+const gestureHeartbeatMs = 400;
 
 function defaultPresence(): BoardRoomPresence {
   return { following: false };
@@ -41,7 +42,10 @@ function differs(next: BoardRoomPresence, previous: BoardRoomPresence | undefine
     next.cursor?.x !== previous.cursor?.x || next.cursor?.y !== previous.cursor?.y;
   const viewChanged = !sameView(next.viewport, previous.viewport);
 
-  return cursorChanged || viewChanged || next.following !== previous.following;
+  const activityChanged =
+    next.following !== previous.following || next.gesture !== previous.gesture;
+
+  return cursorChanged || viewChanged || activityChanged;
 }
 
 export function createPresencePublisher(clock: BoardRoomClock, port: PresencePort) {
@@ -62,7 +66,8 @@ export function createPresencePublisher(clock: BoardRoomClock, port: PresencePor
       return;
     }
 
-    const cadence = differs(current, sent) ? motionIntervalMs : heartbeatMs;
+    const steadyInterval = current.gesture ? gestureHeartbeatMs : heartbeatMs;
+    const cadence = differs(current, sent) ? motionIntervalMs : steadyInterval;
     const interval = Math.max(cadence, backoff);
     const delay = Math.max(0, sentAt + interval - clock.now());
     cancelSchedule = clock.schedule(delay, send);
@@ -128,6 +133,9 @@ export function createPresencePublisher(clock: BoardRoomClock, port: PresencePor
     cancelSchedule?.();
     cancelSchedule = undefined;
     sending = false;
+    if (current.gesture) {
+      current = { ...current, gesture: undefined };
+    }
   }
 
   function leave() {

@@ -3,12 +3,24 @@ import { BoardSuggestionService } from '@codexworkbench/luming-studio-ii-contrac
 
 type OptionEdit = { readonly geometry: JsonObject } | { readonly content: JsonObject };
 
-interface SuggestionOptionInput {
+interface SuggestionOptionMetadata {
   readonly optionId: string;
   readonly label: string;
   readonly description?: string;
-  readonly edit: OptionEdit;
 }
+
+interface SingleSuggestionEdit {
+  readonly edit: OptionEdit;
+  readonly operations?: never;
+}
+
+interface OrderedSuggestionEdits {
+  readonly edit?: never;
+  readonly operations: readonly OptionEdit[];
+}
+
+type SuggestionOptionInput = SuggestionOptionMetadata &
+  (SingleSuggestionEdit | OrderedSuggestionEdits);
 
 interface ModelSuggestionInput {
   readonly boardId: string;
@@ -42,18 +54,26 @@ function responseFailure(status: number) {
   return refusal('INVALID_ARGUMENT', '建议与当前冻结来源或支持的操作不匹配。');
 }
 
+function modelOption(option: SuggestionOptionInput): JsonObject {
+  const { optionId, label, description, edit, operations } = option;
+  const metadata = { optionId, label, ...(description === undefined ? {} : { description }) };
+  if (edit && operations === undefined) {
+    return { ...metadata, ...edit };
+  }
+  if (!edit && operations?.length && operations.length <= 60) {
+    return { ...metadata, operations: operations.map((item) => ({ ...item })) };
+  }
+
+  throw new TypeError('A model suggestion option requires one edit or a bounded list of edits.');
+}
+
 function toSubmitWire(input: ModelSuggestionInput) {
   const wire = fromJson(submission.input, {
     boardId: input.boardId,
     commandId: input.commandId,
     sourceId: input.sourceId,
     observation: input.observation,
-    options: input.options.map(({ optionId, label, description, edit }) => ({
-      optionId,
-      label,
-      ...(description === undefined ? {} : { description }),
-      ...edit,
-    })),
+    options: input.options.map(modelOption),
   });
 
   return toBinary(submission.input, wire);

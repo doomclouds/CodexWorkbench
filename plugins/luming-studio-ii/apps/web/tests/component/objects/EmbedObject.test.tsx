@@ -59,6 +59,59 @@ function canvasEmbedProps(): EmbedViewProps {
   };
 }
 
+it('anchors a verified sandbox selection to a node or to the clicked object position', async () => {
+  const host = mount();
+  const onAnnotateContent = vi.fn<NonNullable<EmbedViewProps['onAnnotateContent']>>();
+  const props = { ...canvasEmbedProps(), onAnnotateContent };
+  const html =
+    region.html +
+    '<p hidden data-studio-id="hidden">Hidden</p>' +
+    '<p data-studio-id="ambiguous">First</p><p data-studio-id="ambiguous">Also present</p>';
+  const payload = { value: { ...region, html }, version: region.version };
+  await act(async () =>
+    host.root.render(<CanvasEmbed {...props} payload={payload} annotationActive />),
+  );
+  const frame = host.dom.window.document.querySelector('iframe')!;
+  const view = host.dom.window.document.querySelector('.studio-ui-embed__canvas-view')!;
+  const bounds = new host.dom.window.DOMRect(100, 200, 500, 300);
+  vi.spyOn(frame, 'getBoundingClientRect').mockReturnValue(bounds);
+  vi.spyOn(view, 'getBoundingClientRect').mockReturnValue(bounds);
+  const runtime = await connectRuntime(host, frame);
+  const selection = {
+    type: 'studio-html-selection',
+    ...runtime.identity,
+    targetIds: ['value'],
+    quote: 'A poll',
+    excerpt: '<p>A poll</p>',
+    point: { x: 125, y: 150 },
+  };
+  host.send(frame, selection, null);
+  host.send(frame, { ...selection, sourceRevision: region.sourceRevision! + 1 });
+  host.send(frame, { ...selection, targetIds: ['value', 'invented'] });
+  host.send(frame, { ...selection, targetIds: ['ambiguous'] });
+  host.send(frame, { ...selection, targetIds: ['hidden'] });
+  host.send(frame, { ...selection, targetIds: ['value', 'value'] });
+  frame.hidden = true;
+  host.send(frame, selection);
+  frame.hidden = false;
+  expect(onAnnotateContent).not.toHaveBeenCalled();
+
+  await act(async () => runtime.click('[data-studio-id="value"]', 125, 150));
+  expect(onAnnotateContent).toHaveBeenCalledExactlyOnceWith({
+    target: { kind: 'html', nodeIds: ['value'], sourceRevision: 2n },
+    u: 0.25,
+    v: 0.5,
+  });
+  host.send(frame, { ...selection, targetIds: [] });
+  expect(onAnnotateContent).toHaveBeenLastCalledWith({
+    target: { kind: 'object' },
+    u: 0.25,
+    v: 0.5,
+  });
+  expect(onAnnotateContent).toHaveBeenCalledTimes(2);
+  expect(props.request).not.toHaveBeenCalled();
+});
+
 it.each(extensions)(
   'registers $kind as embedded Canvas content',
   ({ kind, capabilities, placement }) => {
@@ -528,6 +581,7 @@ async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameE
     embedded = new JSDOM(frame.srcdoc, {
       runScripts: 'dangerously',
       beforeParse(window) {
+        Object.defineProperty(window, 'CSS', { value: { escape: (value: string) => value } });
         Object.defineProperty(window, 'TextEncoder', { value: TextEncoder });
         window.postMessage = (message: unknown) => {
           host.send(frame, message);
@@ -546,6 +600,13 @@ async function connectRuntime(host: ReturnType<typeof mount>, frame: HTMLIFrameE
     post,
     load: () => runtime.window.eval('studioEmbed.load()') as Json,
     save: (state: Json) => runtime.window.eval(`studioEmbed.save(${JSON.stringify(state)})`),
+    click(selector: string, clientX: number, clientY: number) {
+      const element = runtime.window.document.querySelector(selector);
+      expect(element).not.toBeNull();
+      element?.dispatchEvent(
+        new runtime.window.MouseEvent('click', { bubbles: true, clientX, clientY }),
+      );
+    },
   };
 }
 

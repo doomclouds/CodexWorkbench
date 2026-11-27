@@ -7,6 +7,8 @@
   --room-presence-soft: #f0f0ee;
   --room-presence-accent: #9c456e;
   --room-presence-accent-soft: #f2e5ec;
+  --room-presence-focus: #7962ba;
+  --room-presence-shadow: 0 10px 36px #171a2020;
 }
 
 :is([data-theme='dark'], [data-studio-theme='dark'])
@@ -18,6 +20,8 @@
   --room-presence-soft: #24272a;
   --room-presence-accent: #e5b6ce;
   --room-presence-accent-soft: #442739;
+  --room-presence-focus: #bba5f2;
+  --room-presence-shadow: 0 12px 40px #0006;
 }
 
 .room-presence-control {
@@ -69,8 +73,8 @@
 
 .room-presence-avatar[data-followed='true'] {
   z-index: 1;
-  outline: 2px solid var(--room-presence-accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--room-member-color);
+  outline-offset: 2px;
 }
 
 .room-presence-more,
@@ -84,11 +88,61 @@
   box-sizing: border-box;
   inline-size: min(320px, calc(100vw - 16px));
   max-block-size: min(72dvh, 720px);
-  padding: 18px 20px 20px;
+  overflow: visible;
+  padding: 0;
   border-color: var(--room-presence-border);
   border-radius: 16px;
   background: var(--room-presence-surface);
+  box-shadow: var(--room-presence-shadow);
   color: var(--room-presence-text);
+}
+
+.room-presence-control
+  > .studio-ui-anchored-popover[style*='--studio-ui-anchor-offset']:is(
+    [data-placement='bottom'],
+    [data-placement='top']
+  )::before {
+  position: absolute;
+  top: -7px;
+  left: var(--studio-ui-anchor-offset);
+  box-sizing: border-box;
+  inline-size: 12px;
+  block-size: 12px;
+  border-top: 1px solid var(--room-presence-border);
+  border-left: 1px solid var(--room-presence-border);
+  background: var(--room-presence-surface);
+  content: '';
+  pointer-events: none;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.room-presence-control
+  > .studio-ui-anchored-popover[data-placement='top'][style*='--studio-ui-anchor-offset']::before {
+  top: auto;
+  bottom: -7px;
+  transform: translateX(-50%) rotate(225deg);
+}
+
+.room-presence-members {
+  position: relative;
+  box-sizing: border-box;
+  max-block-size: inherit;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 18px 20px 20px;
+  border-radius: inherit;
+  background: var(--room-presence-surface);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.room-presence-members:focus {
+  outline: none;
+}
+
+.room-presence-members:focus-visible {
+  outline: 2px solid var(--room-presence-focus);
+  outline-offset: 3px;
 }
 
 .room-presence-heading {
@@ -96,18 +150,22 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-block-end: 10px;
+  margin-block-end: 6px;
 }
 
 .room-presence-heading h2 {
   margin: 0;
   font-size: 17px;
+  line-height: 1.35;
   font-weight: 600;
 }
 
 .room-presence-close {
   flex: none;
-  margin: -4px;
+  inline-size: 34px;
+  block-size: 34px;
+  margin-block: -6px;
+  margin-inline-end: -6px;
 }
 
 .room-presence-list {
@@ -179,6 +237,10 @@
   overflow-wrap: anywhere;
 }
 
+.room-presence-banner .room-presence-link {
+  font-size: inherit;
+}
+
 .room-presence-cursors {
   position: absolute;
   z-index: 30;
@@ -189,29 +251,33 @@
 
 .room-presence-cursor {
   position: absolute;
-  display: flex;
-  align-items: flex-start;
-  gap: 3px;
+  inline-size: 0;
+  block-size: 0;
 }
 
-.room-presence-cursor svg {
-  flex: none;
+.room-presence-cursor > svg {
+  position: absolute;
+  top: -2px;
+  left: -2px;
 }
 
-.room-presence-cursor span {
-  max-inline-size: 170px;
-  margin-block-start: 13px;
-  padding: 2px 6px;
+.room-presence-cursor > span {
+  position: absolute;
+  top: 18px;
+  left: 13px;
+  max-inline-size: 240px;
+  padding: 3px 6px;
   overflow: hidden;
   border-radius: 4px;
   color: white;
+  font-family: Arial, 'Microsoft YaHei', sans-serif;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 @media (max-width: 690px) {
-  .room-presence-control > .studio-ui-anchored-popover {
+  .room-presence-members {
     padding: 16px;
   }
 }

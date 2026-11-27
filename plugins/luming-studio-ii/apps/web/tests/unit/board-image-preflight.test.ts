@@ -22,12 +22,17 @@ it('rejects an oversized selected file before reading its image data', async () 
   await expect(prepareBoardImage(file)).rejects.toThrow('8 MiB');
 });
 
-it('recognizes image bytes independently of the supplied filename and MIME', async () => {
-  const file = new File(['<svg xmlns="http://www.w3.org/2000/svg"></svg>'], 'forged.png', {
+it('prepares the SVG bytes without a browser preview regardless of the supplied MIME', async () => {
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 34 21"/>';
+  const file = new File([svg], 'diagram.png', {
     type: 'image/png',
   });
 
-  await expect(prepareBoardImage(file)).rejects.toThrow('静态 PNG、JPEG 或 WebP');
+  const image = await prepareBoardImage(file);
+  expect(image).toMatchObject({ width: 34, height: 21, displayName: 'diagram.png' });
+  expect(new TextDecoder().decode(image.content)).toBe(svg);
+  expect(image.previewUrl).toBeUndefined();
+  image.dispose();
 });
 
 it('rejects excessive encoded dimensions before decoding the file', async () => {
@@ -39,7 +44,9 @@ it('rejects excessive encoded dimensions before decoding the file', async () => 
 
 it('rejects animated PNG before creating a preview', async () => {
   const animationControl = 0x6163544c;
-  await expect(prepareBoardImage(pngHeader(80, 40, animationControl))).rejects.toThrow('静态 PNG');
+  await expect(prepareBoardImage(pngHeader(80, 40, animationControl))).rejects.toThrow(
+    '请选择有效的 PNG',
+  );
 });
 
 it('honors an already canceled file request', async () => {

@@ -1,0 +1,179 @@
+.geometry-format-select {
+  box-sizing: border-box;
+  block-size: 28px;
+  padding: 3px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--board-chrome-hover, #f1f3f4);
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+}
+
+.geometry-format-select:focus-visible,
+.geometry-format-trigger:focus-visible {
+  outline: 2px solid var(--studio-ui-focus, Highlight);
+  outline-offset: -2px;
+}
+
+.geometry-format-select:disabled {
+  opacity: 0.45;
+}
+
+.geometry-format-shape {
+  inline-size: 82px;
+}
+
+.geometry-format-font-size {
+  inline-size: 112px;
+}
+
+.geometry-format-trigger[aria-pressed='true'],
+.geometry-format-trigger[aria-expanded='true'] {
+  background: var(--board-chrome-hover, #f1f3f4);
+}
+
+.geometry-format-trigger[aria-label='填充颜色'] {
+  inline-size: 23px;
+  block-size: 23px;
+  margin-inline: 3px;
+  border: 1px solid var(--board-float-border, #d9d9d9);
+  border-radius: 6px;
+}
+
+.geometry-format-trigger[aria-label='填充颜色']:hover:not(:disabled) {
+  outline: 1px solid var(--studio-ui-accent, #eb6c36);
+  outline-offset: 2px;
+}
+
+.studio-ui-anchored-popover:has(> .geometry-format-panel) {
+  z-index: 39;
+  min-inline-size: min(220px, calc(100vw - 30px));
+  max-inline-size: min(320px, calc(100vw - 30px));
+  padding: 10px;
+  border-color: var(--board-float-border, GrayText);
+  border-radius: 9px;
+  background: var(--board-float, Canvas);
+  color: var(--board-chrome-text, CanvasText);
+  box-shadow: 0 8px 24px #0002;
+  font-size: 12px;
+}
+
+.geometry-format-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.geometry-format-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.geometry-format-row button {
+  display: grid;
+  min-inline-size: 30px;
+  min-block-size: 30px;
+  place-items: center;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.geometry-format-row button:hover:not(:disabled) {
+  background: var(--board-chrome-hover, #f1f3f4);
+}
+
+.geometry-format-row button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--studio-ui-accent, #eb6c36) 16%, var(--board-float, Canvas));
+  box-shadow: inset 0 0 0 1px var(--studio-ui-accent, #eb6c36);
+}
+
+.geometry-format-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 2px;
+}
+
+.geometry-format-palette > button {
+  display: grid;
+  box-sizing: border-box;
+  flex: 0 0 24px;
+  block-size: 24px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #7775;
+  border-radius: 50%;
+  background: var(--board-float, Canvas);
+  color: inherit;
+  font: inherit;
+}
+
+.geometry-format-palette > button[aria-pressed='true'] {
+  outline: 2px solid var(--studio-ui-accent, #eb6c36);
+  outline-offset: 3px;
+}
+
+.geometry-format-panel button:focus-visible,
+.geometry-format-panel input:focus-visible {
+  outline: 2px solid var(--studio-ui-focus, Highlight);
+  outline-offset: 2px;
+}
+
+.geometry-format-panel button:disabled {
+  opacity: 0.45;
+}
+
+.geometry-format-custom-editor {
+  display: grid;
+  flex: 1 0 100%;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--board-float-border, GrayText);
+}
+
+.geometry-format-panel input {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  inline-size: 100%;
+  padding: 5px;
+  border: 1px solid var(--board-float-border, GrayText);
+  border-radius: 4px;
+  background: var(--board-float, Canvas);
+  color: inherit;
+  font: inherit;
+}
+
+.geometry-format-custom-editor input[type='color'] {
+  block-size: 32px;
+  padding: 2px;
+}
+
+.geometry-format-custom-editor input[type='text'] {
+  font-family: Consolas, ui-monospace, monospace;
+}
+
+.geometry-format-custom-editor .geometry-format-row {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.geometry-format-width {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.geometry-format-width input {
+  inline-size: 66px;
+}

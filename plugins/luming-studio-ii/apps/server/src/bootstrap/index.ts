@@ -5,7 +5,10 @@ import {
   createWhiteboardRequestHandler,
   type GuestHttpOptions,
 } from '../entrypoints/http/index.js';
-import { createArchiveImportRepository } from '../infrastructure/adapters/archives/index.js';
+import {
+  createArchiveImportRepository,
+  packWhiteboardBackup,
+} from '../infrastructure/adapters/archives/index.js';
 import { readBoardAccess } from '../infrastructure/adapters/authorization/index.js';
 import { createCatalogRepository } from '../infrastructure/adapters/catalog/index.js';
 import { createFeedbackRepository } from '../infrastructure/adapters/feedback/index.js';
@@ -15,7 +18,11 @@ import {
 } from '../infrastructure/adapters/index.js';
 import { createRoomsRepository } from '../infrastructure/adapters/rooms/index.js';
 import { createSharingRepository } from '../infrastructure/adapters/sharing/index.js';
-import { openSqliteDatabase } from '../infrastructure/platform/index.js';
+import {
+  openSqliteDatabase,
+  renderSvgPng,
+  renderSvgUpload,
+} from '../infrastructure/platform/index.js';
 import { createArchiveImportApplication } from '../modules/archives/application/index.js';
 import { createCatalogApplication } from '../modules/catalog/application/index.js';
 import {
@@ -32,11 +39,13 @@ import {
   type SharingScope,
 } from '../modules/sharing/application/index.js';
 import {
+  createBoardBackup,
   createBoardEditorApplication,
   createBoardHistoryApplication,
   createBoardSuggestionApplication,
   createWhiteboardApplication,
 } from '../modules/whiteboard/application/index.js';
+import { createRoomWorkspaceScope } from './room-workspace-scope.js';
 
 type HttpOptions = Parameters<typeof createWhiteboardHttpServer>[0];
 type HttpServer = ReturnType<typeof createWhiteboardHttpServer>;
@@ -48,6 +57,7 @@ export interface WhiteboardServerOptions {
   readonly sharing?: {
     readonly inviteOrigin: (scope: SharingScope) => string | undefined;
     readonly activateScope?: (scope: SharingScope) => Promise<void>;
+    readonly ownerDisplayName?: string;
   };
 }
 
@@ -120,7 +130,12 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
   let sharing: SharingApplication;
   try {
     const repository = createWhiteboardRepository(database);
-    const application = createWhiteboardApplication(repository, Date.now);
+    const application = createWhiteboardApplication(repository, Date.now, {
+      renderPng: renderSvgPng,
+      exportArchive: createBoardBackup(repository, packWhiteboardBackup, (time) =>
+        new Date(time).toISOString(),
+      ),
+    });
     const archives = createArchiveImportRepository(database);
     const catalog = createCatalogRepository(database);
     const catalogApplication = createCatalogApplication(catalog, {
@@ -148,7 +163,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
 
             return {
               capturedBoardRevision: anchor.sourceBoardRevision,
-              objectId: anchor.target.kind === 'object' ? anchor.target.objectId : undefined,
+              objectId: anchor.target.kind === 'board' ? undefined : anchor.target.objectId,
             };
           } catch (error) {
             if (error instanceof FeedbackThreadNotFoundError) {
@@ -173,6 +188,7 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       createRoomsRepository(database, readBoardAccess),
       { nowMillis: Date.now },
       randomUUID(),
+      { mintGeneration: randomUUID, resolveScope: createRoomWorkspaceScope(repository) },
     );
 
     httpOptions = {
@@ -180,8 +196,8 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       catalogApplication,
       archiveApplication,
       features: {
-        editor: createBoardEditorApplication(repository, Date.now),
-        history: createBoardHistoryApplication(repository, Date.now),
+        editor: createBoardEditorApplication(repository, Date.now, renderSvgUpload),
+        history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
         feedback,
         rooms,
         suggestions,
@@ -190,6 +206,8 @@ export function createWhiteboardServer(options: WhiteboardServerOptions): Whiteb
       sharing: {
         application: sharing,
         activateScope: options.sharing?.activateScope,
+        onlineActorIds: (boardId) => rooms.onlineActorIds(boardId),
+        ownerDisplayName: options.sharing?.ownerDisplayName,
         newBrowserToken: () => randomBytes(32).toString('base64url'),
         onActivationError: options.onError,
         onAccessChanged: (boardId) => rooms.notifyAccessChanged(boardId),

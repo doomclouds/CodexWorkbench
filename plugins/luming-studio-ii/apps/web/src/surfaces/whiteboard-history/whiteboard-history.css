@@ -248,6 +248,7 @@
 }
 
 .whiteboard-history__record-summary,
+.whiteboard-history__record-title,
 .whiteboard-history__restored {
   overflow: hidden;
   color: var(--history-muted);

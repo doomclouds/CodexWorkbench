@@ -84,6 +84,20 @@ export function createMcpAssets(getAsset: FetchAsset, lifetime: AbortSignal) {
     return original.get(source) ?? source;
   }
 
+  async function readImage(expectedBoardId: string, source: string, signal?: AbortSignal) {
+    const [, boardId, assetId] = assetPath.exec(restore(source)) ?? [];
+    if (boardId !== expectedBoardId || !assetId) {
+      return undefined;
+    }
+
+    lifetime.throwIfAborted();
+    const { mimeType, bytes } = await getAsset({ boardId, assetId }, signal ?? lifetime);
+    lifetime.throwIfAborted();
+    if (mimeType.startsWith('image/')) {
+      return { mimeType, content: bytes };
+    }
+  }
+
   function close() {
     for (const url of original.keys()) {
       URL.revokeObjectURL(url);
@@ -93,5 +107,5 @@ export function createMcpAssets(getAsset: FetchAsset, lifetime: AbortSignal) {
     fetched.clear();
   }
 
-  return { resolve, restore, close };
+  return { resolve, restore, readImage, close };
 }

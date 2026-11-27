@@ -8,6 +8,7 @@ import { expect, test } from 'vitest';
 import {
   createWhiteboardExportService,
   type ExportBoardFile,
+  type ExportBoardFormat,
   type ExportBoardRequest,
   type ExportBoardResult,
   type WhiteboardPost,
@@ -18,6 +19,15 @@ const boardId = 'release-board';
 const revision = 17n;
 const svgContent = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
 const jsonContent = new TextEncoder().encode('{"objects":[]}');
+const renderedPng = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+const browserSource = {
+  filename: '发布白板.png',
+  revision,
+  width: 120,
+  height: 82,
+  svgTemplate: '<svg><foreignObject/></svg>',
+  regions: [{ index: 0, html: '<p>排版源</p>', width: 100, height: 62 }],
+};
 
 const svgFile: ExportBoardFile = {
   filename: '发布白板.svg',
@@ -113,6 +123,93 @@ test('exposes stale and rejected outcomes without producing a file', async () =>
     kind: 'rejected',
     reason: 'assetUnavailable',
   });
+});
+
+const nativeFormats = [
+  ['png', BoardExportFormat.PNG, '发布白板.png', 'image/png'],
+  ['html', BoardExportFormat.HTML, '发布白板.html', 'text/html'],
+  ['zip', BoardExportFormat.ZIP, '发布白板.studio.zip', 'application/zip'],
+] as const satisfies ReadonlyArray<
+  readonly [ExportBoardFormat, BoardExportFormat, string, ExportBoardFile['mimeType']]
+>;
+
+test.each(nativeFormats)(
+  'negotiates and validates the %s format through protobuf',
+  async (format, encoded, filename, mimeType) => {
+    const expected = { filename, mimeType, revision, content: new Uint8Array([1]) };
+    const exportBoard = createWhiteboardExportService(async (_path, body) => {
+      expect(fromBinary(method.input, body)).toMatchObject({
+        boardId,
+        expectedRevision: revision,
+        format: encoded,
+        scope: { case: 'whole', value: {} },
+      });
+
+      return toBinary(
+        method.output,
+        create(method.output, {
+          result: { case: 'file', value: expected },
+        }),
+      );
+    });
+
+    expectFile(await exportBoard({ ...request, format }), expected);
+  },
+);
+
+test('renders a frozen PNG response through the injected browser platform and forwards cancellation', async () => {
+  const controller = new AbortController();
+  const exportBoard = createWhiteboardExportService(
+    respond({ result: { case: 'browserPng', value: browserSource } }),
+    async (source, format, signal) => {
+      expect(source).toMatchObject(browserSource);
+      expect(format).toBe('png');
+      expect(signal).toBe(controller.signal);
+
+      return renderedPng;
+    },
+  );
+
+  expectFile(await exportBoard({ ...request, format: 'png' }, controller.signal), {
+    filename: browserSource.filename,
+    revision,
+    mimeType: 'image/png',
+    content: renderedPng,
+  });
+});
+
+test('emits an SVG download from the frozen browser layout response', async () => {
+  const source = { ...browserSource, filename: '发布白板.svg' };
+  const content = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  const exportBoard = createWhiteboardExportService(
+    respond({ result: { case: 'browserPng', value: source } }),
+    async (received, format) => {
+      expect(received).toMatchObject(source);
+      expect(format).toBe('svg');
+
+      return content;
+    },
+  );
+
+  expectFile(await exportBoard(request), {
+    filename: source.filename,
+    revision,
+    mimeType: 'image/svg+xml',
+    content,
+  });
+});
+
+test('rejects an unexpected revision and non-image PNG bytes before downloading', async () => {
+  const exportBoard = createWhiteboardExportService(
+    respond({ result: { case: 'browserPng', value: browserSource } }),
+    async () => new Uint8Array([1]),
+  );
+
+  await expect(exportBoard({ ...request, format: 'png', expectedRevision: 1n })).rejects.toThrow(
+    '版次与请求不一致',
+  );
+  await expect(exportBoard({ ...request, format: 'png' })).rejects.toThrow('有效的 PNG');
+  await expect(exportBoard({ ...request, format: 'svg' })).rejects.toThrow('格式与请求不一致');
 });
 
 test.each([

@@ -1,4 +1,15 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react';
 import {
   createWhiteboardSession,
   type BoardEditReceipt,
@@ -7,9 +18,14 @@ import {
 import { Button, OperationNotice, StatePanel, type ActionMenuAnchor } from '../../ui/base/index.js';
 import {
   type CanvasFitScope,
+  type CanvasGeometry,
   type CanvasEditIntent,
   type CanvasHandle,
+  type CanvasNativeSource,
+  type CanvasInlineFormat,
+  type CanvasObjectIntent,
   type CanvasPoint,
+  type CanvasPresentation,
   type CanvasObjectExtension,
   type CanvasProps,
   type CanvasViewport,
@@ -18,24 +34,34 @@ import {
 } from '../../ui/domain/canvas/index.js';
 import { studioObjectExtensions } from '../../ui/domain/objects/index.js';
 import { documentExtension } from '../../ui/domain/objects/document/index.js';
+import { LinkDialog } from '../../ui/domain/objects/media/index.js';
+import { canvasOwnsClipboard } from './board-clipboard.js';
 import type { BoardTool } from './BoardChrome.js';
+import { BoardDraftRecovery } from './BoardDraftRecovery.js';
 import { BoardHtmlCreation, useBoardHtmlCreation } from './BoardHtmlCreation.js';
 import { BoardViewportTools } from './BoardViewportTools.js';
 import { BoardWelcome } from './BoardWelcome.js';
 import { renderBoardHistoryCanvas } from './HistoryCanvasView.js';
 import type {
+  BoardFeedbackFrame,
+  BoardMediaUpload,
   BoardPresenceSlot,
   BoardViewContext,
   WhiteboardEditorFeatures,
 } from './board-features.js';
-import { projectPayloads, projectScene } from './canvas-projection.js';
+import { projectPayloads, projectScene, projectTextStyles } from './canvas-projection.js';
 import { GeometryBoardMenu } from './geometry-controls.js';
+import { adjacentTextDraft, clipboardTextDraft } from './geometry-commands.js';
 import { useGeometryEdits } from './geometry-session.js';
+import { readBoardDraftCurrent } from './local-board-drafts.js';
 import { useMoveSession } from './move-session.js';
 import { renderSuggestionPreview } from './suggestion-preview.js';
 import { useBoardPresentation } from './use-board-presentation.js';
+import { useBoardClipboard } from './use-board-clipboard.js';
 import { useBoardTitle, type RenameBoard } from './use-board-title.js';
+import { useBoardUndo } from './use-board-undo.js';
 import { useContentEdits } from './use-content-edits.js';
+import { record } from './content-edit-value.js';
 import {
   WorkspaceCanvas,
   WorkspaceExport,
@@ -67,6 +93,7 @@ type BoardViewportChange =
 interface BoardWorkspaceProps {
   readonly state: ReadyState;
   readonly session: WhiteboardSession;
+  readonly service: WhiteboardService;
   readonly projection: SceneProjection;
   readonly createCommandId: () => string;
   readonly onBack?: () => void;
@@ -77,6 +104,7 @@ interface BoardWorkspaceProps {
 interface BoardSurfaceProps {
   readonly state: ReadyState;
   readonly session: WhiteboardSession;
+  readonly service: WhiteboardService;
   readonly createCommandId: () => string;
   readonly onBack?: () => void;
   readonly renameBoard?: RenameBoard;
@@ -89,6 +117,9 @@ const movable = {
   rotate: false,
   connect: false,
 } as const;
+const newLink = { title: '链接', href: '' } as const;
+const nativeDropTypes = new Set(['image', 'video']);
+const adjacentTextKinds = new Set(['text', 'note', 'shape', 'section']);
 
 const moveExtensions: readonly CanvasObjectExtension[] = [
   ...studioObjectExtensions.map((extension) => ({
@@ -100,11 +131,6 @@ const moveExtensions: readonly CanvasObjectExtension[] = [
   { kind: 'ink', capabilities: { ...movable, content: 'passive' }, blocksPlacement: false },
   { kind: 'native', capabilities: { ...movable, content: 'native' } },
 ];
-
-const editExtensions: readonly CanvasObjectExtension[] = studioObjectExtensions.map(
-  (extension: CanvasObjectExtension) =>
-    extension.portClick === 'place' ? { ...extension, portClick: 'connect' } : extension,
-);
 
 function useBoardPanels() {
   const [exportAnchor, setExportAnchor] = useState<HTMLButtonElement>();
@@ -186,11 +212,12 @@ function boardPanelActions(
   features: WhiteboardEditorFeatures,
   panels: ReturnType<typeof useBoardPanels>,
 ) {
+  const standaloneSuggestions = features.renderSuggestions && !features.renderFeedback;
   return {
     onOpenShare: features.renderExport ? panels.openExport : undefined,
     onOpenHistory: features.renderHistory ? panels.openHistory : undefined,
     onToggleFeedback: features.renderFeedback ? panels.toggleFeedback : undefined,
-    onOpenSuggestions: features.renderSuggestions ? panels.openSuggestions : undefined,
+    onOpenSuggestions: standaloneSuggestions ? panels.openSuggestions : undefined,
   };
 }
 
@@ -200,6 +227,11 @@ function selectedObjectsFor(projected: SceneProjection, ids: readonly string[]) 
 
     return object ? [object] : [];
   });
+}
+
+function selectedSection(objects: ReturnType<typeof selectedObjectsFor>) {
+  const [first] = objects;
+  return objects.length === 1 && first?.kind === 'section' ? first : undefined;
 }
 
 function welcomeAvailable(
@@ -230,6 +262,58 @@ function annotationActions(
   return { onToggleAnnotation, onAnnotate };
 }
 
+function availableEditAccess(
+  mayEdit: boolean,
+  mayComment: boolean | undefined,
+  watching: boolean,
+  previewing: boolean,
+  documentReading: boolean,
+) {
+  const viewOnly = watching || previewing;
+  const mayAnnotate = !previewing && (!watching || documentReading);
+  return {
+    viewOnly,
+    online: mayEdit && !viewOnly,
+    canComment: (mayComment ?? mayEdit) && mayAnnotate,
+    canEditExpanded: mayEdit && !previewing,
+  };
+}
+
+function feedbackCoordinates(
+  viewport: CanvasViewport,
+  geometry: CanvasGeometry | undefined,
+  size: CanvasViewportSize | undefined,
+): BoardFeedbackFrame['viewport'] {
+  if (!geometry || !size || size.width <= 0) {
+    return viewport;
+  }
+
+  const zoom = size.width / geometry.width;
+  const zoomY = size.height / geometry.height;
+  return { x: -geometry.x * zoom, y: -geometry.y * zoomY, zoom, zoomY };
+}
+
+function readFeedbackView(
+  scope: CanvasPresentation | undefined,
+  projection: SceneProjection,
+  viewport: CanvasViewport,
+  viewportSize: CanvasViewportSize | undefined,
+  history: boolean,
+) {
+  const focusedObjectId = scope?.focusObjectId;
+  const documentReading = Boolean(focusedObjectId);
+  const geometry = focusedObjectId
+    ? projection.objectsById.get(focusedObjectId)?.geometry
+    : undefined;
+
+  return {
+    documentReading,
+    focusedObjectId,
+    viewport: feedbackCoordinates(viewport, geometry, viewportSize),
+    hidingFeedback: history || Boolean(scope && !documentReading),
+  };
+}
+
 interface BoardViewReporterProps extends BoardViewContext {
   readonly onViewContext: (context: BoardViewContext | undefined) => void;
 }
@@ -251,6 +335,7 @@ function BoardViewReporter({
 function BoardWorkspace({
   state,
   session,
+  service,
   projection,
   createCommandId,
   onBack,
@@ -259,6 +344,10 @@ function BoardWorkspace({
 }: BoardWorkspaceProps) {
   const board = state.scene;
   const canvasRef = useRef<CanvasHandle>(null);
+  const mediaUploadRef = useRef<BoardMediaUpload | undefined>(undefined);
+  const handleUploadReady = useCallback((upload: BoardMediaUpload | undefined) => {
+    mediaUploadRef.current = upload;
+  }, []);
   const suggestionTrigger = useRef<HTMLButtonElement>(null);
   const [canvasArea, setCanvasArea] = useState<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
@@ -268,12 +357,23 @@ function BoardWorkspace({
   const [penColor, setPenColor] = useState('#2d3142');
   const [annotationActive, setAnnotationActive] = useState(false);
   const [unresolvedFeedback, setUnresolvedFeedback] = useState(false);
-  const [annotationRequest, setAnnotationRequest] = useState<{
-    readonly objectId: string;
-    readonly sequence: number;
-  }>();
+  const [annotationRequest, setAnnotationRequest] =
+    useState<BoardFeedbackFrame['annotationRequest']>();
+  const [contentAnnotationRequest, setContentAnnotationRequest] =
+    useState<BoardFeedbackFrame['contentAnnotationRequest']>();
+  const [pointAnnotationRequest, setPointAnnotationRequest] =
+    useState<BoardFeedbackFrame['pointAnnotationRequest']>();
+  const [nativeSourceRequest, setNativeSourceRequest] =
+    useState<CanvasProps['nativeSourceRequest']>();
+  const [sourceIssue, setSourceIssue] = useState<string>();
+  const [linkCreation, setLinkCreation] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<ActionMenuAnchor | null>(null);
   const [objectEdit, setObjectEdit] = useState<CanvasProps['editObjectRequest']>();
+  const [formatObjectRequest, setFormatObjectRequest] =
+    useState<CanvasProps['formatObjectRequest']>();
+  const nextFormatRequest = useRef(0);
+  const newTextIds = useRef(new Set<string>());
+  const selectionEpoch = useRef(0);
   const nextWelcomePlacement = useRef(0);
   const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, zoom: 1 });
   const [viewportSize, setViewportSize] = useState<CanvasViewportSize>();
@@ -288,6 +388,10 @@ function BoardWorkspace({
   const projected = useMemo(
     () => projectPayloads(projection, state.payloads),
     [projection, state.payloads],
+  );
+  const textStyleById = useMemo(
+    () => projectTextStyles(state.payloads, selection),
+    [selection, state.payloads],
   );
   const mayEdit = board.canEdit && !state.sceneError;
   const title = board.title || '白板';
@@ -330,6 +434,7 @@ function BoardWorkspace({
     panels.setFeedbackOpen(false);
     setAnnotationActive(false);
     setMenuAnchor(null);
+    setFormatObjectRequest(undefined);
     session.reload();
     features.onRoomAccessLost?.();
   }
@@ -372,18 +477,39 @@ function BoardWorkspace({
     panels.setFeedbackOpen(false);
     setAnnotationActive(false);
     setMenuAnchor(null);
+    setFormatObjectRequest(undefined);
     enter(ids, trigger);
   }
 
   const watching = Boolean(scope);
+  const feedbackView = readFeedbackView(
+    scope,
+    projection,
+    viewport,
+    viewportSize,
+    panels.historyPreview,
+  );
+  const { documentReading, viewport: feedbackViewport } = feedbackView;
   const previewing = panels.historyPreview || panels.suggestionPreview;
-  const viewOnly = watching || previewing;
-  const online = mayEdit && !viewOnly;
-  const canComment = (features.commentAccess ?? mayEdit) && !viewOnly;
-  const canEditExpanded = mayEdit && !previewing;
-  const move = useMoveSession(session, board.boardId, online, createCommandId);
-  const moving = move.pendingEdits.length > 0;
+  const { viewOnly, online, canComment, canEditExpanded } = availableEditAccess(
+    mayEdit,
+    features.commentAccess,
+    watching,
+    previewing,
+    documentReading,
+  );
   const { editService, Viewing, renderExport, renderFeedback } = features;
+  const undo = useBoardUndo({
+    boardId: board.boardId,
+    revision: board.revision,
+    enabled: online,
+    service: editService,
+    createCommandId,
+    onApplied: session.acceptEdit,
+    onConflict: session.acceptConflict,
+  });
+  const move = useMoveSession(session, board.boardId, online, createCommandId, undo.recordMove);
+  const moving = move.pendingEdits.length > 0;
   const editingReady = online && !moving;
   const boardTitle = useBoardTitle({
     boardId: board.boardId,
@@ -397,7 +523,16 @@ function BoardWorkspace({
     ids?: readonly string[],
   ) {
     session.acceptEdit(receipt);
+    undo.recordEdit(receipt);
     if (ids) {
+      const insertedText = receipt.objects.find(
+        ({ id, kind, payloadVersion }) =>
+          kind === 'text' && payloadVersion === 0n && ids.includes(id),
+      );
+
+      if (insertedText) {
+        newTextIds.current.add(insertedText.id);
+      }
       setMenuAnchor(null);
       setSelected(ids);
       creation.complete(receipt, ids);
@@ -411,27 +546,220 @@ function BoardWorkspace({
     service: editService,
     createCommandId,
     objectsById: projection.objectsById,
+    payloadVersion: (id) =>
+      state.payloads.get(id)?.version ??
+      board.objects.find((object) => object.id === id)?.payloadVersion,
     onApplied: handleEditApplied,
     onConflict: session.reload,
   });
   const content = useContentEdits({
     boardId: board.boardId,
     service: editService,
-    canEdit: bodyEditingAvailable(online, canEditExpanded, scope?.expandedObjectId),
+    localDrafts: features.localDrafts,
+    canEdit:
+      !undo.hasPendingEdit &&
+      bodyEditingAvailable(online, canEditExpanded, scope?.expandedObjectId),
     createCommandId,
     onApplied: handleEditApplied,
     onConflict: session.acceptConflict,
   });
-  const canEdit = editingReady && !geometry.hasPendingEdit;
+  const historyReady = editingReady && !geometry.hasPendingEdit;
+  const canEdit = historyReady && !undo.hasPendingEdit;
   const canInsert = canEdit && Boolean(editService);
+  const viewportHistory = {
+    canUndo: historyReady && undo.canUndo,
+    canRedo: historyReady && undo.canRedo,
+    onChange: (direction: 'undo' | 'redo') => undo[direction](),
+  };
   const selectedObjects = selectedObjectsFor(projection, selection);
+
+  async function handleObjectIntent(intent: CanvasObjectIntent) {
+    const { objectId, kind, name, value } = intent;
+    if (name !== 'text.commit' || !record(value) || typeof value.text !== 'string') {
+      return content.handleObjectIntent(intent);
+    }
+
+    const epoch = selectionEpoch.current;
+    const current = state.payloads.get(objectId)?.body;
+    const previousText = current?.kind === 'text' ? current.value.text : undefined;
+    const previouslyFilled = typeof previousText === 'string' && Boolean(previousText.trim());
+    const blankText = value.close === true && kind === 'text' && !value.text.trim();
+    const shouldRemove = blankText && (previouslyFilled || newTextIds.current.has(objectId));
+    const request = shouldRemove ? { ...intent, value: { ...value, deleteEmpty: true } } : intent;
+    const receipt = await content.handleObjectIntent(request);
+    if (!receipt.ok) {
+      return receipt;
+    }
+
+    newTextIds.current.delete(objectId);
+    const currentSelection = selectionEpoch.current === epoch && selection.includes(objectId);
+    if (value.adjacent === true && currentSelection && !blankText) {
+      await createAdjacentText(objectId);
+    }
+
+    return receipt;
+  }
+
+  async function createAdjacentText(id: string) {
+    const source = projection.objectsById.get(id);
+    if (!source || !canInsert || !adjacentTextKinds.has(source.kind)) {
+      return;
+    }
+
+    const object = adjacentTextDraft(source, textStyleById.get(id));
+    const result = await geometry.submitEdit({
+      kind: 'create',
+      interactionId: 'continue-text',
+      object,
+    });
+
+    if (result && 'receipt' in result && result.receipt.kind === 'applied') {
+      const [created] = result.receipt.objects;
+      if (created) {
+        editObject(created.id);
+      }
+    }
+  }
+
+  function placementPoint() {
+    const bounds = canvasArea?.getBoundingClientRect();
+    return bounds && { x: bounds.width / 2, y: bounds.height / 2 };
+  }
+
+  function worldCenter(): CanvasPoint {
+    const center = placementPoint();
+    return {
+      x: ((center?.x ?? 0) - viewport.x) / viewport.zoom,
+      y: ((center?.y ?? 0) - viewport.y) / viewport.zoom,
+    };
+  }
+
+  function insertClipboardText(text: string) {
+    const object = clipboardTextDraft(text, worldCenter());
+    geometry.handleEdit({ kind: 'create', interactionId: 'paste-text', object });
+  }
+
+  function uploadMedia(files: readonly File[], point?: CanvasPoint) {
+    const accepted = files.filter(({ type }) => nativeDropTypes.has(type.split('/')[0] ?? ''));
+    if (!canInsert || !mediaUploadRef.current || accepted.length === 0) {
+      return false;
+    }
+
+    mediaUploadRef.current(accepted, point);
+    return true;
+  }
+
+  const clipboard = useBoardClipboard({
+    clipboard: features.clipboard,
+    sourceBoardId: board.boardId,
+    sourceRevision: board.revision,
+    objects: projection.scene.objects,
+    selection,
+    active: !viewOnly && !annotationActive,
+    canEdit: canInsert && !annotationActive,
+    onSelectionAction: geometry.handleSelectionAction,
+    onObjects: geometry.handlePaste,
+    onText: insertClipboardText,
+    onMedia: uploadMedia,
+  });
+
+  function handleDrop(event: DragEvent<HTMLDivElement>) {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    const bounds = canvasArea?.getBoundingClientRect();
+    const point = bounds && { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+    if (uploadMedia(Array.from(event.dataTransfer.files), point)) {
+      event.preventDefault();
+    }
+  }
+
+  function handleDragOver(event: DragEvent<HTMLDivElement>) {
+    const canReceiveFiles = canInsert && Boolean(mediaUploadRef.current);
+    if (!event.defaultPrevented && canReceiveFiles && event.dataTransfer.types.includes('Files')) {
+      event.preventDefault();
+    }
+  }
+
+  function handleHistoryKey(event: KeyboardEvent<HTMLDivElement>) {
+    const primary = event.ctrlKey || event.metaKey;
+    const typing = event.altKey || event.nativeEvent.isComposing;
+    if (!primary || typing || !canvasOwnsClipboard(event)) {
+      return;
+    }
+
+    const key = event.key.toLowerCase();
+    if (key === 'z' || key === 'y') {
+      event.preventDefault();
+      if (historyReady) {
+        undo[key === 'y' || event.shiftKey ? 'redo' : 'undo']();
+      }
+    }
+  }
+
+  async function handleSaveLink({
+    title: label,
+    href,
+  }: {
+    readonly title: string;
+    readonly href: string;
+  }) {
+    const stateNow = geometry.state;
+    const prior = stateNow.kind === 'unknown' ? stateNow.edit.command.operation : undefined;
+    const retry =
+      prior?.kind === 'create' &&
+      prior.object.kind === 'link' &&
+      prior.initialPayload?.kind === 'link' &&
+      prior.object.label === label &&
+      prior.initialPayload.value.href === href;
+    const { x, y } = worldCenter();
+    const result = retry
+      ? await geometry.retryWithReceipt()
+      : await geometry.submitEdit({
+          kind: 'create',
+          interactionId: 'create-link',
+          object: {
+            kind: 'link',
+            label,
+            geometry: { x, y, width: 320, height: 94, rotation: 0 },
+            metadata: { href },
+          },
+        });
+
+    if (!result) {
+      return false;
+    }
+    if ('detail' in result) {
+      throw new Error(result.detail);
+    }
+
+    return result.receipt.kind === 'applied';
+  }
 
   function handleEdit(intent: CanvasEditIntent) {
     if (intent.kind === 'move') {
       move.handleEdit(intent);
-    } else {
-      geometry.handleEdit(intent);
+      return;
     }
+
+    const isTextPlacement = intent.kind === 'create' && intent.object.kind === 'text';
+    if (!isTextPlacement) {
+      geometry.handleEdit(intent);
+      return;
+    }
+
+    geometry
+      .submitEdit(intent)
+      ?.then((result) => {
+        if (result && 'receipt' in result && result.receipt.kind === 'applied') {
+          const [created] = result.receipt.objects;
+          if (created) {
+            editObject(created.id);
+          }
+        }
+      })
+      .catch(geometry.reportEditFailure);
   }
 
   function handleRestore(receipt: BoardEditReceipt) {
@@ -455,6 +783,27 @@ function BoardWorkspace({
     changeAnnotation(!annotationActive);
   }
 
+  function handleCanvasAnnotation(event: MouseEvent<HTMLDivElement>) {
+    const accepting = canComment && annotationActive && event.detail > 0;
+    if (!accepting || !canvasOwnsClipboard(event)) {
+      return;
+    }
+
+    const bounds = canvasArea?.getBoundingClientRect();
+    if (!bounds) {
+      return;
+    }
+
+    const x = (event.clientX - bounds.left - feedbackViewport.x) / feedbackViewport.zoom;
+    const y =
+      (event.clientY - bounds.top - feedbackViewport.y) /
+      (feedbackViewport.zoomY ?? feedbackViewport.zoom);
+    setPointAnnotationRequest((current) => ({
+      sequence: (current?.sequence ?? 0) + 1,
+      point: { x, y },
+    }));
+  }
+
   function handleAnnotateSelection() {
     const [objectId] = selection;
     if (objectId) {
@@ -462,9 +811,67 @@ function BoardWorkspace({
     }
   }
 
+  const attachContentAnnotation: NonNullable<CanvasProps['onAnnotateContent']> = (id, request) => {
+    const version = projected.payloadById.get(id)?.version;
+    const object = projection.objectsById.get(id);
+    if (!canComment || !object || version === undefined) {
+      return;
+    }
+
+    const { u, v, target: content } = request;
+    if (content.kind === 'object') {
+      setAnnotationRequest((current) => ({
+        objectId: id,
+        sequence: (current?.sequence ?? 0) + 1,
+        u,
+        v,
+      }));
+
+      return;
+    }
+
+    setContentAnnotationRequest((current) => ({
+      sequence: (current?.sequence ?? 0) + 1,
+      target: {
+        kind: 'content',
+        objectId: id,
+        geometryVersion: BigInt(object.version),
+        payloadVersion: BigInt(version),
+        u,
+        v,
+        content,
+      },
+    }));
+  };
+
+  function nativeSourceLabel(source: CanvasNativeSource) {
+    if (!source.artifactId || source.artifactId === board.boardId) {
+      return projection.objectsById.get(source.elementId)?.label;
+    }
+  }
+
+  function openNativeSource(source: CanvasNativeSource) {
+    if (source.artifactId && source.artifactId !== board.boardId) {
+      setSourceIssue('这条来源位于其他白板。');
+      return;
+    }
+    if (!projection.objectsById.has(source.elementId)) {
+      setSourceIssue('来源对象已不存在。');
+      return;
+    }
+
+    setSourceIssue(undefined);
+    exit();
+    detachFollow();
+    setSelected([source.elementId]);
+    fitViewport('selection');
+    setNativeSourceRequest((current) => ({ source, sequence: (current?.sequence ?? 0) + 1 }));
+  }
+
   function handleToolChange(nextTool: BoardTool) {
     setAnnotationActive(false);
     setMenuAnchor(null);
+    setFormatObjectRequest(undefined);
     setTool(nextTool);
   }
 
@@ -503,8 +910,22 @@ function BoardWorkspace({
     setObjectEdit({ id });
   }
 
+  const section = selectedSection(selectedObjects);
+  const onRenameSection = section && (() => editObject(section.id));
+
   function selectAll() {
-    setSelected(projected.scene.objects.map(({ id }) => id));
+    changeSelection(projected.scene.objects.map(({ id }) => id));
+  }
+
+  function changeSelection(ids: readonly string[]) {
+    selectionEpoch.current += 1;
+    setFormatObjectRequest(undefined);
+    setSelected(ids);
+  }
+
+  function handleFormatObject(id: string, format: CanvasInlineFormat) {
+    nextFormatRequest.current += 1;
+    setFormatObjectRequest({ id, format, sequence: nextFormatRequest.current });
   }
 
   const annotation = annotationActions(
@@ -525,10 +946,14 @@ function BoardWorkspace({
       onOpenMore={handleSelectionMenu}
       onSelectAll={selectAll}
       onAnnotate={annotation.onAnnotate}
+      onRenameSection={onRenameSection}
+      clipboard={clipboard.menu}
+      textStyleById={textStyleById}
+      onFormatObject={handleFormatObject}
     />
   );
   const pendingEdits = moving ? move.pendingEdits : geometry.pendingEdits;
-  function renderCanvas(onWorldPointerChange: CanvasProps['onWorldPointerChange']) {
+  function renderCanvas(room?: BoardPresenceSlot) {
     return (
       <WorkspaceCanvas
         viewOnly={viewOnly}
@@ -549,22 +974,33 @@ function BoardWorkspace({
           canEdit,
           canEditExpandedObject: canEditExpanded,
           pendingEdits,
-          objectExtensions: editService ? editExtensions : moveExtensions,
+          objectExtensions: editService ? studioObjectExtensions : moveExtensions,
           payloadById: projected.payloadById,
-          onSelectionChange: setSelected,
+          onSelectionChange: changeSelection,
           onToolChange: handleToolChange,
           onContextMenu: handleContextMenu,
           editObjectRequest: objectEdit,
+          formatObjectRequest,
           onEditIntent: handleEdit,
           canWriteObject: content.canWriteObject,
-          onObjectIntent: content.handleObjectIntent,
+          onObjectIntent: handleObjectIntent,
           readHtmlSource: features.readHtmlSource,
+          downloadFile: features.downloadObjectFile,
+          readDocumentAsset: features.readDocumentAsset,
+          uploadDocumentImage: features.uploadDocumentImage,
+          annotationActive,
+          onAnnotateContent: renderFeedback && canComment ? attachContentAnnotation : undefined,
+          nativeSourceRequest,
+          onOpenNativeSource: openNativeSource,
+          nativeSourceLabel,
           onOpenPresentation: handleOpenViewing,
           onClosePresentation: exit,
           onViewportChange: setViewport,
-          onViewportSizeChange: features.renderPresence ? setViewportSize : undefined,
+          onViewportSizeChange: setViewportSize,
           onViewportNavigation: viewOnly ? undefined : detachFollow,
-          onWorldPointerChange: viewOnly ? undefined : onWorldPointerChange,
+          onWorldPointerChange: viewOnly ? undefined : room?.onCursorChange,
+          onGesturePreviewChange: room?.onGesturePreviewChange,
+          remoteGesturePreviews: room?.remoteGesturePreviews,
           onVisibleObjectsChange: session.observeVisible,
         }}
       />
@@ -580,6 +1016,63 @@ function BoardWorkspace({
 
   function restoreSuggestionsFocus() {
     suggestionTrigger.current?.focus({ preventScroll: true });
+  }
+
+  function renderEditNotices() {
+    const undoError = 'detail' in undo.state ? undo.state.detail : undefined;
+    return (
+      <>
+        <BoardReadNotices
+          state={state}
+          session={session}
+          unsafePayloadVersion={projected.unsafePayloadVersion}
+          renameError={boardTitle.error}
+        />
+        {sourceIssue && (
+          <OperationNotice
+            id="native-source-unavailable"
+            level="warning"
+            message={sourceIssue}
+            dismissible
+            onDismiss={() => setSourceIssue(undefined)}
+          />
+        )}
+        {clipboard.issue && (
+          <OperationNotice
+            id="canvas-clipboard-error"
+            level="warning"
+            message={clipboard.issue}
+            dismissible
+            onDismiss={clipboard.dismiss}
+          />
+        )}
+        {undoError && (
+          <OperationNotice
+            id="canvas-history-error"
+            level="warning"
+            message={undoError}
+            actions={
+              undo.state.kind === 'unknown'
+                ? [
+                    {
+                      id: 'check',
+                      label: '查询回执',
+                      onActivate: undo.checkReceipt,
+                      disabled: !undo.canRetry,
+                    },
+                    {
+                      id: 'retry',
+                      label: '重试',
+                      onActivate: undo.retry,
+                      disabled: !undo.canRetry,
+                    },
+                  ]
+                : undefined
+            }
+          />
+        )}
+      </>
+    );
   }
 
   function renderWorkspace(room?: BoardPresenceSlot) {
@@ -604,6 +1097,7 @@ function BoardWorkspace({
         <WorkspaceHeader
           title={title}
           watching={watching}
+          documentReading={documentReading}
           historyPreview={previewing}
           historyOpen={Boolean(panels.historyAnchor)}
           feedbackOpen={panels.feedbackOpen}
@@ -623,21 +1117,30 @@ function BoardWorkspace({
           onRename={boardTitle.rename}
           {...boardPanelActions(features, panels)}
           onToggleAnnotation={annotation.onToggleAnnotation}
-          readNotices={
-            <BoardReadNotices
-              state={state}
-              session={session}
-              unsafePayloadVersion={projected.unsafePayloadVersion}
-              renameError={boardTitle.error}
-            />
-          }
+          readNotices={renderEditNotices()}
         />
         {room?.notice}
         <div className="whiteboard-editor__canvas" ref={setCanvasArea}>
-          <div className="whiteboard-editor__live-canvas" inert={previewing}>
+          <BoardDraftRecovery
+            draftAccess={content.draftAccess}
+            readCurrent={(objectId, signal) =>
+              readBoardDraftCurrent(service, board.boardId, objectId, signal)
+            }
+            copyText={features.clipboard?.writeText}
+            downloadFile={features.downloadObjectFile}
+          />
+          <div
+            className="whiteboard-editor__live-canvas"
+            inert={previewing}
+            {...clipboard.handlers}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onKeyDown={handleHistoryKey}
+            onClick={handleCanvasAnnotation}
+          >
             <Viewing
               active={watching}
-              documentReading={Boolean(scope?.focusObjectId)}
+              documentReading={documentReading}
               title={title}
               viewport={viewport}
               onZoom={handleZoomBoard}
@@ -645,7 +1148,7 @@ function BoardWorkspace({
               onExit={exit}
               onCanvasFocus={focusCanvas}
             >
-              {renderCanvas(room?.onCursorChange)}
+              {renderCanvas(room)}
             </Viewing>
             {room?.overlay}
             <div hidden={watching}>
@@ -660,6 +1163,7 @@ function BoardWorkspace({
                 onSingleKeysChange={setSingleKeys}
                 timerEditable={board.canEdit}
                 timer={features.renderSharedTimer?.()}
+                history={viewportHistory}
               />
               <WorkspaceToolbar
                 boardId={board.boardId}
@@ -677,6 +1181,9 @@ function BoardWorkspace({
                 penColor={penColor}
                 onPenColorChange={setPenColor}
                 onAddHtml={canInsert ? handleOpenHtml : undefined}
+                onAddLink={canInsert ? () => setLinkCreation(true) : undefined}
+                placementPoint={placementPoint}
+                onUploadReady={handleUploadReady}
               />
             </div>
             {welcomeAvailable(viewOnly, annotationActive, tool, projected.scene.objects.length) && (
@@ -693,8 +1200,8 @@ function BoardWorkspace({
             feedback={{
               boardId: board.boardId,
               canEdit: canComment,
-              viewing: viewOnly,
-              viewport,
+              viewing: feedbackView.hidingFeedback,
+              viewport: feedbackViewport,
               objects: board.objects,
               selectedIds: selection,
               panelOpen: panels.feedbackOpen,
@@ -705,6 +1212,10 @@ function BoardWorkspace({
               onAnnotationActiveChange: changeAnnotation,
               onUnresolvedChange: setUnresolvedFeedback,
               annotationRequest,
+              contentAnnotationRequest,
+              pointAnnotationRequest,
+              hostPicking: true,
+              focusedObjectId: feedbackView.focusedObjectId,
               singleKeys,
               onReviewThread: features.renderSuggestions ? handleReviewThread : undefined,
             }}
@@ -724,6 +1235,7 @@ function BoardWorkspace({
               revision: board.revision,
               selection,
               feedbackThreadId: panels.suggestionThreadId,
+              previewHost: canvasArea,
               anchor: panels.suggestionAnchor,
               onClose: panels.closeSuggestions,
               restoreFocus: restoreSuggestionsFocus,
@@ -741,8 +1253,19 @@ function BoardWorkspace({
           onFit={handleManualFit}
           onSelectAll={selectAll}
           onRequestClose={() => setMenuAnchor(null)}
+          onRenameSection={onRenameSection}
+          clipboard={clipboard.menu}
           returnFocus={focusCanvas}
         />
+        {linkCreation && (
+          <LinkDialog
+            initial={newLink}
+            onSave={handleSaveLink}
+            onClose={() => setLinkCreation(false)}
+            onRestoreFocus={focusCanvas}
+            readOnly={!online}
+          />
+        )}
         <BoardHtmlCreation
           creation={creation}
           geometry={geometry}
@@ -827,6 +1350,7 @@ function BoardReadNotices({
 function LoadedBoard({
   state,
   session,
+  service,
   createCommandId,
   onBack,
   renameBoard,
@@ -850,6 +1374,7 @@ function LoadedBoard({
     <BoardWorkspace
       state={state}
       session={session}
+      service={service}
       projection={projection}
       createCommandId={createCommandId}
       onBack={onBack}
@@ -894,6 +1419,7 @@ export function WhiteboardEditorSurface({
           key={boardId}
           state={state}
           session={session}
+          service={service}
           createCommandId={createCommandId}
           onBack={onBack}
           renameBoard={renameBoard}

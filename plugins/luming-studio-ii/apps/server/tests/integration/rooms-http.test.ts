@@ -1,6 +1,7 @@
 import { fromJsonString, type MessageInitShape } from '@bufbuild/protobuf';
 import {
   BoardRoomEventSchema,
+  BoardRoomGestureKind,
   BoardRoomService,
   BoardRoomTimerPhase,
   BoardTimerRejection,
@@ -44,6 +45,16 @@ const extras = {
 };
 const frameSeparator = '\n\n';
 const dataPrefix = 'data: ';
+const gesture = {
+  kind: BoardRoomGestureKind.RESIZE,
+  changes: [
+    {
+      objectId: shapeId,
+      expectedGeometryVersion: 0n,
+      geometry: { x: 50, y: 60, width: 400, height: 300, rotation: 0 },
+    },
+  ],
+};
 
 function streamUrl(boardId: string, viewId: string): URL {
   const url = new URL('/studio-room-events', server.address);
@@ -168,6 +179,74 @@ test('streams a snapshot, viewport deltas and ordered departure to board members
   } finally {
     await stream.close();
   }
+});
+
+test('publishes authorized transient gestures without writing scene state and clears the departed view', async () => {
+  const stream = await openRoom(editorId, 'observer');
+  try {
+    const original = await callWhiteboard(
+      server.address,
+      editorId,
+      WhiteboardService.method.getBoardScene,
+      scope,
+    );
+    await stream.next();
+    const input = { ...scope, viewId, sequence: 1n, gesture };
+    const accepted = await callWhiteboard(server.address, teammateId, updateBoardPresence, input);
+    expect(accepted.accepted).toBe(true);
+
+    const frame = await stream.next();
+    expect(frame?.payload).toMatchObject({
+      case: 'participants',
+      value: { upserts: [{ key: { actorId: teammateId, viewId }, gesture }] },
+    });
+
+    if (frame?.payload.case === 'participants') {
+      const deadline = frame.payload.value.upserts[0]?.gestureExpiresAtUnixMs;
+      expect(Number(deadline) - Number(frame.serverTimeUnixMs)).toBe(1200);
+    }
+
+    const unchanged = await callWhiteboard(
+      server.address,
+      editorId,
+      WhiteboardService.method.getBoardScene,
+      scope,
+    );
+    expect(unchanged).toEqual(original);
+    await callWhiteboard(server.address, teammateId, leaveBoardPresence, {
+      ...scope,
+      viewId,
+      sequence: 2n,
+    });
+    expect((await stream.next())?.payload).toMatchObject({
+      case: 'participants',
+      value: { removals: [{ actorId: teammateId, viewId }] },
+    });
+  } finally {
+    await stream.close();
+  }
+});
+
+test('rejects gesture publication by a viewer and malformed or oversized geometry', async () => {
+  const valid = { ...scope, viewId, sequence: 1n, gesture };
+  const denied = await sendWhiteboardRequest(server.address, viewerId, updateBoardPresence, valid);
+  expect(denied.status).toBe(403);
+
+  const changes = Array.from({ length: 33 }, (_, index) => ({
+    ...gesture.changes[0],
+    objectId: 'preview-' + index,
+  }));
+  const oversized = await sendWhiteboardRequest(server.address, editorId, updateBoardPresence, {
+    ...valid,
+    gesture: { ...gesture, changes },
+  });
+  expect(oversized.status).toBe(400);
+
+  const duplicate = await sendWhiteboardRequest(server.address, editorId, updateBoardPresence, {
+    ...valid,
+    gesture: { ...gesture, changes: [...gesture.changes, ...gesture.changes] },
+  });
+  expect(duplicate.status).toBe(400);
 });
 
 test('closes the old stream on role downgrade and denies another board', async () => {

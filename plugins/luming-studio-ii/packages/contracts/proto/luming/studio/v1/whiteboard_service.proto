@@ -33,6 +33,9 @@ enum BoardExportFormat {
   BOARD_EXPORT_FORMAT_UNSPECIFIED = 0;
   BOARD_EXPORT_FORMAT_JSON = 1;
   BOARD_EXPORT_FORMAT_SVG = 2;
+  BOARD_EXPORT_FORMAT_PNG = 3;
+  BOARD_EXPORT_FORMAT_HTML = 4;
+  BOARD_EXPORT_FORMAT_ZIP = 5;
 }
 
 message ExportBoardResponse {
@@ -40,7 +43,24 @@ message ExportBoardResponse {
     ExportBoardFile file = 1;
     ExportBoardStale stale = 2;
     ExportBoardRejected rejected = 3;
+    ExportBoardBrowserPng browser_png = 4;
   }
+}
+
+message ExportBoardBrowserPng {
+  string filename = 1;
+  uint64 revision = 2;
+  double width = 3;
+  double height = 4;
+  string svg_template = 5;
+  repeated ExportPngRegion regions = 6;
+}
+
+message ExportPngRegion {
+  uint32 index = 1;
+  string html = 2;
+  double width = 3;
+  double height = 4;
 }
 
 message ExportBoardFile {

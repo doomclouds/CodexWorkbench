@@ -8,6 +8,8 @@ import { createTemporaryDatabase } from '../support/whiteboard-database.js';
 
 type Scope = 'local' | 'lan';
 
+export const agentPrincipalPrefix = 'test-agent:';
+
 async function listen(server: Server) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -51,10 +53,14 @@ async function start(
     databasePath,
     resolveActor(request) {
       const id = request.headers[actorHeader];
+      if (typeof id === 'string' && id.startsWith(agentPrincipalPrefix)) {
+        return { id: id.slice(agentPrincipalPrefix.length), kind: 'agent' as const };
+      }
 
       return typeof id === 'string' ? { id } : undefined;
     },
     sharing: {
+      ownerDisplayName: 'Studio Test Owner',
       inviteOrigin: (scope) => addresses.get(scope)?.origin,
       activateScope(scope) {
         activated.push(scope);

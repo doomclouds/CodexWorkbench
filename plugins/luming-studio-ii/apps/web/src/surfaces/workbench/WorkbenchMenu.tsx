@@ -2,6 +2,7 @@ import { useEffectEvent, useLayoutEffect, useRef, type KeyboardEvent, type React
 import { createPortal } from 'react-dom';
 
 interface WorkbenchMenuProps {
+  readonly id?: string;
   readonly anchor: HTMLButtonElement;
   readonly label: string;
   readonly initialFocus?: 'first' | 'last' | 'selected';
@@ -61,7 +62,10 @@ function isOutsideList(anchor: HTMLButtonElement, rect: DOMRect) {
     return false;
   }
 
-  return rect.bottom <= list.top || rect.top >= list.bottom;
+  const outsideVertical = rect.bottom <= list.top || rect.top >= list.bottom;
+  const outsideHorizontal = rect.right <= list.left || rect.left >= list.right;
+
+  return outsideVertical || outsideHorizontal;
 }
 
 function nextMenuItem(key: string, index: number, count: number) {
@@ -76,6 +80,7 @@ function nextMenuItem(key: string, index: number, count: number) {
 }
 
 export function WorkbenchMenu({
+  id,
   anchor,
   label,
   initialFocus = 'selected',
@@ -109,7 +114,7 @@ export function WorkbenchMenu({
       positionMenu(menu, rect, host, view);
     };
 
-    const dismissOutside = (event: PointerEvent) => {
+    const dismissOutside = (event: Event) => {
       if (!(event.target instanceof Node)) {
         return;
       }
@@ -122,11 +127,13 @@ export function WorkbenchMenu({
     positionMenu(menu, anchor.getBoundingClientRect(), host, view);
     focusMenu(menu, initialFocus);
     doc.addEventListener('pointerdown', dismissOutside, true);
+    doc.addEventListener('focusin', dismissOutside, true);
     doc.addEventListener('scroll', reposition, true);
     view.addEventListener('resize', reposition);
 
     return () => {
       doc.removeEventListener('pointerdown', dismissOutside, true);
+      doc.removeEventListener('focusin', dismissOutside, true);
       doc.removeEventListener('scroll', reposition, true);
       view.removeEventListener('resize', reposition);
     };
@@ -160,6 +167,7 @@ export function WorkbenchMenu({
 
   return createPortal(
     <div
+      id={id}
       ref={menuRef}
       role="menu"
       aria-label={label}

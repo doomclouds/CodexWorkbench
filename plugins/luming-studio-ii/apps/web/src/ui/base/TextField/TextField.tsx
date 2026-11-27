@@ -13,6 +13,7 @@ export interface TextFieldProps {
   value: string;
   onValueChange: (value: string) => void;
   label: string;
+  placeholder?: string;
   description?: string;
   error?: string;
   required?: boolean;
@@ -28,6 +29,7 @@ export function TextField({
   value,
   onValueChange,
   label,
+  placeholder,
   description,
   error,
   required,
@@ -66,6 +68,7 @@ export function TextField({
           id={binding.id}
           name={name}
           type={type}
+          placeholder={placeholder}
           value={value}
           required={binding.required}
           readOnly={readOnly}

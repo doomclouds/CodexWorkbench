@@ -1,5 +1,5 @@
-import { Download, X } from 'lucide-react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { Archive, Download, X } from 'lucide-react';
+import { useLayoutEffect, useRef, useState, type Ref } from 'react';
 import type {
   ExportBoard,
   ExportBoardFile,
@@ -31,6 +31,7 @@ export interface WhiteboardExportSurfaceProps {
   readonly onRequestClose: () => void;
   readonly restoreFocus?: () => void;
   readonly inline?: boolean;
+  readonly canBackup?: boolean;
 }
 
 interface ExportNotice {
@@ -38,10 +39,27 @@ interface ExportNotice {
   readonly tone: StatusTextTone;
 }
 
-const formats = [
-  { format: 'json', label: '白板文件' },
+interface ExportOption {
+  readonly format: ExportBoardFormat;
+  readonly label: string;
+  readonly description?: string;
+}
+
+const formats: readonly ExportOption[] = [
+  { format: 'png', label: 'PNG 图片' },
   { format: 'svg', label: 'SVG 图片' },
-] as const;
+  {
+    format: 'html',
+    label: '整板网页（HTML）',
+    description: '导出整块白板的已保存内容，不含协作评论和历史。网页中的交互状态仅保存在本页内存。',
+  },
+  { format: 'json', label: '白板文件 (.json)' },
+];
+const backup = {
+  format: 'zip',
+  label: '完整作品备份',
+  description: '包含历史记录与资源',
+} as const;
 
 const rejectionMessages: Record<ExportBoardRejection, string> = {
   invalidSelection: '部分选中对象已发生变化。请重新选择导出范围。',
@@ -64,6 +82,42 @@ function resultNotice(result: ExportBoardResult): ExportNotice {
   }
 }
 
+function supportsSelection(format: ExportBoardFormat): boolean {
+  return format !== 'html' && format !== 'zip';
+}
+
+interface ExportFormatButtonProps {
+  readonly option: ExportOption;
+  readonly buttonRef?: Ref<HTMLButtonElement>;
+  readonly disabled: boolean;
+  readonly onExport: (format: ExportBoardFormat) => void;
+}
+
+function ExportFormatButton({ option, buttonRef, disabled, onExport }: ExportFormatButtonProps) {
+  const { format, label, description } = option;
+  const isBackup = format === 'zip';
+  const Icon = isBackup ? Archive : Download;
+
+  return (
+    <button
+      type="button"
+      ref={buttonRef}
+      className="whiteboard-export__format"
+      data-export-format={format}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onExport(format)}
+    >
+      <Icon size={18} aria-hidden="true" />
+      <span>
+        {isBackup ? <strong>{label}</strong> : label}
+        {description && <small className="whiteboard-export__description">{description}</small>}
+      </span>
+      <small>{format.toUpperCase()}</small>
+    </button>
+  );
+}
+
 function OpenExport({
   anchor,
   context,
@@ -72,6 +126,7 @@ function OpenExport({
   onRequestClose,
   restoreFocus,
   inline = false,
+  canBackup = false,
 }: WhiteboardExportSurfaceProps) {
   const [scope, setScope] = useState<'whole' | 'selection'>('whole');
   const [pendingFormat, setPendingFormat] = useState<ExportBoardFormat>();
@@ -90,14 +145,14 @@ function OpenExport({
     onRequestClose();
   }
 
-  function startExport(format: ExportBoardFormat) {
-    if (pending.current || selectionUnavailable) {
+  function handleExport(format: ExportBoardFormat) {
+    if (pending.current || (selectionUnavailable && supportsSelection(format))) {
       return;
     }
 
     const { boardId, revision, selectedIds } = context;
     const selectedScope =
-      scope === 'selection'
+      scope === 'selection' && supportsSelection(format)
         ? { kind: 'selection' as const, objectIds: [...selectedIds] }
         : { kind: 'whole' as const };
     const controller = new AbortController();
@@ -138,6 +193,22 @@ function OpenExport({
       });
   }
 
+  function renderFormat(option: ExportOption) {
+    const { format } = option;
+
+    return (
+      <ExportFormatButton
+        key={format}
+        option={option}
+        buttonRef={format === 'png' ? firstFormat : undefined}
+        disabled={
+          pendingFormat !== undefined || (selectionUnavailable && supportsSelection(format))
+        }
+        onExport={handleExport}
+      />
+    );
+  }
+
   const content = (
     <section className="whiteboard-export" aria-busy={pendingFormat !== undefined}>
       {!inline && (
@@ -170,21 +241,10 @@ function OpenExport({
         onValueChange={(value) => setScope(value === 'selection' ? 'selection' : 'whole')}
       />
       <div className="whiteboard-export__formats">
-        {formats.map(({ format, label }) => (
-          <button
-            key={format}
-            type="button"
-            ref={format === 'json' ? firstFormat : undefined}
-            className="whiteboard-export__format"
-            disabled={pendingFormat !== undefined || selectionUnavailable}
-            onClick={() => startExport(format)}
-          >
-            <Download size={18} aria-hidden="true" />
-            <span>{label}</span>
-            <small>{format.toUpperCase()}</small>
-          </button>
-        ))}
+        <p className="whiteboard-export__revision">选择导出格式</p>
+        {formats.map(renderFormat)}
       </div>
+      {canBackup && renderFormat(backup)}
       {pendingFormat && <StatusText message="正在导出…" announcement="polite" busy />}
       {notice && <StatusText message={notice.message} tone={notice.tone} announcement="polite" />}
     </section>

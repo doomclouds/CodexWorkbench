@@ -7,6 +7,7 @@ import {
   type BoardSummary,
   type CatalogCommandReceipt,
   type GetCatalogCommandReceiptResponse,
+  type GetBoardThumbnailResponse,
 } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import type {
   BoardCatalogService,
@@ -55,6 +56,7 @@ export function readBoard({
   pinned,
   entryVersion,
   canManage,
+  previewRevision,
 }: BoardSummary): CatalogBoardSummary {
   if (!boardId.trim()) {
     throw new Error('Catalog response is missing a board ID.');
@@ -63,11 +65,42 @@ export function readBoard({
     throw new Error('Catalog response is missing a board entry version.');
   }
 
-  return { boardId, title, updatedAtMillis, pinned, entryVersion, canManage };
+  return {
+    boardId,
+    title,
+    updatedAtMillis,
+    pinned,
+    entryVersion,
+    canManage,
+    ...(previewRevision === undefined ? {} : { previewRevision }),
+  };
 }
 
 export function listInput(input: CatalogListRequest) {
   return { ...input, order: orders[input.order] };
+}
+
+const thumbnailMaxBytes = 128 * 1024;
+const thumbnailMime = 'image/svg+xml';
+const base64ChunkSize = 8192;
+
+function readThumbnail({ thumbnail }: GetBoardThumbnailResponse, expectedRevision: bigint) {
+  if (thumbnail?.revision !== expectedRevision) {
+    return;
+  }
+
+  const { mimeType, content } = thumbnail;
+  if (mimeType !== thumbnailMime || !content.length || content.length > thumbnailMaxBytes) {
+    throw new Error('目录缩略图的格式或大小无效。');
+  }
+
+  let binary = '';
+  for (let offset = 0; offset < content.length; offset += base64ChunkSize) {
+    const chunk = content.subarray(offset, offset + base64ChunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return 'data:' + thumbnailMime + ';base64,' + btoa(binary);
 }
 
 function readBoards(boards: readonly BoardSummary[]): readonly CatalogBoardSummary[] {
@@ -143,13 +176,20 @@ export function readReceiptLookup<Receipt>(
 }
 
 export function createBoardCatalogService(post: CatalogPost) {
-  const { listBoards, createBoard, duplicateBoard, getCatalogCommandReceipt } = wireService.method;
+  const { listBoards, createBoard, duplicateBoard, getCatalogCommandReceipt, getBoardThumbnail } =
+    wireService.method;
 
   return {
     async listBoards(input, signal?: AbortSignal) {
       const { boards, nextCursor } = await request(post, listBoards, listInput(input), signal);
 
       return { boards: readBoards(boards), nextCursor };
+    },
+    async getBoardThumbnail(input, signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      const response = await request(post, getBoardThumbnail, input, signal);
+      signal?.throwIfAborted();
+      return readThumbnail(response, input.revision);
     },
     async createBoard({ commandId, title }, signal?: AbortSignal) {
       requireCommandId(commandId);

@@ -1,11 +1,20 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import type { FocusEvent, KeyboardEvent, MouseEvent } from 'react';
-import { Button, TextField, ToggleButton, Toolbar } from '../../../base/index.js';
-import type { TextFieldHandle } from '../../../base/index.js';
+import { Button, ToggleButton, Toolbar } from '../../../base/index.js';
 import { InlineTextEditor } from './InlineTextEditor.js';
-import type { InlineTextEditorHandle, InlineTextFormatState } from './InlineTextEditor.js';
+import type {
+  InlineTextEditorHandle,
+  InlineTextFormat,
+  InlineTextFormatState,
+} from './InlineTextEditor.js';
+import { InlineTextLinkEditor } from './InlineTextLinkEditor.js';
 import { RichText } from './RichText.js';
 import './text.css';
+
+export interface InlineTextFormatRequest {
+  readonly sequence: number;
+  readonly format: InlineTextFormat;
+}
 
 export interface TextObjectProps {
   text: string;
@@ -17,6 +26,9 @@ export interface TextObjectProps {
   fontFamily?: string;
   fontSize?: number;
   align?: 'left' | 'center' | 'right';
+  bold?: boolean;
+  italic?: boolean;
+  formatRequest?: InlineTextFormatRequest;
   onTextChange?: (text: string) => void;
   onCommit?: (adjacent?: boolean) => void;
   onRequestEdit?: () => void;
@@ -28,12 +40,7 @@ interface TextObjectEditorProps {
   singleLine?: boolean;
   onTextChange: (text: string) => void;
   onCommit?: (adjacent?: boolean) => void;
-}
-
-interface LinkFieldsProps {
-  initialUrl: string;
-  onApply: (value: string) => boolean;
-  onClose: () => void;
+  formatRequest?: InlineTextFormatRequest;
 }
 
 const formatOptions = [
@@ -50,70 +57,39 @@ const unformatted: InlineTextFormatState = {
   numbered: false,
 };
 
-function LinkFields({ initialUrl, onApply, onClose }: LinkFieldsProps) {
-  const [value, setValue] = useState(initialUrl);
-  const [error, setError] = useState<string>();
-  const field = useRef<TextFieldHandle>(null);
-
-  useLayoutEffect(() => {
-    field.current?.focus();
-    field.current?.select();
-  }, []);
-
-  function handleApply() {
-    if (onApply(value.trim())) {
-      onClose();
-    } else {
-      setError('请输入有效的 HTTP 或 HTTPS 链接');
-    }
-  }
-
-  function handleChange(nextValue: string) {
-    setValue(nextValue);
-    setError(undefined);
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    }
-    if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
-      event.preventDefault();
-      event.stopPropagation();
-      handleApply();
-    }
-  }
-
-  return (
-    <div className="studio-ui-text-object-link-fields" onKeyDown={handleKeyDown}>
-      <TextField
-        type="url"
-        label="链接地址"
-        value={value}
-        onValueChange={handleChange}
-        error={error}
-        ref={field}
-      />
-      <div className="studio-ui-text-object-link-actions">
-        <Button label="应用链接" onActivate={handleApply} />
-        <Button label="取消链接编辑" variant="ghost" onActivate={onClose} />
-      </div>
-    </div>
-  );
-}
-
 function TextObjectEditor({
   text,
   label,
   singleLine,
   onTextChange,
   onCommit,
+  formatRequest,
 }: TextObjectEditorProps) {
   const editor = useRef<InlineTextEditorHandle>(null);
+  const formatSeen = useRef<number>(undefined);
+  const opened = useRef(false);
   const [format, setFormat] = useState(unformatted);
   const [link, setLink] = useState<string>();
+
+  const applyFormatRequest = useEffectEvent(() => {
+    const firstOpen = !opened.current;
+    opened.current = true;
+    const active = editor.current;
+    if (!formatRequest || formatSeen.current === formatRequest.sequence || !active) {
+      return;
+    }
+
+    formatSeen.current = formatRequest.sequence;
+    if (firstOpen) {
+      active.focus(true);
+    }
+
+    active.format(formatRequest.format);
+  });
+
+  useLayoutEffect(() => {
+    applyFormatRequest();
+  }, [formatRequest]);
 
   function handleCloseLink() {
     editor.current?.focus();
@@ -121,7 +97,12 @@ function TextObjectEditor({
   }
 
   function handleBlur(event: FocusEvent<HTMLDivElement>) {
-    if (!event.currentTarget.contains(event.relatedTarget)) {
+    const target = event.relatedTarget;
+    const canvasToolbar = target?.closest('[data-canvas-selection-actions]');
+    const canvas = event.currentTarget.closest('[data-canvas-root]');
+    const inToolbar = canvasToolbar && canvas?.contains(canvasToolbar);
+
+    if (!event.currentTarget.contains(target) && !inToolbar) {
       onCommit?.(false);
     }
   }
@@ -151,7 +132,7 @@ function TextObjectEditor({
         <Button label="链接" onActivate={() => editor.current?.format('link')} />
       </Toolbar>
       {link !== undefined && (
-        <LinkFields
+        <InlineTextLinkEditor
           initialUrl={link}
           onApply={(url) => editor.current?.format('link', url) ?? false}
           onClose={handleCloseLink}
@@ -171,6 +152,9 @@ export function TextObject({
   fontFamily,
   fontSize,
   align,
+  bold,
+  italic,
+  formatRequest,
   onTextChange,
   onCommit,
   onRequestEdit,
@@ -197,7 +181,14 @@ export function TextObject({
   return (
     <div
       className="studio-ui-text-object"
-      style={{ color, fontFamily, fontSize, textAlign: align }}
+      style={{
+        color,
+        fontFamily,
+        fontSize,
+        textAlign: align,
+        fontWeight: bold ? 700 : undefined,
+        fontStyle: italic ? 'italic' : undefined,
+      }}
       onDoubleClick={activatable && !showEditor ? requestEdit : undefined}
       onKeyDown={activatable && !showEditor ? handlePreviewKey : undefined}
       tabIndex={activatable && !showEditor ? 0 : undefined}
@@ -207,6 +198,7 @@ export function TextObject({
           text={text}
           label={label}
           singleLine={singleLine}
+          formatRequest={formatRequest}
           onTextChange={onTextChange}
           onCommit={onCommit}
         />

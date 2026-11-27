@@ -148,7 +148,7 @@ function readLinks(
 function readMembers(members: readonly WireSharingMember[]): readonly SharingMember[] {
   const seen = new Set<string>();
 
-  return members.map(({ actorId, name, role: rawRole, removed, active }) => {
+  return members.map(({ actorId, name, role: rawRole, removed, active, online }) => {
     const role = roles.get(rawRole);
     const hasIdentity = actorId.trim() !== '' && name.trim() !== '';
     if (!role || !hasIdentity || seen.has(actorId)) {
@@ -157,7 +157,7 @@ function readMembers(members: readonly WireSharingMember[]): readonly SharingMem
 
     seen.add(actorId);
 
-    return { actorId, name, role, removed, active };
+    return { actorId, name, role, removed, active, online: online && active && !removed };
   });
 }
 
@@ -187,6 +187,7 @@ export function readBoardSharing(
     links: readLinks(value.links, boardId, role),
     members: role === 'owner' ? readMembers(value.members) : [],
     memberUrl: readMemberUrl(value.memberUrl, boardId),
+    ownerDisplayName: role === 'owner' ? value.ownerDisplayName?.trim() || undefined : undefined,
   };
 }
 
@@ -214,7 +215,14 @@ export function readBoardInvitation(
   response: InspectBoardInvitationResponse,
   boardId: string,
 ): BoardInvitationResult {
-  const { invitation, rejection } = response;
+  const { invitation, rejection, session } = response;
+  if (session) {
+    if (invitation) {
+      throw new Error('分享服务同时返回了邀请与加入结果。');
+    }
+
+    return readGuestJoin({ session, rejection }, boardId);
+  }
   if (!invitation) {
     return { kind: 'rejected', reason: readRejection(rejection) };
   }
@@ -228,7 +236,7 @@ export function readBoardInvitation(
 }
 
 export function readGuestJoin(
-  response: JoinBoardInvitationResponse,
+  response: Pick<JoinBoardInvitationResponse, 'session' | 'rejection'>,
   boardId: string,
 ): GuestJoinResult {
   const { session, rejection } = response;

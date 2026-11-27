@@ -250,11 +250,17 @@ describe('recycle bin through the Studio app', () => {
         expect(button(app.host, '打开白板：可删除的作品').disabled).toBe(true);
         expect(button(app.host, '恢复作品：可以恢复的作品').textContent).toBe('');
 
-        await click(app.host, '永久删除作品：可删除的作品');
+        const deleteTrigger = button(app.host, '永久删除作品：可删除的作品');
+        await act(async () => {
+          deleteTrigger.focus();
+          deleteTrigger.click();
+        });
         expect(dialog(app.host).textContent).toContain('永久删除 1 项作品，此操作无法恢复。');
         expect(app.purgeRequests).toEqual([]);
+        expect(document.activeElement).toBe(button(dialog(app.host), '取消'));
         await click(dialog(app.host), '取消');
         expect(app.trash.size).toBe(2);
+        expect(document.activeElement).toBe(deleteTrigger);
 
         await click(app.host, '永久删除作品：可删除的作品');
         await click(dialog(app.host), '永久删除');
@@ -271,6 +277,31 @@ describe('recycle bin through the Studio app', () => {
       }
     },
   );
+
+  it('keeps selection and clear-all commands within managed boards', async () => {
+    const owned = trashBoard('remove', '我的作品');
+    const other = trashBoard('readonly', '只读作品');
+    const app = recycleApp([owned, { ...other, board: { ...other.board, canManage: false } }]);
+
+    try {
+      await app.mount();
+      expect(button(app.host, '恢复作品：只读作品').disabled).toBe(true);
+      expect(button(app.host, '永久删除作品：只读作品').disabled).toBe(true);
+      expect(app.host.querySelector('[aria-label="选择作品：只读作品"]:disabled')).not.toBeNull();
+
+      await selectAll(app.host);
+      expect(app.host.textContent).toContain('1 项已选');
+      await click(app.host, '清空回收站');
+      expect(dialog(app.host).textContent).toContain('永久删除 1 项作品');
+      await click(dialog(app.host), '清空回收站');
+      expect(app.purgeRequests[0]?.targets).toEqual([
+        { boardId: owned.board.boardId, expectedEntryVersion: 2n },
+      ]);
+      expect(app.trash.has(other.board.boardId)).toBe(true);
+    } finally {
+      app.dispose();
+    }
+  });
 
   it('keeps failed rows selected and retries only the failures', async () => {
     const app = recycleApp([trashBoard('remove', '可删除'), trashBoard('retry', '需要重试')]);

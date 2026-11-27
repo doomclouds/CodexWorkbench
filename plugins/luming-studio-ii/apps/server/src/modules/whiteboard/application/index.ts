@@ -3,14 +3,19 @@ import type {
   BoardScene,
   CommandReceipt,
   ExportBoardCommand,
+  ExportBoardFileCommand,
   ExportBoardResult,
+  ExportRenderCommand,
   MoveCommand,
   PayloadResult,
 } from '../domain/index.js';
 import type { WhiteboardRepository } from '../ports/index.js';
 import { payloadResult, requireAccess, WhiteboardAccessError } from './board-read.js';
 import { executeBoardExport } from './export-board.js';
+import { renderExportPng, type SvgPngRenderer } from './export-png.js';
 import { executeMove } from './move-objects.js';
+
+export { createBoardBackup } from './export-backup.js';
 
 export { BoardSuggestionError, createBoardSuggestionApplication } from './board-suggestions.js';
 export type { BoardSuggestionApplication } from './board-suggestions.js';
@@ -23,6 +28,7 @@ export type {
   BoardSuggestionOptionDraft,
   BoardSuggestionPreview,
 } from '../domain/index.js';
+export type { BoardCreationAttachment } from '../domain/index.js';
 export type {
   Actor,
   Appearance,
@@ -40,6 +46,7 @@ export type {
   ConnectorHead,
   ConnectorPort,
   ExportBoardCommand,
+  ExportBoardFileCommand,
   ExportBoardResult,
   Geometry,
   GeometryDetail,
@@ -48,6 +55,7 @@ export type {
   GeometryOperation,
   GeometryTransformKind,
   ImageOperation,
+  VideoOperation,
   JsonObject,
   JsonValue,
   MoveApplied,
@@ -85,12 +93,33 @@ export interface WhiteboardApplication {
   moveObjects(actor: Actor, command: MoveCommand): CommandReceipt;
   getCommandReceipt(actor: Actor, boardId: string, commandId: string): CommandReceipt | undefined;
   exportBoard(actor: Actor, command: ExportBoardCommand): ExportBoardResult;
+  exportBoardFile(actor: Actor, command: ExportBoardFileCommand): Promise<ExportBoardResult>;
+}
+
+interface WhiteboardFileResources {
+  readonly renderPng?: SvgPngRenderer;
+  readonly exportArchive?: (
+    actor: Actor,
+    command: ExportBoardFileCommand,
+  ) => Promise<ExportBoardResult>;
 }
 
 export function createWhiteboardApplication(
   repository: WhiteboardRepository,
   now?: () => number,
+  files: WhiteboardFileResources = {},
 ): WhiteboardApplication {
+  function exportBoard(actor: Actor, command: ExportRenderCommand) {
+    return executeBoardExport(repository, actor, command, requireAccess, (reader) => {
+      const board = reader.getBoard(command.boardId);
+      if (!board) {
+        throw new WhiteboardAccessError();
+      }
+
+      return board;
+    });
+  }
+
   return {
     getBoardScene(actor, boardId) {
       return repository.read((reader) => {
@@ -126,15 +155,22 @@ export function createWhiteboardApplication(
         return reader.getReceipt(boardId, actor.id, commandId)?.receipt;
       });
     },
-    exportBoard(actor, command) {
-      return executeBoardExport(repository, actor, command, requireAccess, (reader) => {
-        const board = reader.getBoard(command.boardId);
-        if (!board) {
-          throw new WhiteboardAccessError();
-        }
+    exportBoard,
+    async exportBoardFile(actor, command) {
+      const { format } = command;
+      if (format === 'zip') {
+        return files.exportArchive?.(actor, command) ?? { kind: 'rejected', reason: 'unsupported' };
+      }
 
-        return board;
-      });
+      if (format === 'png') {
+        const source = exportBoard(actor, { ...command, format });
+
+        return renderExportPng(source, files.renderPng, () => {
+          repository.read((reader) => requireAccess(reader, actor, command.boardId));
+        });
+      }
+
+      return exportBoard(actor, { ...command, format });
     },
   };
 }

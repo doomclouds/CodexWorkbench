@@ -15,9 +15,15 @@ interface FeedbackComposerProps {
   readonly focusOnMount?: boolean;
   readonly variant?: 'create' | 'reply' | 'edit';
   readonly resolved?: boolean;
+  readonly attachment?: {
+    readonly checked: boolean;
+    readonly label: string;
+    readonly disabled: boolean;
+    readonly onChange: (checked: boolean) => void;
+  };
 }
 
-const maximumFeedbackLength = 4_000;
+const maximumFeedbackLength = 16_000;
 
 export function FeedbackComposer({
   label,
@@ -31,6 +37,7 @@ export function FeedbackComposer({
   focusOnMount,
   variant = 'create',
   resolved = false,
+  attachment,
 }: FeedbackComposerProps) {
   const input = useRef<HTMLTextAreaElement>(null);
   const length = value.trim().length;
@@ -53,12 +60,20 @@ export function FeedbackComposer({
   }
 
   function handleSubmitKey(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+    if (event.nativeEvent.isComposing) {
       return;
     }
 
-    const useSubmit = editing ? event.ctrlKey || event.metaKey : !event.shiftKey;
-    if (useSubmit) {
+    if (editing && event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!cancelDisabled) {
+        onCancel?.();
+      }
+
+      return;
+    }
+    if (event.key === 'Enter' && !event.shiftKey && !editing) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
@@ -71,16 +86,27 @@ export function FeedbackComposer({
         aria-label={label}
         placeholder={placeholder}
         value={value}
-        rows={variant === 'reply' ? 1 : 2}
+        rows={composerRows[variant]}
         disabled={disabled}
         maxLength={maximumFeedbackLength}
         onChange={(event) => onChange(event.currentTarget.value)}
         onKeyDown={handleSubmitKey}
       />
       {tooLong && (
-        <StatusText message="备注内容最多 4000 个字符。" tone="error" announcement="assertive" />
+        <StatusText message="备注内容最多 16000 个字符。" tone="error" announcement="assertive" />
       )}
       <div className="whiteboard-feedback__composer-footer">
+        {attachment && (
+          <label className="whiteboard-feedback__composer-attachment">
+            <input
+              type="checkbox"
+              checked={attachment.checked}
+              disabled={disabled || attachment.disabled}
+              onChange={(event) => attachment.onChange(event.currentTarget.checked)}
+            />
+            {attachment.label}
+          </label>
+        )}
         {onCancel && (
           <Button label="取消" variant="ghost" onActivate={onCancel} disabled={cancelDisabled} />
         )}
@@ -103,3 +129,4 @@ export function FeedbackComposer({
 }
 
 const placeholders = { create: '添加备注…', reply: '回复…', edit: '' };
+const composerRows = { create: 2, reply: 1, edit: 3 };

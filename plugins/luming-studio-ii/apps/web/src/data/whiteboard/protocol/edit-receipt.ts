@@ -21,6 +21,7 @@ const rejections = new Map<BoardEditRejectionReason, BoardEditRejection>([
   [BoardEditRejectionReason.VERSION_UNAVAILABLE, 'versionUnavailable'],
   [BoardEditRejectionReason.TOO_LARGE, 'tooLarge'],
   [BoardEditRejectionReason.INVALID_IMAGE, 'invalidImage'],
+  [BoardEditRejectionReason.INVALID_VIDEO, 'invalidVideo'],
 ]);
 
 function readIds(ids: readonly string[], name: string): readonly string[] {

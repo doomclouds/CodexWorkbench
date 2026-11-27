@@ -6,6 +6,7 @@ import type {
 import type { FeedbackCanvasObject } from './contracts.js';
 import { FeedbackThreadView } from './FeedbackThreadView.js';
 import type { ThreadDraft } from './thread-draft.js';
+import type { FeedbackAttachment } from './use-feedback-attachment.js';
 import type { useFeedbackQueries } from './use-feedback-queries.js';
 
 export interface CreateDraft {
@@ -13,6 +14,7 @@ export interface CreateDraft {
   readonly text: string;
   readonly frozenPoint?: FeedbackPoint;
   readonly label: string;
+  readonly attach?: boolean;
 }
 
 interface FeedbackDetailsProps {
@@ -25,7 +27,8 @@ interface FeedbackDetailsProps {
   readonly blocked: boolean;
   readonly onLocate: () => void;
   readonly onClose: () => void;
-  readonly onSubmit: (operation: FeedbackOperation) => void;
+  readonly onSubmit: (operation: FeedbackOperation, attach?: boolean) => void;
+  readonly attachment: FeedbackAttachment;
 }
 
 export function FeedbackDetails({
@@ -39,10 +42,15 @@ export function FeedbackDetails({
   onLocate,
   onClose,
   onSubmit,
+  attachment,
 }: FeedbackDetailsProps) {
   const { detail, refresh } = queries;
-  const target = detail.page?.thread.anchor.target;
-  const missing = target?.kind === 'object' && !objects.has(target.objectId);
+  const anchor = detail.page?.thread.anchor;
+  const target = anchor?.target;
+  const missing =
+    target && target.kind !== 'board'
+      ? anchor?.targetMissing === true || !objects.has(target.objectId)
+      : false;
 
   return (
     <FeedbackThreadView
@@ -56,12 +64,14 @@ export function FeedbackDetails({
       pending={detail.pending}
       error={detail.error}
       targetMissing={missing}
+      contentAnchor={target?.kind === 'content' ? anchor : undefined}
       hasMore={Boolean(detail.page?.nextCursor)}
       loadMore={detail.loadMore}
       onRefresh={refresh}
       onBack={onClose}
       onLocate={onLocate}
       onSubmit={onSubmit}
+      attachment={attachment}
     />
   );
 }

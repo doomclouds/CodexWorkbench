@@ -5,6 +5,7 @@ import type {
 } from '../../../modules/feedback/ports/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../../platform/index.js';
 import { readBoardAccess } from '../authorization/index.js';
+import { readContentSource } from './content-source.js';
 import { getMessage, insertMessage, listReplies, updateMessage } from './messages.js';
 import { getReceipt, saveReceipt } from './receipts.js';
 import { feedbackSchema } from './schema.js';
@@ -58,6 +59,7 @@ function createReader(connection: SqliteConnection): FeedbackReader {
     getAccess: (boardId, actorId) => readBoardAccess(connection, boardId, actorId),
     getBoardRevision: (boardId) => getBoardRevision(connection, boardId),
     getObject: (boardId, objectId) => getObject(connection, boardId, objectId),
+    getContentSource: (boardId, target) => readContentSource(connection, boardId, target),
     listThreads: (lookup) => listThreads(connection, lookup),
     getThread: (boardId, threadId) => getThread(connection, boardId, threadId),
     listReplies: (boardId, threadId, afterPosition, limit) =>

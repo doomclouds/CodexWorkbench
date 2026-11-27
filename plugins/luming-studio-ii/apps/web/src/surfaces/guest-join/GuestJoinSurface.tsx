@@ -1,4 +1,5 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Loader2, ShieldAlert, WifiOff } from 'lucide-react';
+import { useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode, SubmitEvent } from 'react';
 import type { BoardSharingService } from '../../data/sharing/index.js';
 import { Button, StatusText } from '../../ui/base/index.js';
@@ -21,6 +22,7 @@ export interface GuestJoinSurfaceProps {
 interface GuestAccessLostProps {
   readonly message?: string;
   readonly onExit?: () => void;
+  readonly activeSession?: boolean;
 }
 
 type InvitationView =
@@ -50,17 +52,87 @@ function GuestCard({ title, children }: { readonly title: string; readonly child
 }
 
 export function GuestAccessLostSurface({
-  message = '这块白板没有分享给你。',
+  message,
   onExit,
+  activeSession = false,
 }: GuestAccessLostProps) {
+  if (activeSession) {
+    return <GuestSessionDenied message={message} onExit={onExit} />;
+  }
+
   return (
     <GuestCard title="无权访问">
       <p role="alert">
-        {message}
+        {message ?? '这块白板没有分享给你。'}
         {getNewInvitation}
       </p>
       {onExit && <Button label="退出此白板" variant="primary" onActivate={onExit} />}
     </GuestCard>
+  );
+}
+
+function GuestSessionDenied({ message, onExit }: Pick<GuestAccessLostProps, 'message' | 'onExit'>) {
+  const panel = useRef<HTMLElement>(null);
+  const titleId = useId();
+  useLayoutEffect(() => {
+    panel.current?.focus({ preventScroll: true });
+  }, []);
+
+  return (
+    <main
+      ref={panel}
+      className="guest-session-denied"
+      tabIndex={-1}
+      role="alert"
+      aria-labelledby={titleId}
+    >
+      <ShieldAlert size={30} aria-hidden="true" />
+      <h1 id={titleId}>无法访问此白板</h1>
+      <p>{message ?? '当前访问权限已失效。'} 请联系房主。</p>
+      <p className="guest-session-denied__draft">本页尚未提交的草稿未发送。</p>
+      {onExit && <Button label="退出此白板" variant="ghost" onActivate={onExit} />}
+    </main>
+  );
+}
+
+export function GuestSessionPendingSurface({
+  activeSession,
+  message,
+  onRetry,
+}: {
+  readonly activeSession: boolean;
+  readonly message?: string;
+  readonly onRetry: () => void;
+}) {
+  if (!activeSession) {
+    return (
+      <GuestCard title="打开白板">
+        {message ? (
+          <>
+            <p role="alert">{message}</p>
+            <Button label="重新连接" variant="primary" onActivate={onRetry} />
+          </>
+        ) : (
+          <StatusText message="正在验证白板访问权限…" busy announcement="polite" />
+        )}
+      </GuestCard>
+    );
+  }
+
+  return (
+    <div className="guest-session-connection" role="status">
+      {message ? (
+        <WifiOff size={16} aria-hidden="true" />
+      ) : (
+        <Loader2 className="guest-session-connection__loading" size={16} aria-hidden="true" />
+      )}
+      <span>{message ? '连接已中断，正在重新连接。' : '正在核对访问权限，编辑已暂停。'}</span>
+      {message && (
+        <button type="button" className="guest-session-connection__retry" onClick={onRetry}>
+          重新连接
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -147,6 +219,7 @@ function GuestInvite({
   const [retry, setRetry] = useState(0);
   const lifecycle = useRef<AbortController>(undefined);
   const joining = useRef(false);
+  const restoreSession = useEffectEvent(onJoined);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -156,6 +229,11 @@ function GuestInvite({
       .inspectBoardInvitation({ boardId, invitationToken }, signal)
       .then((result) => {
         if (signal.aborted) {
+          return;
+        }
+
+        if (result.kind === 'joined') {
+          restoreSession(result.session);
           return;
         }
 

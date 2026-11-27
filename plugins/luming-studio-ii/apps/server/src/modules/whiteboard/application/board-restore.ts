@@ -277,6 +277,39 @@ function addsToProtectedParent(
   return newParents.some((id) => protectedInNext.has(id));
 }
 
+export function validateReversedScene(
+  current: ObjectsById,
+  next: ObjectsById,
+  targets: ReadonlySet<string>,
+  order: readonly string[] = [...next.keys()],
+  payloadTargetIds: readonly string[] = [],
+): BoardEditRejected | undefined {
+  const protectedObjects = protectedObjectIds(current, (object) => {
+    const unlockedByReversal =
+      targets.has(object.objectId) && next.get(object.objectId)?.locked === false;
+
+    return object.locked && !unlockedByReversal;
+  });
+  const protectedPayload = payloadTargetIds.some((id) => {
+    const kind = current.get(id)?.kind;
+
+    return protectedObjects.has(id) && (kind === 'ink' || kind === 'image');
+  });
+  const protectedLayout =
+    changesLockedLayout(current, next, protectedObjects) ||
+    lockedLayerMoved(current, order, targets, protectedObjects) ||
+    addsToProtectedParent(current, next, protectedObjects);
+
+  if (protectedLayout || protectedPayload) {
+    return { kind: 'rejected', reason: 'geometryLocked' };
+  }
+  if (!validRelations(next)) {
+    return { kind: 'rejected', reason: 'invalidEdit' };
+  }
+
+  return undefined;
+}
+
 function lockedLayerMoved(
   current: ObjectsById,
   order: readonly string[],

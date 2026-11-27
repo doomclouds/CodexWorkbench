@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type {
   BoardEditReceipt,
   EditObjectContentCommand,
@@ -11,6 +11,13 @@ import type {
 } from '../../ui/domain/canvas/index.js';
 import { projectEditablePayload } from './canvas-projection.js';
 import { isWritableContentKind, readContentEdit } from './content-edit-command.js';
+import {
+  useLocalBoardDrafts,
+  type BoardDraftAccess,
+  type CapturedDraft,
+  type LocalBoardDraft,
+  type LocalBoardDraftConfig,
+} from './local-board-drafts.js';
 
 type ContentEditPort = Pick<WhiteboardEditService, 'editContent' | 'getReceipt'>;
 type AppliedReceipt = Extract<BoardEditReceipt, { kind: 'applied' }>;
@@ -23,12 +30,14 @@ interface ContentEditOptions {
   readonly createCommandId: () => string;
   readonly onApplied: (receipt: AppliedReceipt) => void;
   readonly onConflict?: (receipt: ConflictReceipt) => void;
+  readonly localDrafts?: LocalBoardDraftConfig;
 }
 
 interface PendingContentEdit {
   readonly service: ContentEditPort;
   readonly command: EditObjectContentCommand;
   readonly signature: string;
+  readonly draft?: CapturedDraft;
   controller?: AbortController;
 }
 
@@ -160,6 +169,16 @@ function contentReceipt(
     return rejection(rejectionMessages.get(receipt.reason) ?? '服务端拒绝了这次正文保存。');
   }
 
+  if (receipt.kind === 'applied' && receipt.removedIds.includes(command.objectId)) {
+    const removed = command.edit.kind === 'text' && command.edit.deleteEmpty;
+    if (removed) {
+      return {
+        ok: true,
+        payload: { version: Number(command.expectedPayloadVersion), value: { removed: true } },
+      };
+    }
+  }
+
   const payload = payloadForReceipt(receipt, command);
   if (receipt.kind === 'conflict') {
     return { ok: false, message: '正文已被其他操作修改。', current: payload, conflict: true };
@@ -178,11 +197,13 @@ export function useContentEdits({
   createCommandId,
   onApplied,
   onConflict,
+  localDrafts,
 }: ContentEditOptions) {
   const pending = useRef(new Map<string, PendingContentEdit>());
   const [unknownReceipts, setUnknownReceipts] = useState<readonly UnknownContentReceipt[]>([]);
+  const vault = useLocalBoardDrafts(localDrafts, boardId, canEdit);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const requests = pending.current;
 
     return () => {
@@ -212,15 +233,25 @@ export function useContentEdits({
     if (pending.current.get(objectId) !== request) {
       return rejection('该对象的保存已经离开当前视图。');
     }
+
     if (attempt.kind === 'unknown') {
+      vault.retain(request.draft);
+
       return publishUnknown(request, attempt.message);
     }
 
     const { receipt } = attempt;
     if (receipt.kind === 'applied') {
+      vault.confirm(request.draft);
       onApplied(receipt);
     } else if (receipt.kind === 'conflict') {
+      vault.retain(request.draft);
       onConflict?.(receipt);
+    } else if (receipt.reason === 'forbidden') {
+      vault.confirm(request.draft);
+      vault.revoke();
+    } else {
+      vault.retain(request.draft);
     }
 
     pending.current.delete(objectId);
@@ -255,7 +286,10 @@ export function useContentEdits({
     return Boolean(canEdit && service && isWritableContentKind(kind));
   }
 
-  async function handleObjectIntent(intent: CanvasObjectIntent): Promise<CanvasObjectReceipt> {
+  async function handleObjectIntent(
+    intent: CanvasObjectIntent,
+    localDraftId?: string,
+  ): Promise<CanvasObjectReceipt> {
     if (!service || !canWriteObject(intent.kind)) {
       return rejection(editUnavailable);
     }
@@ -291,10 +325,23 @@ export function useContentEdits({
       expectedPayloadVersion: BigInt(expectedVersion),
       edit,
     };
-    const request: PendingContentEdit = { service, command, signature };
+    const request: PendingContentEdit = {
+      service,
+      command,
+      signature,
+      draft: vault.remember(intent, localDraftId),
+    };
     pending.current.set(objectId, request);
 
     return run(request, false);
+  }
+
+  function restoreDraft(draft: LocalBoardDraft): Promise<CanvasObjectReceipt> {
+    if (!vault.access?.active() || pending.current.has(draft.intent.objectId)) {
+      return Promise.resolve(rejection('请先处理该对象的当前保存，再恢复本机草稿。'));
+    }
+
+    return handleObjectIntent(draft.intent, draft.id);
   }
 
   const waiting = unknownReceipts.find(
@@ -312,5 +359,9 @@ export function useContentEdits({
   const notice =
     waiting && canEdit ? { kind: 'unknown' as const, message: waiting.message, retry } : undefined;
 
-  return { canWriteObject, handleObjectIntent, notice };
+  const draftAccess: BoardDraftAccess | undefined = vault.access
+    ? { ...vault.access, restore: restoreDraft }
+    : undefined;
+
+  return { canWriteObject, handleObjectIntent, notice, draftAccess };
 }

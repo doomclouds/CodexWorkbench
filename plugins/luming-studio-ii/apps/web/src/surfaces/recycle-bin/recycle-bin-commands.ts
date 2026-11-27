@@ -85,7 +85,9 @@ export async function collectPurgeScope(management: CatalogManagementService, si
     );
 
     for (const item of page.boards) {
-      targets.set(item.board.boardId, toRecycleTarget(item));
+      if (item.board.canManage === true) {
+        targets.set(item.board.boardId, toRecycleTarget(item));
+      }
     }
 
     cursor = page.nextCursor;

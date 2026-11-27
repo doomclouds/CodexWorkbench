@@ -1,10 +1,12 @@
+import { hasFeedbackContent } from '../domain/index.js';
 import type {
   FeedbackActor,
   FeedbackMessageView,
   FeedbackReceipt,
+  FeedbackThread,
   FeedbackThreadView,
 } from '../domain/index.js';
-import type { FeedbackRepository } from '../ports/index.js';
+import type { FeedbackReader, FeedbackRepository } from '../ports/index.js';
 import {
   permitsFeedback,
   requireAccess,
@@ -26,6 +28,7 @@ import {
 export type {
   FeedbackAnchor,
   FeedbackAnchorTarget,
+  FeedbackContentUnit,
   FeedbackMessageView,
   FeedbackOperation,
   FeedbackReceipt,
@@ -60,6 +63,24 @@ export interface FeedbackApplication {
   getReceipt(actor: FeedbackActor, boardId: string, commandId: string): FeedbackReceipt | undefined;
 }
 
+function currentThread(
+  reader: FeedbackReader,
+  boardId: string,
+  thread: FeedbackThread,
+): FeedbackThread {
+  const { anchor } = thread;
+  const { target } = anchor;
+  if (target.kind !== 'content' || anchor.targetMissing) {
+    return thread;
+  }
+
+  const source = reader.getContentSource(boardId, target);
+
+  return source && hasFeedbackContent(target.content, source)
+    ? thread
+    : { ...thread, anchor: { ...anchor, targetMissing: true } };
+}
+
 export function createFeedbackApplication(
   repository: FeedbackRepository,
   services: FeedbackServices,
@@ -82,7 +103,9 @@ export function createFeedbackApplication(
         const last = page.at(-1);
 
         return {
-          threads: page.map((thread) => viewThread(actor, access, thread)),
+          threads: page.map((thread) =>
+            viewThread(actor, access, currentThread(reader, boardId, thread)),
+          ),
           nextCursor: last && rows.length > limit ? writeThreadPosition(last) : undefined,
           canWrite: permitsFeedback(access),
         };
@@ -100,7 +123,7 @@ export function createFeedbackApplication(
         const replies = reader.listReplies(boardId, threadId, position, limit + 1);
 
         return {
-          thread: viewThread(actor, access, thread),
+          thread: viewThread(actor, access, currentThread(reader, boardId, thread)),
           replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply)),
           nextCursor: replies.length > limit ? String(position + limit) : undefined,
           canWrite: permitsFeedback(access),

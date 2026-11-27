@@ -101,6 +101,8 @@ function readBody(
           fontFamily: value.fontFamily,
           fontSize: value.fontSize,
           align: alignment.get(value.align),
+          bold: value.bold,
+          italic: value.italic,
         },
       };
     case 'document':

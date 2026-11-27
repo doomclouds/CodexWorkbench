@@ -73,6 +73,7 @@ function ImageActions({ href, showLink, showCrop, cropButton, onCrop }: ImageAct
           href={link}
           target="_blank"
           rel="noopener noreferrer"
+          data-canvas-native=""
         >
           <ExternalLinkIcon size={16} />
         </a>

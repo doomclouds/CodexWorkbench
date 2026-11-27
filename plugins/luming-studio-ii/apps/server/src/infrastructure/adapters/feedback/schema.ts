@@ -29,6 +29,16 @@ export const feedbackSchema = `
   CREATE INDEX IF NOT EXISTS feedback_threads_by_status
     ON feedback_threads (board_id, status, updated_at_millis DESC, thread_id DESC);
 
+  CREATE TABLE IF NOT EXISTS feedback_content_anchors (
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    payload_version INTEGER NOT NULL CHECK (payload_version >= 0),
+    unit_json TEXT NOT NULL CHECK (json_valid(unit_json)),
+    frozen_excerpt TEXT,
+    PRIMARY KEY (board_id, thread_id),
+    FOREIGN KEY (board_id, thread_id) REFERENCES feedback_threads (board_id, thread_id) ON DELETE CASCADE
+  ) STRICT;
+
   CREATE TABLE IF NOT EXISTS feedback_messages (
     board_id TEXT NOT NULL,
     thread_id TEXT NOT NULL,

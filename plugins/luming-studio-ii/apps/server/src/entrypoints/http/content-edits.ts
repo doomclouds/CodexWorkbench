@@ -146,6 +146,7 @@ export function readContentOperation({
   objectId,
   expectedPayloadVersion,
   edit,
+  deleteEmptyText,
 }: EditObjectContentRequest): ContentOperation {
   if (expectedPayloadVersion === undefined) {
     throw new HttpRequestError(400, 'An expected payload version is required');
@@ -163,7 +164,12 @@ export function readContentOperation({
     case 'text': {
       const encoded = contentJson(() => toJson(TextPayloadSchema, edit.value));
 
-      return { ...target, kind: 'text', data: { ...encoded, text: edit.value.text } };
+      return {
+        ...target,
+        kind: 'text',
+        data: { ...encoded, text: edit.value.text },
+        deleteEmpty: deleteEmptyText,
+      };
     }
     case 'todo':
       return { ...target, kind: 'todo', edits: edit.value.edits.map(readTodoEdit) };
@@ -216,6 +222,8 @@ export function readContentOperation({
     }
     case 'crop':
       return { ...target, kind: 'crop', ...readCrop(edit.value) };
+    case 'link':
+      return { ...target, kind: 'link', title: edit.value.title, href: edit.value.href };
     case undefined:
       throw new HttpRequestError(400, 'A content operation is required');
   }

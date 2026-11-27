@@ -65,6 +65,10 @@ async function buildRuntime() {
       js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
     },
   });
+  await copyFile(
+    requireServer.resolve('@resvg/resvg-wasm/index_bg.wasm'),
+    join(runtimePath, 'resvg.wasm'),
+  );
   await viteBuild({ root: webRoot, mode: 'mcp', logLevel: 'error' });
   await copyFile(join(webRoot, 'dist', 'mcp', 'mcp.html'), join(runtimePath, 'app.html'));
   await viteBuild({
@@ -307,6 +311,9 @@ async function verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, da
   const [capturedObject] = review.source.targets;
   assert.equal(capturedObject?.objectId, reviewedObject);
   assert.equal(capturedObject?.geometryVersion, 0n);
+  assert.ok(capturedObject.geometry);
+  const { x, y, width, height, rotation } = capturedObject.geometry;
+  const resizedWidth = width + 40;
   const expectedGeometryVersion = String(capturedObject.geometryVersion);
   const proposal = {
     boardId: reviewBoard,
@@ -316,15 +323,30 @@ async function verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, da
     options: [
       {
         optionId: 'lock-shape',
-        label: '锁定该对象',
-        edit: {
-          geometry: {
-            changeLock: {
-              locked: true,
-              targets: [{ objectId: reviewedObject, expectedGeometryVersion }],
+        label: '扩大并锁定该对象',
+        operations: [
+          {
+            geometry: {
+              transform: {
+                kind: 'BOARD_TRANSFORM_KIND_RESIZE',
+                objects: [
+                  {
+                    target: { objectId: reviewedObject, expectedGeometryVersion },
+                    geometry: { x, y, width: resizedWidth, height, rotation },
+                  },
+                ],
+              },
             },
           },
-        },
+          {
+            geometry: {
+              changeLock: {
+                locked: true,
+                targets: [{ objectId: reviewedObject, expectedGeometryVersion }],
+              },
+            },
+          },
+        ],
       },
       {
         optionId: 'remove-shape',
@@ -361,6 +383,29 @@ async function verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, da
   });
   assert.equal(appSubmit.structuredContent.error.code, 'INVALID_ARGUMENT');
 
+  const { tools } = await client.listTools();
+  const modelTool = tools.find(({ name }) => name === 'artifact_suggest');
+  const choices = modelTool?.inputSchema.properties?.options?.items?.anyOf;
+  assert.ok(choices?.some(({ required }) => required.includes('edit')));
+  assert.ok(choices.some(({ properties }) => properties.operations?.maxItems === 60));
+  assert.equal(
+    tools.some(({ name }) => /^(?:artifact_accept|artifact_withdraw)$/u.test(name)),
+    false,
+  );
+
+  const invalid = await client.callTool({
+    name: 'artifact_suggest',
+    arguments: {
+      ...proposal,
+      commandId: 'invalid-both-review-formats',
+      options: [
+        { ...proposal.options[0], edit: proposal.options[0].operations[0] },
+        proposal.options[1],
+      ],
+    },
+  });
+  assert.equal(invalid.isError, true);
+
   const submitted = await client.callTool({
     name: 'artifact_suggest',
     arguments: proposal,
@@ -379,6 +424,11 @@ async function verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, da
     selection,
   );
   assert.equal(preview.result.case, 'preview');
+  const staged = preview.result.value.changedObjects.find(
+    ({ objectId }) => objectId === reviewedObject,
+  );
+  assert.equal(staged?.geometry?.width, resizedWidth);
+  assert.equal(staged?.locked, true);
   const beforeAccept = await rpc(WhiteboardService, WhiteboardService.method.getBoardScene, {
     boardId: reviewBoard,
   });
@@ -407,6 +457,10 @@ async function verifySuggestionRoundtrip(client, sessionId, rpc, reviewBoard, da
     boardId: reviewBoard,
   });
   assert.equal(confirmed.scene.boardRevision, 1n);
+  assert.equal(
+    confirmed.scene.objects.find(({ objectId }) => objectId === reviewedObject)?.geometry?.width,
+    resizedWidth,
+  );
   assert.equal(
     confirmed.scene.objects.find(({ objectId }) => objectId === reviewedObject)?.locked,
     true,

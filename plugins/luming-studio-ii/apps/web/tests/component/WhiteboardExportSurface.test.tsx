@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type {
   ExportBoard,
   ExportBoardFile,
+  ExportBoardFormat,
   ExportBoardResult,
 } from '../../src/data/whiteboard/index.js';
 import {
@@ -52,6 +53,10 @@ function readElement<T extends Element>(selector: string): T {
 
 const formatRows = '.whiteboard-export__format';
 
+function formatButton(format: ExportBoardFormat) {
+  return readElement<HTMLButtonElement>('[data-export-format="' + format + '"]');
+}
+
 function chooseSelection() {
   const select = readElement<HTMLSelectElement>('select');
   select.value = 'selection';
@@ -97,7 +102,7 @@ test('shows the confirmed revision and downloads only the frozen chosen selectio
   expect(document.activeElement).toBe(readElement(formatRows));
 
   act(chooseSelection);
-  await act(async () => readElement<HTMLButtonElement>(formatRows + ':last-child').click());
+  await act(async () => formatButton('svg').click());
   expect(readElement<HTMLButtonElement>(formatRows).disabled).toBe(true);
   expect(exportBoard).toHaveBeenCalledExactlyOnceWith(
     {
@@ -135,7 +140,7 @@ test('aborts on Escape and leaves a late response without a download', async () 
   const exportBoard = vi.fn<ExportBoard>().mockReturnValue(request.promise);
   const surface = mount(exportBoard);
 
-  await act(async () => readElement<HTMLButtonElement>(formatRows + ':last-child').click());
+  await act(async () => formatButton('svg').click());
   act(() => {
     readElement('[role="dialog"]').dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
@@ -171,6 +176,32 @@ test('keeps the selection scope disabled when its objects disappear before submi
   surface.render({ context: { ...context, selectedIds: [] } });
 
   expect(readElement<HTMLSelectElement>('select').value).toBe('selection');
-  expect(readElement<HTMLButtonElement>(formatRows).disabled).toBe(true);
+  expect(formatButton('png').disabled).toBe(true);
+  expect(formatButton('html').disabled).toBe(false);
   expect(exportBoard).not.toHaveBeenCalled();
+});
+
+test('shows the original labels and only lets the owner request a full archive', async () => {
+  const exportBoard = vi
+    .fn<ExportBoard>()
+    .mockResolvedValue({ kind: 'rejected', reason: 'tooLarge' });
+  const surface = mount(exportBoard);
+  expect(
+    [...fixture.host.querySelectorAll(formatRows)].map((row) => row.getAttribute('aria-label')),
+  ).toEqual(['PNG 图片', 'SVG 图片', '整板网页（HTML）', '白板文件 (.json)']);
+  expect(fixture.host.querySelector('[data-export-format="zip"]')).toBeNull();
+
+  surface.render({ canBackup: true });
+  act(chooseSelection);
+  await act(async () => formatButton('png').click());
+  await act(async () => formatButton('html').click());
+  await act(async () => formatButton('zip').click());
+
+  expect(exportBoard.mock.calls.map(([request]) => [request.format, request.scope])).toEqual([
+    ['png', { kind: 'selection', objectIds: ['frame', 'card'] }],
+    ['html', { kind: 'whole' }],
+    ['zip', { kind: 'whole' }],
+  ]);
+  expect(readElement('[role="status"]').textContent).toContain('文件大小上限');
+  expect(surface.download).not.toHaveBeenCalled();
 });

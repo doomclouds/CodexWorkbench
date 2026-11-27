@@ -114,6 +114,7 @@ describe('StickerObject', () => {
 describe('StickerPalette', () => {
   it('searches the original 42 presets in Chinese, commits the choice, and restores the complete list', () => {
     fixture.render(<SelectedSticker />);
+    expect(query<HTMLInputElement>('input[type="search"]').placeholder).toBe('搜索贴纸');
     expect(choices()).toHaveLength(42);
 
     search('合作');

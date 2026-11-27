@@ -134,6 +134,14 @@ export interface CanvasObjectCapabilities {
   readonly rotate: boolean;
   readonly connect: boolean;
   readonly content: 'passive' | 'native' | 'embedded';
+  readonly inlineFormats?: readonly CanvasInlineFormat[];
+}
+
+export type CanvasInlineFormat = 'bold' | 'italic' | 'link' | 'bullets' | 'numbered';
+
+export interface CanvasObjectFormatRequest {
+  readonly sequence: number;
+  readonly format: CanvasInlineFormat;
 }
 
 export interface CanvasObjectGeometryContext {
@@ -188,6 +196,41 @@ export type CanvasObjectNavigation =
       readonly deltaMode: number;
     };
 
+export interface CanvasObjectFile {
+  readonly filename: string;
+  readonly mimeType: string;
+  readonly content: Uint8Array;
+}
+
+export interface CanvasDocumentAsset {
+  readonly mimeType: string;
+  readonly content: Uint8Array;
+}
+
+export interface CanvasNativeSource {
+  readonly artifactId?: string;
+  readonly elementId: string;
+  readonly blockId?: string;
+  readonly itemId?: string;
+  readonly version?: number;
+}
+
+export interface CanvasNativeSourceRequest {
+  readonly sequence: number;
+  readonly source: CanvasNativeSource;
+}
+
+type CanvasContentUnit =
+  | { readonly kind: 'document'; readonly blockIds: readonly string[] }
+  | { readonly kind: 'todo'; readonly itemId: string }
+  | { readonly kind: 'html'; readonly nodeIds: readonly string[]; readonly sourceRevision: bigint };
+
+export interface CanvasContentAnnotationRequest {
+  readonly target: CanvasContentUnit | { readonly kind: 'object' };
+  readonly u: number;
+  readonly v: number;
+}
+
 export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly id?: string;
   readonly payload?: CanvasObjectPayload;
@@ -198,9 +241,21 @@ export interface CanvasObjectViewProps extends CanvasObjectGeometryContext {
   readonly readOnly: boolean;
   readonly locked?: boolean;
   readonly editRequest?: number;
+  readonly formatRequest?: CanvasObjectFormatRequest;
   readonly focusedReading?: boolean;
   readonly expanded?: boolean;
   readonly readHtmlSource?: (file: File) => Promise<string>;
+  readonly downloadFile?: (file: CanvasObjectFile) => void;
+  readonly readDocumentAsset?: (
+    source: string,
+    signal?: AbortSignal,
+  ) => Promise<CanvasDocumentAsset | undefined>;
+  readonly uploadDocumentImage?: (file: File) => Promise<string>;
+  readonly onOpenNativeSource?: (source: CanvasNativeSource) => void;
+  readonly nativeSourceLabel?: (source: CanvasNativeSource) => string | undefined;
+  readonly nativeSourceRequest?: CanvasNativeSourceRequest;
+  readonly annotationActive?: boolean;
+  readonly onAnnotateContent?: (request: CanvasContentAnnotationRequest) => void;
   readonly onOpenPresentation?: () => void;
   readonly onClosePresentation?: () => void;
   readonly request: (operation: CanvasObjectOperation) => Promise<CanvasObjectReceipt>;
@@ -248,6 +303,13 @@ export interface CanvasObjectChange {
   readonly geometry: CanvasGeometry;
   readonly connection?: CanvasConnection;
   readonly ink?: CanvasInk;
+}
+
+export type CanvasGestureGeometry = Pick<CanvasObjectChange, 'id' | 'expectedVersion' | 'geometry'>;
+
+export interface CanvasGesturePreview {
+  readonly kind: 'move' | 'resize' | 'rotate';
+  readonly changes: readonly CanvasGestureGeometry[];
 }
 
 export interface CanvasCreateIntent {
@@ -334,7 +396,16 @@ export interface CanvasProps {
   readonly onContextMenu?: (anchor: CanvasPoint, selection: readonly string[]) => void;
   readonly onObjectActivate?: (activation: CanvasObjectActivation) => void;
   readonly editObjectRequest?: { readonly id: string };
+  readonly formatObjectRequest?: CanvasObjectFormatRequest & { readonly id: string };
   readonly readHtmlSource?: CanvasObjectViewProps['readHtmlSource'];
+  readonly downloadFile?: CanvasObjectViewProps['downloadFile'];
+  readonly readDocumentAsset?: CanvasObjectViewProps['readDocumentAsset'];
+  readonly uploadDocumentImage?: (id: string, file: File) => Promise<string>;
+  readonly onOpenNativeSource?: CanvasObjectViewProps['onOpenNativeSource'];
+  readonly nativeSourceLabel?: CanvasObjectViewProps['nativeSourceLabel'];
+  readonly nativeSourceRequest?: CanvasNativeSourceRequest;
+  readonly annotationActive?: boolean;
+  readonly onAnnotateContent?: (id: string, request: CanvasContentAnnotationRequest) => void;
   readonly canEditExpandedObject?: boolean;
   readonly onOpenPresentation?: (ids: readonly string[]) => void;
   readonly onClosePresentation?: () => void;
@@ -348,6 +419,8 @@ export interface CanvasProps {
   readonly onViewportSizeChange?: (size: CanvasViewportSize) => void;
   readonly onViewportNavigation?: (navigation: CanvasViewportNavigation) => void;
   readonly onWorldPointerChange?: (point: CanvasPoint | undefined) => void;
+  readonly onGesturePreviewChange?: (preview: CanvasGesturePreview | undefined) => void;
+  readonly remoteGesturePreviews?: readonly CanvasGesturePreview[];
   readonly onVisibleObjectsChange?: (ids: readonly string[]) => void;
   readonly ref?: Ref<CanvasHandle>;
 }

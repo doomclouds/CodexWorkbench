@@ -11,16 +11,16 @@ import type { CanvasObjectIntent, CanvasObjectKind } from '../../ui/domain/canva
 import { readNativeContentEdit } from './content-edit-native.js';
 import { isJson, list, maxContentTreeDepth, record } from './content-edit-value.js';
 
-const textKinds = new Set<CanvasObjectKind>(['text', 'note']);
+const textKinds = new Set<CanvasObjectKind>(['text', 'note', 'shape', 'section', 'connector']);
 const writableKinds = new Set<CanvasObjectKind>([
   'document',
   'todo',
-  'text',
-  'note',
+  ...textKinds,
   'table',
   'html',
   'sticker',
   'image',
+  'link',
 ]);
 
 function jsonRecord(value: unknown): value is Record<string, WhiteboardJson> {
@@ -180,7 +180,11 @@ export function readContentEdit(
   }
   const textChange = textKinds.has(kind) && name === 'text.commit';
   if (textChange && record(value) && typeof value.text === 'string') {
-    return { kind: 'text', value: { text: value.text } };
+    return {
+      kind: 'text',
+      value: { text: value.text },
+      ...(value.deleteEmpty === true ? { deleteEmpty: true } : {}),
+    };
   }
 
   return readNativeContentEdit(intent);

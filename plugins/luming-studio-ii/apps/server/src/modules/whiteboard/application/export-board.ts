@@ -5,7 +5,7 @@ import {
   type BoardExportRejection,
   type BoardExportSnapshot,
   type BoardExportStale,
-  type ExportBoardCommand,
+  type ExportRenderCommand,
   type ExportBoardResult,
 } from '../domain/index.js';
 import type { WhiteboardReader, WhiteboardRepository } from '../ports/index.js';
@@ -16,15 +16,17 @@ type CapturedExport = BoardExportSnapshot | BoardExportRejection | BoardExportSt
 
 const maxExportObjects = 10000;
 const maxSnapshotObjects = 20000;
-const richSvgKinds = new Set(['html', 'diagram', 'chart']);
 
 function captureSnapshot(
   reader: WhiteboardReader,
-  command: ExportBoardCommand,
+  command: ExportRenderCommand,
   board: BoardExportSnapshot['board'],
 ): CapturedExport {
   if (board.revision !== command.expectedRevision) {
     return { kind: 'stale', revision: board.revision };
+  }
+  if (command.format === 'html' && command.scope.kind !== 'whole') {
+    return { kind: 'rejected', reason: 'invalidSelection' };
   }
 
   const objects = reader.listObjects(command.boardId, maxSnapshotObjects + 1);
@@ -39,9 +41,6 @@ function captureSnapshot(
   }
   if (selected.length > maxExportObjects) {
     return { kind: 'rejected', reason: 'tooLarge' };
-  }
-  if (command.format === 'svg' && selected.some(({ kind }) => richSvgKinds.has(kind))) {
-    return { kind: 'rejected', reason: 'unsupported' };
   }
 
   const ids = selected.map(({ objectId }) => objectId);
@@ -59,7 +58,7 @@ function captureSnapshot(
 export function executeBoardExport(
   repository: WhiteboardRepository,
   actor: Actor,
-  command: ExportBoardCommand,
+  command: ExportRenderCommand,
   requireAccess: AccessCheck,
   readBoard: (reader: WhiteboardReader) => BoardExportSnapshot['board'],
 ): ExportBoardResult {
@@ -74,7 +73,7 @@ export function executeBoardExport(
   }
 
   const file = renderExportFile(snapshot, command.format);
-  if (file.kind === 'file') {
+  if (file.kind === 'file' || file.kind === 'browserPng') {
     repository.read((reader) => requireAccess(reader, actor, command.boardId));
   }
 

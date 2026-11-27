@@ -54,6 +54,9 @@ export function readCatalogCursor(cursor: string, scope: CatalogScope): CatalogP
   if (values.query !== scope.query || values.order !== scope.order || values.view !== scope.view) {
     throw new CatalogQueryError('The catalog cursor belongs to another query.');
   }
+  if (values.pinnedOnly !== (scope.pinnedOnly ? true : undefined)) {
+    throw new CatalogQueryError('The catalog cursor belongs to another pin filter.');
+  }
 
   const { boardId, title, pinned, updatedAtMillis } = values;
   if (typeof boardId !== 'string' || !boardId) {
@@ -77,7 +80,7 @@ export function readCatalogCursor(cursor: string, scope: CatalogScope): CatalogP
 }
 
 export function writeCatalogCursor(scope: CatalogScope, position: CatalogPosition): string {
-  const { actorId, query, order, view } = scope;
+  const { actorId, query, order, view, pinnedOnly } = scope;
   const { boardId, title, pinned, updatedAtMillis, trashedAtMillis } = position;
 
   return JSON.stringify({
@@ -86,6 +89,7 @@ export function writeCatalogCursor(scope: CatalogScope, position: CatalogPositio
     query,
     order,
     view,
+    pinnedOnly: pinnedOnly ? true : undefined,
     boardId,
     title,
     pinned,

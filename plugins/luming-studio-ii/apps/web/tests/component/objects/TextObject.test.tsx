@@ -95,11 +95,87 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith({
       expectedVersion: 12,
       name: 'text.commit',
-      value: { text: '', adjacent: false },
+      value: { text: '', adjacent: false, close: true },
     });
     expect(host.querySelector('[role="textbox"]')).toBeNull();
     expect(host.textContent).toBe('');
     expect(retention.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('closes a freshly created empty text against its payload version without requesting a successor', async () => {
+    const props = textViewProps();
+    const empty = { version: 0, value: { text: '' } };
+    const request = vi.fn<TextViewProps['request']>().mockResolvedValue({
+      ok: true,
+      payload: { version: 0, value: { removed: true } },
+    });
+    await act(async () => root.render(<CanvasText {...props} payload={empty} request={request} />));
+    expect(editor().textContent?.replaceAll('\u200b', '')).toBe('');
+    await key('Enter', { ctrlKey: true });
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      name: 'text.commit',
+      expectedVersion: 0,
+      value: { text: '', close: true, adjacent: false },
+    });
+    expect(host.querySelector('[role="textbox"]')).toBeNull();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('does not close or overwrite the draft on a mismatched removal receipt or a remote conflict', async () => {
+    const props = textViewProps();
+    const request = vi
+      .fn<TextViewProps['request']>()
+      .mockResolvedValueOnce({ ok: true, payload: { version: 13, value: { removed: true } } })
+      .mockResolvedValueOnce({
+        ok: false,
+        message: '原文字刚被其他成员更新',
+        current: { version: 13, value: { text: '他人新稿' } },
+        conflict: true,
+      });
+    await act(async () => root.render(<CanvasText {...props} request={request} />));
+    await replaceText('');
+    await key('Escape');
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+      '删除回执与原始文字版本不一致。',
+    );
+    expect(editor().textContent).toBe('');
+
+    await act(async () => clickButton('重试保存文字'));
+    expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe('原文字刚被其他成员更新');
+    expect(editor().textContent).toBe('');
+    await act(async () => clickButton('放弃文字修改'));
+    expect(host.textContent).toBe('他人新稿');
+  });
+
+  it('commits a connector label with Ctrl+Enter without creating a neighboring connector', async () => {
+    const props = textViewProps();
+    const geometry = props.geometry;
+    const connector = {
+      kind: 'connector' as const,
+      label: props.object.label,
+      geometry,
+      connection: {
+        start: { point: { x: 10, y: 15 } },
+        end: { point: { x: 170, y: 95 } },
+      },
+    };
+    const request = vi
+      .fn<TextViewProps['request']>()
+      .mockResolvedValue({ ok: true, payload: { version: 13, value: { text: '确认连接' } } });
+    await act(async () =>
+      root.render(<CanvasText {...props} object={connector} request={request} />),
+    );
+    await replaceText('确认连接');
+    await key('Enter', { ctrlKey: true });
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      name: 'text.commit',
+      expectedVersion: 12,
+      value: { text: '确认连接', close: true, adjacent: false },
+    });
+    expect(host.textContent).toBe('确认连接');
   });
 
   it('retains a rejected draft and its version, then shows the current text when discarded', async () => {
@@ -122,7 +198,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenNthCalledWith(2, {
       expectedVersion: 12,
       name: 'text.commit',
-      value: { text: '我的新内容', adjacent: true },
+      value: { text: '我的新内容', adjacent: true, close: true },
     });
 
     await act(async () => clickButton('放弃文字修改'));
@@ -149,7 +225,7 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledWith({
       expectedVersion: 12,
       name: 'text.commit',
-      value: { text: '已保存内容', adjacent: true },
+      value: { text: '已保存内容', adjacent: true, close: true },
     });
     expect(retention.mock.calls).toEqual([[true]]);
 
@@ -178,9 +254,96 @@ describe('registered canvas text objects', () => {
     expect(request).toHaveBeenCalledExactlyOnceWith({
       expectedVersion: 13,
       name: 'text.commit',
-      value: { text: '确认内容', adjacent: false },
+      value: { text: '确认内容', adjacent: false, close: true },
     });
     expect(host.textContent).toBe('确认内容');
+  });
+
+  it('keeps focus during autosave and commits the queued final draft after deselection', async () => {
+    vi.useFakeTimers();
+    try {
+      const props = textViewProps();
+      type Receipt = Awaited<ReturnType<TextViewProps['request']>>;
+      let acknowledge!: (receipt: Receipt) => void;
+      const pending = new Promise<Receipt>((resolve) => {
+        acknowledge = resolve;
+      });
+      const request = vi
+        .fn<TextViewProps['request']>()
+        .mockReturnValueOnce(pending)
+        .mockResolvedValueOnce({ ok: true, payload: { version: 14, value: { text: '最后稿' } } });
+      await act(async () => root.render(<CanvasText {...props} request={request} />));
+      const originalEditor = editor();
+      await replaceText('第一稿');
+      await act(async () => vi.advanceTimersByTimeAsync(249));
+      expect(request).not.toHaveBeenCalled();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(request).toHaveBeenCalledExactlyOnceWith({
+        name: 'text.commit',
+        expectedVersion: 12,
+        value: { text: '第一稿', adjacent: false, close: false },
+      });
+      expect(editor()).toBe(originalEditor);
+      expect(document.activeElement).toBe(originalEditor);
+
+      await replaceText('最后稿');
+      await key('Escape');
+      expect(request).toHaveBeenCalledTimes(1);
+      await act(async () =>
+        root.render(<CanvasText {...props} selected={false} request={request} />),
+      );
+      await act(async () =>
+        acknowledge({ ok: true, payload: { version: 13, value: { text: '第一稿' } } }),
+      );
+
+      expect(request).toHaveBeenNthCalledWith(2, {
+        name: 'text.commit',
+        expectedVersion: 13,
+        value: { text: '最后稿', adjacent: false, close: true },
+      });
+      expect(host.querySelector('[role="textbox"]')).toBeNull();
+      expect(host.textContent).toBe('最后稿');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries the original autosave before committing the queued final draft', async () => {
+    vi.useFakeTimers();
+    try {
+      const props = textViewProps();
+      type Receipt = Awaited<ReturnType<TextViewProps['request']>>;
+      let acknowledge!: (receipt: Receipt) => void;
+      const pending = new Promise<Receipt>((resolve) => {
+        acknowledge = resolve;
+      });
+      const request = vi
+        .fn<TextViewProps['request']>()
+        .mockReturnValueOnce(pending)
+        .mockResolvedValueOnce({ ok: true, payload: { version: 13, value: { text: '第一稿' } } })
+        .mockResolvedValueOnce({ ok: true, payload: { version: 14, value: { text: '最后稿' } } });
+      await act(async () => root.render(<CanvasText {...props} request={request} />));
+      await replaceText('第一稿');
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      await replaceText('最后稿');
+      await key('Escape');
+      await act(async () => acknowledge({ ok: false, message: '自动保存未获回执' }));
+      expect(editor().textContent).toBe('最后稿');
+      expect(host.querySelector('[role="alert"]')?.textContent).toBe('自动保存未获回执');
+
+      await act(async () => clickButton('重试保存文字'));
+
+      expect(request.mock.calls[1]).toEqual(request.mock.calls[0]);
+      expect(request).toHaveBeenNthCalledWith(3, {
+        name: 'text.commit',
+        expectedVersion: 13,
+        value: { text: '最后稿', close: true, adjacent: false },
+      });
+      expect(host.querySelector('[role="textbox"]')).toBeNull();
+      expect(host.textContent).toBe('最后稿');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

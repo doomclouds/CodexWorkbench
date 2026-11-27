@@ -45,6 +45,14 @@ type FeedbackToolsProps = Pick<
   | 'unresolvedFeedback'
 >;
 
+export function BoardDocumentChrome(props: FeedbackToolsProps) {
+  return (
+    <header className="whiteboard-chrome whiteboard-chrome--document">
+      <FeedbackTools {...props} />
+    </header>
+  );
+}
+
 const unavailable = '当前白板服务暂未提供此操作';
 const titleLimit = 200;
 

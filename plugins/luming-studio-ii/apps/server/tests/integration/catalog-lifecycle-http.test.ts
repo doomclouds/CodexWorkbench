@@ -200,7 +200,7 @@ test('proves catalog ownership and replays the same management receipt after res
     case: 'rejected',
     value: { reason: CatalogRejectionReason.COMMAND_ID_REUSE },
   });
-  expect(await activeBoards()).toEqual([receipt.outcome.value]);
+  expect(await activeBoards()).toEqual([{ ...receipt.outcome.value, previewRevision: 0n }]);
 });
 
 test('adopts existing ownership from Stage 3 create and import receipts on restart', async () => {
@@ -212,7 +212,7 @@ test('adopts existing ownership from Stage 3 create and import receipts on resta
 
   const boards = await activeBoards();
   expect(boards).toHaveLength(2);
-  expect(boards).toEqual(expect.arrayContaining([created, imported]));
+  expect(boards).toEqual(expect.arrayContaining([{ ...created, previewRevision: 0n }, imported]));
   const result = await Promise.all([
     change(created, 'pin-previous-create', { case: 'pinned', value: true }),
     change(imported, 'pin-previous-import', { case: 'pinned', value: true }),
@@ -255,7 +255,7 @@ test('restores a pinned archive with the original scene, payload, and media afte
     pinned: true,
     canManage: true,
   });
-  expect(await activeBoards()).toEqual([restored]);
+  expect(await activeBoards()).toEqual([{ ...restored, previewRevision: 0n }]);
   expect(await trashedBoards()).toEqual([]);
   expect(await scene(boardId)).toEqual(beforeScene);
   expect(await payloads(boardId)).toEqual(beforePayload);
@@ -313,7 +313,7 @@ test('purges only matching trash snapshots and preserves restored and retrash co
       },
     },
   ]);
-  expect(await activeBoards()).toEqual([restored]);
+  expect(await activeBoards()).toEqual([{ ...restored, previewRevision: 0n }]);
   expect(await trashedBoards()).toMatchObject([{ board: retrash }]);
   await expectHiddenBoard(purgeable.boardId, assetPath);
   expect(retainedArchiveChunks(server.databasePath, purgeable.boardId)).toHaveLength(0);

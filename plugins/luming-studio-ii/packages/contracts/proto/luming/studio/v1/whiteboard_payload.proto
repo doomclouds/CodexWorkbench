@@ -28,6 +28,8 @@ message TextPayload {
   optional string font_family = 3;
   optional double font_size = 4;
   TextAlignment align = 5;
+  optional bool bold = 6;
+  optional bool italic = 7;
 }
 
 enum TextAlignment {

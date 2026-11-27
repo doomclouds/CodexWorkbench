@@ -14,6 +14,8 @@ interface FeedbackPinsProps {
   readonly selectedThreadId?: string;
   readonly draft?: FeedbackTarget;
   readonly objects: ReadonlyMap<string, FeedbackCanvasObject>;
+  readonly contentPoints?: ReadonlyMap<string, FeedbackPoint>;
+  readonly focusedObjectId?: string;
   readonly viewport: FeedbackViewport;
   readonly picking: boolean;
   readonly onThread: (thread: FeedbackThread, trigger: HTMLButtonElement) => void;
@@ -33,6 +35,8 @@ export function FeedbackPins({
   selectedThreadId,
   draft,
   objects,
+  contentPoints,
+  focusedObjectId,
   viewport,
   picking,
   onThread,
@@ -40,6 +44,11 @@ export function FeedbackPins({
   onCancelPicking,
 }: FeedbackPinsProps) {
   const draftPoint = draft && locateDraft(draft, objects);
+  const visibleThreads = focusedObjectId
+    ? threads.filter(
+        ({ anchor: { target } }) => target.kind !== 'board' && target.objectId === focusedObjectId,
+      )
+    : threads;
 
   function handlePickPoint(event: MouseEvent<HTMLButtonElement>) {
     if (event.detail === 0) {
@@ -52,7 +61,7 @@ export function FeedbackPins({
 
   return (
     <>
-      {threads.map((thread) => (
+      {visibleThreads.map((thread) => (
         <button
           type="button"
           className="whiteboard-feedback__pin"
@@ -64,7 +73,10 @@ export function FeedbackPins({
           aria-label={'备注 ' + pinLabel(thread)}
           title={pinLabel(thread)}
           style={{
-            ...screenPoint(locateAnchor(thread.anchor, objects), viewport),
+            ...screenPoint(
+              locateAnchor(thread.anchor, objects, contentPoints?.get(thread.id)),
+              viewport,
+            ),
             ...feedbackAuthorColors(thread.first.authorId),
           }}
           onPointerDown={(event) => event.stopPropagation()}

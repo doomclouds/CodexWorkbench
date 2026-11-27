@@ -110,6 +110,13 @@ function applyOperation(
           };
         }),
       };
+    case 'arrange':
+    case 'createSection':
+    case 'group':
+    case 'paste':
+    case 'style':
+    case 'ungroup':
+      throw new Error('Unexpected fixture geometry operation ' + operation.kind);
   }
 }
 

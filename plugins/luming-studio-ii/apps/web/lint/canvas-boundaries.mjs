@@ -20,6 +20,7 @@ const canvasRoot = resolve(sourceRoot, 'ui/domain/canvas');
 const canvasEntry = resolve(canvasRoot, 'index');
 const canvasComponent = resolve(canvasRoot, 'Canvas');
 const canvasContracts = resolve(canvasRoot, 'contracts');
+const editorRoot = resolve(sourceRoot, 'surfaces/whiteboard-editor');
 const baseEntry = resolve(baseRoot, 'index');
 const packageName = manifest.name;
 const canvasSpecifier = packageName + '/ui/domain/canvas';
@@ -587,10 +588,53 @@ const noTestReplacement = {
   },
 };
 
+const objectFormatBoundary = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      request:
+        'Send a scoped Canvas format request and let the selected object edit its own content.',
+    },
+  },
+
+  create(context) {
+    const file = context.physicalFilename;
+    if (!contains(canvasRoot, file) && !contains(editorRoot, file)) {
+      return {};
+    }
+
+    function report(node) {
+      context.report({ node, messageId: 'request' });
+    }
+
+    return {
+      'CallExpression[callee.type="MemberExpression"]:matches([callee.property.name="format"], [callee.property.value="format"])':
+        report,
+      'ObjectPattern > Property:matches([key.name="format"], [key.value="format"])': report,
+      'CallExpression[callee.type="Identifier"]'(node) {
+        const definition = bindingOf(context.sourceCode, node.callee)?.defs[0];
+        const source = definition?.type === 'Variable' && definition.node.init;
+        if (source?.type === 'MemberExpression' && nameOf(source.property) === 'format') {
+          report(node);
+        }
+      },
+      NewExpression(node) {
+        const { callee } = node;
+        const constructor = callee.type === 'MemberExpression' ? callee.property : callee;
+        if (nameOf(constructor) === 'CustomEvent') {
+          report(node);
+        }
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: 'luming-canvas' },
   rules: {
     'contract-boundary': contractBoundary,
     'no-test-replacement': noTestReplacement,
+    'object-format-boundary': objectFormatBoundary,
   },
 };

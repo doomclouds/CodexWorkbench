@@ -12,6 +12,7 @@ const rejectionMessages: Readonly<Record<Rejection, string>> = {
   versionUnavailable: '建议的来源版次已不可用。',
   tooLarge: '建议涉及的内容超过处理上限。',
   invalidImage: '建议依赖的图片已不可用。',
+  invalidVideo: '建议依赖的视频已不可用。',
   unknown: '服务拒绝了此操作。',
 };
 

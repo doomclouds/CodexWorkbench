@@ -8,7 +8,9 @@ import {
   type BoardScene,
   type BoardVersionSummary,
   type ExportBoardCommand,
+  type ExportBoardFileCommand,
   type ExportBoardResult,
+  type ExportRenderCommand,
   type PayloadResult,
 } from '../domain/index.js';
 import type {
@@ -20,6 +22,7 @@ import type {
 import { payloadResult, requireAccess, WhiteboardAccessError } from './board-read.js';
 import { planBoardRestore } from './board-restore.js';
 import { executeBoardExport } from './export-board.js';
+import { renderExportPng, type SvgPngRenderer } from './export-png.js';
 import { runBoardEdit } from './run-board-edit.js';
 
 export interface BoardHistoryPage {
@@ -53,6 +56,10 @@ export interface BoardHistoryApplication {
     signature: string,
   ): BoardEditReceipt;
   exportVersion(actor: Actor, command: ExportBoardCommand): BoardVersionExportResult;
+  exportVersionFile(
+    actor: Actor,
+    command: ExportBoardFileCommand,
+  ): Promise<BoardVersionExportResult>;
 }
 
 const defaultPageSize = 20;
@@ -92,7 +99,10 @@ function versionPage(
 ): BoardHistoryPage {
   const earlierThan = before !== undefined && before <= board.revision ? before : undefined;
   const found = reader.listVersions(board.boardId, earlierThan, limit + 1);
-  const versions = found.length === 0 && earlierThan === undefined ? [baseline(board)] : found;
+  const versions =
+    found.length === 0 && earlierThan === undefined
+      ? [readVersion(reader, board, board.revision) ?? baseline(board)]
+      : found;
   const page = versions.slice(0, limit);
 
   return {
@@ -125,7 +135,7 @@ function readonlySnapshotReader(reader: BoardEditReader, revision: bigint): Whit
 function exportSavedVersion(
   repository: BoardEditRepository,
   actor: Actor,
-  command: ExportBoardCommand,
+  command: ExportRenderCommand,
 ): BoardVersionExportResult {
   const snapshot: WhiteboardRepository = {
     read: (work) =>
@@ -166,6 +176,7 @@ function restorePlan(
 export function createBoardHistoryApplication(
   repository: BoardEditRepository,
   now: () => number,
+  renderPng?: SvgPngRenderer,
 ): BoardHistoryApplication {
   return {
     listVersions(actor, boardId, before, limit = defaultPageSize) {
@@ -219,6 +230,26 @@ export function createBoardHistoryApplication(
     },
     exportVersion(actor, command) {
       return exportSavedVersion(repository, actor, command);
+    },
+    async exportVersionFile(actor, command) {
+      const { format } = command;
+      if (format === 'zip') {
+        return { kind: 'rejected', reason: 'unsupported' };
+      }
+      if (format !== 'png') {
+        return exportSavedVersion(repository, actor, { ...command, format });
+      }
+
+      const source = exportSavedVersion(repository, actor, { ...command, format });
+      if (source.kind === 'unavailable') {
+        return source;
+      }
+
+      const result = await renderExportPng(source, renderPng, () => {
+        repository.read((reader) => requireAccess(reader, actor, command.boardId));
+      });
+
+      return result.kind === 'stale' ? { kind: 'unavailable' } : result;
     },
   };
 }

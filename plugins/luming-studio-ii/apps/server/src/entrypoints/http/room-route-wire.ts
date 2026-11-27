@@ -1,6 +1,7 @@
 import { create, fromBinary, toJson, type MessageInitShape } from '@bufbuild/protobuf';
 import {
   BoardRoomEventSchema,
+  BoardRoomGestureKind,
   BoardRoomTimerPhase,
   BoardRoomTimerSchema,
   BoardTimerReceiptSchema,
@@ -8,6 +9,7 @@ import {
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
 import { ObjectMetadataSchema } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/scene';
 import type {
+  GesturePreview,
   Participant,
   RoomEvent,
   RoomEventPayload,
@@ -15,6 +17,7 @@ import type {
   RoomTimerReceipt,
   TimerRejection,
 } from '../../modules/rooms/application/index.js';
+import { agentWorkspaceWire } from './room-agent-activity.js';
 
 const phases: Record<RoomTimer['phase'], BoardRoomTimerPhase> = {
   idle: BoardRoomTimerPhase.IDLE,
@@ -48,8 +51,25 @@ function timerWire({
   };
 }
 
-function participantWire(participant: Participant) {
-  return { ...participant, expiresAtUnixMs: BigInt(participant.expiresAtUnixMs) };
+const gestureKinds: Record<GesturePreview['kind'], BoardRoomGestureKind> = {
+  move: BoardRoomGestureKind.MOVE,
+  resize: BoardRoomGestureKind.RESIZE,
+  rotate: BoardRoomGestureKind.ROTATE,
+};
+
+function participantWire({
+  expiresAtUnixMs,
+  gesture,
+  gestureExpiresAtUnixMs,
+  ...participant
+}: Participant) {
+  return {
+    ...participant,
+    expiresAtUnixMs: BigInt(expiresAtUnixMs),
+    gesture: gesture && { kind: gestureKinds[gesture.kind], changes: [...gesture.changes] },
+    gestureExpiresAtUnixMs:
+      gestureExpiresAtUnixMs === undefined ? undefined : BigInt(gestureExpiresAtUnixMs),
+  };
 }
 
 type WireEvent = MessageInitShape<typeof BoardRoomEventSchema>;
@@ -58,7 +78,15 @@ type WirePayload = NonNullable<WireEvent['payload']>;
 function payloadWire(payload: RoomEventPayload): WirePayload {
   switch (payload.kind) {
     case 'snapshot': {
-      const { actorId, canEdit, boardRevision, participants, timer } = payload.snapshot;
+      const {
+        actorId,
+        canEdit,
+        boardRevision,
+        participants,
+        timer,
+        agentWorkspaces,
+        canReleaseAgentActivity,
+      } = payload.snapshot;
 
       return {
         case: 'snapshot',
@@ -68,6 +96,8 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
           boardRevision,
           participants: participants.map(participantWire),
           timer: timerWire(timer),
+          agentWorkspaces: agentWorkspaces.map(agentWorkspaceWire),
+          canReleaseAgentActivity,
         },
       };
     }
@@ -81,6 +111,11 @@ function payloadWire(payload: RoomEventPayload): WirePayload {
     }
     case 'timer':
       return { case: 'timer', value: timerWire(payload.timer) };
+    case 'agentWorkspaces':
+      return {
+        case: 'agentWorkspaces',
+        value: { workspaces: payload.workspaces.map(agentWorkspaceWire) },
+      };
     case 'contentChanged': {
       const { boardRevision, changedObjectIds, removedObjectIds, changedObjects, refreshScene } =
         payload.change;
@@ -120,6 +155,32 @@ function encodeFrame(event: RoomEvent): string {
   return 'id: ' + event.sequence + '\ndata: ' + data + '\n\n';
 }
 
+function compactPayload(event: RoomEvent): RoomEventPayload {
+  const { payload } = event;
+  if (payload.kind === 'contentChanged') {
+    return {
+      kind: 'contentChanged',
+      change: {
+        boardId: event.boardId,
+        boardRevision: payload.change.boardRevision,
+        refreshScene: true,
+      },
+    };
+  }
+
+  if (payload.kind === 'snapshot') {
+    const participants = payload.snapshot.participants.map((participant) => ({
+      ...participant,
+      gesture: undefined,
+      gestureExpiresAtUnixMs: undefined,
+    }));
+
+    return { kind: 'snapshot', snapshot: { ...payload.snapshot, participants } };
+  }
+
+  return payload;
+}
+
 export function eventFrame(event: RoomEvent): string {
   const cached = encodedFrames.get(event);
   if (cached !== undefined) {
@@ -127,21 +188,10 @@ export function eventFrame(event: RoomEvent): string {
   }
 
   const full = encodeFrame(event);
-  const payload = event.payload;
-  const compact = full.length > maximumFrameCharacters && payload.kind === 'contentChanged';
-  const considered = compact
-    ? encodeFrame({
-        ...event,
-        payload: {
-          kind: 'contentChanged',
-          change: {
-            boardId: event.boardId,
-            boardRevision: payload.change.boardRevision,
-            refreshScene: true,
-          },
-        },
-      })
-    : full;
+  const considered =
+    full.length > maximumFrameCharacters
+      ? encodeFrame({ ...event, payload: compactPayload(event) })
+      : full;
   encodedFrames.set(event, considered);
 
   return considered;

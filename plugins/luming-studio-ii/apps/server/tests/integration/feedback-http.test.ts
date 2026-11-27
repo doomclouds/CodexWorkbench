@@ -10,6 +10,7 @@ import {
   FeedbackThreadStatus,
   type ApplyFeedbackRequestSchema,
   type FeedbackReceipt,
+  type FeedbackContentPointSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
 import { WhiteboardService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
@@ -19,6 +20,7 @@ import {
   feedbackCounts,
   rejectFeedbackReceipts,
   removeFeedbackWritePermission,
+  seedFeedbackContent,
   setFeedbackAnchorRotation,
 } from '../support/feedback-database.js';
 import {
@@ -27,6 +29,8 @@ import {
 } from '../support/whiteboard-client.js';
 import {
   editorId,
+  documentId,
+  documentPayloadVersion,
   mainBoardId,
   outsiderId,
   secondBoardId,
@@ -37,6 +41,7 @@ import {
 import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
 type Operation = NonNullable<MessageInitShape<typeof ApplyFeedbackRequestSchema>['operation']>;
+type ContentPoint = MessageInitShape<typeof FeedbackContentPointSchema>;
 
 const server = useWhiteboardTestServer();
 const { applyFeedback, getFeedbackReceipt, getThread, listThreads } = FeedbackService.method;
@@ -59,6 +64,18 @@ function objectPoint(geometryVersion: bigint): Operation {
           case: 'objectPoint',
           value: { objectId: shapeId, u: 0, v: 0, geometryVersion },
         },
+      },
+    },
+  };
+}
+
+function contentPoint(point: ContentPoint): Operation {
+  return {
+    case: 'create',
+    value: {
+      text: 'Review this content.',
+      anchor: {
+        target: { case: 'contentPoint', value: { u: 0.5, v: 0.5, geometryVersion: 0n, ...point } },
       },
     },
   };
@@ -98,6 +115,151 @@ function assertRejected(receipt: FeedbackReceipt, reason: FeedbackRejectionReaso
   assert.ok(receipt.outcome.case === 'rejected');
   expect(receipt.outcome.value.reason).toBe(reason);
 }
+
+test('freezes the explicit document block and reports missing content after its deletion', async () => {
+  const target = contentPoint({
+    objectId: documentId,
+    payloadVersion: documentPayloadVersion,
+    content: { case: 'document', value: { blockIds: ['paragraph-1'] } },
+  });
+  const { threadId } = applied(await apply('content-document', target));
+  await server.restart();
+  const { thread } = await detail(threadId);
+  assert.ok(thread?.anchor);
+  expect(thread.anchor).toMatchObject({
+    target: {
+      target: {
+        case: 'contentPoint',
+        value: {
+          objectId: documentId,
+          payloadVersion: documentPayloadVersion,
+          content: { case: 'document', value: { blockIds: ['paragraph-1'] } },
+        },
+      },
+    },
+    frozenExcerpt: 'The payload is only fetched when a reader requests it.',
+    targetMissing: false,
+  });
+
+  seedFeedbackContent(server.databasePath, {
+    boardId: mainBoardId,
+    objectId: documentId,
+    kind: 'document',
+    payloadVersion: documentPayloadVersion + 1n,
+    body: {
+      schemaVersion: 1,
+      blocks: [{ blockId: 'replaced', type: 'paragraph', content: 'Replacement' }],
+    },
+  });
+  expect((await detail(threadId)).thread?.anchor).toMatchObject({
+    targetMissing: true,
+    frozenPoint: thread.anchor.frozenPoint,
+    frozenExcerpt: thread.anchor.frozenExcerpt,
+  });
+  assertRejected(await apply('stale-doc-anchor', target), FeedbackRejectionReason.TARGET_CHANGED);
+});
+
+test('validates Todo IDs and freezes the text for the selected item only', async () => {
+  const objectId = 'source-todo';
+  seedFeedbackContent(server.databasePath, {
+    boardId: mainBoardId,
+    objectId,
+    kind: 'todo',
+    payloadVersion: 1n,
+    body: {
+      items: [
+        { itemId: 'item-one', text: 'Selected item' },
+        { itemId: 'item-two', text: 'Another item' },
+      ],
+    },
+  });
+  const target = contentPoint({
+    objectId,
+    payloadVersion: 1n,
+    content: { case: 'todoItemId', value: 'item-one' },
+  });
+  const { threadId } = applied(await apply('attach-todo-item', target));
+  expect((await detail(threadId)).thread?.anchor).toMatchObject({
+    frozenExcerpt: 'Selected item',
+    targetMissing: false,
+  });
+  assertRejected(
+    await apply(
+      'missing-todo-item',
+      contentPoint({
+        objectId,
+        payloadVersion: 1n,
+        content: { case: 'todoItemId', value: 'unknown' },
+      }),
+    ),
+    FeedbackRejectionReason.TARGET_CHANGED,
+  );
+});
+
+test('matches stable HTML IDs at the exact source revision and does not treat script text as a node', async () => {
+  const objectId = 'source-html';
+  seedFeedbackContent(server.databasePath, {
+    boardId: mainBoardId,
+    objectId,
+    kind: 'html',
+    payloadVersion: 3n,
+    body: {
+      sourceRevision: '2',
+      html: '<article data-studio-id="actual">Visible</article><script>"<b data-studio-id=ghost></b>"</script>',
+    },
+  });
+  const { threadId } = applied(
+    await apply(
+      'valid-html-node',
+      contentPoint({
+        objectId,
+        payloadVersion: 3n,
+        content: { case: 'html', value: { nodeIds: ['actual'], sourceRevision: 2n } },
+      }),
+    ),
+  );
+  expect((await detail(threadId)).thread?.anchor).toMatchObject({
+    targetMissing: false,
+    target: {
+      target: {
+        case: 'contentPoint',
+        value: { content: { case: 'html', value: { nodeIds: ['actual'], sourceRevision: 2n } } },
+      },
+    },
+  });
+  assertRejected(
+    await apply(
+      'invalid-html-node',
+      contentPoint({
+        objectId,
+        payloadVersion: 3n,
+        content: { case: 'html', value: { nodeIds: ['ghost'], sourceRevision: 2n } },
+      }),
+    ),
+    FeedbackRejectionReason.TARGET_CHANGED,
+  );
+  assertRejected(
+    await apply(
+      'wrong-html-source-version',
+      contentPoint({
+        objectId,
+        payloadVersion: 3n,
+        content: { case: 'html', value: { nodeIds: ['actual'], sourceRevision: 1n } },
+      }),
+    ),
+    FeedbackRejectionReason.TARGET_CHANGED,
+  );
+});
+
+test('accepts the original 16000-character note limit and rejects a longer note', async () => {
+  const maximum = 16_000;
+  const { threadId } = applied(await apply('full-note', boardPoint('字'.repeat(maximum))));
+  expect((await detail(threadId)).thread?.first?.text.length).toBe(maximum);
+  assertRejected(
+    await apply('oversize-note', boardPoint('字'.repeat(maximum + 1))),
+    FeedbackRejectionReason.INVALID_TEXT,
+  );
+});
 
 test('freezes object geometry, retains its original location, and keeps feedback off the board revision', async () => {
   setFeedbackAnchorRotation(server.databasePath, mainBoardId, shapeId, 90);

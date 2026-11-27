@@ -30,8 +30,10 @@ export function HistoryRecord({
   onToggle,
 }: HistoryRecordProps) {
   const { revision, savedAtMillis, actorId, kind, changedObjectCount, sourceRevision } = entry;
+  const boardTitle = (current || kind === 'baseline') && entry.title.trim();
   const savedAt = savedAtMillis === undefined ? undefined : new Date(savedAtMillis);
-  const actor = actorId || '协作者';
+  const actor = actorId || (kind === 'baseline' ? '' : '协作者');
+  const avatar = actor || boardTitle || '白板';
 
   return (
     <article
@@ -47,11 +49,11 @@ export function HistoryRecord({
         onClick={onToggle}
       >
         <span className="whiteboard-history__avatar" aria-hidden="true">
-          {actor.slice(0, 1)}
+          {avatar.slice(0, 1)}
         </span>
         <span className="whiteboard-history__record-body">
           <span className="whiteboard-history__record-top">
-            <strong title={actor}>{actor}</strong>
+            {actor && <strong title={actor}>{actor}</strong>}
             {savedAt && (
               <time dateTime={savedAt.toISOString()}>{savedAtFormat.format(savedAt)}</time>
             )}
@@ -60,6 +62,11 @@ export function HistoryRecord({
             {versionLabels[kind]}
             {changedObjectCount > 0 && <> · {changedObjectCount} 个对象</>}
           </span>
+          {boardTitle && (
+            <span className="whiteboard-history__record-title" title={boardTitle}>
+              {boardTitle}
+            </span>
+          )}
           {current && <span className="whiteboard-history__current">当前版本</span>}
           {sourceRevision !== undefined && (
             <span className="whiteboard-history__restored">

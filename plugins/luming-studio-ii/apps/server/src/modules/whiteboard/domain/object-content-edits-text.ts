@@ -22,9 +22,11 @@ function validAlignment(value: JsonValue | undefined): boolean {
 }
 
 export function editTextContent(edit: JsonObject, current: JsonObject): ContentPayloadPlan {
-  const { text, color, fontFamily, fontSize, align } = edit;
+  const { text, color, fontFamily, fontSize, align, bold, italic } = edit;
   const validFormatting = validStyle(color) && validStyle(fontFamily) && validSize(fontSize);
-  if (typeof text !== 'string' || !validFormatting || !validAlignment(align)) {
+  const flags = [bold, italic].every((value) => value === undefined || typeof value === 'boolean');
+  const validTextStyle = validAlignment(align) && flags;
+  if (typeof text !== 'string' || !validFormatting || !validTextStyle) {
     return { kind: 'rejected', reason: 'invalidEdit' };
   }
 

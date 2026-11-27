@@ -1,2 +1,6 @@
-export { GuestAccessLostSurface, GuestJoinSurface } from './GuestJoinSurface.js';
+export {
+  GuestAccessLostSurface,
+  GuestJoinSurface,
+  GuestSessionPendingSurface,
+} from './GuestJoinSurface.js';
 export type { GuestJoinSurfaceProps } from './GuestJoinSurface.js';

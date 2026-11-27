@@ -40,11 +40,15 @@ function getPayload(
   boardId: string,
   revision: bigint,
   objectId: string,
+  payloadVersion: bigint,
   signal: AbortSignal,
 ) {
   return service.getVersionPayloads(boardId, revision, [objectId], signal).then(([result]) => {
     if (result?.kind !== 'loaded') {
       throw new Error('此版的对象正文已不可用。');
+    }
+    if (result.payload.id !== objectId || result.payload.version !== payloadVersion) {
+      throw new Error('对象正文与所选版本不一致。');
     }
 
     return result.payload;
@@ -72,7 +76,7 @@ function useDifferenceBodies({
     const read = (sourceRevision: bigint, payloadVersion?: bigint) =>
       payloadVersion === undefined
         ? undefined
-        : getPayload(service, boardId, sourceRevision, change.id, signal);
+        : getPayload(service, boardId, sourceRevision, change.id, payloadVersion, signal);
     Promise.resolve()
       .then(() => {
         signal.throwIfAborted();

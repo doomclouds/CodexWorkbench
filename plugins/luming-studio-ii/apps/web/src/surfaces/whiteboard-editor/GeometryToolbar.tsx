@@ -9,7 +9,6 @@ import {
   ListTodo,
   MousePointer2,
   PenLine,
-  Search,
   Smile,
   StickyNote,
   Table2,
@@ -39,6 +38,7 @@ export interface GeometryToolbarProps {
   readonly onPenColorChange?: (color: string) => void;
   readonly singleKeys?: boolean;
   readonly onAddHtml?: () => void;
+  readonly onAddLink?: () => void;
 }
 
 type PaletteKind = 'draw' | 'shape' | 'sticker';
@@ -168,9 +168,16 @@ interface ShapeChoicesProps {
   readonly onShape: (shape: CanvasShape) => void;
   readonly onInsert: (kind: InsertKind) => void;
   readonly onAddHtml?: () => void;
+  readonly onAddLink?: () => void;
 }
 
-function ShapeChoices({ selectedShape, onShape, onInsert, onAddHtml }: ShapeChoicesProps) {
+function ShapeChoices({
+  selectedShape,
+  onShape,
+  onInsert,
+  onAddHtml,
+  onAddLink,
+}: ShapeChoicesProps) {
   return (
     <div className="whiteboard-editor__shape-options">
       <div className="whiteboard-editor__shape-grid" role="group" aria-label="形状选项">
@@ -191,7 +198,12 @@ function ShapeChoices({ selectedShape, onShape, onInsert, onAddHtml }: ShapeChoi
         <Table2 size={17} />
         表格
       </button>
-      <button type="button" title={unavailable} disabled>
+      <button
+        type="button"
+        title={onAddLink ? '添加链接' : unavailable}
+        disabled={!onAddLink}
+        onClick={onAddLink}
+      >
         <Link size={17} />
         链接
       </button>
@@ -239,6 +251,7 @@ export function GeometryToolbar({
   onPenColorChange,
   singleKeys = true,
   onAddHtml,
+  onAddLink,
 }: GeometryToolbarProps) {
   const nextPlacement = useRef(0);
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
@@ -282,6 +295,11 @@ export function GeometryToolbar({
   function handleAddHtml() {
     closeMediaPalette();
     onAddHtml?.();
+  }
+
+  function handleAddLink() {
+    closeMediaPalette();
+    onAddLink?.();
   }
 
   function handlePickDraw(next: DrawTool) {
@@ -458,15 +476,11 @@ export function GeometryToolbar({
               onShape={handlePickShape}
               onInsert={handleInsert}
               onAddHtml={onAddHtml ? handleAddHtml : undefined}
+              onAddLink={onAddLink ? handleAddLink : undefined}
             />
           )}
           {open === 'sticker' && (
             <div className="whiteboard-editor__sticker-options">
-              <Search
-                size={16}
-                className="whiteboard-editor__sticker-search-icon"
-                aria-hidden="true"
-              />
               <StickerPalette
                 selectedId={sticker}
                 onSelect={(preset) => handlePickSticker(preset.id)}

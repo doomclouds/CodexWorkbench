@@ -30,8 +30,37 @@ function printable(_key: string, value: unknown): unknown {
   return ArrayBuffer.isView(value) ? '二进制 · ' + value.byteLength + ' 字节' : value;
 }
 
-function bodyValue(payload?: WhiteboardPayload): unknown {
+function bodyValue(payload?: WhiteboardPayload) {
   return payload?.body.kind === 'ink' ? payload.body.points : payload?.body.value;
+}
+
+function bodyWithoutText(value: Readonly<Record<string, unknown>>, field: string) {
+  return Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
+}
+
+function textChange(
+  before: WhiteboardPayload['body'] | undefined,
+  after: WhiteboardPayload['body'] | undefined,
+): readonly [string, string] | undefined {
+  if (!before || !after || before.kind !== after.kind) {
+    return;
+  }
+  if (before.kind === 'ink' || after.kind === 'ink') {
+    return;
+  }
+
+  const field = before.kind === 'embed' ? 'html' : 'text';
+  const first = before.value[field];
+  const last = after.value[field];
+  if (typeof first !== 'string' || typeof last !== 'string') {
+    return;
+  }
+
+  const detailsBefore = JSON.stringify(bodyWithoutText(before.value, field), printable);
+  const detailsAfter = JSON.stringify(bodyWithoutText(after.value, field), printable);
+  if (detailsBefore === detailsAfter) {
+    return [first, last];
+  }
 }
 
 function sceneText(
@@ -81,10 +110,12 @@ export function historyTexts(
   const { before, after, order } = change;
   const hasBodies = canCompareBody(change, beforePayload, afterPayload);
   if (hasBodies && !order && before?.geometryVersion === after?.geometryVersion) {
-    return [
-      JSON.stringify(bodyValue(beforePayload), printable, 2) ?? '',
-      JSON.stringify(bodyValue(afterPayload), printable, 2) ?? '',
-    ];
+    return (
+      textChange(beforePayload?.body, afterPayload?.body) ?? [
+        JSON.stringify(bodyValue(beforePayload), printable, 2) ?? '',
+        JSON.stringify(bodyValue(afterPayload), printable, 2) ?? '',
+      ]
+    );
   }
 
   return [

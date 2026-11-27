@@ -1,6 +1,10 @@
 import type { Ref } from 'react';
 
-import type { InlineTextFormat, InlineTextFormatState } from '../text/index.js';
+import type {
+  InlineTextFormat,
+  InlineTextFormatRequest,
+  InlineTextFormatState,
+} from '../text/index.js';
 
 export type TableCellValue = string | number | boolean | null;
 export type TableSourceRow = readonly TableCellValue[];
@@ -56,6 +60,7 @@ export interface TableObjectProps {
   readonly zoom?: number;
   readonly fontSize?: number;
   readonly editRequest?: number;
+  readonly formatRequest?: InlineTextFormatRequest;
   readonly initialDraft?: TableObjectDraft;
   readonly bodyPaint?: TableObjectPaint;
   readonly headerPaint?: TableObjectPaint;

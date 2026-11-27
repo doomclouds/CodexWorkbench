@@ -97,6 +97,7 @@ export function useMoveSession(
   boardId: string,
   canEdit: boolean,
   createCommandId: () => string,
+  onReceipt?: (receipt: WhiteboardMoveReceipt) => void,
 ) {
   const [state, setState] = useState<MoveState>({ kind: 'idle' });
   const pending = useRef<PendingMove | undefined>(undefined);
@@ -123,6 +124,7 @@ export function useMoveSession(
 
     pending.current = undefined;
     setState(reportReceipt(result.receipt));
+    onReceipt?.(result.receipt);
     if (result.receipt.kind === 'conflict') {
       session.reload();
     }

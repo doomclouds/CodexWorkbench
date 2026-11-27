@@ -7,6 +7,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Buffer } from 'node:buffer';
+import { registerAgentActivity } from './agent-activity.js';
 import { createAppBridge, type AppBridgeOptions } from './bridge.js';
 import { BridgeError } from './errors.js';
 import { protobufMediaType } from './operations.js';
@@ -33,28 +34,28 @@ const listSchema = z
 
 const suggestionId = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 const commandObject = z.record(z.string(), z.json());
+const suggestionOperationSchema = z.union([
+  z.object({ geometry: commandObject }).strict(),
+  z.object({ content: commandObject }).strict(),
+]);
+const suggestionOption = z.object({
+  optionId: suggestionId,
+  label: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(1000).optional(),
+});
+const suggestionOptionSchema = z.union([
+  suggestionOption.extend({ edit: suggestionOperationSchema }).strict(),
+  suggestionOption
+    .extend({ operations: z.array(suggestionOperationSchema).min(1).max(60) })
+    .strict(),
+]);
 const suggestionSchema = z
   .object({
     boardId: suggestionId,
     sourceId: suggestionId,
     commandId: suggestionId,
     observation: z.string().trim().min(1).max(2000),
-    options: z
-      .array(
-        z
-          .object({
-            optionId: suggestionId,
-            label: z.string().trim().min(1).max(100),
-            description: z.string().trim().max(1000).optional(),
-            edit: z.union([
-              z.object({ geometry: commandObject }).strict(),
-              z.object({ content: commandObject }).strict(),
-            ]),
-          })
-          .strict(),
-      )
-      .min(2)
-      .max(4),
+    options: z.array(suggestionOptionSchema).min(2).max(4),
   })
   .strict();
 
@@ -67,6 +68,7 @@ interface StudioMcpOptions extends AppBridgeOptions {
   readonly pluginVersion: string;
   readonly onError: (error: unknown) => void;
   readonly submitSuggestion?: SubmitSuggestion;
+  readonly dispatchAgentActivity?: (body: Uint8Array, signal: AbortSignal) => Promise<Response>;
 }
 
 type ListInput = z.infer<typeof listSchema>;
@@ -142,7 +144,7 @@ function registerSuggestions(server: McpServer, options: StudioMcpOptions): void
     {
       title: '提交白板建议',
       description:
-        '为用户已冻结的来源提交 2 至 4 个待人工接受的建议。每项是一个 Protobuf JSON 几何或正文操作，内层命令不含白板和命令 ID。',
+        '为用户已冻结的来源提交 2 至 4 个待人工接受的方案。每项用 edit 描述单个 Protobuf JSON 几何或正文操作，或用 operations 描述 1 至 60 个按顺序且原子生效的操作。内层命令只携带目标和已冻结的基线。',
       inputSchema: suggestionSchema,
       annotations: { openWorldHint: false, destructiveHint: false },
     },
@@ -165,6 +167,15 @@ function registerSuggestions(server: McpServer, options: StudioMcpOptions): void
 export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
   const server = new McpServer({ name, version: options.pluginVersion });
   const bridge = createAppBridge(options);
+  const { allocateId, dispatchAgentActivity, now, onError } = options;
+  const closeAgentActivity =
+    dispatchAgentActivity &&
+    registerAgentActivity(server, {
+      allocateId,
+      dispatch: dispatchAgentActivity,
+      now,
+      reportError: onError,
+    });
 
   server.registerTool(
     'studio_open',
@@ -271,7 +282,7 @@ export function createStudioMcpServer(options: StudioMcpOptions): McpServer {
 
   async function close() {
     try {
-      await bridge.close();
+      await Promise.all([bridge.close(), closeAgentActivity?.()]);
     } finally {
       await closeServer();
     }

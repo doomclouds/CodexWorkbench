@@ -8,6 +8,11 @@ export interface TodoSourceRef {
   readonly version?: number;
 }
 
+export interface TodoSourceRequest {
+  readonly sequence: number;
+  readonly source: TodoSourceRef;
+}
+
 export interface TodoObjectItem {
   readonly id: string;
   readonly text: string;
@@ -50,6 +55,12 @@ export interface TodoPoint {
   readonly y: number;
 }
 
+export interface TodoContentAnnotation {
+  readonly target: { readonly kind: 'todo'; readonly itemId: string };
+  readonly u: number;
+  readonly v: number;
+}
+
 export interface TodoObjectAppearance {
   readonly paper?: string;
   readonly uiScale?: number;
@@ -71,7 +82,9 @@ export interface TodoObjectProps {
   readonly onEditingChange?: (active: boolean) => void;
   readonly onOpenSource?: (source: TodoSourceRef) => void;
   readonly sourceLabel?: (source: TodoSourceRef) => string | undefined;
+  readonly sourceRequest?: TodoSourceRequest;
   readonly annotationActive?: boolean;
+  readonly onAnnotateContent?: (request: TodoContentAnnotation) => void;
   readonly onAnnotateItem?: (id: string, point?: TodoPoint) => void;
   readonly renderItemAdornment?: (id: string) => ReactNode;
   readonly renderOutsideRows?: (shownIds: readonly string[]) => ReactNode;

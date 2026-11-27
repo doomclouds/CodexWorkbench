@@ -1,4 +1,4 @@
-import type { BoardEditDecision, BoardEditIdentity } from './board-edits.js';
+import type { BoardChanges, BoardEditDecision, BoardEditIdentity } from './board-edits.js';
 import type { GeometryOperation } from './geometry-edits.js';
 import type { Geometry } from './model.js';
 import type { ContentOperation } from './object-content-edits.js';
@@ -56,11 +56,45 @@ export type DecodeBoardSuggestionEdit = (edit: BoardSuggestionEdit) => BoardSugg
 
 export interface BoardSuggestionOptionDraft extends BoardSuggestionOption {
   readonly edit: BoardSuggestionEdit;
+  readonly additionalEdits?: readonly BoardSuggestionEdit[];
   readonly editFingerprint: string;
+}
+
+export interface BoardSuggestionFootprint {
+  readonly objectIds: readonly string[];
+  readonly editsOrder: boolean;
+  readonly payloadIds?: readonly string[];
+}
+
+export interface BoardSuggestionApplicationState {
+  readonly optionId: string;
+  readonly boardRevision: bigint;
+  readonly baselineBoardRevision: bigint;
+  readonly footprint: BoardSuggestionFootprint;
+  readonly inverse: BoardChanges;
+  readonly afterFingerprint: string;
+}
+
+export interface BoardSuggestionClock {
+  readonly physical: bigint;
+  readonly logical: bigint;
+}
+
+export interface BoardSuggestionObjectClocks {
+  readonly objectId: string;
+  readonly geometry?: BoardSuggestionClock;
+  readonly payload?: BoardSuggestionClock;
+}
+
+export interface BoardSuggestionReviewState {
+  readonly applications: readonly BoardSuggestionApplicationState[];
+  readonly objectClocks: readonly BoardSuggestionObjectClocks[];
+  readonly boardClock?: BoardSuggestionClock;
 }
 
 export interface BoardSuggestionOptionRecord extends BoardSuggestionOptionDraft {
   readonly plannedFingerprint: string;
+  readonly footprint?: BoardSuggestionFootprint;
 }
 
 export interface BoardSuggestion {
@@ -73,6 +107,7 @@ export interface BoardSuggestion {
   readonly acceptedOptionId?: string;
   readonly acceptedBoardRevision?: bigint;
   readonly rejected: boolean;
+  readonly activeOptionIds?: readonly string[];
 }
 
 export interface StoredBoardSuggestion extends BoardSuggestion {
@@ -80,6 +115,7 @@ export interface StoredBoardSuggestion extends BoardSuggestion {
   readonly ownerActorId: string;
   readonly createdAtMillis: bigint;
   readonly options: readonly BoardSuggestionOptionRecord[];
+  readonly reviewState?: BoardSuggestionReviewState;
 }
 
 export interface SubmitBoardSuggestion extends BoardEditIdentity {

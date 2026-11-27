@@ -26,12 +26,19 @@ const canvasExtensionTypes = new Set([
   'CanvasObjectPayload',
   'CanvasObjectReceipt',
   'CanvasObjectOperation',
+  'CanvasObjectFile',
+  'CanvasDocumentAsset',
+  'CanvasNativeSource',
+  'CanvasNativeSourceRequest',
+  'CanvasContentAnnotationRequest',
 ]);
 const sharedTextEditorExports = new Set([
   'InlineTextEditor',
   'InlineTextEditorHandle',
   'InlineTextFormat',
+  'InlineTextFormatRequest',
   'InlineTextFormatState',
+  'InlineTextLinkEditor',
   'RichText',
   'richTextFirstLine',
 ]);

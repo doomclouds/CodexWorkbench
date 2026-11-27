@@ -1,15 +1,17 @@
 import { exportConnector } from './export-geometry.js';
+import { renderExportHtml } from './export-html.js';
 import { renderExportSvg } from './export-svg.js';
 import {
   maxExportFileBytes,
   type BoardExportSnapshot,
+  type ExportRenderCommand,
   type ExportBoardResult,
 } from './export-types.js';
 import type { BoardObject, ConnectorEndpoint } from './model.js';
 
 const reservedFilename = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
 
-function filenameFor(title: string, format: 'json' | 'svg'): string {
+export function exportFilename(title: string, extension: string): string {
   const name = Array.from(title)
     .slice(0, 100)
     .join('')
@@ -18,7 +20,7 @@ function filenameFor(title: string, format: 'json' | 'svg'): string {
     .replace(/[. ]+$/u, '');
   const filename = reservedFilename.test(name) ? '白板-' + name : name || '白板';
 
-  return filename + '.' + format;
+  return filename + '.' + extension;
 }
 
 function isOutside(endpoint: ConnectorEndpoint, selected: ReadonlySet<string>): boolean {
@@ -76,11 +78,12 @@ function jsonExport(snapshot: BoardExportSnapshot): string {
   return json + '\n';
 }
 
-export function renderExportFile(
+function encodeFile(
   snapshot: BoardExportSnapshot,
-  format: 'json' | 'svg',
+  data: string | ExportBoardResult,
+  extension: string,
+  mimeType: string,
 ): ExportBoardResult {
-  const data = format === 'svg' ? renderExportSvg(snapshot) : jsonExport(snapshot);
   if (typeof data !== 'string') {
     return data;
   }
@@ -92,9 +95,51 @@ export function renderExportFile(
 
   return {
     kind: 'file',
-    filename: filenameFor(snapshot.board.title, format),
-    mimeType: format === 'svg' ? 'image/svg+xml' : 'application/json',
+    filename: exportFilename(snapshot.board.title, extension),
+    mimeType,
     revision: snapshot.board.revision,
     content,
   };
+}
+
+function renderVectorFile(snapshot: BoardExportSnapshot, format: 'svg' | 'png'): ExportBoardResult {
+  const scene = renderExportSvg(snapshot);
+  if (scene.kind === 'rejected') {
+    return scene;
+  }
+
+  if (scene.regions.length) {
+    const { width, height } = scene.viewport;
+    const dimensions = width <= 16384 && height <= 16384;
+    if (!dimensions || Math.ceil(width) * Math.ceil(height) > 32_000_000) {
+      return { kind: 'rejected', reason: 'tooLarge' };
+    }
+
+    return {
+      kind: 'browserPng',
+      filename: exportFilename(snapshot.board.title, format),
+      revision: snapshot.board.revision,
+      width,
+      height,
+      svgTemplate: scene.svg,
+      regions: scene.regions,
+    };
+  }
+
+  return encodeFile(snapshot, scene.svg, 'svg', 'image/svg+xml');
+}
+
+export function renderExportFile(
+  snapshot: BoardExportSnapshot,
+  format: ExportRenderCommand['format'],
+): ExportBoardResult {
+  switch (format) {
+    case 'svg':
+    case 'png':
+      return renderVectorFile(snapshot, format);
+    case 'html':
+      return encodeFile(snapshot, renderExportHtml(snapshot), 'html', 'text/html');
+    case 'json':
+      return encodeFile(snapshot, jsonExport(snapshot), 'json', 'application/json');
+  }
 }

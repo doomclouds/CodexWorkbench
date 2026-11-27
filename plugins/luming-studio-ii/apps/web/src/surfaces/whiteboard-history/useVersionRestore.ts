@@ -36,6 +36,7 @@ const restoreMessages: Readonly<Record<BoardEditRejection, string>> = {
   versionUnavailable: '所选历史版本已无法恢复。',
   tooLarge: '恢复范围超过大小限制。',
   invalidImage: '恢复所需图片已不可用。',
+  invalidVideo: '恢复所需视频已不可用。',
   unknown: '恢复未能完成。',
 };
 

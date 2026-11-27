@@ -67,7 +67,11 @@ function toSource(source: BoardReviewSource) {
 }
 
 function toSuggestion(suggestion: BoardSuggestion) {
-  return { ...suggestion, options: suggestion.options.map((option) => ({ ...option })) };
+  return {
+    ...suggestion,
+    options: suggestion.options.map((option) => ({ ...option })),
+    activeOptionIds: suggestion.activeOptionIds && [...suggestion.activeOptionIds],
+  };
 }
 
 function requireInternalEditIdentity(request: {
@@ -82,7 +86,7 @@ function requireInternalEditIdentity(request: {
   }
 }
 
-function encodeEdit({ edit }: BoardSuggestionOptionInput): BoardSuggestionEdit {
+function encodeEdit({ edit }: Pick<BoardSuggestionOptionInput, 'edit'>): BoardSuggestionEdit {
   switch (edit.case) {
     case 'geometry': {
       requireInternalEditIdentity(edit.value);
@@ -117,14 +121,27 @@ function readOption(
   value: BoardSuggestionOptionInput,
   digest: (bytes: Uint8Array) => string,
 ): BoardSuggestionOptionDraft {
-  const edit = encodeEdit(value);
+  if (value.operations.length && value.edit.case !== undefined) {
+    throw new HttpRequestError(400, 'Choose the single edit or its ordered operations.');
+  }
+
+  const [edit, ...additionalEdits] = value.operations.length
+    ? value.operations.map(encodeEdit)
+    : [encodeEdit(value)];
+
+  if (!edit) {
+    throw new HttpRequestError(400, 'A typed suggestion edit is required.');
+  }
 
   return {
     optionId: requireId(value.optionId),
     label: value.label,
     description: value.description,
     edit,
-    editFingerprint: edit.kind + ':' + digest(edit.bytes),
+    additionalEdits,
+    editFingerprint: [edit, ...additionalEdits]
+      .map(({ kind, bytes }) => kind + ':' + digest(bytes))
+      .join('|'),
   };
 }
 

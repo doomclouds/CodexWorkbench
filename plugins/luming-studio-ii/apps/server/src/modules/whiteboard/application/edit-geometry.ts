@@ -1,4 +1,5 @@
 import {
+  adjacentShapeConnector,
   advanceGeometry,
   boardWritePayloadLimit,
   canAdvanceVersion,
@@ -25,12 +26,23 @@ import {
   type PayloadRecord,
 } from '../domain/index.js';
 import type { BoardEditPlanningReader } from '../ports/index.js';
+import { applyBoardStyle } from './edit-geometry-style.js';
+import {
+  arrangeGeometry,
+  createSelectionSection,
+  updateObjectGroups,
+  type GeometryToolsScope,
+} from './edit-geometry-tools.js';
 
 type Create = Extract<GeometryOperation, { kind: 'create' }>;
 type Transform = Extract<GeometryOperation, { kind: 'transform' }>;
 type Lock = Extract<GeometryOperation, { kind: 'lock' }>;
 type Reorder = Extract<GeometryOperation, { kind: 'reorder' }>;
 type Duplicate = Extract<GeometryOperation, { kind: 'duplicate' }>;
+type SelectionEdit = Extract<
+  GeometryOperation,
+  { kind: 'group' | 'ungroup' | 'createSection' | 'arrange' | 'style' }
+>;
 
 interface GeometryScope {
   readonly board: BoardHeader;
@@ -151,7 +163,64 @@ function checkAttachments(
   }
 }
 
-function createObject(scope: GeometryScope, { object, payload }: Create): BoardEditDecision {
+function linkedCreation(
+  scope: GeometryScope,
+  target: BoardObject,
+  targetPayload: PayloadRecord,
+  attachment: NonNullable<Create['attachment']>,
+): BoardEditDecision {
+  const { connectorId } = attachment;
+  if (
+    connectorId === target.objectId ||
+    !validNewObjectId(connectorId) ||
+    scope.writer.hasUsedObjectId(scope.board.boardId, connectorId)
+  ) {
+    return reject('invalidEdit');
+  }
+
+  const sources = readTargets(scope, [attachment.source]);
+  if (sources.kind !== 'targets') {
+    return sources;
+  }
+
+  const [source] = sources.objects;
+  if (!source) {
+    return reject('objectNotFound');
+  }
+  if (isLocked(scope, source)) {
+    return reject('geometryLocked');
+  }
+
+  const connector = adjacentShapeConnector(source, target, attachment);
+  if (!connector || !validateCreatedObject(connector)) {
+    return reject('invalidEdit');
+  }
+
+  const connectorPayload = initialGeometryPayload(connector, undefined);
+  if (!connectorPayload) {
+    return reject('invalidEdit');
+  }
+
+  const appearance = {
+    ...target.appearance,
+    fill: target.appearance?.fill ?? source.appearance?.fill,
+    stroke: target.appearance?.stroke ?? source.appearance?.stroke,
+  };
+
+  return {
+    kind: 'changes',
+    objects: [
+      { ...target, appearance, payloadVersion: targetPayload.payloadVersion },
+      { ...connector, payloadVersion: connectorPayload.payloadVersion },
+    ],
+    payloads: [targetPayload, connectorPayload],
+  };
+}
+
+function createObject(
+  scope: GeometryScope,
+  { object, payload, attachment }: Create,
+): BoardEditDecision {
   if (!supportsGeometryCreation(object.kind)) {
     return reject('unsupportedKind');
   }
@@ -178,6 +247,9 @@ function createObject(scope: GeometryScope, { object, payload }: Create): BoardE
   const body = initialGeometryPayload(object, payload);
   if (!body) {
     return reject('invalidEdit');
+  }
+  if (attachment) {
+    return linkedCreation(scope, object, body, attachment);
   }
 
   return {
@@ -580,6 +652,34 @@ function duplicateObjects(scope: GeometryScope, operation: Duplicate): BoardEdit
   return duplicateChanges(scope, targets.objects, { ids, groups, delta: operation.delta });
 }
 
+function planSelectionEdit(scope: GeometryScope, operation: SelectionEdit): BoardEditDecision {
+  const requested =
+    operation.kind === 'style' ? operation.targets.map(({ target }) => target) : operation.targets;
+  const targets = readTargets(scope, requested);
+  if (targets.kind !== 'targets') {
+    return targets;
+  }
+
+  const tools: GeometryToolsScope = {
+    board: scope.board,
+    writer: scope.writer,
+    object: scope.object,
+    locked: (object) => isLocked(scope, object),
+  };
+
+  switch (operation.kind) {
+    case 'group':
+    case 'ungroup':
+      return updateObjectGroups(tools, targets.objects, operation);
+    case 'createSection':
+      return createSelectionSection(tools, targets.objects, operation);
+    case 'arrange':
+      return arrangeGeometry(tools, targets.objects, operation);
+    case 'style':
+      return applyBoardStyle(tools, targets.objects, operation);
+  }
+}
+
 export function planGeometryEdit(
   writer: BoardEditPlanningReader,
   board: BoardHeader,
@@ -600,5 +700,13 @@ export function planGeometryEdit(
       return reorderObjects(scope, operation);
     case 'duplicate':
       return duplicateObjects(scope, operation);
+    case 'group':
+    case 'ungroup':
+    case 'createSection':
+    case 'arrange':
+    case 'style':
+      return planSelectionEdit(scope, operation);
+    case 'paste':
+      return reject('unsupportedKind');
   }
 }

@@ -16,7 +16,7 @@ const MAX_PROPERTIES = 64;
 const MAX_UNITS = 4_000;
 const MAX_JSON_DEPTH = 204;
 const MAX_JSON_STRUCTURE = 2_000_000;
-const MAX_BOARD_BYTES = 16 * 1024 * 1024;
+export const MAX_ARCHIVE_BOARD_BYTES = 16 * 1024 * 1024;
 
 interface UnitContent {
   readonly fields: number;
@@ -211,7 +211,7 @@ function checkHistory(value: unknown, contentCount: number, payloadCount: number
 }
 
 function latestObjects(value: ArchiveContent, reader: ArchiveValueReader): readonly unknown[] {
-  const budget: ArchiveValueBudget = { maximum: MAX_BOARD_BYTES, bytes: 0, nodes: 0 };
+  const budget: ArchiveValueBudget = { maximum: MAX_ARCHIVE_BOARD_BYTES, bytes: 0, nodes: 0 };
   if (typeof value === 'number') {
     const content = archiveRecord(reader.payload(value, budget));
     const elements = archiveArray(content.elements);

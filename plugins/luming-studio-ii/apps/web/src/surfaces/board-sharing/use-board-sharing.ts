@@ -20,7 +20,17 @@ interface SharingControls {
 
 interface PendingSharingCommand {
   readonly command: SharingCommand;
-  readonly copyRole?: InvitationRole;
+  readonly copy?: CopyOnApply;
+}
+
+interface CopyOnApply {
+  readonly role: InvitationRole;
+  readonly trigger: HTMLButtonElement;
+}
+
+interface ManualLinkCopy {
+  readonly url: string;
+  readonly trigger: HTMLButtonElement;
 }
 
 function formatFailure(error: unknown, message: string) {
@@ -37,6 +47,7 @@ export function useBoardSharing({
   const [snapshot, setSnapshot] = useState<BoardSharingState>();
   const [pending, setPending] = useState<PendingSharingCommand>();
   const [notice, setNotice] = useState<{ text: string; error: boolean }>();
+  const [manualLink, setManualLink] = useState<ManualLinkCopy>();
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const lifetime = useRef<AbortController>(undefined);
@@ -92,7 +103,7 @@ export function useBoardSharing({
     }
   }, [boardId, open, service]);
 
-  async function copy(url: string) {
+  async function copy(url: string, trigger: HTMLButtonElement) {
     const signal = lifetime.current?.signal;
     try {
       await copyLink(url);
@@ -101,14 +112,15 @@ export function useBoardSharing({
       }
     } catch (error) {
       if (!signal?.aborted) {
-        setNotice({ text: formatFailure(error, '复制链接失败，请重试。'), error: true });
+        setNotice({ text: formatFailure(error, '复制链接失败。'), error: true });
+        setManualLink({ url, trigger });
       }
     }
   }
 
   async function applyReceipt(
     receipt: SharingReceipt,
-    copyRole: InvitationRole | undefined,
+    deferredCopy: CopyOnApply | undefined,
     signal: AbortSignal,
   ) {
     setPending(undefined);
@@ -120,10 +132,13 @@ export function useBoardSharing({
     }
 
     const current = await refresh(signal);
-    if (current && copyRole) {
-      const url = current.links.find(({ role, enabled }) => enabled && role === copyRole)?.url;
+    if (current && deferredCopy) {
+      const url = current.links.find(
+        ({ role, enabled }) => enabled && role === deferredCopy.role,
+      )?.url;
+
       if (url) {
-        await copy(url);
+        await copy(url, deferredCopy.trigger);
       }
     }
 
@@ -145,7 +160,7 @@ export function useBoardSharing({
         ? await service.retryBoardSharing(entry.command, signal)
         : await service.updateBoardSharing(entry.command, signal);
 
-      return !signal.aborted && (await applyReceipt(receipt, entry.copyRole, signal));
+      return !signal.aborted && (await applyReceipt(receipt, entry.copy, signal));
     } catch (error) {
       if (signal.aborted) {
         return false;
@@ -162,7 +177,7 @@ export function useBoardSharing({
     }
   }
 
-  async function update(operation: SharingOperation, copyRole?: InvitationRole) {
+  async function update(operation: SharingOperation, deferredCopy?: CopyOnApply) {
     const unavailable = loading || pending;
     if (snapshot?.role !== 'owner' || unavailable) {
       return false;
@@ -175,26 +190,25 @@ export function useBoardSharing({
       operation,
     };
 
-    return submit({ command, copyRole }, false);
+    return submit({ command, copy: deferredCopy }, false);
   }
 
-  function retry() {
-    if (pending) {
-      submit(pending, true).catch(reportFailure);
-    }
+  async function retry() {
+    return pending ? submit(pending, true) : false;
   }
 
-  function requestUpdate(operation: SharingOperation, role?: InvitationRole) {
-    update(operation, role).catch(reportFailure);
+  function requestUpdate(operation: SharingOperation, deferredCopy?: CopyOnApply) {
+    update(operation, deferredCopy).catch(reportFailure);
   }
 
-  function copyInvitation(url: string) {
-    copy(url).catch(reportFailure);
+  function copyInvitation(url: string, trigger: HTMLButtonElement) {
+    copy(url, trigger).catch(reportFailure);
   }
 
   return {
     snapshot,
     notice,
+    manualLink,
     loading,
     busy,
     pending,
@@ -202,6 +216,7 @@ export function useBoardSharing({
     update,
     requestUpdate,
     retry,
+    dismissManualLink: () => setManualLink(undefined),
     copyInvitation,
     reportFailure,
   };

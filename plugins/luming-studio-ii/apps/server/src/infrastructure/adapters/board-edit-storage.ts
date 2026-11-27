@@ -428,5 +428,6 @@ export function applyBoardChanges(
     payloads,
     removedPayloadObjectIds,
     order,
+    layerChangedObjectIds: orderedIds,
   };
 }

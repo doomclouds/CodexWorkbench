@@ -35,6 +35,7 @@ const privateToken = /^[A-Za-z0-9_-]{43}$/u;
 const loopbackOrigin = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/u;
 const healthRoute = '/luming.studio.v1.WhiteboardService/GetBoardScene';
 const suggestionAgentRoute = '/luming.studio.v1.BoardSuggestionService/SubmitBoardSuggestion';
+const activityAgentRoute = '/luming.studio.v1.BoardRoomService/ChangeAgentActivity';
 
 function systemCode(error: unknown): string | undefined {
   if (!(error instanceof Error) || !('code' in error)) {
@@ -331,20 +332,21 @@ export async function loadMcpRuntime(input: RuntimeOptions) {
     }
   }
 
+  function forwardAgent(route: string, body: Uint8Array, signal: AbortSignal) {
+    return forward(
+      { route, method: 'POST', mediaType: 'application/protobuf', body },
+      signal,
+      'agent',
+    );
+  }
+
   return {
     html,
     pluginVersion,
     dispatch: (request: RuntimeRequest, signal: AbortSignal) => forward(request, signal, 'owner'),
     dispatchAgentSuggestion: (body: Uint8Array, signal: AbortSignal) =>
-      forward(
-        {
-          route: suggestionAgentRoute,
-          method: 'POST',
-          mediaType: 'application/protobuf',
-          body,
-        },
-        signal,
-        'agent',
-      ),
+      forwardAgent(suggestionAgentRoute, body, signal),
+    dispatchAgentActivity: (body: Uint8Array, signal: AbortSignal) =>
+      forwardAgent(activityAgentRoute, body, signal),
   };
 }

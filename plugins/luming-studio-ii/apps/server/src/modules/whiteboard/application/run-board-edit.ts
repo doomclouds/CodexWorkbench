@@ -65,9 +65,11 @@ export function runBoardEditInTransaction(
   }
 
   const { signature, ...details } = request;
-  const outcome = writer.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const applied = writer.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const advancedRevision = applied.boardRevision > board.revision;
+  const outcome = advancedRevision ? applied : { ...applied, order: undefined };
   const receipt = { ...identity, outcome };
-  writer.saveEditReceipt(actor.id, { signature, receipt });
+  writer.saveEditReceipt(actor.id, { signature, receipt, advancedRevision });
 
   return receipt;
 }
@@ -84,4 +86,26 @@ export function readBoardEditReceipt(
       ? reader.getEditReceipt(boardId, actor.id, commandId)?.receipt
       : rejected(identity, 'forbidden'),
   );
+}
+
+export function checkBoardEditBeforePreparation(
+  repository: BoardEditRepository,
+  actor: Actor,
+  identity: BoardEditIdentity,
+  signature: string,
+): BoardEditReceipt | undefined {
+  const { boardId, commandId } = identity;
+
+  return repository.read((reader) => {
+    if (!reader.getAccess(boardId, actor.id)?.canEdit) {
+      return rejected(identity, 'forbidden');
+    }
+
+    const stored = reader.getEditReceipt(boardId, actor.id, commandId);
+    if (stored) {
+      return stored.signature === signature ? stored.receipt : rejected(identity, 'commandIdReuse');
+    }
+
+    return undefined;
+  });
 }

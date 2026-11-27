@@ -24,7 +24,7 @@ interface InvitationActions {
   readonly locked: boolean;
   readonly onUpdate: (operation: SharingOperation) => void;
   readonly onConfirm: (confirmation: SharingConfirmation) => void;
-  readonly onCopy: (role: InvitationRole, url?: string) => void;
+  readonly onCopy: (role: InvitationRole, trigger: HTMLButtonElement, url?: string) => void;
 }
 
 const roleIcons = { editor: Pencil, commenter: MessageSquare, viewer: Eye };
@@ -55,14 +55,20 @@ export function GeneralAccess({
               id: choice,
               label: scopeLabels[choice],
               shortcut: choice === scope ? '✓' : undefined,
-              run: () => onUpdate({ kind: 'setScope', scope: choice }),
+              run: () => {
+                if (choice !== scope) {
+                  onUpdate({ kind: 'setScope', scope: choice });
+                }
+              },
             }))}
             disabled={locked}
           >
             {scopeLabels[scope]} <ChevronDown size={14} />
           </SharingMenu>
           <small>
-            {scope === 'local' ? '链接仅在这台电脑上有效' : '同一局域网内拥有链接的人可访问'}
+            {scope === 'local'
+              ? '只有这台电脑能够打开；邀请链接仍可复制。'
+              : '同一局域网中的人可使用邀请链接访问。'}
           </small>
         </span>
       </div>
@@ -75,7 +81,7 @@ function InvitationMenu({ link, actions }: { link: SharingLink; actions: Invitat
   const toggleLabel = enabled ? '停用此链接' : '启用此链接';
   return (
     <SharingMenu
-      label={roleLabels[role] + '邀请链接选项'}
+      label={roleLabels[role] + '链接更多操作'}
       className="board-sharing__button board-sharing__button--icon"
       disabled={actions.locked}
       items={[
@@ -90,8 +96,8 @@ function InvitationMenu({ link, actions }: { link: SharingLink; actions: Invitat
           run: (trigger) =>
             actions.onConfirm({
               title: '重置邀请链接？',
-              description: '旧邀请链接将失效，请将新链接发给需要加入的人。',
-              label: '重置链接',
+              description: '原链接将失效，通过该链接加入的成员需要使用新链接重新加入。',
+              label: '确认重置',
               operation: { kind: 'resetInvitation', role },
               trigger,
             }),
@@ -118,9 +124,9 @@ function InvitationRow({
   const label = canCopy ? '复制' + roleLabels[role] + '链接' : '启用' + roleLabels[role] + '链接';
   const Icon = roleIcons[role];
 
-  function handleInvitationClick() {
+  function handleInvitationClick(trigger: HTMLButtonElement) {
     if (canCopy) {
-      actions.onCopy(role, url);
+      actions.onCopy(role, trigger, url);
     } else {
       actions.onUpdate({ kind: 'setInvitation', role, enabled: true });
     }
@@ -140,7 +146,7 @@ function InvitationRow({
         className="board-sharing__button board-sharing__button--copy"
         aria-label={label}
         disabled={actions.locked || (state.enabled && enabled && !url)}
-        onClick={handleInvitationClick}
+        onClick={(event) => handleInvitationClick(event.currentTarget)}
       >
         {canCopy && <Copy size={14} aria-hidden="true" />}
         {canCopy ? '复制链接' : '启用链接'}
@@ -157,7 +163,7 @@ export function SharingInvitations({
 }: {
   state: BoardSharingState;
   actions: InvitationActions;
-  onCopyMember: (url: string) => void;
+  onCopyMember: (url: string, trigger: HTMLButtonElement) => void;
 }) {
   const owner = state.role === 'owner';
   const defaults = invitationRoles.map((role) => ({ role, enabled: true }));
@@ -168,23 +174,34 @@ export function SharingInvitations({
   return (
     <section className="board-sharing__section">
       <h3>邀请链接</h3>
-      {links.map((link) => (
-        <InvitationRow key={link.role} link={link} state={state} actions={actions} />
-      ))}
-      {memberUrl && !owner ? (
+      <div className="board-sharing__invitation-list">
+        {links.map((link) => (
+          <InvitationRow key={link.role} link={link} state={state} actions={actions} />
+        ))}
+      </div>
+      {!owner && (
+        <p className="board-sharing__muted">
+          打开邀请链接的人会以对应角色加入。所有者可以更改角色或移除访问权限。
+        </p>
+      )}
+      {!owner ? (
         <div className="board-sharing__canonical">
           <p className="board-sharing__muted">只有有权访问的人才能打开这个链接</p>
           <button
             type="button"
             className="board-sharing__button board-sharing__button--copy"
-            disabled={actions.locked}
-            onClick={() => onCopyMember(memberUrl)}
+            disabled={actions.locked || !memberUrl}
+            onClick={(event) => {
+              if (memberUrl) {
+                onCopyMember(memberUrl, event.currentTarget);
+              }
+            }}
           >
             <Copy size={14} aria-hidden="true" /> 复制页面链接
           </button>
         </div>
       ) : null}
-      {state.role === 'owner' && state.scope === 'local' ? (
+      {owner && !state.enabled ? (
         <p className="board-sharing__muted">复制链接仅创建本机邀请，不会自动开启局域网共享。</p>
       ) : null}
     </section>

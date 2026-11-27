@@ -5,7 +5,13 @@ import { zh } from '@blocknote/core/locales';
 import { useCreateBlockNote } from '@blocknote/react';
 import '@blocknote/ariakit/style.css';
 import type { DocumentBlock, DocumentContent, DocumentObjectProps } from './contracts.js';
-import { emptyDocument, flattenBlocks, safeDocumentImage, sameDocument } from './model.js';
+import {
+  emptyDocument,
+  flattenBlocks,
+  isPrivateDocumentAssetSource,
+  safeDocumentImage,
+  sameDocument,
+} from './model.js';
 
 const schema = BlockNoteSchema.create({
   blockSpecs: {
@@ -242,10 +248,13 @@ export default function DocumentEditor(props: DocumentEditorProps) {
     dictionary: zh,
     initialContent: editableBlocks(initial),
     uploadFile: uploadImage
-      ? (file) => assets.current.uploadImage?.(file) ?? Promise.resolve('')
+      ? (file) =>
+          assets.current.uploadImage?.(file) ??
+          Promise.reject(new Error('当前没有上传文档图片的权限。'))
       : undefined,
     async resolveFileUrl(source) {
-      const direct = safeDocumentImage(source);
+      const needsAuthority = assets.current.resolveImage && isPrivateDocumentAssetSource(source);
+      const direct = needsAuthority ? undefined : safeDocumentImage(source);
       if (direct) {
         return direct;
       }

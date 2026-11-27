@@ -123,6 +123,136 @@ function output() {
   return fixture.host.querySelector('output[aria-label="剩余时间"]')?.textContent;
 }
 
+function timerPanel() {
+  return fixture.host.querySelector<HTMLElement>('[role="dialog"][aria-label="共享计时器"]');
+}
+
+async function pressKey(key: string, type = 'keydown') {
+  await act(async () => {
+    fixture.host.ownerDocument.activeElement?.dispatchEvent(
+      new KeyboardEvent(type, { key, bubbles: true, cancelable: true }),
+    );
+  });
+}
+
+test('aligns the popup to the end of the timer button and places its arrow at the button center', async () => {
+  mockTimer();
+  const trigger = findButton('共享计时器');
+  if (!trigger) {
+    throw new Error('Timer trigger is missing');
+  }
+
+  const triggerBounds = vi
+    .spyOn(trigger, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(420, 12, 34, 33));
+  const panelBounds = vi
+    .spyOn(HTMLDivElement.prototype, 'getBoundingClientRect')
+    .mockReturnValue(new DOMRect(0, 0, 268, 88));
+
+  try {
+    await press('共享计时器');
+    const panel = timerPanel();
+    expect(panel?.dataset.placement).toBe('bottom');
+    expect(panel?.style.left).toBe('186px');
+    expect(panel?.style.getPropertyValue('--studio-ui-anchor-offset')).toBe('251px');
+  } finally {
+    panelBounds.mockRestore();
+    triggerBounds.mockRestore();
+  }
+});
+
+test('cancels a timer draft with Escape, moves between fields and saves on arrow keyup', async () => {
+  const room = mockTimer();
+  const configured = { ...idleTimer, version: 1n, durationMs: 359_000, remainingMs: 359_000 };
+  room.changeTimer.mockImplementationOnce(async ({ commandId }) => {
+    room.update({ timer: configured });
+    return { kind: 'applied', commandId, timer: configured };
+  });
+  await press('共享计时器');
+  pasteDuration('3,27');
+  expect(document.activeElement).toBe(durationField('计时秒数'));
+  await pressKey('Escape');
+  expect(timerPanel()).not.toBeNull();
+  expect(durationField('计时分钟').value).toBe('05');
+  expect(room.changeTimer).not.toHaveBeenCalled();
+  await pressKey('ArrowLeft');
+  expect(document.activeElement).toBe(durationField('计时分钟'));
+  await pressKey('.');
+  expect(document.activeElement).toBe(durationField('计时秒数'));
+  await pressKey('ArrowDown');
+  expect(durationField('计时秒数').value).toBe('59');
+  expect(room.changeTimer).not.toHaveBeenCalled();
+  await pressKey('ArrowDown', 'keyup');
+  expect(room.changeTimer.mock.calls[0]?.[0]?.action).toEqual({
+    kind: 'setDuration',
+    durationMs: 359_000,
+  });
+  pasteDuration('00:00');
+  await pressKey('Enter');
+  expect(room.changeTimer).toHaveBeenCalledTimes(1);
+  expect(fixture.host.textContent).toContain('计时时长至少为 1 秒。');
+  expect(durationField('计时分钟').value).toBe('05');
+  await pressKey('Escape');
+  expect(timerPanel()).toBeNull();
+  expect(document.activeElement).toBe(findButton('共享计时器'));
+});
+
+test('nudges idle values only to whole minutes while manual entry can reach 99:59', async () => {
+  const timer = { ...idleTimer, durationMs: 5_939_000, remainingMs: 5_939_000 };
+  const wholeMinute = { ...timer, version: 1n, durationMs: 5_940_000, remainingMs: 5_940_000 };
+  const manual = { ...timer, version: 2n, durationMs: 5_999_000, remainingMs: 5_999_000 };
+  const room = mockTimer({ timer });
+  for (const next of [wholeMinute, manual]) {
+    room.changeTimer.mockImplementationOnce(async ({ commandId }) => {
+      room.update({ timer: next });
+      return { kind: 'applied', commandId, timer: next };
+    });
+  }
+  await press('共享计时器');
+  await press('增加一分钟');
+  expect(findButton('增加一分钟')?.disabled).toBe(true);
+  expect(findButton('减少一分钟')?.disabled).toBe(false);
+  pasteDuration('99:59');
+  await pressKey('Enter');
+  act(() => room.update({ timer: { ...manual, durationMs: 60_000, remainingMs: 60_000 } }));
+  expect(findButton('减少一分钟')?.disabled).toBe(true);
+  expect(room.changeTimer.mock.calls.map(([command]) => command.action)).toEqual([
+    { kind: 'setDuration', durationMs: 5_940_000 },
+    { kind: 'setDuration', durationMs: 5_999_000 },
+  ]);
+});
+
+test.each(['running', 'paused'] as const)(
+  'keeps the timer open and leaves the focused canvas Escape and click alone when %s',
+  async (phase) => {
+    const room = mockTimer();
+    const canvasInput = document.createElement('input');
+    const onCanvasKey = vi.fn();
+    const onCanvasClick = vi.fn();
+    canvasInput.addEventListener('keydown', onCanvasKey);
+    canvasInput.addEventListener('click', onCanvasClick);
+    fixture.host.prepend(canvasInput);
+    canvasInput.focus();
+    const timer = {
+      ...idleTimer,
+      phase,
+      deadlineUnixMs: phase === 'running' ? serverTime + 125_000 : undefined,
+      remainingMs: 125_000,
+    };
+    act(() => room.update({ timer }));
+    act(() => room.advance(0));
+    expect(timerPanel()).not.toBeNull();
+    expect(document.activeElement).toBe(canvasInput);
+    await pressKey('Escape');
+    expect(onCanvasKey).toHaveBeenCalledOnce();
+    act(() => canvasInput.click());
+    expect(onCanvasClick).toHaveBeenCalledOnce();
+    expect(timerPanel()).not.toBeNull();
+    expect(document.activeElement).toBe(canvasInput);
+    expect(room.changeTimer).not.toHaveBeenCalled();
+  },
+);
+
 test('displays an authoritative running deadline and the ended grace period to a viewer', () => {
   const timer: BoardRoomTimer = {
     ...idleTimer,

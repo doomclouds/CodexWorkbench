@@ -6,8 +6,14 @@ interface ContentTarget {
 }
 
 interface ContentReplacement extends ContentTarget {
-  readonly kind: 'document' | 'text';
+  readonly kind: 'document';
   readonly data: JsonObject;
+}
+
+interface TextReplacement extends ContentTarget {
+  readonly kind: 'text';
+  readonly data: JsonObject;
+  readonly deleteEmpty?: boolean;
 }
 
 interface TodoContentOperation extends ContentTarget {
@@ -46,14 +52,22 @@ interface ImageCropOperation extends ContentTarget {
   readonly naturalSize: ImageNaturalSize;
 }
 
+interface LinkContentOperation extends ContentTarget {
+  readonly kind: 'link';
+  readonly title: string;
+  readonly href: string;
+}
+
 export type ContentOperation =
   | ContentReplacement
+  | TextReplacement
   | TodoContentOperation
   | TableContentOperation
   | EmbedSourceOperation
   | EmbedStateOperation
   | StickerContentOperation
-  | ImageCropOperation;
+  | ImageCropOperation
+  | LinkContentOperation;
 
 export interface TableWidthEdit {
   readonly expectedWidth: number;

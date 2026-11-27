@@ -34,6 +34,8 @@ const mcpServerSdk = '@modelcontextprotocol/sdk/server/mcp.js';
 const mcpStdioSdk = '@modelcontextprotocol/sdk/server/stdio.js';
 const mcpAppServerSdk = '@modelcontextprotocol/ext-apps/server';
 const openAiMcpServerSdk = '@openai/mcp-extensions/server';
+const mcpClientSdk = '@modelcontextprotocol/sdk/client/index.js';
+const mcpTestTransport = '@modelcontextprotocol/sdk/inMemory.js';
 const boundaryRule = 'server/contract-boundary';
 
 const fixtureFiles = [
@@ -90,6 +92,7 @@ const fixtureFiles = [
   'src/infrastructure/adapters/board-edit-storage.ts',
   'src/infrastructure/adapters/private.ts',
   'src/infrastructure/platform/index.ts',
+  'src/infrastructure/platform/png-renderer.ts',
   'tests/fixtures/board.ts',
   'tests/support/server.ts',
   'tests/unit/double.ts',
@@ -152,10 +155,17 @@ const permitted = [
     'src/entrypoints/mcp/index.ts',
     `import { BoardCatalogService, BoardSortOrder } from '${catalogProtocol}';`,
   ],
+  ['src/entrypoints/mcp/agent-activity.ts', `import { BoardRoomService } from '${roomsProtocol}';`],
+  [
+    'tests/integration/mcp-agent-activity.test.ts',
+    `import { createStudioMcpServer } from '../../src/entrypoints/mcp/index.js';\nimport { Client } from '${mcpClientSdk}';\nimport { InMemoryTransport } from '${mcpTestTransport}';`,
+  ],
   [
     'src/infrastructure/platform/mcp-runtime.ts',
     "import { spawn } from 'node:child_process';\nimport { createInterface } from 'node:readline';\nimport process from 'node:process';\nimport lockfile from 'proper-lockfile';",
   ],
+  ['src/infrastructure/platform/png-renderer.ts', "import { Resvg } from '@resvg/resvg-wasm';"],
+  ['src/infrastructure/adapters/feedback/content-source.ts', "import { parse } from 'parse5';"],
   [
     'src/entrypoints/mcp/index.ts',
     `import { McpServer } from '${mcpServerSdk}';\nimport { StdioServerTransport } from '${mcpStdioSdk}';`,
@@ -392,6 +402,10 @@ const permitted = [
     `import type { ExportVersionRequest } from '${historyProtocol}';\nimport type { AttachBoardImageRequest } from '${editingProtocol}';`,
   ],
   [
+    'src/entrypoints/http/video-edits.ts',
+    `import type { AttachBoardVideoRequest } from '${editingProtocol}';\nimport type { VideoOperation } from '../../modules/whiteboard/application/index.js';`,
+  ],
+  [
     'tests/unit/feedback.test.ts',
     "import { createThread } from '../../src/modules/feedback/domain/index.js';\nimport type { FeedbackRepository } from '../../src/modules/feedback/ports/index.js';",
   ],
@@ -430,6 +444,31 @@ const rejected = [
     `import { AcceptSuggestionRequestSchema } from '${suggestionsProtocol}';`,
   ],
   [
+    'MCP general entry cannot use the room protocol directly',
+    'src/entrypoints/mcp/index.ts',
+    `import { BoardRoomService } from '${roomsProtocol}';`,
+  ],
+  [
+    'Agent activity adapter cannot use the board edit wire',
+    'src/entrypoints/mcp/agent-activity.ts',
+    `import { BoardEditService } from '${editingProtocol}';`,
+  ],
+  [
+    'the Agent activity test cannot reach private MCP files',
+    'tests/integration/mcp-agent-activity.test.ts',
+    "import { privateTools } from '../../src/entrypoints/mcp/private.js';",
+  ],
+  [
+    'other integration tests cannot reach the MCP server directly',
+    'tests/integration/rooms-http.test.ts',
+    "import { createStudioMcpServer } from '../../src/entrypoints/mcp/index.js';",
+  ],
+  [
+    'the production MCP adapter cannot use the in-memory test transport',
+    'src/entrypoints/mcp/agent-activity.ts',
+    `import { InMemoryTransport } from '${mcpTestTransport}';`,
+  ],
+  [
     'MCP cannot use the board edit wire to apply a proposal directly',
     'src/entrypoints/mcp/thread-suggestions.ts',
     `import { BoardEditService } from '${editingProtocol}';`,
@@ -463,6 +502,16 @@ const rejected = [
     'other platform files cannot create runtime locks',
     'src/infrastructure/platform/mcp-spool.ts',
     "import lockfile from 'proper-lockfile';",
+  ],
+  [
+    'the application cannot import the platform PNG renderer dependency',
+    whiteboard + 'application/export-board.ts',
+    "import { Resvg } from '@resvg/resvg-wasm';",
+  ],
+  [
+    'feedback domain cannot import the HTML content parser',
+    'src/modules/feedback/domain/anchor.ts',
+    "import { parse } from 'parse5';",
   ],
   [
     'MCP entrypoint calls the whiteboard application instead of injected operations',
@@ -804,6 +853,21 @@ const rejected = [
     'crop content domain takes SQLite access',
     whiteboard + 'domain/object-content-edits-crop.ts',
     "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'video content domain reads files directly',
+    whiteboard + 'domain/video-edits.ts',
+    "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'video attachment domain imports its generated wire contract',
+    whiteboard + 'domain/video-edits.ts',
+    `import type { AttachBoardVideoRequest } from '${editingProtocol}';`,
+  ],
+  [
+    'video HTTP bypasses application and accesses asset storage',
+    'src/entrypoints/http/video-edits.ts',
+    "import { applyBoardChanges } from '../../infrastructure/adapters/board-edit-storage.js';",
   ],
   [
     'embed content domain uses a generated codec',

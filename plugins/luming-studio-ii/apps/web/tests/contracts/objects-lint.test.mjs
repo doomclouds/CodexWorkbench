@@ -170,6 +170,11 @@ const accepted = [
   [source + 'index.ts', "import { todoExtension } from './todo/index.js';"],
   [fixture, "import { TodoObject } from '../../../src/ui/domain/objects/todo/index.js';"],
   [source + 'table/TableObject.tsx', "import { RichText } from '../text/index.js';"],
+  [source + 'table/TableObject.tsx', "import { InlineTextLinkEditor } from '../text/index.js';"],
+  [
+    source + 'table/contracts.ts',
+    "import type { InlineTextFormatRequest } from '../text/index.js';",
+  ],
   [
     source + 'todo/canvas-extension.tsx',
     "import type { CanvasObjectExtension, CanvasObjectViewProps } from '../../canvas/index.js';",

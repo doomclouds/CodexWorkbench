@@ -23,6 +23,8 @@ interface FeedbackListProps {
   readonly loadMore: () => void;
   readonly error?: string;
   readonly onRefresh: () => void;
+  readonly suggestionsOutlet?: (element: HTMLDivElement | null) => void;
+  readonly hasVisibleSuggestions?: boolean;
 }
 
 interface FeedbackListEntryProps {
@@ -33,7 +35,12 @@ interface FeedbackListEntryProps {
   readonly onOpen: (thread: FeedbackThread) => void;
 }
 
-const displayTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' });
+const displayTime = new Intl.DateTimeFormat('zh-CN', {
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 function FeedbackListEntry({ thread, draft, expanded, details, onOpen }: FeedbackListEntryProps) {
   const row = useRef<HTMLLIElement>(null);
@@ -109,8 +116,11 @@ export function FeedbackList({
   loadMore,
   error,
   onRefresh,
+  suggestionsOutlet,
+  hasVisibleSuggestions,
 }: FeedbackListProps) {
-  const empty = !pending && !error && threads.length === 0;
+  const ready = !pending && !error;
+  const empty = ready && threads.length === 0 && !hasVisibleSuggestions;
   const filtered = mine || Boolean(authorId);
 
   return (
@@ -151,6 +161,7 @@ export function FeedbackList({
           </label>
         </div>
       </div>
+      {suggestionsOutlet && <div ref={suggestionsOutlet} />}
       {pending && <StatusText message="正在加载备注…" announcement="polite" />}
       {error && (
         <div className="whiteboard-feedback__actions">

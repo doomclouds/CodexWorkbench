@@ -13,7 +13,16 @@ interface FeedbackCommandOptions {
   readonly boardId: string;
   readonly service: BoardFeedbackService;
   readonly createCommandId: () => string;
-  readonly onApplied: (result: AppliedFeedback, operation: FeedbackOperation) => void;
+  readonly onApplied: (
+    result: AppliedFeedback,
+    operation: FeedbackOperation,
+    attach: boolean,
+  ) => void;
+}
+
+interface FeedbackSubmission {
+  readonly command: FeedbackCommand;
+  readonly attach: boolean;
 }
 
 type FeedbackProgress =
@@ -42,12 +51,16 @@ export function useFeedbackCommand({
   onApplied,
 }: FeedbackCommandOptions) {
   const [progress, setProgress] = useState<FeedbackProgress>();
-  const request = useRef<FeedbackCommand | undefined>(undefined);
+  const request = useRef<FeedbackSubmission | undefined>(undefined);
   const active = useRef<AbortController | undefined>(undefined);
 
   useEffect(() => () => active.current?.abort(), []);
 
-  function accept(result: FeedbackReceipt | undefined, command: FeedbackCommand, message: string) {
+  function accept(
+    result: FeedbackReceipt | undefined,
+    submission: FeedbackSubmission,
+    message: string,
+  ) {
     if (!result) {
       setProgress({ kind: 'unknown', message });
       return;
@@ -60,19 +73,20 @@ export function useFeedbackCommand({
     }
 
     setProgress(undefined);
-    onApplied(result, command.operation);
+    onApplied(result, submission.command.operation, submission.attach);
   }
 
   async function checkReceipt(
-    command: FeedbackCommand,
+    submission: FeedbackSubmission,
     controller: AbortController,
     message: string,
   ) {
     const { signal } = controller;
+    const { boardId, commandId } = submission.command;
     try {
-      const result = await service.getReceipt(command.boardId, command.commandId, signal);
+      const result = await service.getReceipt(boardId, commandId, signal);
       signal.throwIfAborted();
-      accept(result, command, message);
+      accept(result, submission, message);
     } catch (error) {
       if (!signal.aborted) {
         setProgress({ kind: 'unknown', message: errorText(error) });
@@ -80,20 +94,20 @@ export function useFeedbackCommand({
     }
   }
 
-  async function send(command: FeedbackCommand, controller: AbortController) {
+  async function send(submission: FeedbackSubmission, controller: AbortController) {
     const { signal } = controller;
     try {
-      const result = await service.apply(command, signal);
+      const result = await service.apply(submission.command, signal);
       signal.throwIfAborted();
-      accept(result, command, '');
+      accept(result, submission, '');
     } catch (error) {
       if (!signal.aborted) {
-        await checkReceipt(command, controller, errorText(error));
+        await checkReceipt(submission, controller, errorText(error));
       }
     }
   }
 
-  function run(command: FeedbackCommand, mode: 'send' | 'lookup') {
+  function run(submission: FeedbackSubmission, mode: 'send' | 'lookup') {
     if (active.current) {
       return;
     }
@@ -103,8 +117,8 @@ export function useFeedbackCommand({
     setProgress({ kind: 'saving' });
     const pending =
       mode === 'send'
-        ? send(command, controller)
-        : checkReceipt(command, controller, '暂无此操作的保存回执。');
+        ? send(submission, controller)
+        : checkReceipt(submission, controller, '暂无此操作的保存回执。');
 
     pending
       .finally(() => {
@@ -119,11 +133,12 @@ export function useFeedbackCommand({
       });
   }
 
-  function submit(operation: FeedbackOperation) {
+  function submit(operation: FeedbackOperation, attach = false) {
     if (!request.current) {
       const command = { boardId, commandId: createCommandId(), operation };
-      request.current = command;
-      run(command, 'send');
+      const submission = { command, attach };
+      request.current = submission;
+      run(submission, 'send');
     }
   }
 

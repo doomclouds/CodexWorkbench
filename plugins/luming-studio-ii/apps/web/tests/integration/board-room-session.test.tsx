@@ -4,6 +4,7 @@ import {
   type BoardRoomClock,
   type BoardRoomContentChange,
   type BoardRoomEvent,
+  type BoardRoomGesturePreview,
   type BoardRoomPresence,
   type BoardRoomService,
   type BoardRoomStreamObserver,
@@ -198,6 +199,42 @@ test('coalesces visible motion, keeps a room lease alive, and leaves at a higher
   expect(room.leaving).toEqual([4n]);
   await room.advance(5000);
   expect(room.updates).toHaveLength(3);
+});
+
+test('coalesces temporary geometry with cursor samples and drops it before reconnect', async () => {
+  const room = createRoomRig();
+  const first = room.stream();
+  first.onEvent(snapshot(0n));
+  await room.advance(0);
+  const geometry = { x: 40, y: 50, width: 200, height: 150, rotation: 0 };
+  const gesture = {
+    kind: 'resize',
+    changes: [{ id: 'note', expectedVersion: 0, geometry }],
+  } as const satisfies BoardRoomGesturePreview;
+  const latest = {
+    ...gesture,
+    changes: [{ id: 'note', expectedVersion: 0, geometry: { ...geometry, width: 250 } }],
+  };
+  room.session.publishPresence({ following: false, gesture });
+  await room.advance(25);
+  room.session.publishPresence({ following: false, cursor: { x: 55, y: 65 }, gesture: latest });
+  await room.advance(25);
+  expect(room.updates.at(-1)?.presence).toMatchObject({
+    cursor: { x: 55, y: 65 },
+    gesture: latest,
+  });
+  await room.advance(399);
+  expect(room.updates).toHaveLength(2);
+  await room.advance(1);
+  expect(room.updates.at(-1)?.presence.gesture).toEqual(latest);
+
+  first.onDisconnect();
+  await room.advance(500);
+  room.stream(1).onEvent(snapshot(0n));
+  await room.advance(0);
+  expect(room.updates.at(-1)?.presence.gesture).toBeUndefined();
+
+  room.close();
 });
 
 test('ignores repeats and reconnects on an event gap with only a changed revision of content', async () => {

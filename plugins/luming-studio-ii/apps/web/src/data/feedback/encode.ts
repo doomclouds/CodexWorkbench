@@ -2,10 +2,32 @@ import type { MessageInitShape } from '@bufbuild/protobuf';
 import type {
   ApplyFeedbackRequestSchema,
   FeedbackAnchorTargetSchema,
+  FeedbackContentPointSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/feedback/service';
-import type { FeedbackCommand, FeedbackOperation, FeedbackTarget } from './contracts.js';
+import type {
+  FeedbackCommand,
+  FeedbackContentUnit,
+  FeedbackOperation,
+  FeedbackTarget,
+} from './contracts.js';
 
 type SentOperation = MessageInitShape<typeof ApplyFeedbackRequestSchema>['operation'];
+
+function encodeContent(
+  unit: FeedbackContentUnit,
+): MessageInitShape<typeof FeedbackContentPointSchema>['content'] {
+  switch (unit.kind) {
+    case 'document':
+      return { case: 'document', value: { blockIds: [...unit.blockIds] } };
+    case 'todo':
+      return { case: 'todoItemId', value: unit.itemId };
+    case 'html':
+      return {
+        case: 'html',
+        value: { nodeIds: [...unit.nodeIds], sourceRevision: unit.sourceRevision },
+      };
+  }
+}
 
 function encodeTarget(target: FeedbackTarget): MessageInitShape<typeof FeedbackAnchorTargetSchema> {
   if (target.kind === 'board') {
@@ -13,6 +35,21 @@ function encodeTarget(target: FeedbackTarget): MessageInitShape<typeof FeedbackA
   }
 
   const { objectId, u, v, geometryVersion } = target;
+  if (target.kind === 'content') {
+    return {
+      target: {
+        case: 'contentPoint',
+        value: {
+          objectId,
+          u,
+          v,
+          geometryVersion,
+          payloadVersion: target.payloadVersion,
+          content: encodeContent(target.content),
+        },
+      },
+    };
+  }
 
   return { target: { case: 'objectPoint', value: { objectId, u, v, geometryVersion } } };
 }

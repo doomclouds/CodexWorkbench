@@ -5,6 +5,7 @@ package luming.studio.v1;
 service BoardCatalogService {
   rpc ListBoards(ListBoardsRequest) returns (ListBoardsResponse);
   rpc ListTrashedBoards(ListTrashedBoardsRequest) returns (ListTrashedBoardsResponse);
+  rpc GetBoardThumbnail(GetBoardThumbnailRequest) returns (GetBoardThumbnailResponse);
   rpc CreateBoard(CreateBoardRequest) returns (CreateBoardResponse);
   rpc DuplicateBoard(DuplicateBoardRequest) returns (DuplicateBoardResponse);
   rpc ManageBoard(ManageBoardRequest) returns (ManageBoardResponse);
@@ -25,6 +26,7 @@ message BoardSummary {
   bool pinned = 4;
   optional uint64 entry_version = 5;
   bool can_manage = 6;
+  optional uint64 preview_revision = 7;
 }
 
 message ListBoardsRequest {
@@ -32,6 +34,7 @@ message ListBoardsRequest {
   BoardSortOrder order = 2;
   uint32 page_size = 3;
   optional string cursor = 4;
+  bool pinned_only = 5;
 }
 
 message ListBoardsResponse {
@@ -54,6 +57,22 @@ message ListTrashedBoardsRequest {
 message ListTrashedBoardsResponse {
   repeated TrashedBoardSummary boards = 1;
   optional string next_cursor = 2;
+}
+
+message GetBoardThumbnailRequest {
+  string board_id = 1;
+  optional uint64 revision = 2;
+  bool trashed = 3;
+}
+
+message GetBoardThumbnailResponse {
+  BoardThumbnail thumbnail = 1;
+}
+
+message BoardThumbnail {
+  optional uint64 revision = 1;
+  string mime_type = 2;
+  bytes content = 3;
 }
 
 message CreateBoardRequest {

@@ -23,9 +23,14 @@ import type {
 import {
   boardRoomClock,
   copyShareLink,
+  createBoardDraftStorage,
   downloadBoardFile,
   prepareBoardImage,
+  prepareBoardVideo,
+  readCanvasClipboard,
+  readDocumentImageFile,
   readHtmlSource,
+  renderBrowserVectorExport,
 } from '../platform/browser/index.js';
 import {
   connectMcpApp,
@@ -169,7 +174,7 @@ function services(bridge: Bridge) {
   const { assets, postProtobuf } = bridge;
   const scene = createWhiteboardService(postProtobuf);
   const edits = createWhiteboardEditService(postProtobuf);
-  const history = createBoardHistoryService(postProtobuf);
+  const history = createBoardHistoryService(postProtobuf, undefined, renderBrowserVectorExport);
 
   function resolvePayloads(payloads: readonly WhiteboardPayloadResult[], signal?: AbortSignal) {
     return Promise.all(payloads.map((item) => resolvePayload(item, assets, signal)));
@@ -193,6 +198,13 @@ function services(bridge: Bridge) {
     },
   };
   const editService: StudioAppProps['editService'] = {
+    async uploadDocumentImage(command, signal) {
+      if (!edits.uploadDocumentImage) {
+        throw new Error('当前白板服务暂未提供文档图片上传。');
+      }
+
+      return edits.uploadDocumentImage(command, signal);
+    },
     async editGeometry(command, signal) {
       return resolveReceipt(await edits.editGeometry(command, signal), signal);
     },
@@ -202,8 +214,22 @@ function services(bridge: Bridge) {
         signal,
       );
     },
+    async reverseEdit(command, signal) {
+      if (!edits.reverseEdit) {
+        throw new Error('当前白板服务暂未提供撤销或重做。');
+      }
+
+      return resolveReceipt(await edits.reverseEdit(command, signal), signal);
+    },
     async attachImage(command, signal) {
       return resolveReceipt(await edits.attachImage(command, signal), signal);
+    },
+    async attachVideo(command, signal) {
+      if (!edits.attachVideo) {
+        throw new Error('当前白板服务暂未提供视频上传。');
+      }
+
+      return resolveReceipt(await edits.attachVideo(command, signal), signal);
     },
     async getReceipt(boardId, commandId, signal) {
       const receipt = await edits.getReceipt(boardId, commandId, signal);
@@ -272,10 +298,18 @@ function mount(bridge: Bridge) {
       archiveImport={createArchiveImportService(bridge.postArchive, postProtobuf)}
       sharingService={createBoardSharingService(postProtobuf)}
       copyShareLink={copyShareLink}
-      exportBoard={createWhiteboardExportService(postProtobuf)}
+      exportBoard={createWhiteboardExportService(postProtobuf, renderBrowserVectorExport)}
       downloadExport={downloadBoardFile}
+      downloadObjectFile={downloadBoardFile}
+      clipboard={{ writeText: copyShareLink, readText: readCanvasClipboard }}
+      localDrafts={{ actorId: 'mcp-owner', storage: createBoardDraftStorage(createMcpCommandId) }}
+      readDocumentAsset={(boardId, source, signal) =>
+        bridge.assets.readImage(boardId, source, signal)
+      }
+      readDocumentImageFile={readDocumentImageFile}
       readHtmlSource={readHtmlSource}
       prepareImage={prepareBoardImage}
+      prepareVideo={prepareBoardVideo}
       createCommandId={createMcpCommandId}
       navigation={navigation}
       preferences={{ ...preferences, ...preferences.read() }}

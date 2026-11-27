@@ -50,7 +50,7 @@ luming-studio-ii/
 pnpm --filter @codexworkbench/luming-studio-ii build:runtime
 ```
 
-构建通过前后端 Lint 和类型检查后，生成 `runtime/server.mjs`、`backend.mjs`、`app.html` 与独立 Web 文件。打包验证从隔离副本通过 stdio 启动插件，检查资源读取、App 请求、归档分块、冻结来源、Agent 建议和人工接受。Agent 可调用目录查询和提交建议，写入真实白板的决议在房主界面完成。
+构建通过前后端 Lint 和类型检查后，生成 `runtime/server.mjs`、`backend.mjs`、`app.html`、`resvg.wasm` 与独立 Web 文件。打包验证从隔离副本通过 stdio 启动插件，检查资源读取、App 请求、归档分块、冻结来源、Agent 建议和人工接受。房主在白板的「备注列表」处理私人建议，也可在参与者菜单看到 Agent 的实际工作范围。
 
 ## 依赖与状态归属
 

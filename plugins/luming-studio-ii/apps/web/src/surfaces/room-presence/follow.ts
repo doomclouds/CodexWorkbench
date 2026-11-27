@@ -43,7 +43,7 @@ export function participantColor(actorId: string) {
     hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
   }
 
-  return participantColors[hash % participantColors.length];
+  return participantColors[hash % participantColors.length] ?? participantColors[0];
 }
 
 export function toRoomViewport(
@@ -90,4 +90,51 @@ export function fitFollowViewport(
 
 export function canFollowParticipant(participant: BoardRoomParticipant) {
   return participant.viewport !== undefined && !participant.following;
+}
+
+export function presenceMembers(
+  participants: readonly BoardRoomParticipant[],
+  localActor: string | undefined,
+) {
+  const members = new Map<string, BoardRoomParticipant>();
+  for (const participant of participants) {
+    const { actorId } = participant;
+    if (actorId === localActor) {
+      continue;
+    }
+
+    const previous = members.get(actorId);
+    const betterViewport =
+      canFollowParticipant(participant) && previous && !canFollowParticipant(previous);
+
+    if (!previous || betterViewport) {
+      members.set(actorId, participant);
+    }
+  }
+
+  return [...members.values()];
+}
+
+export function roomCursors(
+  participants: readonly BoardRoomParticipant[],
+  localActor: string | undefined,
+) {
+  const cursors = new Map<string, BoardRoomParticipant>();
+  for (const participant of participants) {
+    const { actorId, cursor } = participant;
+    if (actorId === localActor || !cursor) {
+      continue;
+    }
+
+    const previous = cursors.get(actorId);
+    if (!previous || participant.expiresAtMillis > previous.expiresAtMillis) {
+      cursors.set(actorId, participant);
+    }
+  }
+
+  return [...cursors.values()];
+}
+
+export function cursorLabelColor(background: string) {
+  return background === participantColors[0] ? '#f5f5f5' : '#111111';
 }

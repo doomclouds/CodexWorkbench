@@ -47,6 +47,7 @@ export function StickerPalette({ selectedId, onSelect, disabled, onUpload }: Sti
         <SearchIcon />
         <SearchField
           label="搜索贴纸"
+          placeholder="搜索贴纸"
           clearLabel="清除贴纸搜索"
           value={search}
           onValueChange={setSearch}

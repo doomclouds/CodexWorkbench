@@ -6,6 +6,8 @@ import {
   type ApplyFeedbackRequest,
   type FeedbackAnchorSchema,
   type FeedbackAnchorTarget,
+  type FeedbackContentPoint,
+  type FeedbackContentPointSchema,
   type FeedbackReceiptSchema,
   type FeedbackThreadSchema,
   type GetFeedbackReceiptResponseSchema,
@@ -14,6 +16,7 @@ import type {
   FeedbackAnchor,
   FeedbackAnchorTarget as AnchorTarget,
   FeedbackApplication,
+  FeedbackContentUnit,
   FeedbackOperation,
   FeedbackReceipt,
   FeedbackRejectionReason as RejectionReason,
@@ -41,6 +44,23 @@ function requireVersion(version: bigint | undefined): bigint {
   return version;
 }
 
+function readContent(content: FeedbackContentPoint['content']): FeedbackContentUnit {
+  switch (content.case) {
+    case 'document':
+      return { kind: 'document', blockIds: content.value.blockIds };
+    case 'todoItemId':
+      return { kind: 'todo', itemId: requireId(content.value) };
+    case 'html':
+      return {
+        kind: 'html',
+        nodeIds: content.value.nodeIds,
+        sourceRevision: requireVersion(content.value.sourceRevision),
+      };
+    case undefined:
+      throw new HttpRequestError(400, 'Feedback content anchor unit is required.');
+  }
+}
+
 function readTarget(anchor: FeedbackAnchorTarget | undefined): AnchorTarget {
   const target = anchor?.target;
   switch (target?.case) {
@@ -58,6 +78,19 @@ function readTarget(anchor: FeedbackAnchorTarget | undefined): AnchorTarget {
         u,
         v,
         geometryVersion: requireVersion(geometryVersion),
+      };
+    }
+    case 'contentPoint': {
+      const { objectId, u, v, geometryVersion, payloadVersion, content } = target.value;
+
+      return {
+        kind: 'content',
+        objectId: requireId(objectId),
+        u,
+        v,
+        geometryVersion: requireVersion(geometryVersion),
+        payloadVersion: requireVersion(payloadVersion),
+        content: readContent(content),
       };
     }
     case undefined:
@@ -113,6 +146,22 @@ function readStatus(status: FeedbackThreadStatus): ThreadStatus | undefined {
   }
 }
 
+function writeContent(
+  unit: FeedbackContentUnit,
+): MessageInitShape<typeof FeedbackContentPointSchema>['content'] {
+  switch (unit.kind) {
+    case 'document':
+      return { case: 'document', value: { blockIds: [...unit.blockIds] } };
+    case 'todo':
+      return { case: 'todoItemId', value: unit.itemId };
+    case 'html':
+      return {
+        case: 'html',
+        value: { nodeIds: [...unit.nodeIds], sourceRevision: unit.sourceRevision },
+      };
+  }
+}
+
 function writeAnchor(anchor: FeedbackAnchor): MessageInitShape<typeof FeedbackAnchorSchema> {
   const { target, ...source } = anchor;
   if (target.kind === 'board') {
@@ -123,6 +172,24 @@ function writeAnchor(anchor: FeedbackAnchor): MessageInitShape<typeof FeedbackAn
   }
 
   const { objectId, u, v, geometryVersion } = target;
+  if (target.kind === 'content') {
+    return {
+      ...source,
+      target: {
+        target: {
+          case: 'contentPoint',
+          value: {
+            objectId,
+            u,
+            v,
+            geometryVersion,
+            payloadVersion: target.payloadVersion,
+            content: writeContent(target.content),
+          },
+        },
+      },
+    };
+  }
 
   return {
     ...source,

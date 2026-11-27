@@ -72,3 +72,16 @@
   flex: 1;
   min-width: 0;
 }
+
+.whiteboard-export__format[data-export-format='zip'] {
+  border-top: 1px solid var(--studio-ui-border, GrayText);
+  border-radius: 0 0 8px 8px;
+}
+
+.whiteboard-export__description {
+  display: block;
+  margin-top: 4px;
+  color: var(--studio-ui-muted, GrayText);
+  font-size: 11px;
+  line-height: 1.5;
+}

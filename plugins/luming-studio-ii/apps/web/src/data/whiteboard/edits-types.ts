@@ -1,10 +1,12 @@
 import type {
   WhiteboardConnection,
+  WhiteboardConnectorHead,
   WhiteboardGeometry,
   WhiteboardMoveTarget,
   WhiteboardObject,
   WhiteboardPayloadResult,
   WhiteboardPoint,
+  WhiteboardPort,
 } from './contracts.js';
 
 export type WhiteboardJson =
@@ -79,11 +81,17 @@ interface WhiteboardStickerContent {
   readonly fallback?: string;
 }
 
+export interface WhiteboardLinkContent {
+  readonly title: string;
+  readonly href: string;
+}
+
 export type WhiteboardInitialPayload =
   | { readonly kind: 'text'; readonly value: WhiteboardTextContent }
   | { readonly kind: 'document'; readonly value: WhiteboardDocumentContent }
   | { readonly kind: 'todo'; readonly value: WhiteboardTodoContent }
   | { readonly kind: 'sticker'; readonly value: WhiteboardStickerContent }
+  | { readonly kind: 'link'; readonly value: Pick<WhiteboardLinkContent, 'href'> }
   | { readonly kind: 'embed'; readonly value: { readonly title: string; readonly html: string } }
   | { readonly kind: 'ink'; readonly points: readonly WhiteboardPoint[] };
 
@@ -94,6 +102,41 @@ export type WhiteboardObjectDraft = Omit<
 
 export type WhiteboardTransformKind = 'resize' | 'rotate' | 'connect';
 export type WhiteboardLayerDirection = 'forward' | 'backward' | 'front' | 'back';
+export type WhiteboardArrangePreset =
+  | 'tidy'
+  | 'left'
+  | 'hcenter'
+  | 'right'
+  | 'top'
+  | 'vcenter'
+  | 'bottom';
+
+export interface WhiteboardStyleTarget {
+  readonly target: WhiteboardMoveTarget;
+  readonly expectedPayloadVersion?: bigint;
+}
+
+export interface WhiteboardStylePatch {
+  readonly fill?: string;
+  readonly stroke?: string;
+  readonly strokeWidth?: number;
+  readonly dashed?: boolean;
+  readonly hollow?: boolean;
+  readonly textColor?: string;
+  readonly fontFamily?: string;
+  readonly fontSize?: number;
+  readonly textAlign?: WhiteboardTextContent['align'];
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly shapeForm?: string;
+  readonly startHead?: WhiteboardConnectorHead;
+  readonly endHead?: WhiteboardConnectorHead;
+}
+
+export interface WhiteboardPasteTarget {
+  readonly sourceObjectId: string;
+  readonly newObjectId: string;
+}
 
 interface WhiteboardTransformTarget {
   readonly target: WhiteboardMoveTarget;
@@ -107,11 +150,19 @@ interface WhiteboardDuplicateTarget {
   readonly newObjectId: string;
 }
 
+interface WhiteboardCreationAttachment {
+  readonly source: WhiteboardMoveTarget;
+  readonly sourcePort: WhiteboardPort;
+  readonly targetPort: WhiteboardPort;
+  readonly connectorId: string;
+}
+
 export type EditBoardGeometryOperation =
   | {
       readonly kind: 'create';
       readonly object: WhiteboardObjectDraft;
       readonly initialPayload?: WhiteboardInitialPayload;
+      readonly attachment?: WhiteboardCreationAttachment;
     }
   | {
       readonly kind: 'transform';
@@ -133,6 +184,35 @@ export type EditBoardGeometryOperation =
   | {
       readonly kind: 'duplicate';
       readonly targets: readonly WhiteboardDuplicateTarget[];
+      readonly delta: WhiteboardPoint;
+    }
+  | {
+      readonly kind: 'group';
+      readonly targets: readonly WhiteboardMoveTarget[];
+      readonly groupId: string;
+    }
+  | { readonly kind: 'ungroup'; readonly targets: readonly WhiteboardMoveTarget[] }
+  | {
+      readonly kind: 'createSection';
+      readonly targets: readonly WhiteboardMoveTarget[];
+      readonly sectionId: string;
+      readonly title?: string;
+    }
+  | {
+      readonly kind: 'arrange';
+      readonly targets: readonly WhiteboardMoveTarget[];
+      readonly preset: WhiteboardArrangePreset;
+    }
+  | {
+      readonly kind: 'style';
+      readonly targets: readonly WhiteboardStyleTarget[];
+      readonly patch: WhiteboardStylePatch;
+    }
+  | {
+      readonly kind: 'paste';
+      readonly sourceBoardId: string;
+      readonly sourceRevision: bigint;
+      readonly targets: readonly WhiteboardPasteTarget[];
       readonly delta: WhiteboardPoint;
     };
 
@@ -188,7 +268,7 @@ interface WhiteboardImageCropEdit {
 export type EditObjectContentOperation =
   | { readonly kind: 'document'; readonly value: WhiteboardDocumentContent }
   | { readonly kind: 'todo'; readonly value: readonly WhiteboardTodoChange[] }
-  | { readonly kind: 'text'; readonly value: WhiteboardTextContent }
+  | { readonly kind: 'text'; readonly value: WhiteboardTextContent; readonly deleteEmpty?: boolean }
   | {
       readonly kind: 'table';
       readonly value: WhiteboardTableContent;
@@ -197,6 +277,7 @@ export type EditObjectContentOperation =
   | { readonly kind: 'embedSource'; readonly value: WhiteboardEmbedSourceEdit }
   | { readonly kind: 'embedState'; readonly value: WhiteboardJson }
   | { readonly kind: 'sticker'; readonly value: WhiteboardStickerSelection }
+  | { readonly kind: 'link'; readonly value: WhiteboardLinkContent }
   | { readonly kind: 'crop'; readonly value: WhiteboardImageCropEdit };
 
 export interface EditObjectContentCommand extends BoardEditIdentity {
@@ -212,6 +293,22 @@ export interface AttachBoardImageCommand extends BoardEditIdentity {
   readonly content: Uint8Array;
 }
 
+export type BoardVideoType = 'video/mp4' | 'video/webm' | 'video/quicktime';
+
+export interface AttachBoardVideoCommand extends AttachBoardImageCommand {
+  readonly mediaType: BoardVideoType;
+}
+
+export interface UploadBoardDocumentImageCommand extends BoardEditIdentity {
+  readonly objectId: string;
+  readonly content: Uint8Array;
+}
+
+export interface UploadBoardDocumentImageResult {
+  readonly receipt: BoardEditReceipt;
+  readonly assetUrl?: string;
+}
+
 export type BoardEditRejection =
   | 'forbidden'
   | 'invalidEdit'
@@ -222,6 +319,7 @@ export type BoardEditRejection =
   | 'versionUnavailable'
   | 'tooLarge'
   | 'invalidImage'
+  | 'invalidVideo'
   | 'unknown';
 
 interface BoardEditApplied extends BoardEditIdentity {
@@ -248,10 +346,20 @@ interface BoardEditRejected extends BoardEditIdentity {
 
 export type BoardEditReceipt = BoardEditApplied | BoardEditConflict | BoardEditRejected;
 
+export interface ReverseBoardEditCommand extends BoardEditIdentity {
+  readonly source: { readonly kind: 'edit' | 'move'; readonly commandId: string };
+}
+
 export interface WhiteboardEditService {
   editGeometry(command: EditBoardGeometryCommand, signal?: AbortSignal): Promise<BoardEditReceipt>;
   editContent(command: EditObjectContentCommand, signal?: AbortSignal): Promise<BoardEditReceipt>;
   attachImage(command: AttachBoardImageCommand, signal?: AbortSignal): Promise<BoardEditReceipt>;
+  attachVideo?(command: AttachBoardVideoCommand, signal?: AbortSignal): Promise<BoardEditReceipt>;
+  uploadDocumentImage?(
+    command: UploadBoardDocumentImageCommand,
+    signal?: AbortSignal,
+  ): Promise<UploadBoardDocumentImageResult>;
+  reverseEdit?(command: ReverseBoardEditCommand, signal?: AbortSignal): Promise<BoardEditReceipt>;
   getReceipt(
     boardId: string,
     commandId: string,

@@ -8,14 +8,22 @@ import {
   type CanvasProps,
   type CanvasViewport,
 } from '../../ui/domain/canvas/index.js';
-import { BoardHeader, BoardSelectionViewing, BoardToolbar, type BoardTool } from './BoardChrome.js';
+import {
+  BoardDocumentChrome,
+  BoardHeader,
+  BoardSelectionViewing,
+  BoardToolbar,
+  type BoardTool,
+} from './BoardChrome.js';
 import { MoveNotice, MoveStatus } from './MoveFeedback.js';
 import type {
   BoardFeedbackFrame,
   BoardExportContext,
   BoardHistoryFrame,
   BoardMediaAction,
+  BoardMediaUpload,
   BoardSuggestionFrame,
+  BoardSuggestionListFrame,
   WhiteboardEditorFeatures,
 } from './board-features.js';
 import {
@@ -24,6 +32,7 @@ import {
   GeometrySelectionObjectControls,
   GeometryStatus,
 } from './geometry-controls.js';
+import type { GeometryActionContext } from './GeometryBoardMenu.js';
 import type { useGeometryEdits } from './geometry-session.js';
 import type { useMoveSession } from './move-session.js';
 import type { useContentEdits } from './use-content-edits.js';
@@ -51,7 +60,8 @@ export function WorkspaceCanvas({ viewOnly, annotating, input }: WorkspaceCanvas
       selection={viewOnly ? [] : input.selection}
       tool={viewOnly ? 'select' : input.tool}
       pendingEdits={viewOnly ? undefined : input.pendingEdits}
-      onSelectionChange={viewOnly ? ignoreSelection : input.onSelectionChange}
+      onSelectionChange={viewOnly || annotating ? ignoreSelection : input.onSelectionChange}
+      canEdit={input.canEdit && !annotating}
       selectionActions={annotating ? undefined : input.selectionActions}
       onContextMenu={viewOnly || annotating ? undefined : input.onContextMenu}
     />
@@ -69,6 +79,10 @@ interface WorkspaceSelectionBarProps {
   readonly onOpenMore: BoardAnchorAction;
   readonly onSelectAll: () => void;
   readonly onAnnotate?: () => void;
+  readonly onRenameSection?: GeometryActionContext['onRenameSection'];
+  readonly clipboard?: GeometryActionContext['clipboard'];
+  readonly textStyleById?: Parameters<typeof GeometrySelectionObjectControls>[0]['textStyleById'];
+  readonly onFormatObject?: Parameters<typeof GeometrySelectionObjectControls>[0]['onFormatObject'];
 }
 
 export function WorkspaceSelectionBar({
@@ -82,6 +96,10 @@ export function WorkspaceSelectionBar({
   onOpenMore,
   onSelectAll,
   onAnnotate,
+  onRenameSection,
+  clipboard,
+  textStyleById,
+  onFormatObject,
 }: WorkspaceSelectionBarProps) {
   return (
     <>
@@ -93,6 +111,8 @@ export function WorkspaceSelectionBar({
             canEdit={canEdit}
             onEditObject={onEditObject}
             onAction={onAction}
+            textStyleById={textStyleById}
+            onFormatObject={onFormatObject}
           />
           <GeometrySelectionActions
             selection={selection}
@@ -102,6 +122,8 @@ export function WorkspaceSelectionBar({
             moreOpen={moreOpen}
             onSelectAll={onSelectAll}
             onAnnotate={onAnnotate}
+            onRenameSection={onRenameSection}
+            clipboard={clipboard}
           />
         </>
       )}
@@ -112,6 +134,7 @@ export function WorkspaceSelectionBar({
 interface WorkspaceHeaderProps {
   readonly title: string;
   readonly watching: boolean;
+  readonly documentReading: boolean;
   readonly historyPreview: boolean;
   readonly historyOpen: boolean;
   readonly feedbackOpen: boolean;
@@ -179,6 +202,7 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
   const {
     title,
     watching,
+    documentReading,
     historyPreview,
     historyOpen,
     feedbackOpen,
@@ -196,6 +220,18 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
     onToggleFeedback,
     onToggleAnnotation,
   } = props;
+
+  if (documentReading) {
+    return (
+      <BoardDocumentChrome
+        onToggleFeedback={onToggleFeedback}
+        feedbackOpen={feedbackOpen}
+        annotationActive={annotationActive}
+        unresolvedFeedback={unresolvedFeedback}
+        onToggleAnnotation={onToggleAnnotation}
+      />
+    );
+  }
 
   return (
     <div hidden={watching}>
@@ -248,6 +284,9 @@ interface WorkspaceToolbarProps {
   readonly penColor: string;
   readonly onPenColorChange: (color: string) => void;
   readonly onAddHtml?: () => void;
+  readonly onAddLink?: () => void;
+  readonly placementPoint: () => { readonly x: number; readonly y: number } | undefined;
+  readonly onUploadReady: (upload: BoardMediaUpload | undefined) => void;
 }
 
 export function WorkspaceToolbar({
@@ -266,6 +305,9 @@ export function WorkspaceToolbar({
   penColor,
   onPenColorChange,
   onAddHtml,
+  onAddLink,
+  placementPoint,
+  onUploadReady,
 }: WorkspaceToolbarProps) {
   if (!visible && !renderMedia) {
     return null;
@@ -283,6 +325,7 @@ export function WorkspaceToolbar({
         penColor={penColor}
         onPenColorChange={onPenColorChange}
         onAddHtml={onAddHtml}
+        onAddLink={onAddLink}
       />
     );
   }
@@ -293,6 +336,8 @@ export function WorkspaceToolbar({
         canEdit: canInsertImage,
         paused: mediaPaused || !visible,
         viewport,
+        placementPoint,
+        onUploadReady,
         renderTools,
         onApplied: (receipt) =>
           onApplied(
@@ -317,11 +362,29 @@ export function WorkspacePanels({
   history,
   suggestions,
 }: WorkspacePanelsProps) {
+  const { renderFeedback, renderHistory, renderSuggestions } = features;
+  if (!renderFeedback) {
+    return (
+      <>
+        {renderHistory?.(history)}
+        {renderSuggestions?.(suggestions)}
+      </>
+    );
+  }
+
+  const inline =
+    renderSuggestions &&
+    ((frame: BoardSuggestionListFrame) =>
+      renderSuggestions({
+        ...suggestions,
+        anchor: null,
+        inline: { ...frame, previewHost: suggestions.previewHost ?? null },
+      }));
+
   return (
     <>
-      {features.renderFeedback?.(feedback)}
-      {features.renderHistory?.(history)}
-      {features.renderSuggestions?.(suggestions)}
+      {renderFeedback({ ...feedback, renderSuggestions: inline })}
+      {renderHistory?.(history)}
     </>
   );
 }

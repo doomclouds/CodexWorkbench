@@ -1,5 +1,10 @@
 import type { BoardRoomSession } from '../../data/rooms/index.js';
-import { participantColor, participantKey, type RoomPresenceViewport } from './follow.js';
+import {
+  cursorLabelColor,
+  participantColor,
+  roomCursors,
+  type RoomPresenceViewport,
+} from './follow.js';
 import { useRoomCursorSnapshot } from './room-snapshot.js';
 
 interface PeerCursorOverlayProps {
@@ -8,13 +13,13 @@ interface PeerCursorOverlayProps {
 }
 
 export function PeerCursorOverlay({ session, viewport }: PeerCursorOverlayProps) {
-  const { participants, actorId: localActor, viewId: localView } = useRoomCursorSnapshot(session);
+  const { participants, actorId } = useRoomCursorSnapshot(session);
+  const cursors = roomCursors(participants, actorId);
   return (
     <div className="room-presence-cursors" aria-hidden="true">
-      {participants.map((participant) => {
+      {cursors.map((participant) => {
         const { cursor, actorId, displayName } = participant;
-        const ownPointer = actorId === localActor && participant.viewId === localView;
-        if (!cursor || ownPointer) {
+        if (!cursor) {
           return null;
         }
 
@@ -28,15 +33,13 @@ export function PeerCursorOverlay({ session, viewport }: PeerCursorOverlayProps)
 
         const color = participantColor(actorId);
         return (
-          <div
-            key={participantKey(participant)}
-            className="room-presence-cursor"
-            style={{ left: x, top: y }}
-          >
-            <svg width="16" height="20" viewBox="0 0 16 20" fill={color}>
-              <path d="M1 1v15l4-4 3 7 3-1-3-7h6L1 1Z" stroke="white" strokeLinejoin="round" />
+          <div key={actorId} className="room-presence-cursor" style={{ left: x, top: y }}>
+            <svg width="18" height="23" viewBox="0 0 18 23" aria-hidden="true">
+              <path d="M2 1 16 14 10 15 7 21 2 1Z" fill={color} stroke="#fff" strokeWidth="1.4" />
             </svg>
-            <span style={{ backgroundColor: color }}>{displayName}</span>
+            <span style={{ backgroundColor: color, color: cursorLabelColor(color) }}>
+              {displayName}
+            </span>
           </div>
         );
       })}

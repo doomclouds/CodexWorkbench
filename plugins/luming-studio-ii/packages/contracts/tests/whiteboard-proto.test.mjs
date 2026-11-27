@@ -105,6 +105,7 @@ test('declares typed unary methods for every Studio workflow', () => {
       [
         'ListBoards',
         'ListTrashedBoards',
+        'GetBoardThumbnail',
         'CreateBoard',
         'DuplicateBoard',
         'ManageBoard',
@@ -114,7 +115,15 @@ test('declares typed unary methods for every Studio workflow', () => {
     ],
     [
       'BoardEditService',
-      ['EditBoardGeometry', 'EditObjectContent', 'AttachBoardImage', 'GetBoardEditReceipt'],
+      [
+        'EditBoardGeometry',
+        'EditObjectContent',
+        'AttachBoardImage',
+        'AttachBoardVideo',
+        'UploadBoardDocumentImage',
+        'ReverseBoardEdit',
+        'GetBoardEditReceipt',
+      ],
     ],
     [
       'BoardHistoryService',
@@ -134,6 +143,7 @@ test('declares typed unary methods for every Studio workflow', () => {
         'LeaveBoardPresence',
         'ChangeBoardTimer',
         'GetBoardTimerReceipt',
+        'ChangeAgentActivity',
       ],
     ],
     [
@@ -241,6 +251,55 @@ test('preserves suggestion source references and existing typed edit operations'
   });
 });
 
+test('preserves the ordered operations of one suggestion and simultaneous active option IDs', () => {
+  assertRoundTrip('SubmitBoardSuggestionRequest', {
+    boardId,
+    commandId,
+    sourceId: 'selection-1',
+    observation: '保留顺序和对象版本。',
+    options: [
+      {
+        optionId: 'multi',
+        label: '缩放并改正文',
+        operations: [
+          {
+            geometry: {
+              transform: {
+                kind: 'BOARD_TRANSFORM_KIND_RESIZE',
+                objects: [
+                  {
+                    target: { objectId: 'text-1', expectedGeometryVersion: '0' },
+                    geometry: { width: 500, height: 300 },
+                  },
+                ],
+              },
+            },
+          },
+          {
+            content: {
+              objectId: 'text-1',
+              expectedPayloadVersion: '0',
+              text: { text: '修改后的正文' },
+            },
+          },
+        ],
+      },
+    ],
+  });
+  assertRoundTrip('ListBoardSuggestionsResponse', {
+    proposals: [
+      {
+        proposalId: 'proposal-1',
+        sourceId: 'selection-1',
+        observation: '同时显示有效方案。',
+        proposalVersion: '2',
+        expiresAtMillis: '123',
+        activeOptionIds: ['multi', 'detail'],
+      },
+    ],
+  });
+});
+
 test('preserves native content commands and independent table width checks', () => {
   const common = { boardId, commandId, objectId: 'native-object', expectedPayloadVersion: '0' };
   assertRoundTrip('EditObjectContentRequest', {
@@ -302,6 +361,26 @@ test('uses the existing embedded payload on a geometry creation command', () => 
   });
 });
 
+test('preserves the source version and the two ports for an atomic adjacent shape creation', () => {
+  assertRoundTrip('EditBoardGeometryRequest', {
+    boardId,
+    commandId,
+    create: {
+      object: {
+        objectId: 'adjacent-shape',
+        kind: 'shape',
+        geometry: { x: 200, y: 30, width: 144, height: 100 },
+      },
+      attachment: {
+        source: { objectId, expectedGeometryVersion: '0' },
+        sourcePort: 'CONNECTOR_PORT_RIGHT',
+        targetPort: 'CONNECTOR_PORT_LEFT',
+        connectorId: 'adjacent-arrow',
+      },
+    },
+  });
+});
+
 test('keeps the applied editing receipt when optional historical details expire', () => {
   assertRoundTrip('GetBoardEditReceiptResponse', {
     receipt: {
@@ -314,6 +393,34 @@ test('keeps the applied editing receipt when optional historical details expire'
 
 test('preserves the source board and command identity when duplicating', () => {
   assertRoundTrip('DuplicateBoardRequest', { commandId, sourceBoardId: boardId });
+});
+
+test('preserves the pin filter and explicitly requested preview revision zero', () => {
+  assertRoundTrip('ListBoardsRequest', { query: 'Architecture', pageSize: 10, pinnedOnly: true });
+  assertRoundTrip('GetBoardThumbnailRequest', { boardId, revision: '0', trashed: true });
+});
+
+test('preserves a document image command without canvas geometry', () => {
+  assertRoundTrip('UploadBoardDocumentImageRequest', { boardId, commandId, objectId, content: 'AQID' });
+});
+
+test('binds the rich PNG render plan and ZIP request to one saved revision', () => {
+  assertRoundTrip('ExportBoardRequest', {
+    boardId,
+    expectedRevision: boardRevision,
+    whole: {},
+    format: 'BOARD_EXPORT_FORMAT_ZIP',
+  });
+  const plan = {
+    filename: '布局.png',
+    revision: boardRevision,
+    width: 320.5,
+    height: 480,
+    svgTemplate: '<svg/>',
+    regions: [{ index: 2, html: '<p>原稿</p>', width: 240, height: 160 }],
+  };
+  assertRoundTrip('ExportBoardResponse', { browserPng: plan });
+  assertRoundTrip('ExportBoardVersionResponse', { browserPng: plan });
 });
 
 test('preserves confirmed import outcomes and distinguishes missing archive receipts', () => {

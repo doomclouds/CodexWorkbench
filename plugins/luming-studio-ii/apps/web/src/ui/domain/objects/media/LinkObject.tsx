@@ -7,8 +7,11 @@ export function safeHttpLink(value: string | undefined): string | undefined {
   }
 
   const url = URL.parse(value);
+  if (!url || url.username || url.password) {
+    return undefined;
+  }
 
-  return url?.protocol === 'https:' || url?.protocol === 'http:' ? url.href : undefined;
+  return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined;
 }
 
 export function ExternalLinkIcon({ size = 17 }: { readonly size?: number }) {
@@ -29,11 +32,17 @@ export function ExternalLinkIcon({ size = 17 }: { readonly size?: number }) {
   );
 }
 
-export function LinkObject({ label = '链接', href, interactive = true }: LinkObjectProps) {
+export function LinkObject({
+  label,
+  href,
+  interactive = true,
+  showDetails = true,
+}: LinkObjectProps) {
   const url = safeHttpLink(href);
+  const title = label || '链接';
 
   return (
-    <div className="luming-media-link">
+    <div className="luming-media-link" title={showDetails ? undefined : title}>
       <svg
         width="22"
         height="22"
@@ -46,17 +55,20 @@ export function LinkObject({ label = '链接', href, interactive = true }: LinkO
       >
         <path d="m10 13 4-4m-6 7-1 1a3.5 3.5 0 1 1-5-5l4-4a3.5 3.5 0 0 1 5 0m2 7a3.5 3.5 0 0 0 5 0l4-4a3.5 3.5 0 1 0-5-5l-1 1" />
       </svg>
-      <div className="luming-media-link__content">
-        <strong>{label}</strong>
-        {href && <span>{href}</span>}
-      </div>
-      {url && interactive && (
+      {showDetails && (
+        <div className="luming-media-link__content">
+          <strong>{title}</strong>
+          {href && <span>{href}</span>}
+        </div>
+      )}
+      {showDetails && url && interactive && (
         <a
           className="luming-media-link__target"
           aria-label="打开链接"
           href={url}
           target="_blank"
           rel="noopener noreferrer"
+          data-canvas-native=""
         >
           <ExternalLinkIcon />
         </a>

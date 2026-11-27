@@ -8,6 +8,7 @@ import type {
   TableObjectValue,
 } from './contracts.js';
 import { readTable, type TableModel } from './table-model.js';
+import { tableBodyPaint, tableHeaderPaint } from './table-paint.js';
 import { TableObject } from './TableObject.js';
 
 function isCellValue(value: unknown) {
@@ -128,6 +129,7 @@ function TableCanvasView({
   locked,
   zoom,
   editRequest,
+  formatRequest,
   content,
   onRetentionChange,
   request,
@@ -142,6 +144,7 @@ function TableCanvasView({
     () => projected && { ...projected, width: geometry.width },
     [geometry.width, projected],
   );
+  const headerPaint = useMemo(() => tableHeaderPaint(object.fill), [object.fill]);
 
   if (!value) {
     return content;
@@ -179,12 +182,10 @@ function TableCanvasView({
       detail={tableDetail(geometry, zoom)}
       frameHeight={geometry.height}
       zoom={zoom}
-      bodyPaint={{
-        background: 'var(--studio-ui-canvas, Canvas)',
-        color: 'var(--studio-ui-canvas-ink, CanvasText)',
-      }}
-      headerPaint={{ background: object.fill ?? '#eff0f1', color: '#2d3142' }}
+      bodyPaint={tableBodyPaint}
+      headerPaint={headerPaint}
       editRequest={editRequest}
+      formatRequest={formatRequest}
       onSave={handleSave}
       onActivityChange={handleActivityChange}
     />
@@ -193,7 +194,14 @@ function TableCanvasView({
 
 export const tableExtension: CanvasObjectExtension = {
   kind: 'table',
-  capabilities: { content: 'native', move: true, resize: true, rotate: false, connect: true },
+  capabilities: {
+    content: 'native',
+    move: true,
+    resize: true,
+    rotate: false,
+    connect: true,
+    inlineFormats: ['bold', 'italic', 'link', 'bullets', 'numbered'],
+  },
   placement: { kind: 'table', label: '表格', width: 480, height: 180, fill: '#ffffff' },
   View: TableCanvasView,
 };

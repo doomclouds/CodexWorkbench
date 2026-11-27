@@ -211,9 +211,23 @@ it('renders a named non-modal layer inline and leaves open state controlled', ()
   expect(findPopover()).toBeNull();
 });
 
-it('suppresses outside presses only when persistent', () => {
+it('ignores outside presses and passes outside Escape through when persistent', () => {
   const onRequestClose = renderPopover({ persistent: true });
   pressOutside();
+  expect(onRequestClose).not.toHaveBeenCalled();
+
+  const receiveEscape = vi.fn();
+  anchor.addEventListener('keydown', receiveEscape, { once: true });
+  const outsideEscape = new KeyboardEvent('keydown', {
+    key: 'Escape',
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    anchor.dispatchEvent(outsideEscape);
+  });
+  expect(receiveEscape).toHaveBeenCalledExactlyOnceWith(outsideEscape);
+  expect(outsideEscape.defaultPrevented).toBe(false);
   expect(onRequestClose).not.toHaveBeenCalled();
 
   pressEscape();

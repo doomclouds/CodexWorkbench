@@ -9,6 +9,7 @@ import {
 import type { WhiteboardPayloadResult, WhiteboardPost, WhiteboardScene } from './contracts.js';
 import type { BoardEditReceipt } from './edits-types.js';
 import {
+  readBrowserVectorFile,
   readExportFile,
   readExportRejection,
   wireFormats,
@@ -17,6 +18,7 @@ import {
   type ExportBoardFormat,
   type ExportBoardRejection,
   type ExportBoardScope,
+  type RenderBrowserVectorExport,
 } from './export.js';
 import { readBoardEditReceipt } from './protocol/edit-receipt.js';
 import { request } from './protocol/index.js';
@@ -54,7 +56,7 @@ export interface ExportBoardVersionCommand {
   readonly boardId: string;
   readonly revision: bigint;
   readonly scope: ExportBoardScope;
-  readonly format: ExportBoardFormat;
+  readonly format: Exclude<ExportBoardFormat, 'zip'>;
 }
 
 export type BoardHistoryExportResult =
@@ -154,13 +156,20 @@ function readHistoryPage(
   return { currentRevision, versions, nextBeforeRevision };
 }
 
-function readVersionExport(
+async function readVersionExport(
   { result }: ExportBoardVersionResponse,
   { format, revision }: ExportBoardVersionCommand,
-): BoardHistoryExportResult {
+  render: RenderBrowserVectorExport | undefined,
+  signal?: AbortSignal,
+): Promise<BoardHistoryExportResult> {
   switch (result.case) {
     case 'file':
       return { kind: 'file', file: readExportFile(result.value, revision, format) };
+    case 'browserPng':
+      return {
+        kind: 'file',
+        file: await readBrowserVectorFile(result.value, revision, format, render, signal),
+      };
     case 'rejected':
       return { kind: 'rejected', reason: readExportRejection(result.value.reason) };
     case 'unavailable':
@@ -173,6 +182,7 @@ function readVersionExport(
 export function createBoardHistoryService(
   post: WhiteboardPost,
   resolveArchiveAsset: (source: string) => string = (source) => source,
+  render?: RenderBrowserVectorExport,
 ): BoardHistoryService {
   const methods = wireService.method;
 
@@ -264,7 +274,7 @@ export function createBoardHistoryService(
         signal,
       );
 
-      return readVersionExport(response, command);
+      return readVersionExport(response, command, render, signal);
     },
   };
 }

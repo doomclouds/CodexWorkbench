@@ -6,15 +6,20 @@ import type {
   FeedbackThreadStatus,
 } from '../../../modules/feedback/ports/index.js';
 import type { SqliteConnection, SqliteRow } from '../../platform/index.js';
+import { decodeFeedbackContentUnit, encodeFeedbackContentUnit } from './content-source.js';
 import { insertMessage, messageColumns, readMessage } from './messages.js';
 import { readFinite, readText, readUnsigned } from './stored-values.js';
 
 const selectThreads = `
-  SELECT t.*, ${messageColumns}, live.object_id AS live_object_id
+  SELECT t.*, ${messageColumns}, live.object_id AS live_object_id,
+         content.payload_version AS content_payload_version,
+         content.unit_json AS content_unit_json, content.frozen_excerpt AS frozen_excerpt
   FROM feedback_threads AS t
   JOIN feedback_messages AS m
     ON m.board_id = t.board_id AND m.thread_id = t.thread_id AND m.position = 0
   LEFT JOIN board_objects AS live ON live.board_id = t.board_id AND live.object_id = t.object_id
+  LEFT JOIN feedback_content_anchors AS content
+    ON content.board_id = t.board_id AND content.thread_id = t.thread_id
 `;
 
 function readStatus(value: unknown): FeedbackThreadStatus {
@@ -53,17 +58,29 @@ function readAnchor(row: SqliteRow): FeedbackAnchor {
     };
   }
 
+  const point = {
+    objectId: readText(row.object_id, 'object_id'),
+    u: readFinite(row.object_u, 'object_u'),
+    v: readFinite(row.object_v, 'object_v'),
+    geometryVersion: readUnsigned(row.object_geometry_version, 'object_geometry_version'),
+  };
+  const target: FeedbackAnchor['target'] =
+    row.content_payload_version === null
+      ? { ...point, kind: 'object' }
+      : {
+          ...point,
+          kind: 'content',
+          payloadVersion: readUnsigned(row.content_payload_version, 'content_payload_version'),
+          content: decodeFeedbackContentUnit(row.content_unit_json),
+        };
+
   return {
-    target: {
-      kind: 'object',
-      objectId: readText(row.object_id, 'object_id'),
-      u: readFinite(row.object_u, 'object_u'),
-      v: readFinite(row.object_v, 'object_v'),
-      geometryVersion: readUnsigned(row.object_geometry_version, 'object_geometry_version'),
-    },
+    target,
     sourceBoardRevision,
     frozenPoint,
     frozenObject: readFrozenObject(row),
+    frozenExcerpt:
+      row.frozen_excerpt === null ? undefined : readText(row.frozen_excerpt, 'frozen_excerpt'),
     targetMissing: row.live_object_id === null,
   };
 }
@@ -181,6 +198,20 @@ export function insertThread(
       replyCount,
     );
   insertMessage(connection, boardId, threadId, 0, thread.first);
+  if (anchor.target.kind === 'content') {
+    connection
+      .prepare(`
+      INSERT INTO feedback_content_anchors (board_id, thread_id, payload_version, unit_json, frozen_excerpt)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+      .run(
+        boardId,
+        threadId,
+        anchor.target.payloadVersion,
+        encodeFeedbackContentUnit(anchor.target.content),
+        anchor.frozenExcerpt ?? null,
+      );
+  }
 }
 
 export function updateThread(

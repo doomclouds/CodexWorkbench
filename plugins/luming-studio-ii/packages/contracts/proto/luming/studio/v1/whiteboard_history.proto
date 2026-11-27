@@ -97,5 +97,6 @@ message ExportBoardVersionResponse {
     ExportBoardFile file = 1;
     ExportBoardRejected rejected = 2;
     bool unavailable = 3;
+    ExportBoardBrowserPng browser_png = 4;
   }
 }

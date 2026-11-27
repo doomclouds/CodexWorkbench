@@ -6,6 +6,13 @@ import type {
   SuggestionService,
 } from '../../data/suggestions/index.js';
 
+interface InlineBoardSuggestions {
+  readonly outlet: HTMLElement | null;
+  readonly previewHost: HTMLElement | null;
+  readonly showCards: boolean;
+  readonly onCardsVisibleChange: (visible: boolean) => void;
+}
+
 export interface BoardSuggestionsSurfaceProps {
   readonly anchor: HTMLElement | null;
   readonly boardId: string;
@@ -21,6 +28,7 @@ export interface BoardSuggestionsSurfaceProps {
   readonly feedbackThreadId?: string;
   readonly onAttachSource?: (reference: AttachedReviewSource) => void | Promise<void>;
   readonly attachmentMode?: 'context' | 'copy';
+  readonly inline?: InlineBoardSuggestions;
 }
 
 export interface SuggestionNotice {

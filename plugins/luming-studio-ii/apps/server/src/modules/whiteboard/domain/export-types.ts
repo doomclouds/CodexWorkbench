@@ -10,7 +10,15 @@ export interface ExportBoardCommand {
   readonly boardId: string;
   readonly expectedRevision: bigint;
   readonly scope: BoardExportScope;
-  readonly format: 'json' | 'svg';
+  readonly format: 'json' | 'svg' | 'html';
+}
+
+export interface ExportRenderCommand extends Omit<ExportBoardCommand, 'format'> {
+  readonly format: ExportBoardCommand['format'] | 'png';
+}
+
+export interface ExportBoardFileCommand extends Omit<ExportRenderCommand, 'format'> {
+  readonly format: ExportRenderCommand['format'] | 'zip';
 }
 
 export type BoardExportRejectionReason =
@@ -37,7 +45,28 @@ export interface BoardExportFile {
   readonly content: Uint8Array;
 }
 
-export type ExportBoardResult = BoardExportFile | BoardExportStale | BoardExportRejection;
+export interface BoardExportPngRegion {
+  readonly index: number;
+  readonly html: string;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface BoardExportBrowserPng {
+  readonly kind: 'browserPng';
+  readonly filename: string;
+  readonly revision: bigint;
+  readonly width: number;
+  readonly height: number;
+  readonly svgTemplate: string;
+  readonly regions: readonly BoardExportPngRegion[];
+}
+
+export type ExportBoardResult =
+  | BoardExportFile
+  | BoardExportStale
+  | BoardExportRejection
+  | BoardExportBrowserPng;
 
 export interface BoardExportAsset {
   readonly mimeType: string;
@@ -50,5 +79,25 @@ export interface BoardExportSnapshot {
   readonly objects: readonly BoardObject[];
   readonly geometry: ReadonlyMap<string, BoardObject>;
   readonly payloads: readonly PayloadRecord[];
+  readonly assets: ReadonlyMap<string, BoardExportAsset>;
+}
+
+export interface BoardBackupMetadata {
+  readonly createdAtMillis?: number;
+  readonly updatedAtMillis: number;
+  readonly pinned: boolean;
+}
+
+export interface BoardBackupHistory {
+  readonly entry: Readonly<Record<string, unknown>>;
+  readonly artifact: Readonly<Record<string, unknown>>;
+  readonly elements: readonly Readonly<Record<string, unknown>>[];
+}
+
+export interface BoardBackupArchive {
+  readonly boardId: string;
+  readonly properties: Readonly<Record<string, unknown>>;
+  readonly elements: readonly Readonly<Record<string, unknown>>[];
+  readonly history: readonly BoardBackupHistory[];
   readonly assets: ReadonlyMap<string, BoardExportAsset>;
 }

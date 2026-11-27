@@ -197,14 +197,29 @@ function deferredSave() {
   return { result, accept };
 }
 
+function positionDocumentBlocks() {
+  const surface = query('.studio-document-surface');
+  vi.spyOn(surface, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 400, 400));
+  const firstBlock = query('[data-document-read-block="alpha"]');
+  vi.spyOn(firstBlock, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 174, 200, 30));
+
+  return firstBlock;
+}
+
 it('preserves numbered lists, heading depth and valid legacy string table cells in the reader', () => {
   render();
   const reader = readRegion(fixture.host);
   expect(query('article h2', reader).textContent).toBe(first);
-  expect(Array.from(reader.querySelectorAll('ol > li')).map((item) => item.textContent)).toEqual([
-    '步骤一',
-    '步骤二',
-  ]);
+  expect(
+    Array.from(reader.querySelectorAll('ol > li > .studio-document-list-line > div')).map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(['步骤一', '步骤二']);
+  expect(
+    Array.from(reader.querySelectorAll('ol > li .studio-document-list-marker')).map(
+      (marker) => marker.textContent,
+    ),
+  ).toEqual(['1.', '2.']);
   expect(query('td', reader).textContent).toBe('字符串单元格');
   expect(fixture.host.querySelector('[contenteditable]')).toBeNull();
 });
@@ -223,7 +238,7 @@ it('retains the inline and expanded scroll position across opening and returning
     expanded.scrollTop = 350;
     expanded.dispatchEvent(new Event('scroll'));
   });
-  await act(async () => button('返回白板').click());
+  await act(async () => button('返回画板').click());
   expect(readRegion(fixture.host).scrollTop).toBe(135);
   click('放大阅读');
   expect(readRegion(query('dialog')).scrollTop).toBe(350);
@@ -303,7 +318,7 @@ it('opens the clicked paragraph in the real editor and consumes the writing requ
   const selection = document.getSelection();
   const anchor = selection?.anchorNode?.parentElement?.closest('[data-id]');
   expect(anchor?.getAttribute('data-id')).toBe('beta');
-  await act(async () => button('返回白板').click());
+  await act(async () => button('返回画板').click());
   click('放大阅读');
   expect(query('dialog .studio-document-surface').dataset.documentView).toBe('read');
   expect(document.querySelector('[data-document-editor]')).toBeNull();
@@ -398,6 +413,7 @@ it.each([{ ctrlKey: true }, { metaKey: true }])(
   (modifiers) => {
     const onAnnotate = vi.fn();
     render({ onAnnotate });
+    positionDocumentBlocks();
     const reader = readRegion();
     const selectAll = new KeyboardEvent('keydown', {
       key: 'a',
@@ -415,21 +431,222 @@ it.each([{ ctrlKey: true }, { metaKey: true }])(
       expect.objectContaining({
         version: initial.version,
         blockIds: expect.arrayContaining(['alpha', 'beta']),
+        u: 0.5,
+        v: 0.2,
       }),
     );
   },
 );
 
-it('keeps export options inside the document and hands a canonical draft to the injected action', () => {
+it('keeps export options inside the document and hands a canonical draft to the injected action', async () => {
   const onExport = vi.fn();
   render({ onExport });
   click('导出文档');
-  click('块 JSON');
+  await act(async () => button('块 JSON').click());
   expect(onExport).toHaveBeenCalledWith(
     'json',
     expect.objectContaining({ title: documentName, document: initial.document }),
+    expect.any(AbortSignal),
   );
   expect(document.querySelector('[aria-label="文档导出格式"]')).toBeNull();
+});
+
+it('saves the dirty writable document before sending the confirmed snapshot to export', async () => {
+  const onCommit = vi.fn((commit: DocumentCommit) => Promise.resolve(saveReply(commit)));
+  const onExport = vi.fn();
+  render({ onCommit, onExport });
+  await openEditor();
+  vi.useFakeTimers();
+  changeTitle('即将导出的标题');
+  click('导出文档');
+  await act(async () => button('全文 HTML').click());
+
+  expect(onCommit).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ title: '即将导出的标题', expectedVersion: initial.version }),
+  );
+  expect(onExport).toHaveBeenCalledExactlyOnceWith(
+    'html',
+    expect.objectContaining({ title: '即将导出的标题' }),
+    expect.any(AbortSignal),
+  );
+});
+
+it('exports only confirmed content for a reader with a retained local draft', async () => {
+  const onCommit = vi.fn((commit: DocumentCommit) => Promise.resolve(saveReply(commit)));
+  const onExport = vi.fn();
+  render({ onCommit, onExport });
+  await openEditor();
+  vi.useFakeTimers();
+  changeTitle('仅本地草稿');
+  render({ onCommit, onExport, readOnly: true });
+  click('导出文档');
+  await act(async () => button('块 JSON').click());
+
+  expect(onCommit).not.toHaveBeenCalled();
+  expect(onExport).toHaveBeenCalledExactlyOnceWith(
+    'json',
+    { title: initial.title, document: initial.document },
+    expect.any(AbortSignal),
+  );
+});
+
+it('downloads real Canvas HTML and block JSON with escaped script text', async () => {
+  const View = documentExtension.View;
+  type ViewProps = Parameters<typeof View>[0];
+  type Download = NonNullable<ViewProps['downloadFile']>;
+  const downloadFile = vi.fn<Download>();
+  const request = vi.fn();
+  const geometry = { x: 0, y: 0, width: 680, height: 560, rotation: 0 };
+  const title = '研讨/<脚本>';
+  const value = {
+    ...initial,
+    title,
+    document: {
+      schemaVersion: 1,
+      blocks: [
+        { id: 'script', type: 'paragraph', props: {}, content: '<script>内容</script>' },
+        { id: 'count', type: 'numberedListItem', props: { start: 3 }, content: '第三项' },
+      ],
+    },
+  };
+  fixture.render(
+    <View
+      object={{ kind: 'document', label: title, geometry }}
+      geometry={geometry}
+      payload={{ version: 4, value }}
+      zoom={1}
+      interactive
+      selected
+      readOnly
+      request={request}
+      downloadFile={downloadFile}
+    />,
+  );
+  click('导出文档');
+  await act(async () => button('全文 HTML').click());
+  click('导出文档');
+  await act(async () => button('块 JSON').click());
+
+  const [html, json] = downloadFile.mock.calls.map(([file]) => file);
+  if (!html || !json) {
+    throw new Error('Expected the original document export options');
+  }
+
+  const output = new TextDecoder().decode(html.content);
+  expect(html.filename).toBe('研讨--脚本-.html');
+  expect(html.mimeType).toBe('text/html');
+  expect(output).toContain('<ol start="3">');
+  expect(output).toContain('&lt;script&gt;内容&lt;/script&gt;');
+  expect(output).not.toContain('<script>');
+  expect(JSON.parse(new TextDecoder().decode(json.content))).toEqual({
+    title,
+    document: value.document,
+  });
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('uses the authorized private image reader and embeds only its bytes when exporting HTML', async () => {
+  const View = documentExtension.View;
+  type ViewProps = Parameters<typeof View>[0];
+  type Download = NonNullable<ViewProps['downloadFile']>;
+  type Asset = { mimeType: string; content: Uint8Array };
+  type ReadAsset = (source: string, signal?: AbortSignal) => Promise<Asset>;
+  const downloadFile = vi.fn<Download>();
+  const readDocumentAsset = vi
+    .fn<ReadAsset>()
+    .mockResolvedValue({ mimeType: 'image/png', content: new Uint8Array([137, 80, 78, 71]) });
+  const archived = '/studio-archive-assets/test-board/image-paragraph';
+  const publicImage = 'https://example.test/never-read-for-export.png';
+  const value = {
+    ...initial,
+    document: {
+      schemaVersion: 1,
+      blocks: [
+        { id: 'private-image', type: 'image', props: { url: archived, caption: '正文附件' } },
+        { id: 'external-image', type: 'image', props: { url: publicImage, caption: '外部示意' } },
+      ],
+    },
+  };
+  const geometry = { x: 0, y: 0, width: 680, height: 560, rotation: 0 };
+  const injected = { downloadFile, readDocumentAsset };
+  fixture.render(
+    <View
+      object={{ kind: 'document', label: value.title, geometry }}
+      geometry={geometry}
+      payload={{ version: 4, value }}
+      zoom={1}
+      interactive
+      selected
+      readOnly
+      request={vi.fn()}
+      {...injected}
+    />,
+  );
+  click('导出文档');
+  await act(async () => button('全文 HTML').click());
+  const file = downloadFile.mock.calls[0]?.[0];
+  if (!file) {
+    throw new Error('Expected the confirmed document export');
+  }
+
+  expect(readDocumentAsset.mock.calls.map(([source]) => source)).toEqual([archived, archived]);
+  const output = new TextDecoder().decode(file.content);
+  expect(output).toContain('data:image/png;base64,iVBORw==');
+  expect(output).not.toContain(publicImage);
+  expect(output).toContain('图片尚未嵌入 · 外部示意');
+});
+
+it('uses the original automatic white ink on a dark Canvas document fill', () => {
+  const View = documentExtension.View;
+  const geometry = { x: 0, y: 0, width: 680, height: 560, rotation: 0 };
+  fixture.render(
+    <View
+      object={{ kind: 'document', label: documentName, fill: '#181a22', geometry }}
+      geometry={geometry}
+      payload={{ version: initial.version, value: initial }}
+      zoom={1}
+      interactive
+      selected
+      readOnly
+      request={vi.fn()}
+    />,
+  );
+  const paper = query<HTMLElement>('.studio-document-surface', fixture.host);
+  expect(paper.dataset.paperScheme).toBe('dark');
+  expect(paper.style.color).toBe('rgb(245, 245, 245)');
+  expect(paper.style.getPropertyValue('--studio-document-paper')).toBe('#181a22');
+});
+
+it('takes the actual paragraph target from a click or keyboard activation in note mode', () => {
+  const onAnnotate = vi.fn();
+  render({ onAnnotate, annotationActive: true });
+  const paragraph = positionDocumentBlocks();
+  expect(paragraph.tabIndex).toBe(0);
+  const clickPoint = new MouseEvent('click', {
+    bubbles: true,
+    cancelable: true,
+    clientX: 250,
+    clientY: 180,
+  });
+  act(() => {
+    paragraph.dispatchEvent(clickPoint);
+  });
+  expect(clickPoint.defaultPrevented).toBe(true);
+  expect(onAnnotate).toHaveBeenNthCalledWith(1, {
+    version: initial.version,
+    blockIds: ['alpha'],
+    quote: first,
+    u: 0.375,
+    v: 0.2,
+  });
+
+  act(() => {
+    paragraph.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+  expect(onAnnotate).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ blockIds: ['alpha'], u: 0.5, v: 0.2 }),
+  );
 });
 
 it('keeps new typing after a delayed save and writes it with the acknowledged version before returning', async () => {
@@ -447,7 +664,7 @@ it('keeps new typing after a delayed save and writes it with the acknowledged ve
     expect.objectContaining({ expectedVersion: 4, title: '第一次修改' }),
   );
   changeTitle('第二次修改');
-  click('返回白板');
+  click('返回画板');
   expect(document.querySelector('dialog')).not.toBeNull();
   await act(async () =>
     pending.accept?.({ ok: true, value: { ...initial, version: 5, title: '第一次修改' } }),
@@ -528,7 +745,7 @@ it('does not persist a draft after losing edit permission and keeps it available
   render({ onCommit, readOnly: true });
   await clock(1300);
   expect(onCommit).not.toHaveBeenCalled();
-  expect(query('dialog .studio-document-title').textContent).toBe('未提交标题');
+  expect(query<HTMLInputElement>('dialog input.studio-document-title').value).toBe('未提交标题');
 });
 
 it('cancels an unresolved image when the document unmounts', async () => {
@@ -616,7 +833,7 @@ it('keeps an expanded document mounted and releases clean inline content', async
   expect(onRetentionChange).toHaveBeenLastCalledWith(false);
   click('展开文档');
   expect(onRetentionChange).toHaveBeenLastCalledWith(true);
-  await act(async () => button('返回白板').click());
+  await act(async () => button('返回画板').click());
   expect(onRetentionChange).toHaveBeenLastCalledWith(false);
   expect(request).not.toHaveBeenCalled();
 });
@@ -668,7 +885,10 @@ it('uses one title and a keyboard-accessible outline in focused reading', () => 
   const reading = readRegion(focused);
   expect(document.querySelector('dialog')).toBeNull();
   expect(
-    Array.from(focused.querySelectorAll('.studio-document-title'), (node) => node.textContent),
+    Array.from(
+      focused.querySelectorAll<HTMLInputElement>('input.studio-document-title'),
+      (node) => node.value,
+    ),
   ).toEqual([documentName]);
   const find = query<HTMLInputElement>('input[type="search"]', focused);
   expect(find.value).toBe('');
@@ -712,12 +932,15 @@ it.each([
     render({ focusedReading: true, paper, onClosePresentation });
 
     const focused = query('[data-document-focused-reading]', fixture.host);
-    const back = button('返回白板');
+    const back = button('返回画板');
     expect(back.closest('header')).toBe(button('切换文档目录').closest('header'));
     expect(back.closest('[data-canvas-presentation-exit]')).not.toBeNull();
+    const status = query<HTMLSpanElement>('.studio-document-canvas-save', focused);
+    expect(query('[role="status"]', status).textContent).toBe('已保存');
+    expect(status.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
     expect(focused.style.getPropertyValue('--studio-document-paper')).toBe(paper.fill);
     expect(focused.dataset.paperScheme).toBe(paper.scheme);
-    await act(async () => button('返回白板').click());
+    await act(async () => button('返回画板').click());
     expect(onClosePresentation).toHaveBeenCalledOnce();
   },
 );

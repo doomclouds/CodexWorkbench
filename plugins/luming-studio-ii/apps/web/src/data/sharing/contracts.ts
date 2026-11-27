@@ -31,6 +31,7 @@ export interface SharingMember {
   readonly role: SharingRole;
   readonly removed: boolean;
   readonly active: boolean;
+  readonly online?: boolean;
 }
 
 export interface BoardSharingState {
@@ -44,6 +45,7 @@ export interface BoardSharingState {
   readonly links: readonly SharingLink[];
   readonly members: readonly SharingMember[];
   readonly memberUrl?: string;
+  readonly ownerDisplayName?: string;
 }
 
 export type SharingOperation =
@@ -110,7 +112,7 @@ interface InvitationRejected {
 
 export type BoardInvitationResult =
   | { readonly kind: 'available'; readonly invitation: BoardInvitation }
-  | InvitationRejected;
+  | GuestJoinResult;
 
 export type GuestJoinResult =
   | { readonly kind: 'joined'; readonly session: SharingGuestSession }

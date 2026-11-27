@@ -1,11 +1,12 @@
 export type ThreadDraft =
-  | { readonly kind: 'reply'; readonly text: string }
+  | { readonly kind: 'reply'; readonly text: string; readonly attach?: boolean }
   | {
       readonly kind: 'edit';
       readonly messageId: string;
       readonly expectedVersion: bigint;
       readonly originalText: string;
       readonly text: string;
+      readonly attach?: boolean;
     };
 
 export function hasDraftChanges(draft: ThreadDraft | undefined) {

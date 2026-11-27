@@ -23,13 +23,19 @@ export function isTodoOverview(width: number, height: number) {
 function TodoHeadingIcons({
   movable,
   locked,
+  expanded,
+  annotationActive,
 }: {
   readonly movable: boolean;
   readonly locked: boolean;
+  readonly expanded?: boolean;
+  readonly annotationActive?: boolean;
 }) {
+  const showMove = movable && !(expanded || annotationActive);
+
   return (
     <span className="studio-object-todo__heading-icons">
-      {movable && (
+      {showMove && (
         <button
           className="studio-object-todo__move"
           data-canvas-drag-surface="title"
@@ -75,8 +81,8 @@ function todoStyle(appearance: TodoObjectAppearance | undefined, overview: boole
   const scheme = paperScheme(paper);
   const proposedScale = appearance?.uiScale;
   const scaled =
-    proposedScale && Number.isFinite(proposedScale)
-      ? Math.min(Math.max(1, proposedScale), maxOverviewScale)
+    proposedScale && proposedScale > 0 && Number.isFinite(proposedScale)
+      ? Math.min(proposedScale, maxOverviewScale)
       : 1;
   const style: CSSProperties & { '--todo-paper'?: string; '--todo-ui-scale': number } = {
     colorScheme: scheme,
@@ -89,12 +95,12 @@ function todoStyle(appearance: TodoObjectAppearance | undefined, overview: boole
 
 function titleContent(title: string, editable: boolean, session: TodoEditorSession) {
   if (session.draft?.target.kind === 'title') {
-    return <TodoTextEditor label="清单标题" session={session} />;
+    return <TodoTextEditor label="任务清单标题" session={session} />;
   }
   if (editable) {
     return (
       <Button
-        label="编辑清单标题"
+        label={'编辑清单标题：' + title}
         icon={title}
         iconOnly
         variant="ghost"
@@ -135,15 +141,18 @@ function todoAccess({
   annotationActive = false,
   onEdit,
   onRequestExpand,
+  onAnnotateContent,
   onAnnotateItem,
 }: TodoObjectProps) {
   const active = (interactive || expanded) && !annotationActive;
+  const canSave = !readOnly && !annotationActive && onEdit !== undefined;
 
   return {
     active,
-    editable: active && !readOnly && onEdit !== undefined,
+    canSave,
+    editable: active && canSave,
     canExpand: !expanded && !annotationActive && onRequestExpand !== undefined,
-    annotating: annotationActive && onAnnotateItem !== undefined,
+    annotating: annotationActive && Boolean(onAnnotateContent || onAnnotateItem),
   };
 }
 
@@ -176,6 +185,7 @@ function TodoSession(props: TodoObjectProps) {
     onEdit,
     expanded,
     focusedReading,
+    annotationActive,
     movable = false,
     locked = false,
     overview,
@@ -186,16 +196,19 @@ function TodoSession(props: TodoObjectProps) {
     renderOutsideRows,
     onOpenSource,
     sourceLabel,
+    sourceRequest,
+    onAnnotateContent,
     onAnnotateItem,
     renderItemAdornment,
   } = props;
   const [dragging, setDragging] = useState(false);
   const region = useRef<HTMLElement>(null);
   const small = useTodoOverview(region);
-  const { active, editable, canExpand, annotating } = todoAccess(props);
+  const { active, canSave, editable, canExpand, annotating } = todoAccess(props);
   const session = useTodoEditor({
     value,
     onEdit,
+    canSave,
     editable,
     dragging,
     editRequest,
@@ -224,6 +237,7 @@ function TodoSession(props: TodoObjectProps) {
       data-todo-layout={compact ? 'overview' : 'full'}
       data-todo-focused-reading={focusedReading || undefined}
       data-todo-expanded={expanded || undefined}
+      data-todo-annotating={annotating || undefined}
       data-todo-scheme={scheme}
       style={style}
       aria-label={title}
@@ -231,7 +245,12 @@ function TodoSession(props: TodoObjectProps) {
       onPaste={handlePaste}
     >
       <header className="studio-object-todo__heading" data-canvas-native="">
-        <TodoHeadingIcons movable={movable && !expanded} locked={locked || inProgress} />
+        <TodoHeadingIcons
+          movable={movable}
+          locked={locked || inProgress}
+          expanded={expanded}
+          annotationActive={annotationActive}
+        />
         <div className="studio-object-todo__title">{titleContent(title, editable, session)}</div>
         <span className="studio-object-todo__count" aria-live="polite">
           {complete}/{items.length} 完成
@@ -256,6 +275,8 @@ function TodoSession(props: TodoObjectProps) {
           annotating={annotating}
           onOpenSource={onOpenSource}
           sourceLabel={sourceLabel}
+          sourceRequest={sourceRequest}
+          onAnnotateContent={onAnnotateContent}
           onAnnotateItem={onAnnotateItem}
           renderItemAdornment={renderItemAdornment}
           onDraggingChange={setDragging}

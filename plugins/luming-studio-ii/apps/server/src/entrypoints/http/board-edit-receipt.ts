@@ -21,6 +21,7 @@ const rejection: Readonly<Record<BoardEditRejection, BoardEditRejectionReason>> 
   versionUnavailable: BoardEditRejectionReason.VERSION_UNAVAILABLE,
   tooLarge: BoardEditRejectionReason.TOO_LARGE,
   invalidImage: BoardEditRejectionReason.INVALID_IMAGE,
+  invalidVideo: BoardEditRejectionReason.INVALID_VIDEO,
 };
 
 function encodePayload(payload: PayloadRecord) {

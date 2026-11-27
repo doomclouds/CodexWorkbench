@@ -8,6 +8,7 @@ export function RecycleBinPage({
   createCommandId,
   onBack,
   preferences,
+  renderThumbnail,
 }: RecycleBinSurfaceProps) {
   return (
     <RecycleBinSurface
@@ -15,6 +16,7 @@ export function RecycleBinPage({
       createCommandId={createCommandId}
       onBack={onBack}
       preferences={preferences}
+      renderThumbnail={renderThumbnail}
     />
   );
 }

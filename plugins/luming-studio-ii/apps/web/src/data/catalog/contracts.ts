@@ -7,6 +7,7 @@ export interface CatalogBoardSummary {
   readonly pinned: boolean;
   readonly entryVersion: bigint;
   readonly canManage?: boolean;
+  readonly previewRevision?: bigint;
 }
 
 export interface CatalogListRequest {
@@ -14,7 +15,19 @@ export interface CatalogListRequest {
   readonly order: CatalogSortOrder;
   readonly pageSize: number;
   readonly cursor?: string;
+  readonly pinnedOnly?: boolean;
 }
+
+export interface CatalogThumbnailRequest {
+  readonly boardId: string;
+  readonly revision: bigint;
+  readonly trashed: boolean;
+}
+
+export type ReadCatalogThumbnail = (
+  request: CatalogThumbnailRequest,
+  signal?: AbortSignal,
+) => Promise<string | undefined>;
 
 export interface CatalogPage {
   readonly boards: readonly CatalogBoardSummary[];
@@ -56,6 +69,7 @@ export type CatalogPost = (
 
 export interface BoardCatalogService {
   listBoards(request: CatalogListRequest, signal?: AbortSignal): Promise<CatalogPage>;
+  readonly getBoardThumbnail?: ReadCatalogThumbnail;
   createBoard(request: CatalogCreateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;
   duplicateBoard?(request: CatalogDuplicateRequest, signal?: AbortSignal): Promise<CatalogReceipt>;
   getReceipt(commandId: string, signal?: AbortSignal): Promise<CatalogReceipt | undefined>;

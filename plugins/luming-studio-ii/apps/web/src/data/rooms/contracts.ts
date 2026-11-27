@@ -16,10 +16,28 @@ export interface BoardRoomParticipantKey {
   readonly viewId: string;
 }
 
+export interface BoardRoomGestureGeometry extends BoardRoomPoint {
+  readonly width: number;
+  readonly height: number;
+  readonly rotation: number;
+}
+
+export interface BoardRoomGestureChange {
+  readonly id: string;
+  readonly expectedVersion: number;
+  readonly geometry: BoardRoomGestureGeometry;
+}
+
+export interface BoardRoomGesturePreview {
+  readonly kind: 'move' | 'resize' | 'rotate';
+  readonly changes: readonly BoardRoomGestureChange[];
+}
+
 export interface BoardRoomPresence {
   readonly cursor?: BoardRoomPoint;
   readonly viewport?: BoardRoomViewport;
   readonly following: boolean;
+  readonly gesture?: BoardRoomGesturePreview;
 }
 
 export interface BoardRoomParticipant extends BoardRoomParticipantKey, BoardRoomPresence {
@@ -27,6 +45,7 @@ export interface BoardRoomParticipant extends BoardRoomParticipantKey, BoardRoom
   readonly role: string;
   readonly sequence: bigint;
   readonly expiresAtMillis: number;
+  readonly gestureExpiresAtMillis?: number;
 }
 
 export interface BoardRoomTimer {
@@ -75,6 +94,8 @@ type RoomEventPayload =
       readonly revision: bigint;
       readonly participants: readonly BoardRoomParticipant[];
       readonly timer: BoardRoomTimer;
+      readonly agentWorkspaces?: readonly BoardRoomAgentWorkspace[];
+      readonly canReleaseAgentActivity?: boolean;
     }
   | {
       readonly kind: 'participants';
@@ -83,6 +104,7 @@ type RoomEventPayload =
     }
   | { readonly kind: 'timer'; readonly timer: BoardRoomTimer }
   | { readonly kind: 'contentChanged'; readonly change: BoardRoomContentChange }
+  | { readonly kind: 'agentWorkspaces'; readonly workspaces: readonly BoardRoomAgentWorkspace[] }
   | { readonly kind: 'accessLost' };
 
 export type BoardRoomEvent = RoomEventHeader & RoomEventPayload;
@@ -144,6 +166,11 @@ export interface BoardRoomService {
     commandId: string,
     signal?: AbortSignal,
   ): Promise<BoardRoomTimerReply>;
+  releaseAgentWorkspace?(
+    boardId: string,
+    target: BoardRoomAgentWorkspaceTarget,
+    signal?: AbortSignal,
+  ): Promise<void>;
 }
 
 export interface BoardRoomClock {
@@ -160,6 +187,8 @@ export interface BoardRoomState {
   readonly participants: readonly BoardRoomParticipant[];
   readonly timer?: BoardRoomTimer;
   readonly notice?: string;
+  readonly agentWorkspaces?: readonly BoardRoomAgentWorkspace[];
+  readonly canReleaseAgentActivity?: boolean;
 }
 
 export interface BoardRoomObserver {
@@ -178,6 +207,7 @@ export interface BoardRoomSession {
     signal?: AbortSignal,
   ): Promise<BoardRoomTimerReceipt | undefined>;
   now(): number;
+  releaseAgentWorkspace?(target: BoardRoomAgentWorkspaceTarget): Promise<void>;
   schedule(delayMs: number, task: () => void): () => void;
 }
 
@@ -190,3 +220,4 @@ export interface BoardRoomSessionOptions {
 }
 
 import type { BoardRoomContentChange } from './room-message.js';
+import type { BoardRoomAgentWorkspace, BoardRoomAgentWorkspaceTarget } from './agent-workspaces.js';

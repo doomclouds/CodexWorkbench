@@ -94,6 +94,7 @@ function savedBody(
     case 'crop':
       return { kind: 'image', value: { ...native.value, ...edit.value } };
     case 'document':
+    case 'link':
     case 'text':
     case 'todo':
       throw new Error('Unexpected content operation for a native-object fixture.');

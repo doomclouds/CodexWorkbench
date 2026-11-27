@@ -5,9 +5,12 @@ import type {
   CatalogOrder,
   CatalogReceipt,
   CatalogScope,
+  CatalogThumbnailRequest,
+  CatalogThumbnailResult,
   CatalogTrashedBoard,
 } from '../domain/index.js';
 import type { CatalogLookup, CatalogRepository } from '../ports/index.js';
+import { createCatalogThumbnailReader } from './catalog-thumbnail.js';
 import { CatalogQueryError, readCatalogCursor, writeCatalogCursor } from './cursor.js';
 import { duplicateBoard, type DuplicateBoardCommand } from './duplicate-board.js';
 import {
@@ -36,6 +39,7 @@ export interface CatalogListRequest {
   readonly order: CatalogOrder;
   readonly pageSize: number;
   readonly cursor?: string;
+  readonly pinnedOnly?: boolean;
 }
 
 export interface CatalogPage {
@@ -56,6 +60,7 @@ export interface CreateBoardCommand {
 export interface CatalogApplication {
   listBoards(actor: CatalogActor, request: CatalogListRequest): CatalogPage;
   listTrashedBoards(actor: CatalogActor, request: CatalogListRequest): CatalogTrashPage;
+  getBoardThumbnail(actor: CatalogActor, request: CatalogThumbnailRequest): CatalogThumbnailResult;
   createBoard(actor: CatalogActor, command: CreateBoardCommand): CatalogReceipt;
   duplicateBoard(actor: CatalogActor, command: DuplicateBoardCommand): CatalogReceipt;
   manageBoard(actor: CatalogActor, command: ManageBoardCommand): CatalogReceipt;
@@ -90,9 +95,11 @@ function catalogLookup(
   }
 
   const scope = { actorId: actor.id, query, order, view };
-  const after = cursor === undefined ? undefined : readCatalogCursor(cursor, scope);
+  const pinnedScope =
+    view === undefined && request.pinnedOnly ? { ...scope, pinnedOnly: true } : scope;
+  const after = cursor === undefined ? undefined : readCatalogCursor(cursor, pinnedScope);
 
-  return { ...scope, limit: pageSize + 1, after };
+  return { ...pinnedScope, limit: pageSize + 1, after };
 }
 
 function listBoards(
@@ -185,9 +192,12 @@ export function createCatalogApplication(
   repository: CatalogRepository,
   services: CatalogServices,
 ): CatalogApplication {
+  const readThumbnail = createCatalogThumbnailReader(repository);
+
   return {
     listBoards: (actor, request) => listBoards(repository, actor, request),
     listTrashedBoards: (actor, request) => listTrashedBoards(repository, actor, request),
+    getBoardThumbnail: (actor, request) => readThumbnail(actor.id, request),
     createBoard: (actor, command) => createBoard(repository, services, actor, command),
     duplicateBoard: (actor, command) =>
       duplicateBoard(repository, actor.id, command, (commandId, title) =>

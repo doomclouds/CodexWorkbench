@@ -1,14 +1,19 @@
-import { planImageChanges } from '../domain/index.js';
-import type { BoardEditDecision, BoardHeader, ImageOperation } from '../domain/index.js';
+import { planImageChanges, planVideoChanges } from '../domain/index.js';
+import type {
+  BoardEditDecision,
+  BoardHeader,
+  ImageOperation,
+  VideoOperation,
+} from '../domain/index.js';
 import type { BoardEditWriter } from '../ports/index.js';
 
-export function planImageEdit(
+function reserveAttachment(
   writer: BoardEditWriter,
   board: BoardHeader,
   operation: ImageOperation,
+  plan: ReturnType<typeof planImageChanges | typeof planVideoChanges>,
 ): BoardEditDecision {
   const { boardId } = board;
-  const plan = planImageChanges(boardId, operation);
   if (plan.kind === 'rejected') {
     return plan;
   }
@@ -21,4 +26,20 @@ export function planImageEdit(
   }
 
   return plan;
+}
+
+export function planImageEdit(
+  writer: BoardEditWriter,
+  board: BoardHeader,
+  operation: ImageOperation,
+): BoardEditDecision {
+  return reserveAttachment(writer, board, operation, planImageChanges(board.boardId, operation));
+}
+
+export function planVideoEdit(
+  writer: BoardEditWriter,
+  board: BoardHeader,
+  operation: VideoOperation,
+): BoardEditDecision {
+  return reserveAttachment(writer, board, operation, planVideoChanges(board.boardId, operation));
 }

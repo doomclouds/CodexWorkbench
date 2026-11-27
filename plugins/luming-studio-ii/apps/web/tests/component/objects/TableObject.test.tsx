@@ -627,6 +627,30 @@ it('projects separate table header and body paints without mutating their source
   ]);
 });
 
+it('uses readable ink for a stored dark header independently of the body', () => {
+  const request = vi.fn<TableViewProps['request']>();
+  mountExtension(request, {
+    object: {
+      kind: 'table',
+      label: '表格',
+      geometry: tableViewGeometry,
+      fill: '#1d4266',
+    },
+  });
+
+  expect(cell(0, 0).style.background).toBe('rgb(29, 66, 102)');
+  expect(cell(0, 0).style.color).toBe('rgb(245, 245, 245)');
+  expect(find('table').style.background).toBe('var(--studio-ui-canvas, Canvas)');
+  expect(find('table').style.color).toBe('var(--studio-ui-canvas-ink, CanvasText)');
+});
+
+it('uses the theme paper-2 surface for a table without stored header paint', () => {
+  mountExtension(vi.fn<TableViewProps['request']>());
+
+  expect(cell(0, 0).style.background).toContain('--studio-ui-canvas-paper-secondary');
+  expect(cell(0, 0).style.color).toBe('var(--studio-ui-canvas-ink, CanvasText)');
+});
+
 it('uses projected geometry while a table extension draft saves through the versioned receipt', async () => {
   const request = vi.fn<TableViewProps['request']>();
   const saved = {
@@ -648,6 +672,7 @@ it('uses projected geometry while a table extension draft saves through the vers
     resize: true,
     rotate: false,
     connect: true,
+    inlineFormats: ['bold', 'italic', 'link', 'bullets', 'numbered'],
   });
   expect(tableExtension.placement?.kind).toBe('table');
   expect(columnWidths()).toEqual(['300px', '300px']);
@@ -771,6 +796,44 @@ it('offers row and column insertion and deletion while preserving the last cell'
   await mouse(toolbarButton('删除当前列'), 'click');
   expect(toolbarButton('删除当前列').disabled).toBe(true);
   expect(current().data?.rows).toEqual([['C']]);
+});
+
+it('opens the original cell menu on an unselected editable table', async () => {
+  const { current } = editable(initial, { selected: false });
+  await mouse(cell(1, 1), 'contextmenu', { button: 2, clientX: 120, clientY: 40 });
+
+  expect(document.body.querySelectorAll('[role="menuitem"]')).toHaveLength(6);
+  expect(editor().getAttribute('aria-label')).toBe('表格第2行第2列');
+  expect(view.host.querySelector('[role="toolbar"]')).toBeNull();
+  await mouse(menuAction('在上方插入行'), 'click');
+  expect(current().data?.rows).toEqual([
+    ['A', 'B'],
+    ['', ''],
+    ['C', 'D'],
+  ]);
+});
+
+it('keeps the cell menu available with disabled actions while the current write is pending', async () => {
+  let finish: ((result: false) => void) | undefined;
+  const pending = new Promise<false>((resolve) => {
+    finish = resolve;
+  });
+  const onSave = vi.fn(() => pending);
+  mount(initial, { onSave });
+  await mouse(cell(0, 0), 'dblclick');
+  type('Saving cell');
+  await key('Escape');
+  await mouse(cell(1, 0), 'contextmenu', { button: 2 });
+
+  const items = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+  expect(items).toHaveLength(6);
+  expect(items.every((item) => item.getAttribute('aria-disabled') === 'true')).toBe(true);
+  expect(editor().textContent).toBe('Saving cell');
+  await mouse(menuAction('在上方插入行'), 'click');
+  expect(onSave).toHaveBeenCalledTimes(1);
+
+  await act(async () => finish?.(false));
+  expect(menuAction('在上方插入行').hasAttribute('aria-disabled')).toBe(false);
 });
 
 it('keeps a dirty cell open when its menu receives focus and submits it with the inserted row', async () => {

@@ -1,6 +1,10 @@
 import { Check, Ellipsis, Layers, Lock, LockOpen, MessageSquare } from 'lucide-react';
 import { useEffect, useEffectEvent, useState } from 'react';
 import { ActionMenu, OperationNotice, StatusText } from '../../ui/base/index.js';
+import type {
+  WhiteboardArrangePreset,
+  WhiteboardLayerDirection,
+} from '../../data/whiteboard/index.js';
 import type { GeometrySelectionAction } from './geometry-commands.js';
 import type { useGeometryEdits } from './geometry-session.js';
 import {
@@ -27,6 +31,51 @@ interface SelectionActionsProps extends GeometryActionContext {
   readonly moreOpen?: boolean;
 }
 
+const alignmentKeys = new Map<string, WhiteboardArrangePreset>([
+  ['a', 'left'],
+  ['h', 'hcenter'],
+  ['d', 'right'],
+  ['w', 'top'],
+  ['v', 'vcenter'],
+  ['s', 'bottom'],
+]);
+
+function reorderDirection(event: KeyboardEvent): WhiteboardLayerDirection | undefined {
+  const left = event.code === 'BracketLeft' || event.key === '[' || event.key === '{';
+  const right = event.code === 'BracketRight' || event.key === ']' || event.key === '}';
+  if (left) {
+    return event.shiftKey ? 'back' : 'backward';
+  }
+  if (right) {
+    return event.shiftKey ? 'front' : 'forward';
+  }
+}
+
+function modifiedSelectionAction(
+  event: KeyboardEvent,
+  allLocked: boolean,
+  anyLocked: boolean,
+): GeometrySelectionAction | undefined {
+  const key = event.key.toLowerCase();
+  if (event.shiftKey && key === 'l') {
+    return { kind: 'changeLock', locked: !allLocked };
+  }
+  if (!event.shiftKey && key === 'd') {
+    return { kind: 'duplicate' };
+  }
+  if (anyLocked) {
+    return undefined;
+  }
+
+  const direction = reorderDirection(event);
+  if (direction) {
+    return { kind: 'reorder', direction };
+  }
+  if (key === 'g') {
+    return { kind: event.shiftKey ? 'ungroup' : 'group' };
+  }
+}
+
 function keyboardAction(
   event: KeyboardEvent,
   canEdit: boolean,
@@ -37,23 +86,27 @@ function keyboardAction(
     return undefined;
   }
 
-  if (event.ctrlKey || event.metaKey) {
-    const key = event.key.toLowerCase();
-    if (event.shiftKey && key === 'l') {
-      return { kind: 'changeLock', locked: !allLocked };
-    }
-    if (!event.shiftKey && key === 'd') {
-      return { kind: 'duplicate' };
-    }
+  const command = event.ctrlKey || event.metaKey;
+  if (command && !event.altKey) {
+    return modifiedSelectionAction(event, allLocked, anyLocked);
   }
-  if (!anyLocked && event.key === 'Delete') {
-    return { kind: 'delete' };
+  if (command || anyLocked) {
+    return undefined;
   }
+
+  if (event.altKey && !event.shiftKey) {
+    const preset = alignmentKeys.get(event.key.toLowerCase());
+
+    return preset && { kind: 'arrange', preset };
+  }
+
+  const deletion = event.key === 'Delete' || event.key === 'Backspace';
+  return deletion && !event.altKey ? { kind: 'delete' } : undefined;
 }
 
 function acceptsSelectionShortcut(event: KeyboardEvent) {
   const consumed = event.defaultPrevented || event.repeat;
-  if (consumed || event.altKey || event.isComposing) {
+  if (consumed || event.isComposing) {
     return false;
   }
 
@@ -72,6 +125,8 @@ export function GeometrySelectionActions({
   onAction,
   onFit,
   onSelectAll,
+  onRenameSection,
+  clipboard,
   onOpenMore,
   onAnnotate,
   moreOpen = false,
@@ -95,7 +150,7 @@ export function GeometrySelectionActions({
     }
 
     const command = event.ctrlKey || event.metaKey;
-    const selectAll = command && event.key.toLowerCase() === 'a' && onSelectAll;
+    const selectAll = command && !event.altKey && event.key.toLowerCase() === 'a' && onSelectAll;
     if (selectAll) {
       event.preventDefault();
       selectAll();
@@ -103,9 +158,13 @@ export function GeometrySelectionActions({
     }
 
     const action = keyboardAction(event, canEdit, allLocked, anyLocked);
-    if (action) {
+    const needsMultiple = action?.kind === 'group' || action?.kind === 'arrange';
+    if (action && (!needsMultiple || ids.length > 1)) {
       event.preventDefault();
       onAction(action, ids);
+    } else if (event.key === 'F2' && canEdit && onRenameSection) {
+      event.preventDefault();
+      onRenameSection();
     }
   });
   useEffect(() => {
@@ -224,6 +283,8 @@ export function GeometrySelectionActions({
           onAction={onAction}
           onFit={onFit}
           onSelectAll={onSelectAll}
+          onRenameSection={onRenameSection}
+          clipboard={clipboard}
           onRequestClose={() => setMenu(undefined)}
         />
       )}

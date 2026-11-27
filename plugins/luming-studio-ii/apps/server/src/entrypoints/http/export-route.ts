@@ -7,12 +7,12 @@ import {
   type ExportBoardResponseSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import type {
-  ExportBoardCommand,
+  ExportBoardFileCommand,
   ExportBoardResult,
   WhiteboardApplication,
 } from '../../modules/whiteboard/application/index.js';
 import { HttpRequestError, requireId } from './request.js';
-import { unaryRoute, type RouteEntry } from './unary-route.js';
+import { asyncUnaryRoute, type RouteEntry } from './unary-route.js';
 
 type ExportResponse = MessageInitShape<typeof ExportBoardResponseSchema>;
 type Rejected = Extract<ExportBoardResult, { kind: 'rejected' }>;
@@ -24,18 +24,24 @@ const rejectionByReason: Readonly<Record<Rejected['reason'], BoardExportRejectio
   tooLarge: BoardExportRejectionReason.TOO_LARGE,
 };
 
-export function toExportFormat(format: BoardExportFormat): ExportBoardCommand['format'] {
-  if (format === BoardExportFormat.JSON) {
-    return 'json';
-  }
-  if (format === BoardExportFormat.SVG) {
-    return 'svg';
+const formatByWire = new Map<BoardExportFormat, ExportBoardFileCommand['format']>([
+  [BoardExportFormat.JSON, 'json'],
+  [BoardExportFormat.SVG, 'svg'],
+  [BoardExportFormat.PNG, 'png'],
+  [BoardExportFormat.HTML, 'html'],
+  [BoardExportFormat.ZIP, 'zip'],
+]);
+
+export function toExportFormat(format: BoardExportFormat): ExportBoardFileCommand['format'] {
+  const value = formatByWire.get(format);
+  if (value) {
+    return value;
   }
 
   throw new HttpRequestError(400, 'A supported board export format is required');
 }
 
-export function toExportScope(scope: ExportBoardRequest['scope']): ExportBoardCommand['scope'] {
+export function toExportScope(scope: ExportBoardRequest['scope']): ExportBoardFileCommand['scope'] {
   switch (scope.case) {
     case 'whole':
       return { kind: 'whole' };
@@ -46,7 +52,7 @@ export function toExportScope(scope: ExportBoardRequest['scope']): ExportBoardCo
   }
 }
 
-function toExportCommand(request: ExportBoardRequest): ExportBoardCommand {
+function toExportCommand(request: ExportBoardRequest): ExportBoardFileCommand {
   if (request.expectedRevision === undefined) {
     throw new HttpRequestError(400, 'A saved board revision is required');
   }
@@ -68,6 +74,16 @@ export function toExportResponse(result: ExportBoardResult): ExportResponse {
     }
     case 'stale':
       return { result: { case: 'stale', value: { revision: result.revision } } };
+    case 'browserPng': {
+      const { filename, revision, width, height, svgTemplate, regions } = result;
+
+      return {
+        result: {
+          case: 'browserPng',
+          value: { filename, revision, width, height, svgTemplate, regions: [...regions] },
+        },
+      };
+    }
     case 'rejected':
       return {
         result: { case: 'rejected', value: { reason: rejectionByReason[result.reason] } },
@@ -76,7 +92,12 @@ export function toExportResponse(result: ExportBoardResult): ExportResponse {
 }
 
 export function createExportRoute(application: WhiteboardApplication): RouteEntry {
-  return unaryRoute(WhiteboardService.method.exportBoard, (actor, request) =>
-    toExportResponse(application.exportBoard(actor, toExportCommand(request))),
-  );
+  return asyncUnaryRoute(WhiteboardService.method.exportBoard, async (actor, request) => {
+    const result = await application.exportBoardFile(actor, toExportCommand(request));
+    if (result.kind === 'file' || result.kind === 'browserPng') {
+      actor.authorize?.(request);
+    }
+
+    return toExportResponse(result);
+  });
 }

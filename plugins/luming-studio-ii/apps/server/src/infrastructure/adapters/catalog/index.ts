@@ -14,6 +14,7 @@ import type { SqliteConnection, SqliteDatabase, SqliteRow } from '../../platform
 import { duplicateBoard } from './duplicate-board.js';
 import { getManagementReceipt, saveManagementReceipt } from './management-receipts.js';
 import { catalogSchema } from './schema.js';
+import { readCatalogThumbnail } from './thumbnail.js';
 
 type OrderingValue = bigint | number | string | null;
 
@@ -67,6 +68,7 @@ const catalogTables = `
   LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
 `;
 const activeBoards = 'l.trashed_at_millis IS NULL';
+const activePinnedBoards = activeBoards + ' AND c.pinned = 1';
 const ownedTrash = 'l.owner_actor_id = m.actor_id AND l.trashed_at_millis IS NOT NULL';
 
 function readUnsigned(value: unknown, fieldName: string): bigint {
@@ -108,6 +110,13 @@ function readSummary(row: SqliteRow): CatalogBoardSummary {
   };
 }
 
+function readListSummary(row: SqliteRow): CatalogBoardSummary {
+  return {
+    ...readSummary(row),
+    previewRevision: readUnsigned(row.preview_revision, 'preview_revision'),
+  };
+}
+
 function listRows(
   connection: SqliteConnection,
   lookup: CatalogLookup,
@@ -119,11 +128,12 @@ function listRows(
   const values = after ? ordering.values(after) : [];
   const statement = connection.prepare(`
     WITH visible AS (
-      SELECT ${catalogColumns}
+      SELECT ${catalogColumns}, b.revision AS preview_revision
       ${catalogTables}
       WHERE m.actor_id = ? AND instr(lower(b.title), lower(?)) > 0 AND ${condition}
     )
-    SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage, trashed_at_millis
+    SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage,
+      trashed_at_millis, preview_revision
     FROM visible
     ${boundary}
     ORDER BY ${ordering.columns}
@@ -135,8 +145,10 @@ function listRows(
 }
 
 function listBoards(connection: SqliteConnection, lookup: CatalogLookup): CatalogBoardSummary[] {
-  return listRows(connection, lookup, activeBoards, catalogOrderings[lookup.order]).map(
-    readSummary,
+  const condition = lookup.pinnedOnly ? activePinnedBoards : activeBoards;
+
+  return listRows(connection, lookup, condition, catalogOrderings[lookup.order]).map(
+    readListSummary,
   );
 }
 
@@ -145,7 +157,7 @@ function listTrashedBoards(
   lookup: CatalogLookup,
 ): CatalogTrashedBoard[] {
   return listRows(connection, lookup, ownedTrash, trashOrderings[lookup.order]).map((row) => ({
-    board: readSummary(row),
+    board: readListSummary(row),
     trashedAtMillis: readUnsigned(row.trashed_at_millis, 'trashed_at_millis'),
   }));
 }
@@ -308,6 +320,8 @@ export function createCatalogRepository(database: SqliteDatabase): CatalogReposi
     listBoards: (lookup) => database.read((connection) => listBoards(connection, lookup)),
     listTrashedBoards: (lookup) =>
       database.read((connection) => listTrashedBoards(connection, lookup)),
+    readThumbnail: (lookup, cached) =>
+      database.read((connection) => readCatalogThumbnail(connection, lookup, cached)),
     getReceipt: (actorId, commandId) =>
       database.read((connection) => getReceipt(connection, actorId, commandId)?.receipt),
     write: (work) =>

@@ -142,6 +142,7 @@ export function readEditReceipt(
 
   return {
     signature: storedText(row.signature, 'signature'),
+    advancedRevision: value.advancedRevision === true || undefined,
     receipt: {
       boardId,
       commandId,
@@ -151,6 +152,10 @@ export function readEditReceipt(
         objects: storedArray(value.objects, 'objects').map(decodeReceiptObject),
         ...readReceiptDetails(connection, boardId, boardRevision, value),
         removedObjectIds: storedIds(value.removedObjectIds, 'removedObjectIds'),
+        layerChangedObjectIds:
+          value.layerChangedObjectIds === undefined
+            ? undefined
+            : storedIds(value.layerChangedObjectIds, 'layerChangedObjectIds'),
         removedPayloadObjectIds: storedIds(
           value.removedPayloadObjectIds,
           'removedPayloadObjectIds',
@@ -163,7 +168,7 @@ export function readEditReceipt(
 export function saveEditReceipt(
   connection: SqliteConnection,
   actorId: string,
-  { signature, receipt }: StoredBoardEditReceipt,
+  { signature, receipt, advancedRevision }: StoredBoardEditReceipt,
 ) {
   const { boardId, commandId, outcome } = receipt;
   if (outcome.kind !== 'applied') {
@@ -171,6 +176,7 @@ export function saveEditReceipt(
   }
 
   const snapshot = JSON.stringify({
+    advancedRevision,
     boardRevision: outcome.boardRevision.toString(),
     objects: outcome.objects.map((object) => ({
       ...object,
@@ -181,6 +187,7 @@ export function saveEditReceipt(
     removedObjectIds: outcome.removedObjectIds,
     removedPayloadObjectIds: outcome.removedPayloadObjectIds ?? [],
     hasOrder: outcome.order !== undefined,
+    layerChangedObjectIds: outcome.layerChangedObjectIds,
   });
 
   connection

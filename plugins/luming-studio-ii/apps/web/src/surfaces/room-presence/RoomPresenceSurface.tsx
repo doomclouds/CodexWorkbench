@@ -1,9 +1,11 @@
+import { Users } from 'lucide-react';
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
+  BoardRoomAgentWorkspace,
   BoardRoomContentChange,
+  BoardRoomGesturePreview,
   BoardRoomParticipant,
-  BoardRoomParticipantKey,
   BoardRoomPoint,
   BoardRoomSession,
   BoardRoomState,
@@ -13,7 +15,7 @@ import {
   canFollowParticipant,
   fitFollowViewport,
   participantKey,
-  sameParticipant,
+  presenceMembers,
   toRoomViewport,
   type RoomPresenceCamera,
   type RoomPresenceViewport,
@@ -21,6 +23,8 @@ import {
 import { ParticipantControl } from './ParticipantControl.js';
 import { PeerCursorOverlay } from './PeerCursorOverlay.js';
 import { useRoomChromeSnapshot } from './room-snapshot.js';
+import { useAgentWorkspaceCamera } from './use-agent-workspace-camera.js';
+import { usePeerGestures } from './use-peer-gestures.js';
 import './room-presence.css';
 
 export interface RoomPresenceSlot {
@@ -29,6 +33,8 @@ export interface RoomPresenceSlot {
   readonly overlay: ReactNode;
   readonly accessLost: boolean;
   readonly onCursorChange: (point: BoardRoomPoint | undefined) => void;
+  readonly onGesturePreviewChange: (gesture: BoardRoomGesturePreview | undefined) => void;
+  readonly remoteGesturePreviews?: readonly BoardRoomGesturePreview[];
 }
 
 export interface RoomPresenceSurfaceProps {
@@ -43,22 +49,33 @@ export interface RoomPresenceSurfaceProps {
   readonly render: (slot: RoomPresenceSlot) => ReactNode;
 }
 
-interface FollowSelection extends BoardRoomParticipantKey {
+interface FollowSelection {
+  readonly kind: 'person' | 'agent';
+  readonly actorId: string;
   readonly session: BoardRoomSession;
   readonly detachSequence: number;
   readonly displayName: string;
 }
 
+interface PublishedGesture {
+  readonly session: BoardRoomSession;
+  readonly preview: BoardRoomGesturePreview;
+}
+
+const emptyWorkspaces: readonly BoardRoomAgentWorkspace[] = [];
+
 function RoomPresenceNotice({
   status,
   paused,
   waitingForViewport,
+  agent,
   name,
   onStop,
 }: {
   readonly status: BoardRoomState['status'];
   readonly paused: boolean;
   readonly waitingForViewport: boolean;
+  readonly agent: boolean;
   readonly name?: string;
   readonly onStop: () => void;
 }) {
@@ -79,7 +96,7 @@ function RoomPresenceNotice({
     ) : null;
   }
 
-  let text = '正在跟随 ' + name;
+  let text = '正在跟随 ' + name + (agent ? ' 的工作区' : ' 的视角');
   if (reconnecting) {
     text = '正在重新连接白板 · 暂停跟随 ' + name;
   } else if (paused) {
@@ -90,6 +107,7 @@ function RoomPresenceNotice({
 
   return (
     <div className="room-presence-banner">
+      <Users size={14} aria-hidden="true" />
       <span role="status">{text}</span>
       <button type="button" className="room-presence-link" onClick={onStop}>
         停止跟随
@@ -100,13 +118,15 @@ function RoomPresenceNotice({
 
 function usePublishPresence(
   session: BoardRoomSession,
-  status: BoardRoomState['status'],
+  { status, canEdit }: Pick<BoardRoomState, 'status' | 'canEdit'>,
   viewport: BoardRoomViewport | undefined,
   cursor: BoardRoomPoint | undefined,
   following: boolean,
   paused: boolean,
 ) {
   const pointer = useRef<BoardRoomPoint | undefined>(cursor);
+  const gesture = useRef<PublishedGesture | undefined>(undefined);
+  const canPublishGesture = !paused && status === 'online' && canEdit;
   const centerX = viewport?.centerX;
   const centerY = viewport?.centerY;
   const zoom = viewport?.zoom;
@@ -119,23 +139,62 @@ function usePublishPresence(
       cursorX === undefined || cursorY === undefined ? undefined : { x: cursorX, y: cursorY };
   }, [session, cursorX, cursorY]);
 
+  function currentGesture() {
+    const sample = gesture.current;
+    return sample?.session === session ? sample.preview : undefined;
+  }
+
+  function sendPresence() {
+    session.publishPresence({
+      viewport,
+      cursor: pointer.current,
+      following,
+      gesture: currentGesture(),
+    });
+  }
+
   const publish = useEffectEvent(() => {
     if (paused) {
       pointer.current = undefined;
     }
-    session.publishPresence({ viewport, cursor: pointer.current, following });
+    if (!canPublishGesture) {
+      gesture.current = undefined;
+    }
+
+    sendPresence();
   });
   useEffect(() => {
     if (status !== 'accessLost') {
       publish();
     }
-  }, [session, status, centerX, centerY, zoom, width, height, cursorX, cursorY, following, paused]);
+  }, [
+    session,
+    status,
+    centerX,
+    centerY,
+    zoom,
+    width,
+    height,
+    cursorX,
+    cursorY,
+    following,
+    paused,
+    canPublishGesture,
+  ]);
 
-  return (point: BoardRoomPoint | undefined) => {
-    if (!paused && status !== 'accessLost') {
-      pointer.current = point;
-      session.publishPresence({ viewport, cursor: point, following });
-    }
+  return {
+    onCursorChange(point: BoardRoomPoint | undefined) {
+      if (!paused && status !== 'accessLost') {
+        pointer.current = point;
+        sendPresence();
+      }
+    },
+    onGesturePreviewChange(preview: BoardRoomGesturePreview | undefined) {
+      if (canPublishGesture && preview !== currentGesture()) {
+        gesture.current = preview && { session, preview };
+        sendPresence();
+      }
+    },
   };
 }
 
@@ -158,14 +217,13 @@ function useRoomSession({ session, onContentChanged, onAccessLost }: RoomPresenc
 }
 
 function useFollowCamera(
-  target: FollowSelection | undefined,
+  targetId: string | undefined,
   next: RoomPresenceCamera | undefined,
   onViewportRequest: RoomPresenceSurfaceProps['onViewportRequest'],
 ) {
   const x = next?.x;
   const y = next?.y;
   const zoom = next?.zoom;
-  const targetId = target && participantKey(target);
   const requestCamera = useEffectEvent((camera: RoomPresenceCamera) => onViewportRequest(camera));
   useEffect(() => {
     if (x !== undefined && y !== undefined && zoom !== undefined) {
@@ -176,61 +234,61 @@ function useFollowCamera(
 
 function activeFollow(
   selection: FollowSelection | undefined,
-  peer: BoardRoomParticipant | undefined,
+  available: boolean,
   status: BoardRoomState['status'],
   { session, detachSequence }: Pick<RoomPresenceSurfaceProps, 'session' | 'detachSequence'>,
 ) {
   const ownsSelection =
     selection?.session === session && selection.detachSequence === detachSequence;
-  const peerGone = status === 'online' && (!peer || peer.following);
+  const peerGone = status === 'online' && !available;
   return ownsSelection && !peerGone && status !== 'accessLost' ? selection : undefined;
 }
 
-function useRoomFollow(
-  {
-    session,
-    viewport,
-    cursor,
-    paused,
-    detachSequence,
-    onViewportRequest,
-  }: RoomPresenceSurfaceProps,
-  snapshot: BoardRoomState,
+interface FollowCandidates {
+  readonly participants: readonly BoardRoomParticipant[];
+  readonly workspaces: readonly BoardRoomAgentWorkspace[];
+}
+
+function followCandidate(selection: FollowSelection | undefined, candidates: FollowCandidates) {
+  const { participants, workspaces } = candidates;
+  if (selection?.kind === 'agent') {
+    const workspace = workspaces.find(({ agentId }) => agentId === selection.actorId);
+    return {
+      available: workspace !== undefined,
+      name: workspace?.label,
+      waiting: !workspace?.areas.length,
+    };
+  }
+
+  const peer = participants.find(({ actorId }) => actorId === selection?.actorId);
+  return {
+    peer,
+    available: Boolean(peer && !peer.following),
+    name: peer?.displayName,
+    waiting: !peer?.viewport,
+  };
+}
+
+function useFollowSelection(
+  { session, detachSequence }: Pick<RoomPresenceSurfaceProps, 'session' | 'detachSequence'>,
+  status: BoardRoomState['status'],
+  candidates: FollowCandidates,
+  canStartFollow: boolean,
 ) {
   const [selection, setSelection] = useState<FollowSelection>();
-  const { status, actorId, viewId } = snapshot;
-  const online = status === 'online';
-  const participants = snapshot.participants.filter(
-    ({ actorId: actor, viewId: view }) => actor !== actorId || view !== viewId,
-  );
-  const selectedPeer = participants.find((peer) => sameParticipant(peer, selection));
-  const target = activeFollow(selection, selectedPeer, status, { session, detachSequence });
+  const { available, peer, name, waiting } = followCandidate(selection, candidates);
+  const target = activeFollow(selection, available, status, { session, detachSequence });
   if (selection && !target) {
     setSelection(undefined);
   }
 
-  const canApply = online && !paused && target !== undefined;
-  const next = canApply ? fitFollowViewport(selectedPeer?.viewport, viewport) : undefined;
-  useFollowCamera(target, next, onViewportRequest);
-  const roomViewport = toRoomViewport(viewport);
-  const canPublishViewport = !paused && !target;
-  const onCursorChange = usePublishPresence(
-    session,
-    status,
-    canPublishViewport ? roomViewport : undefined,
-    cursor,
-    Boolean(target),
-    paused,
-  );
-
-  const canStartFollow = online && !paused && roomViewport !== undefined;
   function handleFollow(participant: BoardRoomParticipant) {
-    if (sameParticipant(participant, target)) {
+    if (participant.actorId === target?.actorId) {
       setSelection(undefined);
     } else if (canStartFollow && canFollowParticipant(participant)) {
       setSelection({
+        kind: 'person',
         actorId: participant.actorId,
-        viewId: participant.viewId,
         displayName: participant.displayName,
         session,
         detachSequence,
@@ -238,16 +296,68 @@ function useRoomFollow(
     }
   }
 
+  function handleFollowAgent(id: string) {
+    if (target?.kind === 'agent' && id === target.actorId) {
+      setSelection(undefined);
+      return;
+    }
+
+    const workspace = candidates.workspaces.find(
+      ({ agentId, areas }) => agentId === id && areas.length > 0,
+    );
+
+    if (workspace && canStartFollow) {
+      setSelection({
+        kind: 'agent',
+        actorId: id,
+        displayName: workspace.label || 'Agent',
+        session,
+        detachSequence,
+      });
+    }
+  }
+
   return {
-    participants,
     target,
-    canStartFollow,
+    peer,
     handleFollow,
+    handleFollowAgent,
     stop: () => setSelection(undefined),
-    waitingForViewport: !selectedPeer?.viewport,
-    name: target && (selectedPeer?.displayName ?? target.displayName),
-    onCursorChange,
+    waitingForViewport: waiting,
+    name: target && (name || target.displayName),
   };
+}
+
+function useRoomFollow(props: RoomPresenceSurfaceProps, snapshot: BoardRoomState) {
+  const { session, viewport, cursor, paused, onViewportRequest } = props;
+  const { status, actorId } = snapshot;
+  const participants = presenceMembers(snapshot.participants, actorId);
+  const workspaces = snapshot.agentWorkspaces ?? emptyWorkspaces;
+  const roomViewport = toRoomViewport(viewport);
+  const canStartFollow = status === 'online' && !paused && roomViewport !== undefined;
+  const follow = useFollowSelection(props, status, { participants, workspaces }, canStartFollow);
+  const { target, peer } = follow;
+  const canApply = status === 'online' && !paused && target !== undefined;
+  const next = canApply ? fitFollowViewport(peer?.viewport, viewport) : undefined;
+  useFollowCamera(peer && participantKey(peer), next, onViewportRequest);
+  useAgentWorkspaceCamera(
+    target?.kind === 'agent' ? target.actorId : undefined,
+    workspaces,
+    viewport,
+    canApply,
+    onViewportRequest,
+  );
+  const canPublishViewport = !paused && !target;
+  const publish = usePublishPresence(
+    session,
+    snapshot,
+    canPublishViewport ? roomViewport : undefined,
+    cursor,
+    Boolean(target),
+    paused,
+  );
+
+  return { ...follow, participants, workspaces, canStartFollow, publish };
 }
 
 export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
@@ -255,17 +365,29 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
   const snapshot = useRoomSession(props);
   const { status } = snapshot;
   const follow = useRoomFollow(props, snapshot);
+  const remoteGestures = usePeerGestures(session);
 
   return render({
     accessLost: status === 'accessLost',
-    onCursorChange: follow.onCursorChange,
+    ...follow.publish,
+    remoteGesturePreviews: paused ? undefined : remoteGestures,
     participants: status !== 'accessLost' && (
       <ParticipantControl
         participants={follow.participants}
-        target={follow.target}
+        targetActor={follow.target?.actorId}
         canStartFollow={follow.canStartFollow}
+        preview={paused}
         reconnecting={status === 'reconnecting'}
         onFollow={follow.handleFollow}
+        agents={{
+          workspaces: follow.workspaces,
+          followedAgentId: follow.target?.kind === 'agent' ? follow.target.actorId : undefined,
+          onFollow: follow.handleFollowAgent,
+          onRelease:
+            status === 'online' && snapshot.canReleaseAgentActivity
+              ? session.releaseAgentWorkspace?.bind(session)
+              : undefined,
+        }}
       />
     ),
     notice: (
@@ -273,6 +395,7 @@ export function RoomPresenceSurface(props: RoomPresenceSurfaceProps) {
         status={status}
         paused={paused}
         waitingForViewport={follow.waitingForViewport}
+        agent={follow.target?.kind === 'agent'}
         name={follow.name}
         onStop={follow.stop}
       />

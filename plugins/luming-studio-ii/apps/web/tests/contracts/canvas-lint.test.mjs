@@ -5,6 +5,7 @@ import { ESLint } from 'eslint';
 
 const eslint = new ESLint({ cwd: fileURLToPath(new URL('../../', import.meta.url)) });
 const boundary = 'canvas/contract-boundary';
+const formatBoundary = 'canvas/object-format-boundary';
 const canvas = 'src/ui/domain/canvas/';
 const surface = 'src/surfaces/board/editor.ts';
 const component = 'tests/component/Canvas.test.tsx';
@@ -22,6 +23,30 @@ const readonlyExports = [
 ];
 
 const rejected = [
+  [
+    'Canvas invoking a private inline editor handle',
+    canvas + 'rendering/CanvasRegisteredBody.tsx',
+    "editor.current?.format('bold');",
+    formatBoundary,
+  ],
+  [
+    'whiteboard formatting by dispatching private events',
+    'src/surfaces/whiteboard-editor/WhiteboardEditorSurface.tsx',
+    "target.dispatchEvent(new CustomEvent('studio-table-format'));",
+    formatBoundary,
+  ],
+  [
+    'Canvas calling a captured formatting method',
+    canvas + 'Canvas.tsx',
+    "const apply = editor.current.format;\napply('bold');",
+    formatBoundary,
+  ],
+  [
+    'whiteboard capturing an object formatting method by destructuring',
+    'src/surfaces/whiteboard-editor/GeometrySelectionObjectControls.tsx',
+    "const { format: apply } = editor;\napply('bold');",
+    formatBoundary,
+  ],
   [
     'private value',
     surface,
@@ -254,6 +279,18 @@ for (const [name, filePath, source, rule = boundary, messageId] of rejected) {
 }
 
 const accepted = [
+  [
+    canvas + 'rendering/CanvasRegisteredBody.tsx',
+    'export function Body() { return <ObjectView formatRequest={request} />; }',
+  ],
+  [
+    canvas + 'rendering/CanvasObjects.tsx',
+    'export function permitted() { return capability.includes(request.format); }',
+  ],
+  [
+    'src/ui/domain/objects/table/TableObject.tsx',
+    "function formatCell() { return editor.current?.format('bold'); }",
+  ],
   [surface, `import { Canvas } from '${publicPackage}';`],
   [surface, `import { CanvasShapeOutline, expandCanvasSelection } from '${publicPackage}';`],
   [surface, "void import('../../ui/domain/canvas/index.js');"],

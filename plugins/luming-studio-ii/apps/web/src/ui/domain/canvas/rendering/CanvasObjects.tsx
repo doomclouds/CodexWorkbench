@@ -10,6 +10,7 @@ import type {
   CanvasObjectExtension,
   CanvasObjectNavigation,
   CanvasObjectPayload,
+  CanvasObjectViewProps,
   CanvasObjectRegistry,
   CanvasProps,
 } from '../contracts.js';
@@ -34,11 +35,20 @@ interface CanvasObjectsProps {
   zoom?: number;
   activeEmbedId?: string;
   editRequest?: { readonly id: string; readonly sequence: number };
+  formatObjectRequest?: CanvasProps['formatObjectRequest'];
   viewing?: boolean;
   focusObjectId?: string;
   expandedObjectId?: string;
   canEditExpandedObject?: boolean;
   readHtmlSource?: CanvasProps['readHtmlSource'];
+  downloadFile?: CanvasProps['downloadFile'];
+  readDocumentAsset?: CanvasProps['readDocumentAsset'];
+  uploadDocumentImage?: CanvasProps['uploadDocumentImage'];
+  onOpenNativeSource?: CanvasProps['onOpenNativeSource'];
+  nativeSourceLabel?: CanvasProps['nativeSourceLabel'];
+  nativeSourceRequest?: CanvasProps['nativeSourceRequest'];
+  annotationActive?: CanvasProps['annotationActive'];
+  onAnnotateContent?: CanvasProps['onAnnotateContent'];
   isLocked?: (id: string) => boolean;
   canWriteObject?: CanvasProps['canWriteObject'];
   onObjectIntent?: CanvasProps['onObjectIntent'];
@@ -63,9 +73,18 @@ interface CanvasRenderedObjectProps {
   canEdit?: boolean;
   locked?: boolean;
   editRequest?: number;
+  formatRequest?: CanvasObjectViewProps['formatRequest'];
   focusedReading?: boolean;
   expanded?: boolean;
   readHtmlSource?: CanvasObjectsProps['readHtmlSource'];
+  downloadFile?: CanvasObjectsProps['downloadFile'];
+  readDocumentAsset?: CanvasObjectsProps['readDocumentAsset'];
+  uploadDocumentImage?: CanvasObjectsProps['uploadDocumentImage'];
+  onOpenNativeSource?: CanvasObjectsProps['onOpenNativeSource'];
+  nativeSourceLabel?: CanvasObjectsProps['nativeSourceLabel'];
+  nativeSourceRequest?: CanvasObjectsProps['nativeSourceRequest'];
+  annotationActive?: CanvasObjectsProps['annotationActive'];
+  onAnnotateContent?: CanvasObjectsProps['onAnnotateContent'];
   onObjectIntent?: CanvasObjectsProps['onObjectIntent'];
   onOpenPresentation?: CanvasObjectsProps['onOpenPresentation'];
   onClosePresentation?: CanvasObjectsProps['onClosePresentation'];
@@ -183,9 +202,18 @@ const CanvasObjectView = memo(
     canEdit = false,
     locked,
     editRequest,
+    formatRequest,
     focusedReading,
     expanded,
     readHtmlSource,
+    downloadFile,
+    readDocumentAsset,
+    uploadDocumentImage,
+    onOpenNativeSource,
+    nativeSourceLabel,
+    nativeSourceRequest,
+    annotationActive,
+    onAnnotateContent,
     onObjectIntent,
     onOpenPresentation,
     onClosePresentation,
@@ -222,9 +250,18 @@ const CanvasObjectView = memo(
         readOnly={readOnly}
         locked={locked}
         editRequest={editRequest}
+        formatRequest={readOnly ? undefined : formatRequest}
         focusedReading={focusedReading}
         expanded={expanded}
         readHtmlSource={readHtmlSource}
+        downloadFile={downloadFile}
+        readDocumentAsset={readDocumentAsset}
+        uploadDocumentImage={uploadDocumentImage}
+        onOpenNativeSource={onOpenNativeSource}
+        nativeSourceLabel={nativeSourceLabel}
+        nativeSourceRequest={nativeSourceRequest}
+        annotationActive={annotationActive}
+        onAnnotateContent={onAnnotateContent}
         onOpenPresentation={onOpenPresentation}
         onClosePresentation={onClosePresentation}
         onObjectIntent={blockedEmbed ? undefined : onObjectIntent}
@@ -274,6 +311,18 @@ function objectZoom(
   return frame?.usesZoom || extension?.View ? zoom : 1;
 }
 
+function allowedFormatRequest(
+  request: CanvasObjectsProps['formatObjectRequest'],
+  id: string,
+  extension: CanvasRenderedObjectProps['extension'],
+) {
+  if (request?.id !== id || !extension?.capabilities.inlineFormats?.includes(request.format)) {
+    return;
+  }
+
+  return request;
+}
+
 export function CanvasObjects({
   objects,
   registry,
@@ -285,13 +334,22 @@ export function CanvasObjects({
   zoom = 1,
   activeEmbedId,
   editRequest,
+  formatObjectRequest,
   viewing,
   focusObjectId,
   expandedObjectId,
   canEditExpandedObject,
   readHtmlSource,
+  downloadFile,
+  readDocumentAsset,
+  uploadDocumentImage,
+  onOpenNativeSource,
+  nativeSourceLabel,
+  nativeSourceRequest,
+  annotationActive,
+  onAnnotateContent,
   isLocked,
-  canWriteObject,
+  canWriteObject = () => true,
   onObjectIntent,
   onOpenPresentation,
   onClosePresentation,
@@ -299,11 +357,22 @@ export function CanvasObjects({
   onObjectRetentionChange,
 }: CanvasObjectsProps) {
   const selectedIds = useMemo(() => new Set(selection), [selection]);
+  const annotateEmbeds = Boolean(annotationActive && onAnnotateContent);
+  const documentTools = { readDocumentAsset, uploadDocumentImage };
+  const single = selection.length === 1;
+  const formatRequest =
+    selection.length === 1 && selectedIds.has(formatObjectRequest?.id ?? '')
+      ? formatObjectRequest
+      : undefined;
   const projected = objects.map(({ object, geometry, connectorRoute }) => {
     const { id, kind, locked } = object;
     const extension = registry.get(kind);
     const frame = builtInFrame(kind);
     const expanded = id === expandedObjectId;
+    const focused = id === focusObjectId;
+    const selected = selectedIds.has(id);
+    const nativeSource =
+      nativeSourceRequest?.source.elementId === id ? nativeSourceRequest : undefined;
 
     return (
       <CanvasObjectView
@@ -316,18 +385,26 @@ export function CanvasObjects({
         connectorRoute={connectorRoute}
         extension={extension}
         frame={frame}
-        selected={selectedIds.has(id)}
-        singleSelected={selection.length === 1 && selectedIds.has(id)}
-        embedActive={viewing || id === activeEmbedId}
-        focusedReading={id === focusObjectId}
+        selected={selected}
+        singleSelected={single && selected}
+        embedActive={viewing || id === activeEmbedId || annotateEmbeds}
+        focusedReading={focused}
         expanded={expanded}
         canEdit={canEdit || (expanded && canEditExpandedObject)}
         locked={locked || isLocked?.(id)}
         editRequest={editRequest?.id === id ? editRequest.sequence : undefined}
+        formatRequest={allowedFormatRequest(formatRequest, id, extension)}
         readHtmlSource={readHtmlSource}
-        onObjectIntent={canWriteObject?.(kind) === false ? undefined : onObjectIntent}
+        downloadFile={downloadFile}
+        {...(kind === 'document' ? documentTools : undefined)}
+        onOpenNativeSource={onOpenNativeSource}
+        nativeSourceLabel={nativeSourceLabel}
+        nativeSourceRequest={nativeSource}
+        annotationActive={annotationActive}
+        onAnnotateContent={viewing && !focused ? undefined : onAnnotateContent}
+        onObjectIntent={canWriteObject(kind) ? onObjectIntent : undefined}
         onOpenPresentation={onOpenPresentation}
-        onClosePresentation={expanded || id === focusObjectId ? onClosePresentation : undefined}
+        onClosePresentation={expanded || focused ? onClosePresentation : undefined}
         onObjectNavigation={onObjectNavigation}
         onObjectRetentionChange={onObjectRetentionChange}
         zoom={objectZoom(frame, extension, zoom)}

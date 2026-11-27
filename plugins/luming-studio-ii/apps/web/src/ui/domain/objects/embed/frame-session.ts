@@ -115,6 +115,7 @@ export function attachEmbedFrame({
   let pointerInside = false;
   let navigationPan: Extract<HtmlNavigationEvent, { kind: 'pan' }> | null = null;
   let navigationSpace = false;
+  let annotationTargets: ReadonlySet<string> = new Set();
 
   if (scrollPosition.current?.regionId !== regionId) {
     scrollPosition.current = null;
@@ -328,7 +329,8 @@ export function attachEmbedFrame({
   };
 
   const receive = (event: MessageEvent<unknown>) => {
-    if (event.source !== iframe.contentWindow) {
+    const sourceWindow = iframe.contentWindow;
+    if (!sourceWindow || event.source !== sourceWindow) {
       return;
     }
 
@@ -368,21 +370,27 @@ export function attachEmbedFrame({
       startSave();
       return;
     }
-    const selection = validateHtmlSelectionMessage(data, identity);
-    if (selection && current.annotation) {
+    const selection = validateHtmlSelectionMessage(data, identity, annotationTargets);
+    if (selection && current.annotation && isFrameVisible(iframe)) {
       reportSelection(selection, current);
     }
   };
   const current = readProps();
   const state = authority();
-  const srcDoc = buildHtmlRegionDocument(html ?? '', {
-    ...identity,
-    annotation: Boolean(current.annotation),
-    preserveScroll: Boolean(current.preserveScroll),
-    state: state.state,
-    elementVersion: state.version,
-    writable: Boolean(current.onSaveState),
-  });
+  const srcDoc = buildHtmlRegionDocument(
+    html ?? '',
+    {
+      ...identity,
+      annotation: Boolean(current.annotation),
+      preserveScroll: Boolean(current.preserveScroll),
+      state: state.state,
+      elementVersion: state.version,
+      writable: Boolean(current.onSaveState),
+    },
+    (ids) => {
+      annotationTargets = ids;
+    },
+  );
   iframe.srcdoc = srcDoc;
   const session: FrameSession = {
     close() {

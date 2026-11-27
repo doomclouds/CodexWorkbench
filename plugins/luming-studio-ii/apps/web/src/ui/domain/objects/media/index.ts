@@ -13,3 +13,4 @@ export type {
 } from './contracts.js';
 export { imageExtension, linkExtension, videoExtension } from './canvas-extension.js';
 export type { ImageCanvasValue, LinkCanvasValue, VideoCanvasValue } from './canvas-extension.js';
+export { LinkDialog, type LinkDraft } from './LinkDialog.js';

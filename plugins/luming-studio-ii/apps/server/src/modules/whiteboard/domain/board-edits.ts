@@ -9,7 +9,8 @@ export type BoardEditRejection =
   | 'unsupportedKind'
   | 'versionUnavailable'
   | 'tooLarge'
-  | 'invalidImage';
+  | 'invalidImage'
+  | 'invalidVideo';
 
 export interface BoardEditIdentity {
   readonly boardId: string;
@@ -47,6 +48,7 @@ export interface BoardEditApplied {
   readonly removedPayloadObjectIds?: readonly string[];
   readonly order?: readonly string[];
   readonly detailsExpired?: boolean;
+  readonly layerChangedObjectIds?: readonly string[];
 }
 
 export const boardWritePayloadLimit = 32n * 1024n * 1024n;
@@ -72,6 +74,7 @@ export interface BoardEditReceipt extends BoardEditIdentity {
 export interface StoredBoardEditReceipt {
   readonly signature: string;
   readonly receipt: BoardEditReceipt;
+  readonly advancedRevision?: boolean;
 }
 
 export type BoardVersionKind = 'geometry' | 'content' | 'image' | 'restore';

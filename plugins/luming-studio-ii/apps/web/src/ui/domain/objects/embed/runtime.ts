@@ -10,7 +10,40 @@ export const COMMENT_CURSOR =
 export const HTML_REGION_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; navigate-to 'none'";
 
-export function buildHtmlRegionDocument(source: string, options: EmbedRuntimeOptions): string {
+function annotationTargets(doc: Document): ReadonlySet<string> {
+  const unique = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const element of doc.querySelectorAll('body [data-studio-id]')) {
+    if (
+      element.closest(
+        'script,style,template,noscript,[data-studio-runtime],[hidden],[aria-hidden="true"]',
+      )
+    ) {
+      continue;
+    }
+
+    const id = element.getAttribute('data-studio-id');
+    if (!id) {
+      continue;
+    }
+
+    if (unique.has(id)) {
+      duplicates.add(id);
+    }
+    unique.add(id);
+  }
+  for (const id of duplicates) {
+    unique.delete(id);
+  }
+
+  return unique;
+}
+
+export function buildHtmlRegionDocument(
+  source: string,
+  options: EmbedRuntimeOptions,
+  receiveAnnotationTargets?: (targetIds: ReadonlySet<string>) => void,
+): string {
   const doc = new DOMParser().parseFromString(source, 'text/html');
   doc
     .querySelectorAll(
@@ -36,6 +69,8 @@ export function buildHtmlRegionDocument(source: string, options: EmbedRuntimeOpt
       }
     }
   }
+  receiveAnnotationTargets?.(annotationTargets(doc));
+
   const charset = doc.createElement('meta');
   charset.setAttribute('charset', 'utf-8');
   const csp = doc.createElement('meta');

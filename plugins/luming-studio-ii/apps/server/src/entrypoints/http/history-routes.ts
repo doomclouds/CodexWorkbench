@@ -18,7 +18,7 @@ import { toPayloadResult } from './payload.js';
 import { HttpRequestError, requireId } from './request.js';
 import type { ObserveEdit } from './room-changes.js';
 import { toBoardScene } from './scene.js';
-import { unaryRoute, type RouteEntry } from './unary-route.js';
+import { asyncUnaryRoute, unaryRoute, type RouteEntry } from './unary-route.js';
 
 const versionKind: Record<BoardVersionSummary['kind'], BoardVersionKind> = {
   baseline: BoardVersionKind.BASELINE,
@@ -72,7 +72,11 @@ function toVersionExport(
 ): MessageInitShape<typeof ExportBoardVersionResponseSchema> {
   if (result.kind !== 'unavailable') {
     const { result: encoded } = toExportResponse(result);
-    if (encoded?.case === 'file' || encoded?.case === 'rejected') {
+    if (
+      encoded?.case === 'file' ||
+      encoded?.case === 'rejected' ||
+      encoded?.case === 'browserPng'
+    ) {
       return { result: encoded };
     }
   }
@@ -138,15 +142,19 @@ export function createBoardHistoryRoutes(
 
       return { receipt: toBoardEditReceipt(receipt) };
     }),
-    unaryRoute(exportBoardVersion, (actor, request) =>
-      toVersionExport(
-        application.exportVersion(actor, {
-          boardId: requireId(request.boardId),
-          expectedRevision: requireRevision(request.revision),
-          scope: toExportScope(request.scope),
-          format: toExportFormat(request.format),
-        }),
-      ),
-    ),
+    asyncUnaryRoute(exportBoardVersion, async (actor, request) => {
+      const result = await application.exportVersionFile(actor, {
+        boardId: requireId(request.boardId),
+        expectedRevision: requireRevision(request.revision),
+        scope: toExportScope(request.scope),
+        format: toExportFormat(request.format),
+      });
+
+      if (result.kind === 'file' || result.kind === 'browserPng') {
+        actor.authorize?.(request);
+      }
+
+      return toVersionExport(result);
+    }),
   ];
 }

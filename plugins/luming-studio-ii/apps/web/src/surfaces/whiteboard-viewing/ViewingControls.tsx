@@ -180,7 +180,7 @@ export function ViewingControls({
       <button
         type="button"
         aria-label="浏览内容"
-        title="浏览内容"
+        title="浏览内容：可操作按钮、选字和滚动"
         aria-pressed={!marker}
         onClick={(event) => refocus(event, () => onMarker(false))}
       >
@@ -189,7 +189,7 @@ export function ViewingControls({
       <button
         type="button"
         aria-label="临时荧光笔"
-        title="临时荧光笔"
+        title="临时荧光笔：圈画后约 3 秒淡出，仅本次观看"
         aria-pressed={marker}
         onClick={(event) => refocus(event, () => onMarker(!marker))}
       >
@@ -198,7 +198,7 @@ export function ViewingControls({
       <button
         type="button"
         aria-label="清除临时笔迹"
-        title="清除临时笔迹"
+        title="清除本次观看的临时笔迹"
         onClick={(event) => refocus(event, onClear)}
       >
         <Trash2 size={17} />

@@ -133,6 +133,16 @@ export function VersionPreview({
             disabled={unavailable}
             onActivate={() => exporting.handleExport('svg', actionScope(scope, selection))}
           />
+          <Button
+            label="导出 PNG"
+            disabled={unavailable}
+            onActivate={() => exporting.handleExport('png', actionScope(scope, selection))}
+          />
+          <Button
+            label="导出整板 HTML"
+            disabled={busy}
+            onActivate={() => exporting.handleExport('html', { kind: 'whole' })}
+          />
         </div>
         {exporting.pending && <StatusText message="正在导出版本…" announcement="polite" busy />}
         {exporting.notice && (

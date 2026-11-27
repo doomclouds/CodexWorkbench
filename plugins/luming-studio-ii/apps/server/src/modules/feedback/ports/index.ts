@@ -1,6 +1,8 @@
 import type {
   FeedbackAnchorObject,
   FeedbackBoardAccess,
+  FeedbackContentSource,
+  FeedbackContentTarget,
   FeedbackMessage,
   FeedbackStoredReceipt,
   FeedbackThread,
@@ -11,6 +13,9 @@ export type {
   FeedbackAnchor,
   FeedbackAnchorObject,
   FeedbackBoardAccess,
+  FeedbackContentSource,
+  FeedbackContentTarget,
+  FeedbackContentUnit,
   FeedbackFrozenObject,
   FeedbackMessage,
   FeedbackOutcome,
@@ -27,6 +32,10 @@ export interface FeedbackReader {
   getAccess(boardId: string, actorId: string): FeedbackBoardAccess | undefined;
   getBoardRevision(boardId: string): bigint;
   getObject(boardId: string, objectId: string): FeedbackAnchorObject | undefined;
+  getContentSource(
+    boardId: string,
+    target: FeedbackContentTarget,
+  ): FeedbackContentSource | undefined;
   listThreads(lookup: FeedbackThreadLookup): readonly FeedbackThread[];
   getThread(boardId: string, threadId: string): FeedbackThread | undefined;
   listReplies(

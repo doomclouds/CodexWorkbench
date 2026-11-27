@@ -21,6 +21,7 @@ const proposal: BoardSuggestion = {
   proposalVersion: 0n,
   expiresAtMillis: 1_800_000_000_000n,
   options: [{ optionId, label: '移动右侧卡片', description: '保持其他内容原样。' }],
+  activeOptionIds: [],
   rejected: false,
 };
 const changes = { revision: 6n, objects: [], removedIds: [], order: [], payloads: [] };
@@ -125,24 +126,26 @@ async function settle() {
   });
 }
 
-it('selects and previews a choice read-only before explicit acceptance', async () => {
+it('previews an inactive option only while hovered, then applies it on click', async () => {
   const service = suggestionService();
   const renderPreview = vi.fn(() => <div>此区域只读</div>);
   const { onApplied } = render(service, { renderPreview });
   await settle();
-  expect(action('接受所选方案').disabled).toBe(true);
-
-  await click('移动右侧卡片');
-  expect(service.acceptSuggestion).not.toHaveBeenCalled();
-  await click('预览所选方案');
+  const option = action('移动右侧卡片');
+  expect(option.getAttribute('aria-pressed')).toBe('false');
+  await act(async () => {
+    option.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  });
   expect(service.previewSuggestion).toHaveBeenCalledOnce();
   expect(service.acceptSuggestion).not.toHaveBeenCalled();
   expect(renderPreview).toHaveBeenCalledWith(previewFrame);
   expect(view.host.querySelector('[aria-label="只读方案预览"]')).not.toBeNull();
 
-  await click('退出方案预览');
+  await act(async () => {
+    option.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+  });
   expect(view.host.querySelector('[aria-label="只读方案预览"]')).toBeNull();
-  await click('接受所选方案');
+  await click('移动右侧卡片');
   expect(service.acceptSuggestion.mock.calls[0]?.[0]).toEqual({
     boardId,
     proposalId,
@@ -153,12 +156,16 @@ it('selects and previews a choice read-only before explicit acceptance', async (
   expect(onApplied).toHaveBeenCalledExactlyOnceWith(applied);
 });
 
-it('dismisses a suggestion without a change to the underlying board', async () => {
+it('dismisses an applied suggestion card without a change to the underlying board', async () => {
   const service = suggestionService();
+  service.listSuggestions
+    .mockResolvedValueOnce({ proposals: [{ ...proposal, activeOptionIds: [optionId] }] })
+    .mockResolvedValueOnce({ proposals: [] });
   const { onApplied } = render(service);
   await settle();
 
-  await click('拒绝建议');
+  expect(action('移动右侧卡片').getAttribute('aria-pressed')).toBe('true');
+  await click('清除建议，保留已应用内容');
   expect(service.rejectSuggestion.mock.calls[0]?.[0]).toEqual({
     boardId,
     proposalId,
@@ -167,21 +174,56 @@ it('dismisses a suggestion without a change to the underlying board', async () =
   });
   expect(service.acceptSuggestion).not.toHaveBeenCalled();
   expect(onApplied).not.toHaveBeenCalled();
-  expect(view.host.textContent).toContain('已拒绝建议');
+  expect(view.host.textContent).toContain('已清除建议，保留已应用内容');
+  expect(view.host.querySelector('.board-suggestion-card')).toBeNull();
 });
 
-it('retains the original acceptance after closing and recovers it from the receipt', async () => {
+it('withdraws an active option with the latest version and keeps the option reusable', async () => {
+  const service = suggestionService();
+  service.listSuggestions
+    .mockResolvedValueOnce({
+      proposals: [{ ...proposal, proposalVersion: 2n, activeOptionIds: [optionId] }],
+    })
+    .mockResolvedValueOnce({ proposals: [{ ...proposal, proposalVersion: 3n }] });
+  const { onApplied } = render(service);
+  await settle();
+  await act(async () => action('移动右侧卡片').focus());
+  expect(service.previewSuggestion).not.toHaveBeenCalled();
+
+  await click('移动右侧卡片');
+
+  expect(service.acceptSuggestion.mock.calls[0]?.[0]).toMatchObject({
+    optionId,
+    expectedProposalVersion: 2n,
+    commandId,
+  });
+  expect(onApplied).toHaveBeenCalledExactlyOnceWith(applied);
+  expect(action('移动右侧卡片').getAttribute('aria-pressed')).toBe('false');
+  expect(action('移动右侧卡片').disabled).toBe(false);
+  expect(view.host.textContent).toContain('已撤回方案并保存白板');
+});
+
+it('retains the original acceptance after closing the notes outlet and recovers it from the receipt', async () => {
   const service = suggestionService();
   service.acceptSuggestion.mockRejectedValueOnce(new Error('连接中断'));
   service.getAcceptReceipt.mockResolvedValueOnce(undefined).mockResolvedValueOnce(applied);
-  const { onApplied, rerender } = render(service);
+  const inline = {
+    outlet: null,
+    previewHost: null,
+    showCards: true,
+    onCardsVisibleChange: vi.fn<(visible: boolean) => void>(),
+  };
+  const { onApplied, rerender } = render(service, { anchor: null, inline });
+  const outlet = document.createElement('div');
+  view.host.append(outlet);
+  rerender({ inline: { ...inline, outlet } });
   await settle();
   await click('移动右侧卡片');
-  await click('接受所选方案');
   expect(view.host.textContent).toContain('审阅结果待确认');
 
-  rerender({ anchor: null });
-  rerender({ anchor });
+  rerender({ inline });
+  expect(outlet.childElementCount).toBe(0);
+  rerender({ inline: { ...inline, outlet } });
   await settle();
   await click('核对原回执');
   expect(service.acceptSuggestion).toHaveBeenCalledOnce();
@@ -197,8 +239,7 @@ it('reports a conflicting preview and updates the list without making an edit', 
   service.previewSuggestion.mockResolvedValueOnce({ kind: 'conflict', revision: 7n });
   const { onApplied } = render(service);
   await settle();
-  await click('移动右侧卡片');
-  await click('预览所选方案');
+  await act(async () => action('移动右侧卡片').focus());
 
   expect(view.host.textContent).toContain('白板或建议已更新');
   expect(service.listSuggestions).toHaveBeenCalledTimes(2);

@@ -1,5 +1,5 @@
-import { useRef } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useEffect, useEffectEvent, useRef } from 'react';
+import { Loader2, Trash2 } from 'lucide-react';
 import type { CatalogManagementService } from '../../data/catalog/index.js';
 import {
   Button,
@@ -8,7 +8,12 @@ import {
   StatePanel,
   type ButtonHandle,
 } from '../../ui/base/index.js';
-import { RecycleBinCards, RecycleSelection } from './RecycleBinCards.js';
+import {
+  RecycleBinCards,
+  RecycleSelection,
+  type DeleteRecycleTargets,
+  type RenderRecycleThumbnail,
+} from './RecycleBinCards.js';
 import { RecycleBinToolbar, type RecycleBinPreferences } from './RecycleBinToolbar.js';
 import { toRecycleTarget, type PurgeScope } from './recycle-bin-commands.js';
 import { useRecycleBinActions } from './useRecycleBinActions.js';
@@ -20,6 +25,7 @@ export interface RecycleBinSurfaceProps {
   readonly createCommandId: () => string;
   readonly onBack: () => void;
   readonly preferences: RecycleBinPreferences;
+  readonly renderThumbnail?: RenderRecycleThumbnail;
 }
 
 interface LiveRecycleBinProps extends RecycleBinSurfaceProps {
@@ -34,9 +40,10 @@ interface PurgeDialogProps {
   readonly purging: boolean;
   readonly onCancel: () => void;
   readonly onConfirm: () => void;
+  readonly restoreFocus: () => void;
 }
 
-function PurgeDialog({ scope, purging, onCancel, onConfirm }: PurgeDialogProps) {
+function PurgeDialog({ scope, purging, onCancel, onConfirm, restoreFocus }: PurgeDialogProps) {
   const cancel = useRef<ButtonHandle>(null);
   const quantity = scope.targets.length;
   const single = quantity === 1 ? scope.targets[0]?.title : undefined;
@@ -47,8 +54,9 @@ function PurgeDialog({ scope, purging, onCancel, onConfirm }: PurgeDialogProps) 
       open
       title={scope.all ? '清空回收站' : '永久删除作品'}
       description={'将永久删除 ' + quantity + ' 项作品，此操作无法恢复。'}
-      closeLabel="关闭"
+      closeLabel="关闭弹窗"
       initialFocus={() => cancel.current?.focus()}
+      restoreFocus={restoreFocus}
       dismissPolicy={{ escape: !purging, backdrop: !purging }}
       onRequestClose={onCancel}
     >
@@ -58,7 +66,9 @@ function PurgeDialog({ scope, purging, onCancel, onConfirm }: PurgeDialogProps) 
         <div className="studio-recycle-destructive">
           <Button
             label={purging ? '正在删除…' : confirmLabel}
-            icon={<Trash2 size={15} />}
+            icon={
+              purging ? <Loader2 size={15} className="studio-recycle-spin" /> : <Trash2 size={15} />
+            }
             disabled={purging}
             onActivate={onConfirm}
           />
@@ -70,17 +80,30 @@ function PurgeDialog({ scope, purging, onCancel, onConfirm }: PurgeDialogProps) 
 
 function RecycleFeedback({ actions }: { readonly actions: Actions }) {
   const { notice, failures, dismissNotice } = actions;
+  const dismiss = useEffectEvent(dismissNotice);
+
+  useEffect(() => {
+    if (notice?.kind !== 'success') {
+      return;
+    }
+
+    const timer = setTimeout(dismiss, 6_000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   return (
     <>
       {notice && (
-        <OperationNotice
-          id="recycle-bin-feedback"
-          level={notice.kind}
-          message={notice.message}
-          dismissible
-          onDismiss={dismissNotice}
-        />
+        <div className={notice.kind === 'success' ? 'studio-recycle-toast' : undefined}>
+          <OperationNotice
+            id="recycle-bin-feedback"
+            level={notice.kind}
+            message={notice.message}
+            presentation={notice.kind === 'success' ? 'toast' : 'banner'}
+            dismissible
+            onDismiss={dismissNotice}
+          />
+        </div>
       )}
       {failures.length > 0 && (
         <div className="studio-recycle-failures" role="alert">
@@ -103,13 +126,22 @@ function RecycleResults({
   directory,
   actions,
   layout,
+  onDelete,
+  renderThumbnail,
 }: {
   readonly directory: Directory;
   readonly actions: Actions;
   readonly layout: RecycleBinPreferences['layout'];
+  readonly onDelete: DeleteRecycleTargets;
+  readonly renderThumbnail?: RenderRecycleThumbnail;
 }) {
   if (directory.status === 'loading' && !directory.boards.length) {
-    return <StatePanel kind="initial-loading" title="正在读取作品" />;
+    return (
+      <div className="studio-recycle-empty" role="status">
+        <Loader2 size={26} className="studio-recycle-spin" />
+        <p>正在读取作品</p>
+      </div>
+    );
   }
   if (directory.status === 'failed' && !directory.boards.length) {
     return (
@@ -142,7 +174,8 @@ function RecycleResults({
         busy={disabled}
         onSelect={actions.toggleSelection}
         onRestore={actions.restore}
-        onDelete={actions.confirmSelected}
+        onDelete={onDelete}
+        renderThumbnail={directory.status === 'failed' ? undefined : renderThumbnail}
       />
       {directory.nextCursor && (
         <div className="studio-recycle-pagination">
@@ -158,23 +191,56 @@ function RecycleResults({
   );
 }
 
-function LiveRecycleBin({ management, createCommandId, onBack, preferences }: LiveRecycleBinProps) {
+function LiveRecycleBin({
+  management,
+  createCommandId,
+  onBack,
+  preferences,
+  renderThumbnail,
+}: LiveRecycleBinProps) {
   const directory = useRecycleBinDirectory(management);
   const actions = useRecycleBinActions({ management, createCommandId, refresh: directory.refresh });
   const busy = Boolean(actions.activity);
-  const visible = directory.boards.map(toRecycleTarget);
+  const visible = directory.boards
+    .filter(({ board }) => board.canManage === true)
+    .map(toRecycleTarget);
+  const emptyButton = useRef<HTMLButtonElement>(null);
+  const confirmationTrigger = useRef<HTMLButtonElement>(null);
 
   function handleChangeQuery(query: string) {
     actions.resetQueryState();
     directory.changeQuery(query);
   }
 
-  function handleConfirmSelected() {
+  function handleConfirmDeletion(
+    targets: Parameters<DeleteRecycleTargets>[0],
+    trigger: HTMLButtonElement,
+  ) {
+    confirmationTrigger.current = trigger;
+    actions.confirmSelected(targets);
+  }
+
+  function handleConfirmSelected(trigger: HTMLButtonElement) {
     const latest = new Map(visible.map((target) => [target.boardId, target]));
     const selection = [...actions.selected.values()].map(
       (target) => latest.get(target.boardId) ?? target,
     );
-    actions.confirmSelected(selection);
+    handleConfirmDeletion(selection, trigger);
+  }
+
+  function handlePrepareEmpty(trigger: HTMLButtonElement) {
+    confirmationTrigger.current = trigger;
+    actions.prepareEmpty();
+  }
+
+  function restorePurgeFocus() {
+    const trigger = confirmationTrigger.current;
+    confirmationTrigger.current = null;
+    if (trigger?.isConnected && !trigger.disabled) {
+      trigger.focus();
+    } else {
+      emptyButton.current?.focus();
+    }
   }
 
   return (
@@ -185,8 +251,9 @@ function LiveRecycleBin({ management, createCommandId, onBack, preferences }: Li
         available
         preferences={preferences}
         onBack={onBack}
+        emptyButton={emptyButton}
         onQueryChange={handleChangeQuery}
-        onEmpty={actions.prepareEmpty}
+        onEmpty={handlePrepareEmpty}
       />
       <section aria-label="回收站作品">
         {(visible.length > 0 || actions.selected.size > 0) && (
@@ -200,13 +267,20 @@ function LiveRecycleBin({ management, createCommandId, onBack, preferences }: Li
           />
         )}
         <RecycleFeedback actions={actions} />
-        <RecycleResults directory={directory} actions={actions} layout={preferences.layout} />
+        <RecycleResults
+          directory={directory}
+          actions={actions}
+          layout={preferences.layout}
+          onDelete={handleConfirmDeletion}
+          renderThumbnail={renderThumbnail}
+        />
         {actions.confirmation && (
           <PurgeDialog
             scope={actions.confirmation}
             purging={actions.activity === 'purging'}
             onCancel={actions.cancelConfirmation}
             onConfirm={actions.deleteConfirmed}
+            restoreFocus={restorePurgeFocus}
           />
         )}
       </section>
@@ -219,6 +293,7 @@ export function RecycleBinSurface({
   createCommandId,
   onBack,
   preferences,
+  renderThumbnail,
 }: RecycleBinSurfaceProps) {
   return (
     <main className="studio-recycle-bin" data-studio-theme={preferences.resolvedTheme}>
@@ -229,6 +304,7 @@ export function RecycleBinSurface({
             createCommandId={createCommandId}
             onBack={onBack}
             preferences={preferences}
+            renderThumbnail={renderThumbnail}
           />
         ) : (
           <>

@@ -1,6 +1,7 @@
 import { create, fromBinary, toBinary, toJsonString } from '@bufbuild/protobuf';
 import {
   BoardRoomEventSchema,
+  BoardRoomGestureKind,
   BoardRoomService as wireService,
   BoardRoomTimerPhase,
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
@@ -18,6 +19,15 @@ const actorId = 'guest-one';
 const commandId = 'timer-command';
 const instanceId = 'room-instance';
 const now = 1_800_000_000_000;
+const objectGeometry = { x: 30, y: 40, width: 150, height: 120, rotation: 0 };
+const gesture = {
+  kind: 'resize',
+  changes: [{ id: 'card', expectedVersion: 0, geometry: objectGeometry }],
+} as const;
+const wireGesture = {
+  kind: BoardRoomGestureKind.RESIZE,
+  changes: [{ objectId: 'card', expectedGeometryVersion: 0n, geometry: objectGeometry }],
+};
 const wireTimer = {
   version: 0n,
   phase: BoardRoomTimerPhase.RUNNING,
@@ -215,7 +225,7 @@ test('decodes changed metadata through the shared object codec without carrying 
   ]);
 });
 
-test('publishes ordered view-only presence and leaves using its next sequence', async () => {
+test('publishes ordered temporary presence and leaves using its next sequence', async () => {
   const post: BoardRoomPost = async (path, body) => {
     if (path === pathFor(updateBoardPresence.name)) {
       expect(fromBinary(updateBoardPresence.input, body)).toMatchObject({
@@ -224,6 +234,7 @@ test('publishes ordered view-only presence and leaves using its next sequence', 
         sequence: 1n,
         cursor: { x: 10, y: 20 },
         following: true,
+        gesture: wireGesture,
       });
 
       return toBinary(
@@ -246,9 +257,68 @@ test('publishes ordered view-only presence and leaves using its next sequence', 
   };
   const service = createBoardRoomService(post, unusedEvents);
   await expect(
-    service.updatePresence(boardId, viewId, 1n, { cursor: { x: 10, y: 20 }, following: true }),
+    service.updatePresence(boardId, viewId, 1n, {
+      cursor: { x: 10, y: 20 },
+      following: true,
+      gesture,
+    }),
   ).resolves.toBe(true);
   await expect(service.leavePresence(boardId, viewId, 2n)).resolves.toBe(true);
+});
+
+test('decodes a peer gesture lease and an explicit zero geometry version', () => {
+  const received: BoardRoomEvent[] = [];
+  const events: BoardRoomEventPort = (_board, _view, observer) => {
+    const event = create(BoardRoomEventSchema, {
+      boardId,
+      roomInstanceId: instanceId,
+      sequence: 1n,
+      serverTimeUnixMs: BigInt(now),
+      payload: {
+        case: 'participants',
+        value: {
+          upserts: [
+            {
+              key: { actorId: 'peer-editor', viewId: 'peer-tab' },
+              role: 'editor',
+              displayName: '另一位编辑者',
+              sequence: 1n,
+              expiresAtUnixMs: BigInt(now + 18_000),
+              gesture: wireGesture,
+              gestureExpiresAtUnixMs: BigInt(now + 1_200),
+            },
+          ],
+        },
+      },
+    });
+    observer.onEvent(toJsonString(BoardRoomEventSchema, event));
+  };
+  createBoardRoomService(unusedPost, events).subscribe(
+    boardId,
+    viewId,
+    {
+      onEvent: (event) => {
+        received.push(event);
+      },
+      onDisconnect() {
+        throw new Error('Unexpected disconnect.');
+      },
+    },
+    new AbortController().signal,
+  );
+  expect(received).toMatchObject([
+    {
+      kind: 'participants',
+      upserts: [
+        {
+          actorId: 'peer-editor',
+          viewId: 'peer-tab',
+          gesture,
+          gestureExpiresAtMillis: now + 1_200,
+        },
+      ],
+    },
+  ]);
 });
 
 test('pins timer version zero on writes and retains an absent receipt separately from server time', async () => {

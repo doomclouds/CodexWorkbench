@@ -56,6 +56,7 @@ message BoardSharing {
   repeated SharingLink links = 8;
   repeated SharingMember members = 9;
   string member_url = 10;
+  optional string owner_display_name = 11;
 }
 
 message SharingLink {
@@ -70,6 +71,7 @@ message SharingMember {
   SharingRole role = 3;
   bool removed = 4;
   bool active = 5;
+  optional bool online = 6;
 }
 
 message UpdateBoardSharingRequest {
@@ -150,6 +152,7 @@ message InspectBoardInvitationRequest {
 message InspectBoardInvitationResponse {
   BoardInvitation invitation = 1;
   SharingRejectionReason rejection = 2;
+  SharingGuestSession session = 3;
 }
 
 message BoardInvitation {

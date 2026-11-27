@@ -6,6 +6,10 @@ import type {
   CatalogPosition,
   CatalogReceipt,
   CatalogScope,
+  CatalogThumbnail,
+  CatalogThumbnailRequest,
+  CatalogThumbnailResult,
+  CatalogThumbnailScene,
   CatalogTrashedBoard,
 } from '../domain/index.js';
 
@@ -18,6 +22,11 @@ export type {
   CatalogPosition,
   CatalogReceipt,
   CatalogRejectionReason,
+  CatalogThumbnail,
+  CatalogThumbnailObject,
+  CatalogThumbnailRequest,
+  CatalogThumbnailResult,
+  CatalogThumbnailScene,
   CatalogTrashedBoard,
 } from '../domain/index.js';
 
@@ -31,6 +40,14 @@ export interface StoredCatalogReceipt {
   readonly signature?: string;
   readonly duplicateSourceId?: string;
 }
+
+export interface CatalogThumbnailLookup extends CatalogThumbnailRequest {
+  readonly actorId: string;
+}
+
+export type CatalogThumbnailRead =
+  | CatalogThumbnailResult
+  | { readonly kind: 'scene'; readonly scene: CatalogThumbnailScene };
 
 export type CatalogDuplicateFailure = 'stateChanged' | 'invalidCommand';
 
@@ -55,6 +72,7 @@ export interface CatalogWriter {
 export interface CatalogRepository {
   listBoards(lookup: CatalogLookup): readonly CatalogBoardSummary[];
   listTrashedBoards(lookup: CatalogLookup): readonly CatalogTrashedBoard[];
+  readThumbnail(lookup: CatalogThumbnailLookup, cached?: CatalogThumbnail): CatalogThumbnailRead;
   getReceipt(actorId: string, commandId: string): CatalogReceipt | undefined;
   write<T>(work: (writer: CatalogWriter) => T): T;
 }

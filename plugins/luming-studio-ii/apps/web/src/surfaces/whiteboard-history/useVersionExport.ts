@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   BoardHistoryExportResult,
-  ExportBoardFormat,
   ExportBoardRejection,
   ExportBoardScope,
+  ExportBoardVersionCommand,
 } from '../../data/whiteboard/index.js';
 import type { WhiteboardHistorySurfaceProps } from './contracts.js';
 
@@ -42,7 +42,7 @@ export function useVersionExport({
 
   useEffect(() => () => active.current?.abort(), []);
 
-  function handleExport(format: ExportBoardFormat, scope: ExportBoardScope) {
+  function handleExport(format: ExportBoardVersionCommand['format'], scope: ExportBoardScope) {
     if (active.current) {
       return;
     }

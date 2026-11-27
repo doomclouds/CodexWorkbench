@@ -11,6 +11,9 @@ service BoardEditService {
   rpc EditBoardGeometry(EditBoardGeometryRequest) returns (EditBoardGeometryResponse);
   rpc EditObjectContent(EditObjectContentRequest) returns (EditObjectContentResponse);
   rpc AttachBoardImage(AttachBoardImageRequest) returns (AttachBoardImageResponse);
+  rpc AttachBoardVideo(AttachBoardVideoRequest) returns (AttachBoardVideoResponse);
+  rpc UploadBoardDocumentImage(UploadBoardDocumentImageRequest) returns (UploadBoardDocumentImageResponse);
+  rpc ReverseBoardEdit(ReverseBoardEditRequest) returns (ReverseBoardEditResponse);
   rpc GetBoardEditReceipt(GetBoardEditReceiptRequest) returns (GetBoardEditReceiptResponse);
 }
 
@@ -24,12 +27,26 @@ message EditBoardGeometryRequest {
     DeleteBoardObjects delete = 6;
     ReorderBoardObjects reorder = 7;
     DuplicateBoardObjects duplicate = 8;
+    GroupBoardObjects group = 9;
+    UngroupBoardObjects ungroup = 10;
+    CreateSelectionSection create_section = 11;
+    ArrangeBoardObjects arrange = 12;
+    ChangeBoardObjectStyle style = 13;
+    PasteBoardObjects paste = 14;
   }
 }
 
 message CreateBoardObject {
   ObjectMetadata object = 1;
   ObjectPayload initial_payload = 2;
+  BoardCreationAttachment attachment = 3;
+}
+
+message BoardCreationAttachment {
+  EditBoardTarget source = 1;
+  ConnectorPort source_port = 2;
+  ConnectorPort target_port = 3;
+  string connector_id = 4;
 }
 
 message EditBoardTarget {
@@ -89,6 +106,77 @@ message DuplicateBoardObjects {
   MoveDelta delta = 2;
 }
 
+message GroupBoardObjects {
+  repeated EditBoardTarget targets = 1;
+  string group_id = 2;
+}
+
+message UngroupBoardObjects {
+  repeated EditBoardTarget targets = 1;
+}
+
+message CreateSelectionSection {
+  repeated EditBoardTarget targets = 1;
+  string section_id = 2;
+  optional string title = 3;
+}
+
+enum BoardArrangePreset {
+  BOARD_ARRANGE_PRESET_UNSPECIFIED = 0;
+  BOARD_ARRANGE_PRESET_TIDY = 1;
+  BOARD_ARRANGE_PRESET_LEFT = 2;
+  BOARD_ARRANGE_PRESET_HCENTER = 3;
+  BOARD_ARRANGE_PRESET_RIGHT = 4;
+  BOARD_ARRANGE_PRESET_TOP = 5;
+  BOARD_ARRANGE_PRESET_VCENTER = 6;
+  BOARD_ARRANGE_PRESET_BOTTOM = 7;
+}
+
+message ArrangeBoardObjects {
+  repeated EditBoardTarget targets = 1;
+  BoardArrangePreset preset = 2;
+}
+
+message BoardObjectStyleTarget {
+  EditBoardTarget target = 1;
+  optional uint64 expected_payload_version = 2;
+}
+
+message BoardObjectStylePatch {
+  optional string fill = 1;
+  optional string stroke = 2;
+  optional double stroke_width = 3;
+  optional bool dashed = 4;
+  optional bool hollow = 5;
+  optional string text_color = 6;
+  optional string font_family = 7;
+  optional double font_size = 8;
+  optional TextAlignment text_align = 9;
+  optional string shape_form = 10;
+  optional ConnectorHead start_head = 11;
+  optional ConnectorHead end_head = 12;
+  optional string label = 13;
+  optional bool bold = 14;
+  optional bool italic = 15;
+}
+
+message ChangeBoardObjectStyle {
+  repeated BoardObjectStyleTarget targets = 1;
+  BoardObjectStylePatch patch = 2;
+}
+
+message PasteBoardObject {
+  string source_object_id = 1;
+  string object_id = 2;
+}
+
+message PasteBoardObjects {
+  string source_board_id = 1;
+  optional uint64 source_revision = 2;
+  repeated PasteBoardObject targets = 3;
+  MoveDelta delta = 4;
+}
+
 message EditBoardGeometryResponse {
   BoardEditReceipt receipt = 1;
 }
@@ -107,7 +195,14 @@ message EditObjectContentRequest {
     SaveEmbedState embed_state = 10;
     SelectStickerContent sticker = 11;
     CropBoardImage crop = 12;
+    SaveBoardLink link = 13;
   }
+  optional bool delete_empty_text = 14;
+}
+
+message SaveBoardLink {
+  string title = 1;
+  string href = 2;
 }
 
 message SaveTableContent {
@@ -199,6 +294,45 @@ message AttachBoardImageResponse {
   BoardEditReceipt receipt = 1;
 }
 
+message AttachBoardVideoRequest {
+  string board_id = 1;
+  string command_id = 2;
+  string object_id = 3;
+  string display_name = 4;
+  Geometry geometry = 5;
+  bytes content = 6;
+  string media_type = 7;
+}
+
+message AttachBoardVideoResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message UploadBoardDocumentImageRequest {
+  string board_id = 1;
+  string command_id = 2;
+  string object_id = 3;
+  bytes content = 4;
+}
+
+message UploadBoardDocumentImageResponse {
+  BoardEditReceipt receipt = 1;
+  optional string asset_url = 2;
+}
+
+message ReverseBoardEditRequest {
+  string board_id = 1;
+  string command_id = 2;
+  oneof source {
+    string edit_command_id = 3;
+    string move_command_id = 4;
+  }
+}
+
+message ReverseBoardEditResponse {
+  BoardEditReceipt receipt = 1;
+}
+
 message BoardEditReceipt {
   string board_id = 1;
   string command_id = 2;
@@ -239,6 +373,7 @@ enum BoardEditRejectionReason {
   BOARD_EDIT_REJECTION_REASON_VERSION_UNAVAILABLE = 7;
   BOARD_EDIT_REJECTION_REASON_TOO_LARGE = 8;
   BOARD_EDIT_REJECTION_REASON_INVALID_IMAGE = 9;
+  BOARD_EDIT_REJECTION_REASON_INVALID_VIDEO = 10;
 }
 
 message GetBoardEditReceiptRequest {

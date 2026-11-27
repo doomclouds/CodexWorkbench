@@ -4,6 +4,7 @@ import {
   editEmbedSource,
   editEmbedState,
   editImageCrop,
+  editLinkContent,
   editStickerContent,
   editTableContent,
   editTextContent,
@@ -20,6 +21,7 @@ import {
   type TodoContentSource,
 } from '../domain/index.js';
 import type { BoardEditPlanningReader } from '../ports/index.js';
+import { planGeometryEdit } from './edit-geometry.js';
 
 const stableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
 const sourceVersionPattern = /^(?:0|[1-9]\d{0,18})$/u;
@@ -121,6 +123,7 @@ function contentKinds(kind: ContentOperation['kind']) {
     case 'crop':
       return { objectKind: 'image', bodyKind: 'image' };
     case 'document':
+    case 'link':
     case 'sticker':
     case 'table':
     case 'text':
@@ -130,8 +133,14 @@ function contentKinds(kind: ContentOperation['kind']) {
 }
 
 function objectTakesContent(kind: string, expected: string) {
-  return kind === expected || (kind === 'note' && expected === 'text');
+  return (
+    kind === expected ||
+    (expected === 'text' && textObjects.has(kind)) ||
+    (expected === 'html' && kind === 'diagram')
+  );
 }
+
+const textObjects = new Set(['note', 'shape', 'section', 'connector']);
 
 function contentGeometryLocked(
   writer: BoardEditPlanningReader,
@@ -193,6 +202,8 @@ function updatedPayload(
       return editEmbedState(current, object.label, operation.state);
     case 'sticker':
       return editStickerContent(current.data, operation.selection);
+    case 'link':
+      return editLinkContent(operation.title, operation.href);
     case 'crop':
       return editImageCrop(current.data, object.label, operation, {
         boardId,
@@ -234,6 +245,23 @@ function withTableWidth(
   return { ...object, geometry, geometryVersion: object.geometryVersion + 1n };
 }
 
+function clearStandaloneText(
+  writer: BoardEditPlanningReader,
+  board: BoardHeader,
+  object: BoardObject,
+  text: JsonValue | undefined,
+) {
+  const isEmpty = typeof text === 'string' && !text.trim();
+  if (object.kind !== 'text' || !isEmpty) {
+    return { kind: 'rejected' as const, reason: 'invalidEdit' as const };
+  }
+
+  return planGeometryEdit(writer, board, {
+    kind: 'delete',
+    targets: [{ objectId: object.objectId, expectedGeometryVersion: object.geometryVersion }],
+  });
+}
+
 export function planContentEdit(
   writer: BoardEditPlanningReader,
   board: BoardHeader,
@@ -260,6 +288,9 @@ export function planContentEdit(
   }
   if (!canAdvanceVersion(current.payloadVersion) || !canAdvanceVersion(board.revision)) {
     return { kind: 'rejected', reason: 'versionUnavailable' };
+  }
+  if (operation.kind === 'text' && operation.deleteEmpty) {
+    return clearStandaloneText(writer, board, object, operation.data.text);
   }
 
   const editingIcon = operation.kind === 'sticker' && operation.selection.kind === 'icon';

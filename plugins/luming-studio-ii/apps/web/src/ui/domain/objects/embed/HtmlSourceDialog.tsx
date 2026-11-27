@@ -168,9 +168,11 @@ export function HtmlSourceDialog({
         <TextArea
           ref={editor}
           label="HTML 源码"
+          placeholder="粘贴完整 HTML 或选择文件…"
           value={draft.html}
           onValueChange={handleHtml}
           rows={14}
+          spellCheck={false}
           disabled={fieldsLocked}
           error={readError || error || undefined}
         />

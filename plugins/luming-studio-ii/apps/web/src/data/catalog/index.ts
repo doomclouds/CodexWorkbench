@@ -15,6 +15,8 @@ export type {
   CatalogReceipt,
   CatalogRejectionReason,
   CatalogSortOrder,
+  CatalogThumbnailRequest,
+  ReadCatalogThumbnail,
   TrashedBoardSummary,
   TrashedCatalogPage,
 } from './contracts.js';

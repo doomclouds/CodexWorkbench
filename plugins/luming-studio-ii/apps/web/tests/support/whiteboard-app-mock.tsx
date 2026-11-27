@@ -67,7 +67,12 @@ async function update(action: () => void) {
 
 interface AppMockOptions extends Pick<
   ComponentProps<typeof WhiteboardApp>,
-  'suggestions' | 'onAttachReviewSource'
+  | 'feedbackService'
+  | 'suggestions'
+  | 'onAttachReviewSource'
+  | 'localDrafts'
+  | 'clipboard'
+  | 'downloadObjectFile'
 > {
   readonly editService?: WhiteboardEditService;
   readonly createCommandId?: () => string;
@@ -77,8 +82,12 @@ export function createAppMock(
   source: WhiteboardPost | WhiteboardService,
   {
     editService,
+    feedbackService,
     suggestions,
     onAttachReviewSource,
+    localDrafts,
+    clipboard,
+    downloadObjectFile,
     createCommandId = () => boardCommandId,
   }: AppMockOptions = {},
 ) {
@@ -107,8 +116,12 @@ export function createAppMock(
             boardId={boardId}
             service={service}
             editService={editService}
+            feedbackService={feedbackService}
             suggestions={suggestions}
             onAttachReviewSource={onAttachReviewSource}
+            localDrafts={localDrafts}
+            clipboard={clipboard}
+            downloadObjectFile={downloadObjectFile}
             createCommandId={createCommandId}
           />,
         ),

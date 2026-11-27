@@ -8,6 +8,7 @@ import {
 } from 'react';
 import type { FocusEvent, KeyboardEvent, MouseEvent, PointerEvent } from 'react';
 
+import type { AnchoredPopoverCloseReason } from '../../../base/index.js';
 import { InlineTextEditor } from '../text/index.js';
 import type { InlineTextEditorHandle, InlineTextFormat } from '../text/index.js';
 import type { TableObjectProps } from './contracts.js';
@@ -15,6 +16,7 @@ import { TableColumns } from './table-columns.js';
 import { TableCellMenu, TableControls } from './table-controls.js';
 import type { TableMenu } from './table-controls.js';
 import { sameCell, TableGrid } from './table-grid.js';
+import { activeCellLink, TableLinkPopover, type CellLinkDraft } from './table-link.js';
 import { changeCell, clampCell, insertAxis, removeAxis, tabCell } from './table-model.js';
 import type { CellAddress, TableAxis } from './table-model.js';
 import { useTableColumnResize } from './useTableColumnResize.js';
@@ -42,12 +44,16 @@ function TableObjectSession(props: TableObjectProps) {
     zoom = 1,
     fontSize = defaultFontSize,
     ref,
+    formatRequest,
     onRequestLink,
     onFormatStateChange,
   } = props;
   const root = useRef<HTMLDivElement>(null);
   const editor = useRef<InlineTextEditorHandle>(null);
   const linkOpen = useRef(false);
+  const seenFormat = useRef<number>(undefined);
+  const openingFormat = useRef<number>(undefined);
+  const [linkDraft, setLinkDraft] = useState<CellLinkDraft>();
   const [menu, setMenu] = useState<TableMenu | null>(null);
   const controls = canEdit && selected;
   const canResize = controls && !locked;
@@ -57,14 +63,15 @@ function TableObjectSession(props: TableObjectProps) {
   const session = useTableSession(props, resizing);
   const model = columns.preview ?? session.model;
   const active = canEdit ? session.active : null;
-  const visibleMenu = controls ? menu : null;
+  const visibleMenu = canEdit ? menu : null;
   const fullDetail = session.editing || visibleMenu || session.error;
   const view = fullDetail ? 'full' : detail;
   const activeRow = active?.row;
   const activeColumn = active?.column;
+  const activeLink = activeCellLink(controls, active, linkDraft);
 
   const focusSelectedCell = useEffectEvent(() => {
-    if (!visibleMenu) {
+    if (!visibleMenu && !linkOpen.current) {
       editor.current?.focus();
     }
   });
@@ -75,18 +82,30 @@ function TableObjectSession(props: TableObjectProps) {
   }, [activeRow, activeColumn]);
 
   const hideUnavailableMenu = useEffectEvent(() => {
-    if (!selected || !canEdit) {
+    if (!canEdit) {
       setMenu(null);
+      setLinkDraft(undefined);
+      linkOpen.current = false;
     }
   });
   useLayoutEffect(() => {
     hideUnavailableMenu();
-  }, [canEdit, selected]);
+  }, [canEdit]);
+
+  const hideInactiveLink = useEffectEvent(() => {
+    if (linkDraft && !activeLink) {
+      clearLink();
+    }
+  });
+  useLayoutEffect(() => {
+    hideInactiveLink();
+  }, [activeRow, activeColumn, controls]);
 
   function format(format: InlineTextFormat, url?: string) {
     const applied = editor.current?.format(format, url) ?? false;
-    if (applied && format === 'link') {
+    if (applied && format === 'link' && url !== undefined) {
       linkOpen.current = false;
+      setLinkDraft(undefined);
     }
 
     return applied;
@@ -97,6 +116,55 @@ function TableObjectSession(props: TableObjectProps) {
   }
 
   useImperativeHandle(ref, () => ({ format, focus }));
+
+  const applyFormatRequest = useEffectEvent(() => {
+    if (!controls || !formatRequest || seenFormat.current === formatRequest.sequence) {
+      return;
+    }
+
+    if (!active) {
+      if (!session.saving) {
+        openingFormat.current = formatRequest.sequence;
+        session.select({ row: 0, column: 0 });
+      }
+
+      return;
+    }
+
+    const current = editor.current;
+    if (!current) {
+      return;
+    }
+
+    seenFormat.current = formatRequest.sequence;
+    if (openingFormat.current === formatRequest.sequence) {
+      current.focus(true);
+    }
+
+    format(formatRequest.format);
+  });
+
+  useLayoutEffect(() => {
+    applyFormatRequest();
+  }, [formatRequest, activeRow, activeColumn, controls, session.saving]);
+
+  function clearLink() {
+    linkOpen.current = false;
+    setLinkDraft(undefined);
+  }
+
+  function handleCloseLink() {
+    clearLink();
+    focus();
+  }
+
+  function handleDismissLink(reason: AnchoredPopoverCloseReason) {
+    if (reason === 'escape') {
+      handleCloseLink();
+    } else {
+      clearLink();
+    }
+  }
 
   function handleStartColumn(event: PointerEvent<HTMLDivElement>, column: number) {
     if (session.saving) {
@@ -156,6 +224,9 @@ function TableObjectSession(props: TableObjectProps) {
 
     event.stopPropagation();
     event.preventDefault();
+    if (linkDraft) {
+      clearLink();
+    }
     session.commit(cell);
   }
 
@@ -169,7 +240,7 @@ function TableObjectSession(props: TableObjectProps) {
   }
 
   function handleMenuOpen(event: MouseEvent<HTMLTableCellElement>, cell: CellAddress) {
-    if (!canEdit || session.saving) {
+    if (!canEdit) {
       return;
     }
 
@@ -193,14 +264,35 @@ function TableObjectSession(props: TableObjectProps) {
       target?.closest('[data-table-floating-menu]')?.getAttribute('data-table-floating-menu') ===
       value.id;
 
-    if (inTable || inMenu || linkOpen.current) {
+    const toolbar = target?.closest('[data-canvas-selection-actions]');
+    const canvas = root.current?.closest('[data-canvas-root]');
+    const inToolbar = toolbar && canvas?.contains(toolbar);
+    const staysInEditor = [inTable, inMenu, inToolbar, linkOpen.current].some(Boolean);
+    if (session.saving || staysInEditor) {
       event.preventDefault();
     }
   }
 
   function handleLinkRequest(url: string) {
-    linkOpen.current = true;
-    onRequestLink?.(url);
+    if (!active) {
+      return;
+    }
+
+    if (onRequestLink) {
+      linkOpen.current = true;
+      onRequestLink(url);
+      return;
+    }
+
+    const coordinate = active.row + ':' + active.column;
+    const anchor = root.current?.querySelector<HTMLTableCellElement>(
+      '[data-cell="' + coordinate + '"]',
+    );
+
+    if (anchor) {
+      linkOpen.current = true;
+      setLinkDraft({ cell: active, anchor, url });
+    }
   }
 
   function navigateTab(event: KeyboardEvent<HTMLDivElement>, cell: CellAddress) {
@@ -258,7 +350,7 @@ function TableObjectSession(props: TableObjectProps) {
         onCommit={() => session.commit(null)}
         onBlur={handleEditorBlur}
         onKeyDown={(event) => editorKeys(event, cell)}
-        onRequestLink={onRequestLink ? handleLinkRequest : undefined}
+        onRequestLink={handleLinkRequest}
         onFormatStateChange={onFormatStateChange}
       />
     );
@@ -338,6 +430,12 @@ function TableObjectSession(props: TableObjectProps) {
           onDiscard={session.discard}
         />
       )}
+      <TableLinkPopover
+        link={activeLink}
+        onApply={(url) => format('link', url)}
+        onClose={handleCloseLink}
+        onDismiss={handleDismissLink}
+      />
       {visibleMenu && (
         <TableCellMenu
           tableId={value.id}

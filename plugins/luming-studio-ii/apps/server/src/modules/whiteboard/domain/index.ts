@@ -28,15 +28,22 @@ export type {
   StoredReceipt,
 } from './model.js';
 export type {
+  BoardBackupArchive,
+  BoardBackupHistory,
+  BoardBackupMetadata,
   BoardExportAsset,
   BoardExportRejection,
   BoardExportSnapshot,
   BoardExportStale,
   ExportBoardCommand,
+  ExportBoardFileCommand,
   ExportBoardResult,
+  ExportRenderCommand,
 } from './export-types.js';
+export { maxExportFileBytes } from './export-types.js';
 export { selectExportObjects } from './export-scope.js';
-export { renderExportFile } from './export-file.js';
+export { exportFilename, renderExportFile } from './export-file.js';
+export { backupElement, BackupElementError } from './backup-elements.js';
 export {
   canAdvanceVersion,
   canTranslate,
@@ -77,6 +84,7 @@ export {
   validNewObjectId,
 } from './geometry-edits.js';
 export { initialGeometryPayload, supportsGeometryCreation } from './geometry-edit-payloads.js';
+export { adjacentShapeConnector, type BoardCreationAttachment } from './geometry-attachments.js';
 export type {
   ContentOperation,
   TodoContentEdit,
@@ -89,7 +97,15 @@ export { editTodoContent } from './object-content-edits-todo.js';
 export { editTableContent, tableContentIssue } from './object-content-edits-table.js';
 export { editEmbedSource, editEmbedState } from './object-content-edits-embed.js';
 export { editImageCrop, editStickerContent } from './object-content-edits-media.js';
-export { planImageChanges, type ImageOperation } from './image-edits.js';
+export { editLinkContent } from './link-content.js';
+export {
+  archiveImageSource,
+  planDocumentImageAsset,
+  planImageChanges,
+  type ImageOperation,
+} from './image-edits.js';
+export { looksLikeSvgImage, svgForImagePreview } from './svg-image.js';
+export { planVideoChanges, type VideoOperation } from './video-edits.js';
 export type {
   AcceptBoardSuggestion,
   BoardReviewActor,
@@ -98,13 +114,18 @@ export type {
   BoardReviewTarget,
   BoardSuggestion,
   BoardSuggestionChoice,
+  BoardSuggestionApplicationState,
+  BoardSuggestionClock,
   BoardSuggestionCommandReceipt,
   BoardSuggestionEdit,
+  BoardSuggestionFootprint,
   BoardSuggestionList,
   BoardSuggestionOperation,
+  BoardSuggestionObjectClocks,
   BoardSuggestionOptionDraft,
   BoardSuggestionOptionRecord,
   BoardSuggestionPreview,
+  BoardSuggestionReviewState,
   CreateBoardReviewSource,
   DecodeBoardSuggestionEdit,
   RejectBoardSuggestion,
@@ -112,3 +133,14 @@ export type {
   SubmitBoardSuggestion,
 } from './board-suggestions.js';
 export { boardWritePayloadLimit } from './board-edits.js';
+export { arrangeSelection, selectionFrame } from './geometry-arrange.js';
+export {
+  objectAllowsStyle,
+  styleChangesObjectKind,
+  styledObject,
+  styledText,
+  styleTouchesObject,
+  styleTouchesText,
+  validStylePatch,
+} from './geometry-style.js';
+export { clipboardObject } from './clipboard-geometry.js';

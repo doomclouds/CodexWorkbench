@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type Ref } from 'react';
 import { ArrowLeft, LayoutGrid, List, Moon, Search, Sun, Trash2, X } from 'lucide-react';
 
 export interface RecycleBinPreferences {
@@ -15,7 +15,8 @@ interface RecycleBinToolbarProps {
   readonly preferences: RecycleBinPreferences;
   readonly onBack: () => void;
   readonly onQueryChange?: (query: string) => void;
-  readonly onEmpty?: () => void;
+  readonly emptyButton?: Ref<HTMLButtonElement>;
+  readonly onEmpty?: (trigger: HTMLButtonElement) => void;
 }
 
 export function RecycleBinToolbar({
@@ -25,6 +26,7 @@ export function RecycleBinToolbar({
   preferences,
   onBack,
   onQueryChange,
+  emptyButton,
   onEmpty,
 }: RecycleBinToolbarProps) {
   const { layout, resolvedTheme, onLayoutChange, onThemeChange } = preferences;
@@ -89,7 +91,7 @@ export function RecycleBinToolbar({
         <h1>回收站</h1>
       </div>
       <div className="studio-recycle-controls" role="toolbar" aria-label="作品工具栏">
-        <div className="studio-recycle-search-group" ref={searchGroup}>
+        <div className="studio-recycle-search-group" ref={searchGroup} data-open={searchVisible}>
           <button
             ref={searchButton}
             type="button"
@@ -150,7 +152,8 @@ export function RecycleBinToolbar({
           aria-label="清空回收站"
           title="清空回收站"
           disabled={busy || !available}
-          onClick={onEmpty}
+          ref={emptyButton}
+          onClick={(event) => onEmpty?.(event.currentTarget)}
         >
           <Trash2 size={18} />
         </button>

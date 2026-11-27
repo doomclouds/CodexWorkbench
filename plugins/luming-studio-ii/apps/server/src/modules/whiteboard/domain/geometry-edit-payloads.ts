@@ -1,10 +1,11 @@
 import { hasValidEditInk } from './geometry-edits.js';
+import { editLinkContent } from './link-content.js';
 import type { BoardObject, JsonObject, JsonValue, PayloadRecord, Point } from './model.js';
 import { tableContentIssue } from './object-content-edits-table.js';
 import { contentFits, contentTitleLimit } from './object-content-edits.js';
 
 type NativeInitialBodyKind = 'text' | 'sticker' | 'ink' | 'document' | 'todo' | 'table';
-type InitialBodyKind = NativeInitialBodyKind | 'embed';
+type InitialBodyKind = NativeInitialBodyKind | 'embed' | 'link';
 
 const initialBodyKinds = new Map<string, InitialBodyKind>([
   ['text', 'text'],
@@ -18,6 +19,7 @@ const initialBodyKinds = new Map<string, InitialBodyKind>([
   ['todo', 'todo'],
   ['table', 'table'],
   ['html', 'embed'],
+  ['link', 'link'],
 ]);
 const maxTextLength = 64 * 1024;
 const maxTitleLength = 4096;
@@ -176,7 +178,8 @@ export function initialGeometryPayload(
 
   const { objectId } = object;
   if (!payload) {
-    const data = bodyKind === 'embed' ? undefined : defaultInitialData(bodyKind, object);
+    const needsContent = bodyKind === 'embed' || bodyKind === 'link';
+    const data = needsContent ? undefined : defaultInitialData(bodyKind, object);
 
     return data && { objectId, bodyKind, payloadVersion: 0n, data };
   }
@@ -192,6 +195,18 @@ export function initialGeometryPayload(
     const data = initialEmbedData(object, payload.data);
 
     return data && { ...payload, data };
+  }
+  if (bodyKind === 'link') {
+    const { href } = payload.data;
+    if (typeof href !== 'string') {
+      return undefined;
+    }
+
+    const link = editLinkContent(object.label, href);
+
+    return link.kind === 'updated' && link.label === object.label
+      ? { ...payload, data: link.data }
+      : undefined;
   }
 
   return validInitialData(bodyKind, payload.data) ? payload : undefined;

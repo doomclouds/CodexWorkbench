@@ -67,6 +67,8 @@ export interface DocumentNoteSource {
   readonly blockIds: readonly string[];
   readonly quote: string;
   readonly version: number;
+  readonly u: number;
+  readonly v: number;
 }
 
 export interface DocumentObjectProps {
@@ -77,6 +79,8 @@ export interface DocumentObjectProps {
   readonly paper?: DocumentPaper;
   readonly canvas?: { readonly width: number; readonly height: number; readonly zoom: number };
   readonly focusedReading?: boolean;
+  readonly annotationActive?: boolean;
+  readonly nativeBlockRequest?: { readonly id: string; readonly sequence: number };
   readonly expandControl?: { readonly label: string; readonly title: string };
   readonly locked?: boolean;
   readonly onOpenPresentation?: () => void;
@@ -85,7 +89,11 @@ export interface DocumentObjectProps {
   readonly onChange?: (draft: DocumentDraft) => void;
   readonly onCommit?: (commit: DocumentCommit) => Promise<DocumentCommitResult>;
   readonly onActivity?: (activity: DocumentActivity) => void;
-  readonly onExport?: (format: 'html' | 'json', value: DocumentDraft) => void;
+  readonly onExport?: (
+    format: 'html' | 'json',
+    value: DocumentDraft,
+    signal: AbortSignal,
+  ) => void | Promise<void>;
   readonly onAnnotate?: (source: DocumentNoteSource) => void;
   readonly resolveImage?: (source: string, signal: AbortSignal) => Promise<string | undefined>;
   readonly uploadImage?: (file: File) => Promise<string>;

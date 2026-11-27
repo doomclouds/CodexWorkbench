@@ -14,6 +14,7 @@ export interface HttpActor {
   readonly kind?: 'human' | 'agent';
   readonly guestScope?: SharingScope;
   readonly authorize?: (request: object) => void;
+  readonly authorizeRead?: (boardId: string) => void;
 }
 
 export type ProtobufRoute = (

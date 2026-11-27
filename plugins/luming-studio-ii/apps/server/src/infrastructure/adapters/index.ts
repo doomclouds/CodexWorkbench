@@ -12,6 +12,7 @@ import type {
 } from '../../modules/whiteboard/ports/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../platform/index.js';
 import { readBoardAccess } from './authorization/index.js';
+import { readBackupMetadata } from './board-backup-metadata.js';
 import {
   advanceBoardRevision,
   applyBoardChanges,
@@ -281,6 +282,7 @@ function createReader(connection: SqliteConnection): BoardEditReader {
       return access && { canEdit: access.canEdit };
     },
     getBoard: (boardId) => readBoard(connection, boardId),
+    getBackupMetadata: (boardId, actorId) => readBackupMetadata(connection, boardId, actorId),
     listObjects: (boardId, limit) =>
       limit === undefined
         ? readObjects(connection, listScene, boardId)

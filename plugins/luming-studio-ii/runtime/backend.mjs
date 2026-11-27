@@ -527,8 +527,8 @@ var require_graceful_fs = __commonJS({
       fs2.createReadStream = createReadStream3;
       fs2.createWriteStream = createWriteStream2;
       var fs$readFile = fs2.readFile;
-      fs2.readFile = readFile3;
-      function readFile3(path2, options, cb) {
+      fs2.readFile = readFile4;
+      function readFile4(path2, options, cb) {
         if (typeof options === "function")
           cb = options, options = null;
         return go$readFile(path2, options, cb);
@@ -1004,9 +1004,9 @@ var require_retry = __commonJS({
         }
       }
       for (var i = 0; i < methods.length; i++) {
-        var method = methods[i];
-        var original = obj[method];
-        obj[method] = function retryWrapper(original2) {
+        var method2 = methods[i];
+        var original = obj[method2];
+        obj[method2] = function retryWrapper(original2) {
           var op = exports.operation(options);
           var args = Array.prototype.slice.call(arguments, 1);
           var callback = args.pop();
@@ -1023,7 +1023,7 @@ var require_retry = __commonJS({
             original2.apply(obj, args);
           });
         }.bind(obj, original);
-        obj[method].options = options;
+        obj[method2].options = options;
       }
     };
   }
@@ -1519,12 +1519,12 @@ var require_adapter = __commonJS({
     function createSyncFs(fs2) {
       const methods = ["mkdir", "realpath", "stat", "rmdir", "utimes"];
       const newFs = { ...fs2 };
-      methods.forEach((method) => {
-        newFs[method] = (...args) => {
+      methods.forEach((method2) => {
+        newFs[method2] = (...args) => {
           const callback = args.pop();
           let ret;
           try {
-            ret = fs2[`${method}Sync`](...args);
+            ret = fs2[`${method2}Sync`](...args);
           } catch (err) {
             return callback(err);
           }
@@ -1533,7 +1533,7 @@ var require_adapter = __commonJS({
       });
       return newFs;
     }
-    function toPromise(method) {
+    function toPromise(method2) {
       return (...args) => new Promise((resolve, reject2) => {
         args.push((err, result) => {
           if (err) {
@@ -1542,10 +1542,10 @@ var require_adapter = __commonJS({
             resolve(result);
           }
         });
-        method(...args);
+        method2(...args);
       });
     }
-    function toSync(method) {
+    function toSync(method2) {
       return (...args) => {
         let err;
         let result;
@@ -1553,7 +1553,7 @@ var require_adapter = __commonJS({
           err = _err;
           result = _result;
         });
-        method(...args);
+        method2(...args);
         if (err) {
           throw err;
         }
@@ -1614,7 +1614,7 @@ var require_proper_lockfile = __commonJS({
 
 // src/bootstrap/main.ts
 import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, userInfo } from "node:os";
 import process2 from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -1661,6 +1661,178 @@ function createArchiveImportApplication(port, dependencies) {
   };
 }
 
+// src/modules/catalog/domain/thumbnail.ts
+var imageWidth = 560;
+var imageHeight = 320;
+var previewPadding = 16;
+var previewBytes = 128 * 1024;
+var labelLimit = 60;
+var paper = "#f3f4f6";
+var ink = "#2d3142";
+var muted = "#68758a";
+var colorLiteral = /^(?:transparent|#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8})$/iu;
+var inlineImage = /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z\d+/]+={0,2}$/iu;
+function record(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function readRecord(value) {
+  if (value !== void 0) {
+    try {
+      return record(JSON.parse(value));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) {
+        throw error;
+      }
+    }
+  }
+}
+function color(value, fallback) {
+  return typeof value === "string" && colorLiteral.test(value) ? value : fallback;
+}
+function xml(value) {
+  return value.replace(new RegExp("\\p{Cc}|[\\uFFFE\\uFFFF]", "gu"), "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+function dimensions({ x, y, width, height }) {
+  return `x="${x}" y="${y}" width="${width}" height="${height}"`;
+}
+function previewShape(frame, outline, paint) {
+  const { x, y, width, height } = frame;
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const right = x + width;
+  const bottom = y + height;
+  const bevel = width / 6;
+  switch (outline) {
+    case "ellipse":
+      return `<ellipse cx="${centerX}" cy="${centerY}" rx="${width / 2}" ry="${height / 2}" ${paint}/>`;
+    case "diamond":
+      return `<polygon points="${centerX},${y} ${right},${centerY} ${centerX},${bottom} ${x},${centerY}" ${paint}/>`;
+    case "hexagon":
+      return `<polygon points="${x + bevel},${y} ${right - bevel},${y} ${right},${centerY} ${right - bevel},${bottom} ${x + bevel},${bottom} ${x},${centerY}" ${paint}/>`;
+    case "parallelogram":
+      return `<polygon points="${x + bevel},${y} ${right},${y} ${right - bevel},${bottom} ${x},${bottom}" ${paint}/>`;
+    case "pill":
+      return `<rect ${dimensions(frame)} rx="${Math.min(width, height) / 2}" ${paint}/>`;
+    case "rect":
+      return `<rect ${dimensions(frame)} ${paint}/>`;
+    default:
+      return `<rect ${dimensions(frame)} rx="${Math.min(5, width / 4, height / 4)}" ${paint}/>`;
+  }
+}
+function previewLabel(label2, frame) {
+  if (frame.width < 40 || frame.height < 13) {
+    return "";
+  }
+  const count = Math.floor((frame.width - 8) / 8);
+  const display = Array.from(label2.trim()).slice(0, Math.min(count, labelLimit)).join("");
+  if (!display) {
+    return "";
+  }
+  const centerX = frame.x + frame.width / 2;
+  const centerY = frame.y + frame.height / 2 + 3;
+  return `<text x="${centerX}" y="${centerY}" text-anchor="middle" fill="${ink}" font-family="sans-serif" font-size="9">${xml(display)}</text>`;
+}
+function point(input) {
+  const value = record(input);
+  const x = value?.x;
+  const y = value?.y;
+  const isNumeric = typeof x === "number" && typeof y === "number";
+  return isNumeric && Number.isFinite(x) && Number.isFinite(y) ? { x, y } : void 0;
+}
+function attachedPoint(object3, port) {
+  const { x, y, width, height } = object3;
+  switch (port) {
+    case "top":
+      return { x: x + width / 2, y };
+    case "bottom":
+      return { x: x + width / 2, y: y + height };
+    case "left":
+      return { x, y: y + height / 2 };
+    case "right":
+      return { x: x + width, y: y + height / 2 };
+    default:
+      return { x: x + width / 2, y: y + height / 2 };
+  }
+}
+function previewEndpoint(endpoint2, byId2, fallback) {
+  const value = record(endpoint2);
+  const attachment = record(value?.attachment);
+  const object3 = typeof attachment?.objectId === "string" ? byId2.get(attachment.objectId) : void 0;
+  return object3 ? attachedPoint(object3, attachment?.port) : point(value?.point) ?? fallback;
+}
+function previewConnector(object3, projection, stroke) {
+  const info = readRecord(object3.detail);
+  const start = previewEndpoint(info?.start, projection.byId, object3);
+  const stop = previewEndpoint(info?.end, projection.byId, {
+    x: object3.x + object3.width,
+    y: object3.y + object3.height
+  });
+  const bends = Array.isArray(info?.bends) ? info.bends.slice(0, 16).flatMap((bend) => point(bend) ?? []) : [];
+  const points = [start, ...bends, stop].map(projection.project).map(({ x, y }) => `${x},${y}`).join(" ");
+  return `<polyline points="${points}" fill="none" stroke="${stroke}" stroke-width="1.1"/>`;
+}
+function appearance(object3) {
+  const style = readRecord(object3.appearance);
+  const defaultFill = object3.kind === "note" ? "#f9e391" : "#ffffff";
+  const transparent = object3.kind === "section" || object3.kind === "text";
+  const fill = color(style?.fill, transparent ? "transparent" : defaultFill);
+  const stroke = color(style?.stroke, object3.kind === "text" ? "transparent" : muted);
+  const dash = style?.dashed === true ? ' stroke-dasharray="3 2"' : "";
+  return { fill, stroke, dash };
+}
+function previewObject(object3, projection, includeImages) {
+  const { fill, stroke, dash } = appearance(object3);
+  if (object3.kind === "connector" || object3.kind === "arrow") {
+    return previewConnector(object3, projection, stroke);
+  }
+  const position = projection.project(object3);
+  const width = Math.max(1, Math.round(object3.width * projection.scale * 10) / 10);
+  const height = Math.max(1, Math.round(object3.height * projection.scale * 10) / 10);
+  const frame = { ...position, width, height };
+  const info = readRecord(object3.detail);
+  const paint = `fill="${fill}" stroke="${stroke}" stroke-width="1"${dash}`;
+  const shape = previewShape(frame, info?.outline, paint);
+  const image = includeImages && object3.image && inlineImage.test(object3.image) ? object3.image : void 0;
+  const content = image ? `${shape}<image ${dimensions(frame)} preserveAspectRatio="xMidYMid meet" href="${image}"/>` : shape + previewLabel(object3.label, frame);
+  if (object3.rotation === 0) {
+    return content;
+  }
+  return `<g transform="rotate(${object3.rotation} ${frame.x + width / 2} ${frame.y + height / 2})">${content}</g>`;
+}
+function projectScene({ objects, left, top, right, bottom }) {
+  const width = Math.max(1, right - left);
+  const height = Math.max(1, bottom - top);
+  const scale = Math.min(
+    (imageWidth - 2 * previewPadding) / width,
+    (imageHeight - 2 * previewPadding) / height
+  );
+  const offsetX = (imageWidth - width * scale) / 2;
+  const offsetY = (imageHeight - height * scale) / 2;
+  return {
+    byId: new Map(objects.map((object3) => [object3.id, object3])),
+    scale,
+    project: ({ x, y }) => ({
+      x: Math.round((offsetX + (x - left) * scale) * 10) / 10,
+      y: Math.round((offsetY + (y - top) * scale) * 10) / 10
+    })
+  };
+}
+function renderOverview(scene, projection, includeImages) {
+  const content = scene.objects.map((object3) => previewObject(object3, projection, includeImages)).join("");
+  return new TextEncoder().encode(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${imageWidth}" height="${imageHeight}" viewBox="0 0 ${imageWidth} ${imageHeight}"><rect width="100%" height="100%" fill="${paper}"/>${content}</svg>`
+  );
+}
+function renderCatalogThumbnail(scene) {
+  if (scene.objects.length === 0) {
+    return void 0;
+  }
+  const projection = projectScene(scene);
+  const detailed = renderOverview(scene, projection, true);
+  const content = detailed.byteLength > previewBytes ? renderOverview(scene, projection, false) : detailed;
+  return content.byteLength <= previewBytes ? { revision: scene.revision, mimeType: "image/svg+xml", content } : void 0;
+}
+
 // src/modules/catalog/domain/index.ts
 var maxTitleLength = 200;
 var defaultBoardTitle = "\u672A\u547D\u540D\u767D\u677F";
@@ -1682,6 +1854,38 @@ function catalogTimestamp(now) {
     throw new Error("The clock returned an invalid catalog timestamp.");
   }
   return BigInt(now);
+}
+
+// src/modules/catalog/application/catalog-thumbnail.ts
+var previewCacheEntries = 24;
+function keep(cache, boardId, thumbnail) {
+  cache.delete(boardId);
+  cache.set(boardId, thumbnail);
+  if (cache.size > previewCacheEntries) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== void 0) {
+      cache.delete(oldest);
+    }
+  }
+}
+function createCatalogThumbnailReader(repository) {
+  const cache = /* @__PURE__ */ new Map();
+  return (actorId2, request) => {
+    const { boardId } = request;
+    const result = repository.readThumbnail({ ...request, actorId: actorId2 }, cache.get(boardId));
+    if (result.kind !== "scene") {
+      if (result.kind === "thumbnail") {
+        keep(cache, boardId, result.thumbnail);
+      }
+      return result;
+    }
+    const thumbnail = renderCatalogThumbnail(result.scene);
+    if (!thumbnail) {
+      return { kind: "unavailable" };
+    }
+    keep(cache, boardId, thumbnail);
+    return { kind: "thumbnail", thumbnail };
+  };
 }
 
 // src/modules/catalog/application/cursor.ts
@@ -1731,6 +1935,9 @@ function readCatalogCursor(cursor, scope2) {
   if (values.query !== scope2.query || values.order !== scope2.order || values.view !== scope2.view) {
     throw new CatalogQueryError("The catalog cursor belongs to another query.");
   }
+  if (values.pinnedOnly !== (scope2.pinnedOnly ? true : void 0)) {
+    throw new CatalogQueryError("The catalog cursor belongs to another pin filter.");
+  }
   const { boardId, title, pinned, updatedAtMillis } = values;
   if (typeof boardId !== "string" || !boardId) {
     throw new CatalogQueryError("The catalog cursor board id is invalid.");
@@ -1749,7 +1956,7 @@ function readCatalogCursor(cursor, scope2) {
   return { ...position, trashedAtMillis };
 }
 function writeCatalogCursor(scope2, position) {
-  const { actorId: actorId2, query, order, view } = scope2;
+  const { actorId: actorId2, query, order, view, pinnedOnly } = scope2;
   const { boardId, title, pinned, updatedAtMillis, trashedAtMillis } = position;
   return JSON.stringify({
     version: cursorVersion,
@@ -1757,6 +1964,7 @@ function writeCatalogCursor(scope2, position) {
     query,
     order,
     view,
+    pinnedOnly: pinnedOnly ? true : void 0,
     boardId,
     title,
     pinned,
@@ -1786,8 +1994,8 @@ function duplicateBoard(repository, actorId2, command, newBoard2) {
       return { kind: "rejected", commandId, reason: "invalidTitle" };
     }
     const receipt = newBoard2(commandId, title);
-    const rejected5 = writer2.duplicateBoard(actorId2, sourceBoardId, receipt);
-    return rejected5 ? { kind: "rejected", commandId, reason: rejected5 } : receipt;
+    const rejected7 = writer2.duplicateBoard(actorId2, sourceBoardId, receipt);
+    return rejected7 ? { kind: "rejected", commandId, reason: rejected7 } : receipt;
   });
 }
 
@@ -1880,18 +2088,18 @@ function uniqueTargets(targets) {
   if (targets.length === 0 || targets.length > maxPurgeTargets) {
     return void 0;
   }
-  const byId = /* @__PURE__ */ new Map();
+  const byId2 = /* @__PURE__ */ new Map();
   for (const target2 of targets) {
     if (!validTarget(target2)) {
       return void 0;
     }
-    const existing = byId.get(target2.boardId);
+    const existing = byId2.get(target2.boardId);
     if (existing && existing.expectedEntryVersion !== target2.expectedEntryVersion) {
       return void 0;
     }
-    byId.set(target2.boardId, target2);
+    byId2.set(target2.boardId, target2);
   }
-  return [...byId.values()];
+  return [...byId2.values()];
 }
 function purgeOne(writer2, actorId2, target2) {
   const { boardId } = target2;
@@ -1942,8 +2150,9 @@ function catalogLookup(actor, request, view) {
     throw new CatalogQueryError("The catalog page size is out of range.");
   }
   const scope2 = { actorId: actor.id, query, order, view };
-  const after = cursor === void 0 ? void 0 : readCatalogCursor(cursor, scope2);
-  return { ...scope2, limit: pageSize + 1, after };
+  const pinnedScope = view === void 0 && request.pinnedOnly ? { ...scope2, pinnedOnly: true } : scope2;
+  const after = cursor === void 0 ? void 0 : readCatalogCursor(cursor, pinnedScope);
+  return { ...pinnedScope, limit: pageSize + 1, after };
 }
 function listBoards(repository, actor, request) {
   const { pageSize } = request;
@@ -1998,9 +2207,11 @@ function createBoard(repository, services, actor, command) {
   });
 }
 function createCatalogApplication(repository, services) {
+  const readThumbnail = createCatalogThumbnailReader(repository);
   return {
     listBoards: (actor, request) => listBoards(repository, actor, request),
     listTrashedBoards: (actor, request) => listTrashedBoards(repository, actor, request),
+    getBoardThumbnail: (actor, request) => readThumbnail(actor.id, request),
     createBoard: (actor, command) => createBoard(repository, services, actor, command),
     duplicateBoard: (actor, command) => duplicateBoard(
       repository,
@@ -2011,6 +2222,187 @@ function createCatalogApplication(repository, services) {
     manageBoard: (actor, command) => manageBoard(repository, actor.id, command, services.now),
     purgeBoards: (actor, command) => purgeBoards(repository, actor.id, command),
     getReceipt: (actor, commandId) => repository.getReceipt(actor.id, commandId)
+  };
+}
+
+// src/modules/feedback/domain/content.ts
+var maximumUnits = 64;
+var maximumUnitIdLength = 192;
+var maximumExcerpt = 512;
+var maximumBlockNodes = 2e4;
+var maximumInlineDepth = 12;
+var control = new RegExp("\\p{Cc}", "u");
+function record2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : void 0;
+}
+function validId(id) {
+  return id.length <= maximumUnitIdLength && Boolean(id.trim()) && !control.test(id);
+}
+function validIds(ids) {
+  return ids.length > 0 && ids.length <= maximumUnits && new Set(ids).size === ids.length && ids.every(validId);
+}
+function validFeedbackContentUnit(unit) {
+  switch (unit.kind) {
+    case "document":
+      return validIds(unit.blockIds);
+    case "todo":
+      return validId(unit.itemId);
+    case "html":
+      return unit.sourceRevision >= 0n && validIds(unit.nodeIds);
+  }
+}
+function excerpt(value, maximum = maximumExcerpt, depth = 0) {
+  if (depth > maximumInlineDepth || maximum <= 0) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value.slice(0, maximum);
+  }
+  if (!Array.isArray(value)) {
+    const part = record2(value);
+    return part ? excerpt(part.text ?? part.content, maximum, depth + 1) : "";
+  }
+  let text3 = "";
+  for (const item of value) {
+    text3 += excerpt(item, maximum - text3.length, depth + 1);
+    if (text3.length >= maximum) {
+      break;
+    }
+  }
+  return text3;
+}
+function documentUnits(data, ids) {
+  if (data.schemaVersion !== 1 || !Array.isArray(data.blocks)) {
+    return void 0;
+  }
+  const targets = new Set(ids);
+  const found = /* @__PURE__ */ new Map();
+  const blocks = [...data.blocks];
+  for (let index = 0; index < blocks.length && index < maximumBlockNodes; index += 1) {
+    const block = record2(blocks[index]);
+    if (!block) {
+      continue;
+    }
+    if (typeof block.blockId === "string" && targets.has(block.blockId)) {
+      found.set(block.blockId, excerpt(block.content).trim());
+    }
+    if (Array.isArray(block.children)) {
+      for (const child3 of block.children) {
+        blocks.push(child3);
+      }
+    }
+  }
+  return found.size === targets.size ? ids.map((id) => found.get(id)).filter(Boolean).join("\n").slice(0, maximumExcerpt) : void 0;
+}
+function todoUnit(data, itemId) {
+  if (!Array.isArray(data.items)) {
+    return void 0;
+  }
+  for (const raw of data.items) {
+    const item = record2(raw);
+    if (item?.itemId === itemId && typeof item.text === "string") {
+      return excerpt(item.text).trim();
+    }
+  }
+}
+function storedSourceRevision(value) {
+  if (value === void 0) {
+    return 0n;
+  }
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return BigInt(value);
+  }
+  if (typeof value === "string" && /^\d{1,20}$/u.test(value)) {
+    return BigInt(value);
+  }
+}
+function contentExcerpt(unit, source) {
+  const data = record2(source.data);
+  if (!data) {
+    return void 0;
+  }
+  switch (unit.kind) {
+    case "document":
+      return source.kind === "document" ? documentUnits(data, unit.blockIds) : void 0;
+    case "todo":
+      return source.kind === "todo" ? todoUnit(data, unit.itemId) : void 0;
+    case "html": {
+      const sameSource = source.kind === "embed" && storedSourceRevision(data.sourceRevision) === unit.sourceRevision;
+      const nodes = new Set(source.htmlNodeIds);
+      return sameSource && unit.nodeIds.every((id) => nodes.has(id)) ? "" : void 0;
+    }
+  }
+}
+function hasFeedbackContent(unit, source) {
+  return contentExcerpt(unit, source) !== void 0;
+}
+function freezeFeedbackContent(target2, objectKind, source) {
+  if (!validFeedbackContentUnit(target2.content)) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  if (source?.payloadVersion !== target2.payloadVersion) {
+    return { kind: "rejected", reason: "targetChanged", currentVersion: source?.payloadVersion };
+  }
+  const compatible = target2.content.kind === "html" ? htmlObjectKinds.has(objectKind) : objectKind === target2.content.kind;
+  if (!compatible) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  const text3 = contentExcerpt(target2.content, source);
+  return text3 === void 0 ? { kind: "rejected", reason: "targetChanged", currentVersion: source.payloadVersion } : { frozenExcerpt: text3 || void 0 };
+}
+var htmlObjectKinds = /* @__PURE__ */ new Set(["html", "diagram", "chart"]);
+
+// src/modules/feedback/domain/anchor.ts
+var maximumBoardCoordinate = 1e9;
+function validCoordinate(value) {
+  return Number.isFinite(value) && Math.abs(value) <= maximumBoardCoordinate;
+}
+function validPoint(point2) {
+  return validCoordinate(point2.x) && validCoordinate(point2.y);
+}
+function inUnitInterval(value) {
+  return Number.isFinite(value) && value >= 0 && value <= 1;
+}
+function projectObjectPoint(object3, u, v) {
+  const radians = object3.rotation * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const localX = (u - 0.5) * object3.width;
+  const localY = (v - 0.5) * object3.height;
+  return {
+    x: object3.x + object3.width / 2 + localX * cos - localY * sin,
+    y: object3.y + object3.height / 2 + localX * sin + localY * cos
+  };
+}
+function freezeFeedbackAnchor(sourceBoardRevision, target2, object3, contentSource) {
+  if (target2.kind === "board") {
+    return validPoint(target2.point) ? { target: target2, sourceBoardRevision, frozenPoint: target2.point, targetMissing: false } : { kind: "rejected", reason: "invalidAnchor" };
+  }
+  if (!inUnitInterval(target2.u) || !inUnitInterval(target2.v)) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  if (!object3 || object3.objectId !== target2.objectId) {
+    return { kind: "rejected", reason: "targetChanged" };
+  }
+  if (object3.geometryVersion !== target2.geometryVersion) {
+    return { kind: "rejected", reason: "targetChanged", currentVersion: object3.geometryVersion };
+  }
+  const frozenPoint = projectObjectPoint(object3, target2.u, target2.v);
+  if (!validPoint(frozenPoint)) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  const { kind, label: label2, x, y, width, height, rotation } = object3;
+  const content = target2.kind === "content" ? freezeFeedbackContent(target2, kind, contentSource) : {};
+  if ("kind" in content) {
+    return content;
+  }
+  return {
+    target: target2,
+    sourceBoardRevision,
+    frozenPoint,
+    frozenObject: { kind, label: label2, x, y, width, height, rotation },
+    ...content,
+    targetMissing: false
   };
 }
 
@@ -2065,59 +2457,10 @@ function viewThread(actor, access, thread) {
   };
 }
 
-// src/modules/feedback/domain/anchor.ts
-var maximumBoardCoordinate = 1e9;
-function validCoordinate(value) {
-  return Number.isFinite(value) && Math.abs(value) <= maximumBoardCoordinate;
-}
-function validPoint(point) {
-  return validCoordinate(point.x) && validCoordinate(point.y);
-}
-function inUnitInterval(value) {
-  return Number.isFinite(value) && value >= 0 && value <= 1;
-}
-function projectObjectPoint(object, u, v) {
-  const radians = object.rotation * Math.PI / 180;
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  const localX = (u - 0.5) * object.width;
-  const localY = (v - 0.5) * object.height;
-  return {
-    x: object.x + object.width / 2 + localX * cos - localY * sin,
-    y: object.y + object.height / 2 + localX * sin + localY * cos
-  };
-}
-function freezeFeedbackAnchor(sourceBoardRevision, target2, object) {
-  if (target2.kind === "board") {
-    return validPoint(target2.point) ? { target: target2, sourceBoardRevision, frozenPoint: target2.point, targetMissing: false } : { kind: "rejected", reason: "invalidAnchor" };
-  }
-  if (!inUnitInterval(target2.u) || !inUnitInterval(target2.v)) {
-    return { kind: "rejected", reason: "invalidAnchor" };
-  }
-  if (!object || object.objectId !== target2.objectId) {
-    return { kind: "rejected", reason: "targetChanged" };
-  }
-  if (object.geometryVersion !== target2.geometryVersion) {
-    return { kind: "rejected", reason: "targetChanged", currentVersion: object.geometryVersion };
-  }
-  const frozenPoint = projectObjectPoint(object, target2.u, target2.v);
-  if (!validPoint(frozenPoint)) {
-    return { kind: "rejected", reason: "invalidAnchor" };
-  }
-  const { kind, label, x, y, width, height, rotation } = object;
-  return {
-    target: target2,
-    sourceBoardRevision,
-    frozenPoint,
-    frozenObject: { kind, label, x, y, width, height, rotation },
-    targetMissing: false
-  };
-}
-
 // src/modules/feedback/application/commands.ts
-var maximumTextLength = 4e3;
-function normalizedText(text2) {
-  const content = text2.trim();
+var maximumTextLength = 16e3;
+function normalizedText(text3) {
+  const content = text3.trim();
   const validLength = content.length <= maximumTextLength;
   return validLength && !content.includes("\0") ? content : "";
 }
@@ -2126,12 +2469,25 @@ function timestamp(now, previous = 0n) {
   if (!Number.isSafeInteger(current) || current < 0) {
     throw new Error("Feedback clock returned an invalid timestamp.");
   }
-  const millis = BigInt(current);
-  return millis > previous ? millis : previous;
+  const millis2 = BigInt(current);
+  return millis2 > previous ? millis2 : previous;
 }
 function anchorSignature(target2) {
   if (target2.kind === "board") {
     return [target2.kind, String(target2.point.x), String(target2.point.y)];
+  }
+  if (target2.kind === "content") {
+    const unit = target2.content;
+    const value = unit.kind === "html" ? { ...unit, sourceRevision: unit.sourceRevision.toString() } : unit;
+    return [
+      target2.kind,
+      target2.objectId,
+      String(target2.u),
+      String(target2.v),
+      target2.geometryVersion.toString(),
+      target2.payloadVersion.toString(),
+      value
+    ];
   }
   return [
     target2.kind,
@@ -2169,11 +2525,11 @@ function commandSignature(operation) {
       ]);
   }
 }
-function makeMessage(context, messageId, text2, updatedAtMillis) {
+function makeMessage(context, messageId, text3, updatedAtMillis) {
   return {
     messageId,
     authorActorId: context.actor.id,
-    text: text2,
+    text: text3,
     version: 1n,
     createdAtMillis: updatedAtMillis,
     updatedAtMillis
@@ -2190,20 +2546,24 @@ function applied(thread, message) {
   };
 }
 function createThread(context, operation) {
-  const text2 = normalizedText(operation.text);
-  if (!text2) {
+  const text3 = normalizedText(operation.text);
+  if (!text3) {
     return { kind: "rejected", reason: "invalidText" };
   }
   const { writer: writer2, boardId, now } = context;
   const target2 = operation.anchor;
-  const object = target2.kind === "object" ? writer2.getObject(boardId, target2.objectId) : void 0;
-  const anchor = freezeFeedbackAnchor(writer2.getBoardRevision(boardId), target2, object);
+  if (target2.kind === "content" && !validFeedbackContentUnit(target2.content)) {
+    return { kind: "rejected", reason: "invalidAnchor" };
+  }
+  const object3 = target2.kind === "board" ? void 0 : writer2.getObject(boardId, target2.objectId);
+  const content = target2.kind === "content" && object3 ? writer2.getContentSource(boardId, target2) : void 0;
+  const anchor = freezeFeedbackAnchor(writer2.getBoardRevision(boardId), target2, object3, content);
   if ("kind" in anchor) {
     return anchor;
   }
   const threadId = writer2.allocateId();
   const updatedAtMillis = timestamp(now);
-  const first = makeMessage(context, threadId, text2, updatedAtMillis);
+  const first = makeMessage(context, threadId, text3, updatedAtMillis);
   const thread = {
     threadId,
     anchor,
@@ -2217,13 +2577,13 @@ function createThread(context, operation) {
   return applied(thread, first);
 }
 function replyToThread(context, thread, operation) {
-  const text2 = normalizedText(operation.text);
-  if (!text2) {
+  const text3 = normalizedText(operation.text);
+  if (!text3) {
     return { kind: "rejected", reason: "invalidText" };
   }
   const { writer: writer2, boardId, now } = context;
   const updatedAtMillis = timestamp(now, thread.updatedAtMillis);
-  const reply = makeMessage(context, writer2.allocateId(), text2, updatedAtMillis);
+  const reply = makeMessage(context, writer2.allocateId(), text3, updatedAtMillis);
   const updated = {
     ...thread,
     status: "open",
@@ -2247,15 +2607,15 @@ function editMessage(context, thread, operation) {
   if (previous.version !== operation.expectedMessageVersion) {
     return { kind: "rejected", reason: "versionChanged", currentVersion: previous.version };
   }
-  const text2 = normalizedText(operation.text);
-  if (!text2) {
+  const text3 = normalizedText(operation.text);
+  if (!text3) {
     return { kind: "rejected", reason: "invalidText" };
   }
-  if (text2 === previous.text) {
+  if (text3 === previous.text) {
     return applied(thread, previous);
   }
   const updatedAtMillis = timestamp(now, thread.updatedAtMillis);
-  const message = { ...previous, text: text2, updatedAtMillis, version: previous.version + 1n };
+  const message = { ...previous, text: text3, updatedAtMillis, version: previous.version + 1n };
   const updated = { ...thread, updatedAtMillis, version: thread.version + 1n };
   writer2.updateMessage(boardId, thread.threadId, message);
   writer2.updateThread(boardId, updated);
@@ -2376,6 +2736,15 @@ function readReplyPosition(cursor) {
 }
 
 // src/modules/feedback/application/index.ts
+function currentThread(reader2, boardId, thread) {
+  const { anchor } = thread;
+  const { target: target2 } = anchor;
+  if (target2.kind !== "content" || anchor.targetMissing) {
+    return thread;
+  }
+  const source = reader2.getContentSource(boardId, target2);
+  return source && hasFeedbackContent(target2.content, source) ? thread : { ...thread, anchor: { ...anchor, targetMissing: true } };
+}
 function createFeedbackApplication(repository, services) {
   return {
     listThreads: (actor, boardId, query) => repository.read((reader2) => {
@@ -2393,7 +2762,9 @@ function createFeedbackApplication(repository, services) {
       const page = rows.slice(0, limit);
       const last = page.at(-1);
       return {
-        threads: page.map((thread) => viewThread(actor, access, thread)),
+        threads: page.map(
+          (thread) => viewThread(actor, access, currentThread(reader2, boardId, thread))
+        ),
         nextCursor: last && rows.length > limit ? writeThreadPosition(last) : void 0,
         canWrite: permitsFeedback(access)
       };
@@ -2408,7 +2779,7 @@ function createFeedbackApplication(repository, services) {
       const position = readReplyPosition(query.cursor);
       const replies = reader2.listReplies(boardId, threadId, position, limit + 1);
       return {
-        thread: viewThread(actor, access, thread),
+        thread: viewThread(actor, access, currentThread(reader2, boardId, thread)),
         replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply)),
         nextCursor: replies.length > limit ? String(position + limit) : void 0,
         canWrite: permitsFeedback(access)
@@ -2422,19 +2793,105 @@ function createFeedbackApplication(repository, services) {
   };
 }
 
+// src/modules/rooms/domain/agent-activity.ts
+var maxAgentActivityObjects = 24;
+var declaredAreaId = "@area";
+var coordinateLimit = 1e7;
+var identifier = /^[A-Za-z0-9_.:-]{1,160}$/u;
+var phases = /* @__PURE__ */ new Set(["preparing", "writing", "verifying"]);
+function validAgentActivityId(value) {
+  return identifier.test(value);
+}
+function insideWorld(value) {
+  return Number.isFinite(value) && Math.abs(value) <= coordinateLimit;
+}
+function validBounds({ x, y, width, height }) {
+  const withinLimits = [x, y, width, height, x + width, y + height].every(insideWorld);
+  return withinLimits && width > 0 && height > 0;
+}
+function validActivityObjectIds(ids) {
+  const bounded2 = ids.length <= maxAgentActivityObjects;
+  const unique = new Set(ids).size === ids.length;
+  return bounded2 && unique && ids.every(validAgentActivityId);
+}
+function validActivityPhase(phase) {
+  return phases.has(phase);
+}
+function normalizedActivityScope(scope2) {
+  if (scope2.kind === "area") {
+    return validBounds(scope2.bounds) ? { kind: "area", bounds: { ...scope2.bounds } } : void 0;
+  }
+  if (scope2.objectIds.length && validActivityObjectIds(scope2.objectIds)) {
+    return { kind: "objects", objectIds: [...scope2.objectIds].sort() };
+  }
+}
+function sameBounds(left, right) {
+  const sameOrigin = left.x === right.x && left.y === right.y;
+  const sameSize = left.width === right.width && left.height === right.height;
+  return sameOrigin && sameSize;
+}
+function sameActivityScope(left, right) {
+  if (left.kind === "area" && right.kind === "area") {
+    return sameBounds(left.bounds, right.bounds);
+  }
+  if (left.kind !== "objects" || right.kind !== "objects") {
+    return false;
+  }
+  return left.objectIds.length === right.objectIds.length && left.objectIds.every((id, index) => id === right.objectIds[index]);
+}
+function contains(outer, inner) {
+  const insideX = inner.x >= outer.x && inner.x + inner.width <= outer.x + outer.width;
+  const insideY = inner.y >= outer.y && inner.y + inner.height <= outer.y + outer.height;
+  return insideX && insideY;
+}
+function intersects(left, right) {
+  const overlapsX = left.x < right.x + right.width && right.x < left.x + left.width;
+  const overlapsY = left.y < right.y + right.height && right.y < left.y + left.height;
+  return overlapsX && overlapsY;
+}
+function projectedActivityAreas(scope2, metadata) {
+  const ids = metadata.map(({ id }) => id);
+  const validGeometry2 = metadata.every(({ bounds }) => validBounds(bounds));
+  if (!validGeometry2 || !validActivityObjectIds(ids)) {
+    return void 0;
+  }
+  const expected = scope2.kind === "objects" ? new Set(scope2.objectIds) : void 0;
+  const missingTargets = expected && (ids.length !== expected.size || ids.some((id) => !expected.has(id)));
+  if (missingTargets) {
+    return void 0;
+  }
+  const areas = metadata.map(({ id, bounds }) => ({ id, bounds: { ...bounds }, active: false }));
+  if (scope2.kind === "area") {
+    const withinScope = areas.filter(({ bounds }) => contains(scope2.bounds, bounds));
+    return [{ id: declaredAreaId, bounds: scope2.bounds, active: false }, ...withinScope];
+  }
+  return areas;
+}
+function overlappingWorkspaces(left, right) {
+  return left.some(
+    (area) => right.some((other) => {
+      const sameObject = area.id !== declaredAreaId && area.id === other.id;
+      return sameObject || intersects(area.bounds, other.bounds);
+    })
+  );
+}
+
 // src/modules/rooms/domain/presence.ts
 var boardLimit = 1e7;
 var maximumScreenDimension = 2e4;
 var maximumZoom = 32;
 var viewIdPattern = /^[A-Za-z0-9_-]{1,120}$/u;
+var maxGestureObjects = 32;
+var maxGestureObjectIdLength = 160;
+var maxGeometryVersion = BigInt(Number.MAX_SAFE_INTEGER);
 function validViewId(id) {
   return viewIdPattern.test(id);
 }
 function withinWorld(value) {
   return Number.isFinite(value) && Math.abs(value) <= boardLimit;
 }
-function validCursor(point) {
-  return point === void 0 || [point.x, point.y].every(withinWorld);
+function validCursor(point2) {
+  return point2 === void 0 || [point2.x, point2.y].every(withinWorld);
 }
 function validViewport(viewport) {
   if (!viewport) {
@@ -2443,14 +2900,32 @@ function validViewport(viewport) {
   const { centerX, centerY, zoom, width, height } = viewport;
   const center = [centerX, centerY].every(withinWorld);
   const magnification = Number.isFinite(zoom) && zoom >= 1e-3 && zoom <= maximumZoom;
-  const dimensions = [width, height].every(
+  const dimensions3 = [width, height].every(
     (value) => Number.isFinite(value) && value > 0 && value <= maximumScreenDimension
   );
-  return center && magnification && dimensions;
+  return center && magnification && dimensions3;
 }
 function validPresence(input) {
   const freshIdentity = validViewId(input.viewId) && input.sequence > 0n;
-  return freshIdentity && validCursor(input.cursor) && validViewport(input.viewport);
+  const validView = validCursor(input.cursor) && validViewport(input.viewport);
+  return freshIdentity && validView && validGesture(input.gesture);
+}
+function validGestureChange({ objectId, expectedGeometryVersion, geometry }) {
+  const validId2 = objectId.trim().length > 0 && objectId.length <= maxGestureObjectIdLength;
+  const validVersion2 = expectedGeometryVersion >= 0n && expectedGeometryVersion <= maxGeometryVersion;
+  const { x, y, width, height, rotation } = geometry;
+  const coordinatesFit = [x, y, width, height, rotation].every(withinWorld);
+  const positiveSize = width > 0 && height > 0;
+  return validId2 && validVersion2 && coordinatesFit && positiveSize;
+}
+function validGesture(gesture) {
+  if (!gesture) {
+    return true;
+  }
+  const { changes } = gesture;
+  const bounded2 = changes.length > 0 && changes.length <= maxGestureObjects;
+  const unique = new Set(changes.map(({ objectId }) => objectId)).size === changes.length;
+  return bounded2 && unique && changes.every(validGestureChange);
 }
 
 // src/modules/rooms/domain/timer.ts
@@ -2527,22 +3002,283 @@ function changeTimer(current, action, now) {
   return state && { ...state, version: current.version + 1n };
 }
 
+// src/modules/rooms/application/agent-activity.ts
+var leaseMs = 10 * 6e4;
+var maxBoardWorkspaces = 12;
+var maxAgentWorkspaces = 6;
+var maxBoardHistory = 256;
+var maxStored = 8192;
+var maxLabelLength = 120;
+var invalidLabel = new RegExp("\\p{Cc}", "u");
+var emptyWorkspaces = [];
+function taskKey({ ownerId, agentId }, taskId) {
+  return JSON.stringify([ownerId, agentId, taskId]);
+}
+function validPrincipal({ boardId, ownerId, agentId }) {
+  const distinct = ownerId !== agentId;
+  return distinct && [boardId, ownerId, agentId].every(validAgentActivityId);
+}
+function rejected(reason) {
+  return { kind: "rejected", reason };
+}
+function resultOf(record7) {
+  if (record7.kind === "active") {
+    return { kind: "active", workspace: record7.workspace };
+  }
+  return { kind: "ended", generation: record7.generation, reason: record7.reason };
+}
+function retire(generation, reason) {
+  return { kind: "ended", generation, reason };
+}
+function currentRecord(board, key, now) {
+  const record7 = board.get(key);
+  const expired = record7?.kind === "active" && record7.workspace.expiresAtUnixMs <= now;
+  if (!expired) {
+    return record7;
+  }
+  const retired = retire(record7.workspace.generation, "expired");
+  board.set(key, retired);
+  return retired;
+}
+function liveWorkspaces(board, now, ownerId) {
+  if (!board) {
+    return emptyWorkspaces;
+  }
+  const workspaces = [];
+  for (const record7 of board.values()) {
+    if (record7.kind !== "active" || record7.workspace.expiresAtUnixMs <= now) {
+      continue;
+    }
+    if (ownerId === void 0 || record7.ownerId === ownerId) {
+      workspaces.push(record7.workspace);
+    }
+  }
+  return workspaces.length ? workspaces : emptyWorkspaces;
+}
+function priorBegin(record7, input, scope2) {
+  const priorGeneration = input.previousGeneration;
+  if (!record7) {
+    return priorGeneration === void 0 ? void 0 : rejected("generationChanged");
+  }
+  if (record7.kind === "ended") {
+    if (record7.reason === "released") {
+      return rejected("workspaceReleased");
+    }
+    return record7.generation === priorGeneration ? void 0 : rejected("generationChanged");
+  }
+  const alreadyActive = priorGeneration === void 0 || record7.workspace.generation === priorGeneration;
+  const repeatsRenewal = record7.precedingGeneration === priorGeneration;
+  if (!alreadyActive && !repeatsRenewal) {
+    return rejected("generationChanged");
+  }
+  return sameActivityScope(record7.workspace.scope, scope2) ? resultOf(record7) : rejected("invalid");
+}
+function labelOf(raw) {
+  const label2 = raw.trim();
+  if (label2.length > maxLabelLength || invalidLabel.test(label2)) {
+    return void 0;
+  }
+  return label2 || "Agent";
+}
+function sameFocus(workspace, focused) {
+  const active = workspace.areas.filter(({ active: selected }) => selected);
+  return active.length === focused.size && active.every(({ id }) => focused.has(id));
+}
+function focusedAreas(areas, focused) {
+  const next = areas.map((area) => ({ ...area, active: focused.has(area.id) }));
+  return next.filter(({ active }) => active).length === focused.size ? next : void 0;
+}
+function createAgentActivity(options) {
+  const boards = /* @__PURE__ */ new Map();
+  let stored = 0;
+  function boardFor(boardId) {
+    const known = boards.get(boardId);
+    if (known) {
+      return known;
+    }
+    const board = /* @__PURE__ */ new Map();
+    boards.set(boardId, board);
+    return board;
+  }
+  function resolve(principal, scope2, focus = []) {
+    const { boardId, ownerId } = principal;
+    const metadataScope = scope2.kind === "area" && focus.length ? { kind: "objects", objectIds: focus } : scope2;
+    const metadata = options.resolveScope(boardId, ownerId, metadataScope);
+    return metadata && projectedActivityAreas(scope2, metadata);
+  }
+  function begin(principal, input, now) {
+    const scope2 = normalizedActivityScope(input.scope);
+    const label2 = labelOf(input.label);
+    if (!scope2 || label2 === void 0) {
+      return rejected("invalid");
+    }
+    const key = taskKey(principal, input.taskId);
+    const known = boards.get(principal.boardId);
+    const record7 = known && currentRecord(known, key, now);
+    const existing = priorBegin(record7, input, scope2);
+    if (existing) {
+      return existing;
+    }
+    const capacity = stored < maxStored && (known?.size ?? 0) < maxBoardHistory;
+    if (!record7 && !capacity) {
+      return rejected("capacity");
+    }
+    const active = liveWorkspaces(known, now, principal.ownerId);
+    const own = active.filter(({ agentId }) => agentId === principal.agentId);
+    if (active.length >= maxBoardWorkspaces || own.length >= maxAgentWorkspaces) {
+      return rejected("capacity");
+    }
+    const areas = resolve(principal, scope2);
+    if (!areas) {
+      return rejected("invalid");
+    }
+    if (active.some((workspace2) => overlappingWorkspaces(workspace2.areas, areas))) {
+      return rejected("overlap");
+    }
+    const board = boardFor(principal.boardId);
+    const workspace = {
+      agentId: principal.agentId,
+      taskId: input.taskId,
+      generation: options.mintGeneration(),
+      label: label2,
+      scope: scope2,
+      phase: "preparing",
+      areas,
+      expiresAtUnixMs: now + leaseMs
+    };
+    board.set(key, {
+      kind: "active",
+      ownerId: principal.ownerId,
+      precedingGeneration: input.previousGeneration,
+      workspace
+    });
+    if (!record7) {
+      stored += 1;
+    }
+    return { kind: "active", workspace };
+  }
+  function update2(principal, board, record7, input, now) {
+    const { workspace } = record7;
+    const { phase, activeObjectIds } = input;
+    if (!validActivityPhase(phase) || !validActivityObjectIds(activeObjectIds)) {
+      return rejected("invalid");
+    }
+    const focused = new Set(activeObjectIds);
+    if (phase === workspace.phase && sameFocus(workspace, focused)) {
+      return resultOf(record7);
+    }
+    const resolved = resolve(principal, workspace.scope, activeObjectIds);
+    const areas = resolved && focusedAreas(resolved, focused);
+    if (!areas) {
+      return rejected("invalid");
+    }
+    const others = liveWorkspaces(board, now, principal.ownerId).filter(
+      (other) => other !== workspace
+    );
+    if (others.some((other) => overlappingWorkspaces(other.areas, areas))) {
+      return rejected("overlap");
+    }
+    const changed = { ...workspace, phase, areas, expiresAtUnixMs: now + leaseMs };
+    board.set(taskKey(principal, input.taskId), { ...record7, workspace: changed });
+    return { kind: "active", workspace: changed };
+  }
+  function close(board, record7, key, reason) {
+    const terminal = retire(record7.workspace.generation, reason);
+    board.set(key, terminal);
+    return resultOf(terminal);
+  }
+  function change(principal, operation) {
+    const { taskId } = operation;
+    if (!validPrincipal(principal) || !validAgentActivityId(taskId)) {
+      return rejected("invalid");
+    }
+    const now = options.now();
+    if (operation.kind === "begin") {
+      return begin(principal, operation, now);
+    }
+    const board = boards.get(principal.boardId);
+    const key = taskKey(principal, taskId);
+    const record7 = board && currentRecord(board, key, now);
+    if (!board || !record7) {
+      return rejected("notFound");
+    }
+    if (operation.kind === "status") {
+      return resultOf(record7);
+    }
+    const generation = record7.kind === "active" ? record7.workspace.generation : record7.generation;
+    if (generation !== operation.generation) {
+      return rejected("generationChanged");
+    }
+    if (record7.kind === "ended") {
+      return operation.kind === "end" ? resultOf(record7) : rejected("generationChanged");
+    }
+    if (operation.kind === "end") {
+      return close(board, record7, key, "completed");
+    }
+    return update2(principal, board, record7, operation, now);
+  }
+  function release(request) {
+    const { boardId, taskId, generation } = request;
+    if (!validPrincipal(request) || !validAgentActivityId(taskId)) {
+      return rejected("invalid");
+    }
+    const board = boards.get(boardId);
+    const key = taskKey(request, taskId);
+    const now = options.now();
+    const record7 = board && currentRecord(board, key, now);
+    if (!board || !record7) {
+      return rejected("notFound");
+    }
+    if (record7.kind === "ended") {
+      return record7.generation === generation ? resultOf(record7) : rejected("generationChanged");
+    }
+    if (record7.workspace.generation !== generation) {
+      return rejected("generationChanged");
+    }
+    return close(board, record7, key, "released");
+  }
+  function withdraw({ ownerId, agentId }) {
+    const now = options.now();
+    const affected = /* @__PURE__ */ new Set();
+    for (const [boardId, board] of boards) {
+      for (const [key, record7] of board) {
+        if (record7.kind !== "active" || record7.workspace.agentId !== agentId) {
+          continue;
+        }
+        if (record7.ownerId === ownerId && record7.workspace.expiresAtUnixMs > now) {
+          close(board, record7, key, "released");
+          affected.add(boardId);
+        }
+      }
+    }
+    return [...affected];
+  }
+  return {
+    change,
+    release,
+    snapshot: (boardId, ownerId) => liveWorkspaces(boards.get(boardId), options.now(), ownerId),
+    withdraw
+  };
+}
+
 // src/modules/rooms/application/room-memory.ts
 var maxParticipants = 64;
 var maxPresenceSlots = 256;
 var maxSubscriptions = 64;
 var presenceTtlMs = 18e3;
+var gestureTtlMs = 1200;
+var snapshotGestureBudget = 128;
 var tombstoneTtlMs = 3e4;
 var minimumUpdateGapMs = 40;
 function peerKey({ actorId: actorId2, viewId }) {
   return JSON.stringify([actorId2, viewId]);
 }
-function absent(old, now, sequence2 = old.sequence) {
-  return { key: old.key, sequence: sequence2, updatedAt: now, releaseAt: now + tombstoneTtlMs };
+function absent(old, now, sequence3 = old.sequence) {
+  return { key: old.key, sequence: sequence3, updatedAt: now, releaseAt: now + tombstoneTtlMs };
 }
-function acceptUpdate(previous, sequence2, now) {
+function acceptUpdate(previous, sequence3, now) {
   const throttled = previous.participant !== void 0 && now - previous.updatedAt < minimumUpdateGapMs;
-  return previous.sequence < sequence2 && !throttled;
+  return previous.sequence < sequence3 && !throttled;
 }
 var RoomMemory = class {
   constructor(boardId, roomInstanceId, baselineRevision) {
@@ -2558,6 +3294,7 @@ var RoomMemory = class {
   delivering = false;
   sequence = 0n;
   baselineRevision;
+  agentWorkspaces = [];
   get active() {
     return this.listeners.size > 0 || this.slots.size > 0;
   }
@@ -2569,6 +3306,20 @@ var RoomMemory = class {
       }
     }
     return participants;
+  }
+  currentParticipants(now) {
+    let budget = snapshotGestureBudget;
+    return this.snapshot().map((participant) => {
+      const { gesture, gestureExpiresAtUnixMs } = participant;
+      if (!gesture || gestureExpiresAtUnixMs === void 0) {
+        return participant;
+      }
+      if (gestureExpiresAtUnixMs <= now || gesture.changes.length > budget) {
+        return { ...participant, gesture: void 0, gestureExpiresAtUnixMs: void 0 };
+      }
+      budget -= gesture.changes.length;
+      return participant;
+    });
   }
   event(payload, now) {
     return {
@@ -2660,7 +3411,9 @@ var RoomMemory = class {
       expiresAtUnixMs: now + presenceTtlMs,
       cursor: input.cursor,
       viewport: input.viewport,
-      following: input.following
+      following: input.following,
+      gesture: input.gesture,
+      gestureExpiresAtUnixMs: input.gesture && now + gestureTtlMs
     };
     this.slots.set(id, {
       key,
@@ -2672,17 +3425,17 @@ var RoomMemory = class {
     this.change({ upserts: [participant], removals: [] }, now);
     return true;
   }
-  leave(key, sequence2, now) {
+  leave(key, sequence3, now) {
     this.sweep(now);
     const id = peerKey(key);
     const previous = this.slots.get(id);
-    if (previous && previous.sequence >= sequence2) {
+    if (previous && previous.sequence >= sequence3) {
       return false;
     }
     if (!previous && this.slots.size >= maxPresenceSlots) {
       return false;
     }
-    this.slots.set(id, { key, sequence: sequence2, updatedAt: now, releaseAt: now + tombstoneTtlMs });
+    this.slots.set(id, { key, sequence: sequence3, updatedAt: now, releaseAt: now + tombstoneTtlMs });
     if (previous?.participant) {
       this.change({ upserts: [], removals: [key] }, now);
     }
@@ -2699,7 +3452,7 @@ var RoomMemory = class {
 };
 
 // src/modules/rooms/application/timer-commands.ts
-function rejected(key, reason) {
+function rejected2(key, reason) {
   return { changed: false, receipt: { ...key, outcome: { kind: "rejected", reason } } };
 }
 function executeTimerChange(repository, actorId2, command, now) {
@@ -2708,11 +3461,11 @@ function executeTimerChange(repository, actorId2, command, now) {
   const signature = JSON.stringify([expectedVersion.toString(), action]);
   return repository.write((writer2) => {
     if (!writer2.access(boardId, actorId2)?.canEdit) {
-      return rejected(key, "forbidden");
+      return rejected2(key, "forbidden");
     }
     const stored = writer2.receipt(actorId2, key);
     if (stored) {
-      return stored.signature === signature ? { changed: false, receipt: stored.receipt } : rejected(key, "commandIdReuse");
+      return stored.signature === signature ? { changed: false, receipt: stored.receipt } : rejected2(key, "commandIdReuse");
     }
     const current = writer2.timer(boardId) ?? initialTimer;
     if (current.version !== expectedVersion) {
@@ -2721,7 +3474,7 @@ function executeTimerChange(repository, actorId2, command, now) {
     }
     const next = changeTimer(current, action, now);
     if (!next) {
-      return rejected(key, "invalidAction");
+      return rejected2(key, "invalidAction");
     }
     const outcome = { kind: "applied", timer: timerView(next, now) };
     const receipt = { ...key, outcome };
@@ -2762,8 +3515,9 @@ function limitedChange(change) {
   const refreshScene = change.refreshScene || tooLarge || incomplete;
   return refreshScene ? { boardId, boardRevision, refreshScene: true } : { boardId, boardRevision, changedObjectIds, removedObjectIds, changedObjects };
 }
-function createRoomsApplication(repository, clock, instanceId) {
+function createRoomsApplication(repository, clock, instanceId, activityOptions) {
   const rooms = /* @__PURE__ */ new Map();
+  const agentActivity = activityOptions && createAgentActivity({ ...activityOptions, now: () => clock.nowMillis() });
   let instances = 0;
   function roomFor(boardId, revision, now) {
     const existing = rooms.get(boardId);
@@ -2788,13 +3542,36 @@ function createRoomsApplication(repository, clock, instanceId) {
   function access(boardId, actorId2) {
     return repository.read((reader2) => reader2.access(boardId, actorId2));
   }
-  function readSnapshot(boardId, actorId2, now) {
+  function syncAgentWorkspaces(boardId, room, now) {
+    if (!agentActivity) {
+      return;
+    }
+    const workspaces = agentActivity.snapshot(boardId);
+    if (workspaces.length !== room.agentWorkspaces.length || workspaces.some((workspace, index) => workspace !== room.agentWorkspaces[index])) {
+      room.agentWorkspaces = workspaces;
+      room.publish({ kind: "agentWorkspaces", workspaces }, now);
+    }
+  }
+  function authorizeAgentActivity(boardId, ownerId) {
+    if (!agentActivity || access(boardId, ownerId)?.role !== "owner") {
+      throw new RoomAccessError("Agent workspaces require current board ownership.");
+    }
+    return agentActivity;
+  }
+  function publishAgentWorkspaces(boardId) {
+    const room = rooms.get(boardId);
+    if (room) {
+      syncAgentWorkspaces(boardId, room, clock.nowMillis());
+    }
+  }
+  function readSnapshot2(boardId, actorId2, now) {
     const stored = repository.read((reader2) => ({
       access: requireAccess2(reader2.access(boardId, actorId2)),
       timer: reader2.timer(boardId) ?? initialTimer
     }));
     const room = roomFor(boardId, stored.access.boardRevision, now);
     room.sweep(now);
+    syncAgentWorkspaces(boardId, room, now);
     const event = room.event(
       {
         kind: "snapshot",
@@ -2802,8 +3579,10 @@ function createRoomsApplication(repository, clock, instanceId) {
           actorId: actorId2,
           canEdit: stored.access.canEdit,
           boardRevision: stored.access.boardRevision,
-          participants: room.snapshot(),
-          timer: timerView(stored.timer, now)
+          participants: room.currentParticipants(now),
+          timer: timerView(stored.timer, now),
+          agentWorkspaces: room.agentWorkspaces,
+          canReleaseAgentActivity: agentActivity !== void 0 && stored.access.role === "owner"
         }
       },
       now
@@ -2819,10 +3598,19 @@ function createRoomsApplication(repository, clock, instanceId) {
     room.publish({ kind: "contentChanged", change: limitedChange(change) }, clock.nowMillis());
   }
   return {
-    snapshot: (boardId, actorId2) => readSnapshot(boardId, actorId2, clock.nowMillis()).event,
+    snapshot: (boardId, actorId2) => readSnapshot2(boardId, actorId2, clock.nowMillis()).event,
+    onlineActorIds(boardId) {
+      const now = clock.nowMillis();
+      const participants = rooms.get(boardId)?.snapshot() ?? [];
+      const live = participants.filter(({ expiresAtUnixMs }) => expiresAtUnixMs > now);
+      return new Set(live.map(({ key }) => key.actorId));
+    },
     access,
     publishPresence(boardId, actorId2, input) {
       const authorized = requireAccess2(access(boardId, actorId2));
+      if (input.gesture && !authorized.canEdit) {
+        throw new RoomAccessError("Gesture preview requires editing access");
+      }
       if (!validPresence(input)) {
         throw new RoomInputError("Invalid room presence");
       }
@@ -2830,19 +3618,19 @@ function createRoomsApplication(repository, clock, instanceId) {
       const room = roomFor(boardId, authorized.boardRevision, now);
       return room.update(actorId2, input, authorized, now);
     },
-    leavePresence(boardId, key, sequence2) {
+    leavePresence(boardId, key, sequence3) {
       const authorized = requireAccess2(access(boardId, key.actorId));
-      if (!validViewId(key.viewId) || sequence2 <= 0n) {
+      if (!validViewId(key.viewId) || sequence3 <= 0n) {
         throw new RoomInputError("Invalid room presence identity");
       }
       const now = clock.nowMillis();
-      return roomFor(boardId, authorized.boardRevision, now).leave(key, sequence2, now);
+      return roomFor(boardId, authorized.boardRevision, now).leave(key, sequence3, now);
     },
     subscribe(boardId, key, listener2) {
       if (!validViewId(key.viewId)) {
         throw new RoomInputError("Invalid room presence identity");
       }
-      const { room, event, access: access2 } = readSnapshot(boardId, key.actorId, clock.nowMillis());
+      const { room, event, access: access2 } = readSnapshot2(boardId, key.actorId, clock.nowMillis());
       const release = room.listen(listener2);
       if (!release) {
         throw new RoomCapacityError("Too many room connections");
@@ -2851,6 +3639,7 @@ function createRoomsApplication(repository, clock, instanceId) {
     },
     tick(boardId, boardRevision) {
       rooms.get(boardId)?.sweep(clock.nowMillis());
+      publishAgentWorkspaces(boardId);
       publishContentChange({ boardId, boardRevision, refreshScene: true });
     },
     notifyAccessChanged(boardId) {
@@ -2874,6 +3663,20 @@ function createRoomsApplication(repository, clock, instanceId) {
       });
       return { receipt, serverTimeUnixMs: clock.nowMillis() };
     },
+    changeAgentActivity(principal, operation) {
+      const { boardId, ownerId } = principal;
+      const activity = authorizeAgentActivity(boardId, ownerId);
+      const result = activity.change(principal, operation);
+      publishAgentWorkspaces(boardId);
+      return result;
+    },
+    releaseAgentActivity(request) {
+      const { boardId, ownerId } = request;
+      const activity = authorizeAgentActivity(boardId, ownerId);
+      const result = activity.release(request);
+      publishAgentWorkspaces(boardId);
+      return result;
+    },
     publishContentChange,
     close() {
       for (const room of rooms.values()) {
@@ -2883,6 +3686,9 @@ function createRoomsApplication(repository, clock, instanceId) {
     }
   };
 }
+
+// src/modules/whiteboard/domain/export-types.ts
+var maxExportFileBytes = 32 * 1024 * 1024;
 
 // src/modules/whiteboard/domain/section.ts
 var radiansPerDegree = Math.PI / 180;
@@ -2925,16 +3731,16 @@ function sectionContains(section, candidate) {
 var maxContainmentChecks = 1e6;
 function indexByRelation(objects, field) {
   const index = /* @__PURE__ */ new Map();
-  for (const object of objects) {
-    const relation = object[field];
+  for (const object3 of objects) {
+    const relation = object3[field];
     if (relation === void 0) {
       continue;
     }
     const bucket = index.get(relation);
     if (bucket) {
-      bucket.push(object);
+      bucket.push(object3);
     } else {
-      index.set(relation, [object]);
+      index.set(relation, [object3]);
     }
   }
   return index;
@@ -2945,19 +3751,19 @@ function addObjects(ids, objects) {
   }
 }
 function includeWithinSection(ids, objects, section) {
-  for (const object of objects) {
-    if (!ids.has(object.objectId) && sectionContains(section.geometry, object.geometry)) {
-      ids.add(object.objectId);
+  for (const object3 of objects) {
+    if (!ids.has(object3.objectId) && sectionContains(section.geometry, object3.geometry)) {
+      ids.add(object3.objectId);
     }
   }
 }
-function expandSelection(ids, objects, byId) {
+function expandSelection(ids, objects, byId2) {
   const byParent = indexByRelation(objects, "parentId");
   const byGroup = indexByRelation(objects, "groupId");
   const groups = /* @__PURE__ */ new Set();
   let checks = 0;
   for (const id of ids) {
-    const entry = byId.get(id);
+    const entry = byId2.get(id);
     if (!entry) {
       return { kind: "rejected", reason: "invalidSelection" };
     }
@@ -2975,7 +3781,7 @@ function expandSelection(ids, objects, byId) {
     }
   }
 }
-function selectExportObjects(objects, byId, scope2) {
+function selectExportObjects(objects, byId2, scope2) {
   if (scope2.kind === "whole") {
     return objects;
   }
@@ -2983,7 +3789,7 @@ function selectExportObjects(objects, byId, scope2) {
     return { kind: "rejected", reason: "invalidSelection" };
   }
   const ids = new Set(scope2.objectIds);
-  const expansionFailure = expandSelection(ids, objects, byId);
+  const expansionFailure = expandSelection(ids, objects, byId2);
   if (expansionFailure) {
     return expansionFailure;
   }
@@ -3021,15 +3827,15 @@ function geometryCorners(geometry) {
     { x: horizontal, y: -vertical },
     { x: horizontal, y: vertical },
     { x: -horizontal, y: vertical }
-  ].map((point) => {
-    const rotated = rotatePoint(point, geometry.rotation);
+  ].map((point2) => {
+    const rotated = rotatePoint(point2, geometry.rotation);
     return { x: center.x + rotated.x, y: center.y + rotated.y };
   });
 }
 function target(endpoint2, geometry) {
-  const { attachment, point } = endpoint2;
-  const object = attachment && geometry.get(attachment.objectId);
-  return { fallback: point, geometry: object?.geometry, port: attachment?.port };
+  const { attachment, point: point2 } = endpoint2;
+  const object3 = attachment && geometry.get(attachment.objectId);
+  return { fallback: point2, geometry: object3?.geometry, port: attachment?.port };
 }
 function centerOf(entry) {
   return entry.geometry ? geometryCenter(entry.geometry) : entry.fallback;
@@ -3059,8 +3865,8 @@ function resolveEnd(entry, other) {
     horizontal: Math.abs(direction.x) >= Math.abs(direction.y)
   };
 }
-function step(point, coordinate, horizontal) {
-  return horizontal ? { x: coordinate, y: point.y } : { x: point.x, y: coordinate };
+function step(point2, coordinate2, horizontal) {
+  return horizontal ? { x: coordinate2, y: point2.y } : { x: point2.x, y: coordinate2 };
 }
 function clearsEndpoint(entry, tip, neighbor) {
   if (!entry.geometry) {
@@ -3078,12 +3884,12 @@ function relativeRoute(relative, from, to) {
     return void 0;
   }
   const start = centerOf(from);
-  const end = centerOf(to);
+  const end2 = centerOf(to);
   const firstHorizontal = relative.firstAxis === "horizontal";
   const lastHorizontal = firstHorizontal === (offsets.length % 2 === 0);
   const split = Math.ceil(offsets.length / 2);
   const coordinates = offsets.map((offset, index) => {
-    const center = index < split ? start : end;
+    const center = index < split ? start : end2;
     const horizontal = firstHorizontal === (index % 2 === 0);
     return offset + (horizontal ? center.x : center.y);
   });
@@ -3093,11 +3899,11 @@ function relativeRoute(relative, from, to) {
     return void 0;
   }
   const tip = resolveEnd(from, step(start, first, firstHorizontal)).point;
-  const destination = resolveEnd(to, step(end, last, !lastHorizontal)).point;
+  const destination = resolveEnd(to, step(end2, last, !lastHorizontal)).point;
   const points = [tip];
   let cursor = tip;
-  coordinates.forEach((coordinate, index) => {
-    cursor = step(cursor, coordinate, firstHorizontal === (index % 2 === 0));
+  coordinates.forEach((coordinate2, index) => {
+    cursor = step(cursor, coordinate2, firstHorizontal === (index % 2 === 0));
     points.push(cursor);
   });
   points.push(
@@ -3109,15 +3915,15 @@ function relativeRoute(relative, from, to) {
   const clearsTargets = clearsStart && clearsEnd;
   return clearsTargets && points.every(finitePoint) ? points : void 0;
 }
-function automaticRoute(start, end) {
+function automaticRoute(start, end2) {
   const from = start.point;
-  const to = end.point;
+  const to = end2.point;
   const horizontalDistance = Math.abs(to.x - from.x);
   const verticalDistance = Math.abs(to.y - from.y);
   if (horizontalDistance < straightTolerance || verticalDistance < straightTolerance) {
     return [from, to];
   }
-  const horizontal = start.horizontal ?? end.horizontal ?? horizontalDistance >= verticalDistance;
+  const horizontal = start.horizontal ?? end2.horizontal ?? horizontalDistance >= verticalDistance;
   const middle = horizontal ? (from.x + to.x) / 2 : (from.y + to.y) / 2;
   return [from, step(from, middle, horizontal), step(to, middle, horizontal), to];
 }
@@ -3127,14 +3933,14 @@ function route(detail, from, to) {
     return relative;
   }
   const start = resolveEnd(from, centerOf(to));
-  const end = resolveEnd(to, centerOf(from));
-  return detail.bends.length ? [start.point, ...detail.bends, end.point] : automaticRoute(start, end);
+  const end2 = resolveEnd(to, centerOf(from));
+  return detail.bends.length ? [start.point, ...detail.bends, end2.point] : automaticRoute(start, end2);
 }
 function exportConnector(detail, geometry) {
   const raw = route(detail, target(detail.start, geometry), target(detail.end, geometry));
-  const points = raw.filter((point, index) => {
+  const points = raw.filter((point2, index) => {
     const previous = raw[index - 1];
-    return !previous || previous.x !== point.x || previous.y !== point.y;
+    return !previous || previous.x !== point2.x || previous.y !== point2.y;
   });
   const middle = Math.floor((points.length - 1) / 2);
   const first = points[middle];
@@ -3142,11 +3948,11 @@ function exportConnector(detail, geometry) {
     return void 0;
   }
   const second = points[middle + 1] ?? first;
-  const label = {
+  const label2 = {
     x: (first.x + second.x) / 2 + (detail.labelOffset?.x ?? 0),
     y: (first.y + second.y) / 2 + (detail.labelOffset?.y ?? 0)
   };
-  return finitePoint(label) ? { points, label } : void 0;
+  return finitePoint(label2) ? { points, label: label2 } : void 0;
 }
 
 // src/modules/whiteboard/domain/export-svg-shapes.ts
@@ -3172,17 +3978,17 @@ var palette = /* @__PURE__ */ new Map([
   ["terracotta", "#b64e2a"],
   ["none", "none"]
 ]);
-var colorLiteral = /^(?:#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})|rgba?\([-\d., %/]+\))$/iu;
+var colorLiteral2 = /^(?:#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})|rgba?\([-\d., %/]+\))$/iu;
 var canvasTint = /^color-mix\(in srgb, *canvas (100|[1-9]?\d)%, *(#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8}))\)$/iu;
 var defaultStrokeWidth = 1.4;
 var maximumStrokeWidth = 256;
 function svgColor(value, fallback) {
-  const color = value?.trim().toLowerCase() ?? "";
-  const tint = canvasTint.exec(color);
+  const color2 = value?.trim().toLowerCase() ?? "";
+  const tint = canvasTint.exec(color2);
   if (tint) {
     return `color-mix(in srgb, #f5f5f5 ${tint[1]}%, ${tint[2]})`;
   }
-  return palette.get(color) ?? (colorLiteral.test(color) ? color : fallback);
+  return palette.get(color2) ?? (colorLiteral2.test(color2) ? color2 : fallback);
 }
 function svgStrokeWidth(value, fallback = defaultStrokeWidth) {
   return value !== void 0 && value >= 0 && value <= maximumStrokeWidth ? value : fallback;
@@ -3244,15 +4050,15 @@ function shapeOutline(shape, width, height) {
       return void 0;
   }
 }
-function svgShape(shape, width, height, appearance2) {
+function svgShape(shape, width, height, appearance3) {
   const outline = shapeOutline(shape, width, height);
   if (outline === void 0) {
     return void 0;
   }
-  const fill = appearance2?.hollow ? "none" : svgColor(appearance2?.fill, "#ececec");
-  const stroke = svgColor(appearance2?.stroke, "#68738a");
-  const strokeWidth = svgStrokeWidth(appearance2?.strokeWidth);
-  const dashed = appearance2?.dashed ? ' stroke-dasharray="6 5"' : "";
+  const fill = appearance3?.hollow ? "none" : svgColor(appearance3?.fill, "#ececec");
+  const stroke = svgColor(appearance3?.stroke, "#68738a");
+  const strokeWidth = svgStrokeWidth(appearance3?.strokeWidth);
+  const dashed = appearance3?.dashed ? ' stroke-dasharray="6 5"' : "";
   return `<g fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"${dashed}>${outline}</g>`;
 }
 
@@ -3275,7 +4081,7 @@ function escapeXml(value) {
     (character) => character >= " " || xmlWhitespace.has(character) ? character : ""
   ).replace(/[\p{Cs}\ufffe\uffff]/gu, "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 }
-function record(value) {
+function record3(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
 }
 function stringValue(value) {
@@ -3289,25 +4095,25 @@ function lineText(value) {
     return value;
   }
   if (!Array.isArray(value)) {
-    return stringValue(record(value)?.text);
+    return stringValue(record3(value)?.text);
   }
-  return value.map((run) => stringValue(record(run)?.text) || stringValue(run)).join("");
+  return value.map((run) => stringValue(record3(run)?.text) || stringValue(run)).join("");
 }
 function documentRows(data, count) {
   const queue = Array.isArray(data.blocks) ? [...data.blocks] : [];
   const rows = [];
   for (let cursor = 0; cursor < queue.length && rows.length < count; cursor += 1) {
-    const block = record(queue[cursor]);
+    const block = record3(queue[cursor]);
     if (!block) {
       continue;
     }
-    const text2 = lineText(block.content) || stringValue(record(block.props)?.caption);
-    if (text2) {
-      rows.push(text2);
+    const text3 = lineText(block.content) || stringValue(record3(block.props)?.caption);
+    if (text3) {
+      rows.push(text3);
     }
     if (Array.isArray(block.children)) {
-      for (const child of block.children) {
-        queue.push(child);
+      for (const child3 of block.children) {
+        queue.push(child3);
       }
     }
   }
@@ -3316,13 +4122,13 @@ function documentRows(data, count) {
 function todoRows(data, count) {
   const items = Array.isArray(data.items) ? data.items : [];
   return items.slice(0, count).map((item) => {
-    const row = record(item);
+    const row = record3(item);
     const checked = row?.checked === true ? "\u2713" : "\u25A1";
     return checked + " " + stringValue(row?.text);
   });
 }
 function cellValue(cell2) {
-  const data = record(cell2);
+  const data = record3(cell2);
   if (typeof data?.number === "number") {
     return String(data.number);
   }
@@ -3332,24 +4138,24 @@ function cellValue(cell2) {
   return stringValue(data?.text);
 }
 function tableRows(data, count) {
-  const rows = record(data.grid)?.rows;
+  const rows = record3(data.grid)?.rows;
   if (!Array.isArray(rows)) {
     return [];
   }
   return rows.slice(0, count).map((row) => {
-    const cells = record(row)?.cells;
+    const cells = record3(row)?.cells;
     return Array.isArray(cells) ? cells.map(cellValue).join("  |  ") : "";
   });
 }
-function compactLines(label, width, fontSize, count) {
+function compactLines(label2, width, fontSize, count) {
   const columns = Math.max(1, Math.floor(width / (fontSize * 0.67)));
-  return label.split(/\r?\n/u).slice(0, count).map((line) => line.length > columns ? line.slice(0, columns) + "\u2026" : line);
+  return label2.split(/\r?\n/u).slice(0, count).map((line) => line.length > columns ? line.slice(0, columns) + "\u2026" : line);
 }
-function svgLabel(label, width, height, data, centered) {
+function svgLabel(label2, width, height, data, centered) {
   const fontSize = bounded(data.fontSize, 8, 72, 14);
   const fill = svgColor(stringValue(data.color), "#2d3142");
   const count = Math.max(1, Math.min(maxRows, Math.floor(height / rowHeight)));
-  const lines = compactLines(label, width, fontSize, count);
+  const lines = compactLines(label2, width, fontSize, count);
   const right = data.align === "TEXT_ALIGNMENT_RIGHT";
   const center = centered || data.align === "TEXT_ALIGNMENT_CENTER";
   const alignedX = center ? width / 2 : 0;
@@ -3360,22 +4166,22 @@ function svgLabel(label, width, height, data, centered) {
   const body = lines.map((line) => `<tspan x="${x}" dy="${rowHeight}">${escapeXml(line)}</tspan>`).join("");
   return `<text y="${y - rowHeight}" font-size="${fontSize}" text-anchor="${anchor}" fill="${fill}">${body}</text>`;
 }
-function nativeCard(object, payload) {
-  const { width, height } = object.geometry;
+function nativeCard(object3, payload) {
+  const { width, height } = object3.geometry;
   const data = payload?.data ?? {};
   const count = Math.max(0, Math.min(maxRows, Math.floor((height - 40) / rowHeight)));
   let rows = [];
-  if (object.kind === "document") {
+  if (object3.kind === "document") {
     rows = documentRows(data, count);
-  } else if (object.kind === "todo") {
+  } else if (object3.kind === "todo") {
     rows = todoRows(data, count);
-  } else if (object.kind === "table") {
+  } else if (object3.kind === "table") {
     rows = tableRows(data, count);
   }
-  const text2 = [stringValue(data.title) || object.label, ...rows].join("\n");
-  const fill = svgColor(object.appearance?.fill, object.kind === "note" ? "#f6e39c" : "#ffffff");
-  const stroke = svgColor(object.appearance?.stroke, "#bfc0c0");
-  const caption = svgLabel(text2, Math.max(0, width - 20), height, data, false);
+  const text3 = [stringValue(data.title) || object3.label, ...rows].join("\n");
+  const fill = svgColor(object3.appearance?.fill, object3.kind === "note" ? "#f6e39c" : "#ffffff");
+  const stroke = svgColor(object3.appearance?.stroke, "#bfc0c0");
+  const caption = svgLabel(text3, Math.max(0, width - 20), height, data, false);
   return `<rect width="${width}" height="${height}" rx="4" fill="${fill}" stroke="${stroke}"/><g transform="translate(10 8)">${caption}</g>`;
 }
 function rasterUri(source, assets) {
@@ -3390,14 +4196,14 @@ function rasterUri(source, assets) {
   return match?.[1] && rasterMimeTypes.has(match[1].toLowerCase()) ? source : void 0;
 }
 function imageExtent(width, height, data) {
-  const crop = record(data.crop);
+  const crop = record3(data.crop);
   if (!crop) {
     return { x: 0, y: 0, width, height, aspect: "xMidYMid meet" };
   }
   const zoom = bounded(crop.zoom, 1, 10, 1);
   const x = bounded(crop.x, 0, 1, 0.5);
   const y = bounded(crop.y, 0, 1, 0.5);
-  const naturalSize2 = record(data.naturalSize);
+  const naturalSize2 = record3(data.naturalSize);
   const naturalWidth = bounded(naturalSize2?.width, 0, 4294967295, 0);
   const naturalHeight = bounded(naturalSize2?.height, 0, 4294967295, 0);
   if (naturalWidth === 0 || naturalHeight === 0) {
@@ -3420,26 +4226,26 @@ function imageExtent(width, height, data) {
     aspect: "none"
   };
 }
-function svgImage(object, data, assets) {
-  const source = object.kind === "video" ? data.poster : data.src;
+function svgImage(object3, data, assets) {
+  const source = object3.kind === "video" ? data.poster : data.src;
   if (!source) {
-    return object.kind === "video" ? nativeCard(object, void 0) : void 0;
+    return object3.kind === "video" ? nativeCard(object3, void 0) : void 0;
   }
   const uri = rasterUri(source, assets);
   if (!uri) {
     return void 0;
   }
-  const { width, height } = object.geometry;
+  const { width, height } = object3.geometry;
   const rect = imageExtent(width, height, data);
   return `<image x="${rect.x}" y="${rect.y}" width="${rect.width}" height="${rect.height}" preserveAspectRatio="${rect.aspect}" href="${uri}"/>`;
 }
-function svgInk(object, data) {
+function svgInk(object3, data) {
   if (!Array.isArray(data.points)) {
     return void 0;
   }
-  const { width, height } = object.geometry;
-  const points = data.points.map((point) => {
-    const entry = record(point);
+  const { width, height } = object3.geometry;
+  const points = data.points.map((point2) => {
+    const entry = record3(point2);
     if (typeof entry?.x !== "number" || typeof entry.y !== "number") {
       return void 0;
     }
@@ -3448,36 +4254,175 @@ function svgInk(object, data) {
   if (points.includes(void 0)) {
     return void 0;
   }
-  const color = svgColor(object.appearance?.stroke, "#2d3142");
-  const inkWidth = object.detail?.kind === "ink" ? object.detail.width : void 0;
-  const strokeWidth = svgStrokeWidth(inkWidth ?? object.appearance?.strokeWidth, 3);
-  return `<polyline points="${points.join(" ")}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const color2 = svgColor(object3.appearance?.stroke, "#2d3142");
+  const inkWidth = object3.detail?.kind === "ink" ? object3.detail.width : void 0;
+  const strokeWidth = svgStrokeWidth(inkWidth ?? object3.appearance?.strokeWidth, 3);
+  return `<polyline points="${points.join(" ")}" fill="none" stroke="${color2}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"/>`;
 }
-function svgContent(object, payload, assets) {
+function svgContent(object3, payload, assets) {
   const data = payload?.data ?? {};
-  const { width, height } = object.geometry;
-  switch (object.kind) {
+  const { width, height } = object3.geometry;
+  switch (object3.kind) {
     case "image":
     case "video":
-      return svgImage(object, data, assets);
+      return svgImage(object3, data, assets);
     case "ink":
-      return svgInk(object, data);
+      return svgInk(object3, data);
     case "text":
     case "sticker":
-      return svgLabel(stringValue(data.text) || object.label, width, height, data, false);
+      return svgLabel(stringValue(data.text) || object3.label, width, height, data, false);
     case "document":
     case "todo":
     case "table":
     case "note":
     case "link":
-      return nativeCard(object, payload);
+      return nativeCard(object3, payload);
     default:
       return void 0;
   }
 }
 
-// src/modules/whiteboard/domain/export-types.ts
-var maxExportFileBytes = 32 * 1024 * 1024;
+// src/modules/whiteboard/domain/export-html-content.ts
+var assetUri = /^data:(?:image|video)\/[a-z\d.+-]+;base64,[a-z\d+/]+={0,2}$/iu;
+var markupAsset = /(?:\b(?:src|href|poster)\s*=\s*["']|\burl\(\s*["']?)(\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128})(?=["'\s)])/gu;
+var csp = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+function offlineAsset(value, assets) {
+  if (typeof value !== "string") {
+    return void 0;
+  }
+  const captured = assets.get(value);
+  const embedded = captured ? `data:${captured.mimeType};base64,${captured.base64}` : value;
+  return assetUri.test(embedded) ? embedded : void 0;
+}
+function object(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+}
+function text(value) {
+  return typeof value === "string" ? escapeXml(value) : "";
+}
+var formatTags = [
+  ["bold", "strong"],
+  ["italic", "em"],
+  ["underline", "u"],
+  ["strike", "s"],
+  ["code", "code"]
+];
+var linkTarget = /^(?:https?:\/\/|mailto:)[^\p{Cc}]+$/iu;
+function inline(value, depth = 0) {
+  if (depth >= 64) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => inline(item, depth + 1)).join("");
+  }
+  const run = object(value);
+  if (!run) {
+    return text(value).replaceAll("\n", "<br>");
+  }
+  if (run.type === "link" && typeof run.href === "string" && linkTarget.test(run.href)) {
+    return `<a href="${escapeXml(run.href)}" target="_blank" rel="noopener noreferrer">${inline(run.content, depth + 1)}</a>`;
+  }
+  if (typeof run.text !== "string") {
+    return inline(run.content, depth + 1);
+  }
+  const styles = object(run.styles);
+  return formatTags.reduce(
+    (content, [property, tag2]) => styles?.[property] ? `<${tag2}>${content}</${tag2}>` : content,
+    text(run.text).replaceAll("\n", "<br>")
+  );
+}
+function sequence(value) {
+  return Array.isArray(value) ? value : [];
+}
+function tableSpan(props, name) {
+  const value = props?.[name];
+  const safe = typeof value === "number" && Number.isInteger(value);
+  return safe && value > 1 && value <= 100 ? ` ${name}="${value}"` : "";
+}
+function tableMarkup(value) {
+  const table = object(value);
+  const headerCount = typeof table?.headerRows === "number" ? table.headerRows : 0;
+  const rows = sequence(table?.rows).map((row, index) => {
+    const tag2 = index < headerCount ? "th" : "td";
+    const cells = sequence(object(row)?.cells).map((cell2) => {
+      const props = object(object(cell2)?.props);
+      return `<${tag2}${tableSpan(props, "colspan")}${tableSpan(props, "rowspan")}>${inline(cell2)}</${tag2}>`;
+    });
+    return `<tr>${cells.join("")}</tr>`;
+  });
+  return `<table><tbody>${rows.join("")}</tbody></table>`;
+}
+function blockMarkup(block, assets) {
+  const content = inline(block.content);
+  const props = object(block.props);
+  const type = typeof block.type === "string" ? block.type : "";
+  switch (type) {
+    case "heading": {
+      const chosen = props?.level;
+      const level = typeof chosen === "number" && Number.isInteger(chosen) ? Math.max(1, Math.min(6, chosen)) : 1;
+      return `<h${level}>${content}</h${level}>`;
+    }
+    case "bulletListItem":
+      return `<p class="list-item">${content}</p>`;
+    case "numberedListItem":
+      return `<p class="list-item numbered">${content}</p>`;
+    case "checkListItem":
+      return `<p><label><input disabled type="checkbox"${props?.checked ? " checked" : ""}> ${content}</label></p>`;
+    case "quote":
+      return `<blockquote>${content}</blockquote>`;
+    case "codeBlock":
+      return `<pre><code>${content}</code></pre>`;
+    case "divider":
+      return "<hr>";
+    case "table":
+      return tableMarkup(block.content);
+    case "image": {
+      const source = offlineAsset(props?.url, assets);
+      return source ? `<figure><img src="${escapeXml(source)}" alt="${text(props?.caption)}"><figcaption>${text(props?.caption)}</figcaption></figure>` : `<p>${text(props?.caption)}</p>`;
+    }
+    default:
+      return `<p>${content}</p>`;
+  }
+}
+function documentMarkup(value, assets, depth = 0) {
+  if (!Array.isArray(value) || depth >= 64) {
+    return "";
+  }
+  return value.map((entry) => {
+    const block = object(entry);
+    if (!block) {
+      return "";
+    }
+    return blockMarkup(block, assets) + documentMarkup(block.children, assets, depth + 1);
+  }).join("");
+}
+function todoMarkup(value) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  const rows = value.map((entry) => {
+    const item = object(entry);
+    return `<li><label><input disabled type="checkbox"${item?.checked ? " checked" : ""}>${text(item?.text)}</label></li>`;
+  });
+  return `<ul>${rows.join("")}</ul>`;
+}
+function bridge(seed) {
+  const state = JSON.stringify(seed ?? null).replaceAll("<", "\\u003c");
+  return `<script>(()=>{let state=${state};const listeners=new Set();const load=()=>structuredClone(state);const save=(value)=>{const json=JSON.stringify(value);if(!value||typeof value!=='object'||Array.isArray(value)||!json||new TextEncoder().encode(json).length>65536)throw new TypeError('Invalid Studio state');state=JSON.parse(json);for(const listener of listeners)listener(load());};const onLoad=(listener)=>{listeners.add(listener);return()=>listeners.delete(listener);};Object.defineProperty(window,'studioEmbed',{value:Object.freeze({load,save,onLoad})});})()</script>`;
+}
+function embedMarkup(data, assets, interactive = true) {
+  const html = typeof data.html === "string" ? data.html : "";
+  const source = html.replaceAll(markupAsset, (match, previous) => {
+    const embedded = offlineAsset(previous, assets);
+    return embedded ? match.replace(previous, embedded) : match;
+  });
+  const body = source.replace(/^\s*<!doctype[^>]*>/iu, "");
+  const policy = interactive ? csp : csp.replace("script-src 'unsafe-inline'", "script-src 'none'");
+  const state = interactive ? bridge(data.state) : "";
+  return '<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="' + policy + '">' + state + body;
+}
 
 // src/modules/whiteboard/domain/export-svg.ts
 var pad = 32;
@@ -3506,14 +4451,14 @@ function expandFrame(frame, points) {
     bottom: Math.max(frame.bottom, bounds.bottom)
   };
 }
-function arrowHead(head, tip, previous, stroke, width) {
+function arrowHead(head2, tip, previous, stroke, width) {
   if (!tip || !previous) {
     return "";
   }
-  if (!head || head === "none") {
+  if (!head2 || head2 === "none") {
     return "";
   }
-  if (head === "circle") {
+  if (head2 === "circle") {
     return `<circle cx="${tip.x}" cy="${tip.y}" r="${2 * width}" fill="${stroke}"/>`;
   }
   const distance = Math.hypot(tip.x - previous.x, tip.y - previous.y);
@@ -3528,8 +4473,8 @@ function arrowHead(head, tip, previous, stroke, width) {
   const right = { x: tip.x - dx * back + dy * side, y: tip.y - dy * back - dx * side };
   return `<path d="M ${tip.x} ${tip.y} L ${left.x} ${left.y} L ${right.x} ${right.y} Z" fill="${stroke}"/>`;
 }
-function connectorMarkup(object, geometry) {
-  const detail = object.detail;
+function connectorMarkup(object3, geometry) {
+  const detail = object3.detail;
   if (detail?.kind !== "connector") {
     return void 0;
   }
@@ -3537,118 +4482,230 @@ function connectorMarkup(object, geometry) {
   if (!route2) {
     return void 0;
   }
-  const { points, label } = route2;
+  const { points, label: label2 } = route2;
   const coordinates = points.map(({ x, y }) => `${x},${y}`).join(" ");
-  const stroke = svgColor(object.appearance?.stroke, "#4f5d75");
-  const width = svgStrokeWidth(object.appearance?.strokeWidth, 2);
-  const dash = object.appearance?.dashed ? ' stroke-dasharray="6 5"' : "";
+  const stroke = svgColor(object3.appearance?.stroke, "#4f5d75");
+  const width = svgStrokeWidth(object3.appearance?.strokeWidth, 2);
+  const dash = object3.appearance?.dashed ? ' stroke-dasharray="6 5"' : "";
   const start = arrowHead(detail.startHead, points[0], points[1], stroke, width);
-  const end = arrowHead(detail.endHead ?? "arrow", points.at(-1), points.at(-2), stroke, width);
-  const caption = escapeXml(object.label);
-  const text2 = caption ? `<text x="${label.x}" y="${label.y - 4}" text-anchor="middle" font-size="13" fill="#2d3142">${caption}</text>` : "";
+  const end2 = arrowHead(detail.endHead ?? "arrow", points.at(-1), points.at(-2), stroke, width);
+  const caption = escapeXml(object3.label);
+  const text3 = caption ? `<text x="${label2.x}" y="${label2.y - 4}" text-anchor="middle" font-size="13" fill="#2d3142">${caption}</text>` : "";
   const line = `<polyline points="${coordinates}" fill="none" stroke="${stroke}" stroke-width="${width}" stroke-linejoin="round"${dash}/>`;
-  return { value: line + start + end + text2, bounds: [...points, label] };
+  return { value: line + start + end2 + text3, bounds: [...points, label2] };
 }
-function sectionMarkup(object) {
-  const transparent = object.detail?.kind === "section" && object.detail.transparent;
-  const fill = transparent ? "none" : svgColor(object.appearance?.fill, "#ececec");
-  const stroke = svgColor(object.appearance?.stroke, "#bfc0c0");
-  const { width, height } = object.geometry;
-  const caption = escapeXml(object.label);
+function sectionMarkup(object3) {
+  const transparent = object3.detail?.kind === "section" && object3.detail.transparent;
+  const fill = transparent ? "none" : svgColor(object3.appearance?.fill, "#ececec");
+  const stroke = svgColor(object3.appearance?.stroke, "#bfc0c0");
+  const { width, height } = object3.geometry;
+  const caption = escapeXml(object3.label);
   return `<rect width="${width}" height="${height}" fill="${fill}" stroke="${stroke}" stroke-dasharray="6 5"/><text x="8" y="17" font-size="13" fill="#4f5d75">${caption}</text>`;
 }
-function objectMarkup(object, payload, assets) {
-  if (object.kind === "section") {
-    return sectionMarkup(object);
+function objectMarkup(object3, payload, assets) {
+  if (object3.kind === "section") {
+    return sectionMarkup(object3);
   }
-  if (object.kind === "shape") {
-    const { width, height } = object.geometry;
-    const outline = object.detail?.kind === "shape" ? object.detail.outline : "rounded";
-    const shape = svgShape(outline, width, height, object.appearance);
-    const text2 = svgLabel(object.label, width, height, payload?.data ?? {}, true);
-    return shape === void 0 ? void 0 : shape + text2;
+  if (object3.kind === "shape") {
+    const { width, height } = object3.geometry;
+    const outline = object3.detail?.kind === "shape" ? object3.detail.outline : "rounded";
+    const shape = svgShape(outline, width, height, object3.appearance);
+    const text3 = svgLabel(object3.label, width, height, payload?.data ?? {}, true);
+    return shape === void 0 ? void 0 : shape + text3;
   }
-  return svgContent(object, payload, assets);
+  return svgContent(object3, payload, assets);
 }
-function positionedMarkup(object, index, snapshot, payload) {
-  if (object.kind === "connector") {
-    return connectorMarkup(object, snapshot.geometry);
+function positionedSvgMarkup(object3, index, snapshot, payload, richMarkup2) {
+  if (object3.kind === "connector") {
+    return connectorMarkup(object3, snapshot.geometry);
   }
-  const points = geometryCorners(object.geometry);
+  const points = geometryCorners(object3.geometry);
   if (!points.every(finitePoint)) {
     return void 0;
   }
-  const markup = objectMarkup(object, payload, snapshot.assets);
+  const markup = richMarkup2 ?? objectMarkup(object3, payload, snapshot.assets);
   if (markup === void 0) {
     return void 0;
   }
-  const { x, y, width, height, rotation } = object.geometry;
+  const { x, y, width, height, rotation } = object3.geometry;
   const transform = `translate(${x} ${y}) rotate(${rotation % 360} ${width / 2} ${height / 2})`;
   const id = "board-object-" + index;
-  const clip = object.kind === "image" || object.kind === "video" ? `<clipPath id="${id}"><rect width="${width}" height="${height}" rx="4"/></clipPath>` : `<clipPath id="${id}"><rect width="${width}" height="${height}"/></clipPath>`;
+  const clip = object3.kind === "image" || object3.kind === "video" ? `<clipPath id="${id}"><rect width="${width}" height="${height}" rx="4"/></clipPath>` : `<clipPath id="${id}"><rect width="${width}" height="${height}"/></clipPath>`;
   const body = `<g clip-path="url(#${id})">${markup}</g>`;
   return { value: `<g transform="${transform}">${clip}${body}</g>`, bounds: points };
 }
-function svgDocument(snapshot, frame, body) {
+function exportViewport(frame) {
   const x = (frame?.left ?? 0) - pad;
   const y = (frame?.top ?? 0) - pad;
   const width = (frame ? frame.right - frame.left : 1) + pad * 2;
   const height = (frame ? frame.bottom - frame.top : 1) + pad * 2;
+  return { x, y, width, height };
+}
+function svgDocument(snapshot, frame, body) {
+  const { x, y, width, height } = exportViewport(frame);
   const title = escapeXml(snapshot.board.title);
   const revision = snapshot.board.revision.toString();
   const description = `\u767D\u677F\u7248\u672C ${revision}\uFF0C\u5305\u542B ${snapshot.objects.length} \u4E2A\u5BF9\u8C61\u3002`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${x} ${y} ${width} ${height}" role="img" font-family="sans-serif"><title>${title}</title><desc>${description}</desc><rect x="${x}" y="${y}" width="${width}" height="${height}" fill="#f5f5f5"/>${body}</svg>
 `;
 }
+function richRegion(object3, index, payload, snapshot) {
+  const { width, height } = object3.geometry;
+  if (payload?.bodyKind !== "embed" || !(width > 0 && height > 0)) {
+    return void 0;
+  }
+  return { index, width, height, html: embedMarkup(payload.data, snapshot.assets, false) };
+}
+function richMarkup({ index, width, height }) {
+  return `<foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${index}"></div></foreignObject>`;
+}
 function renderExportSvg(snapshot) {
   const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
   const layers = [];
+  const regions = [];
+  const utf82 = new TextEncoder();
   let length = 0;
   let frame;
-  for (const [index, object] of snapshot.objects.entries()) {
-    const markup = positionedMarkup(object, index, snapshot, payloads.get(object.objectId));
+  for (const [index, object3] of snapshot.objects.entries()) {
+    const payload = payloads.get(object3.objectId);
+    const region = richRegion(object3, index, payload, snapshot);
+    const markup = positionedSvgMarkup(
+      object3,
+      index,
+      snapshot,
+      payload,
+      region && richMarkup(region)
+    );
     if (!markup) {
       return { kind: "rejected", reason: "unsupported" };
     }
-    length += markup.value.length;
+    length += utf82.encode(markup.value).byteLength;
+    if (region) {
+      regions.push(region);
+      length += utf82.encode(region.html).byteLength;
+    }
     if (length > maxExportFileBytes) {
       return { kind: "rejected", reason: "tooLarge" };
     }
     layers.push(markup.value);
     frame = expandFrame(frame, markup.bounds);
   }
-  return svgDocument(snapshot, frame, layers.join(""));
+  return {
+    svg: svgDocument(snapshot, frame, layers.join("")),
+    regions,
+    viewport: exportViewport(frame)
+  };
+}
+
+// src/modules/whiteboard/domain/export-html.ts
+var head = `<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; frame-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<style>body{margin:0;background:#f5f5f5;color:#2d3142;font:16px/1.5 system-ui,sans-serif}main{position:relative;overflow:hidden;margin:auto}.world{position:absolute;inset:0}iframe,svg,video{display:block;border:0}iframe{background:transparent}section{box-sizing:border-box;overflow:auto;background:#fff;border:1px solid #bfc0c0;border-radius:4px;padding:.7em 1em}h1{margin:.05em 0 .5em;font-size:1.1em}h2,h3{margin:.8em 0 .35em}p,pre,figure,blockquote{margin:.5em 0;overflow-wrap:anywhere}pre{white-space:pre-wrap}.list-item{display:list-item;margin-left:1.25em}img{max-width:100%}figcaption{font-size:.85em}video{background:#111;object-fit:contain}ul{list-style:none;padding:0;margin:0}li{padding:.3em 0;border-top:1px solid #e6e6e6}li input{vertical-align:middle;margin-right:.5em}@media print{main{margin:0}}</style>`;
+function positioned({ x, y, width, height, rotation }) {
+  return `position:absolute;left:${x}px;top:${y}px;width:${width}px;height:${height}px;transform:rotate(${rotation % 360}deg)`;
+}
+function nativeLayer(object3, payload, snapshot) {
+  const label2 = escapeXml(object3.label);
+  const position = positioned(object3.geometry);
+  const { data } = payload;
+  switch (payload.bodyKind) {
+    case "document":
+      return `<section style="${position}" aria-label="${label2}"><h1>${label2}</h1>${documentMarkup(data.blocks, snapshot.assets)}</section>`;
+    case "todo":
+      return `<section style="${position}" aria-label="${label2}"><h1>${label2}</h1>${todoMarkup(data.items)}</section>`;
+    case "embed":
+      return `<iframe title="${label2}" sandbox="allow-scripts" style="${position}" srcdoc="${escapeXml(embedMarkup(data, snapshot.assets))}"></iframe>`;
+    case "video": {
+      const source = offlineAsset(data.src, snapshot.assets);
+      if (!source?.startsWith("data:video/")) {
+        return false;
+      }
+      const poster = offlineAsset(data.poster, snapshot.assets);
+      const posterAttribute = poster?.startsWith("data:image/") ? ` poster="${escapeXml(poster)}"` : "";
+      return `<video controls playsinline preload="metadata" style="${position}" src="${escapeXml(source)}"${posterAttribute}></video>`;
+    }
+  }
+}
+function vectorLayer(object3, index, payload, snapshot) {
+  const shape = positionedSvgMarkup(object3, index, snapshot, payload);
+  if (!shape) {
+    return void 0;
+  }
+  const frame = expandFrame(void 0, shape.bounds);
+  const { left, top, right, bottom } = frame;
+  const width = Math.max(1, right - left + 4);
+  const height = Math.max(1, bottom - top + 4);
+  const x = left - 2;
+  const y = top - 2;
+  const style = `position:absolute;left:${x}px;top:${y}px;width:${width}px;height:${height}px`;
+  const value = `<svg xmlns="http://www.w3.org/2000/svg" style="${style}" viewBox="${x} ${y} ${width} ${height}">${shape.value}</svg>`;
+  return { value, bounds: shape.bounds };
+}
+function objectLayer(object3, index, snapshot, payload) {
+  const native = payload ? nativeLayer(object3, payload, snapshot) : void 0;
+  if (native === false) {
+    return void 0;
+  }
+  if (native === void 0) {
+    return vectorLayer(object3, index, payload, snapshot);
+  }
+  const bounds = geometryCorners(object3.geometry);
+  return bounds.every(finitePoint) ? { value: native, bounds } : void 0;
+}
+function renderExportHtml(snapshot) {
+  const payloads = new Map(snapshot.payloads.map((payload) => [payload.objectId, payload]));
+  const layers = [];
+  const utf82 = new TextEncoder();
+  let bytes = 0;
+  let frame;
+  for (const [index, object3] of snapshot.objects.entries()) {
+    const layer = objectLayer(object3, index, snapshot, payloads.get(object3.objectId));
+    if (!layer) {
+      return { kind: "rejected", reason: "unsupported" };
+    }
+    bytes += utf82.encode(layer.value).byteLength;
+    if (bytes > maxExportFileBytes) {
+      return { kind: "rejected", reason: "tooLarge" };
+    }
+    frame = expandFrame(frame, layer.bounds);
+    layers.push(layer.value);
+  }
+  const { x, y, width, height } = exportViewport(frame);
+  const title = escapeXml(snapshot.board.title);
+  return `<!doctype html>
+<html lang="zh-CN"><head>${head}<title>${title}</title></head><body><main aria-label="${title}" style="width:${width}px;height:${height}px"><div class="world" style="transform:translate(${-x}px,${-y}px)">${layers.join("")}</div></main></body></html>
+`;
 }
 
 // src/modules/whiteboard/domain/export-file.ts
 var reservedFilename = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
-function filenameFor(title, format) {
+function exportFilename(title, extension) {
   const name = Array.from(title).slice(0, 100).join("").replace(/[\p{Cc}<>:"/\\|?*]/gu, "-").trim().replace(/[. ]+$/u, "");
   const filename = reservedFilename.test(name) ? "\u767D\u677F-" + name : name || "\u767D\u677F";
-  return filename + "." + format;
+  return filename + "." + extension;
 }
 function isOutside(endpoint2, selected) {
   return endpoint2.attachment !== void 0 && !selected.has(endpoint2.attachment.objectId);
 }
-function standaloneObject(object, selected, geometry) {
-  const { detail } = object;
+function standaloneObject(object3, selected, geometry) {
+  const { detail } = object3;
   if (detail?.kind !== "connector") {
-    return object;
+    return object3;
   }
   const outsideStart = isOutside(detail.start, selected);
   const outsideEnd = isOutside(detail.end, selected);
   if (!outsideStart && !outsideEnd) {
-    return object;
+    return object3;
   }
   const route2 = exportConnector(detail, geometry);
   const startPoint = route2?.points[0] ?? detail.start.point;
-  const endPoint = route2?.points.at(-1) ?? detail.end.point;
+  const endPoint2 = route2?.points.at(-1) ?? detail.end.point;
   return {
-    ...object,
+    ...object3,
     detail: {
       ...detail,
       start: outsideStart ? { point: startPoint } : detail.start,
-      end: outsideEnd ? { point: endPoint } : detail.end,
+      end: outsideEnd ? { point: endPoint2 } : detail.end,
       bends: route2?.points.slice(1, -1) ?? detail.bends,
       relativeBends: void 0
     }
@@ -3661,7 +4718,7 @@ function jsonExport(snapshot) {
     schemaVersion: 1,
     board: snapshot.board,
     objects: snapshot.objects.map(
-      (object) => standaloneObject(object, selected, snapshot.geometry)
+      (object3) => standaloneObject(object3, selected, snapshot.geometry)
     ),
     payloads: snapshot.payloads,
     assets
@@ -3672,8 +4729,7 @@ function jsonExport(snapshot) {
   );
   return json + "\n";
 }
-function renderExportFile(snapshot, format) {
-  const data = format === "svg" ? renderExportSvg(snapshot) : jsonExport(snapshot);
+function encodeFile(snapshot, data, extension, mimeType) {
   if (typeof data !== "string") {
     return data;
   }
@@ -3683,10 +4739,248 @@ function renderExportFile(snapshot, format) {
   }
   return {
     kind: "file",
-    filename: filenameFor(snapshot.board.title, format),
-    mimeType: format === "svg" ? "image/svg+xml" : "application/json",
+    filename: exportFilename(snapshot.board.title, extension),
+    mimeType,
     revision: snapshot.board.revision,
     content
+  };
+}
+function renderVectorFile(snapshot, format) {
+  const scene = renderExportSvg(snapshot);
+  if (scene.kind === "rejected") {
+    return scene;
+  }
+  if (scene.regions.length) {
+    const { width, height } = scene.viewport;
+    const dimensions3 = width <= 16384 && height <= 16384;
+    if (!dimensions3 || Math.ceil(width) * Math.ceil(height) > 32e6) {
+      return { kind: "rejected", reason: "tooLarge" };
+    }
+    return {
+      kind: "browserPng",
+      filename: exportFilename(snapshot.board.title, format),
+      revision: snapshot.board.revision,
+      width,
+      height,
+      svgTemplate: scene.svg,
+      regions: scene.regions
+    };
+  }
+  return encodeFile(snapshot, scene.svg, "svg", "image/svg+xml");
+}
+function renderExportFile(snapshot, format) {
+  switch (format) {
+    case "svg":
+    case "png":
+      return renderVectorFile(snapshot, format);
+    case "html":
+      return encodeFile(snapshot, renderExportHtml(snapshot), "html", "text/html");
+    case "json":
+      return encodeFile(snapshot, jsonExport(snapshot), "json", "application/json");
+  }
+}
+
+// src/modules/whiteboard/domain/backup-elements.ts
+var BackupElementError = class extends Error {
+  constructor(reason) {
+    super("The v4 archive cannot represent this object.");
+    this.reason = reason;
+  }
+  reason;
+};
+var supported = /* @__PURE__ */ new Set([
+  "shape",
+  "section",
+  "connector",
+  "ink",
+  "text",
+  "note",
+  "document",
+  "todo",
+  "table",
+  "image",
+  "video",
+  "html",
+  "diagram",
+  "chart",
+  "link",
+  "sticker"
+]);
+var legacyType = /* @__PURE__ */ new Map([
+  ["section", "container"],
+  ["connector", "arrow"],
+  ["ink", "stroke"],
+  ["video", "image"]
+]);
+var alignments = /* @__PURE__ */ new Map([
+  ["TEXT_ALIGNMENT_LEFT", "left"],
+  ["TEXT_ALIGNMENT_CENTER", "center"],
+  ["TEXT_ALIGNMENT_RIGHT", "right"]
+]);
+var attachmentSource = /(?<![\w/:.])\/studio-archive-assets\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+(?![\w./%-])/gu;
+function object2(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function array(value) {
+  return Array.isArray(value) ? value : [];
+}
+function rewrite(value, source) {
+  return typeof value === "string" ? value.replaceAll(attachmentSource, source) : value;
+}
+function legacyVersion(value) {
+  if (value === void 0) {
+    return void 0;
+  }
+  const revision = Number(value);
+  if (!Number.isSafeInteger(revision) || revision < 0) {
+    throw new BackupElementError("unsupported");
+  }
+  return revision;
+}
+function documentBlock(value, source, depth) {
+  if (depth >= 64) {
+    throw new BackupElementError("tooLarge");
+  }
+  const { blockId, type, props, content, children } = object2(value);
+  const fields = object2(props);
+  return {
+    id: blockId,
+    type,
+    props: { ...fields, url: rewrite(fields.url, source) },
+    content,
+    children: array(children).map((child3) => documentBlock(child3, source, depth + 1))
+  };
+}
+function todoItem(value) {
+  const { itemId, text: text3, checked, sourceRef } = object2(value);
+  const source = object2(sourceRef);
+  return {
+    id: itemId,
+    text: text3,
+    checked,
+    sourceRef: sourceRef === void 0 ? void 0 : {
+      artifactId: source.boardId,
+      elementId: source.objectId,
+      blockId: source.blockId,
+      itemId: source.itemId,
+      version: legacyVersion(source.version)
+    }
+  };
+}
+function tableCell(value) {
+  const { text: text3, number, boolValue } = object2(value);
+  return text3 ?? number ?? boolValue ?? null;
+}
+function imageFields(data, source) {
+  const size = object2(data.naturalSize);
+  return {
+    src: rewrite(data.src, source),
+    href: rewrite(data.href, source),
+    crop: data.crop,
+    data: { naturalWidth: size.width, naturalHeight: size.height }
+  };
+}
+function contentFields(element, payload, source) {
+  const data = payload?.data ?? {};
+  switch (element.kind) {
+    case "document":
+      return {
+        document: {
+          schemaVersion: 1,
+          blocks: array(data.blocks).map((value) => documentBlock(value, source, 0))
+        }
+      };
+    case "todo":
+      return { data: { items: array(data.items).map(todoItem) } };
+    case "table": {
+      const { rows, ...fields } = object2(data.grid);
+      return {
+        data: {
+          ...fields,
+          rows: array(rows).map((row) => array(object2(row).cells).map(tableCell))
+        }
+      };
+    }
+    case "image":
+      return imageFields(data, source);
+    case "video":
+      return { video: rewrite(data.src, source), src: rewrite(data.poster, source) };
+    case "html":
+    case "diagram":
+    case "chart":
+      return {
+        html: rewrite(data.html, source),
+        sourceRevision: legacyVersion(data.sourceRevision),
+        state: data.state
+      };
+    case "sticker":
+      return { data: { stickerIconId: data.stickerId } };
+    case "link":
+      return { href: rewrite(data.href, source) };
+    case "ink":
+      return {
+        points: array(data.points).flatMap((value) => {
+          const point2 = object2(value);
+          return [
+            Number(point2.x) * (element.geometry.width || 1),
+            Number(point2.y) * (element.geometry.height || 1)
+          ];
+        })
+      };
+    default:
+      return {
+        color: data.color,
+        fontFamily: data.fontFamily,
+        fontSize: data.fontSize,
+        textAlign: typeof data.align === "string" ? alignments.get(data.align) : void 0
+      };
+  }
+}
+function endPoint({ attachment, point: point2 }) {
+  return attachment?.objectId ?? [point2.x, point2.y];
+}
+function connectorFields(detail) {
+  const { start, end: end2, bends, relativeBends, startHead, endHead, labelOffset } = detail;
+  return {
+    from: endPoint(start),
+    fromSide: start.attachment?.port,
+    to: endPoint(end2),
+    toSide: end2.attachment?.port,
+    labelOffset,
+    heads: [startHead ?? "none", endHead ?? "arrow"],
+    bends: relativeBends ? [relativeBends.firstAxis === "horizontal" ? "h" : "v", ...relativeBends.offsets] : bends.flatMap(({ x, y }) => [x, y])
+  };
+}
+function backupElement(element, payload, source) {
+  const { objectId, kind, label: label2, geometry, locked, parentId, groupId, appearance: appearance3, detail } = element;
+  if (!supported.has(kind)) {
+    return void 0;
+  }
+  const { width, height, x, y, rotation } = geometry;
+  const styled = {
+    fill: appearance3?.fill,
+    stroke: appearance3?.stroke,
+    strokeWidth: detail?.kind === "ink" ? detail.width : appearance3?.strokeWidth,
+    dash: appearance3?.dashed,
+    hollow: detail?.kind === "section" ? detail.transparent : appearance3?.hollow
+  };
+  return {
+    id: objectId,
+    type: legacyType.get(kind) ?? kind,
+    x,
+    y,
+    w: width,
+    h: height,
+    rotation,
+    text: label2,
+    label: kind === "connector" ? label2 : void 0,
+    locked,
+    parentId,
+    groupId,
+    kind: detail?.kind === "shape" ? detail.outline : void 0,
+    ...styled,
+    ...contentFields(element, payload, source),
+    ...detail?.kind === "connector" ? connectorFields(detail) : void 0
   };
 }
 
@@ -3734,29 +5028,29 @@ function translateEndpoint(endpoint2, delta) {
 }
 function translateConnector(detail, delta) {
   const start = translateEndpoint(detail.start, delta);
-  const end = translateEndpoint(detail.end, delta);
-  const bends = detail.bends.map((point) => translatePoint(point, delta));
-  if (![start.point, end.point, ...bends].every(
+  const end2 = translateEndpoint(detail.end, delta);
+  const bends = detail.bends.map((point2) => translatePoint(point2, delta));
+  if (![start.point, end2.point, ...bends].every(
     ({ x, y }) => Number.isFinite(x) && Number.isFinite(y)
   )) {
     return void 0;
   }
-  return { ...detail, start, end, bends };
+  return { ...detail, start, end: end2, bends };
 }
 function hasFiniteGeometry({ x, y, width, height, rotation }) {
   const coordinates = [x, y, width, height, rotation, x + width, y + height];
   return coordinates.every(Number.isFinite) && Math.min(width, height) >= 0;
 }
-function translateObject(object, delta) {
-  const geometry = { ...object.geometry, ...translatePoint(object.geometry, delta) };
-  if (!hasFiniteGeometry(geometry) || !canAdvanceVersion(object.geometryVersion)) {
+function translateObject(object3, delta) {
+  const geometry = { ...object3.geometry, ...translatePoint(object3.geometry, delta) };
+  if (!hasFiniteGeometry(geometry) || !canAdvanceVersion(object3.geometryVersion)) {
     return void 0;
   }
-  const translated = { ...object, geometry, geometryVersion: object.geometryVersion + 1n };
-  if (object.detail?.kind !== "connector") {
+  const translated = { ...object3, geometry, geometryVersion: object3.geometryVersion + 1n };
+  if (object3.detail?.kind !== "connector") {
     return translated;
   }
-  const detail = translateConnector(object.detail, delta);
+  const detail = translateConnector(object3.detail, delta);
   return detail && { ...translated, detail };
 }
 
@@ -3809,7 +5103,7 @@ var fixedOrientationKinds = /* @__PURE__ */ new Set([
   "diagram",
   "chart"
 ]);
-var colorLiteral2 = /^(?:transparent|#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8})$/iu;
+var colorLiteral3 = /^(?:transparent|#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8})$/iu;
 function inWorld(value) {
   return Number.isFinite(value) && Math.abs(value) <= worldLimit;
 }
@@ -3819,12 +5113,12 @@ function pointInWorld({ x, y }) {
 function validGeometry({ x, y, width, height, rotation }) {
   return [x, y, width, height, x + width, y + height].every(inWorld) && width >= 0 && height >= 0 && Number.isFinite(rotation) && Math.abs(rotation) <= rotationLimit;
 }
-function validAppearance({ appearance: appearance2 }) {
-  if (!appearance2) {
+function validAppearance({ appearance: appearance3 }) {
+  if (!appearance3) {
     return true;
   }
-  const { fill, stroke, strokeWidth } = appearance2;
-  return [fill, stroke].every((value) => value === void 0 || colorLiteral2.test(value)) && (strokeWidth === void 0 || strokeWidth >= 0 && strokeWidth <= maximumInkWidth);
+  const { fill, stroke, strokeWidth } = appearance3;
+  return [fill, stroke].every((value) => value === void 0 || colorLiteral3.test(value)) && (strokeWidth === void 0 || strokeWidth >= 0 && strokeWidth <= maximumInkWidth);
 }
 function validInkWidth(width) {
   return width >= minimumInkWidth && width <= maximumInkWidth;
@@ -3833,17 +5127,17 @@ function hasValidEditInk(points) {
   return points.length > 0 && points.length <= maximumInkSamples && points.every(({ x, y }) => x >= 0 && x <= 1 && y >= 0 && y <= 1);
 }
 function connectorAttachmentIds(detail) {
-  const { start, end } = detail;
-  const ids = [start.attachment?.objectId, end.attachment?.objectId];
+  const { start, end: end2 } = detail;
+  const ids = [start.attachment?.objectId, end2.attachment?.objectId];
   return [...new Set(ids.filter((id) => id !== void 0))];
 }
-function validEndpoint({ point, attachment }) {
-  return pointInWorld(point) && (!attachment || validNewObjectId(attachment.objectId));
+function validEndpoint({ point: point2, attachment }) {
+  return pointInWorld(point2) && (!attachment || validNewObjectId(attachment.objectId));
 }
 function hasValidConnectorGeometry(detail) {
-  const { start, end, bends, relativeBends, labelOffset } = detail;
+  const { start, end: end2, bends, relativeBends, labelOffset } = detail;
   const validRelative = !relativeBends || relativeBends.offsets.length <= maximumPaths && relativeBends.offsets.every(inWorld);
-  return validEndpoint(start) && validEndpoint(end) && bends.length <= maximumPaths && bends.every(pointInWorld) && validRelative && (!labelOffset || pointInWorld(labelOffset));
+  return validEndpoint(start) && validEndpoint(end2) && bends.length <= maximumPaths && bends.every(pointInWorld) && validRelative && (!labelOffset || pointInWorld(labelOffset));
 }
 function validNewObjectId(id) {
   return id.length <= 160 && /^[\p{L}\p{N}][\p{L}\p{N}_.:-]*$/u.test(id);
@@ -3862,11 +5156,11 @@ function validDetail({ kind, detail }) {
       return detail === void 0;
   }
 }
-function validateCreatedObject(object) {
-  const { objectId, label, geometryVersion, payloadVersion, locked, groupId, geometry } = object;
+function validateCreatedObject(object3) {
+  const { objectId, label: label2, geometryVersion, payloadVersion, locked, groupId, geometry } = object3;
   const validVersion2 = geometryVersion === 0n && (payloadVersion === void 0 || payloadVersion === 0n);
-  const hasArea = object.kind === "connector" || geometry.width > 0 && geometry.height > 0;
-  return validNewObjectId(objectId) && label.length <= maximumLabelLength && validVersion2 && !locked && groupId === void 0 && hasArea && validGeometry(geometry) && validAppearance(object) && validDetail(object);
+  const hasArea = object3.kind === "connector" || geometry.width > 0 && geometry.height > 0;
+  return validNewObjectId(objectId) && label2.length <= maximumLabelLength && validVersion2 && !locked && groupId === void 0 && hasArea && validGeometry(geometry) && validAppearance(object3) && validDetail(object3);
 }
 function scaleInkWidth(width, before, after) {
   const scaleX = before.width > 0 ? after.width / before.width : 1;
@@ -3874,43 +5168,43 @@ function scaleInkWidth(width, before, after) {
   const averageScale = (scaleX + scaleY) / 2;
   return Math.min(maximumInkWidth, Math.max(minimumInkWidth, width * averageScale));
 }
-function nextDetail(object, { geometry, connector: connector2 }, transform) {
+function nextDetail(object3, { geometry, connector: connector2 }, transform) {
   if (transform === "connect") {
     return connector2;
   }
-  const { detail } = object;
+  const { detail } = object3;
   if (transform === "resize" && detail?.kind === "ink") {
-    return { ...detail, width: scaleInkWidth(detail.width, object.geometry, geometry) };
+    return { ...detail, width: scaleInkWidth(detail.width, object3.geometry, geometry) };
   }
   return detail;
 }
-function validTransformFields(object, { geometry, connector: connector2, ink }, transform) {
-  const detailKind = object.detail?.kind;
+function validTransformFields(object3, { geometry, connector: connector2, ink: ink2 }, transform) {
+  const detailKind = object3.detail?.kind;
   if (transform === "connect") {
-    return detailKind === "connector" && connector2 !== void 0 && hasValidConnectorGeometry(connector2) && geometry.rotation === object.geometry.rotation && !ink;
+    return detailKind === "connector" && connector2 !== void 0 && hasValidConnectorGeometry(connector2) && geometry.rotation === object3.geometry.rotation && !ink2;
   }
   if (connector2 || detailKind === "connector") {
     return false;
   }
-  const invalidPoints = ink !== void 0 && ink.length > 0 && !hasValidEditInk(ink);
-  if (ink && (detailKind !== "ink" || invalidPoints)) {
+  const invalidPoints = ink2 !== void 0 && ink2.length > 0 && !hasValidEditInk(ink2);
+  if (ink2 && (detailKind !== "ink" || invalidPoints)) {
     return false;
   }
-  const previous = object.geometry;
+  const previous = object3.geometry;
   if (transform === "resize") {
     return geometry.rotation === previous.rotation && geometry.width > 0 && geometry.height > 0;
   }
-  return !fixedOrientationKinds.has(object.kind) && geometry.width === previous.width && geometry.height === previous.height;
+  return !fixedOrientationKinds.has(object3.kind) && geometry.width === previous.width && geometry.height === previous.height;
 }
-function advanceGeometry(object, change, transform) {
-  if (!canAdvanceVersion(object.geometryVersion) || !validGeometry(change.geometry) || !validTransformFields(object, change, transform)) {
+function advanceGeometry(object3, change, transform) {
+  if (!canAdvanceVersion(object3.geometryVersion) || !validGeometry(change.geometry) || !validTransformFields(object3, change, transform)) {
     return void 0;
   }
   return {
-    ...object,
+    ...object3,
     geometry: change.geometry,
-    geometryVersion: object.geometryVersion + 1n,
-    detail: nextDetail(object, change, transform)
+    geometryVersion: object3.geometryVersion + 1n,
+    detail: nextDetail(object3, change, transform)
   };
 }
 function geometryInWorld(geometry) {
@@ -3930,6 +5224,29 @@ function contentFits(data) {
   return json.length <= maximumContentBytes && encoder.encode(json).byteLength <= maximumContentBytes;
 }
 
+// src/modules/whiteboard/domain/link-content.ts
+var maximumLinkLength = 4096;
+var controlCharacter = new RegExp("\\p{Cc}", "u");
+function readLink(value) {
+  if (typeof value !== "string" || value.length > maximumLinkLength || controlCharacter.test(value)) {
+    return void 0;
+  }
+  const url = URL.parse(value.trim());
+  if (!url || url.username || url.password) {
+    return void 0;
+  }
+  if (url.protocol === "https:" || url.protocol === "http:") {
+    return url;
+  }
+}
+function editLinkContent(title, href) {
+  const url = readLink(href);
+  if (!url || title.length > contentTitleLimit || controlCharacter.test(title)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  return { kind: "updated", label: title.trim() || url.hostname, data: { href: url.href } };
+}
+
 // src/modules/whiteboard/domain/object-content-edits-table.ts
 var maxRows2 = 1e3;
 var maxColumns = 256;
@@ -3937,9 +5254,9 @@ var maxCells = 2e4;
 var maxAxisIdLength = 192;
 var maxTableWidth = 1e7;
 var widthTolerance = 1e-6;
-var controlCharacter = new RegExp("\\p{Cc}", "u");
+var controlCharacter2 = new RegExp("\\p{Cc}", "u");
 function validAxisId(value) {
-  return typeof value === "string" && value.length <= maxAxisIdLength && Boolean(value.trim()) && !controlCharacter.test(value);
+  return typeof value === "string" && value.length <= maxAxisIdLength && Boolean(value.trim()) && !controlCharacter2.test(value);
 }
 function validAxis(value, count) {
   if (!Array.isArray(value) || value.length !== count) {
@@ -4049,29 +5366,29 @@ function layoutChanges(objectId, current, next) {
 function validWidth(width) {
   return Number.isFinite(width) && width > 0 && width <= maxTableWidth;
 }
-function editTableContent(object, current, { data, widthChange }) {
+function editTableContent(object3, current, { data, widthChange }) {
   const issue = tableContentIssue(data);
   if (issue) {
     return { kind: "rejected", reason: issue };
   }
-  const { axesChanged, columnsResized } = layoutChanges(object.objectId, current, data);
+  const { axesChanged, columnsResized } = layoutChanges(object3.objectId, current, data);
   const changesLayout = axesChanged || columnsResized;
   if (widthChange && ![widthChange.width, widthChange.expectedWidth].every(validWidth)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  if (widthChange && widthChange.expectedWidth !== object.geometry.width) {
+  if (widthChange && widthChange.expectedWidth !== object3.geometry.width) {
     return { kind: "conflict" };
   }
   if (changesLayout && !widthChange) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  const width = widthChange?.width ?? object.geometry.width;
-  const resizedFrame = width !== object.geometry.width;
+  const width = widthChange?.width ?? object3.geometry.width;
+  const resizedFrame = width !== object3.geometry.width;
   const geometryChanged = changesLayout || resizedFrame;
-  const label = typeof data.text === "string" ? data.text : object.label;
+  const label2 = typeof data.text === "string" ? data.text : object3.label;
   return {
     kind: "updated",
-    label,
+    label: label2,
     data,
     geometryWidth: geometryChanged ? width : void 0,
     requiresGeometryUnlock: columnsResized || resizedFrame
@@ -4090,7 +5407,8 @@ var initialBodyKinds = /* @__PURE__ */ new Map([
   ["document", "document"],
   ["todo", "todo"],
   ["table", "table"],
-  ["html", "embed"]
+  ["html", "embed"],
+  ["link", "link"]
 ]);
 var maxTextLength = 64 * 1024;
 var maxTitleLength2 = 4096;
@@ -4102,7 +5420,7 @@ var defaultTableRows = [
   ["\u9879\u76EE B", "\u5F85\u8865\u5145", "\u5F85\u5904\u7406"]
 ];
 var defaultTableColumnCount = defaultTableRows[0].length;
-var alignments = /* @__PURE__ */ new Set([
+var alignments2 = /* @__PURE__ */ new Set([
   "TEXT_ALIGNMENT_UNSPECIFIED",
   "TEXT_ALIGNMENT_LEFT",
   "TEXT_ALIGNMENT_CENTER",
@@ -4111,18 +5429,18 @@ var alignments = /* @__PURE__ */ new Set([
 function supportsGeometryCreation(kind) {
   return initialBodyKinds.has(kind);
 }
-function defaultTableData({ objectId, label, geometry }) {
-  const rows = defaultTableRows.map((row) => ({ cells: row.map((text2) => ({ text: text2 })) }));
+function defaultTableData({ objectId, label: label2, geometry }) {
+  const rows = defaultTableRows.map((row) => ({ cells: row.map((text3) => ({ text: text3 })) }));
   const rowIds = rows.map((_row, index) => objectId + ":row:" + index);
   const columnIds = Array.from(
     { length: defaultTableColumnCount },
     (_, index) => objectId + ":col:" + index
   );
   const columnWidths = columnIds.map(() => geometry.width / defaultTableColumnCount);
-  return { text: label, grid: { rows, rowIds, columnIds, columnWidths, head: true } };
+  return { text: label2, grid: { rows, rowIds, columnIds, columnWidths, head: true } };
 }
-function defaultInitialData(kind, object) {
-  const { label } = object;
+function defaultInitialData(kind, object3) {
+  const { label: label2 } = object3;
   switch (kind) {
     case "text":
       return { text: "" };
@@ -4131,11 +5449,11 @@ function defaultInitialData(kind, object) {
     case "ink":
       return void 0;
     case "document":
-      return { title: label, schemaVersion: 1, blocks: [] };
+      return { title: label2, schemaVersion: 1, blocks: [] };
     case "todo":
-      return { title: label, items: [] };
+      return { title: label2, items: [] };
     case "table":
-      return defaultTableData(object);
+      return defaultTableData(object3);
   }
 }
 function optionalString(value, maximum) {
@@ -4159,17 +5477,17 @@ function validInkPoints(points) {
   }
   const path2 = [];
   for (const value of points) {
-    const point = readInkPoint(value);
-    if (!point) {
+    const point2 = readInkPoint(value);
+    if (!point2) {
       return false;
     }
-    path2.push(point);
+    path2.push(point2);
   }
   return hasValidEditInk(path2);
 }
-function validInitialText({ text: text2, color, fontFamily, fontSize, align }) {
+function validInitialText({ text: text3, color: color2, fontFamily, fontSize, align: align2 }) {
   const validFont = fontSize === void 0 || typeof fontSize === "number" && fontSize > 0 && fontSize <= maxFontSize;
-  return optionalString(text2, maxTextLength) && optionalString(color, maxStyleStringLength) && optionalString(fontFamily, maxStyleStringLength) && validFont && (align === void 0 || typeof align === "string" && alignments.has(align));
+  return optionalString(text3, maxTextLength) && optionalString(color2, maxStyleStringLength) && optionalString(fontFamily, maxStyleStringLength) && validFont && (align2 === void 0 || typeof align2 === "string" && alignments2.has(align2));
 }
 function validInitialData(kind, data) {
   switch (kind) {
@@ -4187,9 +5505,9 @@ function validInitialData(kind, data) {
       return tableContentIssue(data) === void 0;
   }
 }
-function initialEmbedData({ label }, payload) {
+function initialEmbedData({ label: label2 }, payload) {
   const { title, html, sourceRevision, state } = payload;
-  const validTitle = label.length <= contentTitleLimit && (title === void 0 || title === label);
+  const validTitle = label2.length <= contentTitleLimit && (title === void 0 || title === label2);
   const startsAtZero = sourceRevision === void 0 || sourceRevision === "0";
   if (!validTitle || !startsAtZero || state !== void 0) {
     return void 0;
@@ -4197,27 +5515,98 @@ function initialEmbedData({ label }, payload) {
   if (typeof html !== "string" || !html.trim()) {
     return void 0;
   }
-  const data = { title: label, html, sourceRevision: "0" };
+  const data = { title: label2, html, sourceRevision: "0" };
   return contentFits(data) ? data : void 0;
 }
-function initialGeometryPayload(object, payload) {
-  const bodyKind = initialBodyKinds.get(object.kind);
+function initialGeometryPayload(object3, payload) {
+  const bodyKind = initialBodyKinds.get(object3.kind);
   if (!bodyKind) {
     return void 0;
   }
-  const { objectId } = object;
+  const { objectId } = object3;
   if (!payload) {
-    const data = bodyKind === "embed" ? void 0 : defaultInitialData(bodyKind, object);
+    const needsContent = bodyKind === "embed" || bodyKind === "link";
+    const data = needsContent ? void 0 : defaultInitialData(bodyKind, object3);
     return data && { objectId, bodyKind, payloadVersion: 0n, data };
   }
   if (payload.objectId !== objectId || payload.payloadVersion !== 0n || payload.bodyKind !== bodyKind) {
     return void 0;
   }
   if (bodyKind === "embed") {
-    const data = initialEmbedData(object, payload.data);
+    const data = initialEmbedData(object3, payload.data);
     return data && { ...payload, data };
   }
+  if (bodyKind === "link") {
+    const { href } = payload.data;
+    if (typeof href !== "string") {
+      return void 0;
+    }
+    const link = editLinkContent(object3.label, href);
+    return link.kind === "updated" && link.label === object3.label ? { ...payload, data: link.data } : void 0;
+  }
   return validInitialData(bodyKind, payload.data) ? payload : void 0;
+}
+
+// src/modules/whiteboard/domain/geometry-attachments.ts
+var oppositePort = {
+  top: "bottom",
+  right: "left",
+  bottom: "top",
+  left: "right"
+};
+function adjacentShapeConnector(source, target2, { sourcePort, targetPort, connectorId }) {
+  if (source.kind !== "shape" || target2.kind !== "shape" || oppositePort[sourcePort] !== targetPort) {
+    return void 0;
+  }
+  const detail = {
+    kind: "connector",
+    start: {
+      point: geometryCenter(source.geometry),
+      attachment: { objectId: source.objectId, port: sourcePort }
+    },
+    end: {
+      point: geometryCenter(target2.geometry),
+      attachment: { objectId: target2.objectId, port: targetPort }
+    },
+    bends: [],
+    endHead: "arrow"
+  };
+  const objects = /* @__PURE__ */ new Map([
+    [source.objectId, source],
+    [target2.objectId, target2]
+  ]);
+  const route2 = exportConnector(detail, objects);
+  if (!route2) {
+    return void 0;
+  }
+  const [first, second] = route2.points;
+  const last = route2.points.at(-1);
+  if (!first || !second || !last) {
+    return void 0;
+  }
+  const x = route2.points.map((point2) => point2.x);
+  const y = route2.points.map((point2) => point2.y);
+  const left = Math.min(...x);
+  const top = Math.min(...y);
+  return {
+    objectId: connectorId,
+    label: "\u8FDE\u7EBF",
+    kind: "connector",
+    geometry: {
+      x: left,
+      y: top,
+      width: Math.max(...x) - left,
+      height: Math.max(...y) - top,
+      rotation: 0
+    },
+    locked: false,
+    geometryVersion: 0n,
+    detail: {
+      ...detail,
+      start: { ...detail.start, point: first },
+      end: { ...detail.end, point: last }
+    }
+  };
 }
 
 // src/modules/whiteboard/domain/object-content-edits-document.ts
@@ -4249,8 +5638,8 @@ function knownImages(current) {
       sources.add(source);
     }
     if (Array.isArray(block?.children)) {
-      for (const child of block.children) {
-        pending.push(child);
+      for (const child3 of block.children) {
+        pending.push(child3);
       }
     }
   }
@@ -4309,8 +5698,8 @@ function checkBlocks(blocks, assets, known) {
     }
     const block = contentRecord(entry.block);
     const id = block?.blockId;
-    const validId = typeof id === "string" && contentIdentifier.test(id);
-    if (!block || !validId) {
+    const validId2 = typeof id === "string" && contentIdentifier.test(id);
+    if (!block || !validId2) {
       return "invalidEdit";
     }
     if (ids.has(id) || !validBlock(block, assets, known)) {
@@ -4318,8 +5707,8 @@ function checkBlocks(blocks, assets, known) {
     }
     ids.add(id);
     if (Array.isArray(block.children)) {
-      for (const child of block.children) {
-        pending.push({ block: child, depth: entry.depth + 1 });
+      for (const child3 of block.children) {
+        pending.push({ block: child3, depth: entry.depth + 1 });
       }
     }
   }
@@ -4329,15 +5718,15 @@ function editDocumentContent(data, current, assets) {
   if (typeof title !== "string" || schemaVersion !== documentSchema || !Array.isArray(blocks)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  const label = title.trim() || untitledDocument;
-  if (label.length > contentTitleLimit || !contentFits(data)) {
+  const label2 = title.trim() || untitledDocument;
+  if (label2.length > contentTitleLimit || !contentFits(data)) {
     return { kind: "rejected", reason: "tooLarge" };
   }
   const rejection3 = checkBlocks(blocks, assets, knownImages(current));
   if (rejection3) {
     return { kind: "rejected", reason: rejection3 };
   }
-  return { kind: "updated", label, data: { title: label, schemaVersion, blocks } };
+  return { kind: "updated", label: label2, data: { title: label2, schemaVersion, blocks } };
 }
 
 // src/modules/whiteboard/domain/object-content-edits-text.ts
@@ -4358,19 +5747,21 @@ function validAlignment(value) {
   return value === void 0 || typeof value === "string" && alignment.has(value);
 }
 function editTextContent(edit, current) {
-  const { text: text2, color, fontFamily, fontSize, align } = edit;
-  const validFormatting = validStyle(color) && validStyle(fontFamily) && validSize(fontSize);
-  if (typeof text2 !== "string" || !validFormatting || !validAlignment(align)) {
+  const { text: text3, color: color2, fontFamily, fontSize, align: align2, bold, italic } = edit;
+  const validFormatting = validStyle(color2) && validStyle(fontFamily) && validSize(fontSize);
+  const flags = [bold, italic].every((value) => value === void 0 || typeof value === "boolean");
+  const validTextStyle = validAlignment(align2) && flags;
+  if (typeof text3 !== "string" || !validFormatting || !validTextStyle) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
   const data = { ...current, ...edit };
-  if (align === "TEXT_ALIGNMENT_UNSPECIFIED" && current.align !== void 0) {
+  if (align2 === "TEXT_ALIGNMENT_UNSPECIFIED" && current.align !== void 0) {
     data.align = current.align;
   }
   if (!contentFits(data)) {
     return { kind: "rejected", reason: "tooLarge" };
   }
-  return { kind: "updated", label: text2, data };
+  return { kind: "updated", label: text3, data };
 }
 
 // src/modules/whiteboard/domain/object-content-edits-todo.ts
@@ -4378,8 +5769,8 @@ var maxTodoItems = 200;
 var maxTodoTextBytes = 2e3;
 var untitledTodo = "\u4EFB\u52A1\u6E05\u5355";
 var encoder2 = new TextEncoder();
-function validText(text2) {
-  return text2.length <= maxTodoTextBytes && encoder2.encode(text2).byteLength <= maxTodoTextBytes;
+function validText(text3) {
+  return text3.length <= maxTodoTextBytes && encoder2.encode(text3).byteLength <= maxTodoTextBytes;
 }
 function sourceData(source) {
   const { boardId, objectId, blockId, itemId, version } = source;
@@ -4391,10 +5782,10 @@ function sourceData(source) {
     ...version === void 0 ? {} : { version }
   };
 }
-function rowData({ itemId, text: text2, checked, sourceRef }) {
+function rowData({ itemId, text: text3, checked, sourceRef }) {
   return {
     itemId,
-    text: text2,
+    text: text3,
     checked,
     ...sourceRef === void 0 ? {} : { sourceRef: sourceData(sourceRef) }
   };
@@ -4408,8 +5799,8 @@ function readRows(value) {
   for (const raw of value) {
     const row = contentRecord(raw);
     const id = row?.itemId;
-    const validId = typeof id === "string" && contentIdentifier.test(id);
-    if (!row || !validId || ids.has(id)) {
+    const validId2 = typeof id === "string" && contentIdentifier.test(id);
+    if (!row || !validId2 || ids.has(id)) {
       return;
     }
     if (typeof row.text !== "string" || typeof row.checked !== "boolean") {
@@ -4446,16 +5837,16 @@ function addRow(rows, usedIds, { item, placement }, canLink) {
   usedIds.add(item.itemId);
 }
 function updateRow(rows, index, change, canLink) {
-  const { text: text2, checked, sourceRef } = change;
-  if (text2 !== void 0 && !validText(text2)) {
+  const { text: text3, checked, sourceRef } = change;
+  if (text3 !== void 0 && !validText(text3)) {
     return "tooLarge";
   }
   if (sourceRef && !canLink(sourceRef)) {
     return "invalidEdit";
   }
   const next = { ...rows[index] };
-  if (text2 !== void 0) {
-    next.text = text2;
+  if (text3 !== void 0) {
+    next.text = text3;
   }
   if (checked !== void 0) {
     next.checked = checked;
@@ -4553,14 +5944,14 @@ function validStateLeaf(state, depth) {
   if (Array.isArray(state)) {
     return state.every((entry) => validStateLeaf(entry, depth + 1));
   }
-  const record5 = contentRecord(state);
-  if (record5) {
-    return Object.values(record5).every((entry) => validStateLeaf(entry, depth + 1));
+  const record7 = contentRecord(state);
+  if (record7) {
+    return Object.values(record7).every((entry) => validStateLeaf(entry, depth + 1));
   }
   return typeof state !== "number" || Number.isFinite(state);
 }
-function persistSource(data, label) {
-  return contentFits(data) ? { kind: "updated", data, label } : { kind: "rejected", reason: "tooLarge" };
+function persistSource(data, label2) {
+  return contentFits(data) ? { kind: "updated", data, label: label2 } : { kind: "rejected", reason: "tooLarge" };
 }
 function editEmbedSource(current, { title, html, expectedSourceRevision }) {
   const revision = embedSourceRevision(current);
@@ -4574,14 +5965,14 @@ function editEmbedSource(current, { title, html, expectedSourceRevision }) {
   if (sourceChanged && !canAdvanceVersion(revision)) {
     return { kind: "rejected", reason: "versionUnavailable" };
   }
-  const label = title.trim() || "HTML \u56FE\u89E3";
-  if (label.length > contentTitleLimit || html.length > 1024 * 1024) {
+  const label2 = title.trim() || "HTML \u56FE\u89E3";
+  if (label2.length > contentTitleLimit || html.length > 1024 * 1024) {
     return { kind: "rejected", reason: "tooLarge" };
   }
   const sourceRevision = (sourceChanged ? revision + 1n : revision).toString();
-  return persistSource({ ...current.data, title: label, html, sourceRevision }, label);
+  return persistSource({ ...current.data, title: label2, html, sourceRevision }, label2);
 }
-function editEmbedState(current, label, state) {
+function editEmbedState(current, label2, state) {
   const revision = embedSourceRevision(current);
   if (revision === void 0) {
     return { kind: "rejected", reason: "versionUnavailable" };
@@ -4596,7 +5987,7 @@ function editEmbedState(current, label, state) {
   return {
     kind: "updated",
     data: { ...current.data, state, sourceRevision: revision.toString() },
-    label
+    label: label2
   };
 }
 
@@ -4662,11 +6053,11 @@ function editStickerContent(current, selection) {
     delete data.stickerId;
     return { kind: "updated", label: fallback.trim().slice(0, maxStickerLabelLength), data };
   }
-  const label = stickers.get(selection.id);
-  if (!label) {
+  const label2 = stickers.get(selection.id);
+  if (!label2) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  return { kind: "updated", label, data: { ...current, stickerId: selection.id } };
+  return { kind: "updated", label: label2, data: { ...current, stickerId: selection.id } };
 }
 function hasLocalSource(src, assets) {
   if (typeof src !== "string") {
@@ -4685,7 +6076,7 @@ function priorZoom(current) {
   const zoom = contentRecord(current.crop)?.zoom;
   return typeof zoom === "number" && Number.isFinite(zoom) ? zoom : 0;
 }
-function editImageCrop(current, label, { crop, naturalSize: naturalSize2 }, assets) {
+function editImageCrop(current, label2, { crop, naturalSize: naturalSize2 }, assets) {
   const zoomInRange = Number.isFinite(crop.zoom) && crop.zoom >= 1 && crop.zoom <= Math.max(maxCropZoom, priorZoom(current));
   const offsetsInRange = fittedCoordinate(crop.x) && fittedCoordinate(crop.y);
   const validSize2 = [naturalSize2.width, naturalSize2.height].every(naturalDimension);
@@ -4696,7 +6087,94 @@ function editImageCrop(current, label, { crop, naturalSize: naturalSize2 }, asse
     return { kind: "rejected", reason: "invalidEdit" };
   }
   const data = { ...current, crop: { ...crop }, naturalSize: { ...naturalSize2 } };
-  return { kind: "updated", label, data };
+  return { kind: "updated", label: label2, data };
+}
+
+// src/modules/whiteboard/domain/gif-image.ts
+var imageBlock = 44;
+var extensionBlock = 33;
+var trailer = 59;
+var screenDescriptorSize = 13;
+var frameDescriptorSize = 10;
+var maximumFrames = 1e3;
+var maximumFramePixels = 256 * 1024 * 1024;
+function colorTableBytes(flags) {
+  return flags & 128 ? 3 * (2 << (flags & 7)) : 0;
+}
+function hasSignature(view) {
+  if (view.byteLength < screenDescriptorSize || view.getUint32(0) !== 1195984440) {
+    return false;
+  }
+  const version = view.getUint16(4);
+  return version === 14177 || version === 14689;
+}
+function skipSubBlocks(bytes, start) {
+  for (let offset = start; offset < bytes.byteLength; ) {
+    const count = bytes[offset];
+    if (count === 0) {
+      return offset + 1;
+    }
+    if (count === void 0) {
+      return void 0;
+    }
+    offset += count + 1;
+  }
+}
+function readFrame(view, offset, screen) {
+  if (offset + frameDescriptorSize >= view.byteLength) {
+    return void 0;
+  }
+  const left = view.getUint16(offset + 1, true);
+  const top = view.getUint16(offset + 3, true);
+  const width = view.getUint16(offset + 5, true);
+  const height = view.getUint16(offset + 7, true);
+  const emptyFrame = width === 0 || height === 0;
+  const outsideScreen = left + width > screen.width || top + height > screen.height;
+  if (emptyFrame || outsideScreen) {
+    return void 0;
+  }
+  const flags = view.getUint8(offset + 9);
+  const data = offset + frameDescriptorSize + colorTableBytes(flags);
+  if (data + 1 >= view.byteLength) {
+    return void 0;
+  }
+  const codeSize = view.getUint8(data);
+  if (codeSize < 2 || codeSize > 8 || view.getUint8(data + 1) === 0) {
+    return void 0;
+  }
+  return data + 1;
+}
+function readGifSize(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (!hasSignature(view)) {
+    return void 0;
+  }
+  const screen = { width: view.getUint16(6, true), height: view.getUint16(8, true) };
+  let offset = screenDescriptorSize + colorTableBytes(view.getUint8(10));
+  let frames = 0;
+  while (offset < bytes.byteLength) {
+    const tag2 = bytes[offset];
+    if (tag2 === trailer) {
+      return frames > 0 && offset + 1 === bytes.byteLength ? screen : void 0;
+    }
+    let data = offset + 2;
+    if (tag2 === imageBlock) {
+      const frame = readFrame(view, offset, screen);
+      if (frame === void 0) {
+        return void 0;
+      }
+      data = frame;
+      frames += 1;
+    } else if (tag2 !== extensionBlock) {
+      return void 0;
+    }
+    const next = skipSubBlocks(bytes, data);
+    const pixels = frames * screen.width * screen.height;
+    if (next === void 0 || frames > maximumFrames || pixels > maximumFramePixels) {
+      return void 0;
+    }
+    offset = next;
+  }
 }
 
 // src/modules/whiteboard/domain/image-edits.ts
@@ -4764,12 +6242,12 @@ function hasCompletePngData(view) {
   for (let offset = pngFirstDataOffset; offset + pngChunkOverhead <= view.byteLength; ) {
     const length = view.getUint32(offset);
     const type = fourCc(view, offset + 4);
-    const end = offset + pngChunkOverhead + length;
-    if (end > view.byteLength || type === "IHDR" || type === "acTL") {
+    const end2 = offset + pngChunkOverhead + length;
+    if (end2 > view.byteLength || type === "IHDR" || type === "acTL") {
       return false;
     }
     if (type === "IEND") {
-      return hasImageData && length === 0 && end === view.byteLength;
+      return hasImageData && length === 0 && end2 === view.byteLength;
     }
     if (type === "PLTE") {
       if (hasPalette || hasImageData || length === 0) {
@@ -4789,7 +6267,7 @@ function hasCompletePngData(view) {
     } else {
       imageDataClosed ||= hasImageData;
     }
-    offset = end;
+    offset = end2;
   }
   return false;
 }
@@ -4825,22 +6303,22 @@ function findJpegScanEnd(bytes, start) {
   }
   return -1;
 }
-function readJpegFrame(view, segment, length) {
-  if (length < 8 || view.getUint8(segment + 2) !== 8) {
+function readJpegFrame(view, segment2, length) {
+  if (length < 8 || view.getUint8(segment2 + 2) !== 8) {
     return void 0;
   }
-  const components = view.getUint8(segment + 7);
+  const components = view.getUint8(segment2 + 7);
   if (![1, 3, 4].includes(components) || length !== 8 + 3 * components) {
     return void 0;
   }
-  const size = { width: view.getUint16(segment + 5), height: view.getUint16(segment + 3) };
+  const size = { width: view.getUint16(segment2 + 5), height: view.getUint16(segment2 + 3) };
   return validDimensions(size) ? size : void 0;
 }
-function validJpegScanHeader(view, segment, length) {
+function validJpegScanHeader(view, segment2, length) {
   if (length < 6) {
     return false;
   }
-  const components = view.getUint8(segment + 2);
+  const components = view.getUint8(segment2 + 2);
   return components > 0 && components <= 4 && length === 6 + 2 * components;
 }
 function readJpegSize(view, bytes) {
@@ -4849,37 +6327,37 @@ function readJpegSize(view, bytes) {
   for (let offset = 2; bytes[offset] === jpegMarkerPrefix; ) {
     const markerOffset = jpegMarkerOffset(bytes, offset);
     const marker = bytes[markerOffset];
-    const segment = markerOffset + 1;
+    const segment2 = markerOffset + 1;
     if (marker === jpegEnd) {
-      return hasScan && segment === view.byteLength ? size : void 0;
+      return hasScan && segment2 === view.byteLength ? size : void 0;
     }
     const markerOutOfRange = marker === void 0 || marker < 192 || marker === 216;
-    if (markerOutOfRange || isRestartMarker(marker) || segment + 2 > view.byteLength) {
+    if (markerOutOfRange || isRestartMarker(marker) || segment2 + 2 > view.byteLength) {
       return void 0;
     }
-    const length = view.getUint16(segment);
-    const end = segment + length;
-    if (length < 2 || end > view.byteLength) {
+    const length = view.getUint16(segment2);
+    const end2 = segment2 + length;
+    if (length < 2 || end2 > view.byteLength) {
       return void 0;
     }
     if (jpegFrameMarkers.has(marker)) {
       if (size) {
         return void 0;
       }
-      size = readJpegFrame(view, segment, length);
+      size = readJpegFrame(view, segment2, length);
       if (!size) {
         return void 0;
       }
     }
     if (marker !== jpegScan) {
-      offset = end;
+      offset = end2;
       continue;
     }
-    if (!size || !validJpegScanHeader(view, segment, length)) {
+    if (!size || !validJpegScanHeader(view, segment2, length)) {
       return void 0;
     }
-    offset = findJpegScanEnd(bytes, end);
-    if (offset <= end) {
+    offset = findJpegScanEnd(bytes, end2);
+    if (offset <= end2) {
       return void 0;
     }
     hasScan = true;
@@ -4937,15 +6415,15 @@ function readWebpChunk(view, offset) {
   const type = fourCc(view, offset);
   const length = view.getUint32(offset + 4, true);
   const start = offset + riffChunkHeaderSize;
-  const end = start + length + length % 2;
+  const end2 = start + length + length % 2;
   const animation = type === "ANIM" || type === "ANMF";
-  if (end > view.byteLength || animation) {
+  if (end2 > view.byteLength || animation) {
     return void 0;
   }
-  if (length % 2 === 1 && view.getUint8(end - 1) !== 0) {
+  if (length % 2 === 1 && view.getUint8(end2 - 1) !== 0) {
     return void 0;
   }
-  return { type, length, start, end };
+  return { type, length, start, end: end2 };
 }
 function readWebpSize(view) {
   if (view.getUint32(4, true) !== view.byteLength - 8) {
@@ -4959,7 +6437,7 @@ function readWebpSize(view) {
     if (!chunk) {
       return void 0;
     }
-    const { type, length, start, end } = chunk;
+    const { type, length, start, end: end2 } = chunk;
     if (type === "VP8X") {
       canvas = readWebpCanvas(view, start, length);
       if (offset !== riffHeaderSize || !canvas) {
@@ -4976,7 +6454,7 @@ function readWebpSize(view) {
     } else if (!canvas) {
       return void 0;
     }
-    offset = end;
+    offset = end2;
   }
   if (offset !== view.byteLength || !size) {
     return void 0;
@@ -4996,12 +6474,36 @@ function inspectImage(content) {
   }
   return void 0;
 }
+function inspectCanvasImage(content) {
+  const raster = inspectImage(content);
+  if (raster) {
+    return raster;
+  }
+  const size = readGifSize(content);
+  return size && validDimensions(size) ? { mimeType: "image/gif", size } : void 0;
+}
 function validImagePlacement(boardId, assetId, operation) {
   const { objectId, displayName, geometry } = operation;
   const idsFitPath = [boardId, objectId, assetId].every((id) => pathSegment.test(id));
   const validName = displayName.length <= maximumDisplayName && !unsafeName.test(displayName);
   const positiveSize = geometry.width > 0 && geometry.height > 0;
   return idsFitPath && validName && positiveSize && geometryInWorld(geometry);
+}
+function archiveImageSource(boardId, assetId) {
+  return archiveAssetPath + boardId + "/" + assetId;
+}
+function planDocumentImageAsset(boardId, assetId, content) {
+  if (content.byteLength > maximumImageBytes) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  if (!pathSegment.test(boardId) || !pathSegment.test(assetId)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const image = inspectImage(content);
+  if (!image?.size) {
+    return { kind: "rejected", reason: "invalidImage" };
+  }
+  return { kind: "changes", assets: [{ assetId, mimeType: image.mimeType, bytes: content }] };
 }
 function planImageChanges(boardId, operation) {
   const { objectId, displayName, geometry, content } = operation;
@@ -5012,7 +6514,7 @@ function planImageChanges(boardId, operation) {
   if (!validImagePlacement(boardId, assetId, operation)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  const image = inspectImage(content);
+  const image = inspectCanvasImage(content);
   if (!image?.size) {
     return { kind: "rejected", reason: "invalidImage" };
   }
@@ -5035,7 +6537,7 @@ function planImageChanges(boardId, operation) {
         bodyKind: "image",
         payloadVersion: 0n,
         data: {
-          src: archiveAssetPath + boardId + "/" + assetId,
+          src: archiveImageSource(boardId, assetId),
           naturalSize: { ...image.size }
         }
       }
@@ -5044,8 +6546,748 @@ function planImageChanges(boardId, operation) {
   };
 }
 
+// src/modules/whiteboard/domain/svg-image.ts
+var maximumSvgBytes = 1024 * 1024;
+var maximumElements = 4096;
+var maximumSide = 16384;
+var maximumPixels2 = 32e6;
+var namespace = "http://www.w3.org/2000/svg";
+var xlinkNamespace = "http://www.w3.org/1999/xlink";
+var xmlDeclaration = /^\s*<\?xml\s+version\s*=\s*(['"])1\.0\1(?:\s+encoding\s*=\s*(['"])UTF-8\2)?(?:\s+standalone\s*=\s*(['"])(?:yes|no)\3)?\s*\?>/iu;
+var localReference = /^#[A-Za-z_][\w.:-]*$/u;
+var localPaint = /url\(\s*(?:"#[A-Za-z_][\w.:-]*"|'#[A-Za-z_][\w.:-]*'|#[A-Za-z_][\w.:-]*)\s*\)/giu;
+var unsafeReference = /[\\@&]|\b(?:https?|file|data|javascript|blob|ftp):|\/\/|\burl\s*\(/iu;
+var textEntity = /&(?:amp|lt|gt|quot|apos|#\d{1,7}|#x[\da-f]{1,6});/giu;
+var svgElements = /* @__PURE__ */ new Set([
+  "svg",
+  "g",
+  "defs",
+  "path",
+  "rect",
+  "line",
+  "polyline",
+  "polygon",
+  "circle",
+  "ellipse",
+  "text",
+  "tspan",
+  "textPath",
+  "title",
+  "desc",
+  "style",
+  "symbol",
+  "use",
+  "marker",
+  "mask",
+  "clipPath",
+  "pattern",
+  "linearGradient",
+  "radialGradient",
+  "stop",
+  "filter",
+  "feGaussianBlur",
+  "feColorMatrix",
+  "feOffset",
+  "feMerge",
+  "feMergeNode",
+  "feBlend",
+  "feComposite",
+  "feFlood",
+  "feDropShadow"
+]);
+function safeReferences(value) {
+  return !unsafeReference.test(value.replace(localPaint, ""));
+}
+function safeAttribute(name, value) {
+  if (name === "xmlns") {
+    return value === namespace;
+  }
+  if (name === "xmlns:xlink") {
+    return value === xlinkNamespace;
+  }
+  if (name === "xml:space") {
+    return value === "default" || value === "preserve";
+  }
+  if (name === "href" || name === "xlink:href") {
+    return localReference.test(value);
+  }
+  const asksForResource = /^(?:on|src|background|xmlns|xml)/iu.test(name) || name.includes(":");
+  return !asksForResource && safeReferences(value);
+}
+function readAttributes(tail) {
+  const attributes2 = /* @__PURE__ */ new Map();
+  const assignment = /\s+([A-Za-z_][\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/guy;
+  let offset = 0;
+  while (tail.slice(offset).trim()) {
+    assignment.lastIndex = offset;
+    const match = assignment.exec(tail);
+    const name = match?.[1];
+    const value = match?.[2] ?? match?.[3];
+    if (name === void 0 || value === void 0 || attributes2.has(name)) {
+      return void 0;
+    }
+    if (!safeAttribute(name, value)) {
+      return void 0;
+    }
+    attributes2.set(name, value);
+    offset = assignment.lastIndex;
+  }
+  return attributes2;
+}
+function safeText(text3, parent) {
+  if (parent === "style") {
+    const css = text3.trim().replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/u, "$1");
+    return !css.includes("<") && safeReferences(css);
+  }
+  if (!parent) {
+    return text3.trim() === "";
+  }
+  return !text3.includes("<") && !text3.replace(textEntity, "").includes("&");
+}
+function readSvgRoot(source) {
+  const stack = [];
+  const token2 = /<(\/?)([A-Za-z][\w:-]*)([^<>]*)>/gu;
+  let offset = 0;
+  let elements2 = 0;
+  let root;
+  for (const match of source.matchAll(token2)) {
+    const [markup, closing, name, tail] = match;
+    if (!name || tail === void 0 || !svgElements.has(name)) {
+      return void 0;
+    }
+    if (!safeText(source.slice(offset, match.index), stack.at(-1))) {
+      return void 0;
+    }
+    offset = match.index + markup.length;
+    if (closing) {
+      if (tail.trim() || stack.pop() !== name) {
+        return void 0;
+      }
+      continue;
+    }
+    const empty = /\/\s*$/u.test(tail);
+    const parameters = readAttributes(empty ? tail.replace(/\/\s*$/u, "") : tail);
+    elements2 += 1;
+    if (!parameters || elements2 > maximumElements) {
+      return void 0;
+    }
+    if (stack.length === 0) {
+      if (root || name !== "svg") {
+        return void 0;
+      }
+      root = { attributes: parameters, end: offset, empty };
+    }
+    if (!empty) {
+      stack.push(name);
+    }
+  }
+  return stack.length === 0 && safeText(source.slice(offset), void 0) ? root : void 0;
+}
+function dimensions2(attributes2) {
+  const viewBox = attributes2.get("viewBox")?.trim().split(/[\s,]+/u).map(Number);
+  const viewWidth = viewBox?.length === 4 ? viewBox[2] : void 0;
+  const viewHeight = viewBox?.length === 4 ? viewBox[3] : void 0;
+  const rawWidth = attributes2.get("width")?.trim().match(/^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u)?.[1];
+  const rawHeight = attributes2.get("height")?.trim().match(/^(\d+(?:\.\d+)?|\.\d+)(?:px)?$/u)?.[1];
+  const width = Math.ceil(rawWidth === void 0 ? viewWidth ?? 300 : Number(rawWidth));
+  const height = Math.ceil(rawHeight === void 0 ? viewHeight ?? 150 : Number(rawHeight));
+  const validWidth2 = width > 0 && width <= maximumSide;
+  const validHeight = height > 0 && height <= maximumSide;
+  return validWidth2 && validHeight && width * height <= maximumPixels2 ? { width, height } : void 0;
+}
+function looksLikeSvgImage(bytes) {
+  const head2 = new TextDecoder().decode(bytes.subarray(0, 4096)).trimStart();
+  return head2.startsWith("<");
+}
+function svgForImagePreview(bytes) {
+  if (bytes.byteLength > maximumSvgBytes) {
+    return void 0;
+  }
+  let decoded;
+  try {
+    decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    if (!(error instanceof TypeError)) {
+      throw error;
+    }
+    return void 0;
+  }
+  const source = decoded.replace(xmlDeclaration, "").replace(/<!--[\s\S]*?-->/gu, "");
+  const root = readSvgRoot(source);
+  const size = root ? dimensions2(root.attributes) : void 0;
+  if (!root || !size) {
+    return void 0;
+  }
+  const extra = [...root.attributes].filter(([name]) => !["width", "height", "xmlns"].includes(name)).map(([name, value]) => ` ${name}="${value.replaceAll('"', "&quot;")}"`).join("");
+  const start = `<svg xmlns="${namespace}" width="${size.width}" height="${size.height}"${extra}`;
+  return start + (root.empty ? "/>" : ">") + source.slice(root.end);
+}
+
+// src/modules/whiteboard/domain/video-iso.ts
+var basicHeaderSize = 8;
+var extendedHeaderSize = 16;
+var maximumBoxes = 65536;
+var compatibleBrands = /* @__PURE__ */ new Set([
+  "isom",
+  "iso2",
+  "iso4",
+  "iso5",
+  "iso6",
+  "mp41",
+  "mp42",
+  "avc1",
+  "M4V ",
+  "dash"
+]);
+function tag(view, offset) {
+  return String.fromCharCode(
+    view.getUint8(offset),
+    view.getUint8(offset + 1),
+    view.getUint8(offset + 2),
+    view.getUint8(offset + 3)
+  );
+}
+function readBox(view, offset, bound) {
+  if (bound - offset < basicHeaderSize) {
+    return void 0;
+  }
+  const declared = view.getUint32(offset);
+  const header = declared === 1 ? extendedHeaderSize : basicHeaderSize;
+  if (bound - offset < header) {
+    return void 0;
+  }
+  const size = declared === 1 ? Number(view.getBigUint64(offset + basicHeaderSize)) : declared;
+  const end2 = size === 0 ? bound : offset + size;
+  if (end2 < offset + header || end2 > bound) {
+    return void 0;
+  }
+  return { name: tag(view, offset + 4), data: offset + header, end: end2 };
+}
+function* boxes(view, start, end2) {
+  let offset = start;
+  for (let count = 0; count < maximumBoxes && offset < end2; count += 1) {
+    const box = readBox(view, offset, end2);
+    if (!box) {
+      return;
+    }
+    yield box;
+    offset = box.end;
+  }
+}
+function child(view, parent, name) {
+  for (const box of boxes(view, parent.data, parent.end)) {
+    if (box.name === name) {
+      return box;
+    }
+  }
+}
+function videoTrack(view, track) {
+  const media = child(view, track, "mdia");
+  const handler = media && child(view, media, "hdlr");
+  const handlerOffset = 8;
+  return Boolean(
+    handler && handler.end - handler.data >= handlerOffset + 4 && tag(view, handler.data + handlerOffset) === "vide"
+  );
+}
+function hasVideoTrack(view, metadata) {
+  for (const box of boxes(view, metadata.data, metadata.end)) {
+    if (box.name === "trak" && videoTrack(view, box)) {
+      return true;
+    }
+  }
+  return false;
+}
+function classifyBrand(view, box) {
+  if (box.end - box.data < 8) {
+    return void 0;
+  }
+  const major = tag(view, box.data);
+  if (major === "qt  ") {
+    return "video/quicktime";
+  }
+  if (compatibleBrands.has(major)) {
+    return "video/mp4";
+  }
+  for (let offset = box.data + 8; offset + 4 <= box.end; offset += 4) {
+    if (compatibleBrands.has(tag(view, offset))) {
+      return "video/mp4";
+    }
+  }
+}
+function inspectIsoVideo(view) {
+  let brand;
+  let video = false;
+  let samples = false;
+  let consumed = 0;
+  for (const box of boxes(view, 0, view.byteLength)) {
+    consumed = box.end;
+    if (box.name === "ftyp") {
+      brand = box;
+    } else if (box.name === "moov") {
+      video = hasVideoTrack(view, box);
+    } else if (box.name === "mdat") {
+      samples ||= box.data < box.end;
+    }
+  }
+  if (!video || !samples || consumed !== view.byteLength) {
+    return void 0;
+  }
+  return brand ? classifyBrand(view, brand) : "video/quicktime";
+}
+
+// src/modules/whiteboard/domain/video-webm.ts
+var ebmlHeader = 440786851;
+var docType = 17026;
+var segment = 408125543;
+var tracks = 374648427;
+var trackEntry = 174;
+var trackType = 131;
+var cluster = 524531317;
+var videoTrackType = 1;
+var maximumElements2 = 65536;
+var decoder = new TextDecoder();
+function vint(bytes, offset, maximumWidth, isSize) {
+  const first = bytes[offset];
+  if (!first) {
+    return void 0;
+  }
+  let mask = 128;
+  let width = 1;
+  while (!(first & mask)) {
+    mask >>= 1;
+    width += 1;
+  }
+  const end2 = offset + width;
+  if (width > maximumWidth || end2 > bytes.length) {
+    return void 0;
+  }
+  let value = isSize ? first & mask - 1 : first;
+  let allOnes = isSize && value === mask - 1;
+  for (let index = offset + 1; index < end2; index += 1) {
+    const byte = bytes[index];
+    value = value * 256 + byte;
+    allOnes &&= byte === 255;
+  }
+  return { value, end: end2, allOnes };
+}
+function readElement(bytes, offset, bound) {
+  const id = vint(bytes, offset, 4, false);
+  const size = id && vint(bytes, id.end, 8, true);
+  if (!id || !size || size.end > bound) {
+    return void 0;
+  }
+  const end2 = size.allOnes ? bound : size.end + size.value;
+  if (end2 > bound) {
+    return void 0;
+  }
+  return { id: id.value, data: size.end, end: end2 };
+}
+function* elements(bytes, start, end2) {
+  let offset = start;
+  for (let count = 0; count < maximumElements2 && offset < end2; count += 1) {
+    const element = readElement(bytes, offset, end2);
+    if (!element) {
+      return;
+    }
+    yield element;
+    offset = element.end;
+  }
+}
+function child2(bytes, parent, id) {
+  for (const element of elements(bytes, parent.data, parent.end)) {
+    if (element.id === id) {
+      return element;
+    }
+  }
+}
+function hasVideoTrack2(bytes, mediaTracks) {
+  for (const entry of elements(bytes, mediaTracks.data, mediaTracks.end)) {
+    const type = entry.id === trackEntry ? child2(bytes, entry, trackType) : void 0;
+    if (type && type.end === type.data + 1 && bytes[type.data] === videoTrackType) {
+      return true;
+    }
+  }
+  return false;
+}
+function isWebmVideo(bytes) {
+  const root = { id: 0, data: 0, end: bytes.length };
+  const header = child2(bytes, root, ebmlHeader);
+  const type = header && child2(bytes, header, docType);
+  const webm = type && type.end === type.data + 4;
+  if (!webm || decoder.decode(bytes.subarray(type.data, type.end)) !== "webm") {
+    return false;
+  }
+  const media = child2(bytes, root, segment);
+  const mediaTracks = media && child2(bytes, media, tracks);
+  const samples = media && child2(bytes, media, cluster);
+  const hasSamples = Boolean(samples && samples.end > samples.data);
+  return Boolean(mediaTracks && hasSamples && hasVideoTrack2(bytes, mediaTracks));
+}
+
+// src/modules/whiteboard/domain/video-edits.ts
+var archiveAssetPath2 = "/studio-archive-assets/";
+var pathSegment2 = /^[A-Za-z0-9_-]{1,128}$/u;
+var unsafeName2 = new RegExp("[/\\\\]|\\p{Cc}|^[A-Za-z]:", "u");
+var maximumDisplayName2 = 160;
+var maximumVideoBytes = 20 * 1024 * 1024;
+var webmSignature = 440786851;
+function inspectVideo(content) {
+  const view = new DataView(content.buffer, content.byteOffset, content.byteLength);
+  if (view.byteLength >= 4 && view.getUint32(0) === webmSignature) {
+    return isWebmVideo(content) ? "video/webm" : void 0;
+  }
+  return inspectIsoVideo(view);
+}
+function validPlacement(boardId, assetId, operation) {
+  const { objectId, displayName, geometry } = operation;
+  const idsFitPath = [boardId, objectId, assetId].every((id) => pathSegment2.test(id));
+  const validName = displayName.length <= maximumDisplayName2 && !unsafeName2.test(displayName);
+  const validSize2 = geometry.width > 0 && geometry.height > 0 && geometryInWorld(geometry);
+  return idsFitPath && validName && validSize2;
+}
+function planVideoChanges(boardId, operation) {
+  const { objectId, displayName, geometry, content, mediaType: mediaType2 } = operation;
+  const assetId = "video-" + objectId;
+  if (content.byteLength > maximumVideoBytes) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  if (!validPlacement(boardId, assetId, operation)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const detected = inspectVideo(content);
+  if (!detected || detected !== mediaType2) {
+    return { kind: "rejected", reason: "invalidVideo" };
+  }
+  return {
+    kind: "changes",
+    objects: [
+      {
+        objectId,
+        kind: "video",
+        label: displayName.trim() || "\u89C6\u9891",
+        geometry,
+        geometryVersion: 0n,
+        payloadVersion: 0n,
+        locked: false
+      }
+    ],
+    payloads: [
+      {
+        objectId,
+        bodyKind: "video",
+        payloadVersion: 0n,
+        data: { src: archiveAssetPath2 + boardId + "/" + assetId }
+      }
+    ],
+    assets: [{ assetId, mimeType: detected, bytes: content }]
+  };
+}
+
 // src/modules/whiteboard/domain/board-edits.ts
 var boardWritePayloadLimit = 32n * 1024n * 1024n;
+
+// src/modules/whiteboard/domain/geometry-arrange.ts
+var gap = 24;
+var sectionLabelHeight = 35.5;
+var htmlLabelHeight = 32;
+var notTidied = /* @__PURE__ */ new Set(["connector", "ink", "section"]);
+function boundsOf(points) {
+  const xs = points.map(({ x: x2 }) => x2);
+  const ys = points.map(({ y: y2 }) => y2);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y, rotation: 0 };
+}
+function objectPoints(object3, scene, includeLabels) {
+  const { detail, kind } = object3;
+  if (detail?.kind === "connector") {
+    const connector2 = exportConnector(detail, scene);
+    if (connector2?.points.length) {
+      return connector2.points;
+    }
+  }
+  const corners2 = geometryCorners(object3.geometry);
+  if (!includeLabels || kind !== "section" && kind !== "html") {
+    return corners2;
+  }
+  const { x, y } = boundsOf(corners2);
+  const titleHeight = kind === "section" ? sectionLabelHeight : htmlLabelHeight;
+  return [...corners2, { x, y: y - titleHeight }];
+}
+function selectionFrame({ scene, selected }, includeLabels = false) {
+  const span = boundsOf(selected.flatMap((object3) => objectPoints(object3, scene, includeLabels)));
+  if (!includeLabels) {
+    return span;
+  }
+  return {
+    ...span,
+    x: span.x - gap,
+    y: span.y - gap,
+    width: span.width + 2 * gap,
+    height: span.height + 2 * gap
+  };
+}
+function rootOf(parents, id) {
+  let root = id;
+  let parent = parents.get(root);
+  while (parent !== void 0 && parent !== root) {
+    root = parent;
+    parent = parents.get(root);
+  }
+  return root;
+}
+function layoutUnits({ scene, selected }) {
+  const parents = new Map(selected.map(({ objectId }) => [objectId, objectId]));
+  for (const owner of selected) {
+    for (const member of selected) {
+      const grouped = owner.groupId !== void 0 && owner.groupId === member.groupId;
+      const enclosed = owner.kind === "section" && sectionContains(owner.geometry, member.geometry);
+      if (grouped || enclosed || member.parentId === owner.objectId) {
+        parents.set(rootOf(parents, member.objectId), rootOf(parents, owner.objectId));
+      }
+    }
+  }
+  const members = /* @__PURE__ */ new Map();
+  for (const object3 of selected) {
+    const root = rootOf(parents, object3.objectId);
+    const group = members.get(root);
+    if (group) {
+      group.push(object3);
+    } else {
+      members.set(root, [object3]);
+    }
+  }
+  return [...members.values()].map((objects) => ({
+    ids: objects.map(({ objectId }) => objectId),
+    bounds: selectionFrame({ scene, selected: objects })
+  }));
+}
+function alignDelta(target2, own, preset) {
+  switch (preset) {
+    case "left":
+      return { dx: target2.x - own.x, dy: 0 };
+    case "right":
+      return { dx: target2.x + target2.width - own.x - own.width, dy: 0 };
+    case "hcenter":
+      return { dx: target2.x + (target2.width - own.width) / 2 - own.x, dy: 0 };
+    case "top":
+      return { dx: 0, dy: target2.y - own.y };
+    case "bottom":
+      return { dx: 0, dy: target2.y + target2.height - own.y - own.height };
+    case "vcenter":
+      return { dx: 0, dy: target2.y + (target2.height - own.height) / 2 - own.y };
+  }
+}
+function tidyUnits(units) {
+  const ordered = [...units].sort((a, b) => a.bounds.y - b.bounds.y || a.bounds.x - b.bounds.x);
+  const columns = Math.ceil(Math.sqrt(ordered.length));
+  const x = Math.min(...ordered.map((unit) => unit.bounds.x));
+  const y = Math.min(...ordered.map((unit) => unit.bounds.y));
+  const width = Math.max(...ordered.map((unit) => unit.bounds.width));
+  const height = Math.max(...ordered.map((unit) => unit.bounds.height));
+  return ordered.map(({ bounds, ids }, index) => ({
+    ids,
+    delta: {
+      dx: x + index % columns * (width + gap) + (width - bounds.width) / 2 - bounds.x,
+      dy: y + Math.floor(index / columns) * (height + gap) - bounds.y
+    }
+  }));
+}
+function arrangeSelection(selection, movable, preset) {
+  const { scene } = selection;
+  const grouped = layoutUnits({ scene, selected: movable });
+  const units = preset === "tidy" ? grouped.filter(({ ids }) => ids.some((id) => !notTidied.has(scene.get(id)?.kind ?? ""))) : grouped;
+  if (units.length < 2) {
+    return /* @__PURE__ */ new Map();
+  }
+  const target2 = selectionFrame(selection);
+  const offsets = preset === "tidy" ? tidyUnits(units) : units.map(({ bounds, ids }) => ({ ids, delta: alignDelta(target2, bounds, preset) }));
+  const result = /* @__PURE__ */ new Map();
+  for (const { ids, delta } of offsets) {
+    if (delta.dx !== 0 || delta.dy !== 0) {
+      for (const id of ids) {
+        result.set(id, delta);
+      }
+    }
+  }
+  return result;
+}
+
+// src/modules/whiteboard/domain/geometry-style.ts
+var colorValue = /^(?:transparent|#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8})$/iu;
+var shapes2 = /* @__PURE__ */ new Set([
+  "rounded",
+  "rect",
+  "ellipse",
+  "diamond",
+  "pill",
+  "hexagon",
+  "parallelogram",
+  "database",
+  "queue",
+  "document",
+  "cloud",
+  "person"
+]);
+var align = /* @__PURE__ */ new Set(["TEXT_ALIGNMENT_LEFT", "TEXT_ALIGNMENT_CENTER", "TEXT_ALIGNMENT_RIGHT"]);
+var maxLabelBytes = 4096;
+var encoder4 = new TextEncoder();
+function validStylePatch(patch) {
+  const palette2 = [patch.fill, patch.stroke, patch.textColor].every(
+    (value) => value === void 0 || colorValue.test(value)
+  );
+  const stroke = patch.strokeWidth === void 0 || Number.isFinite(patch.strokeWidth) && patch.strokeWidth >= 0 && patch.strokeWidth <= 100;
+  const fontSize = patch.fontSize === void 0 || Number.isFinite(patch.fontSize) && patch.fontSize >= 1 && patch.fontSize <= 512;
+  const fontFamily = patch.fontFamily === void 0 || patch.fontFamily.length <= 128 && !new RegExp("\\p{Cc}", "u").test(patch.fontFamily);
+  const shape = patch.shapeForm === void 0 || patch.shapeForm === "text" || shapes2.has(patch.shapeForm);
+  const alignment2 = patch.textAlign === void 0 || align.has(patch.textAlign);
+  const label2 = patch.label === void 0 || encoder4.encode(patch.label).byteLength <= maxLabelBytes;
+  return [palette2, stroke, fontSize, fontFamily, shape, alignment2, label2].every(Boolean) && Object.values(patch).some((value) => value !== void 0);
+}
+function styleTouchesText(patch) {
+  return [
+    patch.textColor,
+    patch.fontFamily,
+    patch.fontSize,
+    patch.textAlign,
+    patch.bold,
+    patch.italic
+  ].some((value) => value !== void 0);
+}
+function styleTouchesObject(patch) {
+  const { fill, stroke, strokeWidth, dashed, hollow, shapeForm, startHead, endHead } = patch;
+  return [
+    fill,
+    stroke,
+    strokeWidth,
+    dashed,
+    hollow,
+    shapeForm,
+    startHead,
+    endHead,
+    patch.label
+  ].some((value) => value !== void 0);
+}
+function styleChangesObjectKind(object3, patch) {
+  const { shapeForm } = patch;
+  if (shapeForm === void 0) {
+    return false;
+  }
+  const nextKind = shapeForm === "text" ? "text" : "shape";
+  return nextKind !== object3.kind;
+}
+function objectAllowsStyle(object3, patch) {
+  const { shapeForm, startHead, endHead } = patch;
+  const supportsForm = shapeForm === void 0 || object3.kind === "text" || object3.kind === "shape";
+  const connectorHeads2 = startHead !== void 0 || endHead !== void 0;
+  const supportsHeads = !connectorHeads2 || object3.detail?.kind === "connector";
+  const supportsLabel = patch.label === void 0 || object3.kind === "section";
+  return supportsForm && supportsHeads && supportsLabel;
+}
+function appearanceOf(object3, patch) {
+  const { fill, stroke, strokeWidth, dashed, hollow } = patch;
+  if ([fill, stroke, strokeWidth, dashed, hollow].every((value) => value === void 0)) {
+    return object3.appearance;
+  }
+  return {
+    ...object3.appearance,
+    ...fill === void 0 ? {} : { fill },
+    ...stroke === void 0 ? {} : { stroke },
+    ...strokeWidth === void 0 ? {} : { strokeWidth },
+    ...dashed === void 0 ? {} : { dashed },
+    ...hollow === void 0 ? {} : { hollow }
+  };
+}
+function formOf(object3, shapeForm) {
+  if (shapeForm === void 0) {
+    return object3.kind;
+  }
+  return shapeForm === "text" ? "text" : "shape";
+}
+function styledDetail(object3, { shapeForm, startHead, endHead, fill, strokeWidth }) {
+  if (shapeForm !== void 0) {
+    return shapeForm === "text" ? void 0 : { kind: "shape", outline: shapeForm };
+  }
+  const { detail } = object3;
+  if (detail?.kind === "connector") {
+    return {
+      ...detail,
+      startHead: startHead ?? detail.startHead,
+      endHead: endHead ?? detail.endHead
+    };
+  }
+  if (detail?.kind === "section" && fill !== void 0) {
+    return { ...detail, transparent: fill === "transparent" };
+  }
+  if (detail?.kind === "ink" && strokeWidth !== void 0 && strokeWidth > 0) {
+    return { ...detail, width: strokeWidth };
+  }
+  return detail;
+}
+function styledObject(object3, patch) {
+  return {
+    ...object3,
+    kind: formOf(object3, patch.shapeForm),
+    label: patch.label === void 0 ? object3.label : sectionTitle(patch.label),
+    geometryVersion: object3.geometryVersion + 1n,
+    appearance: appearanceOf(object3, patch),
+    detail: styledDetail(object3, patch)
+  };
+}
+function sectionTitle(label2) {
+  return label2.trim() || "\u5206\u533A";
+}
+function styledText(current, patch) {
+  const { textColor, fontSize, fontFamily, textAlign, label: label2, bold, italic } = patch;
+  return {
+    ...current,
+    ...textColor === void 0 ? {} : { color: textColor },
+    ...fontSize === void 0 ? {} : { fontSize },
+    ...fontFamily === void 0 ? {} : { fontFamily },
+    ...textAlign === void 0 ? {} : { align: textAlign },
+    ...label2 === void 0 ? {} : { text: sectionTitle(label2) },
+    ...bold === void 0 ? {} : { bold },
+    ...italic === void 0 ? {} : { italic }
+  };
+}
+
+// src/modules/whiteboard/domain/clipboard-geometry.ts
+function copiedEndpoint(source, translated, resolved, scope2) {
+  const { attachment } = source;
+  if (!attachment) {
+    return translated;
+  }
+  const copy = scope2.ids.get(attachment.objectId);
+  const base = resolved ?? source.point;
+  const point2 = { x: base.x + scope2.delta.dx, y: base.y + scope2.delta.dy };
+  if (copy !== void 0) {
+    return { point: point2, attachment: { ...attachment, objectId: copy } };
+  }
+  return scope2.attachableObjects.has(attachment.objectId) ? source : { point: point2 };
+}
+function clipboardObject(source, objectId, scope2) {
+  const moved = translateObject({ ...source, geometryVersion: 0n }, scope2.delta);
+  if (!moved || !geometryInWorld(moved.geometry)) {
+    return void 0;
+  }
+  const copy = {
+    ...moved,
+    objectId,
+    geometryVersion: 0n,
+    payloadVersion: source.payloadVersion === void 0 ? void 0 : 0n,
+    groupId: source.groupId === void 0 ? void 0 : scope2.groups.get(source.groupId),
+    parentId: source.parentId === void 0 ? void 0 : scope2.ids.get(source.parentId)
+  };
+  const { detail } = moved;
+  if (source.detail?.kind !== "connector" || detail?.kind !== "connector") {
+    return copy;
+  }
+  const connector2 = exportConnector(source.detail, scope2.geometry);
+  const start = copiedEndpoint(source.detail.start, detail.start, connector2?.points[0], scope2);
+  const end2 = copiedEndpoint(source.detail.end, detail.end, connector2?.points.at(-1), scope2);
+  const next = { ...detail, start, end: end2 };
+  return hasValidConnectorGeometry(next) ? { ...copy, detail: next } : void 0;
+}
 
 // src/modules/whiteboard/application/board-read.ts
 var WhiteboardAccessError = class extends Error {
@@ -5092,8 +7334,8 @@ function documentAssets(sources, blocks) {
       addAssetSource(sources, readObject(block.props)?.url);
     }
     if (Array.isArray(block?.children)) {
-      for (const child of block.children) {
-        pending.push(child);
+      for (const child3 of block.children) {
+        pending.push(child3);
       }
     }
   }
@@ -5111,6 +7353,7 @@ function embedAssets(sources, markup) {
 }
 function collectSources(payloads, format) {
   const sources = /* @__PURE__ */ new Set();
+  const fullContent = format === "json" || format === "html";
   for (const { bodyKind, data } of payloads) {
     switch (bodyKind) {
       case "image":
@@ -5118,19 +7361,17 @@ function collectSources(payloads, format) {
         break;
       case "video":
         addAssetSource(sources, data.poster);
-        if (format === "json") {
+        if (fullContent) {
           addAssetSource(sources, data.src);
         }
         break;
       case "document":
-        if (format === "json") {
+        if (fullContent) {
           documentAssets(sources, data.blocks);
         }
         break;
       case "embed":
-        if (format === "json") {
-          embedAssets(sources, data.html);
-        }
+        embedAssets(sources, data.html);
     }
   }
   return sources;
@@ -5160,25 +7401,24 @@ function captureExportAssets(reader2, boardId, payloads, format) {
 // src/modules/whiteboard/application/export-board.ts
 var maxExportObjects = 1e4;
 var maxSnapshotObjects = 2e4;
-var richSvgKinds = /* @__PURE__ */ new Set(["html", "diagram", "chart"]);
 function captureSnapshot(reader2, command, board) {
   if (board.revision !== command.expectedRevision) {
     return { kind: "stale", revision: board.revision };
+  }
+  if (command.format === "html" && command.scope.kind !== "whole") {
+    return { kind: "rejected", reason: "invalidSelection" };
   }
   const objects = reader2.listObjects(command.boardId, maxSnapshotObjects + 1);
   if (objects.length > maxSnapshotObjects) {
     return { kind: "rejected", reason: "tooLarge" };
   }
-  const geometry = new Map(objects.map((object) => [object.objectId, object]));
+  const geometry = new Map(objects.map((object3) => [object3.objectId, object3]));
   const selected = selectExportObjects(objects, geometry, command.scope);
   if ("kind" in selected) {
     return selected;
   }
   if (selected.length > maxExportObjects) {
     return { kind: "rejected", reason: "tooLarge" };
-  }
-  if (command.format === "svg" && selected.some(({ kind }) => richSvgKinds.has(kind))) {
-    return { kind: "rejected", reason: "unsupported" };
   }
   const ids = selected.map(({ objectId }) => objectId);
   const rows = reader2.getPayloads(command.boardId, ids);
@@ -5199,29 +7439,50 @@ function executeBoardExport(repository, actor, command, requireAccess4, readBoar
     return snapshot;
   }
   const file = renderExportFile(snapshot, command.format);
-  if (file.kind === "file") {
+  if (file.kind === "file" || file.kind === "browserPng") {
     repository.read((reader2) => requireAccess4(reader2, actor, command.boardId));
   }
   return file;
 }
 
+// src/modules/whiteboard/application/export-png.ts
+async function renderExportPng(source, render, assertAccess) {
+  if (source.kind !== "file") {
+    return source;
+  }
+  if (!render) {
+    return { kind: "rejected", reason: "unsupported" };
+  }
+  const content = await render(new TextDecoder().decode(source.content));
+  if (!content || !content.byteLength || content.byteLength > maxExportFileBytes) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  assertAccess();
+  return {
+    ...source,
+    filename: source.filename.slice(0, -4) + ".png",
+    mimeType: "image/png",
+    content
+  };
+}
+
 // src/modules/whiteboard/application/move-scope.ts
-function ancestorsLocked(object, getObject2) {
+function ancestorsLocked(object3, getObject3) {
   const visited = /* @__PURE__ */ new Set();
-  let current = object;
+  let current = object3;
   while (current && !visited.has(current.objectId)) {
     if (current.locked) {
       return true;
     }
     visited.add(current.objectId);
-    current = current.parentId === void 0 ? void 0 : getObject2(current.parentId);
+    current = current.parentId === void 0 ? void 0 : getObject3(current.parentId);
   }
   return false;
 }
 function collectObjects(initial, getRelated, isLocked2) {
-  const pending = new Map(initial.map((object) => [object.objectId, object]));
-  for (const object of pending.values()) {
-    for (const candidate of getRelated(object)) {
+  const pending = new Map(initial.map((object3) => [object3.objectId, object3]));
+  for (const object3 of pending.values()) {
+    for (const candidate of getRelated(object3)) {
       if (!pending.has(candidate.objectId) && !isLocked2(candidate)) {
         pending.set(candidate.objectId, candidate);
       }
@@ -5238,12 +7499,12 @@ function createMoveScope(writer2, boardId, targets) {
   const visitedGroups = /* @__PURE__ */ new Set();
   let scene;
   function remember(objects) {
-    for (const object of objects) {
-      cachedObjects.set(object.objectId, object);
+    for (const object3 of objects) {
+      cachedObjects.set(object3.objectId, object3);
     }
     return objects;
   }
-  function getObject2(id) {
+  function getObject3(id) {
     if (!cachedObjects.has(id) && scene === void 0) {
       cachedObjects.set(id, writer2.getObjects(boardId, [id])[0]);
     }
@@ -5256,22 +7517,22 @@ function createMoveScope(writer2, boardId, targets) {
     visitedGroups.add(groupId);
     return remember(writer2.listGroupObjects(boardId, groupId));
   }
-  function sectionMembers(object) {
-    if (object.kind !== "section") {
+  function sectionMembers(object3) {
+    if (object3.kind !== "section") {
       return [];
     }
     scene ??= remember(writer2.listObjects(boardId));
-    return scene.filter((member) => sectionContains(object.geometry, member.geometry));
+    return scene.filter((member) => sectionContains(object3.geometry, member.geometry));
   }
-  function getRelated(object) {
-    const children = remember(writer2.listChildObjects(boardId, object.objectId));
-    return [...children, ...groupMembers(object.groupId), ...sectionMembers(object)];
+  function getRelated(object3) {
+    const children = remember(writer2.listChildObjects(boardId, object3.objectId));
+    return [...children, ...groupMembers(object3.groupId), ...sectionMembers(object3)];
   }
-  function isLocked2(object) {
-    return ancestorsLocked(object, getObject2);
+  function isLocked2(object3) {
+    return ancestorsLocked(object3, getObject3);
   }
   return {
-    targets: new Map(objectIds.map((id) => [id, getObject2(id)])),
+    targets: new Map(objectIds.map((id) => [id, getObject3(id)])),
     isLocked: isLocked2,
     requiredObjects: (objects) => collectObjects(objects, getRelated, isLocked2)
   };
@@ -5286,8 +7547,8 @@ function conflict(reason, boardRevision, currentObjects, missingObjectIds = []) 
 }
 function translatedObjects(current, delta) {
   const translated = [];
-  for (const object of current) {
-    const next = translateObject(object, delta);
+  for (const object3 of current) {
+    const next = translateObject(object3, delta);
     if (!next) {
       return void 0;
     }
@@ -5300,17 +7561,17 @@ function applyMove(writer2, board, command, stamp) {
   const scope2 = createMoveScope(writer2, boardId, command.targets);
   const current = [];
   const missing = [];
-  for (const [id, object] of scope2.targets) {
-    if (!object) {
+  for (const [id, object3] of scope2.targets) {
+    if (!object3) {
       missing.push(id);
       continue;
     }
-    current.push(object);
+    current.push(object3);
   }
   if (missing.length) {
     return conflict("targetsChanged", revision, current, missing);
   }
-  if (current.some((object) => scope2.isLocked(object))) {
+  if (current.some((object3) => scope2.isLocked(object3))) {
     return { kind: "rejected", reason: "geometryLocked" };
   }
   const changed = command.targets.some(
@@ -5328,7 +7589,7 @@ function applyMove(writer2, board, command, stamp) {
   }
   const movingIds = current.map(({ objectId }) => objectId);
   const related = writer2.listRelatedConnectors?.(boardId, movingIds);
-  if (related?.some((object) => scope2.isLocked(object))) {
+  if (related?.some((object3) => scope2.isLocked(object3))) {
     return { kind: "rejected", reason: "geometryLocked" };
   }
   const objects = translatedObjects(current, command.delta);
@@ -5370,202 +7631,586 @@ function executeMove(writer2, actor, command, now) {
   return receipt;
 }
 
-// src/modules/whiteboard/application/edit-content.ts
-var stableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
-var sourceVersionPattern2 = /^(?:0|[1-9]\d{0,18})$/u;
-var maxSourceVersion = (1n << 63n) - 1n;
-function isRecord(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+// src/modules/whiteboard/application/export-backup.ts
+var maxVersions = 200;
+var maxObjects = 4e3;
+var maxStoredPayload = 32n * 1024n * 1024n;
+var maxAssetBytes2 = 20 * 1024 * 1024;
+var portableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
+var assetPrefix2 = "/studio-archive-assets/";
+var BackupError = class extends Error {
+  constructor(reason) {
+    super("Could not compose the whiteboard archive.");
+    this.reason = reason;
+  }
+  reason;
+};
+function requireOwner(reader2, actor, boardId) {
+  const metadata = reader2.getBackupMetadata?.(boardId, actor.id);
+  if (!metadata) {
+    throw new WhiteboardAccessError();
+  }
+  return metadata;
 }
-function hasBlock(blocks, blockId) {
-  const pending = Array.isArray(blocks) ? [...blocks] : [];
-  while (pending.length) {
-    const block = pending.pop();
-    if (!isRecord(block)) {
-      continue;
+function numericVersion(value) {
+  const version = Number(value);
+  if (!Number.isSafeInteger(version) || version < 0) {
+    throw new BackupError("unsupported");
+  }
+  return version;
+}
+function timeString(value, formatTime) {
+  return value === void 0 ? void 0 : formatTime(value);
+}
+function artifact(board, metadata, formatTime, version) {
+  return {
+    id: board.boardId,
+    title: version?.title ?? board.title,
+    type: "whiteboard",
+    revision: numericVersion(version?.revision ?? board.revision),
+    createdAt: timeString(metadata.createdAtMillis, formatTime),
+    updatedAt: timeString(version?.savedAtMillis ?? metadata.updatedAtMillis, formatTime),
+    pinned: metadata.pinned,
+    sharing: false
+  };
+}
+function historyEntry(version, formatTime) {
+  const { actorId: actorId2, revision, savedAtMillis, kind, sourceRevision, changedObjectCount } = version;
+  return {
+    id: "revision-" + revision,
+    revision: numericVersion(revision),
+    createdAt: timeString(savedAtMillis, formatTime),
+    actor: actorId2 ? { id: actorId2, name: actorId2 } : void 0,
+    summary: kind,
+    changedIds: [],
+    changedObjectCount,
+    restoredFrom: sourceRevision !== void 0 ? "revision-" + sourceRevision : void 0
+  };
+}
+function payloadKey(objectId, payloadVersion) {
+  return objectId + ":" + payloadVersion;
+}
+var BackupCapture = class {
+  constructor(reader2, boardId) {
+    this.reader = reader2;
+    this.boardId = boardId;
+  }
+  reader;
+  boardId;
+  assets = /* @__PURE__ */ new Map();
+  payloads = /* @__PURE__ */ new Map();
+  objects = /* @__PURE__ */ new Map();
+  remainingPayload = maxStoredPayload;
+  remainingAssets = maxAssetBytes2;
+  readAsset(source) {
+    const prefix = assetPrefix2 + this.boardId + "/";
+    const assetId = source.slice(prefix.length);
+    if (!source.startsWith(prefix) || !portableId.test(assetId)) {
+      throw new BackupError("assetUnavailable");
     }
-    if (block.blockId === blockId) {
-      return true;
+    if (!this.assets.has(assetId)) {
+      const media = this.reader.getExportAsset?.(this.boardId, assetId, this.remainingAssets);
+      if (!media) {
+        throw new BackupError("assetUnavailable");
+      }
+      if (media.kind === "tooLarge" || media.asset.byteLength > this.remainingAssets) {
+        throw new BackupError("tooLarge");
+      }
+      this.remainingAssets -= media.asset.byteLength;
+      this.assets.set(assetId, media.asset);
     }
-    if (Array.isArray(block.children)) {
-      for (const child of block.children) {
-        pending.push(child);
+    return "/assets/" + this.boardId + "/" + assetId;
+  }
+  readPayloads(objects, revision) {
+    const missing = objects.flatMap(({ objectId, payloadVersion }) => {
+      const cached = payloadVersion === void 0 || this.payloads.has(payloadKey(objectId, payloadVersion));
+      return cached ? [] : [objectId];
+    });
+    if (!missing.length) {
+      return;
+    }
+    const size = this.reader.payloadByteSize?.(this.boardId, missing, revision) ?? 0n;
+    if (size > this.remainingPayload) {
+      throw new BackupError("tooLarge");
+    }
+    this.remainingPayload -= size;
+    const loaded = revision === void 0 ? this.reader.getPayloads(this.boardId, missing) : this.reader.getVersionPayloads(this.boardId, revision, missing);
+    for (const payload of loaded) {
+      this.payloads.set(payloadKey(payload.objectId, payload.payloadVersion), payload);
+    }
+  }
+  encodeObject(object3) {
+    if (!portableId.test(object3.objectId)) {
+      throw new BackupError("unsupported");
+    }
+    const { objectId, geometryVersion, payloadVersion } = object3;
+    const key = objectId + ":" + geometryVersion + ":" + String(payloadVersion);
+    const existing = this.objects.get(key);
+    if (existing) {
+      return existing;
+    }
+    const payload = payloadVersion === void 0 ? void 0 : this.payloads.get(payloadKey(objectId, payloadVersion));
+    if (!payload && payloadVersion !== void 0) {
+      throw new BackupError("unsupported");
+    }
+    const element = backupElement(object3, payload, (source) => this.readAsset(source));
+    if (!element) {
+      throw new BackupError("unsupported");
+    }
+    this.objects.set(key, element);
+    return element;
+  }
+  elements(objects, revision) {
+    if (objects.length > maxObjects) {
+      throw new BackupError("tooLarge");
+    }
+    this.readPayloads(objects, revision);
+    return objects.map((object3) => this.encodeObject(object3));
+  }
+};
+function capture(reader2, actor, command, formatTime) {
+  const { boardId, expectedRevision, scope: scope2 } = command;
+  const metadata = requireOwner(reader2, actor, boardId);
+  const board = reader2.getBoard(boardId);
+  if (!board) {
+    throw new WhiteboardAccessError();
+  }
+  if (board.revision !== expectedRevision) {
+    return { kind: "stale", revision: board.revision };
+  }
+  if (scope2.kind !== "whole") {
+    return { kind: "rejected", reason: "invalidSelection" };
+  }
+  const builder = new BackupCapture(reader2, boardId);
+  const elements2 = builder.elements(reader2.listObjects(boardId, maxObjects + 1));
+  const history = [...reader2.listVersions(boardId, void 0, maxVersions)].reverse().map((version) => ({
+    entry: historyEntry(version, formatTime),
+    artifact: artifact(board, metadata, formatTime, version),
+    elements: version.revision === board.revision ? elements2 : builder.elements(
+      reader2.listVersionObjects(boardId, version.revision),
+      version.revision
+    )
+  }));
+  const assetIndex = Object.fromEntries(
+    [...builder.assets].map(([id, asset]) => [
+      id,
+      { id, filename: id, size: asset.byteLength, mimeType: asset.mimeType }
+    ])
+  );
+  const properties = {
+    schemaVersion: 2,
+    artifact: artifact(board, metadata, formatTime),
+    feedback: [],
+    sources: {},
+    operations: [],
+    sharing: { enabled: false, generation: 0, tokens: {} },
+    assets: assetIndex
+  };
+  return { board, archive: { boardId, properties, elements: elements2, history, assets: builder.assets } };
+}
+function createBoardBackup(repository, encode, formatTime) {
+  return async (actor, command) => {
+    try {
+      const snapshot = repository.read((reader2) => capture(reader2, actor, command, formatTime));
+      if ("kind" in snapshot) {
+        return snapshot;
+      }
+      const content = await encode(snapshot.archive, maxExportFileBytes);
+      if (!content?.byteLength) {
+        return { kind: "rejected", reason: "tooLarge" };
+      }
+      repository.read((reader2) => requireOwner(reader2, actor, command.boardId));
+      return {
+        kind: "file",
+        filename: exportFilename(snapshot.board.title, "studio.zip"),
+        mimeType: "application/zip",
+        revision: snapshot.board.revision,
+        content
+      };
+    } catch (error) {
+      if (error instanceof BackupError || error instanceof BackupElementError) {
+        return { kind: "rejected", reason: error.reason };
+      }
+      throw error;
+    }
+  };
+}
+
+// src/modules/whiteboard/application/board-suggestion-overlay.ts
+function createSuggestionOverlay(base, boardId, pinClocks) {
+  const objects = /* @__PURE__ */ new Map();
+  const payloads = /* @__PURE__ */ new Map();
+  let order;
+  let placement;
+  let structuralEdits = 0;
+  function overlayMetadata(next, original) {
+    const staged = payloads.get(next.objectId);
+    const payloadVersion = staged === void 0 ? next.payloadVersion : staged?.payloadVersion;
+    if (pinClocks && original) {
+      return {
+        ...next,
+        geometryVersion: original.geometryVersion,
+        payloadVersion: original.payloadVersion
+      };
+    }
+    return { ...next, payloadVersion };
+  }
+  function orderObjects(result) {
+    if (!order) {
+      return result;
+    }
+    const ranks = new Map(order.map((id, index) => [id, index]));
+    return result.sort(
+      (left, right) => (ranks.get(left.objectId) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(right.objectId) ?? Number.MAX_SAFE_INTEGER)
+    );
+  }
+  function projectedObjects(originals, filter, include = Array.from(objects.keys())) {
+    const result = [];
+    const visited = /* @__PURE__ */ new Set();
+    for (const original of originals) {
+      const { objectId } = original;
+      visited.add(objectId);
+      const replacement = objects.get(objectId);
+      const next = replacement === void 0 ? original : replacement;
+      if (next && filter(next)) {
+        result.push(overlayMetadata(next, original));
       }
     }
-  }
-  return false;
-}
-function validSourceVersion(version) {
-  return version === void 0 || sourceVersionPattern2.test(version) && BigInt(version) <= maxSourceVersion;
-}
-function optionalStableId(value) {
-  return value === void 0 || stableId.test(value);
-}
-function resolveSourceLocation(writer2, boardId, { objectId, blockId, itemId }) {
-  if (blockId === void 0 && itemId === void 0) {
-    return writer2.getObjects(boardId, [objectId]).length === 1;
-  }
-  const [payload] = writer2.getPayloads(boardId, [objectId]);
-  if (!payload) {
-    return false;
-  }
-  if (blockId !== void 0) {
-    return payload.bodyKind === "document" && hasBlock(payload.data.blocks, blockId);
-  }
-  const { items } = payload.data;
-  return payload.bodyKind === "todo" && Array.isArray(items) && items.some((row) => isRecord(row) && row.itemId === itemId);
-}
-function validTodoSource(writer2, boardId, source) {
-  const { boardId: owner, objectId, blockId, itemId, version } = source;
-  const sameBoard = owner === void 0 || owner === boardId;
-  const validIds = [objectId, blockId, itemId].every(optionalStableId);
-  const unambiguous = blockId === void 0 || itemId === void 0;
-  if (!sameBoard || !validIds || !unambiguous) {
-    return false;
-  }
-  if (!validSourceVersion(version)) {
-    return false;
-  }
-  return resolveSourceLocation(writer2, boardId, source);
-}
-function contentKinds(kind) {
-  switch (kind) {
-    case "embedSource":
-    case "embedState":
-      return { objectKind: "html", bodyKind: "embed" };
-    case "crop":
-      return { objectKind: "image", bodyKind: "image" };
-    case "document":
-    case "sticker":
-    case "table":
-    case "text":
-    case "todo":
-      return { objectKind: kind, bodyKind: kind };
-  }
-}
-function objectTakesContent(kind, expected) {
-  return kind === expected || kind === "note" && expected === "text";
-}
-function contentGeometryLocked(writer2, boardId, object) {
-  const visited = /* @__PURE__ */ new Set();
-  let candidate = object;
-  while (candidate) {
-    if (candidate.locked || visited.has(candidate.objectId)) {
-      return true;
+    for (const id of include) {
+      const next = objects.get(id);
+      if (next && !visited.has(id) && filter(next)) {
+        const original = pinClocks ? base.getObjects(boardId, [id])[0] : void 0;
+        result.push(overlayMetadata(next, original));
+      }
     }
-    visited.add(candidate.objectId);
-    const parentId = candidate.parentId;
-    candidate = parentId === void 0 ? void 0 : writer2.getObjects(boardId, [parentId])[0];
+    return orderObjects(result);
   }
-  return false;
-}
-function assetLookup(writer2, boardId) {
-  const checked = /* @__PURE__ */ new Map();
-  return (assetId) => {
-    const current = checked.get(assetId);
-    if (current !== void 0) {
-      return current;
+  function projectedPayloads(current, ids) {
+    const originals = base.getPayloads(current, ids);
+    if (current !== boardId) {
+      return originals;
     }
-    const found = writer2.getExportAsset?.(boardId, assetId, 0) !== void 0;
-    checked.set(assetId, found);
-    return found;
-  };
-}
-function updatedPayload({ writer: writer2, boardId, object, current }, operation) {
-  switch (operation.kind) {
-    case "document":
-      return editDocumentContent(operation.data, current.data, {
-        boardId,
-        hasAsset: assetLookup(writer2, boardId)
-      });
-    case "todo":
-      return editTodoContent(
-        current.data,
-        operation.edits,
-        (source) => validTodoSource(writer2, boardId, source)
+    const byId2 = new Map(originals.map((payload) => [payload.objectId, payload]));
+    const result = [];
+    for (const id of ids) {
+      const saved = byId2.get(id);
+      const pending = payloads.get(id);
+      const next = pending === void 0 ? saved : pending;
+      if (next) {
+        result.push(pinClocks && saved ? { ...next, payloadVersion: saved.payloadVersion } : next);
+      }
+    }
+    return result;
+  }
+  const measurePayloads = base.payloadByteSize;
+  function projectedPayloadSize(current, ids, revision) {
+    const pointInTime = current !== boardId || revision !== void 0;
+    if (pointInTime) {
+      return measurePayloads?.(current, ids, revision) ?? 0n;
+    }
+    const unchanged = ids.filter((id) => !payloads.has(id));
+    const bytes = ids.reduce((sum, id) => {
+      const pending = payloads.get(id);
+      if (!pending) {
+        return sum;
+      }
+      return sum + new TextEncoder().encode(JSON.stringify(pending.data)).byteLength;
+    }, 0);
+    return (measurePayloads?.(current, unchanged) ?? 0n) + BigInt(bytes);
+  }
+  const reader2 = {
+    ...base,
+    getObjects: (current, ids) => current === boardId ? projectedObjects(base.getObjects(current, ids), () => true, ids) : base.getObjects(current, ids),
+    listObjects: (current, limit) => current === boardId ? projectedObjects(base.listObjects(current), () => true).slice(0, limit) : base.listObjects(current, limit),
+    listGroupObjects: (current, id) => current === boardId ? projectedObjects(base.listGroupObjects(current, id), (object3) => object3.groupId === id) : base.listGroupObjects(current, id),
+    listChildObjects: (current, id) => current === boardId ? projectedObjects(base.listChildObjects(current, id), (object3) => object3.parentId === id) : base.listChildObjects(current, id),
+    listRelatedConnectors: (current, ids) => {
+      const originals = base.listRelatedConnectors(current, ids);
+      if (current !== boardId) {
+        return originals;
+      }
+      const targets = new Set(ids);
+      return projectedObjects(
+        originals,
+        ({ detail }) => detail?.kind === "connector" && connectorAttachmentIds(detail).some((id) => targets.has(id))
       );
-    case "text":
-      return editTextContent(operation.data, current.data);
-    case "table":
-      return editTableContent(object, current.data, operation);
-    case "embedSource":
-      return editEmbedSource(current, operation);
-    case "embedState":
-      return editEmbedState(current, object.label, operation.state);
-    case "sticker":
-      return editStickerContent(current.data, operation.selection);
-    case "crop":
-      return editImageCrop(current.data, object.label, operation, {
-        boardId,
-        hasAsset: assetLookup(writer2, boardId)
-      });
-  }
-}
-function contentVersionConflict(board, object, current) {
+    },
+    getPayloads: projectedPayloads,
+    payloadByteSize: measurePayloads ? projectedPayloadSize : void 0,
+    hasUsedObjectId: (current, id) => current === boardId && objects.has(id) || base.hasUsedObjectId(current, id)
+  };
   return {
-    kind: "conflict",
-    boardRevision: board.revision,
-    objects: [object],
-    payloads: [current]
+    reader: reader2,
+    stage(changes) {
+      for (const object3 of changes.objects ?? []) {
+        objects.set(object3.objectId, object3);
+      }
+      for (const id of changes.removedObjectIds ?? []) {
+        objects.set(id, null);
+        payloads.set(id, null);
+      }
+      for (const payload of changes.payloads ?? []) {
+        payloads.set(payload.objectId, payload);
+      }
+      for (const id of changes.removedPayloadObjectIds ?? []) {
+        payloads.set(id, null);
+      }
+      if (changes.order) {
+        order = changes.order;
+        placement = changes.layerPlacement;
+        structuralEdits += 1;
+      }
+      if (order && changes.removedObjectIds?.length) {
+        order = order.filter((id) => !changes.removedObjectIds?.includes(id));
+      }
+    },
+    changes() {
+      return {
+        kind: "changes",
+        objects: [...objects.values()].filter((object3) => object3 !== null),
+        removedObjectIds: [...objects].filter(([, object3]) => object3 === null).map(([id]) => id),
+        payloads: [...payloads.values()].filter(
+          (payload) => payload !== null
+        ),
+        removedPayloadObjectIds: [...payloads].filter(([id, payload]) => payload === null && objects.get(id) !== null).map(([id]) => id),
+        order,
+        layerPlacement: structuralEdits === 1 ? placement : void 0
+      };
+    }
   };
 }
-function withTableWidth({ writer: writer2, boardId, object }, width, requiresUnlock) {
-  if (requiresUnlock && contentGeometryLocked(writer2, boardId, object)) {
-    return { kind: "rejected", reason: "geometryLocked" };
+
+// src/modules/whiteboard/application/edit-geometry-style.ts
+var textKinds = /* @__PURE__ */ new Set(["text", "note", "shape", "section", "connector"]);
+function textPayloads(scope2, objects, { targets, patch }) {
+  const ids = objects.map(({ objectId }) => objectId);
+  const current = scope2.writer.getPayloads(scope2.board.boardId, ids);
+  const bodies = new Map(current.map((payload) => [payload.objectId, payload]));
+  const versions = new Map(
+    targets.map(({ target: target2, expectedPayloadVersion }) => [target2.objectId, expectedPayloadVersion])
+  );
+  const needsVersion = styleTouchesText(patch);
+  const writesText = needsVersion || patch.label !== void 0;
+  const updates = [];
+  for (const object3 of objects) {
+    const payload = bodies.get(object3.objectId);
+    if (!textKinds.has(object3.kind)) {
+      return { kind: "rejected", reason: "unsupportedKind" };
+    }
+    const expected = versions.get(object3.objectId);
+    if (!payload) {
+      if (expected !== void 0 || object3.payloadVersion !== void 0) {
+        return {
+          kind: "conflict",
+          boardRevision: scope2.board.revision,
+          objects,
+          payloads: current
+        };
+      }
+      updates.push({
+        objectId: object3.objectId,
+        bodyKind: "text",
+        payloadVersion: 0n,
+        data: styledText({ text: object3.label }, patch)
+      });
+      continue;
+    }
+    if (payload.bodyKind !== "text") {
+      return { kind: "rejected", reason: "unsupportedKind" };
+    }
+    if (!writesText) {
+      continue;
+    }
+    if (needsVersion && expected === void 0) {
+      return { kind: "rejected", reason: "invalidEdit" };
+    }
+    if (expected !== void 0 && payload.payloadVersion !== expected) {
+      return { kind: "conflict", boardRevision: scope2.board.revision, objects, payloads: current };
+    }
+    if (!canAdvanceVersion(payload.payloadVersion)) {
+      return { kind: "rejected", reason: "versionUnavailable" };
+    }
+    updates.push({
+      ...payload,
+      payloadVersion: payload.payloadVersion + 1n,
+      data: styledText(payload.data, patch)
+    });
   }
-  if (!canAdvanceVersion(object.geometryVersion)) {
-    return { kind: "rejected", reason: "versionUnavailable" };
-  }
-  const geometry = { ...object.geometry, width };
-  if (!geometryInWorld(geometry)) {
+  return updates;
+}
+function styleObjects(selected, payloads, patch) {
+  const versions = new Map(
+    payloads.map(({ objectId, payloadVersion }) => [objectId, payloadVersion])
+  );
+  const metadata = styleTouchesObject(patch);
+  return selected.map((object3) => {
+    const next = metadata ? styledObject(object3, patch) : object3;
+    const payloadVersion = versions.get(object3.objectId);
+    return payloadVersion === void 0 ? next : { ...next, payloadVersion };
+  });
+}
+function applyBoardStyle(scope2, selected, operation) {
+  const { patch } = operation;
+  if (!validStylePatch(patch)) {
     return { kind: "rejected", reason: "invalidEdit" };
   }
-  return { ...object, geometry, geometryVersion: object.geometryVersion + 1n };
-}
-function planContentEdit(writer2, board, operation) {
-  const { boardId } = board;
-  const { objectId, expectedPayloadVersion } = operation;
-  const [object] = writer2.getObjects(boardId, [objectId]);
-  if (!object) {
-    return { kind: "rejected", reason: "objectNotFound" };
-  }
-  const { objectKind, bodyKind } = contentKinds(operation.kind);
-  if (!objectTakesContent(object.kind, objectKind)) {
+  if (selected.some((object3) => !objectAllowsStyle(object3, patch))) {
     return { kind: "rejected", reason: "unsupportedKind" };
   }
-  const [current] = writer2.getPayloads(boardId, [objectId]);
-  if (!current || current.bodyKind !== bodyKind) {
-    return { kind: "rejected", reason: "versionUnavailable" };
-  }
-  if (current.payloadVersion !== expectedPayloadVersion) {
-    return contentVersionConflict(board, object, current);
-  }
-  if (!canAdvanceVersion(current.payloadVersion) || !canAdvanceVersion(board.revision)) {
-    return { kind: "rejected", reason: "versionUnavailable" };
-  }
-  const editingIcon = operation.kind === "sticker" && operation.selection.kind === "icon";
-  const needsUnlockedObject = editingIcon || operation.kind === "crop";
-  if (needsUnlockedObject && contentGeometryLocked(writer2, boardId, object)) {
+  if (selected.some((object3) => styleChangesObjectKind(object3, patch) && scope2.locked(object3))) {
     return { kind: "rejected", reason: "geometryLocked" };
   }
-  const scope2 = { writer: writer2, boardId, object, current };
-  const planned = updatedPayload(scope2, operation);
-  if (planned.kind === "rejected") {
-    return planned;
+  if (styleTouchesObject(patch) && selected.some((object3) => !canAdvanceVersion(object3.geometryVersion))) {
+    return { kind: "rejected", reason: "versionUnavailable" };
   }
-  if (planned.kind === "conflict") {
-    return contentVersionConflict(board, object, current);
+  const texts = styleTouchesText(patch) || patch.label !== void 0 || patch.shapeForm === "text";
+  const payloads = texts ? textPayloads(scope2, selected, operation) : [];
+  if ("kind" in payloads) {
+    return payloads;
   }
-  const revised = planned.geometryWidth === void 0 ? object : withTableWidth(scope2, planned.geometryWidth, Boolean(planned.requiresGeometryUnlock));
-  if ("reason" in revised) {
-    return revised;
+  return { kind: "changes", objects: styleObjects(selected, payloads, patch), payloads };
+}
+
+// src/modules/whiteboard/application/edit-geometry-tools.ts
+var maximumDerivedObjects = 2048;
+function updateObjectGroups(scope2, selected, operation) {
+  const groupId = operation.kind === "group" ? operation.groupId : void 0;
+  if (groupId !== void 0) {
+    if (selected.length < 2 || !validNewObjectId(groupId)) {
+      return { kind: "rejected", reason: "invalidEdit" };
+    }
+    if (scope2.writer.listGroupObjects(scope2.board.boardId, groupId).length) {
+      return { kind: "rejected", reason: "invalidEdit" };
+    }
   }
-  const payloadVersion = current.payloadVersion + 1n;
+  const touched = selected.filter((object3) => object3.groupId !== groupId);
+  if (!touched.length) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  if (touched.some(scope2.locked)) {
+    return { kind: "rejected", reason: "geometryLocked" };
+  }
+  if (touched.some(({ geometryVersion }) => !canAdvanceVersion(geometryVersion))) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
   return {
     kind: "changes",
-    objects: [{ ...revised, label: planned.label, payloadVersion }],
-    payloads: [{ ...current, payloadVersion, data: planned.data }]
+    objects: touched.map((object3) => ({
+      ...object3,
+      groupId,
+      geometryVersion: object3.geometryVersion + 1n
+    }))
   };
+}
+function selectedAncestor(scope2, id, selected) {
+  let parentId = id;
+  const visited = /* @__PURE__ */ new Set();
+  while (parentId !== void 0 && !visited.has(parentId)) {
+    if (selected.has(parentId)) {
+      return true;
+    }
+    visited.add(parentId);
+    parentId = scope2.object(parentId)?.parentId;
+  }
+  return false;
+}
+function commonParent(objects) {
+  const parentId = objects[0]?.parentId;
+  return objects.every((object3) => object3.parentId === parentId) ? parentId : void 0;
+}
+function orderWithSection(objects, selected, sectionId) {
+  const ids = objects.map(({ objectId }) => objectId);
+  const before = ids.findIndex((id) => selected.has(id));
+  ids.splice(before < 0 ? 0 : before, 0, sectionId);
+  return ids;
+}
+function createSelectionSection(scope2, selected, { sectionId, title }) {
+  const { boardId } = scope2.board;
+  const parentsValid = validNewObjectId(sectionId) && !scope2.writer.hasUsedObjectId(boardId, sectionId);
+  if (selected.length < 2 || !parentsValid) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const ids = new Set(selected.map(({ objectId }) => objectId));
+  const roots = selected.filter(({ parentId: parentId2 }) => !selectedAncestor(scope2, parentId2, ids));
+  const writable = roots.filter((object3) => !scope2.locked(object3));
+  if (!roots.length || writable.some(({ geometryVersion }) => !canAdvanceVersion(geometryVersion))) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
+  const ordered = scope2.writer.listObjects(boardId);
+  const scene = new Map(ordered.map((object3) => [object3.objectId, object3]));
+  const geometry = selectionFrame({ scene, selected }, true);
+  const label2 = title?.trim() || "\u5206\u533A";
+  const parentId = commonParent(writable);
+  const section = {
+    objectId: sectionId,
+    kind: "section",
+    label: label2,
+    geometry,
+    geometryVersion: 0n,
+    payloadVersion: 0n,
+    parentId,
+    locked: false,
+    appearance: { fill: "transparent" },
+    detail: { kind: "section", transparent: true }
+  };
+  if (!validateCreatedObject(section)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const children = writable.map((object3) => ({
+    ...object3,
+    parentId: sectionId,
+    geometryVersion: object3.geometryVersion + 1n
+  }));
+  return {
+    kind: "changes",
+    objects: [section, ...children],
+    payloads: [
+      { objectId: sectionId, payloadVersion: 0n, bodyKind: "text", data: { text: label2 } }
+    ],
+    order: orderWithSection(ordered, ids, sectionId)
+  };
+}
+function requiredLayoutObjects(scope2, targets, movable) {
+  const moves = createMoveScope(scope2.writer, scope2.board.boardId, targets);
+  return moves.requiredObjects(movable);
+}
+function arrangeGeometry(scope2, selected, operation) {
+  const { boardId, revision } = scope2.board;
+  const movable = selected.filter((object3) => !scope2.locked(object3));
+  if (movable.length < 2) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const required = requiredLayoutObjects(scope2, operation.targets, movable);
+  if (required.length > maximumDerivedObjects) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  const ids = new Set(selected.map(({ objectId }) => objectId));
+  if (required.some(({ objectId }) => !ids.has(objectId))) {
+    return { kind: "conflict", boardRevision: revision, objects: required };
+  }
+  const scene = new Map(
+    scope2.writer.listObjects(boardId).map((object3) => [object3.objectId, object3])
+  );
+  const offsets = arrangeSelection({ scene, selected }, movable, operation.preset);
+  if (!offsets.size) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  if (scope2.writer.listRelatedConnectors(boardId, [...offsets.keys()]).some(scope2.locked)) {
+    return { kind: "rejected", reason: "geometryLocked" };
+  }
+  const objects = [];
+  for (const object3 of movable) {
+    const delta = offsets.get(object3.objectId);
+    if (!delta) {
+      continue;
+    }
+    const moved = translateObject(object3, delta);
+    if (!moved || !geometryInWorld(moved.geometry)) {
+      return { kind: "rejected", reason: "invalidEdit" };
+    }
+    objects.push(moved);
+  }
+  return { kind: "changes", objects };
 }
 
 // src/modules/whiteboard/application/edit-geometry.ts
@@ -5583,17 +8228,17 @@ function createGeometryScope(writer2, board) {
     }
     return found;
   }
-  function object(objectId) {
+  function object3(objectId) {
     if (!cache.has(objectId)) {
       cache.set(objectId, objects([objectId])[0]);
     }
     return cache.get(objectId);
   }
-  return { board, writer: writer2, object, objects };
+  return { board, writer: writer2, object: object3, objects };
 }
-function isLocked(scope2, object) {
+function isLocked(scope2, object3) {
   const visited = /* @__PURE__ */ new Set();
-  let current = object;
+  let current = object3;
   while (current) {
     if (current.locked || visited.has(current.objectId)) {
       return true;
@@ -5603,8 +8248,8 @@ function isLocked(scope2, object) {
   }
   return false;
 }
-function lockedParent(scope2, object) {
-  return object.parentId !== void 0 && isLocked(scope2, scope2.object(object.parentId));
+function lockedParent(scope2, object3) {
+  return object3.parentId !== void 0 && isLocked(scope2, scope2.object(object3.parentId));
 }
 function conflict2(scope2, objects) {
   return { kind: "conflict", boardRevision: scope2.board.revision, objects };
@@ -5626,13 +8271,13 @@ function readTargets(scope2, targets) {
   const versions = new Map(
     targets.map((target2) => [target2.objectId, target2.expectedGeometryVersion])
   );
-  if (objects.some((object) => object.geometryVersion !== versions.get(object.objectId))) {
+  if (objects.some((object3) => object3.geometryVersion !== versions.get(object3.objectId))) {
     return conflict2(scope2, objects);
   }
   return { kind: "targets", objects };
 }
-function checkAttachments(scope2, object, newIds) {
-  const { detail, objectId } = object;
+function checkAttachments(scope2, object3, newIds) {
+  const { detail, objectId } = object3;
   if (detail?.kind !== "connector") {
     return void 0;
   }
@@ -5645,50 +8290,91 @@ function checkAttachments(scope2, object, newIds) {
     return reject("objectNotFound");
   }
 }
-function createObject(scope2, { object, payload }) {
-  if (!supportsGeometryCreation(object.kind)) {
-    return reject("unsupportedKind");
-  }
-  if (!validateCreatedObject(object) || scope2.writer.hasUsedObjectId(scope2.board.boardId, object.objectId)) {
+function linkedCreation(scope2, target2, targetPayload, attachment) {
+  const { connectorId } = attachment;
+  if (connectorId === target2.objectId || !validNewObjectId(connectorId) || scope2.writer.hasUsedObjectId(scope2.board.boardId, connectorId)) {
     return reject("invalidEdit");
   }
-  const parent = object.parentId === void 0 ? void 0 : scope2.object(object.parentId);
-  if (object.parentId !== void 0 && parent?.kind !== "section") {
+  const sources = readTargets(scope2, [attachment.source]);
+  if (sources.kind !== "targets") {
+    return sources;
+  }
+  const [source] = sources.objects;
+  if (!source) {
+    return reject("objectNotFound");
+  }
+  if (isLocked(scope2, source)) {
+    return reject("geometryLocked");
+  }
+  const connector2 = adjacentShapeConnector(source, target2, attachment);
+  if (!connector2 || !validateCreatedObject(connector2)) {
+    return reject("invalidEdit");
+  }
+  const connectorPayload = initialGeometryPayload(connector2, void 0);
+  if (!connectorPayload) {
+    return reject("invalidEdit");
+  }
+  const appearance3 = {
+    ...target2.appearance,
+    fill: target2.appearance?.fill ?? source.appearance?.fill,
+    stroke: target2.appearance?.stroke ?? source.appearance?.stroke
+  };
+  return {
+    kind: "changes",
+    objects: [
+      { ...target2, appearance: appearance3, payloadVersion: targetPayload.payloadVersion },
+      { ...connector2, payloadVersion: connectorPayload.payloadVersion }
+    ],
+    payloads: [targetPayload, connectorPayload]
+  };
+}
+function createObject(scope2, { object: object3, payload, attachment }) {
+  if (!supportsGeometryCreation(object3.kind)) {
+    return reject("unsupportedKind");
+  }
+  if (!validateCreatedObject(object3) || scope2.writer.hasUsedObjectId(scope2.board.boardId, object3.objectId)) {
+    return reject("invalidEdit");
+  }
+  const parent = object3.parentId === void 0 ? void 0 : scope2.object(object3.parentId);
+  if (object3.parentId !== void 0 && parent?.kind !== "section") {
     return reject("objectNotFound");
   }
   if (isLocked(scope2, parent)) {
     return reject("geometryLocked");
   }
-  const invalidAttachment = checkAttachments(scope2, object);
+  const invalidAttachment = checkAttachments(scope2, object3);
   if (invalidAttachment) {
     return invalidAttachment;
   }
-  const body = initialGeometryPayload(object, payload);
+  const body = initialGeometryPayload(object3, payload);
   if (!body) {
     return reject("invalidEdit");
   }
+  if (attachment) {
+    return linkedCreation(scope2, object3, body, attachment);
+  }
   return {
     kind: "changes",
-    objects: [{ ...object, payloadVersion: body.payloadVersion }],
+    objects: [{ ...object3, payloadVersion: body.payloadVersion }],
     payloads: [body]
   };
 }
 function changeTransforms(scope2, operation, objects) {
   const { transform } = operation;
-  if (objects.some((object) => isLocked(scope2, object))) {
+  if (objects.some((object3) => isLocked(scope2, object3))) {
     return reject("geometryLocked");
   }
-  const existing = new Map(objects.map((object) => [object.objectId, object]));
+  const existing = new Map(objects.map((object3) => [object3.objectId, object3]));
   const changed = [];
   for (const change of operation.objects) {
-    const object = existing.get(change.target.objectId);
-    if (!object) {
+    const object3 = existing.get(change.target.objectId);
+    if (!object3) {
       return reject("objectNotFound");
     }
-    if (!canAdvanceVersion(object.geometryVersion)) {
+    if (!canAdvanceVersion(object3.geometryVersion)) {
       return reject("versionUnavailable");
     }
-    const next = advanceGeometry(object, change, transform);
+    const next = advanceGeometry(object3, change, transform);
     if (!next) {
       return reject("invalidEdit");
     }
@@ -5711,7 +8397,7 @@ function transformObjects(scope2, operation) {
   const { writer: writer2, board } = scope2;
   const ids = targets.objects.map(({ objectId }) => objectId);
   const related = operation.transform === "connect" ? [] : writer2.listRelatedConnectors(board.boardId, ids);
-  if (related.some((object) => isLocked(scope2, object))) {
+  if (related.some((object3) => isLocked(scope2, object3))) {
     return reject("geometryLocked");
   }
   return changeTransforms(scope2, operation, targets.objects);
@@ -5725,7 +8411,7 @@ function changeLock(scope2, operation) {
   if (objects.length === 0) {
     return reject("invalidEdit");
   }
-  if (objects.some((object) => lockedParent(scope2, object))) {
+  if (objects.some((object3) => lockedParent(scope2, object3))) {
     return reject("geometryLocked");
   }
   if (objects.some(({ geometryVersion }) => !canAdvanceVersion(geometryVersion))) {
@@ -5733,16 +8419,16 @@ function changeLock(scope2, operation) {
   }
   return {
     kind: "changes",
-    objects: objects.map((object) => ({
-      ...object,
+    objects: objects.map((object3) => ({
+      ...object3,
       locked: operation.locked,
-      geometryVersion: object.geometryVersion + 1n
+      geometryVersion: object3.geometryVersion + 1n
     }))
   };
 }
 function objectsRemovedByDeletion(scope2, targets) {
   const { writer: writer2, board } = scope2;
-  const removed = new Map(targets.map((object) => [object.objectId, object]));
+  const removed = new Map(targets.map((object3) => [object3.objectId, object3]));
   let batch = [...removed.keys()];
   while (batch.length > 0) {
     const related = writer2.listRelatedConnectors(board.boardId, batch);
@@ -5762,9 +8448,9 @@ function objectsRemovedByDeletion(scope2, targets) {
 function detachedChildren(scope2, removed) {
   const children = [];
   for (const { objectId } of removed.values()) {
-    for (const child of scope2.writer.listChildObjects(scope2.board.boardId, objectId)) {
-      if (!removed.has(child.objectId)) {
-        children.push(child);
+    for (const child3 of scope2.writer.listChildObjects(scope2.board.boardId, objectId)) {
+      if (!removed.has(child3.objectId)) {
+        children.push(child3);
       }
     }
   }
@@ -5783,7 +8469,7 @@ function deleteObjects(scope2, operation) {
   if (children.length + removed.size > derivedLimit) {
     return reject("tooLarge");
   }
-  if ([...removed.values(), ...children].some((object) => isLocked(scope2, object))) {
+  if ([...removed.values(), ...children].some((object3) => isLocked(scope2, object3))) {
     return reject("geometryLocked");
   }
   if (children.some(({ geometryVersion }) => !canAdvanceVersion(geometryVersion))) {
@@ -5792,19 +8478,19 @@ function deleteObjects(scope2, operation) {
   return {
     kind: "changes",
     removedObjectIds: [...removed.keys()],
-    objects: children.map((child) => ({
-      ...child,
+    objects: children.map((child3) => ({
+      ...child3,
       parentId: void 0,
-      geometryVersion: child.geometryVersion + 1n
+      geometryVersion: child3.geometryVersion + 1n
     }))
   };
 }
 function stepOrder(ids, selected, forward) {
   const changed = [...ids];
   const start = forward ? changed.length - 2 : 1;
-  const end = forward ? -1 : changed.length;
+  const end2 = forward ? -1 : changed.length;
   const step2 = forward ? -1 : 1;
-  for (let index = start; index !== end && index >= 0; index += step2) {
+  for (let index = start; index !== end2 && index >= 0; index += step2) {
     const neighbor = index - step2;
     const currentId = changed[index];
     const neighborId = changed[neighbor];
@@ -5835,7 +8521,7 @@ function reorderObjects(scope2, operation) {
   if (scope2.board.revision !== operation.expectedBoardRevision) {
     return conflict2(scope2, targets.objects);
   }
-  if (targets.objects.some((object) => isLocked(scope2, object))) {
+  if (targets.objects.some((object3) => isLocked(scope2, object3))) {
     return reject("geometryLocked");
   }
   const order = scope2.writer.listObjects(scope2.board.boardId).map(({ objectId }) => objectId);
@@ -5843,7 +8529,7 @@ function reorderObjects(scope2, operation) {
   const next = reorder(order, selected, operation.direction);
   return next.order.some((id, index) => order[index] !== id) ? { kind: "changes", ...next } : reject("invalidEdit");
 }
-function copiedEndpoint(endpoint2, { ids, delta }) {
+function copiedEndpoint2(endpoint2, { ids, delta }) {
   if (!endpoint2.attachment) {
     return endpoint2;
   }
@@ -5873,9 +8559,9 @@ function duplicateObject(source, objectId, duplicate) {
   if (detail?.kind !== "connector") {
     return copy;
   }
-  const start = copiedEndpoint(detail.start, duplicate);
-  const end = copiedEndpoint(detail.end, duplicate);
-  const nextDetail2 = { ...detail, start, end };
+  const start = copiedEndpoint2(detail.start, duplicate);
+  const end2 = copiedEndpoint2(detail.end, duplicate);
+  const nextDetail2 = { ...detail, start, end: end2 };
   return hasValidConnectorGeometry(nextDetail2) ? { ...copy, detail: nextDetail2 } : void 0;
 }
 function duplicateGroups(scope2, sources, ids) {
@@ -5898,10 +8584,10 @@ function duplicatePayloads(scope2, sources, ids) {
     scope2.board.boardId,
     sources.map(({ objectId }) => objectId)
   );
-  const byId = new Map(bodies.map((body) => [body.objectId, body]));
+  const byId2 = new Map(bodies.map((body) => [body.objectId, body]));
   const copied = [];
   for (const source of sources) {
-    const body = byId.get(source.objectId);
+    const body = byId2.get(source.objectId);
     const objectId = ids.get(source.objectId);
     if (!body || !objectId || body.payloadVersion !== source.payloadVersion) {
       return void 0;
@@ -5959,6 +8645,30 @@ function duplicateObjects(scope2, operation) {
   }
   return duplicateChanges(scope2, targets.objects, { ids, groups, delta: operation.delta });
 }
+function planSelectionEdit(scope2, operation) {
+  const requested = operation.kind === "style" ? operation.targets.map(({ target: target2 }) => target2) : operation.targets;
+  const targets = readTargets(scope2, requested);
+  if (targets.kind !== "targets") {
+    return targets;
+  }
+  const tools = {
+    board: scope2.board,
+    writer: scope2.writer,
+    object: scope2.object,
+    locked: (object3) => isLocked(scope2, object3)
+  };
+  switch (operation.kind) {
+    case "group":
+    case "ungroup":
+      return updateObjectGroups(tools, targets.objects, operation);
+    case "createSection":
+      return createSelectionSection(tools, targets.objects, operation);
+    case "arrange":
+      return arrangeGeometry(tools, targets.objects, operation);
+    case "style":
+      return applyBoardStyle(tools, targets.objects, operation);
+  }
+}
 function planGeometryEdit(writer2, board, operation) {
   const scope2 = createGeometryScope(writer2, board);
   switch (operation.kind) {
@@ -5974,7 +8684,230 @@ function planGeometryEdit(writer2, board, operation) {
       return reorderObjects(scope2, operation);
     case "duplicate":
       return duplicateObjects(scope2, operation);
+    case "group":
+    case "ungroup":
+    case "createSection":
+    case "arrange":
+    case "style":
+      return planSelectionEdit(scope2, operation);
+    case "paste":
+      return reject("unsupportedKind");
   }
+}
+
+// src/modules/whiteboard/application/edit-content.ts
+var stableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
+var sourceVersionPattern2 = /^(?:0|[1-9]\d{0,18})$/u;
+var maxSourceVersion = (1n << 63n) - 1n;
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function hasBlock(blocks, blockId) {
+  const pending = Array.isArray(blocks) ? [...blocks] : [];
+  while (pending.length) {
+    const block = pending.pop();
+    if (!isRecord(block)) {
+      continue;
+    }
+    if (block.blockId === blockId) {
+      return true;
+    }
+    if (Array.isArray(block.children)) {
+      for (const child3 of block.children) {
+        pending.push(child3);
+      }
+    }
+  }
+  return false;
+}
+function validSourceVersion(version) {
+  return version === void 0 || sourceVersionPattern2.test(version) && BigInt(version) <= maxSourceVersion;
+}
+function optionalStableId(value) {
+  return value === void 0 || stableId.test(value);
+}
+function resolveSourceLocation(writer2, boardId, { objectId, blockId, itemId }) {
+  if (blockId === void 0 && itemId === void 0) {
+    return writer2.getObjects(boardId, [objectId]).length === 1;
+  }
+  const [payload] = writer2.getPayloads(boardId, [objectId]);
+  if (!payload) {
+    return false;
+  }
+  if (blockId !== void 0) {
+    return payload.bodyKind === "document" && hasBlock(payload.data.blocks, blockId);
+  }
+  const { items } = payload.data;
+  return payload.bodyKind === "todo" && Array.isArray(items) && items.some((row) => isRecord(row) && row.itemId === itemId);
+}
+function validTodoSource(writer2, boardId, source) {
+  const { boardId: owner, objectId, blockId, itemId, version } = source;
+  const sameBoard = owner === void 0 || owner === boardId;
+  const validIds2 = [objectId, blockId, itemId].every(optionalStableId);
+  const unambiguous = blockId === void 0 || itemId === void 0;
+  if (!sameBoard || !validIds2 || !unambiguous) {
+    return false;
+  }
+  if (!validSourceVersion(version)) {
+    return false;
+  }
+  return resolveSourceLocation(writer2, boardId, source);
+}
+function contentKinds(kind) {
+  switch (kind) {
+    case "embedSource":
+    case "embedState":
+      return { objectKind: "html", bodyKind: "embed" };
+    case "crop":
+      return { objectKind: "image", bodyKind: "image" };
+    case "document":
+    case "link":
+    case "sticker":
+    case "table":
+    case "text":
+    case "todo":
+      return { objectKind: kind, bodyKind: kind };
+  }
+}
+function objectTakesContent(kind, expected) {
+  return kind === expected || expected === "text" && textObjects.has(kind) || expected === "html" && kind === "diagram";
+}
+var textObjects = /* @__PURE__ */ new Set(["note", "shape", "section", "connector"]);
+function contentGeometryLocked(writer2, boardId, object3) {
+  const visited = /* @__PURE__ */ new Set();
+  let candidate = object3;
+  while (candidate) {
+    if (candidate.locked || visited.has(candidate.objectId)) {
+      return true;
+    }
+    visited.add(candidate.objectId);
+    const parentId = candidate.parentId;
+    candidate = parentId === void 0 ? void 0 : writer2.getObjects(boardId, [parentId])[0];
+  }
+  return false;
+}
+function assetLookup(writer2, boardId) {
+  const checked = /* @__PURE__ */ new Map();
+  return (assetId) => {
+    const current = checked.get(assetId);
+    if (current !== void 0) {
+      return current;
+    }
+    const found = writer2.getExportAsset?.(boardId, assetId, 0) !== void 0;
+    checked.set(assetId, found);
+    return found;
+  };
+}
+function updatedPayload({ writer: writer2, boardId, object: object3, current }, operation) {
+  switch (operation.kind) {
+    case "document":
+      return editDocumentContent(operation.data, current.data, {
+        boardId,
+        hasAsset: assetLookup(writer2, boardId)
+      });
+    case "todo":
+      return editTodoContent(
+        current.data,
+        operation.edits,
+        (source) => validTodoSource(writer2, boardId, source)
+      );
+    case "text":
+      return editTextContent(operation.data, current.data);
+    case "table":
+      return editTableContent(object3, current.data, operation);
+    case "embedSource":
+      return editEmbedSource(current, operation);
+    case "embedState":
+      return editEmbedState(current, object3.label, operation.state);
+    case "sticker":
+      return editStickerContent(current.data, operation.selection);
+    case "link":
+      return editLinkContent(operation.title, operation.href);
+    case "crop":
+      return editImageCrop(current.data, object3.label, operation, {
+        boardId,
+        hasAsset: assetLookup(writer2, boardId)
+      });
+  }
+}
+function contentVersionConflict(board, object3, current) {
+  return {
+    kind: "conflict",
+    boardRevision: board.revision,
+    objects: [object3],
+    payloads: [current]
+  };
+}
+function withTableWidth({ writer: writer2, boardId, object: object3 }, width, requiresUnlock) {
+  if (requiresUnlock && contentGeometryLocked(writer2, boardId, object3)) {
+    return { kind: "rejected", reason: "geometryLocked" };
+  }
+  if (!canAdvanceVersion(object3.geometryVersion)) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
+  const geometry = { ...object3.geometry, width };
+  if (!geometryInWorld(geometry)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  return { ...object3, geometry, geometryVersion: object3.geometryVersion + 1n };
+}
+function clearStandaloneText(writer2, board, object3, text3) {
+  const isEmpty = typeof text3 === "string" && !text3.trim();
+  if (object3.kind !== "text" || !isEmpty) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  return planGeometryEdit(writer2, board, {
+    kind: "delete",
+    targets: [{ objectId: object3.objectId, expectedGeometryVersion: object3.geometryVersion }]
+  });
+}
+function planContentEdit(writer2, board, operation) {
+  const { boardId } = board;
+  const { objectId, expectedPayloadVersion } = operation;
+  const [object3] = writer2.getObjects(boardId, [objectId]);
+  if (!object3) {
+    return { kind: "rejected", reason: "objectNotFound" };
+  }
+  const { objectKind, bodyKind } = contentKinds(operation.kind);
+  if (!objectTakesContent(object3.kind, objectKind)) {
+    return { kind: "rejected", reason: "unsupportedKind" };
+  }
+  const [current] = writer2.getPayloads(boardId, [objectId]);
+  if (!current || current.bodyKind !== bodyKind) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
+  if (current.payloadVersion !== expectedPayloadVersion) {
+    return contentVersionConflict(board, object3, current);
+  }
+  if (!canAdvanceVersion(current.payloadVersion) || !canAdvanceVersion(board.revision)) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
+  if (operation.kind === "text" && operation.deleteEmpty) {
+    return clearStandaloneText(writer2, board, object3, operation.data.text);
+  }
+  const editingIcon = operation.kind === "sticker" && operation.selection.kind === "icon";
+  const needsUnlockedObject = editingIcon || operation.kind === "crop";
+  if (needsUnlockedObject && contentGeometryLocked(writer2, boardId, object3)) {
+    return { kind: "rejected", reason: "geometryLocked" };
+  }
+  const scope2 = { writer: writer2, boardId, object: object3, current };
+  const planned = updatedPayload(scope2, operation);
+  if (planned.kind === "rejected") {
+    return planned;
+  }
+  if (planned.kind === "conflict") {
+    return contentVersionConflict(board, object3, current);
+  }
+  const revised = planned.geometryWidth === void 0 ? object3 : withTableWidth(scope2, planned.geometryWidth, Boolean(planned.requiresGeometryUnlock));
+  if ("reason" in revised) {
+    return revised;
+  }
+  const payloadVersion = current.payloadVersion + 1n;
+  return {
+    kind: "changes",
+    objects: [{ ...revised, label: planned.label, payloadVersion }],
+    payloads: [{ ...current, payloadVersion, data: planned.data }]
+  };
 }
 
 // src/modules/whiteboard/application/board-suggestion-plans.ts
@@ -5989,6 +8922,7 @@ var BoardSuggestionError = class extends Error {
 var proposalLifetimeMillis = 30n * 60000n;
 var suggestionIdentifier = /^[A-Za-z0-9_-]{1,128}$/u;
 var maximumProposalBytes = 256 * 1024;
+var maximumOperations = 60;
 function validOption(option) {
   const labelLength = option.label.trim().length;
   const descriptionLength = option.description?.trim().length ?? 0;
@@ -5998,12 +8932,19 @@ function normalizeOptions(options) {
   if (options.length < 2 || options.length > 4 || !options.every(validOption)) {
     throw new BoardSuggestionError(400, "\u8BF7\u9009\u62E9\u4E24\u81F3\u56DB\u6761\u6709\u6548\u65B9\u6848\u3002");
   }
-  const bytes = options.reduce((total, option) => total + option.edit.bytes.byteLength, 0);
+  const operations = options.flatMap(({ edit, additionalEdits }) => [
+    edit,
+    ...additionalEdits ?? []
+  ]);
+  const bytes = operations.reduce((total, edit) => total + edit.bytes.byteLength, 0);
   if (bytes > maximumProposalBytes) {
     throw new BoardSuggestionError(400, "\u5EFA\u8BAE\u5185\u5BB9\u8FC7\u5927\u3002");
   }
+  if (options.some(({ additionalEdits }) => (additionalEdits?.length ?? 0) >= maximumOperations)) {
+    throw new BoardSuggestionError(400, "\u5EFA\u8BAE\u65B9\u6848\u7684\u64CD\u4F5C\u8FC7\u591A\u3002");
+  }
   const ids = new Set(options.map(({ optionId }) => optionId));
-  const labels = new Set(options.map(({ label }) => label.trim()));
+  const labels = new Set(options.map(({ label: label2 }) => label2.trim()));
   const edits = new Set(options.map(({ editFingerprint }) => editFingerprint));
   if ([ids, labels, edits].some((set) => set.size !== options.length)) {
     throw new BoardSuggestionError(400, "\u5EFA\u8BAE\u65B9\u6848\u7684\u6807\u8BC6\u3001\u540D\u79F0\u53CA\u64CD\u4F5C\u9700\u8981\u4E92\u4E0D\u76F8\u540C\u3002");
@@ -6017,14 +8958,22 @@ function normalizeOptions(options) {
 function geometryTargets(operation) {
   switch (operation.kind) {
     case "create":
+      return operation.attachment ? [operation.attachment.source.objectId] : [];
+    case "paste":
       return [];
     case "transform":
       return operation.objects.map(({ target: target2 }) => target2.objectId);
     case "duplicate":
       return operation.targets.map(({ source }) => source.objectId);
+    case "style":
+      return operation.targets.map(({ target: target2 }) => target2.objectId);
     case "lock":
     case "delete":
     case "reorder":
+    case "group":
+    case "ungroup":
+    case "arrange":
+    case "createSection":
       return operation.targets.map(({ objectId }) => objectId);
   }
 }
@@ -6032,20 +8981,27 @@ function operationFitsSource(request, sourceIds) {
   if (request.kind === "content") {
     return sourceIds.has(request.operation.objectId);
   }
+  if (request.operation.kind === "paste") {
+    return false;
+  }
   return geometryTargets(request.operation).every((id) => sourceIds.has(id));
 }
 function planSuggestion(reader2, board, request) {
   return request.kind === "geometry" ? planGeometryEdit(reader2, board, request.operation) : planContentEdit(reader2, board, request.operation);
 }
-function changesFitSource(changes, sourceIds) {
-  const writtenIds = [
-    ...changes.objects?.map(({ objectId }) => objectId) ?? [],
-    ...changes.removedObjectIds ?? [],
-    ...changes.payloads?.map(({ objectId }) => objectId) ?? [],
-    ...changes.removedPayloadObjectIds ?? [],
-    ...changes.layerPlacement?.objectIds ?? []
+function suggestionWrittenIds(changes) {
+  return [
+    .../* @__PURE__ */ new Set([
+      ...changes.objects?.map(({ objectId }) => objectId) ?? [],
+      ...changes.removedObjectIds ?? [],
+      ...changes.payloads?.map(({ objectId }) => objectId) ?? [],
+      ...changes.removedPayloadObjectIds ?? [],
+      ...changes.layerPlacement?.objectIds ?? []
+    ])
   ];
-  return writtenIds.every((id) => sourceIds.has(id));
+}
+function changesFitSource(changes, sourceIds) {
+  return suggestionWrittenIds(changes).every((id) => sourceIds.has(id));
 }
 function planScopedSuggestion(reader2, board, request, sourceIds) {
   if (!operationFitsSource(request, sourceIds)) {
@@ -6065,49 +9021,38 @@ function changeFingerprint(changes, digest2) {
     )
   );
 }
-function reviewChoice(reader2, board, proposal, choice, decodeEdit2, now, digest2) {
-  const option = proposal?.options.find(({ optionId }) => optionId === choice.optionId);
-  if (!proposal || !option || proposal.expiresAtMillis <= now) {
-    return { kind: "rejected", reason: "versionUnavailable" };
+function planSuggestionOption(reader2, board, option, sourceIds, decodeEdit2) {
+  if (!option.additionalEdits?.length) {
+    return planScopedSuggestion(reader2, board, decodeEdit2(option.edit), sourceIds);
   }
-  if (proposal.proposalVersion !== choice.expectedProposalVersion) {
-    return { kind: "conflict", boardRevision: board.revision };
+  const staged = createSuggestionOverlay(reader2, board.boardId, true);
+  for (const edit of [option.edit, ...option.additionalEdits]) {
+    const decision = planScopedSuggestion(staged.reader, board, decodeEdit2(edit), sourceIds);
+    if (decision.kind !== "changes") {
+      return decision;
+    }
+    staged.stage(decision);
   }
-  if (proposal.rejected || proposal.acceptedOptionId) {
-    return { kind: "rejected", reason: "invalidEdit" };
-  }
-  const source = reader2.getReviewSource(board.boardId, proposal.sourceId);
-  if (!source) {
-    return { kind: "rejected", reason: "forbidden" };
-  }
-  const plan = planScopedSuggestion(
-    reader2,
-    board,
-    decodeEdit2(option.edit),
-    new Set(source.objectIds)
-  );
-  if (plan.kind === "changes" && changeFingerprint(plan, digest2) !== option.plannedFingerprint) {
-    return { kind: "conflict", boardRevision: board.revision };
-  }
-  return plan;
+  return staged.changes();
 }
 function publicSuggestion(proposal) {
   const { proposalId, sourceId, observation, proposalVersion, expiresAtMillis } = proposal;
-  const { acceptedOptionId, acceptedBoardRevision, rejected: rejected5 } = proposal;
+  const { acceptedOptionId, acceptedBoardRevision, rejected: rejected7 } = proposal;
   return {
     proposalId,
     sourceId,
     observation,
     proposalVersion,
     expiresAtMillis,
-    options: proposal.options.map(({ optionId, label, description }) => ({
+    options: proposal.options.map(({ optionId, label: label2, description }) => ({
       optionId,
-      label,
+      label: label2,
       description
     })),
     acceptedOptionId,
     acceptedBoardRevision,
-    rejected: rejected5
+    rejected: rejected7,
+    activeOptionIds: proposal.reviewState?.applications.map(({ optionId }) => optionId) ?? (acceptedOptionId ? [acceptedOptionId] : [])
   };
 }
 function firstSubmission(proposal) {
@@ -6116,25 +9061,414 @@ function firstSubmission(proposal) {
     proposalVersion: 0n,
     acceptedOptionId: void 0,
     acceptedBoardRevision: void 0,
-    rejected: false
+    rejected: false,
+    activeOptionIds: []
   };
 }
 function planDraftOptions(reader2, board, options, sourceIds, decodeEdit2, digest2) {
   return options.map((option) => {
-    const operation = decodeEdit2(option.edit);
-    const decision = planScopedSuggestion(reader2, board, operation, sourceIds);
+    const decision = planSuggestionOption(reader2, board, option, sourceIds, decodeEdit2);
     if (decision.kind === "rejected" && decision.reason === "forbidden") {
       throw new BoardSuggestionError(403, "\u5EFA\u8BAE\u64CD\u4F5C\u8D85\u51FA\u5DF2\u9644\u52A0\u7684\u767D\u677F\u5BF9\u8C61\u3002");
     }
     if (decision.kind !== "changes") {
       throw new BoardSuggestionError(409, "\u5EFA\u8BAE\u65B9\u6848\u7684\u76EE\u6807\u3001\u57FA\u7EBF\u6216\u6743\u9650\u5DF2\u53D8\u5316\u3002");
     }
-    return { ...option, plannedFingerprint: changeFingerprint(decision, digest2) };
+    return {
+      ...option,
+      plannedFingerprint: changeFingerprint(decision, digest2),
+      footprint: {
+        objectIds: suggestionWrittenIds(decision),
+        editsOrder: !!decision.order || !!decision.removedObjectIds?.length
+      }
+    };
   });
 }
 
+// src/modules/whiteboard/application/board-suggestion-review.ts
+var noReview = { applications: [], objectClocks: [] };
+var unavailableVersion = {
+  decision: { kind: "rejected", reason: "versionUnavailable" }
+};
+function lexicalJson(value) {
+  return JSON.stringify(
+    value,
+    (_key, child3) => typeof child3 === "bigint" ? child3.toString() : child3
+  );
+}
+function suggestionFootprint(changes) {
+  const payloadIds = [
+    ...changes.payloads?.map(({ objectId }) => objectId) ?? [],
+    ...changes.removedPayloadObjectIds ?? [],
+    ...changes.removedObjectIds ?? []
+  ];
+  return {
+    objectIds: suggestionWrittenIds(changes),
+    editsOrder: !!changes.order || !!changes.removedObjectIds?.length,
+    payloadIds: [...new Set(payloadIds)]
+  };
+}
+function readSnapshot(reader2, boardId, footprint) {
+  const objects = reader2.getObjects(boardId, footprint.objectIds);
+  const found = new Set(objects.map(({ objectId }) => objectId));
+  const payloadIds = footprint.payloadIds ?? [];
+  const payloads = reader2.getPayloads(boardId, payloadIds);
+  const loadedPayloads = new Set(payloads.map(({ objectId }) => objectId));
+  return {
+    kind: "changes",
+    objects,
+    payloads,
+    removedObjectIds: footprint.objectIds.filter((id) => !found.has(id)),
+    removedPayloadObjectIds: payloadIds.filter((id) => found.has(id) && !loadedPayloads.has(id)),
+    order: footprint.editsOrder ? reader2.listObjects(boardId).map(({ objectId }) => objectId) : void 0
+  };
+}
+function scopesOverlap(left, right) {
+  if (left.editsOrder && right.editsOrder) {
+    return true;
+  }
+  const ids = new Set(left.objectIds);
+  return right.objectIds.some((id) => ids.has(id));
+}
+function clockOf(physical, alias) {
+  return alias?.physical === physical ? alias.logical : physical;
+}
+function aliasedReader(reader2, boardId, state) {
+  const aliases = new Map(state.objectClocks.map((clock) => [clock.objectId, clock]));
+  function withClocks(id, objects) {
+    if (id !== boardId) {
+      return objects;
+    }
+    return objects.map((object3) => {
+      const clock = aliases.get(object3.objectId);
+      return {
+        ...object3,
+        geometryVersion: clockOf(object3.geometryVersion, clock?.geometry),
+        payloadVersion: object3.payloadVersion === void 0 ? void 0 : clockOf(object3.payloadVersion, clock?.payload)
+      };
+    });
+  }
+  return {
+    ...reader2,
+    getObjects: (id, ids) => withClocks(id, reader2.getObjects(id, ids)),
+    listObjects: (id, limit) => withClocks(id, reader2.listObjects(id, limit)),
+    listGroupObjects: (id, group) => withClocks(id, reader2.listGroupObjects(id, group)),
+    listChildObjects: (id, parent) => withClocks(id, reader2.listChildObjects(id, parent)),
+    listRelatedConnectors: (id, ids) => withClocks(id, reader2.listRelatedConnectors(id, ids)),
+    getPayloads(id, ids) {
+      const payloads = reader2.getPayloads(id, ids);
+      if (id !== boardId) {
+        return payloads;
+      }
+      return payloads.map((payload) => ({
+        ...payload,
+        payloadVersion: clockOf(payload.payloadVersion, aliases.get(payload.objectId)?.payload)
+      }));
+    }
+  };
+}
+function comparableGeometry({
+  kind,
+  geometry,
+  parentId,
+  groupId,
+  locked,
+  appearance: appearance3,
+  detail
+}) {
+  return { kind, geometry, parentId, groupId, locked, appearance: appearance3, detail };
+}
+function advancesGeometry(before, after) {
+  return !before || lexicalJson(comparableGeometry(before)) !== lexicalJson(comparableGeometry(after));
+}
+function clockBase(boardRevision, logical, current) {
+  return current ?? (boardRevision > logical ? boardRevision : logical);
+}
+function nextClock(boardRevision, logical, current) {
+  return clockBase(boardRevision, logical, current) + 1n;
+}
+function materialize(reader2, board, changes) {
+  const objects = reader2.getObjects(
+    board.boardId,
+    changes.objects?.map(({ objectId }) => objectId) ?? []
+  );
+  const payloads = reader2.getPayloads(
+    board.boardId,
+    changes.payloads?.map(({ objectId }) => objectId) ?? []
+  );
+  const metadata = new Map(objects.map((object3) => [object3.objectId, object3]));
+  const bodies = new Map(payloads.map((payload) => [payload.objectId, payload]));
+  const exhaustedPayload = changes.payloads?.some(
+    (payload) => !canAdvanceVersion(
+      clockBase(
+        board.revision,
+        payload.payloadVersion,
+        bodies.get(payload.objectId)?.payloadVersion
+      )
+    )
+  );
+  const exhaustedGeometry = changes.objects?.some((object3) => {
+    const live = metadata.get(object3.objectId);
+    return advancesGeometry(live, object3) && !canAdvanceVersion(clockBase(board.revision, object3.geometryVersion, live?.geometryVersion));
+  });
+  if (exhaustedGeometry || exhaustedPayload) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  const updatedPayloads = changes.payloads?.map((payload) => ({
+    ...payload,
+    payloadVersion: nextClock(
+      board.revision,
+      payload.payloadVersion,
+      bodies.get(payload.objectId)?.payloadVersion
+    )
+  }));
+  const versions = new Map(
+    updatedPayloads?.map(({ objectId, payloadVersion }) => [objectId, payloadVersion])
+  );
+  const removedBodies = new Set(changes.removedPayloadObjectIds);
+  return {
+    ...changes,
+    payloads: updatedPayloads,
+    objects: changes.objects?.map((object3) => {
+      const live = metadata.get(object3.objectId);
+      const payloadVersion = removedBodies.has(object3.objectId) ? void 0 : versions.get(object3.objectId) ?? live?.payloadVersion ?? object3.payloadVersion;
+      return {
+        ...object3,
+        payloadVersion,
+        geometryVersion: advancesGeometry(live, object3) ? nextClock(board.revision, object3.geometryVersion, live?.geometryVersion) : live?.geometryVersion ?? object3.geometryVersion
+      };
+    })
+  };
+}
+function conflict3(revision) {
+  return { decision: { kind: "conflict", boardRevision: revision } };
+}
+function stillOwnsUndo(reader2, board, application, digest2) {
+  const now = readSnapshot(reader2, board.boardId, application.footprint);
+  return changeFingerprint(now, digest2) === application.afterFingerprint;
+}
+function lockedThroughParents(reader2, boardId, object3, restoredUnlocks) {
+  const visited = /* @__PURE__ */ new Set();
+  let current = object3;
+  while (current) {
+    const protectedLock = current.locked && !restoredUnlocks.has(current.objectId);
+    if (protectedLock || visited.has(current.objectId)) {
+      return true;
+    }
+    visited.add(current.objectId);
+    current = current.parentId ? reader2.getObjects(boardId, [current.parentId])[0] : void 0;
+  }
+  return false;
+}
+function protectedGeometry(object3) {
+  const { locked: _locked, ...changed } = comparableGeometry(object3);
+  return lexicalJson(changed);
+}
+function undoChangesLockedGeometry(reader2, boardId, application) {
+  const saved = application.inverse.objects ?? [];
+  const current = reader2.getObjects(
+    boardId,
+    saved.map(({ objectId }) => objectId)
+  );
+  const byId2 = new Map(current.map((object3) => [object3.objectId, object3]));
+  const restoredUnlocks = new Set(
+    saved.filter(({ locked }) => !locked).map(({ objectId }) => objectId)
+  );
+  return saved.some((object3) => {
+    const live = byId2.get(object3.objectId);
+    if (!live || protectedGeometry(live) === protectedGeometry(object3)) {
+      return false;
+    }
+    return lockedThroughParents(reader2, boardId, live, restoredUnlocks);
+  });
+}
+function reviewBoardRevision(board, state, reversed) {
+  const matching = reversed.find(({ footprint }) => footprint.editsOrder);
+  return matching?.baselineBoardRevision ?? clockOf(board.revision, state.boardClock);
+}
+function prepareSuggestionDecision({
+  reader: reader2,
+  board,
+  proposal,
+  choice,
+  decodeEdit: decodeEdit2,
+  digest: digest2,
+  applying
+}) {
+  const option = proposal.options.find(({ optionId }) => optionId === choice.optionId);
+  if (!option) {
+    return unavailableVersion;
+  }
+  if (proposal.proposalVersion !== choice.expectedProposalVersion) {
+    return conflict3(board.revision);
+  }
+  if (proposal.rejected) {
+    return { decision: { kind: "rejected", reason: "invalidEdit" } };
+  }
+  const source = reader2.getReviewSource(board.boardId, proposal.sourceId);
+  if (!source) {
+    return { decision: { kind: "rejected", reason: "forbidden" } };
+  }
+  return prepareFromSource(
+    { reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying },
+    new Set(source.objectIds),
+    option
+  );
+}
+function prepareFromSource({ reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying }, sourceIds, option) {
+  if (proposal.acceptedOptionId && !proposal.reviewState) {
+    return unavailableVersion;
+  }
+  const state = proposal.reviewState ?? noReview;
+  const selected = state.applications.find(({ optionId }) => optionId === choice.optionId);
+  if (selected && !applying) {
+    return { decision: { kind: "changes" } };
+  }
+  const reversed = selected ? [selected] : state.applications.filter(
+    ({ footprint }) => !option.footprint || scopesOverlap(footprint, option.footprint)
+  );
+  if (reversed.some((application) => !stillOwnsUndo(reader2, board, application, digest2))) {
+    return conflict3(board.revision);
+  }
+  if (reversed.some(({ footprint }) => footprint.objectIds.some((id) => !sourceIds.has(id)))) {
+    return { decision: { kind: "rejected", reason: "forbidden" } };
+  }
+  if (reversed.some((application) => undoChangesLockedGeometry(reader2, board.boardId, application))) {
+    return { decision: { kind: "rejected", reason: "geometryLocked" } };
+  }
+  const working = createSuggestionOverlay(
+    aliasedReader(reader2, board.boardId, state),
+    board.boardId,
+    false
+  );
+  for (const application of reversed) {
+    working.stage(application.inverse);
+  }
+  const logicalRevision = reviewBoardRevision(board, state, reversed);
+  const restored = working.changes();
+  if (selected) {
+    return {
+      decision: materialize(reader2, board, restored),
+      review: {
+        previous: state,
+        reversed,
+        restoredObjects: restored.objects ?? [],
+        restoredPayloads: restored.payloads ?? [],
+        restoredBoardRevision: restored.order && logicalRevision
+      }
+    };
+  }
+  return prepareCandidate(
+    { reader: reader2, board, proposal, choice, decodeEdit: decodeEdit2, digest: digest2, applying },
+    sourceIds,
+    option,
+    { working, state, reversed, logicalRevision, restored }
+  );
+}
+function prepareCandidate({ reader: reader2, board, choice, decodeEdit: decodeEdit2, digest: digest2 }, sourceIds, option, { working, state, reversed, logicalRevision, restored }) {
+  const logicalBoard = { ...board, revision: logicalRevision };
+  const decision = planSuggestionOption(
+    working.reader,
+    logicalBoard,
+    option,
+    sourceIds,
+    decodeEdit2
+  );
+  if (decision.kind !== "changes") {
+    return { decision };
+  }
+  if (changeFingerprint(decision, digest2) !== option.plannedFingerprint) {
+    return conflict3(board.revision);
+  }
+  const footprint = suggestionFootprint(decision);
+  const inverse = readSnapshot(working.reader, board.boardId, footprint);
+  working.stage(decision);
+  const carriesLogicalClocks = state.objectClocks.length > 0 || reversed.length > 0;
+  const logical = reversed.length ? working.changes() : decision;
+  const selectedGeometry = new Set(
+    decision.objects?.filter((object3) => {
+      const before = inverse.objects?.find(({ objectId }) => objectId === object3.objectId);
+      return object3.geometryVersion !== before?.geometryVersion;
+    }).map(({ objectId }) => objectId)
+  );
+  const selectedPayloads = new Set(footprint.payloadIds);
+  return {
+    decision: carriesLogicalClocks ? materialize(reader2, board, logical) : decision,
+    review: {
+      previous: state,
+      reversed,
+      application: {
+        optionId: choice.optionId,
+        baselineBoardRevision: logicalRevision,
+        footprint,
+        inverse
+      },
+      restoredObjects: restored.objects?.filter(({ objectId }) => !selectedGeometry.has(objectId)) ?? [],
+      restoredPayloads: restored.payloads?.filter(({ objectId }) => !selectedPayloads.has(objectId)) ?? [],
+      restoredBoardRevision: !footprint.editsOrder && restored.order ? logicalRevision : void 0
+    }
+  };
+}
+function chooseClock(physical, logical) {
+  return physical === logical ? void 0 : { physical, logical };
+}
+function restoredClocks(reader2, boardId, draft) {
+  const clocks = new Map(draft.previous.objectClocks.map((clock) => [clock.objectId, clock]));
+  const objects = new Map(
+    reader2.getObjects(
+      boardId,
+      draft.restoredObjects.map(({ objectId }) => objectId)
+    ).map((object3) => [object3.objectId, object3])
+  );
+  for (const { objectId, geometryVersion } of draft.restoredObjects) {
+    const live = objects.get(objectId)?.geometryVersion;
+    if (live !== void 0) {
+      clocks.set(objectId, {
+        ...clocks.get(objectId),
+        objectId,
+        geometry: chooseClock(live, geometryVersion)
+      });
+    }
+  }
+  const payloads = new Map(
+    reader2.getPayloads(
+      boardId,
+      draft.restoredPayloads.map(({ objectId }) => objectId)
+    ).map((payload) => [payload.objectId, payload])
+  );
+  for (const { objectId, payloadVersion } of draft.restoredPayloads) {
+    const live = payloads.get(objectId)?.payloadVersion;
+    if (live !== void 0) {
+      clocks.set(objectId, {
+        ...clocks.get(objectId),
+        objectId,
+        payload: chooseClock(live, payloadVersion)
+      });
+    }
+  }
+  return [...clocks.values()].filter(({ geometry, payload }) => !!geometry || !!payload);
+}
+function finishSuggestionDecision(reader2, boardId, receivedRevision, draft, digest2) {
+  const replaced = new Set(draft.reversed.map(({ optionId }) => optionId));
+  const remaining = draft.previous.applications.filter(({ optionId }) => !replaced.has(optionId));
+  const application = draft.application;
+  if (application) {
+    const after = readSnapshot(reader2, boardId, application.footprint);
+    remaining.push({
+      ...application,
+      boardRevision: receivedRevision,
+      afterFingerprint: changeFingerprint(after, digest2)
+    });
+  }
+  return {
+    applications: remaining,
+    objectClocks: restoredClocks(reader2, boardId, draft),
+    boardClock: draft.restoredBoardRevision === void 0 ? draft.previous.boardClock : chooseClock(receivedRevision, draft.restoredBoardRevision)
+  };
+}
+
 // src/modules/whiteboard/application/run-board-edit.ts
-function rejected2(identity, reason) {
+function rejected3(identity, reason) {
   return { ...identity, outcome: { kind: "rejected", reason } };
 }
 function runBoardEdit(repository, actor, identity, request, plan) {
@@ -6147,34 +9481,49 @@ function runBoardEditInTransaction(writer2, actor, identity, request, plan) {
   const access = writer2.getAccess(boardId, actor.id);
   const board = access?.canEdit ? writer2.getBoard(boardId) : void 0;
   if (!board) {
-    return rejected2(identity, "forbidden");
+    return rejected3(identity, "forbidden");
   }
   const stored = writer2.getEditReceipt(boardId, actor.id, commandId);
   if (stored) {
-    return stored.signature === request.signature ? stored.receipt : rejected2(identity, "commandIdReuse");
+    return stored.signature === request.signature ? stored.receipt : rejected3(identity, "commandIdReuse");
   }
   const decision = plan(writer2, board);
   if (decision.kind !== "changes") {
     return { ...identity, outcome: decision };
   }
   if (!canAdvanceVersion(board.revision)) {
-    return rejected2(identity, "invalidEdit");
+    return rejected3(identity, "invalidEdit");
   }
   const { signature, ...details } = request;
-  const outcome = writer2.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const applied2 = writer2.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const advancedRevision = applied2.boardRevision > board.revision;
+  const outcome = advancedRevision ? applied2 : { ...applied2, order: void 0 };
   const receipt = { ...identity, outcome };
-  writer2.saveEditReceipt(actor.id, { signature, receipt });
+  writer2.saveEditReceipt(actor.id, { signature, receipt, advancedRevision });
   return receipt;
 }
 function readBoardEditReceipt(repository, actor, identity) {
   const { boardId, commandId } = identity;
   return repository.read(
-    (reader2) => reader2.getAccess(boardId, actor.id)?.canEdit ? reader2.getEditReceipt(boardId, actor.id, commandId)?.receipt : rejected2(identity, "forbidden")
+    (reader2) => reader2.getAccess(boardId, actor.id)?.canEdit ? reader2.getEditReceipt(boardId, actor.id, commandId)?.receipt : rejected3(identity, "forbidden")
   );
+}
+function checkBoardEditBeforePreparation(repository, actor, identity, signature) {
+  const { boardId, commandId } = identity;
+  return repository.read((reader2) => {
+    if (!reader2.getAccess(boardId, actor.id)?.canEdit) {
+      return rejected3(identity, "forbidden");
+    }
+    const stored = reader2.getEditReceipt(boardId, actor.id, commandId);
+    if (stored) {
+      return stored.signature === signature ? stored.receipt : rejected3(identity, "commandIdReuse");
+    }
+    return void 0;
+  });
 }
 
 // src/modules/whiteboard/application/board-suggestions.ts
-function requireOwner(reader2, actor, boardId, kind) {
+function requireOwner2(reader2, actor, boardId, kind) {
   const allowed = actor.kind === kind && reader2.canReviewBoard(boardId, actor.id);
   const board = allowed ? reader2.getBoard(boardId) : void 0;
   if (!board) {
@@ -6207,7 +9556,7 @@ function attachedFeedback(repository, actor, request, readFeedback) {
   }
   const { origin, boardId } = request;
   const replay = repository.read((reader2) => {
-    requireOwner(reader2, actor, boardId, "human");
+    requireOwner2(reader2, actor, boardId, "human");
     return reader2.getSuggestionReceipt(boardId, actor.id, request.commandId);
   });
   if (replay) {
@@ -6283,42 +9632,66 @@ function rejectPending(writer2, request, now) {
   if (!proposal || proposal.expiresAtMillis <= now) {
     throw new BoardSuggestionError(404, "\u5EFA\u8BAE\u4E0D\u5B58\u5728\u6216\u5DF2\u8FC7\u671F\u3002");
   }
-  if (proposal.rejected || proposal.acceptedOptionId || proposal.proposalVersion !== request.expectedProposalVersion) {
+  if (proposal.rejected || proposal.proposalVersion !== request.expectedProposalVersion) {
     throw new BoardSuggestionError(409, "\u5EFA\u8BAE\u72B6\u6001\u5DF2\u53D8\u5316\uFF0C\u8BF7\u91CD\u65B0\u67E5\u770B\u3002");
   }
   return { ...proposal, proposalVersion: proposal.proposalVersion + 1n, rejected: true };
 }
+function reviewChoice(reader2, board, proposed, choice, decodeEdit2, time, digest2, applying) {
+  if (!proposed || proposed.expiresAtMillis <= BigInt(time)) {
+    return { decision: { kind: "rejected", reason: "versionUnavailable" } };
+  }
+  return prepareSuggestionDecision({
+    reader: reader2,
+    board,
+    proposal: proposed,
+    choice,
+    decodeEdit: decodeEdit2,
+    digest: digest2,
+    applying
+  });
+}
 function acceptPending(writer2, actor, request, decodeEdit2, timeMillis, digest2) {
-  const board = requireOwner(writer2, actor, request.boardId, "human");
+  const board = requireOwner2(writer2, actor, request.boardId, "human");
   const { boardId, commandId, signature, proposalId, optionId } = request;
   const proposal = writer2.getSuggestion(boardId, proposalId);
   const option = proposal?.options.find((entry) => entry.optionId === optionId);
-  let appliesNow = false;
+  let review;
   const edit = runBoardEditInTransaction(
     writer2,
     actor,
     { boardId, commandId },
     { signature, savedAtMillis: timeMillis, kind: option?.edit.kind ?? "geometry" },
     () => {
-      const decision = reviewChoice(
+      const prepared = reviewChoice(
         writer2,
         board,
         proposal,
         request,
         decodeEdit2,
-        BigInt(timeMillis),
-        digest2
+        timeMillis,
+        digest2,
+        true
       );
-      appliesNow = decision.kind === "changes";
-      return decision;
+      review = prepared.review;
+      return prepared.decision;
     }
   );
-  if (appliesNow && proposal && edit.outcome.kind === "applied") {
+  if (review && proposal && edit.outcome.kind === "applied") {
+    const state = finishSuggestionDecision(
+      writer2,
+      boardId,
+      edit.outcome.boardRevision,
+      review,
+      digest2
+    );
+    const accepted = state.applications.at(-1);
     writer2.decideSuggestion({
       ...proposal,
-      acceptedOptionId: optionId,
-      acceptedBoardRevision: edit.outcome.boardRevision,
-      proposalVersion: proposal.proposalVersion + 1n
+      acceptedOptionId: accepted?.optionId,
+      acceptedBoardRevision: accepted?.boardRevision,
+      proposalVersion: proposal.proposalVersion + 1n,
+      reviewState: state
     });
   }
   return edit;
@@ -6328,7 +9701,7 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
     createSource(actor, request) {
       const frozen = attachedFeedback(repository, actor, request, readFeedbackSource);
       return repository.write((writer2) => {
-        const board = requireOwner(writer2, actor, request.boardId, "human");
+        const board = requireOwner2(writer2, actor, request.boardId, "human");
         const replay = commandReplay(writer2, actor, request, "source");
         if (replay) {
           return recordedSource(writer2, board.boardId, replay);
@@ -6341,7 +9714,7 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
     },
     submit(actor, request, decodeEdit2) {
       return repository.write((writer2) => {
-        const board = requireOwner(writer2, actor, request.boardId, "agent");
+        const board = requireOwner2(writer2, actor, request.boardId, "agent");
         const replay = commandReplay(writer2, actor, request, "submit");
         if (replay) {
           return firstSubmission(recordedSuggestion(writer2, board.boardId, replay));
@@ -6382,7 +9755,7 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
     },
     list(actor, { boardId, limit, beforeProposalId }) {
       return repository.read((reader2) => {
-        requireOwner(reader2, actor, boardId, "human");
+        requireOwner2(reader2, actor, boardId, "human");
         const proposals = reader2.listSuggestions(
           boardId,
           BigInt(now()),
@@ -6398,19 +9771,11 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
     },
     preview(actor, choice, decodeEdit2) {
       return repository.read((reader2) => {
-        const board = requireOwner(reader2, actor, choice.boardId, "human");
+        const board = requireOwner2(reader2, actor, choice.boardId, "human");
         const proposal = reader2.getSuggestion(board.boardId, choice.proposalId);
         return {
           boardRevision: board.revision,
-          decision: reviewChoice(
-            reader2,
-            board,
-            proposal,
-            choice,
-            decodeEdit2,
-            BigInt(now()),
-            digest2
-          )
+          decision: reviewChoice(reader2, board, proposal, choice, decodeEdit2, now(), digest2, false).decision
         };
       });
     },
@@ -6419,24 +9784,23 @@ function createBoardSuggestionApplication(repository, { now, newId, digest: dige
     ),
     reject(actor, request) {
       return repository.write((writer2) => {
-        const board = requireOwner(writer2, actor, request.boardId, "human");
+        const board = requireOwner2(writer2, actor, request.boardId, "human");
         const replay = commandReplay(writer2, actor, request, "reject");
         if (replay) {
           return publicSuggestion(recordedSuggestion(writer2, board.boardId, replay));
         }
-        const rejected5 = rejectPending(writer2, request, BigInt(now()));
-        writer2.decideSuggestion(rejected5);
-        preserveReceipt(writer2, actor, request, "reject", rejected5.proposalId);
-        return publicSuggestion(rejected5);
+        const rejected7 = rejectPending(writer2, request, BigInt(now()));
+        writer2.decideSuggestion(rejected7);
+        preserveReceipt(writer2, actor, request, "reject", rejected7.proposalId);
+        return publicSuggestion(rejected7);
       });
     }
   };
 }
 
 // src/modules/whiteboard/application/attach-image.ts
-function planImageEdit(writer2, board, operation) {
+function reserveAttachment(writer2, board, operation, plan) {
   const { boardId } = board;
-  const plan = planImageChanges(boardId, operation);
   if (plan.kind === "rejected") {
     return plan;
   }
@@ -6448,38 +9812,349 @@ function planImageEdit(writer2, board, operation) {
   }
   return plan;
 }
+function planImageEdit(writer2, board, operation) {
+  return reserveAttachment(writer2, board, operation, planImageChanges(board.boardId, operation));
+}
+function planVideoEdit(writer2, board, operation) {
+  return reserveAttachment(writer2, board, operation, planVideoChanges(board.boardId, operation));
+}
 
-// src/modules/whiteboard/application/board-editor.ts
-function createBoardEditorApplication(repository, now) {
+// src/modules/whiteboard/application/clipboard-payloads.ts
+var assetPrefix3 = "/studio-archive-assets/";
+var assetPattern = /(?<![\w:/-])\/studio-archive-assets\/([A-Za-z0-9_-]{1,128})\/([A-Za-z0-9_-]{1,128})(?![A-Za-z0-9_-])/gu;
+var assetKinds = /* @__PURE__ */ new Set(["image", "video", "link", "document", "embed"]);
+var maxDepth = 80;
+var uriFields = /* @__PURE__ */ new Set(["src", "href", "url", "poster"]);
+var ClipboardDataError = class extends Error {
+  constructor(reason) {
+    super("Clipboard data could not be copied");
+    this.reason = reason;
+  }
+  reason;
+};
+function propertyValue(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : void 0;
+}
+function makeAssetResolver(scope2) {
+  const mapped = /* @__PURE__ */ new Map();
+  let budget = scope2.availableBytes;
+  function resolve(value) {
+    return value.replace(assetPattern, (_path, boardId, sourceId) => {
+      if (boardId !== scope2.sourceBoardId) {
+        throw new ClipboardDataError("invalidEdit");
+      }
+      const found = mapped.get(sourceId);
+      if (found) {
+        return assetPrefix3 + scope2.destinationBoardId + "/" + found.assetId;
+      }
+      const read = scope2.writer.getExportAsset?.(boardId, sourceId, budget);
+      if (!read) {
+        throw new ClipboardDataError("objectNotFound");
+      }
+      if (read.kind === "tooLarge") {
+        throw new ClipboardDataError("tooLarge");
+      }
+      const assetId = "paste-" + scope2.assetNamespace + "-" + mapped.size;
+      const bytes = Uint8Array.from(atob(read.asset.base64), (value2) => value2.charCodeAt(0));
+      if (bytes.byteLength !== read.asset.byteLength || bytes.byteLength > budget) {
+        throw new ClipboardDataError("tooLarge");
+      }
+      budget -= bytes.byteLength;
+      mapped.set(sourceId, { assetId, mimeType: read.asset.mimeType, bytes });
+      return assetPrefix3 + scope2.destinationBoardId + "/" + assetId;
+    });
+  }
+  return { resolve, assets: () => [...mapped.values()] };
+}
+function rebindAssets(value, resolve, depth = 0) {
+  if (depth >= maxDepth) {
+    throw new ClipboardDataError("tooLarge");
+  }
+  if (typeof value === "string") {
+    return resolve(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => rebindAssets(entry, resolve, depth + 1));
+  }
+  const record7 = propertyValue(value);
+  return record7 ? Object.fromEntries(
+    Object.entries(record7).map(([key, child3]) => [
+      key,
+      rebindAssets(child3, resolve, depth + 1)
+    ])
+  ) : value;
+}
+function rebindMediaFields(value, resolve, depth = 0) {
+  if (depth >= maxDepth) {
+    throw new ClipboardDataError("tooLarge");
+  }
+  if (Array.isArray(value)) {
+    return value.map((entry) => rebindMediaFields(entry, resolve, depth + 1));
+  }
+  const record7 = propertyValue(value);
+  if (!record7) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(record7).map(([key, child3]) => {
+      const reference = typeof child3 === "string" && uriFields.has(key) && child3.startsWith(assetPrefix3);
+      return [key, reference ? resolve(child3) : rebindMediaFields(child3, resolve, depth + 1)];
+    })
+  );
+}
+function rebindEmbed(data, resolve) {
+  const copy = { ...data };
+  if (typeof data.html === "string") {
+    copy.html = resolve(data.html);
+  }
+  if (data.state !== void 0) {
+    copy.state = rebindAssets(data.state, resolve);
+  }
+  return copy;
+}
+function todoSource(source, scope2) {
+  const { boardId, objectId } = source;
+  const currentBoard2 = boardId === void 0 || boardId === scope2.sourceBoardId;
+  if (!currentBoard2 || typeof objectId !== "string") {
+    return source;
+  }
+  const copied = scope2.ids.get(objectId);
+  return copied === void 0 ? { ...source, boardId: scope2.sourceBoardId } : { ...source, boardId: scope2.destinationBoardId, objectId: copied, version: "0" };
+}
+function rebindTodos(data, scope2) {
+  if (!Array.isArray(data.items)) {
+    return data;
+  }
+  const items = data.items.map((entry) => {
+    const item = propertyValue(entry);
+    const source = propertyValue(item?.sourceRef);
+    return item && source ? { ...item, sourceRef: todoSource(source, scope2) } : entry;
+  });
+  return { ...data, items };
+}
+function payloadData(payload, scope2, resolve) {
+  const { data, bodyKind } = payload;
+  if (bodyKind === "todo") {
+    return rebindTodos(data, scope2);
+  }
+  if (!assetKinds.has(bodyKind) || scope2.sourceBoardId === scope2.destinationBoardId) {
+    return data;
+  }
+  if (bodyKind === "embed") {
+    return rebindEmbed(data, resolve);
+  }
+  const resolved = propertyValue(rebindMediaFields(data, resolve));
+  if (!resolved) {
+    throw new ClipboardDataError("invalidEdit");
+  }
+  return resolved;
+}
+function clipboardPayloads(bodies, scope2) {
+  const references = makeAssetResolver(scope2);
+  const payloads = [];
+  try {
+    for (const payload of bodies) {
+      const objectId = scope2.ids.get(payload.objectId);
+      if (!objectId) {
+        return "invalidEdit";
+      }
+      payloads.push({
+        ...payload,
+        objectId,
+        payloadVersion: 0n,
+        data: payloadData(payload, scope2, references.resolve)
+      });
+    }
+  } catch (error) {
+    if (error instanceof ClipboardDataError) {
+      return error.reason;
+    }
+    throw error;
+  }
+  return { payloads, assets: references.assets() };
+}
+
+// src/modules/whiteboard/application/clipboard-paste.ts
+var clipboardObjectLimit = 200;
+var expectedNamespace = /^geometry:([a-f0-9]{64})$/u;
+function rejected4(reason) {
+  return { kind: "rejected", reason };
+}
+function currentSourceReader(writer2, { sourceBoardId, sourceRevision }, current) {
+  const version = current ? void 0 : sourceRevision;
   return {
-    editGeometry(actor, { operation, signature, boardId, commandId }) {
-      return runBoardEdit(
-        repository,
-        actor,
-        { boardId, commandId },
-        { kind: "geometry", signature, savedAtMillis: now() },
-        (writer2, board) => planGeometryEdit(writer2, board, operation)
-      );
-    },
-    editContent(actor, { operation, signature, boardId, commandId }) {
-      return runBoardEdit(
-        repository,
-        actor,
-        { boardId, commandId },
-        { kind: "content", signature, savedAtMillis: now() },
-        (writer2, board) => planContentEdit(writer2, board, operation)
-      );
-    },
-    attachImage(actor, { operation, signature, boardId, commandId }) {
-      return runBoardEdit(
-        repository,
-        actor,
-        { boardId, commandId },
-        { kind: "image", signature, savedAtMillis: now() },
-        (writer2, board) => planImageEdit(writer2, board, operation)
-      );
-    },
-    getEditReceipt: (actor, identity) => readBoardEditReceipt(repository, actor, identity)
+    objects: (ids) => current ? writer2.getObjects(sourceBoardId, ids) : writer2.listVersionObjects(sourceBoardId, sourceRevision, ids),
+    payloads: (ids) => current ? writer2.getPayloads(sourceBoardId, ids) : writer2.getVersionPayloads(sourceBoardId, sourceRevision, ids),
+    bytes: (ids) => writer2.payloadByteSize?.(sourceBoardId, ids, version) ?? 0n
+  };
+}
+function clipboardAttachments(objects) {
+  const linked = new Set(
+    objects.flatMap(
+      ({ detail }) => detail?.kind === "connector" ? connectorAttachmentIds(detail) : []
+    )
+  );
+  for (const { objectId } of objects) {
+    linked.delete(objectId);
+  }
+  return [...linked];
+}
+function readSource(writer2, actor, operation) {
+  const { sourceBoardId, sourceRevision, targets } = operation;
+  if (!writer2.getAccess(sourceBoardId, actor.id)) {
+    return "forbidden";
+  }
+  const board = writer2.getBoard(sourceBoardId);
+  const current = board?.revision === sourceRevision;
+  if (!current && !writer2.getVersion(sourceBoardId, sourceRevision)) {
+    return "versionUnavailable";
+  }
+  const reader2 = currentSourceReader(writer2, operation, current);
+  const ids = targets.map(({ sourceObjectId }) => sourceObjectId);
+  const objects = reader2.objects(ids);
+  if (objects.length !== ids.length) {
+    return "objectNotFound";
+  }
+  const required = objects.filter(({ payloadVersion }) => payloadVersion !== void 0);
+  const bodyIds = required.map(({ objectId }) => objectId);
+  const payloadBytes = reader2.bytes(bodyIds);
+  if (payloadBytes > boardWritePayloadLimit) {
+    return "tooLarge";
+  }
+  const payloads = reader2.payloads(bodyIds);
+  const versions = new Map(
+    payloads.map(({ objectId, payloadVersion }) => [objectId, payloadVersion])
+  );
+  if (required.some(({ objectId, payloadVersion }) => versions.get(objectId) !== payloadVersion)) {
+    return "versionUnavailable";
+  }
+  const attached = reader2.objects(clipboardAttachments(objects));
+  const geometry = new Map([...objects, ...attached].map((object3) => [object3.objectId, object3]));
+  return { objects, geometry, payloads, payloadBytes };
+}
+function destinationIds(writer2, boardId, targets) {
+  const ids = new Map(targets.map(({ objectId, sourceObjectId }) => [sourceObjectId, objectId]));
+  const generated = new Set(ids.values());
+  if (generated.size !== ids.size || ids.size !== targets.length) {
+    return void 0;
+  }
+  if ([...generated].some((id) => !validNewObjectId(id) || writer2.hasUsedObjectId(boardId, id))) {
+    return void 0;
+  }
+  return ids;
+}
+function destinationGroups(writer2, boardId, origin, ids) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const { groupId, objectId } of origin) {
+    const replacement = ids.get(objectId);
+    if (groupId === void 0 || !replacement || groups.has(groupId)) {
+      continue;
+    }
+    const id = "group:" + replacement;
+    if (writer2.listGroupObjects(boardId, id).length > 0) {
+      return void 0;
+    }
+    groups.set(groupId, id);
+  }
+  return groups;
+}
+function pasteObjects({ scope: scope2, source }) {
+  const added = [];
+  for (const object3 of source.objects) {
+    const id = scope2.ids.get(object3.objectId);
+    const copy = id && clipboardObject(object3, id, scope2);
+    if (!copy) {
+      return void 0;
+    }
+    added.push(copy);
+  }
+  return added;
+}
+function pasteBoardObjects(writer2, board, actor, operation, signature) {
+  const { boardId } = board;
+  const { targets, delta, sourceBoardId } = operation;
+  if (!targets.length || ![delta.dx, delta.dy].every(Number.isFinite)) {
+    return rejected4("invalidEdit");
+  }
+  if (targets.length > clipboardObjectLimit) {
+    return rejected4("tooLarge");
+  }
+  const ids = destinationIds(writer2, boardId, targets);
+  const assetNamespace = expectedNamespace.exec(signature)?.[1];
+  if (!ids || !assetNamespace) {
+    return rejected4("invalidEdit");
+  }
+  const source = readSource(writer2, actor, operation);
+  if (typeof source === "string") {
+    return rejected4(source);
+  }
+  const groups = destinationGroups(writer2, boardId, source.objects, ids);
+  if (!groups) {
+    return rejected4("invalidEdit");
+  }
+  const sameBoard = sourceBoardId === boardId;
+  const liveAttachments = sameBoard ? writer2.getObjects(boardId, clipboardAttachments(source.objects)) : [];
+  const attachableObjects = new Set(liveAttachments.map(({ objectId }) => objectId));
+  const scope2 = { ids, groups, geometry: source.geometry, delta, attachableObjects };
+  const objects = pasteObjects({ scope: scope2, source });
+  if (!objects) {
+    return rejected4("invalidEdit");
+  }
+  const data = clipboardPayloads(source.payloads, {
+    sourceBoardId,
+    destinationBoardId: boardId,
+    assetNamespace,
+    ids,
+    writer: writer2,
+    availableBytes: Number(boardWritePayloadLimit - source.payloadBytes)
+  });
+  if (typeof data === "string") {
+    return rejected4(data);
+  }
+  return { kind: "changes", objects, ...data };
+}
+
+// src/modules/whiteboard/application/document-image.ts
+function planDocumentImageUpload(writer2, { boardId }, operation) {
+  const { objectId, assetId, content } = operation;
+  const [document] = writer2.getObjects(boardId, [objectId]);
+  if (!document) {
+    return { kind: "rejected", reason: "objectNotFound" };
+  }
+  if (document.kind !== "document") {
+    return { kind: "rejected", reason: "unsupportedKind" };
+  }
+  if (writer2.getExportAsset?.(boardId, assetId, 0)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  return planDocumentImageAsset(boardId, assetId, content);
+}
+
+// src/modules/whiteboard/application/prepare-board-image.ts
+function createAttachImage(repository, now, renderUploadedSvg) {
+  return async (actor, command) => {
+    const { operation, signature, boardId, commandId } = command;
+    const identity = { boardId, commandId };
+    let prepared = operation;
+    if (looksLikeSvgImage(operation.content)) {
+      const prior = checkBoardEditBeforePreparation(repository, actor, identity, signature);
+      if (prior) {
+        return prior;
+      }
+      const svg = svgForImagePreview(operation.content);
+      const raster = svg && renderUploadedSvg ? await renderUploadedSvg(svg) : void 0;
+      if (!raster) {
+        return { ...identity, outcome: { kind: "rejected", reason: "invalidImage" } };
+      }
+      prepared = { ...operation, content: raster };
+    }
+    return runBoardEdit(
+      repository,
+      actor,
+      identity,
+      { kind: "image", signature, savedAtMillis: now() },
+      (writer2, board) => planImageEdit(writer2, board, prepared)
+    );
   };
 }
 
@@ -6488,7 +10163,7 @@ var maxRestoreObjects = 2e4;
 var maxRestoreSelection = 500;
 var maxRestorePayloadBytes = 32n * 1024n * 1024n;
 function byObjectId(objects) {
-  return new Map(objects.map((object) => [object.objectId, object]));
+  return new Map(objects.map((object3) => [object3.objectId, object3]));
 }
 function same(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -6497,7 +10172,7 @@ function sameGeometry(left, right) {
   return left.kind === right.kind && left.parentId === right.parentId && left.groupId === right.groupId && same(left.geometry, right.geometry) && same(left.detail, right.detail);
 }
 function selectedRestore(current, historical, targets) {
-  const head = [];
+  const head2 = [];
   const insertions = /* @__PURE__ */ new Map();
   const selected = [];
   let anchor;
@@ -6509,26 +10184,26 @@ function selectedRestore(current, historical, targets) {
         selected.push(saved);
       }
     } else if (targets.has(objectId)) {
-      appendRestoredObject(saved, anchor, head, insertions);
+      appendRestoredObject(saved, anchor, head2, insertions);
     }
   }
   const inOrder = selected.values();
-  const next = [...head];
-  for (const object of current.values()) {
-    const replacement = targets.has(object.objectId) ? inOrder.next().value : object;
+  const next = [...head2];
+  for (const object3 of current.values()) {
+    const replacement = targets.has(object3.objectId) ? inOrder.next().value : object3;
     if (replacement) {
       next.push(replacement, ...insertions.get(replacement.objectId) ?? []);
     }
   }
   return next;
 }
-function appendRestoredObject(object, anchor, head, insertions) {
+function appendRestoredObject(object3, anchor, head2, insertions) {
   if (anchor === void 0) {
-    head.push(object);
+    head2.push(object3);
     return;
   }
   const siblings = insertions.get(anchor) ?? [];
-  siblings.push(object);
+  siblings.push(object3);
   insertions.set(anchor, siblings);
 }
 function planScope(current, historical, scope2) {
@@ -6548,17 +10223,17 @@ function planScope(current, historical, scope2) {
   }
   return { objects: selectedRestore(current, historical, targets), targets };
 }
-function attachedIds(object) {
-  if (object.detail?.kind !== "connector") {
+function attachedIds(object3) {
+  if (object3.detail?.kind !== "connector") {
     return [];
   }
-  return [object.detail.start, object.detail.end].flatMap(
+  return [object3.detail.start, object3.detail.end].flatMap(
     ({ attachment }) => attachment ? [attachment.objectId] : []
   );
 }
-function validParentChain(object, objects, verified) {
+function validParentChain(object3, objects, verified) {
   const path2 = /* @__PURE__ */ new Set();
-  let node = object;
+  let node = object3;
   while (!verified.has(node.objectId)) {
     if (path2.has(node.objectId)) {
       return false;
@@ -6580,20 +10255,20 @@ function validParentChain(object, objects, verified) {
 }
 function validRelations(objects) {
   const verified = /* @__PURE__ */ new Set();
-  for (const object of objects.values()) {
-    const connected = attachedIds(object).every((id) => id !== object.objectId && objects.has(id));
-    if (!connected || !validParentChain(object, objects, verified)) {
+  for (const object3 of objects.values()) {
+    const connected = attachedIds(object3).every((id) => id !== object3.objectId && objects.has(id));
+    if (!connected || !validParentChain(object3, objects, verified)) {
       return false;
     }
   }
   return true;
 }
-function protectedObjectIds(objects, isLocked2 = (object) => object.locked) {
+function protectedObjectIds(objects, isLocked2 = (object3) => object3.locked) {
   const visited = /* @__PURE__ */ new Set();
   const protectedObjects = /* @__PURE__ */ new Set();
-  for (const object of objects.values()) {
+  for (const object3 of objects.values()) {
     const path2 = [];
-    let current = object;
+    let current = object3;
     while (current && !visited.has(current.objectId)) {
       visited.add(current.objectId);
       path2.push(current.objectId);
@@ -6614,8 +10289,8 @@ function protectedObjectIds(objects, isLocked2 = (object) => object.locked) {
 function changesProtectedGeometry(before, after) {
   return !after || before.locked && !after.locked || !sameGeometry(before, after);
 }
-function movedLockedAttachment(object, current, next) {
-  return attachedIds(object).some((id) => !same(current.get(id)?.geometry, next.get(id)?.geometry));
+function movedLockedAttachment(object3, current, next) {
+  return attachedIds(object3).some((id) => !same(current.get(id)?.geometry, next.get(id)?.geometry));
 }
 function changesLockedLayout(current, next, protectedObjects) {
   for (const [id, before] of current) {
@@ -6645,6 +10320,24 @@ function addsToProtectedParent(current, next, protectedObjects) {
   );
   return newParents.some((id) => protectedInNext.has(id));
 }
+function validateReversedScene(current, next, targets, order = [...next.keys()], payloadTargetIds = []) {
+  const protectedObjects = protectedObjectIds(current, (object3) => {
+    const unlockedByReversal = targets.has(object3.objectId) && next.get(object3.objectId)?.locked === false;
+    return object3.locked && !unlockedByReversal;
+  });
+  const protectedPayload = payloadTargetIds.some((id) => {
+    const kind = current.get(id)?.kind;
+    return protectedObjects.has(id) && (kind === "ink" || kind === "image");
+  });
+  const protectedLayout = changesLockedLayout(current, next, protectedObjects) || lockedLayerMoved(current, order, targets, protectedObjects) || addsToProtectedParent(current, next, protectedObjects);
+  if (protectedLayout || protectedPayload) {
+    return { kind: "rejected", reason: "geometryLocked" };
+  }
+  if (!validRelations(next)) {
+    return { kind: "rejected", reason: "invalidEdit" };
+  }
+  return void 0;
+}
 function lockedLayerMoved(current, order, targets, protectedObjects) {
   const result = new Set(order);
   const surviving = [...current.keys()].filter((id) => result.has(id));
@@ -6668,11 +10361,11 @@ function lockedLayerMoved(current, order, targets, protectedObjects) {
 function samePayload(left, right) {
   return left?.bodyKind === right?.bodyKind && same(left?.data, right?.data);
 }
-function changesLockedPayload(object, current, saved) {
-  if (object.kind === "ink") {
+function changesLockedPayload(object3, current, saved) {
+  if (object3.kind === "ink") {
     return !samePayload(current, saved);
   }
-  return object.kind === "image" && !same(current?.data.crop, saved?.data.crop);
+  return object3.kind === "image" && !same(current?.data.crop, saved?.data.crop);
 }
 function advanceVersion(revision, ...versions) {
   const latest = versions.reduce(
@@ -6729,8 +10422,8 @@ function restoredObject(context, source, delta) {
 }
 function collectRestoredChanges(context, scope2, removedObjectIds, order) {
   const delta = { objects: [], payloads: [], removedPayloadObjectIds: [] };
-  for (const object of scope2.objects) {
-    const rejection3 = scope2.targets.has(object.objectId) ? restoredObject(context, object, delta) : void 0;
+  for (const object3 of scope2.objects) {
+    const rejection3 = scope2.targets.has(object3.objectId) ? restoredObject(context, object3, delta) : void 0;
     if (rejection3) {
       return rejection3;
     }
@@ -6807,6 +10500,409 @@ function planBoardRestore(reader2, board, revision, scope2) {
   return collectRestoredChanges(context, restore, removedObjectIds, order);
 }
 
+// src/modules/whiteboard/application/reverse-board-fields.ts
+var objectFields = [
+  "kind",
+  "label",
+  "locked",
+  "parentId",
+  "groupId",
+  "appearance",
+  "detail"
+];
+var geometryFields = ["x", "y", "width", "height", "rotation"];
+function sameReversalValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+function sameObjectContent(left, right) {
+  return sameReversalValue(left.geometry, right.geometry) && objectFields.every((field) => sameReversalValue(left[field], right[field]));
+}
+function nextObjectClock(revision, ...clocks) {
+  const latest = clocks.reduce(
+    (maximum, clock) => clock !== void 0 && clock > maximum ? clock : maximum,
+    revision
+  );
+  return canAdvanceVersion(latest) ? latest + 1n : void 0;
+}
+function reverseFields(current, expected, desired, fields) {
+  const changes = {};
+  for (const field of fields) {
+    if (sameReversalValue(expected[field], desired[field])) {
+      continue;
+    }
+    if (!sameReversalValue(current[field], expected[field])) {
+      return void 0;
+    }
+    changes[field] = desired[field];
+  }
+  return changes;
+}
+function reverseObjectFields(current, expected, desired) {
+  const fields = reverseFields(current, expected, desired, objectFields);
+  const geometry = reverseFields(
+    current.geometry,
+    expected.geometry,
+    desired.geometry,
+    geometryFields
+  );
+  if (!fields || !geometry) {
+    return void 0;
+  }
+  return { ...current, ...fields, geometry: { ...current.geometry, ...geometry } };
+}
+function samePayloadContent(left, right) {
+  return left?.bodyKind === right?.bodyKind && sameReversalValue(left?.data, right?.data);
+}
+
+// src/modules/whiteboard/application/reverse-board-order.ts
+function reverseExplicitOrder({ current, desired, expected = [], existing }) {
+  const originallyPresent = new Set(expected);
+  const live = new Set(current);
+  const actual = current.filter((id) => originallyPresent.has(id));
+  if (!sameReversalValue(
+    actual,
+    expected.filter((id) => live.has(id))
+  )) {
+    return void 0;
+  }
+  const replacement = desired.filter((id) => live.has(id) && existing.has(id));
+  const sequence3 = replacement.values();
+  const order = [];
+  for (const id of current) {
+    if (originallyPresent.has(id)) {
+      const next = sequence3.next().value;
+      if (next !== void 0) {
+        order.push(next);
+      }
+    } else if (existing.has(id)) {
+      order.push(id);
+    }
+  }
+  return reinsertRestoredObjects({ current: [...order, ...sequence3], desired, existing });
+}
+function reinsertRestoredObjects({ current, desired, existing }) {
+  const live = new Set(current);
+  const restored = /* @__PURE__ */ new Map();
+  let anchor;
+  for (const id of desired) {
+    if (!existing.has(id)) {
+      continue;
+    }
+    if (live.has(id)) {
+      anchor = id;
+      continue;
+    }
+    const related = restored.get(anchor) ?? [];
+    related.push(id);
+    restored.set(anchor, related);
+  }
+  return [
+    ...restored.get(void 0) ?? [],
+    ...current.filter((id) => existing.has(id)).flatMap((id) => [id, ...restored.get(id) ?? []])
+  ];
+}
+function planReverseOrder(change) {
+  return change.expected ? reverseExplicitOrder(change) : reinsertRestoredObjects(change);
+}
+
+// src/modules/whiteboard/application/reverse-board-edit.ts
+var maxTargets = 500;
+var maxSceneObjects = 2e4;
+function byId(items) {
+  return new Map(items.map((item) => [item.objectId, item]));
+}
+function confirmedChange(reader2, boardId, actorId2, source) {
+  if (source.kind === "move") {
+    const result2 = reader2.getReceipt(boardId, actorId2, source.commandId)?.receipt.outcome;
+    if (result2?.kind === "applied") {
+      return {
+        revision: result2.boardRevision,
+        targets: result2.objects.map(({ objectId }) => objectId),
+        ordered: false
+      };
+    }
+    return void 0;
+  }
+  const stored = reader2.getEditReceipt(boardId, actorId2, source.commandId);
+  const result = stored?.receipt.outcome;
+  if (!stored?.advancedRevision || result?.kind !== "applied" || result.detailsExpired) {
+    return void 0;
+  }
+  return {
+    revision: result.boardRevision,
+    targets: [
+      .../* @__PURE__ */ new Set([...result.objects.map(({ objectId }) => objectId), ...result.removedObjectIds])
+    ],
+    ordered: result.order !== void 0,
+    layerTargets: result.layerChangedObjectIds
+  };
+}
+function needsPayload({ before, after, current }) {
+  return before ? before.payloadVersion !== after?.payloadVersion : after?.payloadVersion !== current?.payloadVersion;
+}
+function readPayloadStates(reader2, boardId, revision, ids) {
+  if (!ids.length) {
+    return /* @__PURE__ */ new Map();
+  }
+  const prior = revision - 1n;
+  const beforeBytes = reader2.payloadByteSize?.(boardId, ids, prior) ?? 0n;
+  const afterBytes = reader2.payloadByteSize?.(boardId, ids, revision) ?? 0n;
+  const currentBytes = reader2.payloadByteSize?.(boardId, ids) ?? 0n;
+  if (beforeBytes + afterBytes + currentBytes > boardWritePayloadLimit) {
+    return void 0;
+  }
+  const before = byId(reader2.getVersionPayloads(boardId, prior, ids));
+  const after = byId(reader2.getVersionPayloads(boardId, revision, ids));
+  const current = byId(reader2.getPayloads(boardId, ids));
+  return new Map(
+    ids.map((id) => [
+      id,
+      { before: before.get(id), after: after.get(id), current: current.get(id) }
+    ])
+  );
+}
+function validPayloadSnapshot(change, state) {
+  const before = change.before?.payloadVersion === state.before?.payloadVersion;
+  const after = change.after?.payloadVersion === state.after?.payloadVersion;
+  const current = change.current?.payloadVersion === state.current?.payloadVersion;
+  return before && after && current;
+}
+function reversePayload(board, change, state, delta) {
+  if (!state) {
+    return true;
+  }
+  if (!validPayloadSnapshot(change, state)) {
+    return false;
+  }
+  if (samePayloadContent(state.before, state.after)) {
+    return true;
+  }
+  if (!samePayloadContent(state.current, state.after)) {
+    return false;
+  }
+  if (!change.before) {
+    return true;
+  }
+  if (!state.before) {
+    delta.removedPayloadObjectIds.push(change.objectId);
+    return true;
+  }
+  const { payloadVersion } = state.before;
+  const clock = nextObjectClock(board.revision, state.current?.payloadVersion, payloadVersion);
+  if (clock === void 0) {
+    return false;
+  }
+  delta.payloads.push({ ...state.before, payloadVersion: clock });
+  return true;
+}
+function reverseObject(board, change, delta) {
+  const { before, after, current, objectId } = change;
+  if (!before && after) {
+    if (!current || !sameObjectContent(current, after)) {
+      return false;
+    }
+    delta.removedObjectIds.push(objectId);
+    return true;
+  }
+  if (!before || Boolean(after) !== Boolean(current)) {
+    return false;
+  }
+  const next = after && current ? reverseObjectFields(current, after, before) : before;
+  if (!next) {
+    return false;
+  }
+  if (current && sameObjectContent(next, current)) {
+    return true;
+  }
+  const geometryVersion = nextObjectClock(
+    board.revision,
+    current?.geometryVersion,
+    before.geometryVersion
+  );
+  if (geometryVersion === void 0) {
+    return false;
+  }
+  delta.objects.push({ ...next, geometryVersion });
+  return true;
+}
+function buildChanges(board, targets, payloads) {
+  const changes = {
+    objects: [],
+    payloads: [],
+    removedObjectIds: [],
+    removedPayloadObjectIds: []
+  };
+  for (const target2 of targets) {
+    const payload = payloads.get(target2.objectId);
+    if (!reverseObject(board, target2, changes) || !reversePayload(board, target2, payload, changes)) {
+      return void 0;
+    }
+  }
+  return changes;
+}
+function reverseScene(reader2, board, source, delta) {
+  const { boardId, revision } = board;
+  const live = reader2.listObjects(boardId, maxSceneObjects + 1);
+  if (live.length > maxSceneObjects) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  const current = byId(live);
+  const next = new Map(current);
+  for (const id of delta.removedObjectIds) {
+    next.delete(id);
+  }
+  for (const object3 of delta.objects) {
+    next.set(object3.objectId, object3);
+  }
+  const targets = /* @__PURE__ */ new Set([...source.targets, ...source.layerTargets ?? []]);
+  const needsOrder = source.ordered || delta.objects.some(({ objectId }) => !current.has(objectId));
+  const order = needsOrder ? readReverseOrder(reader2, boardId, source, current, next) : void 0;
+  if (needsOrder && !order) {
+    return { kind: "conflict", boardRevision: revision };
+  }
+  const payloadIds = [
+    ...delta.payloads.map(({ objectId }) => objectId),
+    ...delta.removedPayloadObjectIds
+  ];
+  const invalid = validateReversedScene(current, next, targets, order, payloadIds);
+  if (invalid) {
+    return invalid;
+  }
+  return { kind: "changes", ...delta, order };
+}
+function translationOnly({ before, after }) {
+  if (!before || !after || before.payloadVersion !== after.payloadVersion) {
+    return false;
+  }
+  const { x, y } = after.geometry;
+  return sameObjectContent({ ...before, geometry: { ...before.geometry, x, y } }, after);
+}
+function reverseTranslation(writer2, board, live, changes) {
+  const targets = live.map(({ objectId, geometryVersion }) => ({
+    objectId,
+    expectedGeometryVersion: geometryVersion
+  }));
+  const { boardId, revision } = board;
+  const scope2 = createMoveScope(writer2, boardId, targets);
+  const related = writer2.listRelatedConnectors(
+    boardId,
+    targets.map(({ objectId }) => objectId)
+  );
+  if ([...live, ...related].some((object3) => scope2.isLocked(object3))) {
+    return { kind: "rejected", reason: "geometryLocked" };
+  }
+  if (!live.every(canTranslate) || scope2.requiredObjects(live).length !== live.length) {
+    return { kind: "conflict", boardRevision: revision, objects: live };
+  }
+  return { kind: "changes", ...changes };
+}
+function readReverseOrder(reader2, boardId, source, current, next) {
+  const idsAt = (revision) => reader2.listVersionObjects(boardId, revision).map(({ objectId }) => objectId);
+  const desired = idsAt(source.revision - 1n);
+  const expected = source.ordered ? idsAt(source.revision) : void 0;
+  const order = planReverseOrder({
+    current: [...current.keys()],
+    desired,
+    expected,
+    existing: new Set(next.keys())
+  });
+  return order && new Set(order).size === next.size ? order : void 0;
+}
+function planBoardReverse(reader2, board, actor, command) {
+  const { boardId } = board;
+  const source = confirmedChange(reader2, boardId, actor.id, command);
+  if (!source || source.revision === 0n) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
+  const version = reader2.getVersion(boardId, source.revision);
+  const prior = source.revision - 1n;
+  if (version?.actorId !== actor.id || version.kind === "restore" || !reader2.getVersion(boardId, prior)) {
+    return { kind: "rejected", reason: "versionUnavailable" };
+  }
+  if (source.targets.length > maxTargets) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  const before = byId(reader2.listVersionObjects(boardId, prior, source.targets));
+  const after = byId(reader2.listVersionObjects(boardId, source.revision, source.targets));
+  const live = byId(reader2.getObjects(boardId, source.targets));
+  const targets = source.targets.map((objectId) => ({
+    objectId,
+    before: before.get(objectId),
+    after: after.get(objectId),
+    current: live.get(objectId)
+  }));
+  const ids = targets.filter(needsPayload).map(({ objectId }) => objectId);
+  const payloads = readPayloadStates(reader2, boardId, source.revision, ids);
+  if (!payloads) {
+    return { kind: "rejected", reason: "tooLarge" };
+  }
+  const changes = buildChanges(board, targets, payloads);
+  if (!changes) {
+    return { kind: "conflict", boardRevision: board.revision, objects: [...live.values()] };
+  }
+  if (!source.ordered && targets.length > 0 && targets.every(translationOnly)) {
+    return reverseTranslation(reader2, board, [...live.values()], changes);
+  }
+  return reverseScene(reader2, board, source, changes);
+}
+
+// src/modules/whiteboard/application/board-editor.ts
+function createBoardEditorApplication(repository, now, renderUploadedSvg) {
+  return {
+    editGeometry(actor, { operation, signature, boardId, commandId }) {
+      return runBoardEdit(
+        repository,
+        actor,
+        { boardId, commandId },
+        { kind: "geometry", signature, savedAtMillis: now() },
+        (writer2, board) => operation.kind === "paste" ? pasteBoardObjects(writer2, board, actor, operation, signature) : planGeometryEdit(writer2, board, operation)
+      );
+    },
+    editContent(actor, { operation, signature, boardId, commandId }) {
+      return runBoardEdit(
+        repository,
+        actor,
+        { boardId, commandId },
+        { kind: "content", signature, savedAtMillis: now() },
+        (writer2, board) => planContentEdit(writer2, board, operation)
+      );
+    },
+    attachImage: createAttachImage(repository, now, renderUploadedSvg),
+    attachVideo(actor, { operation, signature, boardId, commandId }) {
+      return runBoardEdit(
+        repository,
+        actor,
+        { boardId, commandId },
+        { kind: "content", signature, savedAtMillis: now() },
+        (writer2, board) => planVideoEdit(writer2, board, operation)
+      );
+    },
+    uploadDocumentImage(actor, { operation, signature, boardId, commandId }) {
+      const receipt = runBoardEdit(
+        repository,
+        actor,
+        { boardId, commandId },
+        { kind: "image", signature, savedAtMillis: now() },
+        (writer2, board) => planDocumentImageUpload(writer2, board, operation)
+      );
+      return {
+        receipt,
+        assetUrl: receipt.outcome.kind === "applied" ? archiveImageSource(boardId, operation.assetId) : void 0
+      };
+    },
+    reverseEdit(actor, { operation, signature, boardId, commandId }) {
+      return runBoardEdit(
+        repository,
+        actor,
+        { boardId, commandId },
+        { kind: "geometry", signature, savedAtMillis: now() },
+        (writer2, board) => planBoardReverse(writer2, board, actor, operation)
+      );
+    },
+    getEditReceipt: (actor, identity) => readBoardEditReceipt(repository, actor, identity)
+  };
+}
+
 // src/modules/whiteboard/application/board-history.ts
 var defaultPageSize2 = 20;
 var maxPageSize2 = 50;
@@ -6831,7 +10927,7 @@ function readVersion(reader2, board, revision) {
 function versionPage(reader2, board, before, limit) {
   const earlierThan = before !== void 0 && before <= board.revision ? before : void 0;
   const found = reader2.listVersions(board.boardId, earlierThan, limit + 1);
-  const versions = found.length === 0 && earlierThan === void 0 ? [baseline(board)] : found;
+  const versions = found.length === 0 && earlierThan === void 0 ? [readVersion(reader2, board, board.revision) ?? baseline(board)] : found;
   const page = versions.slice(0, limit);
   return {
     currentRevision: board.revision,
@@ -6886,7 +10982,7 @@ function restorePlan(reader2, board, { expectedCurrentRevision, revision, scope:
   }
   return planBoardRestore(reader2, board, revision, scope2);
 }
-function createBoardHistoryApplication(repository, now) {
+function createBoardHistoryApplication(repository, now, renderPng) {
   return {
     listVersions(actor, boardId, before, limit = defaultPageSize2) {
       return repository.read((reader2) => {
@@ -6916,8 +11012,8 @@ function createBoardHistoryApplication(repository, now) {
           return void 0;
         }
         const rows = reader2.getVersionPayloads(boardId, revision, [...new Set(objectIds)]);
-        const byId = new Map(rows.map((row) => [row.objectId, row]));
-        return objectIds.map((id) => payloadResult(id, byId.get(id)));
+        const byId2 = new Map(rows.map((row) => [row.objectId, row]));
+        return objectIds.map((id) => payloadResult(id, byId2.get(id)));
       });
     },
     restoreVersion(actor, command, signature) {
@@ -6938,12 +11034,38 @@ function createBoardHistoryApplication(repository, now) {
     },
     exportVersion(actor, command) {
       return exportSavedVersion(repository, actor, command);
+    },
+    async exportVersionFile(actor, command) {
+      const { format } = command;
+      if (format === "zip") {
+        return { kind: "rejected", reason: "unsupported" };
+      }
+      if (format !== "png") {
+        return exportSavedVersion(repository, actor, { ...command, format });
+      }
+      const source = exportSavedVersion(repository, actor, { ...command, format });
+      if (source.kind === "unavailable") {
+        return source;
+      }
+      const result = await renderExportPng(source, renderPng, () => {
+        repository.read((reader2) => requireAccess3(reader2, actor, command.boardId));
+      });
+      return result.kind === "stale" ? { kind: "unavailable" } : result;
     }
   };
 }
 
 // src/modules/whiteboard/application/index.ts
-function createWhiteboardApplication(repository, now) {
+function createWhiteboardApplication(repository, now, files = {}) {
+  function exportBoard(actor, command) {
+    return executeBoardExport(repository, actor, command, requireAccess3, (reader2) => {
+      const board = reader2.getBoard(command.boardId);
+      if (!board) {
+        throw new WhiteboardAccessError();
+      }
+      return board;
+    });
+  }
   return {
     getBoardScene(actor, boardId) {
       return repository.read((reader2) => {
@@ -6962,8 +11084,8 @@ function createWhiteboardApplication(repository, now) {
           return [];
         }
         const payloads = reader2.getPayloads(boardId, [...new Set(objectIds)]);
-        const byId = new Map(payloads.map((payload) => [payload.objectId, payload]));
-        return objectIds.map((id) => payloadResult(id, byId.get(id)));
+        const byId2 = new Map(payloads.map((payload) => [payload.objectId, payload]));
+        return objectIds.map((id) => payloadResult(id, byId2.get(id)));
       });
     },
     moveObjects(actor, command) {
@@ -6975,14 +11097,19 @@ function createWhiteboardApplication(repository, now) {
         return reader2.getReceipt(boardId, actor.id, commandId)?.receipt;
       });
     },
-    exportBoard(actor, command) {
-      return executeBoardExport(repository, actor, command, requireAccess3, (reader2) => {
-        const board = reader2.getBoard(command.boardId);
-        if (!board) {
-          throw new WhiteboardAccessError();
-        }
-        return board;
-      });
+    exportBoard,
+    async exportBoardFile(actor, command) {
+      const { format } = command;
+      if (format === "zip") {
+        return files.exportArchive?.(actor, command) ?? { kind: "rejected", reason: "unsupported" };
+      }
+      if (format === "png") {
+        const source = exportBoard(actor, { ...command, format });
+        return renderExportPng(source, files.renderPng, () => {
+          repository.read((reader2) => requireAccess3(reader2, actor, command.boardId));
+        });
+      }
+      return exportBoard(actor, { ...command, format });
     }
   };
 }
@@ -7103,7 +11230,7 @@ function sharingView(reader2, services, boardId, role) {
 }
 
 // src/modules/sharing/application/commands.ts
-function rejected3(command, reason) {
+function rejected5(command, reason) {
   return {
     boardId: command.boardId,
     commandId: command.commandId,
@@ -7120,16 +11247,16 @@ function validIdentity({ boardId, commandId }) {
 function previousOrRejected(reader2, services, actorId2, command) {
   const { boardId, commandId, expectedVersion } = command;
   if (!validIdentity(command)) {
-    return rejected3(command, "invalidCommand");
+    return rejected5(command, "invalidCommand");
   }
   if (!reader2.ownsBoard(boardId, actorId2)) {
-    return rejected3(command, "forbidden");
+    return rejected5(command, "forbidden");
   }
   const prior = reader2.getReceipt(boardId, actorId2, commandId);
   if (prior) {
-    return prior.signature === commandSignature3(command, services) ? prior.receipt : rejected3(command, "commandIdReuse");
+    return prior.signature === commandSignature3(command, services) ? prior.receipt : rejected5(command, "commandIdReuse");
   }
-  return getSettings(reader2, boardId).version === expectedVersion ? void 0 : rejected3(command, "versionChanged");
+  return getSettings(reader2, boardId).version === expectedVersion ? void 0 : rejected5(command, "versionChanged");
 }
 function rotateInvitation(writer2, services, boardId, version, role) {
   const enabled = writer2.getInvitation(boardId, role)?.enabled ?? true;
@@ -7226,11 +11353,11 @@ function applySharing(writer2, services, actorId2, command) {
   const current = getSettings(writer2, boardId);
   const version = nextSharingVersion(current.version);
   if (version === void 0) {
-    return rejected3(command, "invalidCommand");
+    return rejected5(command, "invalidCommand");
   }
   const problem = perform(writer2, services, command, current, version);
   if (problem) {
-    return rejected3(command, problem);
+    return rejected5(command, problem);
   }
   const receipt = { boardId, commandId, outcome: { kind: "applied", version } };
   writer2.saveReceipt(actorId2, { signature: commandSignature3(command, services), receipt });
@@ -7415,8 +11542,8 @@ function int64FromString(dec) {
   const base = 1e6;
   let lowBits = 0;
   let highBits = 0;
-  function add1e6digit(begin, end) {
-    const digit1e6 = Number(dec.slice(begin, end));
+  function add1e6digit(begin, end2) {
+    const digit1e6 = Number(dec.slice(begin, end2));
     highBits *= base;
     lowBits = lowBits * base + digit1e6;
     if (lowBits >= TWO_PWR_32_DBL) {
@@ -8069,8 +12196,8 @@ function getTextEncoding() {
     });
     let textDecoderStrict;
     const config = {
-      encodeUtf8(text2) {
-        return textEncoder.encode(text2);
+      encodeUtf8(text3) {
+        return textEncoder.encode(text3);
       },
       decodeUtf8(bytes, strict) {
         if (strict) {
@@ -8084,9 +12211,9 @@ function getTextEncoding() {
         }
         return textDecoder.decode(bytes);
       },
-      checkUtf8(text2) {
+      checkUtf8(text3) {
         try {
-          encodeURIComponent(text2);
+          encodeURIComponent(text3);
           return true;
         } catch (_) {
           return false;
@@ -8098,8 +12225,8 @@ function getTextEncoding() {
     }
     const nativeStringIsWellFormed = String.prototype.isWellFormed;
     if (nativeStringIsWellFormed) {
-      config.checkUtf8 = (text2) => {
-        return nativeStringIsWellFormed.call(text2);
+      config.checkUtf8 = (text3) => {
+        return nativeStringIsWellFormed.call(text3);
       };
     }
     configureTextEncoding(config);
@@ -8107,8 +12234,8 @@ function getTextEncoding() {
   return te;
 }
 function emulateEncodeInto(encodeUtf8) {
-  return (text2, dest) => {
-    const bytes = encodeUtf8(text2);
+  return (text3, dest) => {
+    const bytes = encodeUtf8(text3);
     dest.set(bytes);
     return { written: bytes.byteLength };
   };
@@ -8471,13 +12598,13 @@ var BinaryReader = class {
    */
   tag() {
     const start = this.pos;
-    const tag = this.uint32();
+    const tag2 = this.uint32();
     const bytesRead = this.pos - start;
     if (bytesRead > 5 || bytesRead == 5 && this.buf[this.pos - 1] > 15) {
       throw new Error("illegal tag: varint overflows uint32");
     }
-    const fieldNo = tag >>> 3;
-    const wireType = tag & 7;
+    const fieldNo = tag2 >>> 3;
+    const wireType = tag2 & 7;
     if (fieldNo <= 0 || wireType > 5) {
       throw new Error("illegal tag: field no " + fieldNo + " wire type " + wireType);
     }
@@ -10117,8 +14244,8 @@ function addFields(message, reg, mapEntries) {
   for (const oneof of allOneofs.filter((o) => oneofsSeen.has(o))) {
     message.oneofs.push(oneof);
   }
-  for (const child of message.nestedMessages) {
-    addFields(child, reg, mapEntries);
+  for (const child3 of message.nestedMessages) {
+    addFields(child3, reg, mapEntries);
   }
 }
 function addEnum(proto, file, parent, reg) {
@@ -10215,9 +14342,9 @@ function addService(proto, file, reg) {
   file.services.push(desc);
   reg.add(desc);
   for (const methodProto of proto.method) {
-    const method = newMethod(methodProto, desc, reg);
-    desc.methods.push(method);
-    desc.method[method.localName] = method;
+    const method2 = newMethod(methodProto, desc, reg);
+    desc.methods.push(method2);
+    desc.method[method2.localName] = method2;
   }
 }
 function newMethod(proto, parent, reg) {
@@ -10319,10 +14446,10 @@ function newField(proto, parentOrFile, reg, oneof, mapEntries) {
     enumerable: true,
     configurable: true
   });
-  const label = proto.label;
+  const label2 = proto.label;
   const type = proto.type;
   const jstype = (_c = proto.options) === null || _c === void 0 ? void 0 : _c.jstype;
-  if (label === LABEL_REPEATED) {
+  if (label2 === LABEL_REPEATED) {
     const mapEntry = type == TYPE_MESSAGE ? mapEntries === null || mapEntries === void 0 ? void 0 : mapEntries.get(trimLeadingDot(proto.typeName)) : void 0;
     if (mapEntry) {
       field.fieldKind = "map";
@@ -10872,9 +14999,9 @@ function compileMessageReader(descString, fieldReaders) {
     if (++ctx.depth > ctx.recursionLimit) {
       throw new Error(`cannot decode ${descString} from binary: maximum recursion depth of ${ctx.recursionLimit} reached`);
     }
-    const end = reader2.pos + length;
+    const end2 = reader2.pos + length;
     const unknownFields = (_a = message.$unknown) !== null && _a !== void 0 ? _a : [];
-    while (reader2.pos < end) {
+    while (reader2.pos < end2) {
       const [fieldNo, wireType] = reader2.tag();
       const fieldReader = fieldReaders.get(fieldNo);
       if (fieldReader === void 0) {
@@ -11004,24 +15131,24 @@ function compileMessageFieldReader(field) {
     const oneofLocalName = field.oneof.localName;
     return (message, reader2, ctx) => {
       const oneof = message[oneofLocalName];
-      const child = toMessage(oneof.case === localName ? oneof.value : void 0);
-      readChild(child, reader2, ctx);
-      message[oneofLocalName] = { case: localName, value: toLocal(child) };
+      const child3 = toMessage(oneof.case === localName ? oneof.value : void 0);
+      readChild(child3, reader2, ctx);
+      message[oneofLocalName] = { case: localName, value: toLocal(child3) };
     };
   }
   return (message, reader2, ctx) => {
-    const child = toMessage(message[localName]);
-    readChild(child, reader2, ctx);
-    message[localName] = toLocal(child);
+    const child3 = toMessage(message[localName]);
+    readChild(child3, reader2, ctx);
+    message[localName] = toLocal(child3);
   };
 }
 function compileChildReader(field) {
   const compiledChild = compiledReader(field.message);
   if (field.delimitedEncoding) {
     const fieldNo = field.number;
-    return (child, reader2, ctx) => compiledChild.readGroup(child, reader2, ctx, fieldNo);
+    return (child3, reader2, ctx) => compiledChild.readGroup(child3, reader2, ctx, fieldNo);
   }
-  return (child, reader2, ctx) => compiledChild.read(child, reader2, ctx, reader2.uint32());
+  return (child3, reader2, ctx) => compiledChild.read(child3, reader2, ctx, reader2.uint32());
 }
 function compileListFieldReader(field) {
   const localName = field.localName;
@@ -11029,9 +15156,9 @@ function compileListFieldReader(field) {
     const { toMessage, toLocal } = localMessageMapper(field);
     const readChild = compileChildReader(field);
     return (message, reader2, ctx) => {
-      const child = toMessage(void 0);
-      readChild(child, reader2, ctx);
-      message[localName].push(toLocal(child));
+      const child3 = toMessage(void 0);
+      readChild(child3, reader2, ctx);
+      message[localName].push(toLocal(child3));
     };
   }
   const scalarType = field.listKind == "enum" ? ScalarType.INT32 : field.scalar;
@@ -11041,8 +15168,8 @@ function compileListFieldReader(field) {
   return (message, reader2, ctx, wireType) => {
     const items = message[localName];
     if (wireType == WireType.LengthDelimited && packedPossible) {
-      const end = reader2.uint32() + reader2.pos;
-      while (reader2.pos < end) {
+      const end2 = reader2.uint32() + reader2.pos;
+      while (reader2.pos < end2) {
         items.push(readScalar(reader2));
       }
     } else {
@@ -11079,21 +15206,21 @@ function compileMapFieldReader(field) {
       const { toMessage, toLocal } = localMessageMapper(field);
       const readChild = compiledReader(field.message).read;
       readValue = (reader2, ctx, existing) => {
-        const child = toMessage(existing);
-        readChild(child, reader2, ctx, reader2.uint32());
-        return toLocal(child);
+        const child3 = toMessage(existing);
+        readChild(child3, reader2, ctx, reader2.uint32());
+        return toLocal(child3);
       };
       valueDefault = () => toLocal(toMessage(void 0));
       break;
     }
   }
   return (message, reader2, ctx) => {
-    const record5 = message[localName];
+    const record7 = message[localName];
     let key;
     let val;
     const len = reader2.uint32();
-    const end = reader2.pos + len;
-    while (reader2.pos < end) {
+    const end2 = reader2.pos + len;
+    while (reader2.pos < end2) {
       const [fieldNo, wireType] = reader2.tag();
       switch (fieldNo) {
         case 1:
@@ -11112,7 +15239,7 @@ function compileMapFieldReader(field) {
     if (val === void 0) {
       val = valueDefault();
     }
-    setOwn(record5, key, val);
+    setOwn(record7, key, val);
   };
 }
 function compileScalarReader(type, utf8Validation, longAsString) {
@@ -11382,14 +15509,14 @@ function compileMapField(field) {
     const { toMessage } = localMessageMapper(field);
     const writeMessage = compiledWriter(field.message);
     return (writer2, opts, message) => {
-      const record5 = message[localName];
-      const keys = Object.keys(record5);
+      const record7 = message[localName];
+      const keys = Object.keys(record7);
       for (let i = 0; i < keys.length; i++) {
         const key = keys[i];
         writer2.tag(fieldNo, WireType.LengthDelimited).fork();
         writeKey(writer2, key);
         writer2.tag(2, WireType.LengthDelimited).fork();
-        writeMessage(writer2, opts, toMessage(record5[key]));
+        writeMessage(writer2, opts, toMessage(record7[key]));
         writer2.join();
         writer2.join();
       }
@@ -11399,14 +15526,14 @@ function compileMapField(field) {
   const valueWireType = writeTypeOfScalar(scalarType);
   const writeScalar = compileScalarValue(scalarType, field.parent.typeName, field.name);
   return (writer2, opts, message) => {
-    const record5 = message[localName];
-    const keys = Object.keys(record5);
+    const record7 = message[localName];
+    const keys = Object.keys(record7);
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       writer2.tag(fieldNo, WireType.LengthDelimited).fork();
       writeKey(writer2, key);
       writer2.tag(2, valueWireType);
-      writeScalar(writer2, record5[key]);
+      writeScalar(writer2, record7[key]);
       writer2.join();
     }
   };
@@ -11506,15 +15633,15 @@ function compileChildWriter(field) {
   const fieldNo = field.number;
   const writeMessage = compiledWriter(field.message);
   if (field.delimitedEncoding) {
-    return (writer2, opts, child) => {
+    return (writer2, opts, child3) => {
       writer2.tag(fieldNo, WireType.StartGroup);
-      writeMessage(writer2, opts, child);
+      writeMessage(writer2, opts, child3);
       writer2.tag(fieldNo, WireType.EndGroup);
     };
   }
-  return (writer2, opts, child) => {
+  return (writer2, opts, child3) => {
     writer2.tag(fieldNo, WireType.LengthDelimited).fork();
-    writeMessage(writer2, opts, child);
+    writeMessage(writer2, opts, child3);
     writer2.join();
   };
 }
@@ -11908,15 +16035,15 @@ function compileListItemValue(field) {
 function compileMapValue(field) {
   const writeMapValue = compileMapEntryValue(field);
   return (opts, value) => {
-    const record5 = value;
-    const keys = Object.keys(record5);
+    const record7 = value;
+    const keys = Object.keys(record7);
     if (keys.length == 0 && !opts.alwaysEmitImplicit) {
       return void 0;
     }
     const jsonObject = {};
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
-      setOwn(jsonObject, key, writeMapValue(opts, record5[key]));
+      setOwn(jsonObject, key, writeMapValue(opts, record7[key]));
     }
     return jsonObject;
   };
@@ -12083,7 +16210,7 @@ function durationToJson(val) {
   if (seconds > 0 && nanos < 0 || seconds < 0 && nanos > 0) {
     throw new Error(`cannot encode message ${val.$typeName} to JSON: nanos sign must match seconds sign`);
   }
-  let text2 = val.seconds.toString();
+  let text3 = val.seconds.toString();
   if (nanos !== 0) {
     let nanosStr = Math.abs(nanos).toString();
     nanosStr = "0".repeat(9 - nanosStr.length) + nanosStr;
@@ -12092,12 +16219,12 @@ function durationToJson(val) {
     } else if (nanosStr.substring(6) === "000") {
       nanosStr = nanosStr.substring(0, 6);
     }
-    text2 += "." + nanosStr;
+    text3 += "." + nanosStr;
     if (nanos < 0 && seconds == 0) {
-      text2 = "-" + text2;
+      text3 = "-" + text3;
     }
   }
-  return text2 + "s";
+  return text3 + "s";
 }
 function fieldMaskToJson(val) {
   return val.paths.map((p) => {
@@ -12418,9 +16545,9 @@ function compileMessageFieldReader2(field) {
         }
         return;
       }
-      const child = toMessage(oneof.case === localName ? oneof.value : void 0);
-      readChild(child, json, ctx);
-      message[oneofLocalName] = { case: localName, value: toLocal(child) };
+      const child3 = toMessage(oneof.case === localName ? oneof.value : void 0);
+      readChild(child3, json, ctx);
+      message[oneofLocalName] = { case: localName, value: toLocal(child3) };
     };
   }
   return (message, json, ctx) => {
@@ -12428,9 +16555,9 @@ function compileMessageFieldReader2(field) {
       delete message[localName];
       return;
     }
-    const child = toMessage(message[localName]);
-    readChild(child, json, ctx);
-    message[localName] = toLocal(child);
+    const child3 = toMessage(message[localName]);
+    readChild(child3, json, ctx);
+    message[localName] = toLocal(child3);
   };
 }
 function compileListFieldReader2(field) {
@@ -12497,9 +16624,9 @@ function compileListItemReader(field) {
         if (json === null && nullResets) {
           throw new FieldError(field, "list item must not be null");
         }
-        const child = toMessage(void 0);
-        readChild(child, json, ctx);
-        return toLocal(child);
+        const child3 = toMessage(void 0);
+        readChild(child3, json, ctx);
+        return toLocal(child3);
       };
     }
   }
@@ -12532,9 +16659,9 @@ function compileMapFieldReader2(field) {
       const readChild = compiledReader2(field.message);
       nullResets = field.message.typeName != "google.protobuf.Value";
       parseValue = (json, ctx) => {
-        const child = toMessage(void 0);
-        readChild(child, json, ctx);
-        return toLocal(child);
+        const child3 = toMessage(void 0);
+        readChild(child3, json, ctx);
+        return toLocal(child3);
       };
       break;
     }
@@ -12546,7 +16673,7 @@ function compileMapFieldReader2(field) {
     if (typeof json != "object" || Array.isArray(json)) {
       throw new FieldError(field, "expected object, got " + formatVal(json));
     }
-    const record5 = message[localName];
+    const record7 = message[localName];
     const seen = /* @__PURE__ */ new Set();
     const jsonMapKeys = Object.keys(json);
     for (let i = 0; i < jsonMapKeys.length; i++) {
@@ -12574,7 +16701,7 @@ function compileMapFieldReader2(field) {
           throw new FieldError(field, `map entry ${formatVal(key)}: ${reasonSingular(field, value, check)}`);
         }
       }
-      setOwn(record5, key, toLocalValue(value));
+      setOwn(record7, key, toLocalValue(value));
     }
   };
 }
@@ -12993,27 +17120,27 @@ function sendProtobuf(response, result) {
 }
 
 // src/entrypoints/http/unary-route.ts
-function unaryRoute(method, handle) {
-  const path2 = `/${method.parent.typeName}/${method.name}`;
+function unaryRoute(method2, handle) {
+  const path2 = `/${method2.parent.typeName}/${method2.name}`;
   return [
     path2,
     (actor, body) => {
-      const request = decodeRequest(method.input, body);
+      const request = decodeRequest(method2.input, body);
       actor.authorize?.(request);
       const response = handle(actor, request);
-      return toBinary(method.output, create(method.output, response));
+      return toBinary(method2.output, create(method2.output, response));
     }
   ];
 }
-function asyncUnaryRoute(method, handle) {
-  const path2 = `/${method.parent.typeName}/${method.name}`;
+function asyncUnaryRoute(method2, handle) {
+  const path2 = `/${method2.parent.typeName}/${method2.name}`;
   return [
     path2,
     async (actor, body) => {
-      const request = decodeRequest(method.input, body);
+      const request = decodeRequest(method2.input, body);
       actor.authorize?.(request);
       const response = await handle(actor, request);
-      return toBinary(method.output, create(method.output, response));
+      return toBinary(method2.output, create(method2.output, response));
     }
   ];
 }
@@ -13118,8 +17245,8 @@ function archiveRoute(path2, application) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_catalog_service_pb.js
-var file_luming_studio_v1_board_catalog_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2NhdGFsb2dfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSK3AQoMQm9hcmRTdW1tYXJ5EhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEh4KEXVwZGF0ZWRfYXRfbWlsbGlzGAMgASgESACIAQESDgoGcGlubmVkGAQgASgIEhoKDWVudHJ5X3ZlcnNpb24YBSABKARIAYgBARISCgpjYW5fbWFuYWdlGAYgASgIQhQKEl91cGRhdGVkX2F0X21pbGxpc0IQCg5fZW50cnlfdmVyc2lvbiKGAQoRTGlzdEJvYXJkc1JlcXVlc3QSDQoFcXVlcnkYASABKAkSLwoFb3JkZXIYAiABKA4yIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU29ydE9yZGVyEhEKCXBhZ2Vfc2l6ZRgDIAEoDRITCgZjdXJzb3IYBCABKAlIAIgBAUIJCgdfY3Vyc29yIm4KEkxpc3RCb2FyZHNSZXNwb25zZRIuCgZib2FyZHMYASADKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VtbWFyeRIYCgtuZXh0X2N1cnNvchgCIAEoCUgAiAEBQg4KDF9uZXh0X2N1cnNvciJfChNUcmFzaGVkQm9hcmRTdW1tYXJ5Ei0KBWJvYXJkGAEgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1bW1hcnkSGQoRdHJhc2hlZF9hdF9taWxsaXMYAiABKAQijQEKGExpc3RUcmFzaGVkQm9hcmRzUmVxdWVzdBINCgVxdWVyeRgBIAEoCRIvCgVvcmRlchgCIAEoDjIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTb3J0T3JkZXISEQoJcGFnZV9zaXplGAMgASgNEhMKBmN1cnNvchgEIAEoCUgAiAEBQgkKB19jdXJzb3IifAoZTGlzdFRyYXNoZWRCb2FyZHNSZXNwb25zZRI1CgZib2FyZHMYASADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlRyYXNoZWRCb2FyZFN1bW1hcnkSGAoLbmV4dF9jdXJzb3IYAiABKAlIAIgBAUIOCgxfbmV4dF9jdXJzb3IiNwoSQ3JlYXRlQm9hcmRSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkiTwoTQ3JlYXRlQm9hcmRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQiRAoVRHVwbGljYXRlQm9hcmRSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSFwoPc291cmNlX2JvYXJkX2lkGAIgASgJIlIKFkR1cGxpY2F0ZUJvYXJkUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0IucBChJNYW5hZ2VCb2FyZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIQCghib2FyZF9pZBgCIAEoCRIjChZleHBlY3RlZF9lbnRyeV92ZXJzaW9uGAMgASgESAGIAQESDwoFdGl0bGUYBCABKAlIABIQCgZwaW5uZWQYBSABKAhIABI7CglsaWZlY3ljbGUYBiABKA4yJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkTGlmZWN5Y2xlQWN0aW9uSABCCwoJb3BlcmF0aW9uQhkKF19leHBlY3RlZF9lbnRyeV92ZXJzaW9uIk8KE01hbmFnZUJvYXJkUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0ImQKEFB1cmdlQm9hcmRUYXJnZXQSEAoIYm9hcmRfaWQYASABKAkSIwoWZXhwZWN0ZWRfZW50cnlfdmVyc2lvbhgCIAEoBEgAiAEBQhkKF19leHBlY3RlZF9lbnRyeV92ZXJzaW9uIl0KElB1cmdlQm9hcmRzUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEjMKB3RhcmdldHMYAiADKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlB1cmdlQm9hcmRUYXJnZXQiTwoTUHVyZ2VCb2FyZHNSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQigAEKFkNhdGFsb2dQdXJnZUl0ZW1SZXN1bHQSEAoIYm9hcmRfaWQYASABKAkSEQoHZGVsZXRlZBgCIAEoCEgAEjYKCHJlamVjdGVkGAMgASgLMiIubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVqZWN0aW9uSABCCQoHb3V0Y29tZSJNChJDYXRhbG9nUHVyZ2VSZXN1bHQSNwoFaXRlbXMYASADKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dQdXJnZUl0ZW1SZXN1bHQijAIKFUNhdGFsb2dDb21tYW5kUmVjZWlwdBISCgpjb21tYW5kX2lkGAEgASgJEjEKB2NyZWF0ZWQYAiABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VtbWFyeUgAEjYKCHJlamVjdGVkGAMgASgLMiIubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVqZWN0aW9uSAASMQoHY2hhbmdlZBgEIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdW1tYXJ5SAASNgoGcHVyZ2VkGAUgASgLMiQubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUHVyZ2VSZXN1bHRIAEIJCgdvdXRjb21lIkwKEENhdGFsb2dSZWplY3Rpb24SOAoGcmVhc29uGAEgASgOMigubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVqZWN0aW9uUmVhc29uIjUKH0dldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCSIvChlDYXRhbG9nUmVjZWlwdE5vdFJlY29yZGVkEhIKCmNvbW1hbmRfaWQYASABKAkirQEKIEdldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlc3BvbnNlEjoKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dDb21tYW5kUmVjZWlwdEgAEkMKDG5vdF9yZWNvcmRlZBgCIAEoCzIrLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ1JlY2VpcHROb3RSZWNvcmRlZEgAQggKBnJlc3VsdCprCg5Cb2FyZFNvcnRPcmRlchIgChxCT0FSRF9TT1JUX09SREVSX1VOU1BFQ0lGSUVEEAASGwoXQk9BUkRfU09SVF9PUkRFUl9SRUNFTlQQARIaChZCT0FSRF9TT1JUX09SREVSX1RJVExFEAIqhAEKFEJvYXJkTGlmZWN5Y2xlQWN0aW9uEiYKIkJPQVJEX0xJRkVDWUNMRV9BQ1RJT05fVU5TUEVDSUZJRUQQABIgChxCT0FSRF9MSUZFQ1lDTEVfQUNUSU9OX1RSQVNIEAESIgoeQk9BUkRfTElGRUNZQ0xFX0FDVElPTl9SRVNUT1JFEAIq0wIKFkNhdGFsb2dSZWplY3Rpb25SZWFzb24SKAokQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfVElUTEUQARItCilDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRACEiYKIkNBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QAxIyCi5DQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fRU5UUllfVkVSU0lPTl9DSEFOR0VEEAQSKgomQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX1NUQVRFX0NIQU5HRUQQBRIsCihDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9DT01NQU5EEAYy2QUKE0JvYXJkQ2F0YWxvZ1NlcnZpY2USVwoKTGlzdEJvYXJkcxIjLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkc1JlcXVlc3QaJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZHNSZXNwb25zZRJsChFMaXN0VHJhc2hlZEJvYXJkcxIqLmx1bWluZy5zdHVkaW8udjEuTGlzdFRyYXNoZWRCb2FyZHNSZXF1ZXN0GisubHVtaW5nLnN0dWRpby52MS5MaXN0VHJhc2hlZEJvYXJkc1Jlc3BvbnNlEloKC0NyZWF0ZUJvYXJkEiQubHVtaW5nLnN0dWRpby52MS5DcmVhdGVCb2FyZFJlcXVlc3QaJS5sdW1pbmcuc3R1ZGlvLnYxLkNyZWF0ZUJvYXJkUmVzcG9uc2USYwoORHVwbGljYXRlQm9hcmQSJy5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkUmVxdWVzdBooLmx1bWluZy5zdHVkaW8udjEuRHVwbGljYXRlQm9hcmRSZXNwb25zZRJaCgtNYW5hZ2VCb2FyZBIkLmx1bWluZy5zdHVkaW8udjEuTWFuYWdlQm9hcmRSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5NYW5hZ2VCb2FyZFJlc3BvbnNlEloKC1B1cmdlQm9hcmRzEiQubHVtaW5nLnN0dWRpby52MS5QdXJnZUJvYXJkc1JlcXVlc3QaJS5sdW1pbmcuc3R1ZGlvLnYxLlB1cmdlQm9hcmRzUmVzcG9uc2USgQEKGEdldENhdGFsb2dDb21tYW5kUmVjZWlwdBIxLmx1bWluZy5zdHVkaW8udjEuR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0UmVxdWVzdBoyLmx1bWluZy5zdHVkaW8udjEuR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0UmVzcG9uc2ViBnByb3RvMw");
-var CatalogCommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_catalog_service, 17);
+var file_luming_studio_v1_board_catalog_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX2NhdGFsb2dfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSLrAQoMQm9hcmRTdW1tYXJ5EhAKCGJvYXJkX2lkGAEgASgJEg0KBXRpdGxlGAIgASgJEh4KEXVwZGF0ZWRfYXRfbWlsbGlzGAMgASgESACIAQESDgoGcGlubmVkGAQgASgIEhoKDWVudHJ5X3ZlcnNpb24YBSABKARIAYgBARISCgpjYW5fbWFuYWdlGAYgASgIEh0KEHByZXZpZXdfcmV2aXNpb24YByABKARIAogBAUIUChJfdXBkYXRlZF9hdF9taWxsaXNCEAoOX2VudHJ5X3ZlcnNpb25CEwoRX3ByZXZpZXdfcmV2aXNpb24imwEKEUxpc3RCb2FyZHNSZXF1ZXN0Eg0KBXF1ZXJ5GAEgASgJEi8KBW9yZGVyGAIgASgOMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFNvcnRPcmRlchIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQESEwoLcGlubmVkX29ubHkYBSABKAhCCQoHX2N1cnNvciJuChJMaXN0Qm9hcmRzUmVzcG9uc2USLgoGYm9hcmRzGAEgAygLMh4ubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1bW1hcnkSGAoLbmV4dF9jdXJzb3IYAiABKAlIAIgBAUIOCgxfbmV4dF9jdXJzb3IiXwoTVHJhc2hlZEJvYXJkU3VtbWFyeRItCgVib2FyZBgBIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdW1tYXJ5EhkKEXRyYXNoZWRfYXRfbWlsbGlzGAIgASgEIo0BChhMaXN0VHJhc2hlZEJvYXJkc1JlcXVlc3QSDQoFcXVlcnkYASABKAkSLwoFb3JkZXIYAiABKA4yIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU29ydE9yZGVyEhEKCXBhZ2Vfc2l6ZRgDIAEoDRITCgZjdXJzb3IYBCABKAlIAIgBAUIJCgdfY3Vyc29yInwKGUxpc3RUcmFzaGVkQm9hcmRzUmVzcG9uc2USNQoGYm9hcmRzGAEgAygLMiUubHVtaW5nLnN0dWRpby52MS5UcmFzaGVkQm9hcmRTdW1tYXJ5EhgKC25leHRfY3Vyc29yGAIgASgJSACIAQFCDgoMX25leHRfY3Vyc29yImEKGEdldEJvYXJkVGh1bWJuYWlsUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIVCghyZXZpc2lvbhgCIAEoBEgAiAEBEg8KB3RyYXNoZWQYAyABKAhCCwoJX3JldmlzaW9uIlAKGUdldEJvYXJkVGh1bWJuYWlsUmVzcG9uc2USMwoJdGh1bWJuYWlsGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRodW1ibmFpbCJYCg5Cb2FyZFRodW1ibmFpbBIVCghyZXZpc2lvbhgBIAEoBEgAiAEBEhEKCW1pbWVfdHlwZRgCIAEoCRIPCgdjb250ZW50GAMgASgMQgsKCV9yZXZpc2lvbiI3ChJDcmVhdGVCb2FyZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRINCgV0aXRsZRgCIAEoCSJPChNDcmVhdGVCb2FyZFJlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dDb21tYW5kUmVjZWlwdCJEChVEdXBsaWNhdGVCb2FyZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIXCg9zb3VyY2VfYm9hcmRfaWQYAiABKAkiUgoWRHVwbGljYXRlQm9hcmRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQi5wEKEk1hbmFnZUJvYXJkUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhAKCGJvYXJkX2lkGAIgASgJEiMKFmV4cGVjdGVkX2VudHJ5X3ZlcnNpb24YAyABKARIAYgBARIPCgV0aXRsZRgEIAEoCUgAEhAKBnBpbm5lZBgFIAEoCEgAEjsKCWxpZmVjeWNsZRgGIAEoDjImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRMaWZlY3ljbGVBY3Rpb25IAEILCglvcGVyYXRpb25CGQoXX2V4cGVjdGVkX2VudHJ5X3ZlcnNpb24iTwoTTWFuYWdlQm9hcmRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nQ29tbWFuZFJlY2VpcHQiZAoQUHVyZ2VCb2FyZFRhcmdldBIQCghib2FyZF9pZBgBIAEoCRIjChZleHBlY3RlZF9lbnRyeV92ZXJzaW9uGAIgASgESACIAQFCGQoXX2V4cGVjdGVkX2VudHJ5X3ZlcnNpb24iXQoSUHVyZ2VCb2FyZHNSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSMwoHdGFyZ2V0cxgCIAMoCzIiLmx1bWluZy5zdHVkaW8udjEuUHVyZ2VCb2FyZFRhcmdldCJPChNQdXJnZUJvYXJkc1Jlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dDb21tYW5kUmVjZWlwdCKAAQoWQ2F0YWxvZ1B1cmdlSXRlbVJlc3VsdBIQCghib2FyZF9pZBgBIAEoCRIRCgdkZWxldGVkGAIgASgISAASNgoIcmVqZWN0ZWQYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dSZWplY3Rpb25IAEIJCgdvdXRjb21lIk0KEkNhdGFsb2dQdXJnZVJlc3VsdBI3CgVpdGVtcxgBIAMoCzIoLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ1B1cmdlSXRlbVJlc3VsdCKMAgoVQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0EhIKCmNvbW1hbmRfaWQYASABKAkSMQoHY3JlYXRlZBgCIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdW1tYXJ5SAASNgoIcmVqZWN0ZWQYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dSZWplY3Rpb25IABIxCgdjaGFuZ2VkGAQgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Cb2FyZFN1bW1hcnlIABI2CgZwdXJnZWQYBSABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dQdXJnZVJlc3VsdEgAQgkKB291dGNvbWUiTAoQQ2F0YWxvZ1JlamVjdGlvbhI4CgZyZWFzb24YASABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkNhdGFsb2dSZWplY3Rpb25SZWFzb24iNQofR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0UmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJIi8KGUNhdGFsb2dSZWNlaXB0Tm90UmVjb3JkZWQSEgoKY29tbWFuZF9pZBgBIAEoCSKtAQogR2V0Q2F0YWxvZ0NvbW1hbmRSZWNlaXB0UmVzcG9uc2USOgoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQ2F0YWxvZ0NvbW1hbmRSZWNlaXB0SAASQwoMbm90X3JlY29yZGVkGAIgASgLMisubHVtaW5nLnN0dWRpby52MS5DYXRhbG9nUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KmsKDkJvYXJkU29ydE9yZGVyEiAKHEJPQVJEX1NPUlRfT1JERVJfVU5TUEVDSUZJRUQQABIbChdCT0FSRF9TT1JUX09SREVSX1JFQ0VOVBABEhoKFkJPQVJEX1NPUlRfT1JERVJfVElUTEUQAiqEAQoUQm9hcmRMaWZlY3ljbGVBY3Rpb24SJgoiQk9BUkRfTElGRUNZQ0xFX0FDVElPTl9VTlNQRUNJRklFRBAAEiAKHEJPQVJEX0xJRkVDWUNMRV9BQ1RJT05fVFJBU0gQARIiCh5CT0FSRF9MSUZFQ1lDTEVfQUNUSU9OX1JFU1RPUkUQAirTAgoWQ2F0YWxvZ1JlamVjdGlvblJlYXNvbhIoCiRDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fVU5TUEVDSUZJRUQQABIqCiZDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9USVRMRRABEi0KKUNBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9DT01NQU5EX0lEX1JFVVNFEAISJgoiQ0FUQUxPR19SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThADEjIKLkNBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9FTlRSWV9WRVJTSU9OX0NIQU5HRUQQBBIqCiZDQVRBTE9HX1JFSkVDVElPTl9SRUFTT05fU1RBVEVfQ0hBTkdFRBAFEiwKKENBVEFMT0dfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0NPTU1BTkQQBjLHBgoTQm9hcmRDYXRhbG9nU2VydmljZRJXCgpMaXN0Qm9hcmRzEiMubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRzUmVxdWVzdBokLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkc1Jlc3BvbnNlEmwKEUxpc3RUcmFzaGVkQm9hcmRzEioubHVtaW5nLnN0dWRpby52MS5MaXN0VHJhc2hlZEJvYXJkc1JlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUcmFzaGVkQm9hcmRzUmVzcG9uc2USbAoRR2V0Qm9hcmRUaHVtYm5haWwSKi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGh1bWJuYWlsUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRUaHVtYm5haWxSZXNwb25zZRJaCgtDcmVhdGVCb2FyZBIkLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5DcmVhdGVCb2FyZFJlc3BvbnNlEmMKDkR1cGxpY2F0ZUJvYXJkEicubHVtaW5nLnN0dWRpby52MS5EdXBsaWNhdGVCb2FyZFJlcXVlc3QaKC5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkUmVzcG9uc2USWgoLTWFuYWdlQm9hcmQSJC5sdW1pbmcuc3R1ZGlvLnYxLk1hbmFnZUJvYXJkUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTWFuYWdlQm9hcmRSZXNwb25zZRJaCgtQdXJnZUJvYXJkcxIkLmx1bWluZy5zdHVkaW8udjEuUHVyZ2VCb2FyZHNSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5QdXJnZUJvYXJkc1Jlc3BvbnNlEoEBChhHZXRDYXRhbG9nQ29tbWFuZFJlY2VpcHQSMS5sdW1pbmcuc3R1ZGlvLnYxLkdldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlcXVlc3QaMi5sdW1pbmcuc3R1ZGlvLnYxLkdldENhdGFsb2dDb21tYW5kUmVjZWlwdFJlc3BvbnNlYgZwcm90bzM");
+var CatalogCommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_catalog_service, 20);
 var BoardSortOrderSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 0);
 var BoardSortOrder = /* @__PURE__ */ tsEnum(BoardSortOrderSchema);
 var BoardLifecycleActionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_catalog_service, 1);
@@ -13180,6 +17307,12 @@ function requireEntryVersion(value) {
   }
   return value;
 }
+function requireThumbnailRevision(revision) {
+  if (revision === void 0) {
+    throw new HttpRequestError(400, "The saved preview revision is required.");
+  }
+  return revision;
+}
 function toManageOperation(operation) {
   switch (operation.case) {
     case "title":
@@ -13202,6 +17335,7 @@ function createCatalogRoutes(application) {
   const {
     listBoards: listBoards3,
     listTrashedBoards: listTrashedBoards3,
+    getBoardThumbnail,
     createBoard: createBoard2,
     duplicateBoard: duplicateBoard3,
     manageBoard: manageBoard2,
@@ -13210,12 +17344,13 @@ function createCatalogRoutes(application) {
   } = BoardCatalogService.method;
   return [
     unaryRoute(listBoards3, (actor, request) => {
-      const { query, order, pageSize, cursor } = request;
+      const { query, order, pageSize, cursor, pinnedOnly } = request;
       const result = application.listBoards(actor, {
         query,
         order: toSortOrder(order),
         pageSize,
-        cursor
+        cursor,
+        pinnedOnly
       });
       return { boards: [...result.boards], nextCursor: result.nextCursor };
     }),
@@ -13228,6 +17363,17 @@ function createCatalogRoutes(application) {
         cursor
       });
       return { boards: [...result.boards], nextCursor: result.nextCursor };
+    }),
+    unaryRoute(getBoardThumbnail, (actor, { boardId, revision, trashed }) => {
+      const result = application.getBoardThumbnail(actor, {
+        boardId: requireId(boardId),
+        revision: requireThumbnailRevision(revision),
+        trashed
+      });
+      if (result.kind === "forbidden") {
+        throw new WhiteboardAccessError();
+      }
+      return { thumbnail: result.kind === "thumbnail" ? result.thumbnail : void 0 };
     }),
     unaryRoute(createBoard2, (actor, request) => {
       const receipt = application.createBoard(actor, {
@@ -13284,16 +17430,18 @@ var BendAxisSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_s
 var BendAxis = /* @__PURE__ */ tsEnum(BendAxisSchema);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_payload_pb.js
-var file_luming_studio_v1_whiteboard_payload = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfcGF5bG9hZC5wcm90bxIQbHVtaW5nLnN0dWRpby52MSLsBAoNT2JqZWN0UGF5bG9hZBIcCg9wYXlsb2FkX3ZlcnNpb24YASABKARIAYgBARItCgR0ZXh0GAIgASgLMh0ubHVtaW5nLnN0dWRpby52MS5UZXh0UGF5bG9hZEgAEjUKCGRvY3VtZW50GAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudFBheWxvYWRIABIvCgVlbWJlZBgEIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuRW1iZWRQYXlsb2FkSAASLQoEdG9kbxgFIAEoCzIdLmx1bWluZy5zdHVkaW8udjEuVG9kb1BheWxvYWRIABIvCgV0YWJsZRgGIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuVGFibGVQYXlsb2FkSAASLwoFaW1hZ2UYByABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkltYWdlUGF5bG9hZEgAEi8KBXZpZGVvGAggASgLMh4ubHVtaW5nLnN0dWRpby52MS5WaWRlb1BheWxvYWRIABItCgRsaW5rGAkgASgLMh0ubHVtaW5nLnN0dWRpby52MS5MaW5rUGF5bG9hZEgAEjMKB3N0aWNrZXIYCiABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLlN0aWNrZXJQYXlsb2FkSAASKwoDaW5rGAsgASgLMhwubHVtaW5nLnN0dWRpby52MS5JbmtQYXlsb2FkSAASNwoJZXh0ZW5zaW9uGAwgASgLMiIubHVtaW5nLnN0dWRpby52MS5FeHRlbnNpb25QYXlsb2FkSABCBgoEYm9keUISChBfcGF5bG9hZF92ZXJzaW9uIrkBCgtUZXh0UGF5bG9hZBIMCgR0ZXh0GAEgASgJEhIKBWNvbG9yGAIgASgJSACIAQESGAoLZm9udF9mYW1pbHkYAyABKAlIAYgBARIWCglmb250X3NpemUYBCABKAFIAogBARIuCgVhbGlnbhgFIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuVGV4dEFsaWdubWVudEIICgZfY29sb3JCDgoMX2ZvbnRfZmFtaWx5QgwKCl9mb250X3NpemUiaQoPRG9jdW1lbnRQYXlsb2FkEg0KBXRpdGxlGAEgASgJEhYKDnNjaGVtYV92ZXJzaW9uGAIgASgNEi8KBmJsb2NrcxgDIAMoCzIfLmx1bWluZy5zdHVkaW8udjEuRG9jdW1lbnRCbG9jayKzAQoNRG9jdW1lbnRCbG9jaxIQCghibG9ja19pZBgBIAEoCRIMCgR0eXBlGAIgASgJEiYKBXByb3BzGAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBInCgdjb250ZW50GAQgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEjEKCGNoaWxkcmVuGAUgAygLMh8ubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudEJsb2NrIqEBCgxFbWJlZFBheWxvYWQSEgoFdGl0bGUYASABKAlIAIgBARIRCgRodG1sGAIgASgJSAGIAQESHAoPc291cmNlX3JldmlzaW9uGAMgASgESAKIAQESJQoFc3RhdGUYBCABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWVCCAoGX3RpdGxlQgcKBV9odG1sQhIKEF9zb3VyY2VfcmV2aXNpb24iRwoLVG9kb1BheWxvYWQSDQoFdGl0bGUYASABKAkSKQoFaXRlbXMYAiADKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9JdGVtIm8KCFRvZG9JdGVtEg8KB2l0ZW1faWQYASABKAkSDAoEdGV4dBgCIAEoCRIPCgdjaGVja2VkGAMgASgIEjMKCnNvdXJjZV9yZWYYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9Tb3VyY2VSZWYirgEKDVRvZG9Tb3VyY2VSZWYSFQoIYm9hcmRfaWQYASABKAlIAIgBARIRCglvYmplY3RfaWQYAiABKAkSFQoIYmxvY2tfaWQYAyABKAlIAYgBARIUCgdpdGVtX2lkGAQgASgJSAKIAQESFAoHdmVyc2lvbhgFIAEoBEgDiAEBQgsKCV9ib2FyZF9pZEILCglfYmxvY2tfaWRCCgoIX2l0ZW1faWRCCgoIX3ZlcnNpb24iVQoMVGFibGVQYXlsb2FkEhEKBHRleHQYASABKAlIAIgBARIpCgRncmlkGAIgASgLMhsubHVtaW5nLnN0dWRpby52MS5UYWJsZUdyaWRCBwoFX3RleHQijQEKCVRhYmxlR3JpZBIoCgRyb3dzGAEgAygLMhoubHVtaW5nLnN0dWRpby52MS5UYWJsZVJvdxIPCgdyb3dfaWRzGAIgAygJEhIKCmNvbHVtbl9pZHMYAyADKAkSFQoNY29sdW1uX3dpZHRocxgEIAMoARIRCgRoZWFkGAUgASgISACIAQFCBwoFX2hlYWQiNgoIVGFibGVSb3cSKgoFY2VsbHMYASADKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLlRhYmxlQ2VsbCJ+CglUYWJsZUNlbGwSDgoEdGV4dBgBIAEoCUgAEhAKBm51bWJlchgCIAEoAUgAEhQKCmJvb2xfdmFsdWUYAyABKAhIABIwCgpudWxsX3ZhbHVlGAQgASgOMhouZ29vZ2xlLnByb3RvYnVmLk51bGxWYWx1ZUgAQgcKBXZhbHVlIqIBCgxJbWFnZVBheWxvYWQSEAoDc3JjGAEgASgJSACIAQESEQoEaHJlZhgCIAEoCUgBiAEBEikKBGNyb3AYAyABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLkltYWdlQ3JvcBIxCgxuYXR1cmFsX3NpemUYBCABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLkltYWdlU2l6ZUIGCgRfc3JjQgcKBV9ocmVmIi8KCUltYWdlQ3JvcBIMCgR6b29tGAEgASgBEgkKAXgYAiABKAESCQoBeRgDIAEoASIqCglJbWFnZVNpemUSDQoFd2lkdGgYASABKA0SDgoGaGVpZ2h0GAIgASgNIkgKDFZpZGVvUGF5bG9hZBIQCgNzcmMYASABKAlIAIgBARITCgZwb3N0ZXIYAiABKAlIAYgBAUIGCgRfc3JjQgkKB19wb3N0ZXIiKQoLTGlua1BheWxvYWQSEQoEaHJlZhgBIAEoCUgAiAEBQgcKBV9ocmVmIlwKDlN0aWNrZXJQYXlsb2FkEhcKCnN0aWNrZXJfaWQYASABKAlIAIgBARIVCghmYWxsYmFjaxgCIAEoCUgBiAEBQg0KC19zdGlja2VyX2lkQgsKCV9mYWxsYmFjayI1CgpJbmtQYXlsb2FkEicKBnBvaW50cxgBIAMoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQiMwoQRXh0ZW5zaW9uUGF5bG9hZBIRCglzY2hlbWFfaWQYASABKAkSDAoEZGF0YRgCIAEoDCp9Cg1UZXh0QWxpZ25tZW50Eh4KGlRFWFRfQUxJR05NRU5UX1VOU1BFQ0lGSUVEEAASFwoTVEVYVF9BTElHTk1FTlRfTEVGVBABEhkKFVRFWFRfQUxJR05NRU5UX0NFTlRFUhACEhgKFFRFWFRfQUxJR05NRU5UX1JJR0hUEANiBnByb3RvMw", [file_google_protobuf_struct, file_luming_studio_v1_whiteboard_scene]);
+var file_luming_studio_v1_whiteboard_payload = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfcGF5bG9hZC5wcm90bxIQbHVtaW5nLnN0dWRpby52MSLsBAoNT2JqZWN0UGF5bG9hZBIcCg9wYXlsb2FkX3ZlcnNpb24YASABKARIAYgBARItCgR0ZXh0GAIgASgLMh0ubHVtaW5nLnN0dWRpby52MS5UZXh0UGF5bG9hZEgAEjUKCGRvY3VtZW50GAMgASgLMiEubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudFBheWxvYWRIABIvCgVlbWJlZBgEIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuRW1iZWRQYXlsb2FkSAASLQoEdG9kbxgFIAEoCzIdLmx1bWluZy5zdHVkaW8udjEuVG9kb1BheWxvYWRIABIvCgV0YWJsZRgGIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuVGFibGVQYXlsb2FkSAASLwoFaW1hZ2UYByABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkltYWdlUGF5bG9hZEgAEi8KBXZpZGVvGAggASgLMh4ubHVtaW5nLnN0dWRpby52MS5WaWRlb1BheWxvYWRIABItCgRsaW5rGAkgASgLMh0ubHVtaW5nLnN0dWRpby52MS5MaW5rUGF5bG9hZEgAEjMKB3N0aWNrZXIYCiABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLlN0aWNrZXJQYXlsb2FkSAASKwoDaW5rGAsgASgLMhwubHVtaW5nLnN0dWRpby52MS5JbmtQYXlsb2FkSAASNwoJZXh0ZW5zaW9uGAwgASgLMiIubHVtaW5nLnN0dWRpby52MS5FeHRlbnNpb25QYXlsb2FkSABCBgoEYm9keUISChBfcGF5bG9hZF92ZXJzaW9uIvUBCgtUZXh0UGF5bG9hZBIMCgR0ZXh0GAEgASgJEhIKBWNvbG9yGAIgASgJSACIAQESGAoLZm9udF9mYW1pbHkYAyABKAlIAYgBARIWCglmb250X3NpemUYBCABKAFIAogBARIuCgVhbGlnbhgFIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuVGV4dEFsaWdubWVudBIRCgRib2xkGAYgASgISAOIAQESEwoGaXRhbGljGAcgASgISASIAQFCCAoGX2NvbG9yQg4KDF9mb250X2ZhbWlseUIMCgpfZm9udF9zaXplQgcKBV9ib2xkQgkKB19pdGFsaWMiaQoPRG9jdW1lbnRQYXlsb2FkEg0KBXRpdGxlGAEgASgJEhYKDnNjaGVtYV92ZXJzaW9uGAIgASgNEi8KBmJsb2NrcxgDIAMoCzIfLmx1bWluZy5zdHVkaW8udjEuRG9jdW1lbnRCbG9jayKzAQoNRG9jdW1lbnRCbG9jaxIQCghibG9ja19pZBgBIAEoCRIMCgR0eXBlGAIgASgJEiYKBXByb3BzGAMgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBInCgdjb250ZW50GAQgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlEjEKCGNoaWxkcmVuGAUgAygLMh8ubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudEJsb2NrIqEBCgxFbWJlZFBheWxvYWQSEgoFdGl0bGUYASABKAlIAIgBARIRCgRodG1sGAIgASgJSAGIAQESHAoPc291cmNlX3JldmlzaW9uGAMgASgESAKIAQESJQoFc3RhdGUYBCABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWVCCAoGX3RpdGxlQgcKBV9odG1sQhIKEF9zb3VyY2VfcmV2aXNpb24iRwoLVG9kb1BheWxvYWQSDQoFdGl0bGUYASABKAkSKQoFaXRlbXMYAiADKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9JdGVtIm8KCFRvZG9JdGVtEg8KB2l0ZW1faWQYASABKAkSDAoEdGV4dBgCIAEoCRIPCgdjaGVja2VkGAMgASgIEjMKCnNvdXJjZV9yZWYYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9Tb3VyY2VSZWYirgEKDVRvZG9Tb3VyY2VSZWYSFQoIYm9hcmRfaWQYASABKAlIAIgBARIRCglvYmplY3RfaWQYAiABKAkSFQoIYmxvY2tfaWQYAyABKAlIAYgBARIUCgdpdGVtX2lkGAQgASgJSAKIAQESFAoHdmVyc2lvbhgFIAEoBEgDiAEBQgsKCV9ib2FyZF9pZEILCglfYmxvY2tfaWRCCgoIX2l0ZW1faWRCCgoIX3ZlcnNpb24iVQoMVGFibGVQYXlsb2FkEhEKBHRleHQYASABKAlIAIgBARIpCgRncmlkGAIgASgLMhsubHVtaW5nLnN0dWRpby52MS5UYWJsZUdyaWRCBwoFX3RleHQijQEKCVRhYmxlR3JpZBIoCgRyb3dzGAEgAygLMhoubHVtaW5nLnN0dWRpby52MS5UYWJsZVJvdxIPCgdyb3dfaWRzGAIgAygJEhIKCmNvbHVtbl9pZHMYAyADKAkSFQoNY29sdW1uX3dpZHRocxgEIAMoARIRCgRoZWFkGAUgASgISACIAQFCBwoFX2hlYWQiNgoIVGFibGVSb3cSKgoFY2VsbHMYASADKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLlRhYmxlQ2VsbCJ+CglUYWJsZUNlbGwSDgoEdGV4dBgBIAEoCUgAEhAKBm51bWJlchgCIAEoAUgAEhQKCmJvb2xfdmFsdWUYAyABKAhIABIwCgpudWxsX3ZhbHVlGAQgASgOMhouZ29vZ2xlLnByb3RvYnVmLk51bGxWYWx1ZUgAQgcKBXZhbHVlIqIBCgxJbWFnZVBheWxvYWQSEAoDc3JjGAEgASgJSACIAQESEQoEaHJlZhgCIAEoCUgBiAEBEikKBGNyb3AYAyABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLkltYWdlQ3JvcBIxCgxuYXR1cmFsX3NpemUYBCABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLkltYWdlU2l6ZUIGCgRfc3JjQgcKBV9ocmVmIi8KCUltYWdlQ3JvcBIMCgR6b29tGAEgASgBEgkKAXgYAiABKAESCQoBeRgDIAEoASIqCglJbWFnZVNpemUSDQoFd2lkdGgYASABKA0SDgoGaGVpZ2h0GAIgASgNIkgKDFZpZGVvUGF5bG9hZBIQCgNzcmMYASABKAlIAIgBARITCgZwb3N0ZXIYAiABKAlIAYgBAUIGCgRfc3JjQgkKB19wb3N0ZXIiKQoLTGlua1BheWxvYWQSEQoEaHJlZhgBIAEoCUgAiAEBQgcKBV9ocmVmIlwKDlN0aWNrZXJQYXlsb2FkEhcKCnN0aWNrZXJfaWQYASABKAlIAIgBARIVCghmYWxsYmFjaxgCIAEoCUgBiAEBQg0KC19zdGlja2VyX2lkQgsKCV9mYWxsYmFjayI1CgpJbmtQYXlsb2FkEicKBnBvaW50cxgBIAMoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQiMwoQRXh0ZW5zaW9uUGF5bG9hZBIRCglzY2hlbWFfaWQYASABKAkSDAoEZGF0YRgCIAEoDCp9Cg1UZXh0QWxpZ25tZW50Eh4KGlRFWFRfQUxJR05NRU5UX1VOU1BFQ0lGSUVEEAASFwoTVEVYVF9BTElHTk1FTlRfTEVGVBABEhkKFVRFWFRfQUxJR05NRU5UX0NFTlRFUhACEhgKFFRFWFRfQUxJR05NRU5UX1JJR0hUEANiBnByb3RvMw", [file_google_protobuf_struct, file_luming_studio_v1_whiteboard_scene]);
 var ObjectPayloadSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_payload, 0);
 var TextPayloadSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_payload, 1);
 var DocumentPayloadSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_payload, 2);
 var TablePayloadSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_payload, 8);
+var TextAlignmentSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_payload, 0);
+var TextAlignment = /* @__PURE__ */ tsEnum(TextAlignmentSchema);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_service_pb.js
-var file_luming_studio_v1_whiteboard_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSKMAgoSRXhwb3J0Qm9hcmRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEh4KEWV4cGVjdGVkX3JldmlzaW9uGAIgASgESAGIAQESMwoFd2hvbGUYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydFdob2xlQm9hcmRIABI7CglzZWxlY3Rpb24YBCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkU2VsZWN0aW9uSAASMwoGZm9ybWF0GAUgASgOMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZEV4cG9ydEZvcm1hdEIHCgVzY29wZUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iEgoQRXhwb3J0V2hvbGVCb2FyZCIqChRFeHBvcnRCb2FyZFNlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIsIBChNFeHBvcnRCb2FyZFJlc3BvbnNlEjEKBGZpbGUYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkRmlsZUgAEjMKBXN0YWxlGAIgASgLMiIubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFN0YWxlSAASOQoIcmVqZWN0ZWQYAyABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIAEIICgZyZXN1bHQiWQoPRXhwb3J0Qm9hcmRGaWxlEhAKCGZpbGVuYW1lGAEgASgJEhEKCW1pbWVfdHlwZRgCIAEoCRIQCghyZXZpc2lvbhgDIAEoBBIPCgdjb250ZW50GAQgASgMIiQKEEV4cG9ydEJvYXJkU3RhbGUSEAoIcmV2aXNpb24YASABKAQiUwoTRXhwb3J0Qm9hcmRSZWplY3RlZBI8CgZyZWFzb24YASABKA4yLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0UmVqZWN0aW9uUmVhc29uIigKFEdldEJvYXJkU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkQKFUdldEJvYXJkU2NlbmVSZXNwb25zZRIrCgVzY2VuZRgBIAEoCzIcLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTY2VuZSJAChhHZXRPYmplY3RQYXlsb2Fkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKb2JqZWN0X2lkcxgCIAMoCSJlChlHZXRPYmplY3RQYXlsb2Fkc1Jlc3BvbnNlEhAKCGJvYXJkX2lkGAEgASgJEjYKB3Jlc3VsdHMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRSZXN1bHQiqQEKE09iamVjdFBheWxvYWRSZXN1bHQSEQoJb2JqZWN0X2lkGAEgASgJEjIKB3BheWxvYWQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRIABJBCgt1bmF2YWlsYWJsZRgDIAEoCzIqLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0UGF5bG9hZFVuYXZhaWxhYmxlSABCCAoGcmVzdWx0IlwKGE9iamVjdFBheWxvYWRVbmF2YWlsYWJsZRJACgZyZWFzb24YASABKA4yMC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRVbmF2YWlsYWJsZVJlYXNvbiKVAQoSTW92ZU9iamVjdHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSKgoFZGVsdGEYAyABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVEZWx0YRItCgd0YXJnZXRzGAQgAygLMhwubHVtaW5nLnN0dWRpby52MS5Nb3ZlVGFyZ2V0IiMKCU1vdmVEZWx0YRIKCgJkeBgBIAEoARIKCgJkeRgCIAEoASJlCgpNb3ZlVGFyZ2V0EhEKCW9iamVjdF9pZBgBIAEoCRImChlleHBlY3RlZF9nZW9tZXRyeV92ZXJzaW9uGAIgASgESACIAQFCHAoaX2V4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24iSAoTTW92ZU9iamVjdHNSZXNwb25zZRIxCgdyZWNlaXB0GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Db21tYW5kUmVjZWlwdCLbAQoOQ29tbWFuZFJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIwCgdhcHBsaWVkGAMgASgLMh0ubHVtaW5nLnN0dWRpby52MS5Nb3ZlQXBwbGllZEgAEjIKCGNvbmZsaWN0GAQgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Nb3ZlQ29uZmxpY3RIABIyCghyZWplY3RlZBgFIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuTW92ZVJlamVjdGVkSABCCQoHb3V0Y29tZSJwCgtNb3ZlQXBwbGllZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjEKB29iamVjdHMYAiADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhQhEKD19ib2FyZF9yZXZpc2lvbiLLAQoMTW92ZUNvbmZsaWN0EjQKBnJlYXNvbhgBIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuTW92ZUNvbmZsaWN0UmVhc29uEhsKDmJvYXJkX3JldmlzaW9uGAIgASgESACIAQESOQoPY3VycmVudF9vYmplY3RzGAMgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRIaChJtaXNzaW5nX29iamVjdF9pZHMYBCADKAlCEQoPX2JvYXJkX3JldmlzaW9uIkUKDE1vdmVSZWplY3RlZBI1CgZyZWFzb24YASABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVSZWplY3Rpb25SZWFzb24iQAoYR2V0Q29tbWFuZFJlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkinwEKGUdldENvbW1hbmRSZWNlaXB0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQ29tbWFuZFJlY2VpcHRIABJDCgxub3RfcmVjb3JkZWQYAiABKAsyKy5sdW1pbmcuc3R1ZGlvLnYxLkNvbW1hbmRSZWNlaXB0Tm90UmVjb3JkZWRIAEIICgZyZXN1bHQiQQoZQ29tbWFuZFJlY2VpcHROb3RSZWNvcmRlZBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJKnMKEUJvYXJkRXhwb3J0Rm9ybWF0EiMKH0JPQVJEX0VYUE9SVF9GT1JNQVRfVU5TUEVDSUZJRUQQABIcChhCT0FSRF9FWFBPUlRfRk9STUFUX0pTT04QARIbChdCT0FSRF9FWFBPUlRfRk9STUFUX1NWRxACKpECChpCb2FyZEV4cG9ydFJlamVjdGlvblJlYXNvbhItCilCT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEjMKL0JPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfU0VMRUNUSU9OEAESLQopQk9BUkRfRVhQT1JUX1JFSkVDVElPTl9SRUFTT05fVU5TVVBQT1JURUQQAhIzCi9CT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9BU1NFVF9VTkFWQUlMQUJMRRADEisKJ0JPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX1RPT19MQVJHRRAEKrwBCh5PYmplY3RQYXlsb2FkVW5hdmFpbGFibGVSZWFzb24SMQotT0JKRUNUX1BBWUxPQURfVU5BVkFJTEFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASLworT0JKRUNUX1BBWUxPQURfVU5BVkFJTEFCTEVfUkVBU09OX05PVF9GT1VORBABEjYKMk9CSkVDVF9QQVlMT0FEX1VOQVZBSUxBQkxFX1JFQVNPTl9VTlNVUFBPUlRFRF9LSU5EEAIqlwEKEk1vdmVDb25mbGljdFJlYXNvbhIkCiBNT1ZFX0NPTkZMSUNUX1JFQVNPTl9VTlNQRUNJRklFRBAAEjEKLU1PVkVfQ09ORkxJQ1RfUkVBU09OX0dFT01FVFJZX1ZFUlNJT05fQ0hBTkdFRBABEigKJE1PVkVfQ09ORkxJQ1RfUkVBU09OX1RBUkdFVFNfQ0hBTkdFRBACKuABChNNb3ZlUmVqZWN0aW9uUmVhc29uEiUKIU1PVkVfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEiMKH01PVkVfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QARIpCiVNT1ZFX1JFSkVDVElPTl9SRUFTT05fR0VPTUVUUllfTE9DS0VEEAISJgoiTU9WRV9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfTU9WRRADEioKJk1PVkVfUkVKRUNUSU9OX1JFQVNPTl9DT01NQU5EX0lEX1JFVVNFEAQyiQQKEVdoaXRlYm9hcmRTZXJ2aWNlEmAKDUdldEJvYXJkU2NlbmUSJi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2NlbmVSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNjZW5lUmVzcG9uc2USbAoRR2V0T2JqZWN0UGF5bG9hZHMSKi5sdW1pbmcuc3R1ZGlvLnYxLkdldE9iamVjdFBheWxvYWRzUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuR2V0T2JqZWN0UGF5bG9hZHNSZXNwb25zZRJaCgtNb3ZlT2JqZWN0cxIkLmx1bWluZy5zdHVkaW8udjEuTW92ZU9iamVjdHNSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5Nb3ZlT2JqZWN0c1Jlc3BvbnNlEmwKEUdldENvbW1hbmRSZWNlaXB0EioubHVtaW5nLnN0dWRpby52MS5HZXRDb21tYW5kUmVjZWlwdFJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkdldENvbW1hbmRSZWNlaXB0UmVzcG9uc2USWgoLRXhwb3J0Qm9hcmQSJC5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene]);
-var ObjectPayloadResultSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 11);
-var CommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 17);
+var file_luming_studio_v1_whiteboard_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSKMAgoSRXhwb3J0Qm9hcmRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEh4KEWV4cGVjdGVkX3JldmlzaW9uGAIgASgESAGIAQESMwoFd2hvbGUYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydFdob2xlQm9hcmRIABI7CglzZWxlY3Rpb24YBCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkU2VsZWN0aW9uSAASMwoGZm9ybWF0GAUgASgOMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZEV4cG9ydEZvcm1hdEIHCgVzY29wZUIUChJfZXhwZWN0ZWRfcmV2aXNpb24iEgoQRXhwb3J0V2hvbGVCb2FyZCIqChRFeHBvcnRCb2FyZFNlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIoICChNFeHBvcnRCb2FyZFJlc3BvbnNlEjEKBGZpbGUYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkRmlsZUgAEjMKBXN0YWxlGAIgASgLMiIubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFN0YWxlSAASOQoIcmVqZWN0ZWQYAyABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABI+Cgticm93c2VyX3BuZxgEIAEoCzInLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRCcm93c2VyUG5nSABCCAoGcmVzdWx0IqQBChVFeHBvcnRCb2FyZEJyb3dzZXJQbmcSEAoIZmlsZW5hbWUYASABKAkSEAoIcmV2aXNpb24YAiABKAQSDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBEhQKDHN2Z190ZW1wbGF0ZRgFIAEoCRIyCgdyZWdpb25zGAYgAygLMiEubHVtaW5nLnN0dWRpby52MS5FeHBvcnRQbmdSZWdpb24iTQoPRXhwb3J0UG5nUmVnaW9uEg0KBWluZGV4GAEgASgNEgwKBGh0bWwYAiABKAkSDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBIlkKD0V4cG9ydEJvYXJkRmlsZRIQCghmaWxlbmFtZRgBIAEoCRIRCgltaW1lX3R5cGUYAiABKAkSEAoIcmV2aXNpb24YAyABKAQSDwoHY29udGVudBgEIAEoDCIkChBFeHBvcnRCb2FyZFN0YWxlEhAKCHJldmlzaW9uGAEgASgEIlMKE0V4cG9ydEJvYXJkUmVqZWN0ZWQSPAoGcmVhc29uGAEgASgOMiwubHVtaW5nLnN0dWRpby52MS5Cb2FyZEV4cG9ydFJlamVjdGlvblJlYXNvbiIoChRHZXRCb2FyZFNjZW5lUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCSJEChVHZXRCb2FyZFNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiQAoYR2V0T2JqZWN0UGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCm9iamVjdF9pZHMYAiADKAkiZQoZR2V0T2JqZWN0UGF5bG9hZHNSZXNwb25zZRIQCghib2FyZF9pZBgBIAEoCRI2CgdyZXN1bHRzGAIgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0IqkBChNPYmplY3RQYXlsb2FkUmVzdWx0EhEKCW9iamVjdF9pZBgBIAEoCRIyCgdwYXlsb2FkGAIgASgLMh8ubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkSAASQQoLdW5hdmFpbGFibGUYAyABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRVbmF2YWlsYWJsZUgAQggKBnJlc3VsdCJcChhPYmplY3RQYXlsb2FkVW5hdmFpbGFibGUSQAoGcmVhc29uGAEgASgOMjAubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkVW5hdmFpbGFibGVSZWFzb24ilQEKEk1vdmVPYmplY3RzUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEioKBWRlbHRhGAMgASgLMhsubHVtaW5nLnN0dWRpby52MS5Nb3ZlRGVsdGESLQoHdGFyZ2V0cxgEIAMoCzIcLmx1bWluZy5zdHVkaW8udjEuTW92ZVRhcmdldCIjCglNb3ZlRGVsdGESCgoCZHgYASABKAESCgoCZHkYAiABKAEiZQoKTW92ZVRhcmdldBIRCglvYmplY3RfaWQYASABKAkSJgoZZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbhgCIAEoBEgAiAEBQhwKGl9leHBlY3RlZF9nZW9tZXRyeV92ZXJzaW9uIkgKE01vdmVPYmplY3RzUmVzcG9uc2USMQoHcmVjZWlwdBgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQ29tbWFuZFJlY2VpcHQi2wEKDkNvbW1hbmRSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSMAoHYXBwbGllZBgDIAEoCzIdLmx1bWluZy5zdHVkaW8udjEuTW92ZUFwcGxpZWRIABIyCghjb25mbGljdBgEIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuTW92ZUNvbmZsaWN0SAASMgoIcmVqZWN0ZWQYBSABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVSZWplY3RlZEgAQgkKB291dGNvbWUicAoLTW92ZUFwcGxpZWQSGwoOYm9hcmRfcmV2aXNpb24YASABKARIAIgBARIxCgdvYmplY3RzGAIgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YUIRCg9fYm9hcmRfcmV2aXNpb24iywEKDE1vdmVDb25mbGljdBI0CgZyZWFzb24YASABKA4yJC5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVDb25mbGljdFJlYXNvbhIbCg5ib2FyZF9yZXZpc2lvbhgCIAEoBEgAiAEBEjkKD2N1cnJlbnRfb2JqZWN0cxgDIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoSbWlzc2luZ19vYmplY3RfaWRzGAQgAygJQhEKD19ib2FyZF9yZXZpc2lvbiJFCgxNb3ZlUmVqZWN0ZWQSNQoGcmVhc29uGAEgASgOMiUubHVtaW5nLnN0dWRpby52MS5Nb3ZlUmVqZWN0aW9uUmVhc29uIkAKGEdldENvbW1hbmRSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIp8BChlHZXRDb21tYW5kUmVjZWlwdFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkNvbW1hbmRSZWNlaXB0SAASQwoMbm90X3JlY29yZGVkGAIgASgLMisubHVtaW5nLnN0dWRpby52MS5Db21tYW5kUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0IkEKGUNvbW1hbmRSZWNlaXB0Tm90UmVjb3JkZWQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSrLAQoRQm9hcmRFeHBvcnRGb3JtYXQSIwofQk9BUkRfRVhQT1JUX0ZPUk1BVF9VTlNQRUNJRklFRBAAEhwKGEJPQVJEX0VYUE9SVF9GT1JNQVRfSlNPThABEhsKF0JPQVJEX0VYUE9SVF9GT1JNQVRfU1ZHEAISGwoXQk9BUkRfRVhQT1JUX0ZPUk1BVF9QTkcQAxIcChhCT0FSRF9FWFBPUlRfRk9STUFUX0hUTUwQBBIbChdCT0FSRF9FWFBPUlRfRk9STUFUX1pJUBAFKpECChpCb2FyZEV4cG9ydFJlamVjdGlvblJlYXNvbhItCilCT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEjMKL0JPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfU0VMRUNUSU9OEAESLQopQk9BUkRfRVhQT1JUX1JFSkVDVElPTl9SRUFTT05fVU5TVVBQT1JURUQQAhIzCi9CT0FSRF9FWFBPUlRfUkVKRUNUSU9OX1JFQVNPTl9BU1NFVF9VTkFWQUlMQUJMRRADEisKJ0JPQVJEX0VYUE9SVF9SRUpFQ1RJT05fUkVBU09OX1RPT19MQVJHRRAEKrwBCh5PYmplY3RQYXlsb2FkVW5hdmFpbGFibGVSZWFzb24SMQotT0JKRUNUX1BBWUxPQURfVU5BVkFJTEFCTEVfUkVBU09OX1VOU1BFQ0lGSUVEEAASLworT0JKRUNUX1BBWUxPQURfVU5BVkFJTEFCTEVfUkVBU09OX05PVF9GT1VORBABEjYKMk9CSkVDVF9QQVlMT0FEX1VOQVZBSUxBQkxFX1JFQVNPTl9VTlNVUFBPUlRFRF9LSU5EEAIqlwEKEk1vdmVDb25mbGljdFJlYXNvbhIkCiBNT1ZFX0NPTkZMSUNUX1JFQVNPTl9VTlNQRUNJRklFRBAAEjEKLU1PVkVfQ09ORkxJQ1RfUkVBU09OX0dFT01FVFJZX1ZFUlNJT05fQ0hBTkdFRBABEigKJE1PVkVfQ09ORkxJQ1RfUkVBU09OX1RBUkdFVFNfQ0hBTkdFRBACKuABChNNb3ZlUmVqZWN0aW9uUmVhc29uEiUKIU1PVkVfUkVKRUNUSU9OX1JFQVNPTl9VTlNQRUNJRklFRBAAEiMKH01PVkVfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QARIpCiVNT1ZFX1JFSkVDVElPTl9SRUFTT05fR0VPTUVUUllfTE9DS0VEEAISJgoiTU9WRV9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfTU9WRRADEioKJk1PVkVfUkVKRUNUSU9OX1JFQVNPTl9DT01NQU5EX0lEX1JFVVNFEAQyiQQKEVdoaXRlYm9hcmRTZXJ2aWNlEmAKDUdldEJvYXJkU2NlbmUSJi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2NlbmVSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNjZW5lUmVzcG9uc2USbAoRR2V0T2JqZWN0UGF5bG9hZHMSKi5sdW1pbmcuc3R1ZGlvLnYxLkdldE9iamVjdFBheWxvYWRzUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuR2V0T2JqZWN0UGF5bG9hZHNSZXNwb25zZRJaCgtNb3ZlT2JqZWN0cxIkLmx1bWluZy5zdHVkaW8udjEuTW92ZU9iamVjdHNSZXF1ZXN0GiUubHVtaW5nLnN0dWRpby52MS5Nb3ZlT2JqZWN0c1Jlc3BvbnNlEmwKEUdldENvbW1hbmRSZWNlaXB0EioubHVtaW5nLnN0dWRpby52MS5HZXRDb21tYW5kUmVjZWlwdFJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkdldENvbW1hbmRSZWNlaXB0UmVzcG9uc2USWgoLRXhwb3J0Qm9hcmQSJC5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene]);
+var ObjectPayloadResultSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 13);
+var CommandReceiptSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_service, 19);
 var BoardExportFormatSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_service, 0);
 var BoardExportFormat = /* @__PURE__ */ tsEnum(BoardExportFormatSchema);
 var BoardExportRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_service, 1);
@@ -13307,13 +17455,15 @@ var MoveRejectionReason = /* @__PURE__ */ tsEnum(MoveRejectionReasonSchema);
 var WhiteboardService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_service, 0);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_edits_pb.js
-var file_luming_studio_v1_whiteboard_edits = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfZWRpdHMucHJvdG8SEGx1bWluZy5zdHVkaW8udjEisgMKGEVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjUKBmNyZWF0ZRgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRPYmplY3RIABI8Cgl0cmFuc2Zvcm0YBCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0c0gAEj4KC2NoYW5nZV9sb2NrGAUgASgLMicubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZE9iamVjdExvY2tIABI2CgZkZWxldGUYBiABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkRlbGV0ZUJvYXJkT2JqZWN0c0gAEjgKB3Jlb3JkZXIYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlJlb3JkZXJCb2FyZE9iamVjdHNIABI8CglkdXBsaWNhdGUYCCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkT2JqZWN0c0gAQgsKCW9wZXJhdGlvbiJ/ChFDcmVhdGVCb2FyZE9iamVjdBIwCgZvYmplY3QYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhEjgKD2luaXRpYWxfcGF5bG9hZBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0UGF5bG9hZCJqCg9FZGl0Qm9hcmRUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBAUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiLaAQoUVHJhbnNmb3JtQm9hcmRPYmplY3QSMQoGdGFyZ2V0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSLAoIZ2VvbWV0cnkYAiABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5EjYKCWNvbm5lY3RvchgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yR2VvbWV0cnkSKQoDaW5rGAQgASgLMhwubHVtaW5nLnN0dWRpby52MS5JbmtQYXlsb2FkIoQBChVUcmFuc2Zvcm1Cb2FyZE9iamVjdHMSMgoEa2luZBgBIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUcmFuc2Zvcm1LaW5kEjcKB29iamVjdHMYAiADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0IlsKFUNoYW5nZUJvYXJkT2JqZWN0TG9jaxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSDgoGbG9ja2VkGAIgASgIIkgKEkRlbGV0ZUJvYXJkT2JqZWN0cxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQixQEKE1Jlb3JkZXJCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjgKCWRpcmVjdGlvbhgCIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRMYXllckRpcmVjdGlvbhIkChdleHBlY3RlZF9ib2FyZF9yZXZpc2lvbhgDIAEoBEgAiAEBQhoKGF9leHBlY3RlZF9ib2FyZF9yZXZpc2lvbiJgChREdXBsaWNhdGVCb2FyZE9iamVjdBIxCgZzb3VyY2UYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIVCg1uZXdfb2JqZWN0X2lkGAIgASgJInwKFUR1cGxpY2F0ZUJvYXJkT2JqZWN0cxI3Cgd0YXJnZXRzGAEgAygLMiYubHVtaW5nLnN0dWRpby52MS5EdXBsaWNhdGVCb2FyZE9iamVjdBIqCgVkZWx0YRgCIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuTW92ZURlbHRhIlAKGUVkaXRCb2FyZEdlb21ldHJ5UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCLIBAoYRWRpdE9iamVjdENvbnRlbnRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJb2JqZWN0X2lkGAMgASgJEiUKGGV4cGVjdGVkX3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEjUKCGRvY3VtZW50GAUgASgLMiEubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudFBheWxvYWRIABIrCgR0b2RvGAYgASgLMhsubHVtaW5nLnN0dWRpby52MS5Ub2RvRWRpdHNIABItCgR0ZXh0GAcgASgLMh0ubHVtaW5nLnN0dWRpby52MS5UZXh0UGF5bG9hZEgAEjMKBXRhYmxlGAggASgLMiIubHVtaW5nLnN0dWRpby52MS5TYXZlVGFibGVDb250ZW50SAASOQoMZW1iZWRfc291cmNlGAkgASgLMiEubHVtaW5nLnN0dWRpby52MS5TYXZlRW1iZWRTb3VyY2VIABI3CgtlbWJlZF9zdGF0ZRgKIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuU2F2ZUVtYmVkU3RhdGVIABI5CgdzdGlja2VyGAsgASgLMiYubHVtaW5nLnN0dWRpby52MS5TZWxlY3RTdGlja2VyQ29udGVudEgAEjAKBGNyb3AYDCABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkNyb3BCb2FyZEltYWdlSABCBgoEZWRpdEIbChlfZXhwZWN0ZWRfcGF5bG9hZF92ZXJzaW9uInsKEFNhdmVUYWJsZUNvbnRlbnQSLQoFdGFibGUYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLlRhYmxlUGF5bG9hZBI4Cgx3aWR0aF9jaGFuZ2UYAiABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlRhYmxlV2lkdGhDaGFuZ2UiOQoQVGFibGVXaWR0aENoYW5nZRIWCg5leHBlY3RlZF93aWR0aBgBIAEoARINCgV3aWR0aBgCIAEoASJyCg9TYXZlRW1iZWRTb3VyY2USDQoFdGl0bGUYASABKAkSDAoEaHRtbBgCIAEoCRIlChhleHBlY3RlZF9zb3VyY2VfcmV2aXNpb24YAyABKARIAIgBAUIbChlfZXhwZWN0ZWRfc291cmNlX3JldmlzaW9uIjcKDlNhdmVFbWJlZFN0YXRlEiUKBXN0YXRlGAEgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlIk4KFFNlbGVjdFN0aWNrZXJDb250ZW50EhIKCnN0aWNrZXJfaWQYASABKAkSFQoIZmFsbGJhY2sYAiABKAlIAIgBAUILCglfZmFsbGJhY2sibgoOQ3JvcEJvYXJkSW1hZ2USKQoEY3JvcBgBIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuSW1hZ2VDcm9wEjEKDG5hdHVyYWxfc2l6ZRgCIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuSW1hZ2VTaXplIjYKCVRvZG9FZGl0cxIpCgVlZGl0cxgBIAMoCzIaLmx1bWluZy5zdHVkaW8udjEuVG9kb0VkaXQi2wEKCFRvZG9FZGl0EhAKBnJlbmFtZRgBIAEoCUgAEjIKBmluc2VydBgCIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuSW5zZXJ0VG9kb0l0ZW1IABIyCgZ1cGRhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZVRvZG9JdGVtSAASGAoOZGVsZXRlX2l0ZW1faWQYBCABKAlIABIuCgRtb3ZlGAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5Nb3ZlVG9kb0l0ZW1IAEILCglvcGVyYXRpb24iVwoNVG9kb1BsYWNlbWVudBIPCgVmaXJzdBgBIAEoCEgAEhAKBmFwcGVuZBgCIAEoCEgAEhcKDWFmdGVyX2l0ZW1faWQYAyABKAlIAEIKCghwb3NpdGlvbiJuCg5JbnNlcnRUb2RvSXRlbRIoCgRpdGVtGAEgASgLMhoubHVtaW5nLnN0dWRpby52MS5Ub2RvSXRlbRIyCglwbGFjZW1lbnQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9QbGFjZW1lbnQivwEKDlVwZGF0ZVRvZG9JdGVtEg8KB2l0ZW1faWQYASABKAkSEQoEdGV4dBgCIAEoCUgBiAEBEhQKB2NoZWNrZWQYAyABKAhIAogBARI1Cgpzb3VyY2VfcmVmGAQgASgLMh8ubHVtaW5nLnN0dWRpby52MS5Ub2RvU291cmNlUmVmSAASFgoMY2xlYXJfc291cmNlGAUgASgISABCDwoNc291cmNlX2NoYW5nZUIHCgVfdGV4dEIKCghfY2hlY2tlZCJTCgxNb3ZlVG9kb0l0ZW0SDwoHaXRlbV9pZBgBIAEoCRIyCglwbGFjZW1lbnQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9QbGFjZW1lbnQiUAoZRWRpdE9iamVjdENvbnRlbnRSZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRSZWNlaXB0IqcBChdBdHRhY2hCb2FyZEltYWdlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhEKCW9iamVjdF9pZBgDIAEoCRIUCgxkaXNwbGF5X25hbWUYBCABKAkSLAoIZ2VvbWV0cnkYBSABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5Eg8KB2NvbnRlbnQYBiABKAwiTwoYQXR0YWNoQm9hcmRJbWFnZVJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQi7AEKEEJvYXJkRWRpdFJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI1CgdhcHBsaWVkGAMgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRBcHBsaWVkSAASNwoIY29uZmxpY3QYBCABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdENvbmZsaWN0SAASNwoIcmVqZWN0ZWQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlamVjdGVkSABCCQoHb3V0Y29tZSKJAgoQQm9hcmRFZGl0QXBwbGllZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjkKD2NoYW5nZWRfb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhQKDG9iamVjdF9vcmRlchgEIAMoCRI/ChBjaGFuZ2VkX3BheWxvYWRzGAUgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhcKD2RldGFpbHNfZXhwaXJlZBgGIAEoCEIRCg9fYm9hcmRfcmV2aXNpb24ivwEKEUJvYXJkRWRpdENvbmZsaWN0EhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESOQoPY3VycmVudF9vYmplY3RzGAIgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRI/ChBjdXJyZW50X3BheWxvYWRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0QhEKD19ib2FyZF9yZXZpc2lvbiJPChFCb2FyZEVkaXRSZWplY3RlZBI6CgZyZWFzb24YASABKA4yKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlamVjdGlvblJlYXNvbiJCChpHZXRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIlIKG0dldEJvYXJkRWRpdFJlY2VpcHRSZXNwb25zZRIzCgdyZWNlaXB0GAEgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZEVkaXRSZWNlaXB0Kp4BChJCb2FyZFRyYW5zZm9ybUtpbmQSJAogQk9BUkRfVFJBTlNGT1JNX0tJTkRfVU5TUEVDSUZJRUQQABIfChtCT0FSRF9UUkFOU0ZPUk1fS0lORF9SRVNJWkUQARIfChtCT0FSRF9UUkFOU0ZPUk1fS0lORF9ST1RBVEUQAhIgChxCT0FSRF9UUkFOU0ZPUk1fS0lORF9DT05ORUNUEAMqxAEKE0JvYXJkTGF5ZXJEaXJlY3Rpb24SJQohQk9BUkRfTEFZRVJfRElSRUNUSU9OX1VOU1BFQ0lGSUVEEAASIQodQk9BUkRfTEFZRVJfRElSRUNUSU9OX0ZPUldBUkQQARIiCh5CT0FSRF9MQVlFUl9ESVJFQ1RJT05fQkFDS1dBUkQQAhIfChtCT0FSRF9MQVlFUl9ESVJFQ1RJT05fRlJPTlQQAxIeChpCT0FSRF9MQVlFUl9ESVJFQ1RJT05fQkFDSxAEKvYDChhCb2FyZEVkaXRSZWplY3Rpb25SZWFzb24SKwonQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKQolQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEiwKKEJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0VESVQQAhIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fT0JKRUNUX05PVF9GT1VORBADEi8KK0JPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9HRU9NRVRSWV9MT0NLRUQQBBIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAFEjAKLEJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9VTlNVUFBPUlRFRF9LSU5EEAYSMwovQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fVU5BVkFJTEFCTEUQBxIpCiVCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fVE9PX0xBUkdFEAgSLQopQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfSU1BR0UQCTLNAwoQQm9hcmRFZGl0U2VydmljZRJsChFFZGl0Qm9hcmRHZW9tZXRyeRIqLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkR2VvbWV0cnlSZXF1ZXN0GisubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlc3BvbnNlEmwKEUVkaXRPYmplY3RDb250ZW50EioubHVtaW5nLnN0dWRpby52MS5FZGl0T2JqZWN0Q29udGVudFJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVzcG9uc2USaQoQQXR0YWNoQm9hcmRJbWFnZRIpLmx1bWluZy5zdHVkaW8udjEuQXR0YWNoQm9hcmRJbWFnZVJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLkF0dGFjaEJvYXJkSW1hZ2VSZXNwb25zZRJyChNHZXRCb2FyZEVkaXRSZWNlaXB0EiwubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRFZGl0UmVjZWlwdFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_struct, file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
-var SaveEmbedStateSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_edits, 15);
+var file_luming_studio_v1_whiteboard_edits = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfZWRpdHMucHJvdG8SEGx1bWluZy5zdHVkaW8udjEikQYKGEVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjUKBmNyZWF0ZRgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlQm9hcmRPYmplY3RIABI8Cgl0cmFuc2Zvcm0YBCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0c0gAEj4KC2NoYW5nZV9sb2NrGAUgASgLMicubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZE9iamVjdExvY2tIABI2CgZkZWxldGUYBiABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkRlbGV0ZUJvYXJkT2JqZWN0c0gAEjgKB3Jlb3JkZXIYByABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlJlb3JkZXJCb2FyZE9iamVjdHNIABI8CglkdXBsaWNhdGUYCCABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkR1cGxpY2F0ZUJvYXJkT2JqZWN0c0gAEjQKBWdyb3VwGAkgASgLMiMubHVtaW5nLnN0dWRpby52MS5Hcm91cEJvYXJkT2JqZWN0c0gAEjgKB3VuZ3JvdXAYCiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlVuZ3JvdXBCb2FyZE9iamVjdHNIABJCCg5jcmVhdGVfc2VjdGlvbhgLIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuQ3JlYXRlU2VsZWN0aW9uU2VjdGlvbkgAEjgKB2FycmFuZ2UYDCABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkFycmFuZ2VCb2FyZE9iamVjdHNIABI5CgVzdHlsZRgNIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRPYmplY3RTdHlsZUgAEjQKBXBhc3RlGA4gASgLMiMubHVtaW5nLnN0dWRpby52MS5QYXN0ZUJvYXJkT2JqZWN0c0gAQgsKCW9wZXJhdGlvbiK+AQoRQ3JlYXRlQm9hcmRPYmplY3QSMAoGb2JqZWN0GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRI4Cg9pbml0aWFsX3BheWxvYWQYAiABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWQSPQoKYXR0YWNobWVudBgDIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRDcmVhdGlvbkF0dGFjaG1lbnQizgEKF0JvYXJkQ3JlYXRpb25BdHRhY2htZW50EjEKBnNvdXJjZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjQKC3NvdXJjZV9wb3J0GAIgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0EjQKC3RhcmdldF9wb3J0GAMgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JQb3J0EhQKDGNvbm5lY3Rvcl9pZBgEIAEoCSJqCg9FZGl0Qm9hcmRUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBAUIcChpfZXhwZWN0ZWRfZ2VvbWV0cnlfdmVyc2lvbiLaAQoUVHJhbnNmb3JtQm9hcmRPYmplY3QSMQoGdGFyZ2V0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSLAoIZ2VvbWV0cnkYAiABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLkdlb21ldHJ5EjYKCWNvbm5lY3RvchgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQ29ubmVjdG9yR2VvbWV0cnkSKQoDaW5rGAQgASgLMhwubHVtaW5nLnN0dWRpby52MS5JbmtQYXlsb2FkIoQBChVUcmFuc2Zvcm1Cb2FyZE9iamVjdHMSMgoEa2luZBgBIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUcmFuc2Zvcm1LaW5kEjcKB29iamVjdHMYAiADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlRyYW5zZm9ybUJvYXJkT2JqZWN0IlsKFUNoYW5nZUJvYXJkT2JqZWN0TG9jaxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQSDgoGbG9ja2VkGAIgASgIIkgKEkRlbGV0ZUJvYXJkT2JqZWN0cxIyCgd0YXJnZXRzGAEgAygLMiEubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRUYXJnZXQixQEKE1Jlb3JkZXJCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjgKCWRpcmVjdGlvbhgCIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRMYXllckRpcmVjdGlvbhIkChdleHBlY3RlZF9ib2FyZF9yZXZpc2lvbhgDIAEoBEgAiAEBQhoKGF9leHBlY3RlZF9ib2FyZF9yZXZpc2lvbiJgChREdXBsaWNhdGVCb2FyZE9iamVjdBIxCgZzb3VyY2UYASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIVCg1uZXdfb2JqZWN0X2lkGAIgASgJInwKFUR1cGxpY2F0ZUJvYXJkT2JqZWN0cxI3Cgd0YXJnZXRzGAEgAygLMiYubHVtaW5nLnN0dWRpby52MS5EdXBsaWNhdGVCb2FyZE9iamVjdBIqCgVkZWx0YRgCIAEoCzIbLmx1bWluZy5zdHVkaW8udjEuTW92ZURlbHRhIlkKEUdyb3VwQm9hcmRPYmplY3RzEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBIQCghncm91cF9pZBgCIAEoCSJJChNVbmdyb3VwQm9hcmRPYmplY3RzEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldCJ+ChZDcmVhdGVTZWxlY3Rpb25TZWN0aW9uEjIKB3RhcmdldHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZFRhcmdldBISCgpzZWN0aW9uX2lkGAIgASgJEhIKBXRpdGxlGAMgASgJSACIAQFCCAoGX3RpdGxlIn8KE0FycmFuZ2VCb2FyZE9iamVjdHMSMgoHdGFyZ2V0cxgBIAMoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EjQKBnByZXNldBgCIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRBcnJhbmdlUHJlc2V0Io8BChZCb2FyZE9iamVjdFN0eWxlVGFyZ2V0EjEKBnRhcmdldBgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRWRpdEJvYXJkVGFyZ2V0EiUKGGV4cGVjdGVkX3BheWxvYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhsKGV9leHBlY3RlZF9wYXlsb2FkX3ZlcnNpb24ikAUKFUJvYXJkT2JqZWN0U3R5bGVQYXRjaBIRCgRmaWxsGAEgASgJSACIAQESEwoGc3Ryb2tlGAIgASgJSAGIAQESGQoMc3Ryb2tlX3dpZHRoGAMgASgBSAKIAQESEwoGZGFzaGVkGAQgASgISAOIAQESEwoGaG9sbG93GAUgASgISASIAQESFwoKdGV4dF9jb2xvchgGIAEoCUgFiAEBEhgKC2ZvbnRfZmFtaWx5GAcgASgJSAaIAQESFgoJZm9udF9zaXplGAggASgBSAeIAQESOAoKdGV4dF9hbGlnbhgJIAEoDjIfLmx1bWluZy5zdHVkaW8udjEuVGV4dEFsaWdubWVudEgIiAEBEhcKCnNoYXBlX2Zvcm0YCiABKAlICYgBARI4CgpzdGFydF9oZWFkGAsgASgOMh8ubHVtaW5nLnN0dWRpby52MS5Db25uZWN0b3JIZWFkSAqIAQESNgoIZW5kX2hlYWQYDCABKA4yHy5sdW1pbmcuc3R1ZGlvLnYxLkNvbm5lY3RvckhlYWRIC4gBARISCgVsYWJlbBgNIAEoCUgMiAEBEhEKBGJvbGQYDiABKAhIDYgBARITCgZpdGFsaWMYDyABKAhIDogBAUIHCgVfZmlsbEIJCgdfc3Ryb2tlQg8KDV9zdHJva2Vfd2lkdGhCCQoHX2Rhc2hlZEIJCgdfaG9sbG93Qg0KC190ZXh0X2NvbG9yQg4KDF9mb250X2ZhbWlseUIMCgpfZm9udF9zaXplQg0KC190ZXh0X2FsaWduQg0KC19zaGFwZV9mb3JtQg0KC19zdGFydF9oZWFkQgsKCV9lbmRfaGVhZEIICgZfbGFiZWxCBwoFX2JvbGRCCQoHX2l0YWxpYyKLAQoWQ2hhbmdlQm9hcmRPYmplY3RTdHlsZRI5Cgd0YXJnZXRzGAEgAygLMigubHVtaW5nLnN0dWRpby52MS5Cb2FyZE9iamVjdFN0eWxlVGFyZ2V0EjYKBXBhdGNoGAIgASgLMicubHVtaW5nLnN0dWRpby52MS5Cb2FyZE9iamVjdFN0eWxlUGF0Y2giPwoQUGFzdGVCb2FyZE9iamVjdBIYChBzb3VyY2Vfb2JqZWN0X2lkGAEgASgJEhEKCW9iamVjdF9pZBgCIAEoCSK/AQoRUGFzdGVCb2FyZE9iamVjdHMSFwoPc291cmNlX2JvYXJkX2lkGAEgASgJEhwKD3NvdXJjZV9yZXZpc2lvbhgCIAEoBEgAiAEBEjMKB3RhcmdldHMYAyADKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlBhc3RlQm9hcmRPYmplY3QSKgoFZGVsdGEYBCABKAsyGy5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVEZWx0YUISChBfc291cmNlX3JldmlzaW9uIlAKGUVkaXRCb2FyZEdlb21ldHJ5UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCKvBQoYRWRpdE9iamVjdENvbnRlbnRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJb2JqZWN0X2lkGAMgASgJEiUKGGV4cGVjdGVkX3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEjUKCGRvY3VtZW50GAUgASgLMiEubHVtaW5nLnN0dWRpby52MS5Eb2N1bWVudFBheWxvYWRIABIrCgR0b2RvGAYgASgLMhsubHVtaW5nLnN0dWRpby52MS5Ub2RvRWRpdHNIABItCgR0ZXh0GAcgASgLMh0ubHVtaW5nLnN0dWRpby52MS5UZXh0UGF5bG9hZEgAEjMKBXRhYmxlGAggASgLMiIubHVtaW5nLnN0dWRpby52MS5TYXZlVGFibGVDb250ZW50SAASOQoMZW1iZWRfc291cmNlGAkgASgLMiEubHVtaW5nLnN0dWRpby52MS5TYXZlRW1iZWRTb3VyY2VIABI3CgtlbWJlZF9zdGF0ZRgKIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuU2F2ZUVtYmVkU3RhdGVIABI5CgdzdGlja2VyGAsgASgLMiYubHVtaW5nLnN0dWRpby52MS5TZWxlY3RTdGlja2VyQ29udGVudEgAEjAKBGNyb3AYDCABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkNyb3BCb2FyZEltYWdlSAASLwoEbGluaxgNIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuU2F2ZUJvYXJkTGlua0gAEh4KEWRlbGV0ZV9lbXB0eV90ZXh0GA4gASgISAKIAQFCBgoEZWRpdEIbChlfZXhwZWN0ZWRfcGF5bG9hZF92ZXJzaW9uQhQKEl9kZWxldGVfZW1wdHlfdGV4dCIsCg1TYXZlQm9hcmRMaW5rEg0KBXRpdGxlGAEgASgJEgwKBGhyZWYYAiABKAkiewoQU2F2ZVRhYmxlQ29udGVudBItCgV0YWJsZRgBIAEoCzIeLmx1bWluZy5zdHVkaW8udjEuVGFibGVQYXlsb2FkEjgKDHdpZHRoX2NoYW5nZRgCIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuVGFibGVXaWR0aENoYW5nZSI5ChBUYWJsZVdpZHRoQ2hhbmdlEhYKDmV4cGVjdGVkX3dpZHRoGAEgASgBEg0KBXdpZHRoGAIgASgBInIKD1NhdmVFbWJlZFNvdXJjZRINCgV0aXRsZRgBIAEoCRIMCgRodG1sGAIgASgJEiUKGGV4cGVjdGVkX3NvdXJjZV9yZXZpc2lvbhgDIAEoBEgAiAEBQhsKGV9leHBlY3RlZF9zb3VyY2VfcmV2aXNpb24iNwoOU2F2ZUVtYmVkU3RhdGUSJQoFc3RhdGUYASABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWUiTgoUU2VsZWN0U3RpY2tlckNvbnRlbnQSEgoKc3RpY2tlcl9pZBgBIAEoCRIVCghmYWxsYmFjaxgCIAEoCUgAiAEBQgsKCV9mYWxsYmFjayJuCg5Dcm9wQm9hcmRJbWFnZRIpCgRjcm9wGAEgASgLMhsubHVtaW5nLnN0dWRpby52MS5JbWFnZUNyb3ASMQoMbmF0dXJhbF9zaXplGAIgASgLMhsubHVtaW5nLnN0dWRpby52MS5JbWFnZVNpemUiNgoJVG9kb0VkaXRzEikKBWVkaXRzGAEgAygLMhoubHVtaW5nLnN0dWRpby52MS5Ub2RvRWRpdCLbAQoIVG9kb0VkaXQSEAoGcmVuYW1lGAEgASgJSAASMgoGaW5zZXJ0GAIgASgLMiAubHVtaW5nLnN0dWRpby52MS5JbnNlcnRUb2RvSXRlbUgAEjIKBnVwZGF0ZRgDIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlVG9kb0l0ZW1IABIYCg5kZWxldGVfaXRlbV9pZBgEIAEoCUgAEi4KBG1vdmUYBSABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLk1vdmVUb2RvSXRlbUgAQgsKCW9wZXJhdGlvbiJXCg1Ub2RvUGxhY2VtZW50Eg8KBWZpcnN0GAEgASgISAASEAoGYXBwZW5kGAIgASgISAASFwoNYWZ0ZXJfaXRlbV9pZBgDIAEoCUgAQgoKCHBvc2l0aW9uIm4KDkluc2VydFRvZG9JdGVtEigKBGl0ZW0YASABKAsyGi5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9JdGVtEjIKCXBsYWNlbWVudBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuVG9kb1BsYWNlbWVudCK/AQoOVXBkYXRlVG9kb0l0ZW0SDwoHaXRlbV9pZBgBIAEoCRIRCgR0ZXh0GAIgASgJSAGIAQESFAoHY2hlY2tlZBgDIAEoCEgCiAEBEjUKCnNvdXJjZV9yZWYYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlRvZG9Tb3VyY2VSZWZIABIWCgxjbGVhcl9zb3VyY2UYBSABKAhIAEIPCg1zb3VyY2VfY2hhbmdlQgcKBV90ZXh0QgoKCF9jaGVja2VkIlMKDE1vdmVUb2RvSXRlbRIPCgdpdGVtX2lkGAEgASgJEjIKCXBsYWNlbWVudBgCIAEoCzIfLmx1bWluZy5zdHVkaW8udjEuVG9kb1BsYWNlbWVudCJQChlFZGl0T2JqZWN0Q29udGVudFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQipwEKF0F0dGFjaEJvYXJkSW1hZ2VSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJb2JqZWN0X2lkGAMgASgJEhQKDGRpc3BsYXlfbmFtZRgEIAEoCRIsCghnZW9tZXRyeRgFIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnkSDwoHY29udGVudBgGIAEoDCJPChhBdHRhY2hCb2FyZEltYWdlUmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCK7AQoXQXR0YWNoQm9hcmRWaWRlb1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIRCglvYmplY3RfaWQYAyABKAkSFAoMZGlzcGxheV9uYW1lGAQgASgJEiwKCGdlb21ldHJ5GAUgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeRIPCgdjb250ZW50GAYgASgMEhIKCm1lZGlhX3R5cGUYByABKAkiTwoYQXR0YWNoQm9hcmRWaWRlb1Jlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQiawofVXBsb2FkQm9hcmREb2N1bWVudEltYWdlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhEKCW9iamVjdF9pZBgDIAEoCRIPCgdjb250ZW50GAQgASgMIn0KIFVwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZVJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQSFgoJYXNzZXRfdXJsGAIgASgJSACIAQFCDAoKX2Fzc2V0X3VybCJ/ChdSZXZlcnNlQm9hcmRFZGl0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEhkKD2VkaXRfY29tbWFuZF9pZBgDIAEoCUgAEhkKD21vdmVfY29tbWFuZF9pZBgEIAEoCUgAQggKBnNvdXJjZSJPChhSZXZlcnNlQm9hcmRFZGl0UmVzcG9uc2USMwoHcmVjZWlwdBgBIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVjZWlwdCLsAQoQQm9hcmRFZGl0UmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjUKB2FwcGxpZWQYAyABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdEFwcGxpZWRIABI3Cghjb25mbGljdBgEIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0Q29uZmxpY3RIABI3CghyZWplY3RlZBgFIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0ZWRIAEIJCgdvdXRjb21lIokCChBCb2FyZEVkaXRBcHBsaWVkEhsKDmJvYXJkX3JldmlzaW9uGAEgASgESACIAQESOQoPY2hhbmdlZF9vYmplY3RzGAIgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YRIaChJyZW1vdmVkX29iamVjdF9pZHMYAyADKAkSFAoMb2JqZWN0X29yZGVyGAQgAygJEj8KEGNoYW5nZWRfcGF5bG9hZHMYBSADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRSZXN1bHQSFwoPZGV0YWlsc19leHBpcmVkGAYgASgIQhEKD19ib2FyZF9yZXZpc2lvbiK/AQoRQm9hcmRFZGl0Q29uZmxpY3QSGwoOYm9hcmRfcmV2aXNpb24YASABKARIAIgBARI5Cg9jdXJyZW50X29iamVjdHMYAiADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhEj8KEGN1cnJlbnRfcGF5bG9hZHMYAyADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdFBheWxvYWRSZXN1bHRCEQoPX2JvYXJkX3JldmlzaW9uIk8KEUJvYXJkRWRpdFJlamVjdGVkEjoKBnJlYXNvbhgBIAEoDjIqLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0aW9uUmVhc29uIkIKGkdldEJvYXJkRWRpdFJlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiUgobR2V0Qm9hcmRFZGl0UmVjZWlwdFJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQqngEKEkJvYXJkVHJhbnNmb3JtS2luZBIkCiBCT0FSRF9UUkFOU0ZPUk1fS0lORF9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1RSQU5TRk9STV9LSU5EX1JFU0laRRABEh8KG0JPQVJEX1RSQU5TRk9STV9LSU5EX1JPVEFURRACEiAKHEJPQVJEX1RSQU5TRk9STV9LSU5EX0NPTk5FQ1QQAyrEAQoTQm9hcmRMYXllckRpcmVjdGlvbhIlCiFCT0FSRF9MQVlFUl9ESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIhCh1CT0FSRF9MQVlFUl9ESVJFQ1RJT05fRk9SV0FSRBABEiIKHkJPQVJEX0xBWUVSX0RJUkVDVElPTl9CQUNLV0FSRBACEh8KG0JPQVJEX0xBWUVSX0RJUkVDVElPTl9GUk9OVBADEh4KGkJPQVJEX0xBWUVSX0RJUkVDVElPTl9CQUNLEAQqmwIKEkJvYXJkQXJyYW5nZVByZXNldBIkCiBCT0FSRF9BUlJBTkdFX1BSRVNFVF9VTlNQRUNJRklFRBAAEh0KGUJPQVJEX0FSUkFOR0VfUFJFU0VUX1RJRFkQARIdChlCT0FSRF9BUlJBTkdFX1BSRVNFVF9MRUZUEAISIAocQk9BUkRfQVJSQU5HRV9QUkVTRVRfSENFTlRFUhADEh4KGkJPQVJEX0FSUkFOR0VfUFJFU0VUX1JJR0hUEAQSHAoYQk9BUkRfQVJSQU5HRV9QUkVTRVRfVE9QEAUSIAocQk9BUkRfQVJSQU5HRV9QUkVTRVRfVkNFTlRFUhAGEh8KG0JPQVJEX0FSUkFOR0VfUFJFU0VUX0JPVFRPTRAHKqUEChhCb2FyZEVkaXRSZWplY3Rpb25SZWFzb24SKwonQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKQolQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEiwKKEJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0VESVQQAhIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fT0JKRUNUX05PVF9GT1VORBADEi8KK0JPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9HRU9NRVRSWV9MT0NLRUQQBBIwCixCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAFEjAKLEJPQVJEX0VESVRfUkVKRUNUSU9OX1JFQVNPTl9VTlNVUFBPUlRFRF9LSU5EEAYSMwovQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fVU5BVkFJTEFCTEUQBxIpCiVCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fVE9PX0xBUkdFEAgSLQopQk9BUkRfRURJVF9SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfSU1BR0UQCRItCilCT0FSRF9FRElUX1JFSkVDVElPTl9SRUFTT05fSU5WQUxJRF9WSURFTxAKMqcGChBCb2FyZEVkaXRTZXJ2aWNlEmwKEUVkaXRCb2FyZEdlb21ldHJ5EioubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZEdlb21ldHJ5UmVzcG9uc2USbAoRRWRpdE9iamVjdENvbnRlbnQSKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuRWRpdE9iamVjdENvbnRlbnRSZXNwb25zZRJpChBBdHRhY2hCb2FyZEltYWdlEikubHVtaW5nLnN0dWRpby52MS5BdHRhY2hCb2FyZEltYWdlUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQXR0YWNoQm9hcmRJbWFnZVJlc3BvbnNlEmkKEEF0dGFjaEJvYXJkVmlkZW8SKS5sdW1pbmcuc3R1ZGlvLnYxLkF0dGFjaEJvYXJkVmlkZW9SZXF1ZXN0GioubHVtaW5nLnN0dWRpby52MS5BdHRhY2hCb2FyZFZpZGVvUmVzcG9uc2USgQEKGFVwbG9hZEJvYXJkRG9jdW1lbnRJbWFnZRIxLmx1bWluZy5zdHVkaW8udjEuVXBsb2FkQm9hcmREb2N1bWVudEltYWdlUmVxdWVzdBoyLmx1bWluZy5zdHVkaW8udjEuVXBsb2FkQm9hcmREb2N1bWVudEltYWdlUmVzcG9uc2USaQoQUmV2ZXJzZUJvYXJkRWRpdBIpLmx1bWluZy5zdHVkaW8udjEuUmV2ZXJzZUJvYXJkRWRpdFJlcXVlc3QaKi5sdW1pbmcuc3R1ZGlvLnYxLlJldmVyc2VCb2FyZEVkaXRSZXNwb25zZRJyChNHZXRCb2FyZEVkaXRSZWNlaXB0EiwubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZEVkaXRSZWNlaXB0UmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRFZGl0UmVjZWlwdFJlc3BvbnNlYgZwcm90bzM", [file_google_protobuf_struct, file_luming_studio_v1_whiteboard_payload, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var SaveEmbedStateSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_whiteboard_edits, 26);
 var BoardTransformKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 0);
 var BoardTransformKind = /* @__PURE__ */ tsEnum(BoardTransformKindSchema);
 var BoardLayerDirectionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 1);
 var BoardLayerDirection = /* @__PURE__ */ tsEnum(BoardLayerDirectionSchema);
-var BoardEditRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 2);
+var BoardArrangePresetSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 2);
+var BoardArrangePreset = /* @__PURE__ */ tsEnum(BoardArrangePresetSchema);
+var BoardEditRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_edits, 3);
 var BoardEditRejectionReason = /* @__PURE__ */ tsEnum(BoardEditRejectionReasonSchema);
 var BoardEditService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_edits, 0);
 
@@ -13353,22 +17503,22 @@ var CONNECTOR_HEADS = {
   circle: ConnectorHead.CIRCLE
 };
 function toEndpoint(endpoint2) {
-  const { point, attachment } = endpoint2;
+  const { point: point2, attachment } = endpoint2;
   if (!attachment) {
-    return { point };
+    return { point: point2 };
   }
   const { objectId, port } = attachment;
   return {
-    point,
+    point: point2,
     attachment: { objectId, port: port ? CONNECTOR_PORTS[port] : ConnectorPort.UNSPECIFIED }
   };
 }
 function toConnector(detail) {
-  const { start, end, bends, relativeBends, labelOffset, startHead, endHead } = detail;
+  const { start, end: end2, bends, relativeBends, labelOffset, startHead, endHead } = detail;
   const axis = relativeBends?.firstAxis === "horizontal" ? BendAxis.HORIZONTAL : BendAxis.VERTICAL;
   return {
     start: toEndpoint(start),
-    end: toEndpoint(end),
+    end: toEndpoint(end2),
     bends: [...bends],
     relativeBends: relativeBends ? { firstAxis: axis, offsets: [...relativeBends.offsets] } : void 0,
     labelOffset,
@@ -13391,19 +17541,19 @@ function toGeometryDetail(detail) {
       return { case: "connector", value: toConnector(detail) };
   }
 }
-function toObjectMetadata(object) {
+function toObjectMetadata(object3) {
   return create(ObjectMetadataSchema, {
-    objectId: object.objectId,
-    kind: object.kind,
-    label: object.label,
-    geometry: object.geometry,
-    geometryVersion: object.geometryVersion,
-    payloadVersion: object.payloadVersion,
-    locked: object.locked,
-    parentId: object.parentId,
-    groupId: object.groupId,
-    appearance: object.appearance,
-    geometryDetail: toGeometryDetail(object.detail)
+    objectId: object3.objectId,
+    kind: object3.kind,
+    label: object3.label,
+    geometry: object3.geometry,
+    geometryVersion: object3.geometryVersion,
+    payloadVersion: object3.payloadVersion,
+    locked: object3.locked,
+    parentId: object3.parentId,
+    groupId: object3.groupId,
+    appearance: object3.appearance,
+    geometryDetail: toGeometryDetail(object3.detail)
   });
 }
 function toBoardScene(scene) {
@@ -13426,7 +17576,8 @@ var rejection2 = {
   unsupportedKind: BoardEditRejectionReason.UNSUPPORTED_KIND,
   versionUnavailable: BoardEditRejectionReason.VERSION_UNAVAILABLE,
   tooLarge: BoardEditRejectionReason.TOO_LARGE,
-  invalidImage: BoardEditRejectionReason.INVALID_IMAGE
+  invalidImage: BoardEditRejectionReason.INVALID_IMAGE,
+  invalidVideo: BoardEditRejectionReason.INVALID_VIDEO
 };
 function encodePayload(payload) {
   return toPayloadResult({ kind: "payload", payload });
@@ -13476,6 +17627,28 @@ function toBoardEditReceipt({
       }
     }
   };
+}
+
+// src/entrypoints/http/document-image-route.ts
+var upload = BoardEditService.method.uploadBoardDocumentImage;
+var assetPrefix4 = "document-image-";
+var boardDocumentImageRoutePath = "/" + BoardEditService.typeName + "/" + upload.name;
+function createDocumentImageRoute(application, digest2) {
+  return unaryRoute(upload, (actor, request) => {
+    const boardId = requireId(request.boardId);
+    const commandId = requireId(request.commandId);
+    const objectId = requireId(request.objectId);
+    const identity = new TextEncoder().encode(JSON.stringify([boardId, actor.id, commandId]));
+    const assetId = assetPrefix4 + digest2(identity);
+    const signature = assetPrefix4 + digest2(toBinary(upload.input, request));
+    const { receipt, assetUrl } = application.uploadDocumentImage(actor, {
+      boardId,
+      commandId,
+      operation: { objectId, assetId, content: request.content },
+      signature
+    });
+    return { receipt: toBoardEditReceipt(receipt), assetUrl };
+  });
 }
 
 // src/entrypoints/http/content-edits.ts
@@ -13542,11 +17715,11 @@ function readTodoEdit({ operation }) {
       };
     }
     case "update": {
-      const { itemId, text: text2, checked, sourceChange } = operation.value;
+      const { itemId, text: text3, checked, sourceChange } = operation.value;
       return {
         kind: "update",
         itemId: requireId(itemId),
-        text: text2,
+        text: text3,
         checked,
         sourceRef: readSourceChange(sourceChange)
       };
@@ -13586,7 +17759,8 @@ function readCrop({ crop, naturalSize: naturalSize2 }) {
 function readContentOperation({
   objectId,
   expectedPayloadVersion,
-  edit
+  edit,
+  deleteEmptyText
 }) {
   if (expectedPayloadVersion === void 0) {
     throw new HttpRequestError(400, "An expected payload version is required");
@@ -13601,7 +17775,12 @@ function readContentOperation({
     }
     case "text": {
       const encoded = contentJson(() => toJson(TextPayloadSchema, edit.value));
-      return { ...target2, kind: "text", data: { ...encoded, text: edit.value.text } };
+      return {
+        ...target2,
+        kind: "text",
+        data: { ...encoded, text: edit.value.text },
+        deleteEmpty: deleteEmptyText
+      };
     }
     case "todo":
       return { ...target2, kind: "todo", edits: edit.value.edits.map(readTodoEdit) };
@@ -13650,12 +17829,28 @@ function readContentOperation({
     }
     case "crop":
       return { ...target2, kind: "crop", ...readCrop(edit.value) };
+    case "link":
+      return { ...target2, kind: "link", title: edit.value.title, href: edit.value.href };
     case void 0:
       throw new HttpRequestError(400, "A content operation is required");
   }
 }
 
 // src/entrypoints/http/geometry-edits.ts
+var arrangePresets = /* @__PURE__ */ new Map([
+  [BoardArrangePreset.TIDY, "tidy"],
+  [BoardArrangePreset.LEFT, "left"],
+  [BoardArrangePreset.HCENTER, "hcenter"],
+  [BoardArrangePreset.RIGHT, "right"],
+  [BoardArrangePreset.TOP, "top"],
+  [BoardArrangePreset.VCENTER, "vcenter"],
+  [BoardArrangePreset.BOTTOM, "bottom"]
+]);
+var alignments3 = /* @__PURE__ */ new Map([
+  [TextAlignment.LEFT, "TEXT_ALIGNMENT_LEFT"],
+  [TextAlignment.CENTER, "TEXT_ALIGNMENT_CENTER"],
+  [TextAlignment.RIGHT, "TEXT_ALIGNMENT_RIGHT"]
+]);
 var transformKinds = /* @__PURE__ */ new Map([
   [BoardTransformKind.RESIZE, "resize"],
   [BoardTransformKind.ROTATE, "rotate"],
@@ -13703,8 +17898,8 @@ function readPoint({ x, y }) {
   return { x, y };
 }
 function readEndpoint(value) {
-  const { point, attachment } = requireField(value, "Connector endpoint");
-  const origin = readPoint(requireField(point, "Connector point"));
+  const { point: point2, attachment } = requireField(value, "Connector endpoint");
+  const origin = readPoint(requireField(point2, "Connector point"));
   if (!attachment) {
     return { point: origin };
   }
@@ -13717,7 +17912,7 @@ function readHead(value) {
 }
 function readConnector({
   start,
-  end,
+  end: end2,
   bends,
   relativeBends,
   labelOffset,
@@ -13727,7 +17922,7 @@ function readConnector({
   return {
     kind: "connector",
     start: readEndpoint(start),
-    end: readEndpoint(end),
+    end: readEndpoint(end2),
     bends: bends.map(readPoint),
     relativeBends: relativeBends && {
       firstAxis: requireField(bendAxes.get(relativeBends.firstAxis), "Connector bend axis"),
@@ -13763,27 +17958,27 @@ function readCreatedObject(value) {
   const {
     objectId,
     kind,
-    label,
+    label: label2,
     geometry,
     geometryVersion,
     payloadVersion,
     locked,
     parentId,
     groupId,
-    appearance: appearance2,
+    appearance: appearance3,
     geometryDetail: geometryDetail2
   } = requireField(value, "New object");
   return {
     objectId: requireId(objectId),
     kind,
-    label,
+    label: label2,
     geometry: readGeometry(geometry),
     geometryVersion: geometryVersion ?? 0n,
     payloadVersion,
     locked,
     parentId,
     groupId,
-    appearance: readAppearance(appearance2),
+    appearance: readAppearance(appearance3),
     detail: readDetail(geometryDetail2)
   };
 }
@@ -13799,21 +17994,51 @@ function readInitialPayload(objectId, value) {
   }
   return { objectId, payloadVersion: value.payloadVersion ?? 0n, bodyKind, data };
 }
+function readCreationAttachment(value) {
+  return {
+    source: readTarget(value.source),
+    sourcePort: requireField(ports.get(value.sourcePort), "Source port"),
+    targetPort: requireField(ports.get(value.targetPort), "Target port"),
+    connectorId: requireId(value.connectorId)
+  };
+}
 function readCreate(value) {
-  const object = readCreatedObject(value.object);
+  const object3 = readCreatedObject(value.object);
   return {
     kind: "create",
-    object,
-    payload: readInitialPayload(object.objectId, value.initialPayload)
+    object: object3,
+    payload: readInitialPayload(object3.objectId, value.initialPayload),
+    attachment: value.attachment && readCreationAttachment(value.attachment)
   };
 }
 function readTransform(change) {
-  const { target: target2, geometry, connector: connector2, ink } = change;
+  const { target: target2, geometry, connector: connector2, ink: ink2 } = change;
   return {
     target: readTarget(target2),
     geometry: readGeometry(geometry),
     connector: connector2 && readConnector(connector2),
-    ink: ink?.points.map(readPoint)
+    ink: ink2?.points.map(readPoint)
+  };
+}
+function readStyle(value) {
+  const patch = requireField(value, "Style patch");
+  const { textAlign, startHead, endHead } = patch;
+  return {
+    fill: patch.fill,
+    stroke: patch.stroke,
+    strokeWidth: patch.strokeWidth,
+    dashed: patch.dashed,
+    hollow: patch.hollow,
+    textColor: patch.textColor,
+    fontFamily: patch.fontFamily,
+    fontSize: patch.fontSize,
+    shapeForm: patch.shapeForm,
+    label: patch.label,
+    bold: patch.bold,
+    italic: patch.italic,
+    textAlign: textAlign === void 0 ? void 0 : requireField(alignments3.get(textAlign), "Text alignment"),
+    startHead: startHead === void 0 ? void 0 : requireField(heads.get(startHead), "Start head"),
+    endHead: endHead === void 0 ? void 0 : requireField(heads.get(endHead), "End head")
   };
 }
 function readGeometryOperation({ operation }) {
@@ -13856,6 +18081,50 @@ function readGeometryOperation({ operation }) {
         }))
       };
     }
+    case "group":
+      return {
+        kind: "group",
+        groupId: requireId(operation.value.groupId),
+        targets: operation.value.targets.map(readTarget)
+      };
+    case "ungroup":
+      return { kind: "ungroup", targets: operation.value.targets.map(readTarget) };
+    case "createSection":
+      return {
+        kind: "createSection",
+        sectionId: requireId(operation.value.sectionId),
+        title: operation.value.title,
+        targets: operation.value.targets.map(readTarget)
+      };
+    case "arrange":
+      return {
+        kind: "arrange",
+        preset: requireField(arrangePresets.get(operation.value.preset), "Arrange preset"),
+        targets: operation.value.targets.map(readTarget)
+      };
+    case "style":
+      return {
+        kind: "style",
+        patch: readStyle(operation.value.patch),
+        targets: operation.value.targets.map(({ target: target2, expectedPayloadVersion }) => ({
+          target: readTarget(target2),
+          expectedPayloadVersion
+        }))
+      };
+    case "paste": {
+      const { sourceBoardId, sourceRevision, targets, delta } = operation.value;
+      const { dx, dy } = requireField(delta, "Paste offset");
+      return {
+        kind: "paste",
+        sourceBoardId: requireId(sourceBoardId),
+        sourceRevision: requireField(sourceRevision, "Source revision"),
+        targets: targets.map(({ sourceObjectId, objectId }) => ({
+          sourceObjectId: requireId(sourceObjectId),
+          objectId: requireId(objectId)
+        })),
+        delta: { dx, dy }
+      };
+    }
     case void 0:
       throw new HttpRequestError(400, "Geometry operation is required");
   }
@@ -13876,7 +18145,13 @@ function readImageOperation({
 }
 
 // src/entrypoints/http/edit-routes.ts
-var { editBoardGeometry, editObjectContent, attachBoardImage, getBoardEditReceipt } = BoardEditService.method;
+var {
+  editBoardGeometry,
+  editObjectContent,
+  attachBoardImage,
+  reverseBoardEdit,
+  getBoardEditReceipt
+} = BoardEditService.method;
 var boardImageRoutePath = "/" + BoardEditService.typeName + "/" + attachBoardImage.name;
 var boardImageRequestLimit = 8 * 1024 * 1024 + 32 * 1024;
 function createBoardEditRoutes(application, digest2, observe) {
@@ -13885,16 +18160,22 @@ function createBoardEditRoutes(application, digest2, observe) {
     return toBoardEditReceipt(edit);
   }
   return [
-    unaryRoute(editBoardGeometry, (actor, request) => ({
-      receipt: changed(
-        application.editGeometry(actor, {
-          boardId: requireId(request.boardId),
-          commandId: requireId(request.commandId),
-          operation: readGeometryOperation(request),
-          signature: "geometry:" + digest2(toBinary(editBoardGeometry.input, request))
-        })
-      )
-    })),
+    unaryRoute(editBoardGeometry, (actor, request) => {
+      const operation = readGeometryOperation(request);
+      if (operation.kind === "paste") {
+        actor.authorizeRead?.(operation.sourceBoardId);
+      }
+      return {
+        receipt: changed(
+          application.editGeometry(actor, {
+            boardId: requireId(request.boardId),
+            commandId: requireId(request.commandId),
+            operation,
+            signature: "geometry:" + digest2(toBinary(editBoardGeometry.input, request))
+          })
+        )
+      };
+    }),
     unaryRoute(editObjectContent, (actor, request) => ({
       receipt: changed(
         application.editContent(actor, {
@@ -13905,9 +18186,9 @@ function createBoardEditRoutes(application, digest2, observe) {
         })
       )
     })),
-    unaryRoute(attachBoardImage, (actor, request) => ({
+    asyncUnaryRoute(attachBoardImage, async (actor, request) => ({
       receipt: changed(
-        application.attachImage(actor, {
+        await application.attachImage(actor, {
           boardId: requireId(request.boardId),
           commandId: requireId(request.commandId),
           operation: readImageOperation(request),
@@ -13915,6 +18196,20 @@ function createBoardEditRoutes(application, digest2, observe) {
         })
       )
     })),
+    unaryRoute(reverseBoardEdit, (actor, request) => {
+      const { source } = request;
+      const kind = source.case === "moveCommandId" ? "move" : "edit";
+      return {
+        receipt: changed(
+          application.reverseEdit(actor, {
+            boardId: requireId(request.boardId),
+            commandId: requireId(request.commandId),
+            operation: { kind, commandId: requireId(source.value ?? "") },
+            signature: "reverse:" + digest2(toBinary(reverseBoardEdit.input, request))
+          })
+        )
+      };
+    }),
     unaryRoute(getBoardEditReceipt, (actor, request) => {
       const receipt = application.getEditReceipt(actor, {
         boardId: requireId(request.boardId),
@@ -13926,7 +18221,7 @@ function createBoardEditRoutes(application, digest2, observe) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/feedback_service_pb.js
-var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiKXAQoURmVlZGJhY2tBbmNob3JUYXJnZXQSNgoLYm9hcmRfcG9pbnQYASABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnRIABI9CgxvYmplY3RfcG9pbnQYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrT2JqZWN0UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIvUBCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgiwQEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIsMBChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQFCCQoHX2N1cnNvckISChBfYXV0aG9yX2FjdG9yX2lkIoUBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjEKB3RocmVhZHMYASADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkEhgKC25leHRfY3Vyc29yGAIgASgJSACIAQESEQoJY2FuX3dyaXRlGAMgASgIQg4KDF9uZXh0X2N1cnNvciJqChBHZXRUaHJlYWRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQFCCQoHX2N1cnNvciK2AQoRR2V0VGhyZWFkUmVzcG9uc2USMAoGdGhyZWFkGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIyCgdyZXBsaWVzGAIgAygLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USGAoLbmV4dF9jdXJzb3IYAyABKAlIAIgBARIRCgljYW5fd3JpdGUYBCABKAhCDgoMX25leHRfY3Vyc29yIlYKDkZlZWRiYWNrQ3JlYXRlEjYKBmFuY2hvchgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSDAoEdGV4dBgCIAEoCSIwCg1GZWVkYmFja1JlcGx5EhEKCXRocmVhZF9pZBgBIAEoCRIMCgR0ZXh0GAIgASgJIocBCgxGZWVkYmFja0VkaXQSEQoJdGhyZWFkX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSJQoYZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uGAMgASgESACIAQESDAoEdGV4dBgEIAEoCUIbChlfZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uImsKFEZlZWRiYWNrVGhyZWFkQ2hhbmdlEhEKCXRocmVhZF9pZBgBIAEoCRIkChdleHBlY3RlZF90aHJlYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhoKGF9leHBlY3RlZF90aHJlYWRfdmVyc2lvbiKOAwoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSABCCwoJb3BlcmF0aW9uIksKFUFwcGx5RmVlZGJhY2tSZXNwb25zZRIyCgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHQipwEKD0ZlZWRiYWNrQXBwbGllZBIRCgl0aHJlYWRfaWQYASABKAkSFgoOdGhyZWFkX3ZlcnNpb24YAiABKAQSFwoKbWVzc2FnZV9pZBgDIAEoCUgAiAEBEhwKD21lc3NhZ2VfdmVyc2lvbhgEIAEoBEgBiAEBEg8KB2RlbGV0ZWQYBSABKAhCDQoLX21lc3NhZ2VfaWRCEgoQX21lc3NhZ2VfdmVyc2lvbiJ/ChBGZWVkYmFja1JlamVjdGVkEjkKBnJlYXNvbhgBIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SHAoPY3VycmVudF92ZXJzaW9uGAIgASgESACIAQFCEgoQX2N1cnJlbnRfdmVyc2lvbiKwAQoPRmVlZGJhY2tSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNAoHYXBwbGllZBgDIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBcHBsaWVkSAASNgoIcmVqZWN0ZWQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0ZWRIAEIJCgdvdXRjb21lIkEKGUdldEZlZWRiYWNrUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSIwChpGZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIqIBChpHZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHRIABJECgxub3RfcmVjb3JkZWQYAiABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KoQBChRGZWVkYmFja1RocmVhZFN0YXR1cxImCiJGRUVEQkFDS19USFJFQURfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHwobRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19PUEVOEAESIwofRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19SRVNPTFZFRBACKv0CChdGZWVkYmFja1JlamVjdGlvblJlYXNvbhIpCiVGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1RFWFQQARIsCihGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQU5DSE9SEAISLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9UQVJHRVRfQ0hBTkdFRBADEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fTk9UX0ZPVU5EEAQSJwojRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QBRItCilGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBAGEi4KKkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAHMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
+var file_luming_studio_v1_feedback_service = /* @__PURE__ */ fileDesc("CidsdW1pbmcvc3R1ZGlvL3YxL2ZlZWRiYWNrX3NlcnZpY2UucHJvdG8SEGx1bWluZy5zdHVkaW8udjEiJQoNRmVlZGJhY2tQb2ludBIJCgF4GAEgASgBEgkKAXkYAiABKAEicgoTRmVlZGJhY2tPYmplY3RQb2ludBIRCglvYmplY3RfaWQYASABKAkSCQoBdRgCIAEoARIJCgF2GAMgASgBEh0KEGdlb21ldHJ5X3ZlcnNpb24YBCABKARIAIgBAUITChFfZ2VvbWV0cnlfdmVyc2lvbiIrChZGZWVkYmFja0RvY3VtZW50QW5jaG9yEhEKCWJsb2NrX2lkcxgBIAMoCSJYChJGZWVkYmFja0h0bWxBbmNob3ISEAoIbm9kZV9pZHMYASADKAkSHAoPc291cmNlX3JldmlzaW9uGAIgASgESACIAQFCEgoQX3NvdXJjZV9yZXZpc2lvbiK8AgoURmVlZGJhY2tDb250ZW50UG9pbnQSEQoJb2JqZWN0X2lkGAEgASgJEgkKAXUYAiABKAESCQoBdhgDIAEoARIdChBnZW9tZXRyeV92ZXJzaW9uGAQgASgESAGIAQESHAoPcGF5bG9hZF92ZXJzaW9uGAUgASgESAKIAQESPAoIZG9jdW1lbnQYBiABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrRG9jdW1lbnRBbmNob3JIABIWCgx0b2RvX2l0ZW1faWQYByABKAlIABI0CgRodG1sGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0h0bWxBbmNob3JIAEIJCgdjb250ZW50QhMKEV9nZW9tZXRyeV92ZXJzaW9uQhIKEF9wYXlsb2FkX3ZlcnNpb24i2AEKFEZlZWRiYWNrQW5jaG9yVGFyZ2V0EjYKC2JvYXJkX3BvaW50GAEgASgLMh8ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1BvaW50SAASPQoMb2JqZWN0X3BvaW50GAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja09iamVjdFBvaW50SAASPwoNY29udGVudF9wb2ludBgDIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tDb250ZW50UG9pbnRIAEIICgZ0YXJnZXQiegoURmVlZGJhY2tGcm96ZW5PYmplY3QSDAoEa2luZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIJCgF4GAMgASgBEgkKAXkYBCABKAESDQoFd2lkdGgYBSABKAESDgoGaGVpZ2h0GAYgASgBEhAKCHJvdGF0aW9uGAcgASgBIqUCCg5GZWVkYmFja0FuY2hvchI2CgZ0YXJnZXQYASABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yVGFyZ2V0Eh0KFXNvdXJjZV9ib2FyZF9yZXZpc2lvbhgCIAEoBBI1Cgxmcm96ZW5fcG9pbnQYAyABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUG9pbnQSPQoNZnJvemVuX29iamVjdBgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tGcm96ZW5PYmplY3QSFgoOdGFyZ2V0X21pc3NpbmcYBSABKAgSGwoOZnJvemVuX2V4Y2VycHQYBiABKAlIAIgBAUIRCg9fZnJvemVuX2V4Y2VycHQiwQEKD0ZlZWRiYWNrTWVzc2FnZRISCgptZXNzYWdlX2lkGAEgASgJEhcKD2F1dGhvcl9hY3Rvcl9pZBgCIAEoCRIaChJhdXRob3JlZF9ieV92aWV3ZXIYAyABKAgSDAoEdGV4dBgEIAEoCRIZChFjcmVhdGVkX2F0X21pbGxpcxgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBIPCgd2ZXJzaW9uGAcgASgEEhAKCGNhbl9lZGl0GAggASgIIqkCCg5GZWVkYmFja1RocmVhZBIRCgl0aHJlYWRfaWQYASABKAkSNgoGc3RhdHVzGAIgASgOMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZFN0YXR1cxIwCgZhbmNob3IYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQW5jaG9yEjAKBWZpcnN0GAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USDwoHdmVyc2lvbhgFIAEoBBIZChF1cGRhdGVkX2F0X21pbGxpcxgGIAEoBBITCgtyZXBseV9jb3VudBgHIAEoDRITCgtjYW5fcmVzb2x2ZRgIIAEoCBISCgpjYW5fZGVsZXRlGAkgASgIIsMBChJMaXN0VGhyZWFkc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEQoJcGFnZV9zaXplGAIgASgNEhMKBmN1cnNvchgDIAEoCUgAiAEBEjYKBnN0YXR1cxgEIAEoDjImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRTdGF0dXMSHAoPYXV0aG9yX2FjdG9yX2lkGAUgASgJSAGIAQFCCQoHX2N1cnNvckISChBfYXV0aG9yX2FjdG9yX2lkIoUBChNMaXN0VGhyZWFkc1Jlc3BvbnNlEjEKB3RocmVhZHMYASADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkEhgKC25leHRfY3Vyc29yGAIgASgJSACIAQESEQoJY2FuX3dyaXRlGAMgASgIQg4KDF9uZXh0X2N1cnNvciJqChBHZXRUaHJlYWRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhEKCXRocmVhZF9pZBgCIAEoCRIRCglwYWdlX3NpemUYAyABKA0SEwoGY3Vyc29yGAQgASgJSACIAQFCCQoHX2N1cnNvciK2AQoRR2V0VGhyZWFkUmVzcG9uc2USMAoGdGhyZWFkGAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZBIyCgdyZXBsaWVzGAIgAygLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja01lc3NhZ2USGAoLbmV4dF9jdXJzb3IYAyABKAlIAIgBARIRCgljYW5fd3JpdGUYBCABKAhCDgoMX25leHRfY3Vyc29yIlYKDkZlZWRiYWNrQ3JlYXRlEjYKBmFuY2hvchgBIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBbmNob3JUYXJnZXQSDAoEdGV4dBgCIAEoCSIwCg1GZWVkYmFja1JlcGx5EhEKCXRocmVhZF9pZBgBIAEoCRIMCgR0ZXh0GAIgASgJIocBCgxGZWVkYmFja0VkaXQSEQoJdGhyZWFkX2lkGAEgASgJEhIKCm1lc3NhZ2VfaWQYAiABKAkSJQoYZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uGAMgASgESACIAQESDAoEdGV4dBgEIAEoCUIbChlfZXhwZWN0ZWRfbWVzc2FnZV92ZXJzaW9uImsKFEZlZWRiYWNrVGhyZWFkQ2hhbmdlEhEKCXRocmVhZF9pZBgBIAEoCRIkChdleHBlY3RlZF90aHJlYWRfdmVyc2lvbhgCIAEoBEgAiAEBQhoKGF9leHBlY3RlZF90aHJlYWRfdmVyc2lvbiKOAwoUQXBwbHlGZWVkYmFja1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIyCgZjcmVhdGUYAyABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrQ3JlYXRlSAASMAoFcmVwbHkYBCABKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVwbHlIABIuCgRlZGl0GAUgASgLMh4ubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja0VkaXRIABI5CgdyZXNvbHZlGAYgASgLMiYubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1RocmVhZENoYW5nZUgAEjgKBnJlb3BlbhgHIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tUaHJlYWRDaGFuZ2VIABI4CgZkZWxldGUYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrVGhyZWFkQ2hhbmdlSABCCwoJb3BlcmF0aW9uIksKFUFwcGx5RmVlZGJhY2tSZXNwb25zZRIyCgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHQipwEKD0ZlZWRiYWNrQXBwbGllZBIRCgl0aHJlYWRfaWQYASABKAkSFgoOdGhyZWFkX3ZlcnNpb24YAiABKAQSFwoKbWVzc2FnZV9pZBgDIAEoCUgAiAEBEhwKD21lc3NhZ2VfdmVyc2lvbhgEIAEoBEgBiAEBEg8KB2RlbGV0ZWQYBSABKAhCDQoLX21lc3NhZ2VfaWRCEgoQX21lc3NhZ2VfdmVyc2lvbiJ/ChBGZWVkYmFja1JlamVjdGVkEjkKBnJlYXNvbhgBIAEoDjIpLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tSZWplY3Rpb25SZWFzb24SHAoPY3VycmVudF92ZXJzaW9uGAIgASgESACIAQFCEgoQX2N1cnJlbnRfdmVyc2lvbiKwAQoPRmVlZGJhY2tSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSNAoHYXBwbGllZBgDIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRmVlZGJhY2tBcHBsaWVkSAASNgoIcmVqZWN0ZWQYBCABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVqZWN0ZWRIAEIJCgdvdXRjb21lIkEKGUdldEZlZWRiYWNrUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSIwChpGZWVkYmFja1JlY2VpcHROb3RSZWNvcmRlZBISCgpjb21tYW5kX2lkGAEgASgJIqIBChpHZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5GZWVkYmFja1JlY2VpcHRIABJECgxub3RfcmVjb3JkZWQYAiABKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkZlZWRiYWNrUmVjZWlwdE5vdFJlY29yZGVkSABCCAoGcmVzdWx0KoQBChRGZWVkYmFja1RocmVhZFN0YXR1cxImCiJGRUVEQkFDS19USFJFQURfU1RBVFVTX1VOU1BFQ0lGSUVEEAASHwobRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19PUEVOEAESIwofRkVFREJBQ0tfVEhSRUFEX1NUQVRVU19SRVNPTFZFRBACKv0CChdGZWVkYmFja1JlamVjdGlvblJlYXNvbhIpCiVGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASKgomRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX1RFWFQQARIsCihGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQU5DSE9SEAISLAooRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9UQVJHRVRfQ0hBTkdFRBADEicKI0ZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fTk9UX0ZPVU5EEAQSJwojRkVFREJBQ0tfUkVKRUNUSU9OX1JFQVNPTl9GT1JCSURERU4QBRItCilGRUVEQkFDS19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBAGEi4KKkZFRURCQUNLX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRAHMpYDCg9GZWVkYmFja1NlcnZpY2USWgoLTGlzdFRocmVhZHMSJC5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RUaHJlYWRzUmVxdWVzdBolLmx1bWluZy5zdHVkaW8udjEuTGlzdFRocmVhZHNSZXNwb25zZRJUCglHZXRUaHJlYWQSIi5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlcXVlc3QaIy5sdW1pbmcuc3R1ZGlvLnYxLkdldFRocmVhZFJlc3BvbnNlEmAKDUFwcGx5RmVlZGJhY2sSJi5sdW1pbmcuc3R1ZGlvLnYxLkFwcGx5RmVlZGJhY2tSZXF1ZXN0GicubHVtaW5nLnN0dWRpby52MS5BcHBseUZlZWRiYWNrUmVzcG9uc2USbwoSR2V0RmVlZGJhY2tSZWNlaXB0EisubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5HZXRGZWVkYmFja1JlY2VpcHRSZXNwb25zZWIGcHJvdG8z");
 var FeedbackThreadStatusSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 0);
 var FeedbackThreadStatus = /* @__PURE__ */ tsEnum(FeedbackThreadStatusSchema);
 var FeedbackRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_feedback_service, 1);
@@ -13949,6 +18244,22 @@ function requireVersion(version) {
   }
   return version;
 }
+function readContent(content) {
+  switch (content.case) {
+    case "document":
+      return { kind: "document", blockIds: content.value.blockIds };
+    case "todoItemId":
+      return { kind: "todo", itemId: requireId(content.value) };
+    case "html":
+      return {
+        kind: "html",
+        nodeIds: content.value.nodeIds,
+        sourceRevision: requireVersion(content.value.sourceRevision)
+      };
+    case void 0:
+      throw new HttpRequestError(400, "Feedback content anchor unit is required.");
+  }
+}
 function readTarget2(anchor) {
   const target2 = anchor?.target;
   switch (target2?.case) {
@@ -13965,6 +18276,18 @@ function readTarget2(anchor) {
         u,
         v,
         geometryVersion: requireVersion(geometryVersion)
+      };
+    }
+    case "contentPoint": {
+      const { objectId, u, v, geometryVersion, payloadVersion, content } = target2.value;
+      return {
+        kind: "content",
+        objectId: requireId(objectId),
+        u,
+        v,
+        geometryVersion: requireVersion(geometryVersion),
+        payloadVersion: requireVersion(payloadVersion),
+        content: readContent(content)
       };
     }
     case void 0:
@@ -14017,6 +18340,19 @@ function readStatus(status) {
       throw new HttpRequestError(400, "Feedback status filter is invalid.");
   }
 }
+function writeContent(unit) {
+  switch (unit.kind) {
+    case "document":
+      return { case: "document", value: { blockIds: [...unit.blockIds] } };
+    case "todo":
+      return { case: "todoItemId", value: unit.itemId };
+    case "html":
+      return {
+        case: "html",
+        value: { nodeIds: [...unit.nodeIds], sourceRevision: unit.sourceRevision }
+      };
+  }
+}
 function writeAnchor(anchor) {
   const { target: target2, ...source } = anchor;
   if (target2.kind === "board") {
@@ -14026,6 +18362,24 @@ function writeAnchor(anchor) {
     };
   }
   const { objectId, u, v, geometryVersion } = target2;
+  if (target2.kind === "content") {
+    return {
+      ...source,
+      target: {
+        target: {
+          case: "contentPoint",
+          value: {
+            objectId,
+            u,
+            v,
+            geometryVersion,
+            payloadVersion: target2.payloadVersion,
+            content: writeContent(target2.content)
+          }
+        }
+      }
+    };
+  }
   return {
     ...source,
     target: { target: { case: "objectPoint", value: { objectId, u, v, geometryVersion } } }
@@ -14104,7 +18458,7 @@ function createFeedbackRoutes(application) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/whiteboard_history_pb.js
-var file_luming_studio_v1_whiteboard_history = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfaGlzdG9yeS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJtChhMaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSHAoPYmVmb3JlX3JldmlzaW9uGAIgASgESACIAQESDQoFbGltaXQYAyABKA1CEgoQX2JlZm9yZV9yZXZpc2lvbiLEAQoZTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRIdChBjdXJyZW50X3JldmlzaW9uGAEgASgESACIAQESNwoIdmVyc2lvbnMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvblN1bW1hcnkSIQoUbmV4dF9iZWZvcmVfcmV2aXNpb24YAyABKARIAYgBAUITChFfY3VycmVudF9yZXZpc2lvbkIXChVfbmV4dF9iZWZvcmVfcmV2aXNpb24ijgIKE0JvYXJkVmVyc2lvblN1bW1hcnkSFQoIcmV2aXNpb24YASABKARIAIgBARINCgV0aXRsZRgCIAEoCRIcCg9zYXZlZF9hdF9taWxsaXMYAyABKARIAYgBARIQCghhY3Rvcl9pZBgEIAEoCRIwCgRraW5kGAUgASgOMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFZlcnNpb25LaW5kEhwKFGNoYW5nZWRfb2JqZWN0X2NvdW50GAYgASgNEhwKD3NvdXJjZV9yZXZpc2lvbhgHIAEoBEgCiAEBQgsKCV9yZXZpc2lvbkISChBfc2F2ZWRfYXRfbWlsbGlzQhIKEF9zb3VyY2VfcmV2aXNpb24iUwobR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQFCCwoJX3JldmlzaW9uIksKHEdldEJvYXJkVmVyc2lvblNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiagoeR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQESEgoKb2JqZWN0X2lkcxgDIAMoCUILCglfcmV2aXNpb24ipAEKH0dldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARI2CgdyZXN1bHRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhMKC3VuYXZhaWxhYmxlGAQgASgIQgsKCV9yZXZpc2lvbiKnAgoaUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIVCghyZXZpc2lvbhgDIAEoBEgBiAEBEiYKGWV4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24YBCABKARIAogBARIzCgV3aG9sZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IAEIHCgVzY29wZUILCglfcmV2aXNpb25CHAoaX2V4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24iUgobUmVzdG9yZUJvYXJkVmVyc2lvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQigQIKGUV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAYgBARIzCgV3aG9sZRgDIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IABIzCgZmb3JtYXQYBSABKA4yIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0Rm9ybWF0QgcKBXNjb3BlQgsKCV9yZXZpc2lvbiKrAQoaRXhwb3J0Qm9hcmRWZXJzaW9uUmVzcG9uc2USMQoEZmlsZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRGaWxlSAASOQoIcmVqZWN0ZWQYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABIVCgt1bmF2YWlsYWJsZRgDIAEoCEgAQggKBnJlc3VsdCrWAQoQQm9hcmRWZXJzaW9uS2luZBIiCh5CT0FSRF9WRVJTSU9OX0tJTkRfVU5TUEVDSUZJRUQQABIfChtCT0FSRF9WRVJTSU9OX0tJTkRfQkFTRUxJTkUQARIfChtCT0FSRF9WRVJTSU9OX0tJTkRfR0VPTUVUUlkQAhIeChpCT0FSRF9WRVJTSU9OX0tJTkRfQ09OVEVOVBADEhwKGEJPQVJEX1ZFUlNJT05fS0lORF9JTUFHRRAEEh4KGkJPQVJEX1ZFUlNJT05fS0lORF9SRVNUT1JFEAUy3wQKE0JvYXJkSGlzdG9yeVNlcnZpY2USbAoRTGlzdEJvYXJkVmVyc2lvbnMSKi5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFZlcnNpb25zUmVxdWVzdBorLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRJ1ChRHZXRCb2FyZFZlcnNpb25TY2VuZRItLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25TY2VuZVJlc3BvbnNlEn4KF0dldEJvYXJkVmVyc2lvblBheWxvYWRzEjAubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25QYXlsb2Fkc1JlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2UScgoTUmVzdG9yZUJvYXJkVmVyc2lvbhIsLmx1bWluZy5zdHVkaW8udjEuUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLlJlc3RvcmVCb2FyZFZlcnNpb25SZXNwb25zZRJvChJFeHBvcnRCb2FyZFZlcnNpb24SKy5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QaLC5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkVmVyc2lvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var file_luming_studio_v1_whiteboard_history = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL3doaXRlYm9hcmRfaGlzdG9yeS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSJtChhMaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSHAoPYmVmb3JlX3JldmlzaW9uGAIgASgESACIAQESDQoFbGltaXQYAyABKA1CEgoQX2JlZm9yZV9yZXZpc2lvbiLEAQoZTGlzdEJvYXJkVmVyc2lvbnNSZXNwb25zZRIdChBjdXJyZW50X3JldmlzaW9uGAEgASgESACIAQESNwoIdmVyc2lvbnMYAiADKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVmVyc2lvblN1bW1hcnkSIQoUbmV4dF9iZWZvcmVfcmV2aXNpb24YAyABKARIAYgBAUITChFfY3VycmVudF9yZXZpc2lvbkIXChVfbmV4dF9iZWZvcmVfcmV2aXNpb24ijgIKE0JvYXJkVmVyc2lvblN1bW1hcnkSFQoIcmV2aXNpb24YASABKARIAIgBARINCgV0aXRsZRgCIAEoCRIcCg9zYXZlZF9hdF9taWxsaXMYAyABKARIAYgBARIQCghhY3Rvcl9pZBgEIAEoCRIwCgRraW5kGAUgASgOMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFZlcnNpb25LaW5kEhwKFGNoYW5nZWRfb2JqZWN0X2NvdW50GAYgASgNEhwKD3NvdXJjZV9yZXZpc2lvbhgHIAEoBEgCiAEBQgsKCV9yZXZpc2lvbkISChBfc2F2ZWRfYXRfbWlsbGlzQhIKEF9zb3VyY2VfcmV2aXNpb24iUwobR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQFCCwoJX3JldmlzaW9uIksKHEdldEJvYXJkVmVyc2lvblNjZW5lUmVzcG9uc2USKwoFc2NlbmUYASABKAsyHC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2NlbmUiagoeR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhUKCHJldmlzaW9uGAIgASgESACIAQESEgoKb2JqZWN0X2lkcxgDIAMoCUILCglfcmV2aXNpb24ipAEKH0dldEJvYXJkVmVyc2lvblBheWxvYWRzUmVzcG9uc2USEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAIgBARI2CgdyZXN1bHRzGAMgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0EhMKC3VuYXZhaWxhYmxlGAQgASgIQgsKCV9yZXZpc2lvbiKnAgoaUmVzdG9yZUJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIVCghyZXZpc2lvbhgDIAEoBEgBiAEBEiYKGWV4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24YBCABKARIAogBARIzCgV3aG9sZRgFIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IAEIHCgVzY29wZUILCglfcmV2aXNpb25CHAoaX2V4cGVjdGVkX2N1cnJlbnRfcmV2aXNpb24iUgobUmVzdG9yZUJvYXJkVmVyc2lvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQigQIKGUV4cG9ydEJvYXJkVmVyc2lvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSFQoIcmV2aXNpb24YAiABKARIAYgBARIzCgV3aG9sZRgDIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0V2hvbGVCb2FyZEgAEjsKCXNlbGVjdGlvbhgEIAEoCzImLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRTZWxlY3Rpb25IABIzCgZmb3JtYXQYBSABKA4yIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRXhwb3J0Rm9ybWF0QgcKBXNjb3BlQgsKCV9yZXZpc2lvbiLrAQoaRXhwb3J0Qm9hcmRWZXJzaW9uUmVzcG9uc2USMQoEZmlsZRgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuRXhwb3J0Qm9hcmRGaWxlSAASOQoIcmVqZWN0ZWQYAiABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLkV4cG9ydEJvYXJkUmVqZWN0ZWRIABIVCgt1bmF2YWlsYWJsZRgDIAEoCEgAEj4KC2Jyb3dzZXJfcG5nGAQgASgLMicubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZEJyb3dzZXJQbmdIAEIICgZyZXN1bHQq1gEKEEJvYXJkVmVyc2lvbktpbmQSIgoeQk9BUkRfVkVSU0lPTl9LSU5EX1VOU1BFQ0lGSUVEEAASHwobQk9BUkRfVkVSU0lPTl9LSU5EX0JBU0VMSU5FEAESHwobQk9BUkRfVkVSU0lPTl9LSU5EX0dFT01FVFJZEAISHgoaQk9BUkRfVkVSU0lPTl9LSU5EX0NPTlRFTlQQAxIcChhCT0FSRF9WRVJTSU9OX0tJTkRfSU1BR0UQBBIeChpCT0FSRF9WRVJTSU9OX0tJTkRfUkVTVE9SRRAFMt8EChNCb2FyZEhpc3RvcnlTZXJ2aWNlEmwKEUxpc3RCb2FyZFZlcnNpb25zEioubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRWZXJzaW9uc1JlcXVlc3QaKy5sdW1pbmcuc3R1ZGlvLnYxLkxpc3RCb2FyZFZlcnNpb25zUmVzcG9uc2USdQoUR2V0Qm9hcmRWZXJzaW9uU2NlbmUSLS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVmVyc2lvblNjZW5lUmVxdWVzdBouLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uU2NlbmVSZXNwb25zZRJ+ChdHZXRCb2FyZFZlcnNpb25QYXlsb2FkcxIwLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRWZXJzaW9uUGF5bG9hZHNSZXF1ZXN0GjEubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFZlcnNpb25QYXlsb2Fkc1Jlc3BvbnNlEnIKE1Jlc3RvcmVCb2FyZFZlcnNpb24SLC5sdW1pbmcuc3R1ZGlvLnYxLlJlc3RvcmVCb2FyZFZlcnNpb25SZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5SZXN0b3JlQm9hcmRWZXJzaW9uUmVzcG9uc2USbwoSRXhwb3J0Qm9hcmRWZXJzaW9uEisubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFZlcnNpb25SZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5FeHBvcnRCb2FyZFZlcnNpb25SZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
 var BoardVersionKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_whiteboard_history, 0);
 var BoardVersionKind = /* @__PURE__ */ tsEnum(BoardVersionKindSchema);
 var BoardHistoryService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_whiteboard_history, 0);
@@ -14116,12 +18470,17 @@ var rejectionByReason = {
   assetUnavailable: BoardExportRejectionReason.ASSET_UNAVAILABLE,
   tooLarge: BoardExportRejectionReason.TOO_LARGE
 };
+var formatByWire = /* @__PURE__ */ new Map([
+  [BoardExportFormat.JSON, "json"],
+  [BoardExportFormat.SVG, "svg"],
+  [BoardExportFormat.PNG, "png"],
+  [BoardExportFormat.HTML, "html"],
+  [BoardExportFormat.ZIP, "zip"]
+]);
 function toExportFormat(format) {
-  if (format === BoardExportFormat.JSON) {
-    return "json";
-  }
-  if (format === BoardExportFormat.SVG) {
-    return "svg";
+  const value = formatByWire.get(format);
+  if (value) {
+    return value;
   }
   throw new HttpRequestError(400, "A supported board export format is required");
 }
@@ -14154,6 +18513,15 @@ function toExportResponse(result) {
     }
     case "stale":
       return { result: { case: "stale", value: { revision: result.revision } } };
+    case "browserPng": {
+      const { filename, revision, width, height, svgTemplate, regions } = result;
+      return {
+        result: {
+          case: "browserPng",
+          value: { filename, revision, width, height, svgTemplate, regions: [...regions] }
+        }
+      };
+    }
     case "rejected":
       return {
         result: { case: "rejected", value: { reason: rejectionByReason[result.reason] } }
@@ -14161,10 +18529,13 @@ function toExportResponse(result) {
   }
 }
 function createExportRoute(application) {
-  return unaryRoute(
-    WhiteboardService.method.exportBoard,
-    (actor, request) => toExportResponse(application.exportBoard(actor, toExportCommand(request)))
-  );
+  return asyncUnaryRoute(WhiteboardService.method.exportBoard, async (actor, request) => {
+    const result = await application.exportBoardFile(actor, toExportCommand(request));
+    if (result.kind === "file" || result.kind === "browserPng") {
+      actor.authorize?.(request);
+    }
+    return toExportResponse(result);
+  });
 }
 
 // src/entrypoints/http/history-routes.ts
@@ -14208,7 +18579,7 @@ function toRestoreCommand(request) {
 function toVersionExport(result) {
   if (result.kind !== "unavailable") {
     const { result: encoded } = toExportResponse(result);
-    if (encoded?.case === "file" || encoded?.case === "rejected") {
+    if (encoded?.case === "file" || encoded?.case === "rejected" || encoded?.case === "browserPng") {
       return { result: encoded };
     }
   }
@@ -14263,31 +18634,40 @@ function createBoardHistoryRoutes(application, digest2, observe) {
       observe?.(receipt);
       return { receipt: toBoardEditReceipt(receipt) };
     }),
-    unaryRoute(
-      exportBoardVersion,
-      (actor, request) => toVersionExport(
-        application.exportVersion(actor, {
-          boardId: requireId(request.boardId),
-          expectedRevision: requireRevision(request.revision),
-          scope: toExportScope(request.scope),
-          format: toExportFormat(request.format)
-        })
-      )
-    )
+    asyncUnaryRoute(exportBoardVersion, async (actor, request) => {
+      const result = await application.exportVersionFile(actor, {
+        boardId: requireId(request.boardId),
+        expectedRevision: requireRevision(request.revision),
+        scope: toExportScope(request.scope),
+        format: toExportFormat(request.format)
+      });
+      if (result.kind === "file" || result.kind === "browserPng") {
+        actor.authorize?.(request);
+      }
+      return toVersionExport(result);
+    })
   ];
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_room_service_pb.js
-var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJkChFCb2FyZFJvb21WaWV3cG9ydBIQCghjZW50ZXJfeBgBIAEoARIQCghjZW50ZXJfeRgCIAEoARIMCgR6b29tGAMgASgBEg0KBXdpZHRoGAQgASgBEg4KBmhlaWdodBgFIAEoASI8ChdCb2FyZFJvb21QYXJ0aWNpcGFudEtleRIQCghhY3Rvcl9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJIsECChRCb2FyZFJvb21QYXJ0aWNpcGFudBI2CgNrZXkYASABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5EhQKDGRpc3BsYXlfbmFtZRgCIAEoCRIMCgRyb2xlGAMgASgJEhUKCHNlcXVlbmNlGAQgASgESACIAQESHwoSZXhwaXJlc19hdF91bml4X21zGAUgASgESAGIAQESJwoGY3Vyc29yGAYgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI1Cgh2aWV3cG9ydBgHIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVmlld3BvcnQSEQoJZm9sbG93aW5nGAggASgIQgsKCV9zZXF1ZW5jZUIVChNfZXhwaXJlc19hdF91bml4X21zItYBChpVcGRhdGVCb2FyZFByZXNlbmNlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESACIAQESJwoGY3Vyc29yGAQgASgLMhcubHVtaW5nLnN0dWRpby52MS5Qb2ludBI1Cgh2aWV3cG9ydBgFIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVmlld3BvcnQSEQoJZm9sbG93aW5nGAYgASgIQgsKCV9zZXF1ZW5jZSIvChtVcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USEAoIYWNjZXB0ZWQYASABKAgiYgoZTGVhdmVCb2FyZFByZXNlbmNlUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESACIAQFCCwoJX3NlcXVlbmNlIi4KGkxlYXZlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIItYBChFCb2FyZFJvb21TbmFwc2hvdBIQCghhY3Rvcl9pZBgBIAEoCRIQCghjYW5fZWRpdBgCIAEoCBIbCg5ib2FyZF9yZXZpc2lvbhgDIAEoBEgAiAEBEjwKDHBhcnRpY2lwYW50cxgEIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSLwoFdGltZXIYBSABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyQhEKD19ib2FyZF9yZXZpc2lvbiKNAQoVQm9hcmRSb29tUGFydGljaXBhbnRzEjcKB3Vwc2VydHMYASADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50EjsKCHJlbW92YWxzGAIgAygLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudEtleSLTAQoXQm9hcmRSb29tQ29udGVudENoYW5nZWQSGwoOYm9hcmRfcmV2aXNpb24YASABKARIAIgBARIaChJjaGFuZ2VkX29iamVjdF9pZHMYAiADKAkSGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhUKDXJlZnJlc2hfc2NlbmUYBCABKAgSOQoPY2hhbmdlZF9vYmplY3RzGAUgAygLMiAubHVtaW5nLnN0dWRpby52MS5PYmplY3RNZXRhZGF0YUIRCg9fYm9hcmRfcmV2aXNpb24iFQoTQm9hcmRSb29tQWNjZXNzTG9zdCLWAwoOQm9hcmRSb29tRXZlbnQSEAoIYm9hcmRfaWQYASABKAkSGAoQcm9vbV9pbnN0YW5jZV9pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgBiAEBEiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYBCABKARIAogBARI3CghzbmFwc2hvdBgFIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tU25hcHNob3RIABI/CgxwYXJ0aWNpcGFudHMYBiABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50c0gAEjEKBXRpbWVyGAcgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lckgAEkQKD2NvbnRlbnRfY2hhbmdlZBgIIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tQ29udGVudENoYW5nZWRIABI8CgthY2Nlc3NfbG9zdBgJIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tQWNjZXNzTG9zdEgAQgkKB3BheWxvYWRCCwoJX3NlcXVlbmNlQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIscBCg5Cb2FyZFJvb21UaW1lchIUCgd2ZXJzaW9uGAEgASgESACIAQESNAoFcGhhc2UYAiABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyUGhhc2USEwoLZHVyYXRpb25fbXMYAyABKA0SHQoQZGVhZGxpbmVfdW5peF9tcxgEIAEoBEgBiAEBEhQKDHJlbWFpbmluZ19tcxgFIAEoDUIKCghfdmVyc2lvbkITChFfZGVhZGxpbmVfdW5peF9tcyISChBCb2FyZFRpbWVyQWN0aW9uIosDChdDaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARIzCgVzdGFydBgEIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXBhdXNlGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASNAoGcmVzdW1lGAYgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASMwoFcmVzZXQYByABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIZCg9zZXRfZHVyYXRpb25fbXMYCCABKA1IABIcChJhZGp1c3RfZHVyYXRpb25fbXMYCSABKBFIAEIICgZhY3Rpb25CEwoRX2V4cGVjdGVkX3ZlcnNpb24iRAoRQm9hcmRUaW1lckFwcGxpZWQSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIkUKEkJvYXJkVGltZXJDb25mbGljdBIvCgV0aW1lchgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXIiSwoSQm9hcmRUaW1lclJlamVjdGVkEjUKBnJlYXNvbhgBIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGlvbiLwAQoRQm9hcmRUaW1lclJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI2CgdhcHBsaWVkGAMgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQXBwbGllZEgAEjgKCGNvbmZsaWN0GAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQ29uZmxpY3RIABI4CghyZWplY3RlZBgFIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGVkSABCCQoHb3V0Y29tZSKKAQoYQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEjQKB3JlY2VpcHQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWNlaXB0EiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYAiABKARIAIgBAUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyJDChtHZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSKOAQocR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMqxwEKE0JvYXJkUm9vbVRpbWVyUGhhc2USJgoiQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1JPT01fVElNRVJfUEhBU0VfSURMRRABEiIKHkJPQVJEX1JPT01fVElNRVJfUEhBU0VfUlVOTklORxACEiEKHUJPQVJEX1JPT01fVElNRVJfUEhBU0VfUEFVU0VEEAMSIAocQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9FTkRFRBAEKrcBChNCb2FyZFRpbWVyUmVqZWN0aW9uEiUKIUJPQVJEX1RJTUVSX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiMKH0JPQVJEX1RJTUVSX1JFSkVDVElPTl9GT1JCSURERU4QARIoCiRCT0FSRF9USU1FUl9SRUpFQ1RJT05fSU5WQUxJRF9BQ1RJT04QAhIqCiZCT0FSRF9USU1FUl9SRUpFQ1RJT05fQ09NTUFORF9JRF9SRVVTRRADMrgEChBCb2FyZFJvb21TZXJ2aWNlEl0KDEdldEJvYXJkUm9vbRIlLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRSb29tUmVxdWVzdBomLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRSb29tUmVzcG9uc2UScgoTVXBkYXRlQm9hcmRQcmVzZW5jZRIsLmx1bWluZy5zdHVkaW8udjEuVXBkYXRlQm9hcmRQcmVzZW5jZVJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRJvChJMZWF2ZUJvYXJkUHJlc2VuY2USKy5sdW1pbmcuc3R1ZGlvLnYxLkxlYXZlQm9hcmRQcmVzZW5jZVJlcXVlc3QaLC5sdW1pbmcuc3R1ZGlvLnYxLkxlYXZlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEmkKEENoYW5nZUJvYXJkVGltZXISKS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUJvYXJkVGltZXJSZXF1ZXN0GioubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZFRpbWVyUmVzcG9uc2USdQoUR2V0Qm9hcmRUaW1lclJlY2VpcHQSLS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGltZXJSZWNlaXB0UmVxdWVzdBouLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_scene]);
-var BoardRoomEventSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 13);
-var BoardRoomTimerPhaseSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 0);
+var file_luming_studio_v1_board_room_service = /* @__PURE__ */ fileDesc("CilsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3Jvb21fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSInChNHZXRCb2FyZFJvb21SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkcKFEdldEJvYXJkUm9vbVJlc3BvbnNlEi8KBWV2ZW50GAEgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21FdmVudCJkChFCb2FyZFJvb21WaWV3cG9ydBIQCghjZW50ZXJfeBgBIAEoARIQCghjZW50ZXJfeRgCIAEoARIMCgR6b29tGAMgASgBEg0KBXdpZHRoGAQgASgBEg4KBmhlaWdodBgFIAEoASI8ChdCb2FyZFJvb21QYXJ0aWNpcGFudEtleRIQCghhY3Rvcl9pZBgBIAEoCRIPCgd2aWV3X2lkGAIgASgJIqEBChhCb2FyZFJvb21HZXN0dXJlR2VvbWV0cnkSEQoJb2JqZWN0X2lkGAEgASgJEiYKGWV4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24YAiABKARIAIgBARIsCghnZW9tZXRyeRgDIAEoCzIaLmx1bWluZy5zdHVkaW8udjEuR2VvbWV0cnlCHAoaX2V4cGVjdGVkX2dlb21ldHJ5X3ZlcnNpb24ijAEKF0JvYXJkUm9vbUdlc3R1cmVQcmV2aWV3EjQKBGtpbmQYASABKA4yJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVLaW5kEjsKB2NoYW5nZXMYAiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbUdlc3R1cmVHZW9tZXRyeSLFAwoUQm9hcmRSb29tUGFydGljaXBhbnQSNgoDa2V5GAEgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21QYXJ0aWNpcGFudEtleRIUCgxkaXNwbGF5X25hbWUYAiABKAkSDAoEcm9sZRgDIAEoCRIVCghzZXF1ZW5jZRgEIAEoBEgAiAEBEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgFIAEoBEgBiAEBEicKBmN1cnNvchgGIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYByABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgIIAEoCBI6CgdnZXN0dXJlGAkgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlldxInChpnZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tcxgKIAEoBEgCiAEBQgsKCV9zZXF1ZW5jZUIVChNfZXhwaXJlc19hdF91bml4X21zQh0KG19nZXN0dXJlX2V4cGlyZXNfYXRfdW5peF9tcyKSAgoaVXBkYXRlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBEicKBmN1cnNvchgEIAEoCzIXLmx1bWluZy5zdHVkaW8udjEuUG9pbnQSNQoIdmlld3BvcnQYBSABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVZpZXdwb3J0EhEKCWZvbGxvd2luZxgGIAEoCBI6CgdnZXN0dXJlGAcgASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21HZXN0dXJlUHJldmlld0ILCglfc2VxdWVuY2UiLwobVXBkYXRlQm9hcmRQcmVzZW5jZVJlc3BvbnNlEhAKCGFjY2VwdGVkGAEgASgIImIKGUxlYXZlQm9hcmRQcmVzZW5jZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDwoHdmlld19pZBgCIAEoCRIVCghzZXF1ZW5jZRgDIAEoBEgAiAEBQgsKCV9zZXF1ZW5jZSIuChpMZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRIQCghhY2NlcHRlZBgBIAEoCCK6AgoRQm9hcmRSb29tU25hcHNob3QSEAoIYWN0b3JfaWQYASABKAkSEAoIY2FuX2VkaXQYAiABKAgSGwoOYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARI8CgxwYXJ0aWNpcGFudHMYBCADKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50Ei8KBXRpbWVyGAUgASgLMiAubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21UaW1lchI+ChBhZ2VudF93b3Jrc3BhY2VzGAYgAygLMiQubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2USIgoaY2FuX3JlbGVhc2VfYWdlbnRfYWN0aXZpdHkYByABKAhCEQoPX2JvYXJkX3JldmlzaW9uIo0BChVCb2FyZFJvb21QYXJ0aWNpcGFudHMSNwoHdXBzZXJ0cxgBIAMoCzImLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnQSOwoIcmVtb3ZhbHMYAiADKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVBhcnRpY2lwYW50S2V5ItMBChdCb2FyZFJvb21Db250ZW50Q2hhbmdlZBIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEhoKEmNoYW5nZWRfb2JqZWN0X2lkcxgCIAMoCRIaChJyZW1vdmVkX29iamVjdF9pZHMYAyADKAkSFQoNcmVmcmVzaF9zY2VuZRgEIAEoCBI5Cg9jaGFuZ2VkX29iamVjdHMYBSADKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLk9iamVjdE1ldGFkYXRhQhEKD19ib2FyZF9yZXZpc2lvbiIVChNCb2FyZFJvb21BY2Nlc3NMb3N0IpwECg5Cb2FyZFJvb21FdmVudBIQCghib2FyZF9pZBgBIAEoCRIYChByb29tX2luc3RhbmNlX2lkGAIgASgJEhUKCHNlcXVlbmNlGAMgASgESAGIAQESIAoTc2VydmVyX3RpbWVfdW5peF9tcxgEIAEoBEgCiAEBEjcKCHNuYXBzaG90GAUgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21TbmFwc2hvdEgAEj8KDHBhcnRpY2lwYW50cxgGIAEoCzInLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tUGFydGljaXBhbnRzSAASMQoFdGltZXIYByABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVySAASRAoPY29udGVudF9jaGFuZ2VkGAggASgLMikubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21Db250ZW50Q2hhbmdlZEgAEjwKC2FjY2Vzc19sb3N0GAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJvb21BY2Nlc3NMb3N0SAASRAoQYWdlbnRfd29ya3NwYWNlcxgKIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUm9vbUFnZW50V29ya3NwYWNlTGlzdEgAQgkKB3BheWxvYWRCCwoJX3NlcXVlbmNlQhYKFF9zZXJ2ZXJfdGltZV91bml4X21zIscBCg5Cb2FyZFJvb21UaW1lchIUCgd2ZXJzaW9uGAEgASgESACIAQESNAoFcGhhc2UYAiABKA4yJS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyUGhhc2USEwoLZHVyYXRpb25fbXMYAyABKA0SHQoQZGVhZGxpbmVfdW5peF9tcxgEIAEoBEgBiAEBEhQKDHJlbWFpbmluZ19tcxgFIAEoDUIKCghfdmVyc2lvbkITChFfZGVhZGxpbmVfdW5peF9tcyISChBCb2FyZFRpbWVyQWN0aW9uIosDChdDaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARIzCgVzdGFydBgEIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lckFjdGlvbkgAEjMKBXBhdXNlGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASNAoGcmVzdW1lGAYgASgLMiIubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQWN0aW9uSAASMwoFcmVzZXQYByABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJBY3Rpb25IABIZCg9zZXRfZHVyYXRpb25fbXMYCCABKA1IABIcChJhZGp1c3RfZHVyYXRpb25fbXMYCSABKBFIAEIICgZhY3Rpb25CEwoRX2V4cGVjdGVkX3ZlcnNpb24iRAoRQm9hcmRUaW1lckFwcGxpZWQSLwoFdGltZXIYASABKAsyIC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUm9vbVRpbWVyIkUKEkJvYXJkVGltZXJDb25mbGljdBIvCgV0aW1lchgBIAEoCzIgLmx1bWluZy5zdHVkaW8udjEuQm9hcmRSb29tVGltZXIiSwoSQm9hcmRUaW1lclJlamVjdGVkEjUKBnJlYXNvbhgBIAEoDjIlLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGlvbiLwAQoRQm9hcmRUaW1lclJlY2VpcHQSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI2CgdhcHBsaWVkGAMgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQXBwbGllZEgAEjgKCGNvbmZsaWN0GAQgASgLMiQubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyQ29uZmxpY3RIABI4CghyZWplY3RlZBgFIAEoCzIkLmx1bWluZy5zdHVkaW8udjEuQm9hcmRUaW1lclJlamVjdGVkSABCCQoHb3V0Y29tZSKKAQoYQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEjQKB3JlY2VpcHQYASABKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkVGltZXJSZWNlaXB0EiAKE3NlcnZlcl90aW1lX3VuaXhfbXMYAiABKARIAIgBAUIWChRfc2VydmVyX3RpbWVfdW5peF9tcyJDChtHZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCSKOAQocR2V0Qm9hcmRUaW1lclJlY2VpcHRSZXNwb25zZRI0CgdyZWNlaXB0GAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFRpbWVyUmVjZWlwdBIgChNzZXJ2ZXJfdGltZV91bml4X21zGAIgASgESACIAQFCFgoUX3NlcnZlcl90aW1lX3VuaXhfbXMiSgoTQWdlbnRBY3Rpdml0eUJvdW5kcxIJCgF4GAEgASgBEgkKAXkYAiABKAESDQoFd2lkdGgYAyABKAESDgoGaGVpZ2h0GAQgASgBIi4KGEFnZW50QWN0aXZpdHlPYmplY3RTY29wZRISCgpvYmplY3RfaWRzGAEgAygJIpQBChJBZ2VudEFjdGl2aXR5U2NvcGUSPQoHb2JqZWN0cxgBIAEoCzIqLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eU9iamVjdFNjb3BlSAASNQoEYXJlYRgCIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUJvdW5kc0gAQggKBnRhcmdldCJ1ChJBZ2VudEFjdGl2aXR5QmVnaW4SMwoFc2NvcGUYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlTY29wZRINCgVsYWJlbBgCIAEoCRIbChNwcmV2aW91c19nZW5lcmF0aW9uGAMgASgJInkKE0FnZW50QWN0aXZpdHlVcGRhdGUSEgoKZ2VuZXJhdGlvbhgBIAEoCRIzCgVwaGFzZRgCIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEhkKEWFjdGl2ZV9vYmplY3RfaWRzGAMgAygJIiYKEEFnZW50QWN0aXZpdHlFbmQSEgoKZ2VuZXJhdGlvbhgBIAEoCSIVChNBZ2VudEFjdGl2aXR5U3RhdHVzIioKFEFnZW50QWN0aXZpdHlSZWxlYXNlEhIKCmdlbmVyYXRpb24YASABKAki8gIKGkNoYW5nZUFnZW50QWN0aXZpdHlSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhAKCGFnZW50X2lkGAIgASgJEg8KB3Rhc2tfaWQYAyABKAkSNQoFYmVnaW4YBCABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlCZWdpbkgAEjcKBnVwZGF0ZRgFIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVVwZGF0ZUgAEjEKA2VuZBgGIAEoCzIiLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eUVuZEgAEjcKBnN0YXR1cxgHIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVN0YXR1c0gAEjkKB3JlbGVhc2UYCCABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlSZWxlYXNlSABCCAoGYWN0aW9uImsKFlJvb21BZ2VudFdvcmtzcGFjZUFyZWESCgoCaWQYASABKAkSNQoGYm91bmRzGAIgASgLMiUubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5Qm91bmRzEg4KBmFjdGl2ZRgDIAEoCCK1AgoSUm9vbUFnZW50V29ya3NwYWNlEhAKCGFnZW50X2lkGAEgASgJEg8KB3Rhc2tfaWQYAiABKAkSEgoKZ2VuZXJhdGlvbhgDIAEoCRINCgVsYWJlbBgEIAEoCRIzCgVwaGFzZRgFIAEoDjIkLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVBoYXNlEjcKBWFyZWFzGAYgAygLMigubHVtaW5nLnN0dWRpby52MS5Sb29tQWdlbnRXb3Jrc3BhY2VBcmVhEh8KEmV4cGlyZXNfYXRfdW5peF9tcxgHIAEoBEgAiAEBEjMKBXNjb3BlGAggASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5U2NvcGVCFQoTX2V4cGlyZXNfYXRfdW5peF9tcyJSChZSb29tQWdlbnRXb3Jrc3BhY2VMaXN0EjgKCndvcmtzcGFjZXMYASADKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZSJiChJBZ2VudEFjdGl2aXR5RW5kZWQSEgoKZ2VuZXJhdGlvbhgBIAEoCRI4CgZyZWFzb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLkFnZW50QWN0aXZpdHlFbmRSZWFzb24i1wEKG0NoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZRI5Cgl3b3Jrc3BhY2UYASABKAsyJC5sdW1pbmcuc3R1ZGlvLnYxLlJvb21BZ2VudFdvcmtzcGFjZUgAEjUKBWVuZGVkGAIgASgLMiQubHVtaW5nLnN0dWRpby52MS5BZ2VudEFjdGl2aXR5RW5kZWRIABI8CghyZWplY3RlZBgDIAEoDjIoLmx1bWluZy5zdHVkaW8udjEuQWdlbnRBY3Rpdml0eVJlamVjdGlvbkgAQggKBnJlc3VsdCqpAQoUQm9hcmRSb29tR2VzdHVyZUtpbmQSJwojQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfVU5TUEVDSUZJRUQQABIgChxCT0FSRF9ST09NX0dFU1RVUkVfS0lORF9NT1ZFEAESIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUkVTSVpFEAISIgoeQk9BUkRfUk9PTV9HRVNUVVJFX0tJTkRfUk9UQVRFEAMqxwEKE0JvYXJkUm9vbVRpbWVyUGhhc2USJgoiQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9VTlNQRUNJRklFRBAAEh8KG0JPQVJEX1JPT01fVElNRVJfUEhBU0VfSURMRRABEiIKHkJPQVJEX1JPT01fVElNRVJfUEhBU0VfUlVOTklORxACEiEKHUJPQVJEX1JPT01fVElNRVJfUEhBU0VfUEFVU0VEEAMSIAocQk9BUkRfUk9PTV9USU1FUl9QSEFTRV9FTkRFRBAEKrcBChNCb2FyZFRpbWVyUmVqZWN0aW9uEiUKIUJPQVJEX1RJTUVSX1JFSkVDVElPTl9VTlNQRUNJRklFRBAAEiMKH0JPQVJEX1RJTUVSX1JFSkVDVElPTl9GT1JCSURERU4QARIoCiRCT0FSRF9USU1FUl9SRUpFQ1RJT05fSU5WQUxJRF9BQ1RJT04QAhIqCiZCT0FSRF9USU1FUl9SRUpFQ1RJT05fQ09NTUFORF9JRF9SRVVTRRADKqQBChJBZ2VudEFjdGl2aXR5UGhhc2USJAogQUdFTlRfQUNUSVZJVFlfUEhBU0VfVU5TUEVDSUZJRUQQABIiCh5BR0VOVF9BQ1RJVklUWV9QSEFTRV9QUkVQQVJJTkcQARIgChxBR0VOVF9BQ1RJVklUWV9QSEFTRV9XUklUSU5HEAISIgoeQUdFTlRfQUNUSVZJVFlfUEhBU0VfVkVSSUZZSU5HEAMqvwIKFkFnZW50QWN0aXZpdHlSZWplY3Rpb24SKAokQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1VOU1BFQ0lGSUVEEAASJAogQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX0lOVkFMSUQQARIkCiBBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fT1ZFUkxBUBACEiUKIUFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9DQVBBQ0lUWRADEiYKIkFHRU5UX0FDVElWSVRZX1JFSkVDVElPTl9OT1RfRk9VTkQQBBIvCitBR0VOVF9BQ1RJVklUWV9SRUpFQ1RJT05fR0VORVJBVElPTl9DSEFOR0VEEAUSLworQUdFTlRfQUNUSVZJVFlfUkVKRUNUSU9OX1dPUktTUEFDRV9SRUxFQVNFRBAGKrsBChZBZ2VudEFjdGl2aXR5RW5kUmVhc29uEikKJUFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0NPTVBMRVRFRBABEiYKIkFHRU5UX0FDVElWSVRZX0VORF9SRUFTT05fUkVMRUFTRUQQAhIlCiFBR0VOVF9BQ1RJVklUWV9FTkRfUkVBU09OX0VYUElSRUQQAzKsBQoQQm9hcmRSb29tU2VydmljZRJdCgxHZXRCb2FyZFJvb20SJS5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlcXVlc3QaJi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkUm9vbVJlc3BvbnNlEnIKE1VwZGF0ZUJvYXJkUHJlc2VuY2USLC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0Gi0ubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFByZXNlbmNlUmVzcG9uc2USbwoSTGVhdmVCb2FyZFByZXNlbmNlEisubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5MZWF2ZUJvYXJkUHJlc2VuY2VSZXNwb25zZRJpChBDaGFuZ2VCb2FyZFRpbWVyEikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VCb2FyZFRpbWVyUmVxdWVzdBoqLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQm9hcmRUaW1lclJlc3BvbnNlEnUKFEdldEJvYXJkVGltZXJSZWNlaXB0Ei0ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFRpbWVyUmVjZWlwdFJlcXVlc3QaLi5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkVGltZXJSZWNlaXB0UmVzcG9uc2UScgoTQ2hhbmdlQWdlbnRBY3Rpdml0eRIsLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlQWdlbnRBY3Rpdml0eVJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZUFnZW50QWN0aXZpdHlSZXNwb25zZWIGcHJvdG8z", [file_luming_studio_v1_whiteboard_scene]);
+var BoardRoomEventSchema = /* @__PURE__ */ messageDesc(file_luming_studio_v1_board_room_service, 15);
+var BoardRoomGestureKindSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 0);
+var BoardRoomGestureKind = /* @__PURE__ */ tsEnum(BoardRoomGestureKindSchema);
+var BoardRoomTimerPhaseSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 1);
 var BoardRoomTimerPhase = /* @__PURE__ */ tsEnum(BoardRoomTimerPhaseSchema);
-var BoardTimerRejectionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 1);
+var BoardTimerRejectionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 2);
 var BoardTimerRejection = /* @__PURE__ */ tsEnum(BoardTimerRejectionSchema);
+var AgentActivityPhaseSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 3);
+var AgentActivityPhase = /* @__PURE__ */ tsEnum(AgentActivityPhaseSchema);
+var AgentActivityRejectionSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 4);
+var AgentActivityRejection = /* @__PURE__ */ tsEnum(AgentActivityRejectionSchema);
+var AgentActivityEndReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_room_service, 5);
+var AgentActivityEndReason = /* @__PURE__ */ tsEnum(AgentActivityEndReasonSchema);
 var BoardRoomService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_room_service, 0);
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_sharing_service_pb.js
-var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyLKAgoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCUIKCghfdmVyc2lvbiJYCgtTaGFyaW5nTGluaxIrCgRyb2xlGAEgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZRIPCgdlbmFibGVkGAIgASgIEgsKA3VybBgDIAEoCSJ9Cg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgihAUKGVVwZGF0ZUJvYXJkU2hhcmluZ1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRIdChBleHBlY3RlZF92ZXJzaW9uGAMgASgESAGIAQESNgoJc2V0X3Njb3BlGAQgASgLMiEubHVtaW5nLnN0dWRpby52MS5TZXRTaGFyaW5nU2NvcGVIABIyCgRzdG9wGAUgASgLMiIubHVtaW5nLnN0dWRpby52MS5TdG9wQm9hcmRTaGFyaW5nSAASQAoOc2V0X2ludml0YXRpb24YBiABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdJbnZpdGF0aW9uSAASRAoQcmVzZXRfaW52aXRhdGlvbhgHIAEoCzIoLmx1bWluZy5zdHVkaW8udjEuUmVzZXRTaGFyaW5nSW52aXRhdGlvbkgAEkcKEmNoYW5nZV9tZW1iZXJfcm9sZRgIIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1yZW1vdmVfbWVtYmVyGAkgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SAASQwoOcmVzdG9yZV9tZW1iZXIYCiABKAsyKS5sdW1pbmcuc3R1ZGlvLnYxLkNoYW5nZVNoYXJpbmdNZW1iZXJSb2xlSAASPgoNZm9yZ2V0X21lbWJlchgLIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ01lbWJlclRhcmdldEgAQgsKCW9wZXJhdGlvbkITChFfZXhwZWN0ZWRfdmVyc2lvbiJACg9TZXRTaGFyaW5nU2NvcGUSLQoFc2NvcGUYASABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZSISChBTdG9wQm9hcmRTaGFyaW5nIlQKFFNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgiRQoWUmVzZXRTaGFyaW5nSW52aXRhdGlvbhIrCgRyb2xlGAEgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSJYChdDaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZRIQCghhY3Rvcl9pZBgBIAEoCRIrCgRyb2xlGAIgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSInChNTaGFyaW5nTWVtYmVyVGFyZ2V0EhAKCGFjdG9yX2lkGAEgASgJIlYKGlVwZGF0ZUJvYXJkU2hhcmluZ1Jlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCJFCh1HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJIloKHkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXNwb25zZRI4CgdyZWNlaXB0GAEgASgLMicubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlY2VpcHQiwgEKFVNoYXJpbmdDb21tYW5kUmVjZWlwdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEjoKB2FwcGxpZWQYAyABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kQXBwbGllZEgAEjwKCHJlamVjdGVkGAQgASgLMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nQ29tbWFuZFJlamVjdGVkSABCCQoHb3V0Y29tZSI5ChVTaGFyaW5nQ29tbWFuZEFwcGxpZWQSFAoHdmVyc2lvbhgBIAEoBEgAiAEBQgoKCF92ZXJzaW9uIlIKFlNoYXJpbmdDb21tYW5kUmVqZWN0ZWQSOAoGcmVhc29uGAEgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIksKHUluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhgKEGludml0YXRpb25fdG9rZW4YAiABKAkilAEKHkluc3BlY3RCb2FyZEludml0YXRpb25SZXNwb25zZRI1CgppbnZpdGF0aW9uGAEgASgLMiEubHVtaW5nLnN0dWRpby52MS5Cb2FyZEludml0YXRpb24SOwoJcmVqZWN0aW9uGAIgASgOMigubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUmVqZWN0aW9uUmVhc29uIl8KD0JvYXJkSW52aXRhdGlvbhIQCghib2FyZF9pZBgBIAEoCRINCgV0aXRsZRgCIAEoCRIrCgRyb2xlGAMgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZSJWChpKb2luQm9hcmRJbnZpdGF0aW9uUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRIYChBpbnZpdGF0aW9uX3Rva2VuGAIgASgJEgwKBG5hbWUYAyABKAkikgEKG0pvaW5Cb2FyZEludml0YXRpb25SZXNwb25zZRI2CgdzZXNzaW9uGAEgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nR3Vlc3RTZXNzaW9uEjsKCXJlamVjdGlvbhgCIAEoDjIoLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JlamVjdGlvblJlYXNvbiK9AQoTU2hhcmluZ0d1ZXN0U2Vzc2lvbhIQCghib2FyZF9pZBgBIAEoCRIQCghhY3Rvcl9pZBgCIAEoCRIMCgRuYW1lGAMgASgJEisKBHJvbGUYBCABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEhQKB3ZlcnNpb24YBSABKARIAIgBARIQCghjYW5fZWRpdBgGIAEoCBITCgtjYW5fY29tbWVudBgHIAEoCEIKCghfdmVyc2lvbiqRAQoLU2hhcmluZ1JvbGUSHAoYU0hBUklOR19ST0xFX1VOU1BFQ0lGSUVEEAASFgoSU0hBUklOR19ST0xFX09XTkVSEAESFwoTU0hBUklOR19ST0xFX0VESVRPUhACEhoKFlNIQVJJTkdfUk9MRV9DT01NRU5URVIQAxIXChNTSEFSSU5HX1JPTEVfVklFV0VSEAQqXQoMU2hhcmluZ1Njb3BlEh0KGVNIQVJJTkdfU0NPUEVfVU5TUEVDSUZJRUQQABIXChNTSEFSSU5HX1NDT1BFX0xPQ0FMEAESFQoRU0hBUklOR19TQ09QRV9MQU4QAireAwoWU2hhcmluZ1JlamVjdGlvblJlYXNvbhIoCiRTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fVU5TUEVDSUZJRUQQABImCiJTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fRk9SQklEREVOEAESLAooU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1ZFUlNJT05fQ0hBTkdFRBACEi0KKVNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9DT01NQU5EX0lEX1JFVVNFEAMSLAooU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0lOVkFMSURfQ09NTUFORBAEEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9MQU5fVU5BVkFJTEFCTEUQBRIzCi9TSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fSU5WSVRBVElPTl9VTkFWQUlMQUJMRRAGEicKI1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9OQU1FX1RBS0VOEAcSLworU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX01FTUJFUl9VTkFWQUlMQUJMRRAIEioKJlNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9ST0xFX0RJU0FCTEVEEAky3AQKE0JvYXJkU2hhcmluZ1NlcnZpY2USZgoPR2V0Qm9hcmRTaGFyaW5nEigubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNoYXJpbmdSZXF1ZXN0GikubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNoYXJpbmdSZXNwb25zZRJvChJVcGRhdGVCb2FyZFNoYXJpbmcSKy5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkU2hhcmluZ1JlcXVlc3QaLC5sdW1pbmcuc3R1ZGlvLnYxLlVwZGF0ZUJvYXJkU2hhcmluZ1Jlc3BvbnNlEnsKFkdldEJvYXJkU2hhcmluZ1JlY2VpcHQSLy5sdW1pbmcuc3R1ZGlvLnYxLkdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVzcG9uc2USewoWSW5zcGVjdEJvYXJkSW52aXRhdGlvbhIvLmx1bWluZy5zdHVkaW8udjEuSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlcXVlc3QaMC5sdW1pbmcuc3R1ZGlvLnYxLkluc3BlY3RCb2FyZEludml0YXRpb25SZXNwb25zZRJyChNKb2luQm9hcmRJbnZpdGF0aW9uEiwubHVtaW5nLnN0dWRpby52MS5Kb2luQm9hcmRJbnZpdGF0aW9uUmVxdWVzdBotLmx1bWluZy5zdHVkaW8udjEuSm9pbkJvYXJkSW52aXRhdGlvblJlc3BvbnNlYgZwcm90bzM");
+var file_luming_studio_v1_board_sharing_service = /* @__PURE__ */ fileDesc("CixsdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3NoYXJpbmdfc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChZHZXRCb2FyZFNoYXJpbmdSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJIkoKF0dldEJvYXJkU2hhcmluZ1Jlc3BvbnNlEi8KB3NoYXJpbmcYASABKAsyHi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU2hhcmluZyKCAwoMQm9hcmRTaGFyaW5nEhAKCGJvYXJkX2lkGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSLQoFc2NvcGUYAyABKA4yHi5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdTY29wZRIUCgd2ZXJzaW9uGAQgASgESACIAQESKwoEcm9sZRgFIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAgSLAoFbGlua3MYCCADKAsyHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdMaW5rEjAKB21lbWJlcnMYCSADKAsyHy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXISEgoKbWVtYmVyX3VybBgKIAEoCRIfChJvd25lcl9kaXNwbGF5X25hbWUYCyABKAlIAYgBAUIKCghfdmVyc2lvbkIVChNfb3duZXJfZGlzcGxheV9uYW1lIlgKC1NoYXJpbmdMaW5rEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlEg8KB2VuYWJsZWQYAiABKAgSCwoDdXJsGAMgASgJIp0BCg1TaGFyaW5nTWVtYmVyEhAKCGFjdG9yX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHcmVtb3ZlZBgEIAEoCBIOCgZhY3RpdmUYBSABKAgSEwoGb25saW5lGAYgASgISACIAQFCCQoHX29ubGluZSKEBQoZVXBkYXRlQm9hcmRTaGFyaW5nUmVxdWVzdBIQCghib2FyZF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEh0KEGV4cGVjdGVkX3ZlcnNpb24YAyABKARIAYgBARI2CglzZXRfc2NvcGUYBCABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLlNldFNoYXJpbmdTY29wZUgAEjIKBHN0b3AYBSABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLlN0b3BCb2FyZFNoYXJpbmdIABJACg5zZXRfaW52aXRhdGlvbhgGIAEoCzImLmx1bWluZy5zdHVkaW8udjEuU2V0U2hhcmluZ0ludml0YXRpb25IABJEChByZXNldF9pbnZpdGF0aW9uGAcgASgLMigubHVtaW5nLnN0dWRpby52MS5SZXNldFNoYXJpbmdJbnZpdGF0aW9uSAASRwoSY2hhbmdlX21lbWJlcl9yb2xlGAggASgLMikubHVtaW5nLnN0dWRpby52MS5DaGFuZ2VTaGFyaW5nTWVtYmVyUm9sZUgAEj4KDXJlbW92ZV9tZW1iZXIYCSABKAsyJS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdNZW1iZXJUYXJnZXRIABJDCg5yZXN0b3JlX21lbWJlchgKIAEoCzIpLmx1bWluZy5zdHVkaW8udjEuQ2hhbmdlU2hhcmluZ01lbWJlclJvbGVIABI+Cg1mb3JnZXRfbWVtYmVyGAsgASgLMiUubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nTWVtYmVyVGFyZ2V0SABCCwoJb3BlcmF0aW9uQhMKEV9leHBlY3RlZF92ZXJzaW9uIkAKD1NldFNoYXJpbmdTY29wZRItCgVzY29wZRgBIAEoDjIeLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1Njb3BlIhIKEFN0b3BCb2FyZFNoYXJpbmciVAoUU2V0U2hhcmluZ0ludml0YXRpb24SKwoEcm9sZRgBIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUSDwoHZW5hYmxlZBgCIAEoCCJFChZSZXNldFNoYXJpbmdJbnZpdGF0aW9uEisKBHJvbGUYASABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIlgKF0NoYW5nZVNoYXJpbmdNZW1iZXJSb2xlEhAKCGFjdG9yX2lkGAEgASgJEisKBHJvbGUYAiABKA4yHS5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSb2xlIicKE1NoYXJpbmdNZW1iZXJUYXJnZXQSEAoIYWN0b3JfaWQYASABKAkiVgoaVXBkYXRlQm9hcmRTaGFyaW5nUmVzcG9uc2USOAoHcmVjZWlwdBgBIAEoCzInLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0NvbW1hbmRSZWNlaXB0IkUKHUdldEJvYXJkU2hhcmluZ1JlY2VpcHRSZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkiWgoeR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlc3BvbnNlEjgKB3JlY2VpcHQYASABKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVjZWlwdCLCAQoVU2hhcmluZ0NvbW1hbmRSZWNlaXB0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSOgoHYXBwbGllZBgDIAEoCzInLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0NvbW1hbmRBcHBsaWVkSAASPAoIcmVqZWN0ZWQYBCABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdDb21tYW5kUmVqZWN0ZWRIAEIJCgdvdXRjb21lIjkKFVNoYXJpbmdDb21tYW5kQXBwbGllZBIUCgd2ZXJzaW9uGAEgASgESACIAQFCCgoIX3ZlcnNpb24iUgoWU2hhcmluZ0NvbW1hbmRSZWplY3RlZBI4CgZyZWFzb24YASABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24iSwodSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSGAoQaW52aXRhdGlvbl90b2tlbhgCIAEoCSLMAQoeSW5zcGVjdEJvYXJkSW52aXRhdGlvblJlc3BvbnNlEjUKCmludml0YXRpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkSW52aXRhdGlvbhI7CglyZWplY3Rpb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24SNgoHc2Vzc2lvbhgDIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0d1ZXN0U2Vzc2lvbiJfCg9Cb2FyZEludml0YXRpb24SEAoIYm9hcmRfaWQYASABKAkSDQoFdGl0bGUYAiABKAkSKwoEcm9sZRgDIAEoDjIdLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ1JvbGUiVgoaSm9pbkJvYXJkSW52aXRhdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSGAoQaW52aXRhdGlvbl90b2tlbhgCIAEoCRIMCgRuYW1lGAMgASgJIpIBChtKb2luQm9hcmRJbnZpdGF0aW9uUmVzcG9uc2USNgoHc2Vzc2lvbhgBIAEoCzIlLmx1bWluZy5zdHVkaW8udjEuU2hhcmluZ0d1ZXN0U2Vzc2lvbhI7CglyZWplY3Rpb24YAiABKA4yKC5sdW1pbmcuc3R1ZGlvLnYxLlNoYXJpbmdSZWplY3Rpb25SZWFzb24ivQEKE1NoYXJpbmdHdWVzdFNlc3Npb24SEAoIYm9hcmRfaWQYASABKAkSEAoIYWN0b3JfaWQYAiABKAkSDAoEbmFtZRgDIAEoCRIrCgRyb2xlGAQgASgOMh0ubHVtaW5nLnN0dWRpby52MS5TaGFyaW5nUm9sZRIUCgd2ZXJzaW9uGAUgASgESACIAQESEAoIY2FuX2VkaXQYBiABKAgSEwoLY2FuX2NvbW1lbnQYByABKAhCCgoIX3ZlcnNpb24qkQEKC1NoYXJpbmdSb2xlEhwKGFNIQVJJTkdfUk9MRV9VTlNQRUNJRklFRBAAEhYKElNIQVJJTkdfUk9MRV9PV05FUhABEhcKE1NIQVJJTkdfUk9MRV9FRElUT1IQAhIaChZTSEFSSU5HX1JPTEVfQ09NTUVOVEVSEAMSFwoTU0hBUklOR19ST0xFX1ZJRVdFUhAEKl0KDFNoYXJpbmdTY29wZRIdChlTSEFSSU5HX1NDT1BFX1VOU1BFQ0lGSUVEEAASFwoTU0hBUklOR19TQ09QRV9MT0NBTBABEhUKEVNIQVJJTkdfU0NPUEVfTEFOEAIq3gMKFlNoYXJpbmdSZWplY3Rpb25SZWFzb24SKAokU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX1VOU1BFQ0lGSUVEEAASJgoiU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0ZPUkJJRERFThABEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9WRVJTSU9OX0NIQU5HRUQQAhItCilTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fQ09NTUFORF9JRF9SRVVTRRADEiwKKFNIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9JTlZBTElEX0NPTU1BTkQQBBIsCihTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTEFOX1VOQVZBSUxBQkxFEAUSMwovU0hBUklOR19SRUpFQ1RJT05fUkVBU09OX0lOVklUQVRJT05fVU5BVkFJTEFCTEUQBhInCiNTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fTkFNRV9UQUtFThAHEi8KK1NIQVJJTkdfUkVKRUNUSU9OX1JFQVNPTl9NRU1CRVJfVU5BVkFJTEFCTEUQCBIqCiZTSEFSSU5HX1JFSkVDVElPTl9SRUFTT05fUk9MRV9ESVNBQkxFRBAJMtwEChNCb2FyZFNoYXJpbmdTZXJ2aWNlEmYKD0dldEJvYXJkU2hhcmluZxIoLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVxdWVzdBopLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVzcG9uc2USbwoSVXBkYXRlQm9hcmRTaGFyaW5nEisubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFNoYXJpbmdSZXF1ZXN0GiwubHVtaW5nLnN0dWRpby52MS5VcGRhdGVCb2FyZFNoYXJpbmdSZXNwb25zZRJ7ChZHZXRCb2FyZFNoYXJpbmdSZWNlaXB0Ei8ubHVtaW5nLnN0dWRpby52MS5HZXRCb2FyZFNoYXJpbmdSZWNlaXB0UmVxdWVzdBowLmx1bWluZy5zdHVkaW8udjEuR2V0Qm9hcmRTaGFyaW5nUmVjZWlwdFJlc3BvbnNlEnsKFkluc3BlY3RCb2FyZEludml0YXRpb24SLy5sdW1pbmcuc3R1ZGlvLnYxLkluc3BlY3RCb2FyZEludml0YXRpb25SZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5JbnNwZWN0Qm9hcmRJbnZpdGF0aW9uUmVzcG9uc2UScgoTSm9pbkJvYXJkSW52aXRhdGlvbhIsLmx1bWluZy5zdHVkaW8udjEuSm9pbkJvYXJkSW52aXRhdGlvblJlcXVlc3QaLS5sdW1pbmcuc3R1ZGlvLnYxLkpvaW5Cb2FyZEludml0YXRpb25SZXNwb25zZWIGcHJvdG8z");
 var SharingRoleSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_sharing_service, 0);
 var SharingRole = /* @__PURE__ */ tsEnum(SharingRoleSchema);
 var SharingScopeSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v1_board_sharing_service, 1);
@@ -14296,14 +18676,142 @@ var SharingRejectionReasonSchema = /* @__PURE__ */ enumDesc(file_luming_studio_v
 var SharingRejectionReason = /* @__PURE__ */ tsEnum(SharingRejectionReasonSchema);
 var BoardSharingService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_sharing_service, 0);
 
+// src/entrypoints/http/room-agent-activity.ts
+var method = BoardRoomService.method.changeAgentActivity;
+var agentActivityPath = "/" + BoardRoomService.typeName + "/" + method.name;
+var agentActivityRequestLimit = 16 * 1024;
+var phases2 = {
+  preparing: AgentActivityPhase.PREPARING,
+  writing: AgentActivityPhase.WRITING,
+  verifying: AgentActivityPhase.VERIFYING
+};
+var phaseByWire = /* @__PURE__ */ new Map([
+  [AgentActivityPhase.PREPARING, "preparing"],
+  [AgentActivityPhase.WRITING, "writing"],
+  [AgentActivityPhase.VERIFYING, "verifying"]
+]);
+var endReasons = {
+  completed: AgentActivityEndReason.COMPLETED,
+  released: AgentActivityEndReason.RELEASED,
+  expired: AgentActivityEndReason.EXPIRED
+};
+var rejections2 = {
+  invalid: AgentActivityRejection.INVALID,
+  overlap: AgentActivityRejection.OVERLAP,
+  capacity: AgentActivityRejection.CAPACITY,
+  notFound: AgentActivityRejection.NOT_FOUND,
+  generationChanged: AgentActivityRejection.GENERATION_CHANGED,
+  workspaceReleased: AgentActivityRejection.WORKSPACE_RELEASED
+};
+function agentWorkspaceWire(workspace) {
+  const { scope: scope2, phase, areas, expiresAtUnixMs, ...key } = workspace;
+  const target2 = scope2.kind === "area" ? { case: "area", value: scope2.bounds } : { case: "objects", value: { objectIds: [...scope2.objectIds] } };
+  return {
+    ...key,
+    scope: { target: target2 },
+    phase: phases2[phase],
+    areas: [...areas],
+    expiresAtUnixMs: BigInt(expiresAtUnixMs)
+  };
+}
+function resultWire(result) {
+  switch (result.kind) {
+    case "active":
+      return { result: { case: "workspace", value: agentWorkspaceWire(result.workspace) } };
+    case "ended":
+      return {
+        result: {
+          case: "ended",
+          value: { generation: result.generation, reason: endReasons[result.reason] }
+        }
+      };
+    case "rejected":
+      return { result: { case: "rejected", value: rejections2[result.reason] } };
+  }
+}
+function readScope(scope2) {
+  const { target: target2 } = scope2 ?? {};
+  if (target2?.case === "objects") {
+    return { kind: "objects", objectIds: target2.value.objectIds };
+  }
+  if (target2?.case === "area") {
+    const { x, y, width, height } = target2.value;
+    return { kind: "area", bounds: { x, y, width, height } };
+  }
+  throw new RoomInputError("An Agent workspace scope is required.");
+}
+function readOperation2(action, taskId) {
+  switch (action.case) {
+    case "begin":
+      return {
+        kind: "begin",
+        taskId,
+        label: action.value.label,
+        scope: readScope(action.value.scope),
+        previousGeneration: action.value.previousGeneration || void 0
+      };
+    case "update": {
+      const phase = phaseByWire.get(action.value.phase);
+      if (!phase) {
+        throw new RoomInputError("An Agent workspace phase is required.");
+      }
+      return {
+        kind: "update",
+        taskId,
+        phase,
+        generation: action.value.generation,
+        activeObjectIds: action.value.activeObjectIds
+      };
+    }
+    case "end":
+      return { kind: "end", taskId, generation: action.value.generation };
+    case "status":
+      return { kind: "status", taskId };
+    case "release":
+    case void 0:
+      throw new RoomInputError("An Agent workspace action is required.");
+  }
+}
+function agentActivityRoute(application) {
+  return unaryRoute(method, (actor, request) => {
+    const { action } = request;
+    const boardId = requireId(request.boardId);
+    const { agentId, taskId } = request;
+    const ownerId = actor.id;
+    if (!agentId.startsWith("agent-") || ownerId === agentId) {
+      throw new RoomInputError("An independent Agent work session is required.");
+    }
+    if (action.case === "release") {
+      if (actor.kind === "agent" || actor.guestScope) {
+        throw new RoomAccessError("Only the board owner can release an Agent workspace.");
+      }
+      return resultWire(
+        application.releaseAgentActivity({
+          boardId,
+          ownerId,
+          agentId,
+          taskId,
+          generation: action.value.generation
+        })
+      );
+    }
+    if (actor.kind !== "agent") {
+      throw new RoomAccessError("Agent workspace changes require the Agent entrypoint.");
+    }
+    return resultWire(
+      application.changeAgentActivity({ boardId, ownerId, agentId }, readOperation2(action, taskId))
+    );
+  });
+}
+
 // src/entrypoints/http/room-route-wire.ts
-var phases = {
+var phases3 = {
   idle: BoardRoomTimerPhase.IDLE,
   running: BoardRoomTimerPhase.RUNNING,
   paused: BoardRoomTimerPhase.PAUSED,
   ended: BoardRoomTimerPhase.ENDED
 };
-var rejections2 = {
+var rejections3 = {
   forbidden: BoardTimerRejection.FORBIDDEN,
   invalidAction: BoardTimerRejection.INVALID_ACTION,
   commandIdReuse: BoardTimerRejection.COMMAND_ID_REUSE
@@ -14319,19 +18827,42 @@ function timerWire({
 }) {
   return {
     version,
-    phase: phases[phase],
+    phase: phases3[phase],
     durationMs,
     deadlineUnixMs: deadlineUnixMs === void 0 ? void 0 : BigInt(deadlineUnixMs),
     remainingMs
   };
 }
-function participantWire(participant) {
-  return { ...participant, expiresAtUnixMs: BigInt(participant.expiresAtUnixMs) };
+var gestureKinds = {
+  move: BoardRoomGestureKind.MOVE,
+  resize: BoardRoomGestureKind.RESIZE,
+  rotate: BoardRoomGestureKind.ROTATE
+};
+function participantWire({
+  expiresAtUnixMs,
+  gesture,
+  gestureExpiresAtUnixMs,
+  ...participant
+}) {
+  return {
+    ...participant,
+    expiresAtUnixMs: BigInt(expiresAtUnixMs),
+    gesture: gesture && { kind: gestureKinds[gesture.kind], changes: [...gesture.changes] },
+    gestureExpiresAtUnixMs: gestureExpiresAtUnixMs === void 0 ? void 0 : BigInt(gestureExpiresAtUnixMs)
+  };
 }
 function payloadWire(payload) {
   switch (payload.kind) {
     case "snapshot": {
-      const { actorId: actorId2, canEdit, boardRevision, participants, timer } = payload.snapshot;
+      const {
+        actorId: actorId2,
+        canEdit,
+        boardRevision,
+        participants,
+        timer,
+        agentWorkspaces,
+        canReleaseAgentActivity
+      } = payload.snapshot;
       return {
         case: "snapshot",
         value: {
@@ -14339,7 +18870,9 @@ function payloadWire(payload) {
           canEdit,
           boardRevision,
           participants: participants.map(participantWire),
-          timer: timerWire(timer)
+          timer: timerWire(timer),
+          agentWorkspaces: agentWorkspaces.map(agentWorkspaceWire),
+          canReleaseAgentActivity
         }
       };
     }
@@ -14352,6 +18885,11 @@ function payloadWire(payload) {
     }
     case "timer":
       return { case: "timer", value: timerWire(payload.timer) };
+    case "agentWorkspaces":
+      return {
+        case: "agentWorkspaces",
+        value: { workspaces: payload.workspaces.map(agentWorkspaceWire) }
+      };
     case "contentChanged": {
       const { boardRevision, changedObjectIds, removedObjectIds, changedObjects, refreshScene } = payload.change;
       return {
@@ -14360,7 +18898,7 @@ function payloadWire(payload) {
           boardRevision,
           changedObjectIds: [...changedObjectIds ?? []],
           removedObjectIds: [...removedObjectIds ?? []],
-          changedObjects: changedObjects?.map((object) => fromBinary(ObjectMetadataSchema, object)),
+          changedObjects: changedObjects?.map((object3) => fromBinary(ObjectMetadataSchema, object3)),
           refreshScene
         }
       };
@@ -14370,11 +18908,11 @@ function payloadWire(payload) {
   }
 }
 function eventWire(event) {
-  const { boardId, roomInstanceId, sequence: sequence2, serverTimeUnixMs, payload } = event;
+  const { boardId, roomInstanceId, sequence: sequence3, serverTimeUnixMs, payload } = event;
   return {
     boardId,
     roomInstanceId,
-    sequence: sequence2,
+    sequence: sequence3,
     serverTimeUnixMs: BigInt(serverTimeUnixMs),
     payload: payloadWire(payload)
   };
@@ -14384,25 +18922,35 @@ function encodeFrame(event) {
   const data = JSON.stringify(toJson(BoardRoomEventSchema, wire));
   return "id: " + event.sequence + "\ndata: " + data + "\n\n";
 }
-function eventFrame(event) {
-  const cached = encodedFrames.get(event);
-  if (cached !== void 0) {
-    return cached;
-  }
-  const full = encodeFrame(event);
-  const payload = event.payload;
-  const compact = full.length > maximumFrameCharacters && payload.kind === "contentChanged";
-  const considered = compact ? encodeFrame({
-    ...event,
-    payload: {
+function compactPayload(event) {
+  const { payload } = event;
+  if (payload.kind === "contentChanged") {
+    return {
       kind: "contentChanged",
       change: {
         boardId: event.boardId,
         boardRevision: payload.change.boardRevision,
         refreshScene: true
       }
-    }
-  }) : full;
+    };
+  }
+  if (payload.kind === "snapshot") {
+    const participants = payload.snapshot.participants.map((participant) => ({
+      ...participant,
+      gesture: void 0,
+      gestureExpiresAtUnixMs: void 0
+    }));
+    return { kind: "snapshot", snapshot: { ...payload.snapshot, participants } };
+  }
+  return payload;
+}
+function eventFrame(event) {
+  const cached = encodedFrames.get(event);
+  if (cached !== void 0) {
+    return cached;
+  }
+  const full = encodeFrame(event);
+  const considered = full.length > maximumFrameCharacters ? encodeFrame({ ...event, payload: compactPayload(event) }) : full;
   encodedFrames.set(event, considered);
   return considered;
 }
@@ -14423,7 +18971,7 @@ function receiptWire({
       return {
         boardId,
         commandId,
-        outcome: { case: "rejected", value: { reason: rejections2[outcome.reason] } }
+        outcome: { case: "rejected", value: { reason: rejections3[outcome.reason] } }
       };
   }
 }
@@ -14571,7 +19119,7 @@ var RoomStream = class {
     }
   }
 };
-function readScope(request) {
+function readScope2(request) {
   const url = URL.parse(request.url ?? "", "http://127.0.0.1");
   if (!url) {
     return void 0;
@@ -14588,7 +19136,7 @@ function serveRoomEvents(application, request, response, authorize, reportError)
     sendStatus(response, 405);
     return;
   }
-  const scope2 = readScope(request);
+  const scope2 = readScope2(request);
   if (!scope2) {
     sendStatus(response, 400);
     return;
@@ -14665,11 +19213,39 @@ function actionOf(action) {
       throw new HttpRequestError(400, "A timer action is required");
   }
 }
+var gestureKinds2 = /* @__PURE__ */ new Map([
+  [BoardRoomGestureKind.MOVE, "move"],
+  [BoardRoomGestureKind.RESIZE, "resize"],
+  [BoardRoomGestureKind.ROTATE, "rotate"]
+]);
+function readGesture(wire) {
+  if (!wire) {
+    return;
+  }
+  const kind = gestureKinds2.get(wire.kind);
+  if (!kind) {
+    throw new HttpRequestError(400, "Unsupported room gesture");
+  }
+  return {
+    kind,
+    changes: wire.changes.map(({ objectId, expectedGeometryVersion, geometry }) => {
+      if (!geometry) {
+        throw new HttpRequestError(400, "A room gesture requires object geometry");
+      }
+      const { x, y, width, height, rotation } = geometry;
+      return {
+        objectId: roomId(objectId),
+        expectedGeometryVersion: requireVersion2(expectedGeometryVersion),
+        geometry: { x, y, width, height, rotation }
+      };
+    })
+  };
+}
 function readPresence(request) {
-  const { viewId, sequence: sequence2, cursor, viewport, following } = request;
+  const { viewId, sequence: sequence3, cursor, viewport, following, gesture } = request;
   return {
     viewId: roomId(viewId),
-    sequence: requireVersion2(sequence2),
+    sequence: requireVersion2(sequence3),
     cursor: cursor && { x: cursor.x, y: cursor.y },
     viewport: viewport && {
       centerX: viewport.centerX,
@@ -14678,11 +19254,13 @@ function readPresence(request) {
       width: viewport.width,
       height: viewport.height
     },
-    following
+    following,
+    gesture: readGesture(gesture)
   };
 }
 function createRoomRoutes(application) {
   return [
+    agentActivityRoute(application),
     unaryRoute(getBoardRoom, (actor, request) => ({
       event: eventWire(application.snapshot(roomId(request.boardId), actor.id))
     })),
@@ -14766,7 +19344,7 @@ function guestRole(value) {
   }
   throw new HttpRequestError(400, "Invalid invitation role.");
 }
-function readOperation2(operation) {
+function readOperation3(operation) {
   switch (operation.case) {
     case "setScope":
       return { kind: operation.case, scope: scope(operation.value.scope) };
@@ -14806,16 +19384,23 @@ function readCommand(request) {
     boardId: requireId(boardId),
     commandId: requireId(commandId),
     expectedVersion,
-    operation: readOperation2(operation)
+    operation: readOperation3(operation)
   };
 }
-function writeSharing(sharing) {
+function writeSharing(sharing, options) {
+  const owner = sharing.role === "owner";
+  const online = owner ? options.onlineActorIds?.(sharing.boardId) : void 0;
   return {
     ...sharing,
     scope: sharing.scope === "local" ? SharingScope.LOCAL : SharingScope.LAN,
     role: wireRoles[sharing.role],
     links: sharing.links.map((link) => ({ ...link, role: wireRoles[link.role] })),
-    members: sharing.members.map((member) => ({ ...member, role: wireRoles[member.role] }))
+    members: sharing.members.map((member) => ({
+      ...member,
+      role: wireRoles[member.role],
+      online: online && member.active && online.has(member.actorId)
+    })),
+    ownerDisplayName: owner ? options.ownerDisplayName?.trim() || void 0 : void 0
   };
 }
 function writeReceipt2({
@@ -14858,7 +19443,10 @@ function createSharingRoutes(options) {
   const { getBoardSharing, updateBoardSharing, getBoardSharingReceipt } = BoardSharingService.method;
   return [
     unaryRoute(getBoardSharing, (actor, { boardId }) => ({
-      sharing: writeSharing(application.getSharing(requireId(boardId), actor.id, actor.guestScope))
+      sharing: writeSharing(
+        application.getSharing(requireId(boardId), actor.id, actor.guestScope),
+        options
+      )
     })),
     asyncUnaryRoute(updateBoardSharing, async (actor, request) => ({
       receipt: await update(options, actor.id, readCommand(request))
@@ -14874,8 +19462,8 @@ function createSharingRoutes(options) {
 var cookieName = "luming-studio-ii-guest";
 var cookieLifetimeSeconds = 31536e3;
 var invitationBodyLimit = 16 * 1024;
-function path(method) {
-  return "/" + method.parent.typeName + "/" + method.name;
+function path(method2) {
+  return "/" + method2.parent.typeName + "/" + method2.name;
 }
 var paths = /* @__PURE__ */ new Map([
   [path(WhiteboardService.method.getBoardScene), "read"],
@@ -14886,6 +19474,9 @@ var paths = /* @__PURE__ */ new Map([
   [path(BoardEditService.method.editBoardGeometry), "edit"],
   [path(BoardEditService.method.editObjectContent), "edit"],
   [path(BoardEditService.method.attachBoardImage), "edit"],
+  [path(BoardEditService.method.attachBoardVideo), "edit"],
+  [path(BoardEditService.method.uploadBoardDocumentImage), "edit"],
+  [path(BoardEditService.method.reverseBoardEdit), "edit"],
   [path(BoardEditService.method.getBoardEditReceipt), "edit"],
   [path(BoardHistoryService.method.listBoardVersions), "read"],
   [path(BoardHistoryService.method.getBoardVersionScene), "read"],
@@ -14962,17 +19553,26 @@ function resolveGuestActor(request, options, guest, access) {
   if (!actorId2) {
     return void 0;
   }
+  const requireGuestAccess = (boardId, action) => {
+    const session = options.application.guestAccess(boardId, actorId2, guest.scope);
+    if (!session || !permits(session, action)) {
+      throw new SharingAccessError("Guest access to this board is unavailable.");
+    }
+  };
   return {
     id: actorId2,
     guestScope: guest.scope,
-    authorize(value) {
-      const boardId = boardIdIn(value);
-      const session = options.application.guestAccess(boardId, actorId2, guest.scope);
-      if (!session || !permits(session, access)) {
-        throw new SharingAccessError("Guest access to this board is unavailable.");
-      }
-    }
+    authorize: (value) => requireGuestAccess(boardIdIn(value), access),
+    authorizeRead: (boardId) => requireGuestAccess(requireId(boardId), "read")
   };
+}
+function existingInvitationSession(request, { application }, boardId, scope2, role) {
+  const token2 = readBrowserToken(request);
+  const actorId2 = token2 ? application.browserActor(token2) : void 0;
+  const session = actorId2 ? application.guestAccess(boardId, actorId2, scope2) : void 0;
+  if (session?.role === role) {
+    return { ...session, role: wireRoles[session.role] };
+  }
 }
 function inspectInvitation(request, response, options, guest, bytes) {
   const { boardId, invitationToken } = decodeRequest(inspectBoardInvitation.input, bytes);
@@ -14981,14 +19581,21 @@ function inspectInvitation(request, response, options, guest, bytes) {
     invitationToken,
     scope: guest.scope
   });
-  if ("value" in result) {
-    const browser = stagedToken(request, options);
-    if (browser.fresh) {
-      setCookie(response, browser.token, guest);
-    }
-  }
-  const value = "value" in result ? { invitation: { ...result.value, role: wireRoles[result.value.role] } } : { rejection: wireRejection[result.rejection] };
   const schema2 = inspectBoardInvitation.output;
+  if ("rejection" in result) {
+    sendProtobuf(
+      response,
+      toBinary(schema2, create(schema2, { rejection: wireRejection[result.rejection] }))
+    );
+    return;
+  }
+  const { role } = result.value;
+  const session = existingInvitationSession(request, options, boardId, guest.scope, role);
+  const browser = stagedToken(request, options);
+  if (browser.fresh) {
+    setCookie(response, browser.token, guest);
+  }
+  const value = session ? { session } : { invitation: { ...result.value, role: wireRoles[role] } };
   sendProtobuf(response, toBinary(schema2, create(schema2, value)));
 }
 function joinInvitation(request, response, options, guest, bytes) {
@@ -15051,7 +19658,7 @@ function observeRoomChange(rooms, reportError) {
         changedObjectIds: receipt.objects.map(({ objectId }) => objectId),
         removedObjectIds: "removedObjectIds" in receipt ? receipt.removedObjectIds : [],
         changedObjects: receipt.objects.map(
-          (object) => toBinary(ObjectMetadataSchema, toObjectMetadata(object))
+          (object3) => toBinary(ObjectMetadataSchema, toObjectMetadata(object3))
         )
       });
     } catch (error) {
@@ -15149,7 +19756,7 @@ function createWhiteboardRoutes(application, observe) {
 }
 
 // ../../packages/contracts/dist/proto/luming/studio/v1/board_suggestion_service_pb.js
-var file_luming_studio_v1_board_suggestion_service = /* @__PURE__ */ fileDesc("Ci9sdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3N1Z2dlc3Rpb25fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChRCb2FyZFJldmlld1NlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIu0BCh5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI7CglzZWxlY3Rpb24YAyABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3U2VsZWN0aW9uSAASHAoSZmVlZGJhY2tfdGhyZWFkX2lkGAQgASgJSAASJAoXZXhwZWN0ZWRfYm9hcmRfcmV2aXNpb24YBSABKARIAYgBAUIICgZvcmlnaW5CGgoYX2V4cGVjdGVkX2JvYXJkX3JldmlzaW9uIrwCChFCb2FyZFJldmlld1NvdXJjZRIRCglzb3VyY2VfaWQYASABKAkSEAoIYm9hcmRfaWQYAiABKAkSJAoXY2FwdHVyZWRfYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARISCgpvYmplY3RfaWRzGAQgAygJEh8KEmZlZWRiYWNrX3RocmVhZF9pZBgFIAEoCUgBiAEBEjQKB3RhcmdldHMYBiADKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3VGFyZ2V0EiMKFnRhcmdldHNfYm9hcmRfcmV2aXNpb24YByABKARIAogBAUIaChhfY2FwdHVyZWRfYm9hcmRfcmV2aXNpb25CFQoTX2ZlZWRiYWNrX3RocmVhZF9pZEIZChdfdGFyZ2V0c19ib2FyZF9yZXZpc2lvbiLIAQoRQm9hcmRSZXZpZXdUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSHQoQZ2VvbWV0cnlfdmVyc2lvbhgDIAEoBEgAiAEBEhwKD3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEiwKCGdlb21ldHJ5GAUgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uIlYKH0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USMwoGc291cmNlGAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJldmlld1NvdXJjZSLvAQoaQm9hcmRTdWdnZXN0aW9uT3B0aW9uSW5wdXQSEQoJb3B0aW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESPgoIZ2VvbWV0cnkYBCABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdEgAEj0KB2NvbnRlbnQYBSABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVxdWVzdEgAQgYKBGVkaXRCDgoMX2Rlc2NyaXB0aW9uIqsBChxTdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJc291cmNlX2lkGAMgASgJEhMKC29ic2VydmF0aW9uGAQgASgJEj0KB29wdGlvbnMYBSADKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbklucHV0ImMKFUJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIRCglvcHRpb25faWQYASABKAkSDQoFbGFiZWwYAiABKAkSGAoLZGVzY3JpcHRpb24YAyABKAlIAIgBAUIOCgxfZGVzY3JpcHRpb24i4wIKD0JvYXJkU3VnZ2VzdGlvbhITCgtwcm9wb3NhbF9pZBgBIAEoCRIRCglzb3VyY2VfaWQYAiABKAkSEwoLb2JzZXJ2YXRpb24YAyABKAkSHQoQcHJvcG9zYWxfdmVyc2lvbhgEIAEoBEgAiAEBEhkKEWV4cGlyZXNfYXRfbWlsbGlzGAUgASgEEjgKB29wdGlvbnMYBiADKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIfChJhY2NlcHRlZF9vcHRpb25faWQYByABKAlIAYgBARIkChdhY2NlcHRlZF9ib2FyZF9yZXZpc2lvbhgIIAEoBEgCiAEBEhAKCHJlamVjdGVkGAkgASgIQhMKEV9wcm9wb3NhbF92ZXJzaW9uQhUKE19hY2NlcHRlZF9vcHRpb25faWRCGgoYX2FjY2VwdGVkX2JvYXJkX3JldmlzaW9uIlYKHVN1Ym1pdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjUKCnN1Z2dlc3Rpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbiJ2ChtMaXN0Qm9hcmRTdWdnZXN0aW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDQoFbGltaXQYAiABKA0SHwoSYmVmb3JlX3Byb3Bvc2FsX2lkGAMgASgJSACIAQFCFQoTX2JlZm9yZV9wcm9wb3NhbF9pZCKWAQocTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXNwb25zZRI0Cglwcm9wb3NhbHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbhIkChduZXh0X2JlZm9yZV9wcm9wb3NhbF9pZBgCIAEoCUgAiAEBQhoKGF9uZXh0X2JlZm9yZV9wcm9wb3NhbF9pZCKfAQodUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBAUIcChpfZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbiL2AQoWQm9hcmRTdWdnZXN0aW9uUHJldmlldxIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjkKD2NoYW5nZWRfb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhQKDG9iamVjdF9vcmRlchgEIAMoCRI/ChBjaGFuZ2VkX3BheWxvYWRzGAUgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0QhEKD19ib2FyZF9yZXZpc2lvbiLZAQoeUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjsKB3ByZXZpZXcYASABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvblByZXZpZXdIABI3Cghjb25mbGljdBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0Q29uZmxpY3RIABI3CghyZWplY3RlZBgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0ZWRIAEIICgZyZXN1bHQisgEKHEFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBARISCgpjb21tYW5kX2lkGAUgASgJQhwKGl9leHBlY3RlZF9wcm9wb3NhbF92ZXJzaW9uIlQKHUFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQinwEKHFJlamVjdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSJgoZZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbhgDIAEoBEgAiAEBEhIKCmNvbW1hbmRfaWQYBCABKAlCHAoaX2V4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24iVgodUmVqZWN0Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USNQoKc3VnZ2VzdGlvbhgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdWdnZXN0aW9uMvoFChZCb2FyZFN1Z2dlc3Rpb25TZXJ2aWNlEn4KF0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlEjAubHVtaW5nLnN0dWRpby52MS5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkNyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USeAoVU3VibWl0Qm9hcmRTdWdnZXN0aW9uEi4ubHVtaW5nLnN0dWRpby52MS5TdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5TdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ1ChRMaXN0Qm9hcmRTdWdnZXN0aW9ucxItLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRTdWdnZXN0aW9uc1Jlc3BvbnNlEnsKFlByZXZpZXdCb2FyZFN1Z2dlc3Rpb24SLy5sdW1pbmcuc3R1ZGlvLnYxLlByZXZpZXdCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5QcmV2aWV3Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USeAoVQWNjZXB0Qm9hcmRTdWdnZXN0aW9uEi4ubHVtaW5nLnN0dWRpby52MS5BY2NlcHRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5BY2NlcHRCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ4ChVSZWplY3RCb2FyZFN1Z2dlc3Rpb24SLi5sdW1pbmcuc3R1ZGlvLnYxLlJlamVjdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QaLy5sdW1pbmcuc3R1ZGlvLnYxLlJlamVjdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
+var file_luming_studio_v1_board_suggestion_service = /* @__PURE__ */ fileDesc("Ci9sdW1pbmcvc3R1ZGlvL3YxL2JvYXJkX3N1Z2dlc3Rpb25fc2VydmljZS5wcm90bxIQbHVtaW5nLnN0dWRpby52MSIqChRCb2FyZFJldmlld1NlbGVjdGlvbhISCgpvYmplY3RfaWRzGAEgAygJIu0BCh5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEgoKY29tbWFuZF9pZBgCIAEoCRI7CglzZWxlY3Rpb24YAyABKAsyJi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3U2VsZWN0aW9uSAASHAoSZmVlZGJhY2tfdGhyZWFkX2lkGAQgASgJSAASJAoXZXhwZWN0ZWRfYm9hcmRfcmV2aXNpb24YBSABKARIAYgBAUIICgZvcmlnaW5CGgoYX2V4cGVjdGVkX2JvYXJkX3JldmlzaW9uIrwCChFCb2FyZFJldmlld1NvdXJjZRIRCglzb3VyY2VfaWQYASABKAkSEAoIYm9hcmRfaWQYAiABKAkSJAoXY2FwdHVyZWRfYm9hcmRfcmV2aXNpb24YAyABKARIAIgBARISCgpvYmplY3RfaWRzGAQgAygJEh8KEmZlZWRiYWNrX3RocmVhZF9pZBgFIAEoCUgBiAEBEjQKB3RhcmdldHMYBiADKAsyIy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkUmV2aWV3VGFyZ2V0EiMKFnRhcmdldHNfYm9hcmRfcmV2aXNpb24YByABKARIAogBAUIaChhfY2FwdHVyZWRfYm9hcmRfcmV2aXNpb25CFQoTX2ZlZWRiYWNrX3RocmVhZF9pZEIZChdfdGFyZ2V0c19ib2FyZF9yZXZpc2lvbiLIAQoRQm9hcmRSZXZpZXdUYXJnZXQSEQoJb2JqZWN0X2lkGAEgASgJEgwKBGtpbmQYAiABKAkSHQoQZ2VvbWV0cnlfdmVyc2lvbhgDIAEoBEgAiAEBEhwKD3BheWxvYWRfdmVyc2lvbhgEIAEoBEgBiAEBEiwKCGdlb21ldHJ5GAUgASgLMhoubHVtaW5nLnN0dWRpby52MS5HZW9tZXRyeUITChFfZ2VvbWV0cnlfdmVyc2lvbkISChBfcGF5bG9hZF92ZXJzaW9uIlYKH0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USMwoGc291cmNlGAEgASgLMiMubHVtaW5nLnN0dWRpby52MS5Cb2FyZFJldmlld1NvdXJjZSKvAgoaQm9hcmRTdWdnZXN0aW9uT3B0aW9uSW5wdXQSEQoJb3B0aW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEhgKC2Rlc2NyaXB0aW9uGAMgASgJSAGIAQESPgoIZ2VvbWV0cnkYBCABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRCb2FyZEdlb21ldHJ5UmVxdWVzdEgAEj0KB2NvbnRlbnQYBSABKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkVkaXRPYmplY3RDb250ZW50UmVxdWVzdEgAEj4KCm9wZXJhdGlvbnMYBiADKAsyKi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbkVkaXRJbnB1dEIGCgRlZGl0Qg4KDF9kZXNjcmlwdGlvbiKhAQoYQm9hcmRTdWdnZXN0aW9uRWRpdElucHV0Ej4KCGdlb21ldHJ5GAEgASgLMioubHVtaW5nLnN0dWRpby52MS5FZGl0Qm9hcmRHZW9tZXRyeVJlcXVlc3RIABI9Cgdjb250ZW50GAIgASgLMioubHVtaW5nLnN0dWRpby52MS5FZGl0T2JqZWN0Q29udGVudFJlcXVlc3RIAEIGCgRlZGl0IqsBChxTdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0EhAKCGJvYXJkX2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSEQoJc291cmNlX2lkGAMgASgJEhMKC29ic2VydmF0aW9uGAQgASgJEj0KB29wdGlvbnMYBSADKAsyLC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbklucHV0ImMKFUJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIRCglvcHRpb25faWQYASABKAkSDQoFbGFiZWwYAiABKAkSGAoLZGVzY3JpcHRpb24YAyABKAlIAIgBAUIOCgxfZGVzY3JpcHRpb24i/gIKD0JvYXJkU3VnZ2VzdGlvbhITCgtwcm9wb3NhbF9pZBgBIAEoCRIRCglzb3VyY2VfaWQYAiABKAkSEwoLb2JzZXJ2YXRpb24YAyABKAkSHQoQcHJvcG9zYWxfdmVyc2lvbhgEIAEoBEgAiAEBEhkKEWV4cGlyZXNfYXRfbWlsbGlzGAUgASgEEjgKB29wdGlvbnMYBiADKAsyJy5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbk9wdGlvbhIfChJhY2NlcHRlZF9vcHRpb25faWQYByABKAlIAYgBARIkChdhY2NlcHRlZF9ib2FyZF9yZXZpc2lvbhgIIAEoBEgCiAEBEhAKCHJlamVjdGVkGAkgASgIEhkKEWFjdGl2ZV9vcHRpb25faWRzGAogAygJQhMKEV9wcm9wb3NhbF92ZXJzaW9uQhUKE19hY2NlcHRlZF9vcHRpb25faWRCGgoYX2FjY2VwdGVkX2JvYXJkX3JldmlzaW9uIlYKHVN1Ym1pdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjUKCnN1Z2dlc3Rpb24YASABKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbiJ2ChtMaXN0Qm9hcmRTdWdnZXN0aW9uc1JlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSDQoFbGltaXQYAiABKA0SHwoSYmVmb3JlX3Byb3Bvc2FsX2lkGAMgASgJSACIAQFCFQoTX2JlZm9yZV9wcm9wb3NhbF9pZCKWAQocTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXNwb25zZRI0Cglwcm9wb3NhbHMYASADKAsyIS5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvbhIkChduZXh0X2JlZm9yZV9wcm9wb3NhbF9pZBgCIAEoCUgAiAEBQhoKGF9uZXh0X2JlZm9yZV9wcm9wb3NhbF9pZCKfAQodUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBAUIcChpfZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbiL2AQoWQm9hcmRTdWdnZXN0aW9uUHJldmlldxIbCg5ib2FyZF9yZXZpc2lvbhgBIAEoBEgAiAEBEjkKD2NoYW5nZWRfb2JqZWN0cxgCIAMoCzIgLmx1bWluZy5zdHVkaW8udjEuT2JqZWN0TWV0YWRhdGESGgoScmVtb3ZlZF9vYmplY3RfaWRzGAMgAygJEhQKDG9iamVjdF9vcmRlchgEIAMoCRI/ChBjaGFuZ2VkX3BheWxvYWRzGAUgAygLMiUubHVtaW5nLnN0dWRpby52MS5PYmplY3RQYXlsb2FkUmVzdWx0QhEKD19ib2FyZF9yZXZpc2lvbiLZAQoeUHJldmlld0JvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjsKB3ByZXZpZXcYASABKAsyKC5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkU3VnZ2VzdGlvblByZXZpZXdIABI3Cghjb25mbGljdBgCIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0Q29uZmxpY3RIABI3CghyZWplY3RlZBgDIAEoCzIjLmx1bWluZy5zdHVkaW8udjEuQm9hcmRFZGl0UmVqZWN0ZWRIAEIICgZyZXN1bHQisgEKHEFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSEQoJb3B0aW9uX2lkGAMgASgJEiYKGWV4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24YBCABKARIAIgBARISCgpjb21tYW5kX2lkGAUgASgJQhwKGl9leHBlY3RlZF9wcm9wb3NhbF92ZXJzaW9uIlQKHUFjY2VwdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlEjMKB3JlY2VpcHQYASABKAsyIi5sdW1pbmcuc3R1ZGlvLnYxLkJvYXJkRWRpdFJlY2VpcHQinwEKHFJlamVjdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QSEAoIYm9hcmRfaWQYASABKAkSEwoLcHJvcG9zYWxfaWQYAiABKAkSJgoZZXhwZWN0ZWRfcHJvcG9zYWxfdmVyc2lvbhgDIAEoBEgAiAEBEhIKCmNvbW1hbmRfaWQYBCABKAlCHAoaX2V4cGVjdGVkX3Byb3Bvc2FsX3ZlcnNpb24iVgodUmVqZWN0Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USNQoKc3VnZ2VzdGlvbhgBIAEoCzIhLmx1bWluZy5zdHVkaW8udjEuQm9hcmRTdWdnZXN0aW9uMvoFChZCb2FyZFN1Z2dlc3Rpb25TZXJ2aWNlEn4KF0NyZWF0ZUJvYXJkUmV2aWV3U291cmNlEjAubHVtaW5nLnN0dWRpby52MS5DcmVhdGVCb2FyZFJldmlld1NvdXJjZVJlcXVlc3QaMS5sdW1pbmcuc3R1ZGlvLnYxLkNyZWF0ZUJvYXJkUmV2aWV3U291cmNlUmVzcG9uc2USeAoVU3VibWl0Qm9hcmRTdWdnZXN0aW9uEi4ubHVtaW5nLnN0dWRpby52MS5TdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5TdWJtaXRCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ1ChRMaXN0Qm9hcmRTdWdnZXN0aW9ucxItLmx1bWluZy5zdHVkaW8udjEuTGlzdEJvYXJkU3VnZ2VzdGlvbnNSZXF1ZXN0Gi4ubHVtaW5nLnN0dWRpby52MS5MaXN0Qm9hcmRTdWdnZXN0aW9uc1Jlc3BvbnNlEnsKFlByZXZpZXdCb2FyZFN1Z2dlc3Rpb24SLy5sdW1pbmcuc3R1ZGlvLnYxLlByZXZpZXdCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0GjAubHVtaW5nLnN0dWRpby52MS5QcmV2aWV3Qm9hcmRTdWdnZXN0aW9uUmVzcG9uc2USeAoVQWNjZXB0Qm9hcmRTdWdnZXN0aW9uEi4ubHVtaW5nLnN0dWRpby52MS5BY2NlcHRCb2FyZFN1Z2dlc3Rpb25SZXF1ZXN0Gi8ubHVtaW5nLnN0dWRpby52MS5BY2NlcHRCb2FyZFN1Z2dlc3Rpb25SZXNwb25zZRJ4ChVSZWplY3RCb2FyZFN1Z2dlc3Rpb24SLi5sdW1pbmcuc3R1ZGlvLnYxLlJlamVjdEJvYXJkU3VnZ2VzdGlvblJlcXVlc3QaLy5sdW1pbmcuc3R1ZGlvLnYxLlJlamVjdEJvYXJkU3VnZ2VzdGlvblJlc3BvbnNlYgZwcm90bzM", [file_luming_studio_v1_whiteboard_edits, file_luming_studio_v1_whiteboard_scene, file_luming_studio_v1_whiteboard_service]);
 var BoardSuggestionService = /* @__PURE__ */ serviceDesc(file_luming_studio_v1_board_suggestion_service, 0);
 
 // src/entrypoints/http/suggestion-routes.ts
@@ -15188,7 +19795,11 @@ function toSource(source) {
   };
 }
 function toSuggestion(suggestion) {
-  return { ...suggestion, options: suggestion.options.map((option) => ({ ...option })) };
+  return {
+    ...suggestion,
+    options: suggestion.options.map((option) => ({ ...option })),
+    activeOptionIds: suggestion.activeOptionIds && [...suggestion.activeOptionIds]
+  };
 }
 function requireInternalEditIdentity(request) {
   if (request.boardId || request.commandId) {
@@ -15223,13 +19834,20 @@ function decodeEdit(edit) {
   return { kind: edit.kind, operation: readContentOperation(request) };
 }
 function readOption(value, digest2) {
-  const edit = encodeEdit(value);
+  if (value.operations.length && value.edit.case !== void 0) {
+    throw new HttpRequestError(400, "Choose the single edit or its ordered operations.");
+  }
+  const [edit, ...additionalEdits] = value.operations.length ? value.operations.map(encodeEdit) : [encodeEdit(value)];
+  if (!edit) {
+    throw new HttpRequestError(400, "A typed suggestion edit is required.");
+  }
   return {
     optionId: requireId(value.optionId),
     label: value.label,
     description: value.description,
     edit,
-    editFingerprint: edit.kind + ":" + digest2(edit.bytes)
+    additionalEdits,
+    editFingerprint: [edit, ...additionalEdits].map(({ kind, bytes }) => kind + ":" + digest2(bytes)).join("|")
   };
 }
 function compareVersion(value) {
@@ -15352,6 +19970,39 @@ function createBoardSuggestionRoutes(application, digest2, observe) {
   ];
 }
 
+// src/entrypoints/http/video-edits.ts
+var attach = BoardEditService.method.attachBoardVideo;
+var emptyContent = new Uint8Array();
+var boardVideoRoutePath = "/" + BoardEditService.typeName + "/" + attach.name;
+var boardVideoRequestLimit = 20 * 1024 * 1024 + 32 * 1024;
+function readOperation4({
+  objectId,
+  displayName,
+  content,
+  geometry,
+  mediaType: mediaType2
+}) {
+  if (!geometry) {
+    throw new HttpRequestError(400, "Video geometry is required.");
+  }
+  const { x, y, width, height, rotation } = geometry;
+  return { objectId, displayName, content, mediaType: mediaType2, geometry: { x, y, width, height, rotation } };
+}
+function createVideoEditRoute(application, digest2, observe) {
+  return unaryRoute(attach, (actor, request) => {
+    const { boardId, commandId, content } = request;
+    const metadata = toBinary(attach.input, { ...request, content: emptyContent });
+    const receipt = application.attachVideo(actor, {
+      boardId: requireId(boardId),
+      commandId: requireId(commandId),
+      operation: readOperation4(request),
+      signature: "video:" + digest2(metadata) + ":" + digest2(content)
+    });
+    observe?.(receipt);
+    return { receipt: toBoardEditReceipt(receipt) };
+  });
+}
+
 // src/entrypoints/http/guest-web.ts
 import {
   createServer
@@ -15469,6 +20120,12 @@ var submission = BoardSuggestionService.method.submitBoardSuggestion;
 
 // src/entrypoints/http/index.ts
 var REQUEST_METHOD = "POST";
+var requestLimits = /* @__PURE__ */ new Map([
+  [boardImageRoutePath, boardImageRequestLimit],
+  [boardDocumentImageRoutePath, boardImageRequestLimit],
+  [boardVideoRoutePath, boardVideoRequestLimit],
+  [agentActivityPath, agentActivityRequestLimit]
+]);
 async function handleRequest(request, response, routes, {
   archiveApplication,
   features,
@@ -15497,9 +20154,9 @@ async function handleRequest(request, response, routes, {
     sendStatus(response, 404);
     return;
   }
-  const method = rawRoute?.method ?? REQUEST_METHOD;
-  if (request.method !== method) {
-    response.setHeader("allow", method);
+  const method2 = rawRoute?.method ?? REQUEST_METHOD;
+  if (request.method !== method2) {
+    response.setHeader("allow", method2);
     sendStatus(response, 405);
     return;
   }
@@ -15508,7 +20165,7 @@ async function handleRequest(request, response, routes, {
     sendStatus(response, 401);
     return;
   }
-  if (actor.kind === "agent" && path2 !== agentSuggestionPath) {
+  if (actor.kind === "agent" && path2 !== agentSuggestionPath && path2 !== agentActivityPath) {
     sendStatus(response, 403);
     return;
   }
@@ -15521,7 +20178,7 @@ async function handleRequest(request, response, routes, {
     return;
   }
   if (route2) {
-    const limit = path2 === boardImageRoutePath ? boardImageRequestLimit : void 0;
+    const limit = requestLimits.get(path2);
     sendProtobuf(response, await route2(actor, await readBody(request, limit)));
   }
 }
@@ -15589,6 +20246,8 @@ function createWhiteboardRequestHandler(options, guest) {
   const observe = observeRoomChange(features?.rooms, onError);
   const studioRoutes = features ? [
     ...createBoardEditRoutes(features.editor, features.digest, observe),
+    createVideoEditRoute(features.editor, features.digest, observe),
+    createDocumentImageRoute(features.editor, features.digest),
     ...createBoardHistoryRoutes(features.history, features.digest, observe),
     ...createFeedbackRoutes(features.feedback),
     ...features.rooms ? createRoomRoutes(features.rooms) : [],
@@ -15658,6 +20317,683 @@ async function loadGuestWebAssets(directory) {
 // src/infrastructure/platform/mcp-runtime.ts
 var import_proper_lockfile = __toESM(require_proper_lockfile(), 1);
 
+// src/infrastructure/platform/png-renderer.ts
+import { readFile as readFile2 } from "node:fs/promises";
+import { join as join3 } from "node:path";
+
+// ../../../../node_modules/.pnpm/@resvg+resvg-wasm@2.6.2/node_modules/@resvg/resvg-wasm/index.mjs
+var wasm;
+var heap = new Array(128).fill(void 0);
+heap.push(void 0, null, true, false);
+var heap_next = heap.length;
+function addHeapObject(obj) {
+  if (heap_next === heap.length)
+    heap.push(heap.length + 1);
+  const idx = heap_next;
+  heap_next = heap[idx];
+  heap[idx] = obj;
+  return idx;
+}
+function getObject(idx) {
+  return heap[idx];
+}
+function dropObject(idx) {
+  if (idx < 132)
+    return;
+  heap[idx] = heap_next;
+  heap_next = idx;
+}
+function takeObject(idx) {
+  const ret = getObject(idx);
+  dropObject(idx);
+  return ret;
+}
+var WASM_VECTOR_LEN = 0;
+var cachedUint8Memory0 = null;
+function getUint8Memory0() {
+  if (cachedUint8Memory0 === null || cachedUint8Memory0.byteLength === 0) {
+    cachedUint8Memory0 = new Uint8Array(wasm.memory.buffer);
+  }
+  return cachedUint8Memory0;
+}
+var cachedTextEncoder = typeof TextEncoder !== "undefined" ? new TextEncoder("utf-8") : { encode: () => {
+  throw Error("TextEncoder not available");
+} };
+var encodeString = typeof cachedTextEncoder.encodeInto === "function" ? function(arg, view) {
+  return cachedTextEncoder.encodeInto(arg, view);
+} : function(arg, view) {
+  const buf = cachedTextEncoder.encode(arg);
+  view.set(buf);
+  return {
+    read: arg.length,
+    written: buf.length
+  };
+};
+function passStringToWasm0(arg, malloc, realloc) {
+  if (realloc === void 0) {
+    const buf = cachedTextEncoder.encode(arg);
+    const ptr2 = malloc(buf.length, 1) >>> 0;
+    getUint8Memory0().subarray(ptr2, ptr2 + buf.length).set(buf);
+    WASM_VECTOR_LEN = buf.length;
+    return ptr2;
+  }
+  let len = arg.length;
+  let ptr = malloc(len, 1) >>> 0;
+  const mem = getUint8Memory0();
+  let offset = 0;
+  for (; offset < len; offset++) {
+    const code = arg.charCodeAt(offset);
+    if (code > 127)
+      break;
+    mem[ptr + offset] = code;
+  }
+  if (offset !== len) {
+    if (offset !== 0) {
+      arg = arg.slice(offset);
+    }
+    ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+    const view = getUint8Memory0().subarray(ptr + offset, ptr + len);
+    const ret = encodeString(arg, view);
+    offset += ret.written;
+    ptr = realloc(ptr, len, offset, 1) >>> 0;
+  }
+  WASM_VECTOR_LEN = offset;
+  return ptr;
+}
+function isLikeNone(x) {
+  return x === void 0 || x === null;
+}
+var cachedInt32Memory0 = null;
+function getInt32Memory0() {
+  if (cachedInt32Memory0 === null || cachedInt32Memory0.byteLength === 0) {
+    cachedInt32Memory0 = new Int32Array(wasm.memory.buffer);
+  }
+  return cachedInt32Memory0;
+}
+var cachedTextDecoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: true }) : { decode: () => {
+  throw Error("TextDecoder not available");
+} };
+if (typeof TextDecoder !== "undefined") {
+  cachedTextDecoder.decode();
+}
+function getStringFromWasm0(ptr, len) {
+  ptr = ptr >>> 0;
+  return cachedTextDecoder.decode(getUint8Memory0().subarray(ptr, ptr + len));
+}
+function _assertClass(instance, klass) {
+  if (!(instance instanceof klass)) {
+    throw new Error(`expected instance of ${klass.name}`);
+  }
+  return instance.ptr;
+}
+function handleError2(f, args) {
+  try {
+    return f.apply(this, args);
+  } catch (e) {
+    wasm.__wbindgen_exn_store(addHeapObject(e));
+  }
+}
+var BBoxFinalization = typeof FinalizationRegistry === "undefined" ? { register: () => {
+}, unregister: () => {
+} } : new FinalizationRegistry((ptr) => wasm.__wbg_bbox_free(ptr >>> 0));
+var BBox = class _BBox {
+  static __wrap(ptr) {
+    ptr = ptr >>> 0;
+    const obj = Object.create(_BBox.prototype);
+    obj.__wbg_ptr = ptr;
+    BBoxFinalization.register(obj, obj.__wbg_ptr, obj);
+    return obj;
+  }
+  __destroy_into_raw() {
+    const ptr = this.__wbg_ptr;
+    this.__wbg_ptr = 0;
+    BBoxFinalization.unregister(this);
+    return ptr;
+  }
+  free() {
+    const ptr = this.__destroy_into_raw();
+    wasm.__wbg_bbox_free(ptr);
+  }
+  /**
+  * @returns {number}
+  */
+  get x() {
+    const ret = wasm.__wbg_get_bbox_x(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+  * @param {number} arg0
+  */
+  set x(arg0) {
+    wasm.__wbg_set_bbox_x(this.__wbg_ptr, arg0);
+  }
+  /**
+  * @returns {number}
+  */
+  get y() {
+    const ret = wasm.__wbg_get_bbox_y(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+  * @param {number} arg0
+  */
+  set y(arg0) {
+    wasm.__wbg_set_bbox_y(this.__wbg_ptr, arg0);
+  }
+  /**
+  * @returns {number}
+  */
+  get width() {
+    const ret = wasm.__wbg_get_bbox_width(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+  * @param {number} arg0
+  */
+  set width(arg0) {
+    wasm.__wbg_set_bbox_width(this.__wbg_ptr, arg0);
+  }
+  /**
+  * @returns {number}
+  */
+  get height() {
+    const ret = wasm.__wbg_get_bbox_height(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+  * @param {number} arg0
+  */
+  set height(arg0) {
+    wasm.__wbg_set_bbox_height(this.__wbg_ptr, arg0);
+  }
+};
+var RenderedImageFinalization = typeof FinalizationRegistry === "undefined" ? { register: () => {
+}, unregister: () => {
+} } : new FinalizationRegistry((ptr) => wasm.__wbg_renderedimage_free(ptr >>> 0));
+var RenderedImage = class _RenderedImage {
+  static __wrap(ptr) {
+    ptr = ptr >>> 0;
+    const obj = Object.create(_RenderedImage.prototype);
+    obj.__wbg_ptr = ptr;
+    RenderedImageFinalization.register(obj, obj.__wbg_ptr, obj);
+    return obj;
+  }
+  __destroy_into_raw() {
+    const ptr = this.__wbg_ptr;
+    this.__wbg_ptr = 0;
+    RenderedImageFinalization.unregister(this);
+    return ptr;
+  }
+  free() {
+    const ptr = this.__destroy_into_raw();
+    wasm.__wbg_renderedimage_free(ptr);
+  }
+  /**
+  * Get the PNG width
+  * @returns {number}
+  */
+  get width() {
+    const ret = wasm.renderedimage_width(this.__wbg_ptr);
+    return ret >>> 0;
+  }
+  /**
+  * Get the PNG height
+  * @returns {number}
+  */
+  get height() {
+    const ret = wasm.renderedimage_height(this.__wbg_ptr);
+    return ret >>> 0;
+  }
+  /**
+  * Write the image data to Uint8Array
+  * @returns {Uint8Array}
+  */
+  asPng() {
+    try {
+      const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+      wasm.renderedimage_asPng(retptr, this.__wbg_ptr);
+      var r0 = getInt32Memory0()[retptr / 4 + 0];
+      var r1 = getInt32Memory0()[retptr / 4 + 1];
+      var r2 = getInt32Memory0()[retptr / 4 + 2];
+      if (r2) {
+        throw takeObject(r1);
+      }
+      return takeObject(r0);
+    } finally {
+      wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+  }
+  /**
+  * Get the RGBA pixels of the image
+  * @returns {Uint8Array}
+  */
+  get pixels() {
+    const ret = wasm.renderedimage_pixels(this.__wbg_ptr);
+    return takeObject(ret);
+  }
+};
+var ResvgFinalization = typeof FinalizationRegistry === "undefined" ? { register: () => {
+}, unregister: () => {
+} } : new FinalizationRegistry((ptr) => wasm.__wbg_resvg_free(ptr >>> 0));
+var Resvg = class {
+  __destroy_into_raw() {
+    const ptr = this.__wbg_ptr;
+    this.__wbg_ptr = 0;
+    ResvgFinalization.unregister(this);
+    return ptr;
+  }
+  free() {
+    const ptr = this.__destroy_into_raw();
+    wasm.__wbg_resvg_free(ptr);
+  }
+  /**
+  * @param {Uint8Array | string} svg
+  * @param {string | undefined} [options]
+  * @param {Array<any> | undefined} [custom_font_buffers]
+  */
+  constructor(svg, options, custom_font_buffers) {
+    try {
+      const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+      var ptr0 = isLikeNone(options) ? 0 : passStringToWasm0(options, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+      var len0 = WASM_VECTOR_LEN;
+      wasm.resvg_new(retptr, addHeapObject(svg), ptr0, len0, isLikeNone(custom_font_buffers) ? 0 : addHeapObject(custom_font_buffers));
+      var r0 = getInt32Memory0()[retptr / 4 + 0];
+      var r1 = getInt32Memory0()[retptr / 4 + 1];
+      var r2 = getInt32Memory0()[retptr / 4 + 2];
+      if (r2) {
+        throw takeObject(r1);
+      }
+      this.__wbg_ptr = r0 >>> 0;
+      return this;
+    } finally {
+      wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+  }
+  /**
+  * Get the SVG width
+  * @returns {number}
+  */
+  get width() {
+    const ret = wasm.resvg_width(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+  * Get the SVG height
+  * @returns {number}
+  */
+  get height() {
+    const ret = wasm.resvg_height(this.__wbg_ptr);
+    return ret;
+  }
+  /**
+  * Renders an SVG in Wasm
+  * @returns {RenderedImage}
+  */
+  render() {
+    try {
+      const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+      wasm.resvg_render(retptr, this.__wbg_ptr);
+      var r0 = getInt32Memory0()[retptr / 4 + 0];
+      var r1 = getInt32Memory0()[retptr / 4 + 1];
+      var r2 = getInt32Memory0()[retptr / 4 + 2];
+      if (r2) {
+        throw takeObject(r1);
+      }
+      return RenderedImage.__wrap(r0);
+    } finally {
+      wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+  }
+  /**
+  * Output usvg-simplified SVG string
+  * @returns {string}
+  */
+  toString() {
+    let deferred1_0;
+    let deferred1_1;
+    try {
+      const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+      wasm.resvg_toString(retptr, this.__wbg_ptr);
+      var r0 = getInt32Memory0()[retptr / 4 + 0];
+      var r1 = getInt32Memory0()[retptr / 4 + 1];
+      deferred1_0 = r0;
+      deferred1_1 = r1;
+      return getStringFromWasm0(r0, r1);
+    } finally {
+      wasm.__wbindgen_add_to_stack_pointer(16);
+      wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+    }
+  }
+  /**
+  * Calculate a maximum bounding box of all visible elements in this SVG.
+  *
+  * Note: path bounding box are approx values.
+  * @returns {BBox | undefined}
+  */
+  innerBBox() {
+    const ret = wasm.resvg_innerBBox(this.__wbg_ptr);
+    return ret === 0 ? void 0 : BBox.__wrap(ret);
+  }
+  /**
+  * Calculate a maximum bounding box of all visible elements in this SVG.
+  * This will first apply transform.
+  * Similar to `SVGGraphicsElement.getBBox()` DOM API.
+  * @returns {BBox | undefined}
+  */
+  getBBox() {
+    const ret = wasm.resvg_getBBox(this.__wbg_ptr);
+    return ret === 0 ? void 0 : BBox.__wrap(ret);
+  }
+  /**
+  * Use a given `BBox` to crop the svg. Currently this method simply changes
+  * the viewbox/size of the svg and do not move the elements for simplicity
+  * @param {BBox} bbox
+  */
+  cropByBBox(bbox) {
+    _assertClass(bbox, BBox);
+    wasm.resvg_cropByBBox(this.__wbg_ptr, bbox.__wbg_ptr);
+  }
+  /**
+  * @returns {Array<any>}
+  */
+  imagesToResolve() {
+    try {
+      const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+      wasm.resvg_imagesToResolve(retptr, this.__wbg_ptr);
+      var r0 = getInt32Memory0()[retptr / 4 + 0];
+      var r1 = getInt32Memory0()[retptr / 4 + 1];
+      var r2 = getInt32Memory0()[retptr / 4 + 2];
+      if (r2) {
+        throw takeObject(r1);
+      }
+      return takeObject(r0);
+    } finally {
+      wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+  }
+  /**
+  * @param {string} href
+  * @param {Uint8Array} buffer
+  */
+  resolveImage(href, buffer) {
+    try {
+      const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+      const ptr0 = passStringToWasm0(href, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+      const len0 = WASM_VECTOR_LEN;
+      wasm.resvg_resolveImage(retptr, this.__wbg_ptr, ptr0, len0, addHeapObject(buffer));
+      var r0 = getInt32Memory0()[retptr / 4 + 0];
+      var r1 = getInt32Memory0()[retptr / 4 + 1];
+      if (r1) {
+        throw takeObject(r0);
+      }
+    } finally {
+      wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+  }
+};
+async function __wbg_load(module, imports) {
+  if (typeof Response === "function" && module instanceof Response) {
+    if (typeof WebAssembly.instantiateStreaming === "function") {
+      try {
+        return await WebAssembly.instantiateStreaming(module, imports);
+      } catch (e) {
+        if (module.headers.get("Content-Type") != "application/wasm") {
+          console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+        } else {
+          throw e;
+        }
+      }
+    }
+    const bytes = await module.arrayBuffer();
+    return await WebAssembly.instantiate(bytes, imports);
+  } else {
+    const instance = await WebAssembly.instantiate(module, imports);
+    if (instance instanceof WebAssembly.Instance) {
+      return { instance, module };
+    } else {
+      return instance;
+    }
+  }
+}
+function __wbg_get_imports() {
+  const imports = {};
+  imports.wbg = {};
+  imports.wbg.__wbg_new_28c511d9baebfa89 = function(arg0, arg1) {
+    const ret = new Error(getStringFromWasm0(arg0, arg1));
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbindgen_memory = function() {
+    const ret = wasm.memory;
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_buffer_12d079cc21e14bdb = function(arg0) {
+    const ret = getObject(arg0).buffer;
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_newwithbyteoffsetandlength_aa4a17c33a06e5cb = function(arg0, arg1, arg2) {
+    const ret = new Uint8Array(getObject(arg0), arg1 >>> 0, arg2 >>> 0);
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbindgen_object_drop_ref = function(arg0) {
+    takeObject(arg0);
+  };
+  imports.wbg.__wbg_new_63b92bc8671ed464 = function(arg0) {
+    const ret = new Uint8Array(getObject(arg0));
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_values_839f3396d5aac002 = function(arg0) {
+    const ret = getObject(arg0).values();
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_next_196c84450b364254 = function() {
+    return handleError2(function(arg0) {
+      const ret = getObject(arg0).next();
+      return addHeapObject(ret);
+    }, arguments);
+  };
+  imports.wbg.__wbg_done_298b57d23c0fc80c = function(arg0) {
+    const ret = getObject(arg0).done;
+    return ret;
+  };
+  imports.wbg.__wbg_value_d93c65011f51a456 = function(arg0) {
+    const ret = getObject(arg0).value;
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_instanceof_Uint8Array_2b3bbecd033d19f6 = function(arg0) {
+    let result;
+    try {
+      result = getObject(arg0) instanceof Uint8Array;
+    } catch (_) {
+      result = false;
+    }
+    const ret = result;
+    return ret;
+  };
+  imports.wbg.__wbindgen_string_get = function(arg0, arg1) {
+    const obj = getObject(arg1);
+    const ret = typeof obj === "string" ? obj : void 0;
+    var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    var len1 = WASM_VECTOR_LEN;
+    getInt32Memory0()[arg0 / 4 + 1] = len1;
+    getInt32Memory0()[arg0 / 4 + 0] = ptr1;
+  };
+  imports.wbg.__wbg_new_16b304a2cfa7ff4a = function() {
+    const ret = new Array();
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbindgen_string_new = function(arg0, arg1) {
+    const ret = getStringFromWasm0(arg0, arg1);
+    return addHeapObject(ret);
+  };
+  imports.wbg.__wbg_push_a5b05aedc7234f9f = function(arg0, arg1) {
+    const ret = getObject(arg0).push(getObject(arg1));
+    return ret;
+  };
+  imports.wbg.__wbg_length_c20a40f15020d68a = function(arg0) {
+    const ret = getObject(arg0).length;
+    return ret;
+  };
+  imports.wbg.__wbg_set_a47bac70306a19a7 = function(arg0, arg1, arg2) {
+    getObject(arg0).set(getObject(arg1), arg2 >>> 0);
+  };
+  imports.wbg.__wbindgen_throw = function(arg0, arg1) {
+    throw new Error(getStringFromWasm0(arg0, arg1));
+  };
+  return imports;
+}
+function __wbg_init_memory(imports, maybe_memory) {
+}
+function __wbg_finalize_init(instance, module) {
+  wasm = instance.exports;
+  __wbg_init.__wbindgen_wasm_module = module;
+  cachedInt32Memory0 = null;
+  cachedUint8Memory0 = null;
+  return wasm;
+}
+async function __wbg_init(input) {
+  if (wasm !== void 0)
+    return wasm;
+  if (typeof input === "undefined") {
+    input = new URL("index_bg.wasm", void 0);
+  }
+  const imports = __wbg_get_imports();
+  if (typeof input === "string" || typeof Request === "function" && input instanceof Request || typeof URL === "function" && input instanceof URL) {
+    input = fetch(input);
+  }
+  __wbg_init_memory(imports);
+  const { instance, module } = await __wbg_load(await input, imports);
+  return __wbg_finalize_init(instance, module);
+}
+var dist_default = __wbg_init;
+var initialized = false;
+var initWasm = async (module_or_path) => {
+  if (initialized) {
+    throw new Error("Already initialized. The `initWasm()` function can be used only once.");
+  }
+  await dist_default(await module_or_path);
+  initialized = true;
+};
+var Resvg2 = class extends Resvg {
+  /**
+   * @param {Uint8Array | string} svg
+   * @param {ResvgRenderOptions | undefined} options
+   */
+  constructor(svg, options) {
+    if (!initialized)
+      throw new Error("Wasm has not been initialized. Call `initWasm()` function.");
+    const font = options?.font;
+    if (!!font && isCustomFontsOptions(font)) {
+      const serializableOptions = {
+        ...options,
+        font: {
+          ...font,
+          fontBuffers: void 0
+        }
+      };
+      super(svg, JSON.stringify(serializableOptions), font.fontBuffers);
+    } else {
+      super(svg, JSON.stringify(options));
+    }
+  }
+};
+function isCustomFontsOptions(value) {
+  return Object.prototype.hasOwnProperty.call(value, "fontBuffers");
+}
+
+// src/infrastructure/platform/png-renderer.ts
+var maxSide = 16384;
+var maxPixels = 32e6;
+var renderer;
+var fonts;
+function fileMissing(error) {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+async function readOptional(path2) {
+  try {
+    return await readFile2(path2);
+  } catch (error) {
+    if (!fileMissing(error)) {
+      throw error;
+    }
+    return void 0;
+  }
+}
+async function initialize() {
+  const bundled = await readOptional(new URL("./resvg.wasm", import.meta.url));
+  const source = bundled ?? await readFile2(new URL(import.meta.resolve("@resvg/resvg-wasm/index_bg.wasm")));
+  await initWasm(source);
+}
+function fontConfiguration() {
+  if (process.platform === "win32") {
+    const directory = join3(process.env.WINDIR ?? "C:\\Windows", "Fonts");
+    const paths3 = ["msyh.ttc", "segoeui.ttf", "consola.ttf"].map((name) => join3(directory, name));
+    return { paths: paths3, defaultFontFamily: "Microsoft YaHei" };
+  }
+  if (process.platform === "darwin") {
+    const paths3 = [
+      "/System/Library/Fonts/PingFang.ttc",
+      "/System/Library/Fonts/Supplemental/Arial.ttf"
+    ];
+    return { paths: paths3, defaultFontFamily: "PingFang SC" };
+  }
+  const paths2 = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+  ];
+  return { paths: paths2, defaultFontFamily: "DejaVu Sans" };
+}
+async function readFonts() {
+  const files = await Promise.all(fontConfiguration().paths.map(readOptional));
+  return files.flatMap((bytes) => bytes ? [bytes] : []);
+}
+function validImageSize(width, height) {
+  const validWidth2 = width > 0 && width <= maxSide;
+  const validHeight = height > 0 && height <= maxSide;
+  return validWidth2 && validHeight && width * height <= maxPixels;
+}
+function withinCanvasLimit(svg) {
+  const dimensions3 = /^<svg [^>]*\bwidth="([^"]+)" height="([^"]+)"/u.exec(svg);
+  const width = Number(dimensions3?.[1]);
+  const height = Number(dimensions3?.[2]);
+  return validImageSize(Math.ceil(width), Math.ceil(height));
+}
+async function renderSvgPng(svg) {
+  if (!withinCanvasLimit(svg)) {
+    return void 0;
+  }
+  renderer ??= initialize();
+  fonts ??= readFonts();
+  const [fontBuffers] = await Promise.all([fonts, renderer]);
+  if (fontBuffers.length === 0 && /<text\b/u.test(svg)) {
+    throw new Error("PNG export requires a readable system font for its text.");
+  }
+  const { defaultFontFamily } = fontConfiguration();
+  const resvg = new Resvg2(svg, { font: { fontBuffers, defaultFontFamily } });
+  try {
+    if (!validImageSize(resvg.width, resvg.height)) {
+      return void 0;
+    }
+    const image = resvg.render();
+    try {
+      return Uint8Array.from(image.asPng());
+    } finally {
+      image.free();
+    }
+  } finally {
+    resvg.free();
+  }
+}
+async function renderSvgUpload(svg) {
+  try {
+    return await renderSvgPng(svg);
+  } catch (error) {
+    if (!(error instanceof Error && error.message.startsWith("SVG data parsing failed"))) {
+      throw error;
+    }
+    return void 0;
+  }
+}
+
 // src/infrastructure/platform/index.ts
 function rollback(connection, error) {
   if (!connection.isTransaction) {
@@ -15716,13 +21052,11 @@ function archiveTooLarge() {
   return new ArchiveReadError("tooLarge", "Archive exceeds its size or record limits");
 }
 
-// src/infrastructure/platform/archives/current-archive.ts
-import { Buffer as Buffer6 } from "node:buffer";
-import { createHash } from "node:crypto";
-import { closeSync, createReadStream as createReadStream2, openSync, readFileSync, readSync } from "node:fs";
-import { mkdtemp, readFile as readFile2, realpath as realpath2, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join as join4 } from "node:path";
+// src/infrastructure/platform/archives/backup-archive.ts
+import { Buffer as Buffer8 } from "node:buffer";
+
+// src/infrastructure/platform/archives/backup-state.ts
+import { Buffer as Buffer5 } from "node:buffer";
 
 // src/infrastructure/platform/archives/archive-values.ts
 import { Buffer as Buffer4 } from "node:buffer";
@@ -15795,9 +21129,9 @@ var ArchiveValueReader = class {
     if (Buffer4.byteLength(value) > MAX_TEXT_BYTES) {
       throw archiveTooLarge();
     }
-    const text2 = { value, bytes: jsonBytes(value) };
-    this.textByIndex.set(index, text2);
-    return text2;
+    const text3 = { value, bytes: jsonBytes(value) };
+    this.textByIndex.set(index, text3);
+    return text3;
   }
   object(value, budget, depth) {
     const fields = archiveFields(value);
@@ -15823,14 +21157,14 @@ var ArchiveValueReader = class {
       throw invalidArchive("Invalid archive value wrapper");
     }
     if (Object.hasOwn(wrapped, "text")) {
-      const text2 = this.text(wrapped.text);
-      reserve(budget, text2.bytes);
-      return text2.value;
+      const text3 = this.text(wrapped.text);
+      reserve(budget, text3.bytes);
+      return text3.value;
     }
     if (Object.hasOwn(wrapped, "array")) {
-      const elements = archiveArray(wrapped.array);
-      reserve(budget, 2 + Math.max(0, elements.length - 1));
-      return elements.map((element) => this.value(element, budget, depth + 1));
+      const elements2 = archiveArray(wrapped.array);
+      reserve(budget, 2 + Math.max(0, elements2.length - 1));
+      return elements2.map((element) => this.value(element, budget, depth + 1));
     }
     if (Object.hasOwn(wrapped, "object")) {
       return this.object(wrapped.object, budget, depth);
@@ -15851,7 +21185,7 @@ var MAX_PROPERTIES = 64;
 var MAX_UNITS = 4e3;
 var MAX_JSON_DEPTH = 204;
 var MAX_JSON_STRUCTURE = 2e6;
-var MAX_BOARD_BYTES = 16 * 1024 * 1024;
+var MAX_ARCHIVE_BOARD_BYTES = 16 * 1024 * 1024;
 function textChunk(utf82, chunk) {
   try {
     return utf82.decode(chunk, { stream: chunk !== void 0 });
@@ -15998,14 +21332,14 @@ function checkHistory(value, contentCount, payloadCount) {
   }
 }
 function latestObjects(value, reader2) {
-  const budget = { maximum: MAX_BOARD_BYTES, bytes: 0, nodes: 0 };
+  const budget = { maximum: MAX_ARCHIVE_BOARD_BYTES, bytes: 0, nodes: 0 };
   if (typeof value === "number") {
     const content = archiveRecord(reader2.payload(value, budget));
-    const elements = archiveArray(content.elements);
-    if (elements.length > MAX_UNITS) {
+    const elements2 = archiveArray(content.elements);
+    if (elements2.length > MAX_UNITS) {
       throw archiveTooLarge();
     }
-    return elements;
+    return elements2;
   }
   const fields = archiveRecord(reader2.payload(value.fields, budget));
   if (Object.hasOwn(fields, "elements")) {
@@ -16065,11 +21399,148 @@ async function readCurrentArchiveState(chunks, artifactId) {
   }
 }
 
+// src/infrastructure/platform/archives/backup-state.ts
+var BackupLimit = class extends Error {
+};
+var textInternLength = 1024;
+var maxDepth2 = 64;
+var maxRecords = 1e5;
+var ArchiveRecords = class {
+  texts = [];
+  payloads = [];
+  contents = [];
+  textIds = /* @__PURE__ */ new Map();
+  payloadIds = /* @__PURE__ */ new WeakMap();
+  elementBytes = /* @__PURE__ */ new WeakMap();
+  contentIds = /* @__PURE__ */ new WeakMap();
+  emptyFields = {};
+  bytes = 0;
+  previous;
+  reserve(value) {
+    const record7 = JSON.stringify(value);
+    this.bytes += Buffer5.byteLength(record7) + 1;
+    if (this.bytes > MAX_ARCHIVE_STATE_BYTES) {
+      throw new BackupLimit();
+    }
+    return record7;
+  }
+  text(value) {
+    const indexed = this.textIds.get(value);
+    if (indexed !== void 0) {
+      return indexed;
+    }
+    const index = this.texts.length;
+    this.texts.push(this.reserve(value));
+    this.textIds.set(value, index);
+    return index;
+  }
+  fields(value, depth) {
+    return Object.entries(value).flatMap(
+      ([key, field]) => field === void 0 ? [] : [[key, this.encode(field, depth + 1)]]
+    );
+  }
+  encode(value, depth) {
+    if (depth > maxDepth2) {
+      throw new BackupLimit();
+    }
+    if (typeof value === "string" && value.length > textInternLength) {
+      return { text: this.text(value) };
+    }
+    if (Array.isArray(value)) {
+      return { array: value.map((item) => this.encode(item, depth + 1)) };
+    }
+    if (value && typeof value === "object") {
+      return { object: this.fields(value, depth) };
+    }
+    return value ?? null;
+  }
+  payload(value) {
+    const object3 = value && typeof value === "object" ? value : void 0;
+    const previous = object3 && this.payloadIds.get(object3);
+    if (previous !== void 0) {
+      return previous;
+    }
+    if (this.payloads.length >= maxRecords) {
+      throw new BackupLimit();
+    }
+    const id = this.payloads.length;
+    this.payloads.push(this.reserve(this.encode(value, 0)));
+    if (object3) {
+      this.payloadIds.set(object3, id);
+    }
+    return id;
+  }
+  delta(units) {
+    const fields = this.payload(this.emptyFields);
+    const previous = this.previous;
+    if (previous) {
+      const changes = units.flatMap(
+        (value, index) => value !== previous.elements[index] ? [[index, value]] : []
+      );
+      if (changes.length * 4 + 8 < units.length) {
+        return { base: previous.index, fields, length: units.length, changes };
+      }
+    }
+    return { fields, units };
+  }
+  content(elements2) {
+    const retained = this.contentIds.get(elements2);
+    if (retained !== void 0) {
+      return retained;
+    }
+    const index = this.contents.length;
+    let length = 2 + elements2.length;
+    const units = elements2.map((element) => {
+      const bytes = this.elementBytes.get(element) ?? Buffer5.byteLength(JSON.stringify(element));
+      this.elementBytes.set(element, bytes);
+      length += bytes;
+      if (length > MAX_ARCHIVE_BOARD_BYTES) {
+        throw new BackupLimit();
+      }
+      return this.payload(element);
+    });
+    this.contents.push(this.reserve(this.delta(units)));
+    this.previous = { index, elements: units };
+    this.contentIds.set(elements2, index);
+    return index;
+  }
+  serialize(state) {
+    const history = state.history.map(({ entry, artifact: artifact2, elements: elements2 }) => [
+      this.payload(entry),
+      this.payload(artifact2),
+      this.content(elements2)
+    ]);
+    const current = this.content(state.elements);
+    const properties = Object.entries(state.properties).map(([field, value]) => [
+      field,
+      this.payload(value)
+    ]);
+    const header = this.reserve({
+      version: 2,
+      history,
+      current,
+      properties,
+      lengths: [this.texts.length, this.payloads.length, this.contents.length]
+    });
+    return Buffer5.from([header, ...this.texts, ...this.payloads, ...this.contents, ""].join("\n"));
+  }
+};
+function packBackupState(state) {
+  try {
+    return new ArchiveRecords().serialize(state);
+  } catch (error) {
+    if (error instanceof BackupLimit) {
+      return void 0;
+    }
+    throw error;
+  }
+}
+
 // src/infrastructure/platform/archives/zip-reader.ts
-import { Buffer as Buffer5 } from "node:buffer";
+import { Buffer as Buffer6 } from "node:buffer";
 import { createReadStream, createWriteStream } from "node:fs";
 import { open } from "node:fs/promises";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { crc32, createInflateRaw } from "node:zlib";
@@ -16090,7 +21561,7 @@ var CENTRAL_FILE = 33639248;
 var LOCAL_FILE = 67324752;
 var DATA_DESCRIPTOR = 134695760;
 var utf8 = new TextDecoder("utf-8", { fatal: true });
-var pathSegment2 = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_-])?$/;
+var pathSegment3 = /^[A-Za-z0-9](?:[A-Za-z0-9_.-]*[A-Za-z0-9_-])?$/;
 var deviceName = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 var ZipExtractionError = class extends Error {
   constructor(code, message, options) {
@@ -16106,8 +21577,8 @@ function invalidZip(message = "Invalid ZIP archive", options) {
 function tooLargeZip() {
   return new ZipExtractionError("tooLarge", "ZIP exceeds its extraction limits");
 }
-function invalidPathSegment(segment) {
-  return !pathSegment2.test(segment) || deviceName.test(segment);
+function invalidPathSegment(segment2) {
+  return !pathSegment3.test(segment2) || deviceName.test(segment2);
 }
 function requireEntryLimit(name, limitForName) {
   const path2 = name.endsWith("/") ? name.slice(0, -1) : name;
@@ -16124,7 +21595,7 @@ function requireEntryLimit(name, limitForName) {
   return limit;
 }
 async function readBytes(file, size, offset) {
-  const buffer = Buffer5.allocUnsafe(size);
+  const buffer = Buffer6.allocUnsafe(size);
   let read = 0;
   while (read < size) {
     const block = await file.read(buffer, read, size - read, offset + read);
@@ -16157,14 +21628,14 @@ async function locateDirectory(file) {
       throw invalidZip("Invalid ZIP directory");
     }
     const offset = tail.readUInt32LE(index + 16);
-    const end = size - length + index;
-    if (offset + tail.readUInt32LE(index + 12) !== end) {
+    const end2 = size - length + index;
+    if (offset + tail.readUInt32LE(index + 12) !== end2) {
       throw invalidZip("Invalid ZIP directory");
     }
     if (count > MAX_ARCHIVE_ENTRIES) {
       throw tooLargeZip();
     }
-    return { count, offset, end };
+    return { count, offset, end: end2 };
   }
   throw invalidZip("Invalid ZIP directory");
 }
@@ -16175,15 +21646,15 @@ function entryName(bytes) {
     throw invalidZip("Invalid ZIP entry name encoding", { cause: error });
   }
 }
-async function centralEntry(file, cursor, end, limitForName) {
-  if (cursor + CENTRAL_HEADER_LENGTH > end) {
+async function centralEntry(file, cursor, end2, limitForName) {
+  if (cursor + CENTRAL_HEADER_LENGTH > end2) {
     throw invalidZip();
   }
   const raw = await readBytes(file, CENTRAL_HEADER_LENGTH, cursor);
   const nameLength = raw.readUInt16LE(28);
   const nameOffset = cursor + CENTRAL_HEADER_LENGTH;
   const next = nameOffset + nameLength + raw.readUInt16LE(30) + raw.readUInt16LE(32);
-  if (raw.readUInt32LE(0) !== CENTRAL_FILE || next > end || raw.readUInt16LE(34) !== 0) {
+  if (raw.readUInt32LE(0) !== CENTRAL_FILE || next > end2 || raw.readUInt16LE(34) !== 0) {
     throw invalidZip();
   }
   if (!nameLength || nameLength > MAX_ENTRY_NAME_LENGTH) {
@@ -16236,18 +21707,18 @@ async function localEntry(file, entry, next) {
   }
   const dataOffset = offset + LOCAL_HEADER_LENGTH + name.length + raw.readUInt16LE(28);
   const dataEnd = dataOffset + entry.compressed;
-  const trailer = next - dataEnd;
+  const trailer2 = next - dataEnd;
   if (entry.flags & DESCRIPTOR_FLAG) {
-    if (trailer !== 12 && trailer !== 16) {
+    if (trailer2 !== 12 && trailer2 !== 16) {
       throw invalidZip();
     }
-    const descriptor = await readBytes(file, trailer, dataEnd);
-    const sizesOffset = trailer - 12;
+    const descriptor = await readBytes(file, trailer2, dataEnd);
+    const sizesOffset = trailer2 - 12;
     const badSignature = sizesOffset && descriptor.readUInt32LE(0) !== DATA_DESCRIPTOR;
     if (badSignature || !fileSizesMatch(descriptor, sizesOffset, entry)) {
       throw invalidZip();
     }
-  } else if (trailer || !fileSizesMatch(raw, 14, entry)) {
+  } else if (trailer2 || !fileSizesMatch(raw, 14, entry)) {
     throw invalidZip();
   }
   return { ...entry, dataOffset };
@@ -16333,7 +21804,7 @@ async function extractEntry(archive, entry, file) {
 async function extractEntries(archive, directory, entries) {
   const files = /* @__PURE__ */ new Map();
   for (const [index, entry] of entries.entries()) {
-    const path2 = join3(directory, "entry-" + index);
+    const path2 = join4(directory, "entry-" + index);
     await extractEntry(archive, entry, path2);
     files.set(entry.name, { path: path2, size: entry.size });
   }
@@ -16348,7 +21819,7 @@ async function extractZipAfterManifest(archive, directory, limitForName, manifes
   if (!manifestEntry) {
     throw invalidZip("ZIP archive is missing its manifest");
   }
-  const manifestPath = join3(directory, "manifest-entry");
+  const manifestPath = join4(directory, "manifest-entry");
   await extractEntry(archive, manifestEntry, manifestPath);
   const metadata = await manifest.read({ path: manifestPath, size: manifestEntry.size });
   const payloadEntries = entries.filter((entry) => entry !== manifestEntry);
@@ -16361,7 +21832,117 @@ async function extractZipAfterManifest(archive, directory, limitForName, manifes
   return { metadata, files: await extractEntries(archive, directory, payloadEntries) };
 }
 
+// src/infrastructure/platform/archives/zip-writer.ts
+import { Buffer as Buffer7 } from "node:buffer";
+import { crc32 as crc322, deflateRaw } from "node:zlib";
+var localSignature = 67324752;
+var centralSignature = 33639248;
+var endSignature = 101010256;
+var localHeaderBytes = 30;
+var centralHeaderBytes = 46;
+var endHeaderBytes = 22;
+function compress(source) {
+  return new Promise((resolve, reject2) => {
+    deflateRaw(source, (error, result) => {
+      if (error) {
+        reject2(error);
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+function headers2(entry, bytes, offset) {
+  const name = Buffer7.from(entry.name);
+  const method2 = entry.compressed ? 8 : 0;
+  const crc = crc322(entry.body);
+  const local = Buffer7.alloc(localHeaderBytes + name.length);
+  local.writeUInt32LE(localSignature, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(method2, 8);
+  local.writeUInt32LE(crc, 14);
+  local.writeUInt32LE(bytes.length, 18);
+  local.writeUInt32LE(entry.body.length, 22);
+  local.writeUInt16LE(name.length, 26);
+  name.copy(local, localHeaderBytes);
+  const central = Buffer7.alloc(centralHeaderBytes + name.length);
+  central.writeUInt32LE(centralSignature, 0);
+  central.writeUInt16LE(20, 4);
+  central.writeUInt16LE(20, 6);
+  central.writeUInt16LE(method2, 10);
+  central.writeUInt32LE(crc, 16);
+  central.writeUInt32LE(bytes.length, 20);
+  central.writeUInt32LE(entry.body.length, 24);
+  central.writeUInt16LE(name.length, 28);
+  central.writeUInt32LE(offset, 42);
+  name.copy(central, centralHeaderBytes);
+  return { local, central };
+}
+function end(count, directoryLength, start) {
+  const footer = Buffer7.alloc(endHeaderBytes);
+  footer.writeUInt32LE(endSignature, 0);
+  footer.writeUInt16LE(count, 8);
+  footer.writeUInt16LE(count, 10);
+  footer.writeUInt32LE(directoryLength, 12);
+  footer.writeUInt32LE(start, 16);
+  return footer;
+}
+async function writeZip(entries, limit) {
+  const bodies = [];
+  const directory = [];
+  let offset = 0;
+  let directoryLength = 0;
+  for (const entry of entries) {
+    const bytes = entry.compressed ? await compress(entry.body) : entry.body;
+    const { local, central } = headers2(entry, bytes, offset);
+    offset += local.length + bytes.length;
+    directoryLength += central.length;
+    if (offset + directoryLength + endHeaderBytes > limit) {
+      return void 0;
+    }
+    bodies.push(local, bytes);
+    directory.push(central);
+  }
+  return Buffer7.concat([...bodies, ...directory, end(entries.length, directoryLength, offset)]);
+}
+
+// src/infrastructure/platform/archives/backup-archive.ts
+async function writeBoardArchive(snapshot, maximumBytes) {
+  if (snapshot.assets.size + 2 > MAX_ARCHIVE_ENTRIES) {
+    return void 0;
+  }
+  const state = packBackupState(snapshot);
+  if (!state) {
+    return void 0;
+  }
+  const stateName = "artifact-deltas.ndjson";
+  const manifest = {
+    format: "luming-studio-archive",
+    version: 4,
+    artifactId: snapshot.boardId,
+    state: stateName
+  };
+  const assets = [...snapshot.assets].map(([id, asset]) => ({
+    name: "assets/" + id,
+    body: Buffer8.from(asset.base64, "base64")
+  }));
+  return writeZip(
+    [
+      { name: "manifest.json", body: Buffer8.from(JSON.stringify(manifest)) },
+      { name: stateName, body: state, compressed: true },
+      ...assets
+    ],
+    maximumBytes
+  );
+}
+
 // src/infrastructure/platform/archives/current-archive.ts
+import { Buffer as Buffer9 } from "node:buffer";
+import { createHash } from "node:crypto";
+import { closeSync, createReadStream as createReadStream2, openSync, readFileSync, readSync } from "node:fs";
+import { mkdtemp, readFile as readFile3, realpath as realpath2, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join as join5 } from "node:path";
 var ARCHIVE_FORMAT = "luming-studio-archive";
 var ARCHIVE_VERSION = 4;
 var MANIFEST = "manifest.json";
@@ -16396,7 +21977,7 @@ function parseManifest(bytes) {
   }
 }
 async function readManifest(entry) {
-  const manifest = parseManifest(await readFile2(entry.path));
+  const manifest = parseManifest(await readFile3(entry.path));
   if (manifest.format !== ARCHIVE_FORMAT || manifest.version !== ARCHIVE_VERSION) {
     throw new ArchiveReadError("unsupportedVersion", "Only Studio ZIP v4 is supported");
   }
@@ -16471,8 +22052,8 @@ function readFailure(error, signature) {
 }
 async function stageCurrentArchive(chunks) {
   const temporaryRoot = await realpath2(tmpdir());
-  const stage = await mkdtemp(join4(temporaryRoot, "luming-ii-archive-"));
-  const archivePath = join4(stage, "source.zip");
+  const stage = await mkdtemp(join5(temporaryRoot, "luming-ii-archive-"));
+  const archivePath = join5(stage, "source.zip");
   function dispose() {
     if (dirname(stage) !== temporaryRoot) {
       throw new Error("Archive stage is outside its temporary directory");
@@ -16518,7 +22099,7 @@ function* readStagedArchiveChunks(archive) {
   const descriptor = openSync(archive.archivePath, "r");
   try {
     while (true) {
-      const buffer = Buffer6.allocUnsafe(RETENTION_CHUNK_BYTES);
+      const buffer = Buffer9.allocUnsafe(RETENTION_CHUNK_BYTES);
       const size = readSync(descriptor, buffer);
       if (!size) {
         return;
@@ -16608,13 +22189,13 @@ function readBoardAccess(connection, boardId, actorId2) {
 var ArchiveObjectError = class extends Error {
 };
 var assetPath3 = /(?<![\w/:.])\/assets\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+(?![\w./%-])/gu;
-function record2(value, name) {
+function record4(value, name) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new ArchiveObjectError(`Invalid archived ${name}.`);
   }
   return value;
 }
-function sequence(value, name) {
+function sequence2(value, name) {
   if (!Array.isArray(value)) {
     throw new ArchiveObjectError(`Invalid archived ${name}.`);
   }
@@ -16665,8 +22246,8 @@ function remapSource(value, name, resolveSource) {
   const source = optionalString2(value, name);
   return source ? resolveSource(source, "reference") : source;
 }
-function remapMarkup(text2, resolveSource) {
-  return text2.replace(assetPath3, (source) => resolveSource(source, "text"));
+function remapMarkup(text3, resolveSource) {
+  return text3.replace(assetPath3, (source) => resolveSource(source, "text"));
 }
 function remapContent(value, resolveSource) {
   if (typeof value === "string") {
@@ -16704,7 +22285,7 @@ function readGeometry2(element) {
     rotation: optionalNumber(element.rotation, "object rotation") ?? 0
   };
 }
-function appearance(element) {
+function appearance2(element) {
   const stroke = element.type === "stroke" || element.type === "arrow" ? element.stroke ?? element.color : element.stroke;
   return {
     fill: optionalString2(element.fill, "fill"),
@@ -16725,7 +22306,7 @@ function endpoint(value, side, fallback, ids) {
   if (value === void 0) {
     return { point: fallback };
   }
-  const coords = sequence(value, "connector endpoint");
+  const coords = sequence2(value, "connector endpoint");
   if (coords.length !== 2) {
     throw new ArchiveObjectError("Invalid archived connector endpoint.");
   }
@@ -16744,7 +22325,7 @@ function coordinatePairs(values, field) {
   return points;
 }
 function connectorBends(value) {
-  const bends = value === void 0 ? [] : sequence(value, "connector bends");
+  const bends = value === void 0 ? [] : sequence2(value, "connector bends");
   const axis = bends[0];
   if (axis === "h" || axis === "v") {
     return {
@@ -16764,7 +22345,7 @@ function heads2(element) {
       endHead: element.head === "none" ? "none" : "arrow"
     };
   }
-  const list = sequence(element.heads, "connector heads");
+  const list = sequence2(element.heads, "connector heads");
   const startHead = list[0];
   const endHead = list[1];
   if (list.length !== 2 || typeof startHead !== "string" || typeof endHead !== "string") {
@@ -16779,7 +22360,7 @@ function connectorLabelOffset(value) {
   if (value === void 0) {
     return;
   }
-  const offset = record2(value, "connector label offset");
+  const offset = record4(value, "connector label offset");
   return { x: numberValue(offset.x, "label x offset"), y: numberValue(offset.y, "label y offset") };
 }
 function connector(element, geometry, ids) {
@@ -16815,7 +22396,7 @@ function geometryDetail(element, geometry, ids) {
   }
 }
 function inkPoints(element, { width, height }) {
-  const values = element.points === void 0 ? [] : sequence(element.points, "ink points");
+  const values = element.points === void 0 ? [] : sequence2(element.points, "ink points");
   return coordinatePairs(values, "ink point").map(({ x, y }) => ({
     x: width === 0 ? x : x / width,
     y: height === 0 ? y : y / height
@@ -16830,46 +22411,48 @@ var textAlignments = /* @__PURE__ */ new Map([
 ]);
 var maximumImageDimension = 4294967295;
 function nullableData(value) {
-  return value === void 0 ? {} : record2(value, "object data");
+  return value === void 0 ? {} : record4(value, "object data");
 }
-function textPayload(element, label) {
+function textPayload(element, label2) {
   return {
-    text: label,
+    text: label2,
     color: optionalString2(element.color, "text color"),
     fontFamily: optionalString2(element.fontFamily, "font family"),
     fontSize: optionalNumber(element.fontSize, "font size"),
+    bold: element.bold === void 0 ? void 0 : booleanValue(element.bold, "text bold"),
+    italic: element.italic === void 0 ? void 0 : booleanValue(element.italic, "text italic"),
     align: textAlignments.get(optionalString2(element.textAlign, "text alignment") ?? "")
   };
 }
-function documentBlock(value, resolveSource) {
-  const block = record2(value, "document block");
-  const children = block.children === void 0 ? [] : sequence(block.children, "child blocks");
-  const props = block.props === void 0 ? {} : record2(block.props, "document block props");
+function documentBlock2(value, resolveSource) {
+  const block = record4(value, "document block");
+  const children = block.children === void 0 ? [] : sequence2(block.children, "child blocks");
+  const props = block.props === void 0 ? {} : record4(block.props, "document block props");
   return {
     blockId: requiredId(block.id, "document block identifier"),
     type: stringValue2(block.type, "document block type"),
     props: remapContent(props, resolveSource),
     content: remapContent(block.content, resolveSource),
-    children: children.map((child) => documentBlock(child, resolveSource))
+    children: children.map((child3) => documentBlock2(child3, resolveSource))
   };
 }
 function documentPayload(value, title, resolveSource) {
-  const document = record2(value, "document");
+  const document = record4(value, "document");
   if (document.schemaVersion !== 1) {
     throw new ArchiveObjectError("Invalid archived document schema version.");
   }
-  const blocks = sequence(document.blocks, "document blocks");
+  const blocks = sequence2(document.blocks, "document blocks");
   return {
     title,
     schemaVersion: 1,
-    blocks: blocks.map((block) => documentBlock(block, resolveSource))
+    blocks: blocks.map((block) => documentBlock2(block, resolveSource))
   };
 }
-function todoSource(value, origin) {
+function todoSource2(value, origin) {
   if (value === void 0) {
     return;
   }
-  const source = record2(value, "todo source");
+  const source = record4(value, "todo source");
   const artifactId = optionalString2(source.artifactId, "todo source board");
   const boardId = origin && artifactId === origin.sourceBoardId ? origin.boardId : artifactId;
   return {
@@ -16882,16 +22465,16 @@ function todoSource(value, origin) {
 }
 function todoPayload(value, title, origin) {
   const data = nullableData(value);
-  const items = data.items === void 0 ? [] : sequence(data.items, "todo items");
+  const items = data.items === void 0 ? [] : sequence2(data.items, "todo items");
   return {
     title,
     items: items.map((value2) => {
-      const item = record2(value2, "todo item");
+      const item = record4(value2, "todo item");
       return {
         itemId: requiredId(item.id, "todo item identifier"),
         text: stringValue2(item.text, "todo text"),
         checked: booleanValue(item.checked, "todo checkbox"),
-        sourceRef: todoSource(item.sourceRef, origin)
+        sourceRef: todoSource2(item.sourceRef, origin)
       };
     })
   };
@@ -16908,16 +22491,16 @@ function cell(value) {
   }
   return { number: numberValue(value, "table cell") };
 }
-function tablePayload(value, text2) {
+function tablePayload(value, text3) {
   const table = nullableData(value);
-  const rows = table.rows === void 0 ? [] : sequence(table.rows, "table rows");
-  const rowIds = table.rowIds === void 0 ? [] : sequence(table.rowIds, "table row identifiers");
-  const columnIds = table.columnIds === void 0 ? [] : sequence(table.columnIds, "table column identifiers");
-  const widths = table.columnWidths === void 0 ? [] : sequence(table.columnWidths, "table column widths");
+  const rows = table.rows === void 0 ? [] : sequence2(table.rows, "table rows");
+  const rowIds = table.rowIds === void 0 ? [] : sequence2(table.rowIds, "table row identifiers");
+  const columnIds = table.columnIds === void 0 ? [] : sequence2(table.columnIds, "table column identifiers");
+  const widths = table.columnWidths === void 0 ? [] : sequence2(table.columnWidths, "table column widths");
   return {
-    text: text2,
+    text: text3,
     grid: {
-      rows: rows.map((row) => ({ cells: sequence(row, "table cells").map(cell) })),
+      rows: rows.map((row) => ({ cells: sequence2(row, "table cells").map(cell) })),
       rowIds: rowIds.map((id) => requiredId(id, "table row identifier")),
       columnIds: columnIds.map((id) => requiredId(id, "table column identifier")),
       columnWidths: widths.map((width) => numberValue(width, "table column width")),
@@ -16941,7 +22524,7 @@ function cropValue(value) {
   if (value === void 0) {
     return;
   }
-  const crop = record2(value, "image crop");
+  const crop = record4(value, "image crop");
   return {
     x: numberValue(crop.x, "image crop x"),
     y: numberValue(crop.y, "image crop y"),
@@ -16958,26 +22541,26 @@ function embedPayload(element, title, resolveSource) {
   };
 }
 function payloadFor(element, context) {
-  const { kind, label, geometry, resolveSource, origin } = context;
+  const { kind, label: label2, geometry, resolveSource, origin } = context;
   switch (kind) {
     case "text":
     case "note":
     case "shape":
     case "section":
-      return { bodyKind: "text", data: textPayload(element, label) };
+      return { bodyKind: "text", data: textPayload(element, label2) };
     case "document":
       return {
         bodyKind: "document",
-        data: documentPayload(element.document, label, resolveSource)
+        data: documentPayload(element.document, label2, resolveSource)
       };
     case "todo":
-      return { bodyKind: "todo", data: todoPayload(element.data, label, origin) };
+      return { bodyKind: "todo", data: todoPayload(element.data, label2, origin) };
     case "table":
-      return { bodyKind: "table", data: tablePayload(element.data, label) };
+      return { bodyKind: "table", data: tablePayload(element.data, label2) };
     case "html":
     case "diagram":
     case "chart":
-      return { bodyKind: "embed", data: embedPayload(element, label, resolveSource) };
+      return { bodyKind: "embed", data: embedPayload(element, label2, resolveSource) };
     case "image":
       return {
         bodyKind: "image",
@@ -17005,7 +22588,7 @@ function payloadFor(element, context) {
       const data = nullableData(element.data);
       return {
         bodyKind: "sticker",
-        data: { stickerId: optionalString2(data.stickerIconId, "sticker icon"), fallback: label }
+        data: { stickerId: optionalString2(data.stickerIconId, "sticker icon"), fallback: label2 }
       };
     }
     case "ink":
@@ -17050,26 +22633,26 @@ function sceneKind(element) {
 }
 function sceneObject(objectId, element, ids, resolveSource, origin) {
   const kind = sceneKind(element);
-  const text2 = kind === "connector" ? element.label : element.text;
-  const label = optionalString2(text2, "object label") ?? "";
+  const text3 = kind === "connector" ? element.label : element.text;
+  const label2 = optionalString2(text3, "object label") ?? "";
   const geometry = readGeometry2(element);
   return {
     objectId,
     kind,
-    label,
+    label: label2,
     ...geometry,
     locked: booleanValue(element.locked, "object lock"),
     parentId: optionalString2(element.parentId, "parent identifier"),
     groupId: optionalString2(element.groupId, "group identifier"),
-    appearance: appearance(element),
+    appearance: appearance2(element),
     detail: geometryDetail(element, geometry, ids),
-    payload: payloadFor(element, { geometry, kind, label, resolveSource, origin })
+    payload: payloadFor(element, { geometry, kind, label: label2, resolveSource, origin })
   };
 }
 function prepareArchiveObjects(values, resolveSource, origin) {
   const ids = /* @__PURE__ */ new Set();
   const objectsById = values.map((value) => {
-    const element = record2(value, "object");
+    const element = record4(value, "object");
     const id = requiredId(element.id, "object identifier");
     if (!objectIdentifier.test(id)) {
       throw new ArchiveObjectError("Invalid archived object identifier.");
@@ -17145,30 +22728,30 @@ function writeScene(connection, boardId, objects) {
     INSERT INTO object_payloads (board_id, object_id, payload_version, body_kind, body_json)
     VALUES (?, ?, 0, ?, ?)
   `);
-  for (const [layerIndex, object] of objects.entries()) {
+  for (const [layerIndex, object3] of objects.entries()) {
     insertObject.run(
       boardId,
-      object.objectId,
-      object.kind,
-      object.label,
+      object3.objectId,
+      object3.kind,
+      object3.label,
       layerIndex,
-      object.x,
-      object.y,
-      object.width,
-      object.height,
-      object.rotation,
-      Number(object.locked),
-      object.parentId ?? null,
-      object.groupId ?? null,
-      object.appearance ? JSON.stringify(object.appearance) : null,
-      object.detail ? JSON.stringify(object.detail) : null
+      object3.x,
+      object3.y,
+      object3.width,
+      object3.height,
+      object3.rotation,
+      Number(object3.locked),
+      object3.parentId ?? null,
+      object3.groupId ?? null,
+      object3.appearance ? JSON.stringify(object3.appearance) : null,
+      object3.detail ? JSON.stringify(object3.detail) : null
     );
-    if (object.payload) {
+    if (object3.payload) {
       insertPayload.run(
         boardId,
-        object.objectId,
-        object.payload.bodyKind,
-        JSON.stringify(object.payload.data)
+        object3.objectId,
+        object3.payload.bodyKind,
+        JSON.stringify(object3.payload.data)
       );
     }
   }
@@ -17255,6 +22838,9 @@ var archiveSchema = `
 `;
 
 // src/infrastructure/adapters/archives/index.ts
+function packWhiteboardBackup(snapshot, maximumBytes) {
+  return writeBoardArchive(snapshot, maximumBytes);
+}
 var rejectionReasons = /* @__PURE__ */ new Set([
   "invalidArchive",
   "unsupportedVersion",
@@ -17262,7 +22848,7 @@ var rejectionReasons = /* @__PURE__ */ new Set([
   "commandIdReuse",
   "tooLarge"
 ]);
-function rejected4(commandId, reason) {
+function rejected6(commandId, reason) {
   return { commandId, outcome: { kind: "rejected", reason } };
 }
 function isRejectionReason(value) {
@@ -17287,7 +22873,7 @@ function readReceipt(connection, actorId2, commandId) {
   if (!isRejectionReason(reason)) {
     throw new Error("Invalid archive import rejection.");
   }
-  return { signature, receipt: rejected4(commandId, reason) };
+  return { signature, receipt: rejected6(commandId, reason) };
 }
 function writeReceipt3(connection, actorId2, signature, receipt) {
   const { commandId, outcome } = receipt;
@@ -17305,7 +22891,7 @@ function replayReceipt(connection, command, signature) {
   if (!existing) {
     return void 0;
   }
-  return existing.signature === signature ? existing.receipt : rejected4(command.commandId, "commandIdReuse");
+  return existing.signature === signature ? existing.receipt : rejected6(command.commandId, "commandIdReuse");
 }
 function publishArchive(connection, command, archive) {
   const { actorId: actorId2, boardId, commandId } = command;
@@ -17321,7 +22907,7 @@ function publishArchive(connection, command, archive) {
     if (!(error instanceof ArchiveObjectError)) {
       throw error;
     }
-    return writeReceipt3(connection, actorId2, signature, rejected4(commandId, "incompatibleContent"));
+    return writeReceipt3(connection, actorId2, signature, rejected6(commandId, "incompatibleContent"));
   }
   writePublication(connection, command, archive, publication);
   return writeReceipt3(connection, actorId2, signature, {
@@ -17331,7 +22917,7 @@ function publishArchive(connection, command, archive) {
 }
 function recordReadRejection(database, command, error) {
   const { signature } = error;
-  const receipt = rejected4(command.commandId, error.code);
+  const receipt = rejected6(command.commandId, error.code);
   if (signature === void 0) {
     return receipt;
   }
@@ -17412,8 +22998,8 @@ function rewriteAttribute(name, token2, replace) {
   }
   return token2;
 }
-function rewriteTag(tag, replace) {
-  return tag.replace(
+function rewriteTag(tag2, replace) {
+  return tag2.replace(
     attributes,
     (_token, space, name, equals, value) => space + name + equals + rewriteAttribute(name, value, replace)
   );
@@ -17430,8 +23016,8 @@ function rewriteCopyMarkup(markup, replace) {
     }
   );
 }
-function rewriteCopyText(text2, replace) {
-  return text2.replace(/\S+/gu, (part) => {
+function rewriteCopyText(text3, replace) {
+  return text3.replace(/\S+/gu, (part) => {
     const match = standalonePath.exec(part);
     if (!match) {
       return part;
@@ -17448,7 +23034,7 @@ var CopyPayloadError = class extends Error {
     super("The source board contains an unreadable payload.");
   }
 };
-function record3(value) {
+function record5(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     return void 0;
   }
@@ -17461,7 +23047,7 @@ function replaceField(body, field, replace) {
   }
 }
 function rewriteDocument(body, replace) {
-  const rewriteText = (text2) => rewriteCopyText(text2, replace);
+  const rewriteText = (text3) => rewriteCopyText(text3, replace);
   const pending = [body.blocks];
   while (pending.length) {
     const children = pending.pop();
@@ -17469,7 +23055,7 @@ function rewriteDocument(body, replace) {
       continue;
     }
     for (const value of children) {
-      const block = record3(value);
+      const block = record5(value);
       if (!block) {
         continue;
       }
@@ -17490,7 +23076,7 @@ function rewriteState(value, replace) {
   if (Array.isArray(value)) {
     return value.map((entry) => rewriteState(entry, replace));
   }
-  const fields = record3(value);
+  const fields = record5(value);
   if (!fields) {
     return value;
   }
@@ -17501,7 +23087,7 @@ function rewriteState(value, replace) {
 function rewriteEmbed(body, replace) {
   replaceField(body, "html", (markup) => rewriteCopyMarkup(markup, replace));
   if ("state" in body) {
-    body.state = rewriteState(body.state, (text2) => rewriteCopyText(text2, replace));
+    body.state = rewriteState(body.state, (text3) => rewriteCopyText(text3, replace));
   }
 }
 function rebindTodoSource(source, scope2) {
@@ -17528,7 +23114,7 @@ function rewriteTodo(body, scope2) {
   }
   let changed = false;
   for (const value of body.items) {
-    const source = record3(record3(value)?.sourceRef);
+    const source = record5(record5(value)?.sourceRef);
     if (source && rebindTodoSource(source, scope2)) {
       changed = true;
     }
@@ -17558,7 +23144,7 @@ function rewriteAssets(bodyKind, body, replace) {
 }
 function rewriteCopyPayload(bodyKind, bodyJson, scope2) {
   const parsed = JSON.parse(bodyJson);
-  const body = record3(parsed);
+  const body = record5(parsed);
   if (!body) {
     throw new CopyPayloadError();
   }
@@ -17702,33 +23288,33 @@ function duplicateBoard2(connection, sourceBoardId, destinationBoardId, publish)
 }
 
 // src/infrastructure/adapters/catalog/management-receipts.ts
-function text(value) {
+function text2(value) {
   if (typeof value !== "string") {
     throw new Error("Invalid stored catalog receipt text.");
   }
   return value;
 }
-function record4(value) {
+function record6(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Invalid stored catalog receipt object.");
   }
   return value;
 }
 function unsigned(value) {
-  const decoded = BigInt(text(value));
+  const decoded = BigInt(text2(value));
   if (decoded < 0n) {
     throw new Error("Invalid stored catalog receipt version.");
   }
   return decoded;
 }
 function readBoard(value) {
-  const { boardId, title, updatedAtMillis, pinned, entryVersion, canManage } = record4(value);
+  const { boardId, title, updatedAtMillis, pinned, entryVersion, canManage } = record6(value);
   if (typeof pinned !== "boolean" || typeof canManage !== "boolean") {
     throw new Error("Invalid stored catalog receipt flags.");
   }
   return {
-    boardId: text(boardId),
-    title: text(title),
+    boardId: text2(boardId),
+    title: text2(title),
     updatedAtMillis: updatedAtMillis === void 0 ? void 0 : unsigned(updatedAtMillis),
     pinned,
     entryVersion: unsigned(entryVersion),
@@ -17750,8 +23336,8 @@ function readReason(value) {
 }
 function readReceipt2(json) {
   const decoded = JSON.parse(json);
-  const value = record4(decoded);
-  const commandId = text(value.commandId);
+  const value = record6(decoded);
+  const commandId = text2(value.commandId);
   switch (value.kind) {
     case "changed":
       return { kind: "changed", commandId, board: readBoard(value.board) };
@@ -17768,8 +23354,8 @@ function readReceipt2(json) {
   }
 }
 function readPurgeItem(value) {
-  const item = record4(value);
-  const boardId = text(item.boardId);
+  const item = record6(value);
+  const boardId = text2(item.boardId);
   if (typeof item.deleted !== "boolean") {
     throw new Error("Invalid stored catalog purge result.");
   }
@@ -17781,7 +23367,7 @@ function getManagementReceipt(connection, actorId2, commandId) {
       FROM catalog_management_receipts
       WHERE actor_id = ? AND command_id = ?
     `).get(actorId2, commandId);
-  return row && { signature: text(row.signature), receipt: readReceipt2(text(row.receipt_json)) };
+  return row && { signature: text2(row.signature), receipt: readReceipt2(text2(row.receipt_json)) };
 }
 function saveManagementReceipt(connection, actorId2, signature, receipt) {
   const json = JSON.stringify(
@@ -17876,6 +23462,161 @@ var catalogSchema = `
   WHERE NOT EXISTS (SELECT 1 FROM board_lifecycle AS lifecycle WHERE lifecycle.board_id = owner.board_id);
 `;
 
+// src/infrastructure/adapters/catalog/thumbnail.ts
+var maximumObjects = 160;
+var maximumDescriptorBytes = 8192;
+var maximumMediaSourceBytes = 48 * 1024;
+var maximumEmbeddedImageBytes = 24 * 1024;
+var assetIdentifier = /^[A-Za-z0-9_-]{1,128}$/u;
+var drawableMediaTypes = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var activeCondition = "l.trashed_at_millis IS NULL";
+var trashCondition = "l.trashed_at_millis IS NOT NULL AND l.owner_actor_id = m.actor_id";
+function visibleRevision(connection, lookup) {
+  const condition = lookup.trashed ? trashCondition : activeCondition;
+  const statement = connection.prepare(`
+    SELECT b.revision FROM board_members AS m
+    JOIN boards AS b ON b.board_id = m.board_id
+    LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
+    WHERE m.actor_id = ? AND m.board_id = ? AND ${condition}
+  `);
+  statement.setReadBigInts(true);
+  const row = statement.get(lookup.actorId, lookup.boardId);
+  return row && revisionValue(row.revision);
+}
+function revisionValue(value) {
+  if (typeof value !== "bigint" || value < 0n) {
+    throw new Error("The preview board revision is invalid.");
+  }
+  return value;
+}
+function coordinate(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error("The board preview contains invalid geometry.");
+  }
+  return value;
+}
+function label(value, name) {
+  if (typeof value !== "string") {
+    throw new Error("The board preview contains an invalid " + name + ".");
+  }
+  return value;
+}
+function optionalText(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function readBounds(connection, boardId) {
+  const row = connection.prepare(`
+    SELECT COUNT(*) AS total,
+      MIN(x - CASE WHEN rotation = 0 THEN 0.0 ELSE height / 2.0 END) AS left,
+      MIN(y - CASE WHEN rotation = 0 THEN 0.0 ELSE width / 2.0 END) AS top,
+      MAX(x + width + CASE WHEN rotation = 0 THEN 0.0 ELSE height / 2.0 END) AS right,
+      MAX(y + height + CASE WHEN rotation = 0 THEN 0.0 ELSE width / 2.0 END) AS bottom
+    FROM board_objects WHERE board_id = ?
+  `).get(boardId);
+  if (!row || row.total === 0) {
+    return void 0;
+  }
+  return {
+    total: coordinate(row.total),
+    left: coordinate(row.left),
+    top: coordinate(row.top),
+    right: coordinate(row.right),
+    bottom: coordinate(row.bottom)
+  };
+}
+function readRows2(connection, boardId, total) {
+  const count = Math.min(total, maximumObjects);
+  return connection.prepare(`
+      WITH RECURSIVE slots(slot) AS (
+        VALUES(0)
+        UNION ALL
+        SELECT slot + 1 FROM slots WHERE slot + 1 < ?2
+      ), ordered AS (
+      SELECT *, ROW_NUMBER() OVER (ORDER BY layer_index, object_id) - 1 AS slot
+      FROM board_objects WHERE board_id = ?1
+    ), sampled AS (
+        SELECT ordered.* FROM ordered JOIN slots
+          ON ordered.slot = CAST(slots.slot * ?3 / ?2 AS INTEGER)
+    )
+    SELECT o.object_id, o.kind, SUBSTR(o.label, 1, 120) AS label,
+      o.x, o.y, o.width, o.height, o.rotation,
+      CASE WHEN length(CAST(o.appearance_json AS BLOB)) <= ?4 THEN o.appearance_json END AS appearance,
+      CASE WHEN length(CAST(o.detail_json AS BLOB)) <= ?4 THEN o.detail_json END AS detail,
+      CASE WHEN length(CAST(p.body_json AS BLOB)) <= ?5 THEN json_extract(p.body_json, '$.src') END AS image_source
+    FROM sampled AS o LEFT JOIN object_payloads AS p
+      ON p.board_id = ?1 AND p.object_id = o.object_id AND o.kind = 'image' AND p.body_kind = 'image'
+    ORDER BY o.slot
+  `).all(boardId, count, total, maximumDescriptorBytes, maximumMediaSourceBytes);
+}
+function readImages(connection, boardId) {
+  const prefix = "/studio-archive-assets/" + boardId + "/";
+  let statement;
+  let remaining = maximumEmbeddedImageBytes;
+  return (source) => {
+    if (typeof source !== "string" || remaining === 0 || !source.startsWith(prefix)) {
+      return void 0;
+    }
+    const id = source.slice(prefix.length);
+    if (!assetIdentifier.test(id)) {
+      return void 0;
+    }
+    statement ??= connection.prepare(`
+      SELECT mime_type, bytes FROM board_archive_assets
+      WHERE board_id = ? AND asset_id = ? AND length(bytes) <= ?
+    `);
+    const asset = statement.get(boardId, id, remaining);
+    if (!asset) {
+      return void 0;
+    }
+    const { mime_type: mimeType, bytes } = asset;
+    if (typeof mimeType !== "string" || !drawableMediaTypes.has(mimeType) || !(bytes instanceof Uint8Array)) {
+      return void 0;
+    }
+    remaining -= bytes.byteLength;
+    return "data:" + mimeType + ";base64," + Buffer.from(bytes).toString("base64");
+  };
+}
+function readObject2(row, image) {
+  return {
+    id: label(row.object_id, "object identifier"),
+    kind: label(row.kind, "object kind"),
+    label: label(row.label, "object label"),
+    x: coordinate(row.x),
+    y: coordinate(row.y),
+    width: coordinate(row.width),
+    height: coordinate(row.height),
+    rotation: coordinate(row.rotation),
+    appearance: optionalText(row.appearance),
+    detail: optionalText(row.detail),
+    image
+  };
+}
+function readCatalogThumbnail(connection, lookup, cached) {
+  const { boardId } = lookup;
+  const revision = visibleRevision(connection, lookup);
+  if (revision === void 0) {
+    return { kind: "forbidden" };
+  }
+  if (revision !== lookup.revision) {
+    return { kind: "unavailable" };
+  }
+  if (cached?.revision === revision) {
+    return { kind: "thumbnail", thumbnail: cached };
+  }
+  const bounds = readBounds(connection, boardId);
+  if (!bounds) {
+    return { kind: "unavailable" };
+  }
+  const findImage = readImages(connection, boardId);
+  const objects = readRows2(connection, boardId, bounds.total).map(
+    (row) => readObject2(row, findImage(row.image_source))
+  );
+  return {
+    kind: "scene",
+    scene: { ...bounds, revision, objects }
+  };
+}
+
 // src/infrastructure/adapters/catalog/index.ts
 var catalogOrderings = {
   recent: {
@@ -17919,6 +23660,7 @@ var catalogTables = `
   LEFT JOIN board_lifecycle AS l ON l.board_id = b.board_id
 `;
 var activeBoards = "l.trashed_at_millis IS NULL";
+var activePinnedBoards = activeBoards + " AND c.pinned = 1";
 var ownedTrash = "l.owner_actor_id = m.actor_id AND l.trashed_at_millis IS NOT NULL";
 function readUnsigned(value, fieldName) {
   if (typeof value !== "bigint" || value < 0n) {
@@ -17953,17 +23695,24 @@ function readSummary(row) {
     canManage: canManage === 1n
   };
 }
+function readListSummary(row) {
+  return {
+    ...readSummary(row),
+    previewRevision: readUnsigned(row.preview_revision, "preview_revision")
+  };
+}
 function listRows(connection, lookup, condition, ordering) {
   const { actorId: actorId2, query, limit, after } = lookup;
   const boundary = after ? `WHERE (${ordering.columns}) > (${ordering.parameters})` : "";
   const values = after ? ordering.values(after) : [];
   const statement = connection.prepare(`
     WITH visible AS (
-      SELECT ${catalogColumns}
+      SELECT ${catalogColumns}, b.revision AS preview_revision
       ${catalogTables}
       WHERE m.actor_id = ? AND instr(lower(b.title), lower(?)) > 0 AND ${condition}
     )
-    SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage, trashed_at_millis
+    SELECT board_id, title, updated_at_millis, pinned, entry_version, can_manage,
+      trashed_at_millis, preview_revision
     FROM visible
     ${boundary}
     ORDER BY ${ordering.columns}
@@ -17973,13 +23722,14 @@ function listRows(connection, lookup, condition, ordering) {
   return statement.all(actorId2, query, ...values, limit);
 }
 function listBoards2(connection, lookup) {
-  return listRows(connection, lookup, activeBoards, catalogOrderings[lookup.order]).map(
-    readSummary
+  const condition = lookup.pinnedOnly ? activePinnedBoards : activeBoards;
+  return listRows(connection, lookup, condition, catalogOrderings[lookup.order]).map(
+    readListSummary
   );
 }
 function listTrashedBoards2(connection, lookup) {
   return listRows(connection, lookup, ownedTrash, trashOrderings[lookup.order]).map((row) => ({
-    board: readSummary(row),
+    board: readListSummary(row),
     trashedAtMillis: readUnsigned(row.trashed_at_millis, "trashed_at_millis")
   }));
 }
@@ -18066,14 +23816,14 @@ function saveBoard(connection, actorId2, receipt) {
   `).run(actorId2, commandId, boardId, title, updatedAtMillis, pinValue, entryVersion);
 }
 function saveDuplicatedBoard(connection, actorId2, sourceBoardId, receipt) {
-  const rejected5 = duplicateBoard2(
+  const rejected7 = duplicateBoard2(
     connection,
     sourceBoardId,
     receipt.board.boardId,
     () => saveBoard(connection, actorId2, receipt)
   );
-  if (rejected5) {
-    return rejected5;
+  if (rejected7) {
+    return rejected7;
   }
   connection.prepare(
     "INSERT INTO catalog_duplicate_sources (actor_id, command_id, source_board_id) VALUES (?, ?, ?)"
@@ -18085,6 +23835,7 @@ function createCatalogRepository(database) {
   return {
     listBoards: (lookup) => database.read((connection) => listBoards2(connection, lookup)),
     listTrashedBoards: (lookup) => database.read((connection) => listTrashedBoards2(connection, lookup)),
+    readThumbnail: (lookup, cached) => database.read((connection) => readCatalogThumbnail(connection, lookup, cached)),
     getReceipt: (actorId2, commandId) => database.read((connection) => getReceipt(connection, actorId2, commandId)?.receipt),
     write: (work) => database.write(
       (connection) => work({
@@ -18098,6 +23849,8738 @@ function createCatalogRepository(database) {
       })
     )
   };
+}
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/unicode.js
+var UNDEFINED_CODE_POINTS = /* @__PURE__ */ new Set([
+  65534,
+  65535,
+  131070,
+  131071,
+  196606,
+  196607,
+  262142,
+  262143,
+  327678,
+  327679,
+  393214,
+  393215,
+  458750,
+  458751,
+  524286,
+  524287,
+  589822,
+  589823,
+  655358,
+  655359,
+  720894,
+  720895,
+  786430,
+  786431,
+  851966,
+  851967,
+  917502,
+  917503,
+  983038,
+  983039,
+  1048574,
+  1048575,
+  1114110,
+  1114111
+]);
+var REPLACEMENT_CHARACTER = "\uFFFD";
+var CODE_POINTS;
+(function(CODE_POINTS2) {
+  CODE_POINTS2[CODE_POINTS2["EOF"] = -1] = "EOF";
+  CODE_POINTS2[CODE_POINTS2["NULL"] = 0] = "NULL";
+  CODE_POINTS2[CODE_POINTS2["TABULATION"] = 9] = "TABULATION";
+  CODE_POINTS2[CODE_POINTS2["CARRIAGE_RETURN"] = 13] = "CARRIAGE_RETURN";
+  CODE_POINTS2[CODE_POINTS2["LINE_FEED"] = 10] = "LINE_FEED";
+  CODE_POINTS2[CODE_POINTS2["FORM_FEED"] = 12] = "FORM_FEED";
+  CODE_POINTS2[CODE_POINTS2["SPACE"] = 32] = "SPACE";
+  CODE_POINTS2[CODE_POINTS2["EXCLAMATION_MARK"] = 33] = "EXCLAMATION_MARK";
+  CODE_POINTS2[CODE_POINTS2["QUOTATION_MARK"] = 34] = "QUOTATION_MARK";
+  CODE_POINTS2[CODE_POINTS2["AMPERSAND"] = 38] = "AMPERSAND";
+  CODE_POINTS2[CODE_POINTS2["APOSTROPHE"] = 39] = "APOSTROPHE";
+  CODE_POINTS2[CODE_POINTS2["HYPHEN_MINUS"] = 45] = "HYPHEN_MINUS";
+  CODE_POINTS2[CODE_POINTS2["SOLIDUS"] = 47] = "SOLIDUS";
+  CODE_POINTS2[CODE_POINTS2["DIGIT_0"] = 48] = "DIGIT_0";
+  CODE_POINTS2[CODE_POINTS2["DIGIT_9"] = 57] = "DIGIT_9";
+  CODE_POINTS2[CODE_POINTS2["SEMICOLON"] = 59] = "SEMICOLON";
+  CODE_POINTS2[CODE_POINTS2["LESS_THAN_SIGN"] = 60] = "LESS_THAN_SIGN";
+  CODE_POINTS2[CODE_POINTS2["EQUALS_SIGN"] = 61] = "EQUALS_SIGN";
+  CODE_POINTS2[CODE_POINTS2["GREATER_THAN_SIGN"] = 62] = "GREATER_THAN_SIGN";
+  CODE_POINTS2[CODE_POINTS2["QUESTION_MARK"] = 63] = "QUESTION_MARK";
+  CODE_POINTS2[CODE_POINTS2["LATIN_CAPITAL_A"] = 65] = "LATIN_CAPITAL_A";
+  CODE_POINTS2[CODE_POINTS2["LATIN_CAPITAL_Z"] = 90] = "LATIN_CAPITAL_Z";
+  CODE_POINTS2[CODE_POINTS2["RIGHT_SQUARE_BRACKET"] = 93] = "RIGHT_SQUARE_BRACKET";
+  CODE_POINTS2[CODE_POINTS2["GRAVE_ACCENT"] = 96] = "GRAVE_ACCENT";
+  CODE_POINTS2[CODE_POINTS2["LATIN_SMALL_A"] = 97] = "LATIN_SMALL_A";
+  CODE_POINTS2[CODE_POINTS2["LATIN_SMALL_Z"] = 122] = "LATIN_SMALL_Z";
+})(CODE_POINTS || (CODE_POINTS = {}));
+var SEQUENCES = {
+  DASH_DASH: "--",
+  CDATA_START: "[CDATA[",
+  DOCTYPE: "doctype",
+  SCRIPT: "script",
+  PUBLIC: "public",
+  SYSTEM: "system"
+};
+function isSurrogate(cp) {
+  return cp >= 55296 && cp <= 57343;
+}
+function isSurrogatePair(cp) {
+  return cp >= 56320 && cp <= 57343;
+}
+function getSurrogatePairCodePoint(cp1, cp2) {
+  return (cp1 - 55296) * 1024 + 9216 + cp2;
+}
+function isControlCodePoint(cp) {
+  return cp !== 32 && cp !== 10 && cp !== 13 && cp !== 9 && cp !== 12 && cp >= 1 && cp <= 31 || cp >= 127 && cp <= 159;
+}
+function isUndefinedCodePoint(cp) {
+  return cp >= 64976 && cp <= 65007 || UNDEFINED_CODE_POINTS.has(cp);
+}
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/error-codes.js
+var ERR;
+(function(ERR2) {
+  ERR2["controlCharacterInInputStream"] = "control-character-in-input-stream";
+  ERR2["noncharacterInInputStream"] = "noncharacter-in-input-stream";
+  ERR2["surrogateInInputStream"] = "surrogate-in-input-stream";
+  ERR2["nonVoidHtmlElementStartTagWithTrailingSolidus"] = "non-void-html-element-start-tag-with-trailing-solidus";
+  ERR2["endTagWithAttributes"] = "end-tag-with-attributes";
+  ERR2["endTagWithTrailingSolidus"] = "end-tag-with-trailing-solidus";
+  ERR2["unexpectedSolidusInTag"] = "unexpected-solidus-in-tag";
+  ERR2["unexpectedNullCharacter"] = "unexpected-null-character";
+  ERR2["unexpectedQuestionMarkInsteadOfTagName"] = "unexpected-question-mark-instead-of-tag-name";
+  ERR2["invalidFirstCharacterOfTagName"] = "invalid-first-character-of-tag-name";
+  ERR2["unexpectedEqualsSignBeforeAttributeName"] = "unexpected-equals-sign-before-attribute-name";
+  ERR2["missingEndTagName"] = "missing-end-tag-name";
+  ERR2["unexpectedCharacterInAttributeName"] = "unexpected-character-in-attribute-name";
+  ERR2["unknownNamedCharacterReference"] = "unknown-named-character-reference";
+  ERR2["missingSemicolonAfterCharacterReference"] = "missing-semicolon-after-character-reference";
+  ERR2["unexpectedCharacterAfterDoctypeSystemIdentifier"] = "unexpected-character-after-doctype-system-identifier";
+  ERR2["unexpectedCharacterInUnquotedAttributeValue"] = "unexpected-character-in-unquoted-attribute-value";
+  ERR2["eofBeforeTagName"] = "eof-before-tag-name";
+  ERR2["eofInTag"] = "eof-in-tag";
+  ERR2["missingAttributeValue"] = "missing-attribute-value";
+  ERR2["missingWhitespaceBetweenAttributes"] = "missing-whitespace-between-attributes";
+  ERR2["missingWhitespaceAfterDoctypePublicKeyword"] = "missing-whitespace-after-doctype-public-keyword";
+  ERR2["missingWhitespaceBetweenDoctypePublicAndSystemIdentifiers"] = "missing-whitespace-between-doctype-public-and-system-identifiers";
+  ERR2["missingWhitespaceAfterDoctypeSystemKeyword"] = "missing-whitespace-after-doctype-system-keyword";
+  ERR2["missingQuoteBeforeDoctypePublicIdentifier"] = "missing-quote-before-doctype-public-identifier";
+  ERR2["missingQuoteBeforeDoctypeSystemIdentifier"] = "missing-quote-before-doctype-system-identifier";
+  ERR2["missingDoctypePublicIdentifier"] = "missing-doctype-public-identifier";
+  ERR2["missingDoctypeSystemIdentifier"] = "missing-doctype-system-identifier";
+  ERR2["abruptDoctypePublicIdentifier"] = "abrupt-doctype-public-identifier";
+  ERR2["abruptDoctypeSystemIdentifier"] = "abrupt-doctype-system-identifier";
+  ERR2["cdataInHtmlContent"] = "cdata-in-html-content";
+  ERR2["incorrectlyOpenedComment"] = "incorrectly-opened-comment";
+  ERR2["eofInScriptHtmlCommentLikeText"] = "eof-in-script-html-comment-like-text";
+  ERR2["eofInDoctype"] = "eof-in-doctype";
+  ERR2["nestedComment"] = "nested-comment";
+  ERR2["abruptClosingOfEmptyComment"] = "abrupt-closing-of-empty-comment";
+  ERR2["eofInComment"] = "eof-in-comment";
+  ERR2["incorrectlyClosedComment"] = "incorrectly-closed-comment";
+  ERR2["eofInCdata"] = "eof-in-cdata";
+  ERR2["absenceOfDigitsInNumericCharacterReference"] = "absence-of-digits-in-numeric-character-reference";
+  ERR2["nullCharacterReference"] = "null-character-reference";
+  ERR2["surrogateCharacterReference"] = "surrogate-character-reference";
+  ERR2["characterReferenceOutsideUnicodeRange"] = "character-reference-outside-unicode-range";
+  ERR2["controlCharacterReference"] = "control-character-reference";
+  ERR2["noncharacterCharacterReference"] = "noncharacter-character-reference";
+  ERR2["missingWhitespaceBeforeDoctypeName"] = "missing-whitespace-before-doctype-name";
+  ERR2["missingDoctypeName"] = "missing-doctype-name";
+  ERR2["invalidCharacterSequenceAfterDoctypeName"] = "invalid-character-sequence-after-doctype-name";
+  ERR2["duplicateAttribute"] = "duplicate-attribute";
+  ERR2["nonConformingDoctype"] = "non-conforming-doctype";
+  ERR2["missingDoctype"] = "missing-doctype";
+  ERR2["misplacedDoctype"] = "misplaced-doctype";
+  ERR2["endTagWithoutMatchingOpenElement"] = "end-tag-without-matching-open-element";
+  ERR2["closingOfElementWithOpenChildElements"] = "closing-of-element-with-open-child-elements";
+  ERR2["disallowedContentInNoscriptInHead"] = "disallowed-content-in-noscript-in-head";
+  ERR2["openElementsLeftAfterEof"] = "open-elements-left-after-eof";
+  ERR2["abandonedHeadElementChild"] = "abandoned-head-element-child";
+  ERR2["misplacedStartTagForHeadElement"] = "misplaced-start-tag-for-head-element";
+  ERR2["nestedNoscriptInHead"] = "nested-noscript-in-head";
+  ERR2["eofInElementThatCanContainOnlyText"] = "eof-in-element-that-can-contain-only-text";
+})(ERR || (ERR = {}));
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/tokenizer/preprocessor.js
+var DEFAULT_BUFFER_WATERLINE = 1 << 16;
+var Preprocessor = class {
+  constructor(handler) {
+    this.handler = handler;
+    this.html = "";
+    this.pos = -1;
+    this.lastGapPos = -2;
+    this.gapStack = [];
+    this.skipNextNewLine = false;
+    this.lastChunkWritten = false;
+    this.endOfChunkHit = false;
+    this.bufferWaterline = DEFAULT_BUFFER_WATERLINE;
+    this.isEol = false;
+    this.lineStartPos = 0;
+    this.droppedBufferSize = 0;
+    this.line = 1;
+    this.lastErrOffset = -1;
+  }
+  /** The column on the current line. If we just saw a gap (eg. a surrogate pair), return the index before. */
+  get col() {
+    return this.pos - this.lineStartPos + Number(this.lastGapPos !== this.pos);
+  }
+  /** The index in `html` at which the current code point starts (the high surrogate of a pair). */
+  get codePointStart() {
+    return this.pos - Number(this.lastGapPos === this.pos);
+  }
+  /** The offset of the current code point, before the second unit of a surrogate pair. */
+  get offset() {
+    return this.droppedBufferSize + this.codePointStart;
+  }
+  getError(code, cpOffset) {
+    const { line, col, offset } = this;
+    const startCol = col + cpOffset;
+    const startOffset = offset + cpOffset;
+    return {
+      code,
+      startLine: line,
+      endLine: line,
+      startCol,
+      endCol: startCol,
+      startOffset,
+      endOffset: startOffset
+    };
+  }
+  _err(code) {
+    if (this.handler.onParseError && this.lastErrOffset !== this.offset) {
+      this.lastErrOffset = this.offset;
+      this.handler.onParseError(this.getError(code, 0));
+    }
+  }
+  _addGap() {
+    this.gapStack.push(this.lastGapPos);
+    this.lastGapPos = this.pos;
+  }
+  _processSurrogate(cp) {
+    if (this.pos !== this.html.length - 1) {
+      const nextCp = this.html.charCodeAt(this.pos + 1);
+      if (!isSurrogatePair(cp) && isSurrogatePair(nextCp)) {
+        this.pos++;
+        this._addGap();
+        return getSurrogatePairCodePoint(cp, nextCp);
+      }
+    } else if (!this.lastChunkWritten) {
+      this.endOfChunkHit = true;
+      return CODE_POINTS.EOF;
+    }
+    this._err(ERR.surrogateInInputStream);
+    return cp;
+  }
+  willDropParsedChunk() {
+    return this.pos > this.bufferWaterline;
+  }
+  /**
+   * Drop the parsed input, except for the current code point and the `keep` code units before it. The gap history is
+   * reset, so the kept units must contain no preprocessing gap.
+   */
+  dropParsedChunk(keep2 = 0) {
+    if (this.willDropParsedChunk()) {
+      const droppedSize = this.offset - this.droppedBufferSize - keep2;
+      this.html = this.html.substring(droppedSize);
+      this.lineStartPos -= droppedSize;
+      this.droppedBufferSize += droppedSize;
+      this.pos -= droppedSize;
+      this.lastGapPos = -2;
+      this.gapStack.length = 0;
+      if (this.pos > keep2)
+        this._addGap();
+    }
+  }
+  write(chunk, isLastChunk) {
+    if (this.html.length > 0) {
+      this.html += chunk;
+    } else {
+      this.html = chunk;
+    }
+    this.endOfChunkHit = false;
+    this.lastChunkWritten = isLastChunk;
+  }
+  insertHtmlAtCurrentPos(chunk) {
+    this.html = this.html.substring(0, this.pos + 1) + chunk + this.html.substring(this.pos + 1);
+    this.endOfChunkHit = false;
+  }
+  startsWith(pattern, caseSensitive) {
+    if (this.pos + pattern.length > this.html.length) {
+      this.endOfChunkHit = !this.lastChunkWritten;
+      return false;
+    }
+    if (caseSensitive) {
+      return this.html.startsWith(pattern, this.pos);
+    }
+    for (let i = 0; i < pattern.length; i++) {
+      const cp = this.html.charCodeAt(this.pos + i) | 32;
+      if (cp !== pattern.charCodeAt(i)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  peek(offset) {
+    const pos = this.pos + offset;
+    if (pos >= this.html.length) {
+      this.endOfChunkHit = !this.lastChunkWritten;
+      return CODE_POINTS.EOF;
+    }
+    const code = this.html.charCodeAt(pos);
+    return code === CODE_POINTS.CARRIAGE_RETURN ? CODE_POINTS.LINE_FEED : code;
+  }
+  advance() {
+    this.pos++;
+    if (this.isEol) {
+      this.isEol = false;
+      this.line++;
+      this.lineStartPos = this.pos;
+    }
+    if (this.pos >= this.html.length) {
+      this.endOfChunkHit = !this.lastChunkWritten;
+      return CODE_POINTS.EOF;
+    }
+    let cp = this.html.charCodeAt(this.pos);
+    if (cp === CODE_POINTS.CARRIAGE_RETURN) {
+      this.isEol = true;
+      this.skipNextNewLine = true;
+      return CODE_POINTS.LINE_FEED;
+    }
+    if (cp === CODE_POINTS.LINE_FEED) {
+      this.isEol = true;
+      if (this.skipNextNewLine) {
+        this.line--;
+        this.skipNextNewLine = false;
+        this._addGap();
+        return this.advance();
+      }
+    }
+    this.skipNextNewLine = false;
+    if (isSurrogate(cp)) {
+      cp = this._processSurrogate(cp);
+    }
+    const isCommonValidRange = this.handler.onParseError === null || cp > 31 && cp < 127 || cp === CODE_POINTS.LINE_FEED || cp === CODE_POINTS.CARRIAGE_RETURN || cp > 159 && cp < 64976;
+    if (!isCommonValidRange) {
+      this._checkForProblematicCharacters(cp);
+    }
+    return cp;
+  }
+  _checkForProblematicCharacters(cp) {
+    if (isControlCodePoint(cp)) {
+      this._err(ERR.controlCharacterInInputStream);
+    } else if (isUndefinedCodePoint(cp)) {
+      this._err(ERR.noncharacterInInputStream);
+    }
+  }
+  retreat(count) {
+    this.pos -= count;
+    while (this.pos < this.lastGapPos) {
+      this.lastGapPos = this.gapStack.pop();
+      this.pos--;
+    }
+    this.isEol = false;
+  }
+};
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/token.js
+var TokenType;
+(function(TokenType2) {
+  TokenType2[TokenType2["CHARACTER"] = 0] = "CHARACTER";
+  TokenType2[TokenType2["NULL_CHARACTER"] = 1] = "NULL_CHARACTER";
+  TokenType2[TokenType2["WHITESPACE_CHARACTER"] = 2] = "WHITESPACE_CHARACTER";
+  TokenType2[TokenType2["START_TAG"] = 3] = "START_TAG";
+  TokenType2[TokenType2["END_TAG"] = 4] = "END_TAG";
+  TokenType2[TokenType2["COMMENT"] = 5] = "COMMENT";
+  TokenType2[TokenType2["DOCTYPE"] = 6] = "DOCTYPE";
+  TokenType2[TokenType2["EOF"] = 7] = "EOF";
+  TokenType2[TokenType2["HIBERNATION"] = 8] = "HIBERNATION";
+})(TokenType || (TokenType = {}));
+function getTokenAttr(token2, attrName) {
+  for (let i = token2.attrs.length - 1; i >= 0; i--) {
+    if (token2.attrs[i].name === attrName) {
+      return token2.attrs[i].value;
+    }
+  }
+  return null;
+}
+
+// ../../../../node_modules/.pnpm/entities@9.0.0/node_modules/entities/dist/decode-codepoint.js
+var c1 = [
+  8364,
+  0,
+  8218,
+  402,
+  8222,
+  8230,
+  8224,
+  8225,
+  710,
+  8240,
+  352,
+  8249,
+  338,
+  0,
+  381,
+  0,
+  0,
+  8216,
+  8217,
+  8220,
+  8221,
+  8226,
+  8211,
+  8212,
+  732,
+  8482,
+  353,
+  8250,
+  339,
+  0,
+  382,
+  376
+];
+function isInvalidCodePoint(codePoint) {
+  return codePoint === 0 || codePoint >= 55296 && codePoint <= 57343 || codePoint > 1114111;
+}
+function replaceCodePoint(codePoint) {
+  if (isInvalidCodePoint(codePoint)) {
+    return 65533;
+  }
+  if (codePoint >= 128 && codePoint <= 159) {
+    return c1[codePoint - 128] || codePoint;
+  }
+  return codePoint;
+}
+
+// ../../../../node_modules/.pnpm/entities@9.0.0/node_modules/entities/dist/generated/decode-data-html.js
+var htmlDecodeData = ["Q=\xA8`p0AEligMPacutebrevecircyfrgravelphamacrndogonpfpplyFunctionringscrsigntildeumlBackslashrvwedcyecausernoullistafropfrevescrumpeqCHcyOPYacutepitalDifferentialDyleyscaronedilirconintdotedillanterDotfrhiircleDotMinusPlusTimeslockwiseContourIntegralseCurlyDoubleQuoteQuoteolonengruentinttourIntegralpfroductunterClockwiseContourIntegralrossscrupCapDDotrahdJcyScyZcyaggerrrshvcaronyeltafriacriticalAcuteDotubleAcuteGraveTildemondfferentialDopftDotEqualubleContourIntegralDotwnArrowLeftArrowRightArrowTeeongLeftArrowRightArrowRightArrowRightArrowTeeUpArrowDownArrowVerticalBarwnArrowBarUpArrowBreveLeftRightVectorTeeVectorVectorBarRightTeeVectorVectorBarTeeArrowarrowscrtrokENGTHacutecaronircydotfrgravelementmacrptySmallSquareVerySmallSquareogonpfpsilonqualTildeilibriumscrimtaumlxistsponentialEFcyfrilledSmallSquareVerySmallSquareopfrAlluriertrfscrGJcyTammadbrevecedilircydotfrgopfreaterEqualLessFullEqualGreaterLessSlantEqualTildescrtHARDcyacektcircfrilbertSpaceopfrizontalLinescrtrokumpDownHumpEqualIEcyJligOcyacutecircydotfrgravemacrginaryIpliesntegralrsectionvisibleCommaTimesogonpftascrtildeukcymlJcircyfropfscrercyukcyKHcyJcyappacedilyfropfscrLJcyTacutembdangplacetrfrrcaronedilyeftAngleBracketrrowBarRightArrowCeilingDoubleBracketwnTeeVectorVectorBarFloorRightArrowVectorTeeArrowVectorriangleBarEqualUpDownVectorTeeVectorVectorBarVectorBararrowrightarrowssEqualGreaterFullEqualGreaterLessSlantEqualTildefrleftarrowmidotongLeftArrowRightArrowRightArrowleftarrowrightarrowrightarrowpfwerLeftArrowRightArrowscrhtroktMapcyediumSpacellintrffrinusPlusopfscruNJcyacutecaronedilyegativeMediumSpaceThickSpacenSpaceVeryThinSpacestedGreaterGreaterLessLesswLinefroBreaknBreakingSpacepftCongruentupCapDoubleVerticalBarElementqualTildexistsGreaterEqualFullEqualGreaterLessSlantEqualTildeHumpDownHumpEqualLeftTriangleBarEqualssEqualGreaterLessSlantEqualTildeNestedGreaterGreaterLessLessPrecedesEqualSlantEqualReverseElementightTriangleBarEqualSquareSubsetEqualpersetEqualubsetEqualcceedsEqualSlantEqualTildepersetEqualTildeEqualFullEqualTildeVerticalBarscrtildeuOEligacutecircydblacfrgravemacregaicronopfpenCurlyDoubleQuoteQuoterscrlashtildemesumlverBarraceketParenthesisPartialDcyfrhiilusMinusoincareplanepfrecedesEqualSlantEqualTildeimeoductportionalscriQUOTfropfscrRBarrEGacutengrrtlcaronedilyeverseElementquilibriumUpEquilibriumfrhoightAngleBracketrrowBarLeftArrowCeilingDoubleBracketwnTeeVectorVectorBarFloorTeeArrowVectorriangleBarEqualUpDownVectorTeeVectorVectorBarVectorBararrowopfundImpliesrightarrowscrhuleDelayedSHCHcycyOFTcyacutecaronedilircyfrhortDownArrowLeftArrowRightArrowUpArrowigmamallCircleopfqrtuareIntersectionSubsetEqualpersetEqualUnionscrtarubsetEqualcceedsEqualSlantEqualTildehThatmpersetEqualsetTHORNRADESHcycyabucaronedilyfrhereforetaickSpacenSpaceildeEqualFullEqualTildeopfripleDotscrtrokUacuterrocirbrcyevecircydblacfrgravemacrnderBarraceketParenthesisionPlusogonpfpArrowBarDownArrowDownArrowEquilibriumTeeArrowarrowdownarrowperLeftArrowRightArrowsilonringscrtildeumlVDashbarcydashleerbarticalBarLineSeparatorTildeyThinSpacefropfscrvdashWcircedgefropfscrXfriopfscrYAcyIcyUcyacutecircyfropfscrumlZHcyacutecaronydoteroWidthSpacetafropfscraacutebrevecEdircuteyeligfrgravelefsymphphamacrlgpndanddslopevgelemsdaabcdefghrtvbdsphtzarrogonpfpEacireidosproxeqringscrtympeqtildeumlwconintintbNotackcongepsilonprimesimeqrveewedgebrktbrkcongydquoecausemptyvpsirnoutahweenfrigcapircupodotplustimessqcuptartriangledownupuplusveewedgekarowlacklozengesquaretriangledownleftrightnkk12434ocknequivotopfttomwtiexDLRlrHDUduULRlrVHLRhlrboxdLRlrhDUduminusplustimesuLRlrvHLRhlrprimerevevbarscremiimeolbhsubulletmpEeqcacutepandbrcupcapupdotsretoncapsronedilircupssmdotedilmptyvnterdotfrhcyeckmarkiirEceqlearrowleftrightdRSastcircdashefnintmidscirlubsuitoloneqmmatpfnlementxesngdotintpfrodysrrarrossscrubepetdotudarrlreprsclarrppbrcapcapupdotorsrarrmlyeqprecsuccveewedgerenvearrowleftrightveewedwconintintylctydArrHaraggerlethrrshvbkarowlaccaronydaggerrrotseqegltamptyvfishtrharlriamondsuitsegammasinvideontimesonxjcylcornropollarpfteqdotminusplussquareublebarwedgewnarrowdownarrowsharpoonleftrightrbkarowcornropscryoltroktdotrifuarrharwanglezcyigrarreDDototacutestercaronircolonydotefDotrgravesdotlinterslsdotmacrptysetvsp134ngspogonpfparsllussilonvqcircolonsimlantgtrlessualsestivDDvparslrDotarrscrdotimtahumlroxclistpectationonentialefallingdotseqcyemalefiligligligriligjliglatligtnsnofopfrallkvpartintrac123456823534584556878slownscrgElacutemmadpbrevecircydotelqqslantsccdotollesfrggimeljcylEajnEapproxeqqsimopfravescrimeltccirdotlParquestrapproxrrdoteqlessqlesslesssimvertneqqnEhArrairsplfmiltrdcyrcirwbarcirceartsuitlliprconfrksearowwarowoarrmthtokleftarrowrightarrowpfrbarscrlashtrokybullpheniacutecircyecyxclffrgraveiiintntnfinotajligmacrgelinepartthofpedncarefintieodottcalegersrcallarhkprodocygonpftaprodquestscrinEdotsvvtildeukcymljcircyfrmathopfscrercyukcykappavcedilyfrgreenhcyjcyopfscrlAarrrrtailBarrEgHaracuteemptyvgranmbdangdlepquorrbfsfshklpplsimtltailesbarrbrkracekkeslducaronedililubydcaquorrdharusharsheftarrowtailharpoondownupleftarrowsrightarrowsharpoonssquigarrowthreetimesgqqslantsccdotorgessapproxdoteqgtrqgtrgtrsimfishtloorrgEhardulblkjcylarrcornerhardtrimidotoustachenEapproxeqqsimoangrrbrkngleftarrowrightarrowmapstorightarrowoparrowleftrightparflustimeswastbarzengefparltrarrcornerhardmtrisaquocrhimegqbuortroktccirdothreeimeslarrquestrPariefurdsharuharvertneqqnEmDDotacrletesepstodownleftuprkercommaydasheasuredanglefrhoicrodastcirdotnusbdulcpdrnplusodelspfpscrtposultimapmapnGgtvLeftarrowrightarrowltvRightarrowVDashdashablacutengpEidosproxturalsbspumpecapronedilongdotupydasheArrarhkrowdotquivsearimxistsfrgEeqqslantssimtrhArrarrparisdvjcylArrEarrdreftarrowrightarrowqqslantsssimtriemidopftinEdotvabcnivabcparallelsltolintrcueeceqrArrarrcwightarrowtriesccueerhortmidparallelimeqmidparqsubepeubEeseteqqcceqpEeseteqqtglildelgrianglelefteqrightequmerospvDashHarrapdashgetinfinlArretrierArrtriesimwArrarhkrownearoSacutestcircydashblacivotsoldeligfcirrgonravethbarmintlarrcirrossinetmacregaicrondnusopfparerplusrarrderoffmigoforslopevscrlasholtildemesasumlvbarparallelsimltcyercntiodmilptenkfrhivmmatoneitchforkvlanckhkvusacirbcirdouemnsimtwomointintpfundrEapcueecapproxcurlyeqeqnapproxeqqsimsimimesnEapsimodfalarlinesurfptosimurelscriuncspqfrintopfprimescruaternionsintesteqotrAarrrrtailBarrHaraceutedicemptyvngdelequorrapbfscfshklpplsimtlwtailionalsbarrbrkracekkeslducaronedililubydcaldharquorshealinepartsctgfishtloorrhardulovightarrowtailharpoondownupleftarrowsharpoonsrightarrowssquigarrowthreetimesngsingdotseqlarrharmmoustachenmidoangrrbrkparflustimespargtpolintrarrsaquocrhqbuorthreeimesriefltriuluharxsacutebquocEaproncueedilircnEapsimpolintsimydotbeeArrarhkrowctmiswartminusnxtfrownharpchcyyortmidparallelyigmafvmdoteqgElEneplusrarrlarrmallsetminusshpeparslidletesoftcylbarpfpadesuitrqcapsupssubeseteqpesetequareffrarrscretmnmiletarftarfraightepsilonphinsubEdotedotmultnEeplusrarrseteqqneqqimubpccapproxcurlyeqeqnapproxeqqsimsimmngp123EdotsubedothsolublarrmultnEeplusseteqqneqqimubpwArrarhkrownwarzligtargetubrkcaronedilydotelrecfrhere4foretasymvickapproxsimnspkapsimornildemesbardntoeapbotcirforksaprimeradeiangledownlefteqqrighteqdoteminusplussbtimepeziumscryhcytrokwixtoheadleftarrowrightarrowuArrHaracuterrbrcyevecircydarrblacharfishtrgraveharlrblklcornerroptrimacrlogonpfparrowdownarrowharpoonleftrightlussihlonuparrowsrcornerropingtriscrtdotilderifuarrmlwanglevArrBarvDashangrtrepsilonkappanothingphiiroptorhosigmaubsetneqqpsetneqqthetariangleleftrightcydasheebareqlliprbartfrltrinsubpopfproprtriscrubnEepnEezigzagwcircedbargeqierpfropfpreathscrxcapircupdtrifrhArrarrilArrarrmapnisodotpflustimerArrarrscrqcupuplustriveewedgeyacuteycircyenfricyopfscrucymlzacutecaronydoteetrftafrhcyigrarropfscrwjnjC(D%D($(D'%$$ED($'$'$%$'%E$/D'$F%'D(D&#,%%&&$%$)%+%%$E$F$'$&$(#'D&$(%$&4%($(E'%&%($&$)%*$%$%$+)()')($:&5-($'($%*&&&/%%&)%@$'$F$%&&#%%)$&$&$&$(%%%&$(%$$%&%$E$2.&0,.(.(&'%.$F%$&&&(%6)&+*),---&*/1---)-.&)*+,).%*,&,*'('2+,+)1&'1,)2&'&*('($F%'#&D%D($(E&%$$&$ED($)$'%1(2$'%E$)$'((&+$&%%$%D&$(%-#&$E$3)2$F%'%+$&#'D$$'($$($(%&%$$&$E$$$F$./'*,***'*-*($F$$#)$'%$$'$%$.$&%/$&%'$.'(#'$'$&D(D'%$$&$%D($$%&&*%($%&('+%/,($'%E%%$&$($'E%#(%$$E$F$F%'$'#'$&$'$(%$$E$F$F#'D$$(%'%%%+%%$(%'%$$2(',&,-'*'0).+)1&'('-,)'&*(*)(*/&/('/),))/&')-&'('-%1','*'''-'($E$$%+$($/+-'-',+-'-%E%/(-$&%$%'$$#&$%$-%*$E$+$F$&$$#'$($(%'%$$5+-.)+0%5)+%($E$)%1%%%$&,'(&4&*''+H'(&*-(-L-J-'-M-(&O*H&/2F2((%*(***G*M*(&W,K&+.H.-&1'/3F3(&O2(.I4('H,(().H.-.H(I.(&(+(+,+(&.$FD($$#(D(D'%$$($ED($'%&%($F$6,($$$FE'D(&&D&$)('+&'.#+$%$E$%$$$+$/%%$$%)+(+-+(%&%(&*-%$F%$C'$E$&$F#(D%$(%%%%'%$(%'%$$$%/+-*0$%$%$3)'-&-,(*(0*.,)2&(((&+(+))*0&0((/*,*)0&().&(($&%-$-$&%$$-#)%%$($($$%'%'%&%$$E$0(,(-(*$'$-$F$&%')/))/(+)1()($F$&$%&&)(%)+(+-+(&(%$%$&(+(&&C($'$'%%$%%$$(%'%$$E$+&%%K&)$'(((,(($F$+$F%'C)%%''$'&&D'%$$($ED($'$*)',&(.%&('$'%E$)*&*,%,%.%&((%(%,%/(-%%'&$'$F$(D&#($&$%$'($$%%'&$'*+'+,+(&-$E$F$F$(#($'$E$F$F#F$$$F$F#'$&$&D($'%$$E$F$F$&#'$($(%$$&$0%%$%$&$FC)$($$%D%$E&E&%$D'$$%DD($)&%%&$'&%E$$%&&&$&(&$%$&$&%&&)%*$*$*$*$*$*$*$&%(%*$&&'$&'$'%E$$%$%'%$%%%%%')%D'$F%$%&(%D(D&$*%&#'$*'*'('&*%%'&&)%$&''$'%$$'$()$%(%&%'%%&$&'$E$('&'%&''''(&('&&/.%&(&&&($($.()(+0'0'0(&%%&'$&%%&$E&G%%$F%$&&%'%&'$'$'$&$'$'$'$'$&%'$'$'$&$'$'$'$'$'$'$&&&%'$'$'$&$'$'$'$'$&(&'&(&%'$'$'$&$'$'$'$'$'$'$$($'E'$F%&%%'$%%'$''$&'%%%'$'$($#)%$&&&(&&'%&&&D%&&%$'&&E'%&%&(%$&D'%(E%'($E$&%&('%$$%&$&$'%'..()%*$*&*'*'&$&(&&&'$'(&$'($)$%&($&$'%'))&%%'&&&%E&&F$'%$'%&$F%%'$&$'$$'$))$%&&%%')$%$&(&&'%&&&%&D%')$&+*'(&((F&&.-(%&%&$*%&$(#'$&$(%'%%%%'$$)%&$(%$$$%(&%%(D%%&%($(%D$''$$&'&*''$%$%(%&%$F&)*&&$&$(&&$(%E%$&%(&&(&'&)%/%*'-'..($*%'&&$F&$%%%'$'%%'$$'%&$)$&%)#(%%D(%'$(%%G$%'%$$&$$$'%D$$E'%$&&$$%)%$%$&&$'%&(&($%%'%($$%%%$'%E$&'%%&%%'&'$$(&'%&&**'%'&&&%(%%)$'%&$&%&%%$%E$D&%%$&%&%,&,#0$%$($(%&&&%D$'$G$&%&%&$&$F%'&$'$$*D(($H$($($($'%($G%($($'%'%($'%&%%&$F#%%$$(%&($%$$($'%$$&$$%$%$&$&(%$&%&&)$*$&D'%$E$$%$$'$&$$%$%$%$$%%%''%$&$'$%&$F$'$&%%'$'$D$%%&%%&%'%(%*'%&&&)((&'&&$K%E#'$(%%%'%'&$'&'$$&$'$()&%'%'$E$*&($'%'%.'-%E%'$F%'%'$(%'C)$$E&%$$&E&$%%DD($$%'&%%'%&$'$'&%''''&%%%%&$$%'%&(&%'%$&&&(''&(&'$&%&%E%%$'D($F%%'$'&'$($'$$$%'$'E%#(%$$E$'$F$F%'$'#(($$(%$$E$($&$&$F$F#(%%%'$'$$%$$&$(%)%'%'%%'$'%%$E&%%'$(%'%'%'%'%'&'%%$&&&$'D$'%&%'($&%'&)$$(%'&%%%%$$&%&($%(&(%%$$%*,''..%'-'-1$,+,-'-%$%$&$&(%$&%&&)$*$&D'%&*'&'()''&'&$(%'%D$$%$$''$($%&$&$$%&%)%'%&$(%')'$%%%''%$&$'$%&$'&%%&%.+-')'-%.,(%&&D&&%(%'&&%$&'&$$&'%$'%)%&($%$%&$(%E%$%%'$'$%%&%($%'D$%%&%%&%'%'%'%(%'&$'$'$$*&'$K%E#(D&%%&$'&%$&&)')')%%'$(%$$'$/$E$%D'%$&&&&F&%&($($)$$&%%$($(%E$$$F%'$$%)%&#F%D&D$,(-%D%D&D$-$(%'$'%'%E%$&D&E&%&'%&(%*$D&%F(D$&&&%'%&(F%%%$$'$$%&%''$(%%F%'%'&E%')$$E$E%$&$'D'H&D%&%$&$$'%&%&$$%$&$%$$&$'%D%&%%%$&*(-&$'D'H&D'$%&%$&%($$&$FE$&%(D(F(%)$)$&%(%)$)$$&'('E'D%(%$&&&D'$(E$'%&(D(D%,%&($$%&&&D&D%*)+%%'$($%&%&%((%%%'D'$'F*%,D&%(E&$'D'$'F*%,D$&E'%%%.0%,(1%$$%$&&&%$(%'%E%'%E&D%(%'&D&D'F%'&G%F$'%''$(%%'#%D(%%$&G$%$$'%'%%%%%'$'$'%D$&E'%$$'%$$&$'%&&'%&%$$'%&%(&$&&$F$&%&%&$$%&%$&%(%F$F$%'%%%(%$$&E'%%D(&&)%D&$'#&F$''&&'$&$$%$(&&&&&$&'$E$%&$%'%&$$%*%$$()$'%%%'''$'&'%($'$G%'&'&$$$*%EE&$$%$%%%&%$&$')'*'%'*(&(&'&%&($%%&%&&%%&(''''&$'%%&%'$F%$$(#F$&$F$($F$-'&%&(%E%#(%%%'$'$&$F&&%&%)%%'$'$'%E&%%'%'$(%'$'%'%'%'%'&'%'$%'&%('$'%&%'($&%'&)$$(%'&%%%%$$&%(%&($%%$&'&'''$%%E$$(%'%D$''$($%$&$$,-'(./%(-,+(.(-(-%%%-$'%&%$$()'$'$'&%%&%&&D&&%($&'%%)$'$(%E%$%%&%($$(%'%%'$'$''$)$$#)$'$$%$%%&&%&%$&&%&%%&%&&%)%&%$$&'$'$$'%''$(%E%%%%'%)'$%%$E&&$'%'&$%)(+E$$'($($%$&&&$'$&$'$&$'$&%&'&'$'$/&&%)%%&%%$&$'D$(%$&$'%%E$()&&$$'(D&%(D%&($(&+%'$($(&+%%$&&($&$$'$F%'%'%'$&'$%0+&&%$%&$&&&$'&&'&%'$&'&'&&)%+$)&,$'%'%($%%')'*'%'*(&(&'&%$%%%$F$F$F$&$&&'&&$'&&'(%&'&'&%'$&'&&)%+$)&,$'%'%($$'%''$(%%'D'#)%$$&$(%'%$$&$($E$(('&%(&($%,(&&&%&&&E&$'E&($)%($%%$&%$&&&&&D'&%%$($'%)+'+'/%+$+(0%&&&$&(&'&%&'%)$F&$%&%'$'%1*-#'$&D(%%$'&&D'%$$'%'%&$(%DD($''$%&$()%&&%&$'E$$'%E$)%,%.,(%&%%'$'&%+$()%&&%&%&$F$'%'%%'$$'E%$)#'$&'$$'$(%+&(&*&&'$'(&$'%&('K/D(J/D&('..($%$'$%&&&%%'%'&$$E$'$G'D$F$'$'$F%G(D&F(D$)#($(&%($%'$E$F$$$$%'$F#'%&%%$'$E$'%&$$$'%&$&$&$'%E&&%'$'%&$F%'$(%&$&$(C)&$$'%$D%$E$&$F$F$&E%#)$(%$$&$(%%$E$&$)$F$F$%%%0@0000H8H40H000047P00P@001000@0B0HP@:H9T8P000LB8d@800@I0<110000QQ8400P10030005940@410020000Q02000@0200000@P0101@8000440400000000808000000000@00000000P`0000000040400@0004<000000000008000030000000000P020T400020@0@00000000000000000000000000P0000000400400000400220080000100000000000000000P000000000000P000000@00402000000000@00000000000000000000040000000000000", '\xC6&\xC1\u0102\xC2\u0410\u{1D504}\xC0\u0391\u0100\u2A53\u0104\u{1D538}\u2061\xC5\u{1D49C}\u2254\xC3\xC4\u2216\u2AE7\u2306\u0411\u2235\u212C\u0392\u{1D505}\u{1D539}\u02D8\u212C\u224E\u0427\xA9\u0106\u22D2\u2145\u212D\u010C\xC7\u0108\u2230\u010A\xB8\xB7\u212D\u03A7\u2299\u2296\u2295\u2297\u2232\u201D\u2019\u2237\u2A74\u2261\u222F\u222E\u2102\u2210\u2233\u2A2F\u{1D49E}\u22D3\u224D\u2145\u2911\u0402\u0405\u040F\u2021\u21A1\u2AE4\u010E\u0414\u2207\u0394\u{1D507}\xB4\u02D9\u02DD`\u02DC\u22C4\u2146\u{1D53B}\xA8\u20DC\u2250\u222F\xA8\u21D3\u21D0\u21D4\u2AE4\u27F8\u27FA\u27F9\u21D2\u22A8\u21D1\u21D5\u2225\u2193\u2913\u21F5\u0311\u2950\u295E\u21BD\u2956\u295F\u21C1\u2957\u22A4\u21A7\u21D3\u{1D49F}\u0110\u014A\xD0\xC9\u011A\xCA\u042D\u0116\u{1D508}\xC8\u2208\u0112\u25FB\u25AB\u0118\u{1D53C}\u0395\u2A75\u2242\u21CC\u2130\u2A73\u0397\xCB\u2203\u2147\u0424\u{1D509}\u25FC\u25AA\u{1D53D}\u2200\u2131\u2131\u0403>\u0393\u03DC\u011E\u0122\u011C\u0413\u0120\u{1D50A}\u22D9\u{1D53E}\u2265\u22DB\u2267\u2AA2\u2277\u2A7E\u2273\u{1D4A2}\u226B\u042A\u02C7^\u0124\u210C\u210B\u210D\u2500\u210B\u0126\u224E\u224F\u0415\u0132\u0401\xCD\xCE\u0418\u0130\u2111\xCC\u2111\u012A\u2148\u21D2\u222C\u222B\u22C2\u2063\u2062\u012E\u{1D540}\u0399\u2110\u0128\u0406\xCF\u0134\u0419\u{1D50D}\u{1D541}\u{1D4A5}\u0408\u0404\u0425\u040C\u039A\u0136\u041A\u{1D50E}\u{1D542}\u{1D4A6}\u0409<\u0139\u039B\u27EA\u2112\u219E\u013D\u013B\u041B\u27E8\u2190\u21E4\u21C6\u2308\u27E6\u2961\u21C3\u2959\u230A\u2194\u294E\u22A3\u21A4\u295A\u22B2\u29CF\u22B4\u2951\u2960\u21BF\u2958\u21BC\u2952\u21D0\u21D4\u22DA\u2266\u2276\u2AA1\u2A7D\u2272\u{1D50F}\u22D8\u21DA\u013F\u27F5\u27F7\u27F6\u27F8\u27FA\u27F9\u{1D543}\u2199\u2198\u2112\u21B0\u0141\u226A\u2905\u041C\u205F\u2133\u{1D510}\u2213\u{1D544}\u2133\u039C\u040A\u0143\u0147\u0145\u041D\u200B\u200B\u200B\u200B\u226B\u226A\n\u{1D511}\u2060\xA0\u2115\u2AEC\u2262\u226D\u2226\u2209\u2260\u2242\u0338\u2204\u226F\u2271\u2267\u0338\u226B\u0338\u2279\u2A7E\u0338\u2275\u224E\u0338\u224F\u0338\u22EA\u29CF\u0338\u22EC\u226E\u2270\u2278\u226A\u0338\u2A7D\u0338\u2274\u2AA2\u0338\u2AA1\u0338\u2280\u2AAF\u0338\u22E0\u220C\u22EB\u29D0\u0338\u22ED\u228F\u0338\u22E2\u2290\u0338\u22E3\u2282\u20D2\u2288\u2281\u2AB0\u0338\u22E1\u227F\u0338\u2283\u20D2\u2289\u2241\u2244\u2247\u2249\u2224\u{1D4A9}\xD1\u039D\u0152\xD3\xD4\u041E\u0150\u{1D512}\xD2\u014C\u03A9\u039F\u{1D546}\u201C\u2018\u2A54\u{1D4AA}\xD8\xD5\u2A37\xD6\u203E\u23DE\u23B4\u23DC\u2202\u041F\u{1D513}\u03A6\u03A0\xB1\u210C\u2119\u2ABB\u227A\u2AAF\u227C\u227E\u2033\u220F\u2237\u221D\u{1D4AB}\u03A8"\u{1D514}\u211A\u{1D4AC}\u2910\xAE\u0154\u27EB\u21A0\u2916\u0158\u0156\u0420\u211C\u220B\u21CB\u296F\u211C\u03A1\u27E9\u2192\u21E5\u21C4\u2309\u27E7\u295D\u21C2\u2955\u230B\u22A2\u21A6\u295B\u22B3\u29D0\u22B5\u294F\u295C\u21BE\u2954\u21C0\u2953\u21D2\u211D\u2970\u21DB\u211B\u21B1\u29F4\u0429\u0428\u042C\u015A\u2ABC\u0160\u015E\u015C\u0421\u{1D516}\u2193\u2190\u2192\u2191\u03A3\u2218\u{1D54A}\u221A\u25A1\u2293\u228F\u2291\u2290\u2292\u2294\u{1D4AE}\u22C6\u22D0\u22D0\u2286\u227B\u2AB0\u227D\u227F\u220B\u2211\u22D1\u2283\u2287\u22D1\xDE\u2122\u040B\u0426	\u03A4\u0164\u0162\u0422\u{1D517}\u2234\u0398\u205F\u200A\u2009\u223C\u2243\u2245\u2248\u{1D54B}\u20DB\u{1D4AF}\u0166\xDA\u219F\u2949\u040E\u016C\xDB\u0423\u0170\u{1D518}\xD9\u016A_\u23DF\u23B5\u23DD\u22C3\u228E\u0172\u{1D54C}\u2191\u2912\u21C5\u2195\u296E\u22A5\u21A5\u21D1\u21D5\u2196\u2197\u03D2\u03A5\u016E\u{1D4B0}\u0168\xDC\u22AB\u2AEB\u0412\u22A9\u2AE6\u22C1\u2016\u2016\u2223|\u2758\u2240\u200A\u{1D519}\u{1D54D}\u{1D4B1}\u22AA\u0174\u22C0\u{1D51A}\u{1D54E}\u{1D4B2}\u{1D51B}\u039E\u{1D54F}\u{1D4B3}\u042F\u0407\u042E\xDD\u0176\u042B\u{1D51C}\u{1D550}\u{1D4B4}\u0178\u0416\u0179\u017D\u0417\u017B\u200B\u0396\u2128\u2124\u{1D4B5}\xE1\u0103\u223E\u223E\u0333\u223F\xE2\xB4\u0430\xE6\u2061\u{1D51E}\xE0\u2135\u2135\u03B1\u0101\u2A3F&\u2227\u2A55\u2A5C\u2A58\u2A5A\u2220\u29A4\u2220\u2221\u29A8\u29A9\u29AA\u29AB\u29AC\u29AD\u29AE\u29AF\u221F\u22BE\u299D\u2222\xC5\u237C\u0105\u{1D552}\u2248\u2A70\u2A6F\u224A\u224B\'\u2248\u224A\xE5\u{1D4B6}*\u2248\u224D\xE3\xE4\u2233\u2A11\u2AED\u224C\u03F6\u2035\u223D\u22CD\u22BD\u2305\u2305\u23B5\u23B6\u224C\u0431\u201E\u2235\u2235\u29B0\u03F6\u212C\u03B2\u2136\u226C\u{1D51F}\u22C2\u25EF\u22C3\u2A00\u2A01\u2A02\u2A06\u2605\u25BD\u25B3\u2A04\u22C1\u22C0\u290D\u29EB\u25AA\u25B4\u25BE\u25C2\u25B8\u2423\u2592\u2591\u2593\u2588=\u20E5\u2261\u20E5\u2310\u{1D553}\u22A5\u22A5\u22C8\u2557\u2554\u2556\u2553\u2550\u2566\u2569\u2564\u2567\u255D\u255A\u255C\u2559\u2551\u256C\u2563\u2560\u256B\u2562\u255F\u29C9\u2555\u2552\u2510\u250C\u2500\u2565\u2568\u252C\u2534\u229F\u229E\u22A0\u255B\u2558\u2518\u2514\u2502\u256A\u2561\u255E\u253C\u2524\u251C\u2035\u02D8\xA6\u{1D4B7}\u204F\u223D\u22CD\\\u29C5\u27C8\u2022\u2022\u224E\u2AAE\u224F\u224F\u0107\u2229\u2A44\u2A49\u2A4B\u2A47\u2A40\u2229\uFE00\u2041\u02C7\u2A4D\u010D\xE7\u0109\u2A4C\u2A50\u010B\xB8\u29B2\xA2\xB7\u{1D520}\u0447\u2713\u2713\u03C7\u25CB\u29C3\u02C6\u2257\u21BA\u21BB\xAE\u24C8\u229B\u229A\u229D\u2257\u2A10\u2AEF\u29C2\u2663\u2663:\u2254\u2254,@\u2201\u2218\u2201\u2102\u2245\u2A6D\u222E\u{1D554}\u2210\xA9\u2117\u21B5\u2717\u{1D4B8}\u2ACF\u2AD1\u2AD0\u2AD2\u22EF\u2938\u2935\u22DE\u22DF\u21B6\u293D\u222A\u2A48\u2A46\u2A4A\u228D\u2A45\u222A\uFE00\u21B7\u293C\u22DE\u22DF\u22CE\u22CF\xA4\u21B6\u21B7\u22CE\u22CF\u2232\u2231\u232D\u21D3\u2965\u2020\u2138\u2193\u2010\u22A3\u290F\u02DD\u010F\u0434\u2146\u2021\u21CA\u2A77\xB0\u03B4\u29B1\u297F\u{1D521}\u21C3\u21C2\u22C4\u22C4\u2666\u2666\xA8\u03DD\u22F2\xF7\xF7\u22C7\u22C7\u0452\u231E\u230D$\u{1D555}\u02D9\u2250\u2251\u2238\u2214\u22A1\u2306\u2193\u21CA\u21C3\u21C2\u2910\u231F\u230C\u{1D4B9}\u0455\u29F6\u0111\u22F1\u25BF\u25BE\u21F5\u296F\u29A6\u045F\u27FF\u2A77\u2251\xE9\u2A6E\u011B\u2256\xEA\u2255\u044D\u0117\u2147\u2252\u{1D522}\u2A9A\xE8\u2A96\u2A98\u2A99\u23E7\u2113\u2A95\u2A97\u0113\u2205\u2205\u2205\u2003\u2004\u2005\u014B\u2002\u0119\u{1D556}\u22D5\u29E3\u2A71\u03B5\u03B5\u03F5\u2256\u2255\u2242\u2A96\u2A95=\u225F\u2261\u2A78\u29E5\u2253\u2971\u212F\u2250\u2242\u03B7\xF0\xEB\u20AC!\u2203\u2130\u2147\u2252\u0444\u2640\uFB03\uFB00\uFB04\u{1D523}\uFB01fj\u266D\uFB02\u25B1\u0192\u{1D557}\u2200\u22D4\u2AD9\u2A0D\xBD\u2153\xBC\u2155\u2159\u215B\u2154\u2156\xBE\u2157\u215C\u2158\u215A\u215D\u215E\u2044\u2322\u{1D4BB}\u2267\u2A8C\u01F5\u03B3\u03DD\u2A86\u011F\u011D\u0433\u0121\u2265\u22DB\u2265\u2267\u2A7E\u2A7E\u2AA9\u2A80\u2A82\u2A84\u22DB\uFE00\u2A94\u{1D524}\u226B\u22D9\u2137\u0453\u2277\u2A92\u2AA5\u2AA4\u2269\u2A8A\u2A8A\u2A88\u2A88\u2269\u22E7\u{1D558}`\u210A\u2273\u2A8E\u2A90>\u2AA7\u2A7A\u22D7\u2995\u2A7C\u2A86\u2978\u22D7\u22DB\u2A8C\u2277\u2273\u2269\uFE00\u2269\uFE00\u21D4\u200A\xBD\u210B\u044A\u2194\u2948\u21AD\u210F\u0125\u2665\u2665\u2026\u22B9\u{1D525}\u2925\u2926\u21FF\u223B\u21A9\u21AA\u{1D559}\u2015\u{1D4BD}\u210F\u0127\u2043\u2010\xED\u2063\xEE\u0438\u0435\xA1\u21D4\u{1D526}\xEC\u2148\u2A0C\u222D\u29DC\u2129\u0133\u012B\u2111\u2110\u2111\u0131\u22B7\u01B5\u2208\u2105\u221E\u29DD\u0131\u222B\u22BA\u2124\u22BA\u2A17\u2A3C\u0451\u012F\u{1D55A}\u03B9\u2A3C\xBF\u{1D4BE}\u2208\u22F9\u22F5\u22F4\u22F3\u2208\u2062\u0129\u0456\xEF\u0135\u0439\u{1D527}\u0237\u{1D55B}\u{1D4BF}\u0458\u0454\u03BA\u03F0\u0137\u043A\u{1D528}\u0138\u0445\u045C\u{1D55C}\u{1D4C0}\u21DA\u21D0\u291B\u290E\u2266\u2A8B\u2962\u013A\u29B4\u2112\u03BB\u27E8\u2991\u27E8\u2A85\xAB\u2190\u21E4\u291F\u291D\u21A9\u21AB\u2939\u2973\u21A2\u2AAB\u2919\u2AAD\u2AAD\uFE00\u290C\u2772{[\u298B\u298F\u298D\u013E\u013C\u2308{\u043B\u2936\u201C\u201E\u2967\u294B\u21B2\u2264\u2190\u21A2\u21BD\u21BC\u21C7\u2194\u21C6\u21CB\u21AD\u22CB\u22DA\u2264\u2266\u2A7D\u2A7D\u2AA8\u2A7F\u2A81\u2A83\u22DA\uFE00\u2A93\u2A85\u22D6\u22DA\u2A8B\u2276\u2272\u297C\u230A\u{1D529}\u2276\u2A91\u21BD\u21BC\u296A\u2584\u0459\u226A\u21C7\u231E\u296B\u25FA\u0140\u23B0\u23B0\u2268\u2A89\u2A89\u2A87\u2A87\u2268\u22E6\u27EC\u21FD\u27E6\u27F5\u27F7\u27FC\u27F6\u21AB\u21AC\u2985\u{1D55D}\u2A2D\u2A34\u2217_\u25CA\u25CA\u29EB(\u2993\u21C6\u231F\u21CB\u296D\u200E\u22BF\u2039\u{1D4C1}\u21B0\u2272\u2A8D\u2A8F[\u2018\u201A\u0142<\u2AA6\u2A79\u22D6\u22CB\u22C9\u2976\u2A7B\u2996\u25C3\u22B4\u25C2\u294A\u2966\u2268\uFE00\u2268\uFE00\u223A\xAF\u2642\u2720\u2720\u21A6\u21A6\u21A7\u21A4\u21A5\u25AE\u2A29\u043C\u2014\u2221\u{1D52A}\u2127\xB5\u2223*\u2AF0\xB7\u2212\u229F\u2238\u2A2A\u2ADB\u2026\u2213\u22A7\u{1D55E}\u2213\u{1D4C2}\u223E\u03BC\u22B8\u22B8\u22D9\u0338\u226B\u20D2\u226B\u0338\u21CD\u21CE\u22D8\u0338\u226A\u20D2\u226A\u0338\u21CF\u22AF\u22AE\u2207\u0144\u2220\u20D2\u2249\u2A70\u0338\u224B\u0338\u0149\u2249\u266E\u266E\u2115\xA0\u224E\u0338\u224F\u0338\u2A43\u0148\u0146\u2247\u2A6D\u0338\u2A42\u043D\u2013\u2260\u21D7\u2924\u2197\u2197\u2250\u0338\u2262\u2928\u2242\u0338\u2204\u2204\u{1D52B}\u2267\u0338\u2271\u2271\u2267\u0338\u2A7E\u0338\u2A7E\u0338\u2275\u226F\u226F\u21CE\u21AE\u2AF2\u220B\u22FC\u22FA\u220B\u045A\u21CD\u2266\u0338\u219A\u2025\u2270\u219A\u21AE\u2270\u2266\u0338\u2A7D\u0338\u2A7D\u0338\u226E\u2274\u226E\u22EA\u22EC\u2224\u{1D55F}\xAC\u2209\u22F9\u0338\u22F5\u0338\u2209\u22F7\u22F6\u220C\u220C\u22FE\u22FD\u2226\u2226\u2AFD\u20E5\u2202\u0338\u2A14\u2280\u22E0\u2AAF\u0338\u2280\u2AAF\u0338\u21CF\u219B\u2933\u0338\u219D\u0338\u219B\u22EB\u22ED\u2281\u22E1\u2AB0\u0338\u{1D4C3}\u2224\u2226\u2241\u2244\u2244\u2224\u2226\u22E2\u22E3\u2284\u2AC5\u0338\u2288\u2282\u20D2\u2288\u2AC5\u0338\u2281\u2AB0\u0338\u2285\u2AC6\u0338\u2289\u2283\u20D2\u2289\u2AC6\u0338\u2279\xF1\u2278\u22EA\u22EC\u22EB\u22ED\u03BD#\u2116\u2007\u22AD\u2904\u224D\u20D2\u22AC\u2265\u20D2>\u20D2\u29DE\u2902\u2264\u20D2<\u20D2\u22B4\u20D2\u2903\u22B5\u20D2\u223C\u20D2\u21D6\u2923\u2196\u2196\u2927\u24C8\xF3\u229B\u229A\xF4\u043E\u229D\u0151\u2A38\u2299\u29BC\u0153\u29BF\u{1D52C}\u02DB\xF2\u29C1\u29B5\u03A9\u222E\u21BA\u29BE\u29BB\u203E\u29C0\u014D\u03C9\u03BF\u29B6\u2296\u{1D560}\u29B7\u29B9\u2295\u2228\u21BB\u2A5D\u2134\u2134\xAA\xBA\u22B6\u2A56\u2A57\u2A5B\u2134\xF8\u2298\xF5\u2297\u2A36\xF6\u233D\u2225\xB6\u2225\u2AF3\u2AFD\u2202\u043F%.\u2030\u22A5\u2031\u{1D52D}\u03C6\u03D5\u2133\u260E\u03C0\u22D4\u03D6\u210F\u210E\u210F+\u2A23\u229E\u2A22\u2214\u2A25\u2A72\xB1\u2A26\u2A27\xB1\u2A15\u{1D561}\xA3\u227A\u2AB3\u2AB7\u227C\u2AAF\u227A\u2AB7\u227C\u2AAF\u2AB9\u2AB5\u22E8\u227E\u2032\u2119\u2AB5\u2AB9\u22E8\u220F\u232E\u2312\u2313\u221D\u221D\u227E\u22B0\u{1D4C5}\u03C8\u2008\u{1D52E}\u2A0C\u{1D562}\u2057\u{1D4C6}\u210D\u2A16?\u225F"\u21DB\u21D2\u291C\u290F\u2964\u223D\u0331\u0155\u221A\u29B3\u27E9\u2992\u29A5\u27E9\xBB\u2192\u2975\u21E5\u2920\u2933\u291E\u21AA\u21AC\u2945\u2974\u21A3\u219D\u291A\u2236\u211A\u290D\u2773}]\u298C\u298E\u2990\u0159\u0157\u2309}\u0440\u2937\u2969\u201D\u201D\u21B3\u211C\u211B\u211C\u211D\u25AD\xAE\u297D\u230B\u{1D52F}\u21C1\u21C0\u296C\u03C1\u03F1\u2192\u21A3\u21C1\u21C0\u21C4\u21CC\u21C9\u219D\u22CC\u02DA\u2253\u21C4\u21CC\u200F\u23B1\u23B1\u2AEE\u27ED\u21FE\u27E7\u2986\u{1D563}\u2A2E\u2A35)\u2994\u2A12\u21C9\u203A\u{1D4C7}\u21B1]\u2019\u2019\u22CC\u22CA\u25B9\u22B5\u25B8\u29CE\u2968\u211E\u015B\u201A\u227B\u2AB4\u2AB8\u0161\u227D\u2AB0\u015F\u015D\u2AB6\u2ABA\u22E9\u2A13\u227F\u0441\u22C5\u22A1\u2A66\u21D8\u2925\u2198\u2198\xA7;\u2929\u2216\u2216\u2736\u{1D530}\u2322\u266F\u0449\u0448\u2223\u2225\xAD\u03C3\u03C2\u03C2\u223C\u2A6A\u2243\u2243\u2A9E\u2AA0\u2A9D\u2A9F\u2246\u2A24\u2972\u2190\u2216\u2A33\u29E4\u2223\u2323\u2AAA\u2AAC\u2AAC\uFE00\u044C/\u29C4\u233F\u{1D564}\u2660\u2660\u2225\u2293\u2293\uFE00\u2294\u2294\uFE00\u228F\u2291\u228F\u2291\u2290\u2292\u2290\u2292\u25A1\u25A1\u25AA\u25AA\u2192\u{1D4C8}\u2216\u2323\u22C6\u2606\u2605\u03F5\u03D5\xAF\u2282\u2AC5\u2ABD\u2286\u2AC3\u2AC1\u2ACB\u228A\u2ABF\u2979\u2282\u2286\u2AC5\u228A\u2ACB\u2AC7\u2AD5\u2AD3\u227B\u2AB8\u227D\u2AB0\u2ABA\u2AB6\u22E9\u227F\u2211\u266A\u2283\xB9\xB2\xB3\u2AC6\u2ABE\u2AD8\u2287\u2AC4\u27C9\u2AD7\u297B\u2AC2\u2ACC\u228B\u2AC0\u2283\u2287\u2AC6\u228B\u2ACC\u2AC8\u2AD4\u2AD6\u21D9\u2926\u2199\u2199\u292A\xDF\u2316\u03C4\u23B4\u0165\u0163\u0442\u20DB\u2315\u{1D531}\u2234\u2234\u03B8\u03D1\u03D1\u2248\u223C\u2009\u2248\u223C\xFE\u02DC\xD7\u22A0\u2A31\u2A30\u222D\u2928\u22A4\u2336\u2AF1\u{1D565}\u2ADA\u2929\u2034\u2122\u25B5\u25BF\u25C3\u22B4\u225C\u25B9\u22B5\u25EC\u225C\u2A3A\u2A39\u29CD\u2A3B\u23E2\u{1D4C9}\u0446\u045B\u0167\u226C\u219E\u21A0\u21D1\u2963\xFA\u2191\u045E\u016D\xFB\u0443\u21C5\u0171\u296E\u297E\u{1D532}\xF9\u21BF\u21BE\u2580\u231C\u231C\u230F\u25F8\u016B\xA8\u0173\u{1D566}\u2191\u2195\u21BF\u21BE\u228E\u03C5\u03D2\u03C5\u21C8\u231D\u231D\u230E\u016F\u25F9\u{1D4CA}\u22F0\u0169\u25B5\u25B4\u21C8\xFC\u29A7\u21D5\u2AE8\u2AE9\u22A8\u299C\u03F5\u03F0\u2205\u03D5\u03D6\u221D\u2195\u03F1\u03C2\u228A\uFE00\u2ACB\uFE00\u228B\uFE00\u2ACC\uFE00\u03D1\u22B2\u22B3\u0432\u22A2\u2228\u22BB\u225A\u22EE||\u{1D533}\u22B2\u2282\u20D2\u2283\u20D2\u{1D567}\u221D\u22B3\u{1D4CB}\u2ACB\uFE00\u228A\uFE00\u2ACC\uFE00\u228B\uFE00\u299A\u0175\u2A5F\u2227\u2259\u2118\u{1D534}\u{1D568}\u2118\u2240\u2240\u{1D4CC}\u22C2\u25EF\u22C3\u25BD\u{1D535}\u27FA\u27F7\u03BE\u27F8\u27F5\u27FC\u22FB\u2A00\u{1D569}\u2A01\u2A02\u27F9\u27F6\u{1D4CD}\u2A06\u2A04\u25B3\u22C1\u22C0\xFD\u044F\u0177\u044B\xA5\u{1D536}\u0457\u{1D56A}\u{1D4CE}\u044E\xFF\u017A\u017E\u0437\u017C\u2128\u03B6\u{1D537}\u0436\u21DD\u{1D56B}\u{1D4CF}\u200D\u200C'];
+
+// ../../../../node_modules/.pnpm/entities@9.0.0/node_modules/entities/dist/internal/decode-data-format.js
+var META_BIAS = 35;
+var HEADER_BIAS = 48;
+var HEADER_LENGTH = 6;
+var CHOICE_BITS_PER_CHAR = 6;
+var BUCKET_HASH_1 = 2654435761;
+var BUCKET_HASH_2 = 2246822507;
+var PAIR_TABLE_SIZE = 1024;
+var CHAR_REMAP = (() => {
+  const remap = new Uint8Array(128);
+  for (let code = 48; code <= 57; code++)
+    remap[code] = code - 47;
+  for (let code = 65; code <= 90; code++)
+    remap[code] = code - 54;
+  for (let code = 97; code <= 122; code++)
+    remap[code] = code - 60;
+  return remap;
+})();
+function exactKey(text3, nameStart, length) {
+  return text3.charCodeAt(nameStart) << 25 | text3.charCodeAt(nameStart + 1) << 18 | text3.charCodeAt(nameStart + length - 2) << 11 | CHAR_REMAP[text3.charCodeAt(nameStart + length - 1)] << 5 | length;
+}
+function pairIndex(c0, c12) {
+  return (c0 * 3 << 3 ^ c12) & PAIR_TABLE_SIZE - 1;
+}
+function bucketOne(key, buckets) {
+  return (Math.imul(key, BUCKET_HASH_1) >>> 16) * buckets >>> 16;
+}
+function bucketTwo(key, buckets) {
+  return (Math.imul(key, BUCKET_HASH_2) >>> 16) * buckets >>> 16;
+}
+function initDecodeData(packed) {
+  const [data, values] = packed;
+  const nameCount = data.charCodeAt(0) - HEADER_BIAS << 6 | data.charCodeAt(1) - HEADER_BIAS;
+  const suffixesLength = data.charCodeAt(2) - HEADER_BIAS << 6 | data.charCodeAt(3) - HEADER_BIAS;
+  const buckets = data.charCodeAt(4) - HEADER_BIAS << 6 | data.charCodeAt(5) - HEADER_BIAS;
+  const metaStart = HEADER_LENGTH + suffixesLength;
+  const choicesStart = metaStart + 2 * nameCount;
+  const slotCount = 2 * buckets;
+  const keys = new Int32Array(slotCount);
+  const slotMidOff = new Uint16Array(slotCount);
+  const slotValue = new Uint16Array(slotCount);
+  const lengthBits = new Uint32Array(PAIR_TABLE_SIZE);
+  const middleOffsets = /* @__PURE__ */ new Map();
+  const middles = [];
+  let name = "";
+  let suffixOffset = HEADER_LENGTH;
+  let valueOffset = 0;
+  for (let index = 0; index < nameCount; index++) {
+    const meta0 = data.charCodeAt(metaStart + 2 * index) - META_BIAS;
+    const meta1 = data.charCodeAt(metaStart + 2 * index + 1) - META_BIAS;
+    const prefixLength = meta0 & 31;
+    const length = prefixLength + (meta1 & 31);
+    const valueLength = (meta1 >> 5) + 1;
+    name = name.slice(0, prefixLength) + data.slice(suffixOffset, suffixOffset + length - prefixLength);
+    suffixOffset += length - prefixLength;
+    const key = exactKey(name, 0, length);
+    const choice = data.charCodeAt(choicesStart + Math.floor(index / CHOICE_BITS_PER_CHAR)) - HEADER_BIAS & 1 << index % CHOICE_BITS_PER_CHAR;
+    let slot = 2 * (choice === 0 ? bucketOne : bucketTwo)(key, buckets);
+    if (keys[slot] !== 0)
+      slot += 1;
+    keys[slot] = key;
+    if (length > 4) {
+      const middle = name.slice(2, length - 2);
+      const existing = middleOffsets.get(middle);
+      if (existing === void 0) {
+        middleOffsets.set(middle, middles.length);
+        slotMidOff[slot] = middles.length;
+        for (let middleIndex = 0; middleIndex < middle.length; middleIndex += 2) {
+          middles.push(middle.charCodeAt(middleIndex) | middle.charCodeAt(middleIndex + 1) << 16);
+        }
+      } else {
+        slotMidOff[slot] = existing;
+      }
+    }
+    const pair = pairIndex(name.charCodeAt(0), name.charCodeAt(1));
+    lengthBits[pair] |= length <= 16 ? 1 << length - 2 : 32768;
+    if ((meta0 & 32) !== 0) {
+      lengthBits[pair] |= 1 << length - 2 + 16;
+    }
+    slotValue[slot] = valueOffset << 2 | valueLength - 1 | (meta0 & 32) >> 4;
+    valueOffset += valueLength;
+  }
+  return {
+    keys,
+    buckets,
+    slotMidOff,
+    slotValue,
+    values,
+    lengthBits,
+    middles: new Uint32Array(middles)
+  };
+}
+
+// ../../../../node_modules/.pnpm/entities@9.0.0/node_modules/entities/dist/decode.js
+var CHAR_NUM = 35;
+var CHAR_SEMI = 59;
+var CHAR_EQUALS = 61;
+var CHAR_ZERO = 48;
+var CHAR_LOWER_A = 97;
+var CHAR_LOWER_X = 120;
+var CHAR_UPPER_A = 65;
+var TO_LOWER_BIT = 32;
+function isNumber(code) {
+  return code - CHAR_ZERO >>> 0 <= 9;
+}
+function isAlphaNumeric(code) {
+  return isNumber(code) || (code | TO_LOWER_BIT) - CHAR_LOWER_A >>> 0 <= 25;
+}
+function isEntityInAttributeInvalidEnd(code) {
+  return code === CHAR_EQUALS || isAlphaNumeric(code);
+}
+var DecodingMode;
+(function(DecodingMode2) {
+  DecodingMode2[DecodingMode2["Legacy"] = 0] = "Legacy";
+  DecodingMode2[DecodingMode2["Strict"] = 1] = "Strict";
+  DecodingMode2[DecodingMode2["Attribute"] = 2] = "Attribute";
+})(DecodingMode || (DecodingMode = {}));
+var htmlDecode = /* @__PURE__ */ initDecodeData(htmlDecodeData);
+var htmlKeys = /* @__PURE__ */ (() => htmlDecode.keys)();
+var htmlBuckets = /* @__PURE__ */ (() => htmlDecode.buckets)();
+var htmlSlotMidOff = /* @__PURE__ */ (() => htmlDecode.slotMidOff)();
+var htmlLengthBits = /* @__PURE__ */ (() => htmlDecode.lengthBits)();
+var htmlMiddles = /* @__PURE__ */ (() => htmlDecode.middles)();
+var htmlSlotValue = /* @__PURE__ */ (() => htmlDecode.slotValue)();
+var htmlValues = /* @__PURE__ */ (() => htmlDecode.values)();
+function findSlotHtml(text3, start, length) {
+  const c0 = text3.charCodeAt(start);
+  const c12 = text3.charCodeAt(start + 1);
+  const c2 = text3.charCodeAt(start + length - 2);
+  const c3 = text3.charCodeAt(start + length - 1);
+  if ((c0 | c12 | c2 | c3) > 127)
+    return -1;
+  const key = c0 << 25 | c12 << 18 | c2 << 11 | CHAR_REMAP[c3] << 5 | length;
+  let slot = 2 * ((Math.imul(key, BUCKET_HASH_1) >>> 16) * htmlBuckets >>> 16);
+  for (let attempt = 0; ; attempt++) {
+    if (htmlKeys[slot] === key && (length <= 4 || isMidMatchHtml(slot, text3, start, length))) {
+      return slot;
+    }
+    if (htmlKeys[slot + 1] === key && (length <= 4 || isMidMatchHtml(slot + 1, text3, start, length))) {
+      return slot + 1;
+    }
+    if (attempt === 1)
+      return -1;
+    slot = 2 * ((Math.imul(key, BUCKET_HASH_2) >>> 16) * htmlBuckets >>> 16);
+  }
+}
+function isMidMatchHtml(slot, text3, start, length) {
+  let wordIndex = htmlSlotMidOff[slot];
+  let index = start + 2;
+  const end2 = start + length - 2;
+  while (index + 1 < end2) {
+    if ((text3.charCodeAt(index) | text3.charCodeAt(index + 1) << 16) !== htmlMiddles[wordIndex++])
+      return false;
+    index += 2;
+  }
+  return index === end2 || text3.charCodeAt(index) === (htmlMiddles[wordIndex] & 65535);
+}
+var numericDigits = /* @__PURE__ */ (() => {
+  const digits = new Uint8Array(128).fill(255);
+  for (let digit = 0; digit < 10; digit++) {
+    digits[CHAR_ZERO + digit] = digit;
+  }
+  for (let digit = 0; digit < 6; digit++) {
+    digits[CHAR_UPPER_A + digit] = digit + 10;
+    digits[CHAR_LOWER_A + digit] = digit + 10;
+  }
+  return digits;
+})();
+function findLegacySlot(input, start, maxLength) {
+  let legacy = htmlLengthBits[pairIndex(input.charCodeAt(start), input.charCodeAt(start + 1))] >>> 16 & 31;
+  while (legacy !== 0) {
+    const top = 31 - Math.clz32(legacy);
+    legacy ^= 1 << top;
+    if (top + 2 > maxLength)
+      continue;
+    const slot = findSlotHtml(input, start, top + 2);
+    if (slot >= 0 && (htmlSlotValue[slot] & 2) !== 0) {
+      return slot << 3 | top + 2;
+    }
+  }
+  return -1;
+}
+function findLongClassMatch(input, start, mode) {
+  const length = input.slice(start, start + 32).indexOf(";");
+  if (length - 2 >>> 0 <= 29) {
+    const slot = findSlotHtml(input, start, length);
+    if (slot >= 0)
+      return slot << 6 | length + 1;
+  }
+  if (mode !== DecodingMode.Strict) {
+    const packed = findLegacySlot(input, start, Math.min(31, input.length - start));
+    if (packed >= 0) {
+      const length2 = packed & 7;
+      if (mode !== DecodingMode.Attribute || start + length2 >= input.length || !isEntityInAttributeInvalidEnd(input.charCodeAt(start + length2)))
+        return packed >> 3 << 6 | length2;
+    }
+  }
+  return -1;
+}
+var STATE_ENTITY_START = 0;
+var STATE_NUMERIC_START = 1;
+var STATE_NUMERIC_DECIMAL = 2;
+var STATE_NUMERIC_HEX = 3;
+var STATE_NAMED_ENTITY = 4;
+var EntityDecoderBase = class {
+  emitCodePoint;
+  errors;
+  /** The current state of the decoder. */
+  state = STATE_ENTITY_START;
+  /** Characters that were consumed while parsing an entity. */
+  consumed = 1;
+  /** Accumulated numeric code point, or a packed partial XML name. */
+  result = 0;
+  /** The mode in which the decoder is operating. */
+  decodeMode = DecodingMode.Strict;
+  /** Replacement rules for numeric character references. */
+  replaceNumericCodePoint = replaceCodePoint;
+  constructor(emitCodePoint, errors) {
+    this.emitCodePoint = emitCodePoint;
+    this.errors = errors;
+  }
+  /**
+   * Switches between the numeric decimal and hexadecimal states.
+   *
+   * Equivalent to the `Numeric character reference state` in the HTML spec.
+   * @param input The string containing the entity (or a continuation of the entity).
+   * @param offset The current offset.
+   * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
+   */
+  stateNumericStart(input, offset) {
+    if (offset >= input.length) {
+      return -1;
+    }
+    if ((input.charCodeAt(offset) | TO_LOWER_BIT) === CHAR_LOWER_X) {
+      this.state = STATE_NUMERIC_HEX;
+      this.consumed += 1;
+      return this.stateNumericHex(input, offset + 1);
+    }
+    this.state = STATE_NUMERIC_DECIMAL;
+    return this.stateNumericDecimal(input, offset);
+  }
+  /**
+   * Parses a hexadecimal numeric entity.
+   *
+   * Equivalent to the `Hexadecimal character reference state` in the HTML spec.
+   * @param input The string containing the entity (or a continuation of the entity).
+   * @param offset The current offset.
+   * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
+   */
+  stateNumericHex(input, offset) {
+    const inputLength = input.length;
+    let { result, consumed } = this;
+    let index = offset;
+    while (index < inputLength) {
+      const char = input.charCodeAt(index);
+      const digit = numericDigits[char];
+      if (digit <= 15) {
+        result = result * 16 + digit;
+      } else {
+        this.result = result;
+        this.consumed = consumed;
+        return this.emitNumericEntity(char, 3);
+      }
+      consumed += 1;
+      index += 1;
+    }
+    this.result = result;
+    this.consumed = consumed;
+    return -1;
+  }
+  /**
+   * Parses a decimal numeric entity.
+   *
+   * Equivalent to the `Decimal character reference state` in the HTML spec.
+   * @param input The string containing the entity (or a continuation of the entity).
+   * @param offset The current offset.
+   * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
+   */
+  stateNumericDecimal(input, offset) {
+    const inputLength = input.length;
+    let { result, consumed } = this;
+    let index = offset;
+    while (index < inputLength) {
+      const digit = input.charCodeAt(index) - CHAR_ZERO;
+      if (digit >>> 0 > 9) {
+        this.result = result;
+        this.consumed = consumed;
+        return this.emitNumericEntity(digit + CHAR_ZERO, 2);
+      }
+      result = result * 10 + digit;
+      consumed += 1;
+      index += 1;
+    }
+    this.result = result;
+    this.consumed = consumed;
+    return -1;
+  }
+  /**
+   * Validate and emit a numeric entity.
+   *
+   * Implements the logic from the `Hexadecimal character reference start
+   * state` and `Numeric character reference end state` in the HTML spec.
+   * @param lastCp The last code point of the entity. Used to see if the
+   *               entity was terminated with a semicolon.
+   * @param expectedLength The minimum number of characters that should be
+   *                       consumed. Used to validate that at least one digit
+   *                       was consumed.
+   * @returns The number of characters that were consumed.
+   */
+  emitNumericEntity(lastCp, expectedLength) {
+    if (this.consumed <= expectedLength) {
+      this.errors?.absenceOfDigitsInNumericCharacterReference(this.consumed);
+      return 0;
+    }
+    if (lastCp === CHAR_SEMI) {
+      this.consumed += 1;
+    } else if (this.decodeMode === DecodingMode.Strict) {
+      return 0;
+    }
+    this.emitCodePoint(this.replaceNumericCodePoint(this.result), this.consumed);
+    if (this.errors) {
+      if (lastCp !== CHAR_SEMI) {
+        this.errors.missingSemicolonAfterCharacterReference();
+      }
+      this.errors.validateNumericCharacterReference(this.result);
+    }
+    return this.consumed;
+  }
+  /**
+   * Resets the instance to make it reusable.
+   * @param decodeMode Entity decoding mode to use.
+   */
+  startEntity(decodeMode) {
+    this.decodeMode = decodeMode;
+    this.state = STATE_ENTITY_START;
+    this.result = 0;
+    this.consumed = 1;
+  }
+  /**
+   * Write an entity to the decoder. This can be called multiple times with partial entities.
+   * If the entity is incomplete, the decoder will return -1.
+   * @param input The string containing the entity (or a continuation of the entity).
+   * @param offset The offset at which the entity begins. Should be 0 if this is not the first call.
+   * @returns The number of characters that were consumed, or -1 if the entity is incomplete.
+   */
+  write(input, offset) {
+    switch (this.state) {
+      case STATE_ENTITY_START: {
+        if (input.charCodeAt(offset) === CHAR_NUM) {
+          this.state = STATE_NUMERIC_START;
+          this.consumed += 1;
+          return this.stateNumericStart(input, offset + 1);
+        }
+        this.state = STATE_NAMED_ENTITY;
+        return this.stateNamedEntity(input, offset);
+      }
+      case STATE_NUMERIC_START: {
+        return this.stateNumericStart(input, offset);
+      }
+      case STATE_NUMERIC_DECIMAL: {
+        return this.stateNumericDecimal(input, offset);
+      }
+      case STATE_NUMERIC_HEX: {
+        return this.stateNumericHex(input, offset);
+      }
+      default: {
+        return this.stateNamedEntity(input, offset);
+      }
+    }
+  }
+  /**
+   * Signal to the parser that the end of the input was reached.
+   *
+   * Remaining data will be emitted and relevant errors will be produced.
+   * @returns The number of characters consumed.
+   */
+  end() {
+    switch (this.state) {
+      case STATE_NAMED_ENTITY: {
+        return this.endNamedEntity();
+      }
+      // Otherwise, emit a numeric entity if we have one.
+      case STATE_NUMERIC_DECIMAL: {
+        return this.emitNumericEntity(0, 2);
+      }
+      case STATE_NUMERIC_HEX: {
+        return this.emitNumericEntity(0, 3);
+      }
+      case STATE_NUMERIC_START: {
+        this.errors?.absenceOfDigitsInNumericCharacterReference(this.consumed);
+        return 0;
+      }
+      default: {
+        return 0;
+      }
+    }
+  }
+};
+var HtmlEntityDecoder = class extends EntityDecoderBase {
+  /** Total name characters seen for the current named entity. */
+  runLength = 0;
+  /** Reused for ASCII alphanumerics; the 32nd character rules out an exact match. */
+  nameBuffer = new Uint8Array(32);
+  /**
+   * Emit the replacement for a matched slot. Values are at most two
+   * UTF-16 code units; like previous versions, each unit is emitted as
+   * its own callback (surrogate halves included).
+   * @param slot The matched slot.
+   */
+  emitSlot(slot) {
+    const packed = htmlSlotValue[slot];
+    const off = packed >> 2;
+    this.emitCodePoint(htmlValues.charCodeAt(off), this.consumed);
+    if ((packed & 1) !== 0) {
+      this.emitCodePoint(htmlValues.charCodeAt(off + 1), this.consumed);
+    }
+  }
+  startEntity(decodeMode) {
+    super.startEntity(decodeMode);
+    this.runLength = 0;
+  }
+  stateNamedEntity(input, offset) {
+    const inputLength = input.length;
+    if (this.runLength === 0 && offset + 17 <= inputLength) {
+      const c0 = input.charCodeAt(offset);
+      const pair = pairIndex(c0, input.charCodeAt(offset + 1));
+      const bits = htmlLengthBits[pair];
+      if ((bits & 32768) !== 0 && offset + 32 <= inputLength) {
+        const packed = findLongClassMatch(input, offset, this.decodeMode);
+        if (packed >= 0) {
+          const length = packed & 63;
+          this.consumed = length + 1;
+          this.emitSlot(packed >> 6);
+          if (input.charCodeAt(offset + length - 1) !== CHAR_SEMI) {
+            this.errors?.missingSemicolonAfterCharacterReference();
+          }
+          return this.consumed;
+        }
+        return 0;
+      }
+      let probed = bits & 32767;
+      while (probed !== 0) {
+        const low = probed & -probed;
+        probed ^= low;
+        const length = 33 - Math.clz32(low);
+        if (input.charCodeAt(offset + length) === CHAR_SEMI) {
+          const slot = findSlotHtml(input, offset, length);
+          if (slot >= 0) {
+            this.consumed = length + 2;
+            this.emitSlot(slot);
+            return this.consumed;
+          }
+        }
+      }
+      if ((bits & 32768) === 0) {
+        if (this.decodeMode !== DecodingMode.Strict) {
+          const packed = findLegacySlot(input, offset, 31);
+          if (packed >= 0) {
+            const matchLength = packed & 7;
+            const next = input.charCodeAt(offset + matchLength);
+            if (this.decodeMode === DecodingMode.Attribute && isEntityInAttributeInvalidEnd(next)) {
+              return 0;
+            }
+            this.consumed = matchLength + 1;
+            this.emitSlot(packed >> 3);
+            this.errors?.missingSemicolonAfterCharacterReference();
+            return this.consumed;
+          }
+        }
+        return 0;
+      }
+    }
+    let index = offset;
+    let { runLength } = this;
+    let terminator = -1;
+    const scanEnd = Math.min(inputLength, offset + 32 - runLength);
+    while (index < scanEnd) {
+      const char = input.charCodeAt(index);
+      if (!isAlphaNumeric(char)) {
+        terminator = char;
+        break;
+      }
+      this.nameBuffer[runLength++] = char;
+      index++;
+    }
+    if (terminator < 0 && runLength < 32) {
+      this.runLength = runLength;
+      return -1;
+    }
+    if (terminator === CHAR_SEMI && runLength - 2 >>> 0 <= 29) {
+      const slot = findBufferedHtmlSlot(this.nameBuffer, runLength);
+      if (slot >= 0) {
+        this.consumed = runLength + 2;
+        this.emitSlot(slot);
+        return this.consumed;
+      }
+    }
+    if (this.decodeMode !== DecodingMode.Strict && runLength >= 2) {
+      const packed = findBufferedLegacySlot(this.nameBuffer, runLength);
+      if (packed >= 0) {
+        const length = packed & 7;
+        const next = length < runLength ? this.nameBuffer[length] : terminator;
+        if (this.decodeMode === DecodingMode.Attribute && isEntityInAttributeInvalidEnd(next))
+          return 0;
+        this.consumed = length + 1;
+        this.emitSlot(packed >> 3);
+        this.errors?.missingSemicolonAfterCharacterReference();
+        return this.consumed;
+      }
+    }
+    return 0;
+  }
+  endNamedEntity() {
+    if (this.decodeMode === DecodingMode.Strict || this.runLength < 2) {
+      return 0;
+    }
+    const packed = findBufferedLegacySlot(this.nameBuffer, this.runLength);
+    if (packed < 0)
+      return 0;
+    if (this.decodeMode === DecodingMode.Attribute && (packed & 7) < this.runLength) {
+      return 0;
+    }
+    this.consumed = (packed & 7) + 1;
+    this.emitSlot(packed >> 3);
+    this.errors?.missingSemicolonAfterCharacterReference();
+    return this.consumed;
+  }
+};
+function findBufferedHtmlSlot(buffer, length) {
+  const key = buffer[0] << 25 | buffer[1] << 18 | buffer[length - 2] << 11 | CHAR_REMAP[buffer[length - 1]] << 5 | length;
+  let slot = 2 * ((Math.imul(key, BUCKET_HASH_1) >>> 16) * htmlBuckets >>> 16);
+  for (let attempt = 0; ; attempt++) {
+    if (htmlKeys[slot] === key && (length <= 4 || isBufferedMiddle(slot, buffer, length)))
+      return slot;
+    if (htmlKeys[slot + 1] === key && (length <= 4 || isBufferedMiddle(slot + 1, buffer, length)))
+      return slot + 1;
+    if (attempt === 1)
+      return -1;
+    slot = 2 * ((Math.imul(key, BUCKET_HASH_2) >>> 16) * htmlBuckets >>> 16);
+  }
+}
+function isBufferedMiddle(slot, buffer, length) {
+  let wordIndex = htmlSlotMidOff[slot];
+  let index = 2;
+  const end2 = length - 2;
+  while (index + 1 < end2) {
+    if ((buffer[index] | buffer[index + 1] << 16) !== htmlMiddles[wordIndex++])
+      return false;
+    index += 2;
+  }
+  return index === end2 || buffer[index] === (htmlMiddles[wordIndex] & 65535);
+}
+function findBufferedLegacySlot(buffer, length) {
+  let legacy = htmlLengthBits[pairIndex(buffer[0], buffer[1])] >>> 16 & 31;
+  while (legacy !== 0) {
+    const top = 31 - Math.clz32(legacy);
+    legacy ^= 1 << top;
+    if (top + 2 > length)
+      continue;
+    const slot = findBufferedHtmlSlot(buffer, top + 2);
+    if (slot >= 0 && (htmlSlotValue[slot] & 2) !== 0)
+      return slot << 3 | top + 2;
+  }
+  return -1;
+}
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/html.js
+var NS;
+(function(NS2) {
+  NS2["HTML"] = "http://www.w3.org/1999/xhtml";
+  NS2["MATHML"] = "http://www.w3.org/1998/Math/MathML";
+  NS2["SVG"] = "http://www.w3.org/2000/svg";
+  NS2["XLINK"] = "http://www.w3.org/1999/xlink";
+  NS2["XML"] = "http://www.w3.org/XML/1998/namespace";
+  NS2["XMLNS"] = "http://www.w3.org/2000/xmlns/";
+})(NS || (NS = {}));
+var ATTRS;
+(function(ATTRS2) {
+  ATTRS2["TYPE"] = "type";
+  ATTRS2["ACTION"] = "action";
+  ATTRS2["ENCODING"] = "encoding";
+  ATTRS2["PROMPT"] = "prompt";
+  ATTRS2["NAME"] = "name";
+  ATTRS2["COLOR"] = "color";
+  ATTRS2["FACE"] = "face";
+  ATTRS2["SIZE"] = "size";
+})(ATTRS || (ATTRS = {}));
+var DOCUMENT_MODE;
+(function(DOCUMENT_MODE2) {
+  DOCUMENT_MODE2["NO_QUIRKS"] = "no-quirks";
+  DOCUMENT_MODE2["QUIRKS"] = "quirks";
+  DOCUMENT_MODE2["LIMITED_QUIRKS"] = "limited-quirks";
+})(DOCUMENT_MODE || (DOCUMENT_MODE = {}));
+var TAG_NAMES;
+(function(TAG_NAMES2) {
+  TAG_NAMES2["A"] = "a";
+  TAG_NAMES2["ADDRESS"] = "address";
+  TAG_NAMES2["ANNOTATION_XML"] = "annotation-xml";
+  TAG_NAMES2["APPLET"] = "applet";
+  TAG_NAMES2["AREA"] = "area";
+  TAG_NAMES2["ARTICLE"] = "article";
+  TAG_NAMES2["ASIDE"] = "aside";
+  TAG_NAMES2["B"] = "b";
+  TAG_NAMES2["BASE"] = "base";
+  TAG_NAMES2["BASEFONT"] = "basefont";
+  TAG_NAMES2["BGSOUND"] = "bgsound";
+  TAG_NAMES2["BIG"] = "big";
+  TAG_NAMES2["BLOCKQUOTE"] = "blockquote";
+  TAG_NAMES2["BODY"] = "body";
+  TAG_NAMES2["BR"] = "br";
+  TAG_NAMES2["BUTTON"] = "button";
+  TAG_NAMES2["CAPTION"] = "caption";
+  TAG_NAMES2["CENTER"] = "center";
+  TAG_NAMES2["CODE"] = "code";
+  TAG_NAMES2["COL"] = "col";
+  TAG_NAMES2["COLGROUP"] = "colgroup";
+  TAG_NAMES2["DD"] = "dd";
+  TAG_NAMES2["DESC"] = "desc";
+  TAG_NAMES2["DETAILS"] = "details";
+  TAG_NAMES2["DIALOG"] = "dialog";
+  TAG_NAMES2["DIR"] = "dir";
+  TAG_NAMES2["DIV"] = "div";
+  TAG_NAMES2["DL"] = "dl";
+  TAG_NAMES2["DT"] = "dt";
+  TAG_NAMES2["EM"] = "em";
+  TAG_NAMES2["EMBED"] = "embed";
+  TAG_NAMES2["FIELDSET"] = "fieldset";
+  TAG_NAMES2["FIGCAPTION"] = "figcaption";
+  TAG_NAMES2["FIGURE"] = "figure";
+  TAG_NAMES2["FONT"] = "font";
+  TAG_NAMES2["FOOTER"] = "footer";
+  TAG_NAMES2["FOREIGN_OBJECT"] = "foreignObject";
+  TAG_NAMES2["FORM"] = "form";
+  TAG_NAMES2["FRAME"] = "frame";
+  TAG_NAMES2["FRAMESET"] = "frameset";
+  TAG_NAMES2["H1"] = "h1";
+  TAG_NAMES2["H2"] = "h2";
+  TAG_NAMES2["H3"] = "h3";
+  TAG_NAMES2["H4"] = "h4";
+  TAG_NAMES2["H5"] = "h5";
+  TAG_NAMES2["H6"] = "h6";
+  TAG_NAMES2["HEAD"] = "head";
+  TAG_NAMES2["HEADER"] = "header";
+  TAG_NAMES2["HGROUP"] = "hgroup";
+  TAG_NAMES2["HR"] = "hr";
+  TAG_NAMES2["HTML"] = "html";
+  TAG_NAMES2["I"] = "i";
+  TAG_NAMES2["IMG"] = "img";
+  TAG_NAMES2["IMAGE"] = "image";
+  TAG_NAMES2["INPUT"] = "input";
+  TAG_NAMES2["IFRAME"] = "iframe";
+  TAG_NAMES2["KEYGEN"] = "keygen";
+  TAG_NAMES2["LABEL"] = "label";
+  TAG_NAMES2["LI"] = "li";
+  TAG_NAMES2["LINK"] = "link";
+  TAG_NAMES2["LISTING"] = "listing";
+  TAG_NAMES2["MAIN"] = "main";
+  TAG_NAMES2["MALIGNMARK"] = "malignmark";
+  TAG_NAMES2["MARQUEE"] = "marquee";
+  TAG_NAMES2["MATH"] = "math";
+  TAG_NAMES2["MENU"] = "menu";
+  TAG_NAMES2["META"] = "meta";
+  TAG_NAMES2["MGLYPH"] = "mglyph";
+  TAG_NAMES2["MI"] = "mi";
+  TAG_NAMES2["MO"] = "mo";
+  TAG_NAMES2["MN"] = "mn";
+  TAG_NAMES2["MS"] = "ms";
+  TAG_NAMES2["MTEXT"] = "mtext";
+  TAG_NAMES2["NAV"] = "nav";
+  TAG_NAMES2["NOBR"] = "nobr";
+  TAG_NAMES2["NOFRAMES"] = "noframes";
+  TAG_NAMES2["NOEMBED"] = "noembed";
+  TAG_NAMES2["NOSCRIPT"] = "noscript";
+  TAG_NAMES2["OBJECT"] = "object";
+  TAG_NAMES2["OL"] = "ol";
+  TAG_NAMES2["OPTGROUP"] = "optgroup";
+  TAG_NAMES2["OPTION"] = "option";
+  TAG_NAMES2["P"] = "p";
+  TAG_NAMES2["PARAM"] = "param";
+  TAG_NAMES2["PLAINTEXT"] = "plaintext";
+  TAG_NAMES2["PRE"] = "pre";
+  TAG_NAMES2["RB"] = "rb";
+  TAG_NAMES2["RP"] = "rp";
+  TAG_NAMES2["RT"] = "rt";
+  TAG_NAMES2["RTC"] = "rtc";
+  TAG_NAMES2["RUBY"] = "ruby";
+  TAG_NAMES2["S"] = "s";
+  TAG_NAMES2["SCRIPT"] = "script";
+  TAG_NAMES2["SEARCH"] = "search";
+  TAG_NAMES2["SECTION"] = "section";
+  TAG_NAMES2["SELECT"] = "select";
+  TAG_NAMES2["SOURCE"] = "source";
+  TAG_NAMES2["SMALL"] = "small";
+  TAG_NAMES2["SPAN"] = "span";
+  TAG_NAMES2["STRIKE"] = "strike";
+  TAG_NAMES2["STRONG"] = "strong";
+  TAG_NAMES2["STYLE"] = "style";
+  TAG_NAMES2["SUB"] = "sub";
+  TAG_NAMES2["SUMMARY"] = "summary";
+  TAG_NAMES2["SUP"] = "sup";
+  TAG_NAMES2["TABLE"] = "table";
+  TAG_NAMES2["TBODY"] = "tbody";
+  TAG_NAMES2["TEMPLATE"] = "template";
+  TAG_NAMES2["TEXTAREA"] = "textarea";
+  TAG_NAMES2["TFOOT"] = "tfoot";
+  TAG_NAMES2["TD"] = "td";
+  TAG_NAMES2["TH"] = "th";
+  TAG_NAMES2["THEAD"] = "thead";
+  TAG_NAMES2["TITLE"] = "title";
+  TAG_NAMES2["TR"] = "tr";
+  TAG_NAMES2["TRACK"] = "track";
+  TAG_NAMES2["TT"] = "tt";
+  TAG_NAMES2["U"] = "u";
+  TAG_NAMES2["UL"] = "ul";
+  TAG_NAMES2["SVG"] = "svg";
+  TAG_NAMES2["VAR"] = "var";
+  TAG_NAMES2["WBR"] = "wbr";
+  TAG_NAMES2["XMP"] = "xmp";
+})(TAG_NAMES || (TAG_NAMES = {}));
+var TAG_ID;
+(function(TAG_ID2) {
+  TAG_ID2[TAG_ID2["UNKNOWN"] = 0] = "UNKNOWN";
+  TAG_ID2[TAG_ID2["A"] = 1] = "A";
+  TAG_ID2[TAG_ID2["ADDRESS"] = 2] = "ADDRESS";
+  TAG_ID2[TAG_ID2["ANNOTATION_XML"] = 3] = "ANNOTATION_XML";
+  TAG_ID2[TAG_ID2["APPLET"] = 4] = "APPLET";
+  TAG_ID2[TAG_ID2["AREA"] = 5] = "AREA";
+  TAG_ID2[TAG_ID2["ARTICLE"] = 6] = "ARTICLE";
+  TAG_ID2[TAG_ID2["ASIDE"] = 7] = "ASIDE";
+  TAG_ID2[TAG_ID2["B"] = 8] = "B";
+  TAG_ID2[TAG_ID2["BASE"] = 9] = "BASE";
+  TAG_ID2[TAG_ID2["BASEFONT"] = 10] = "BASEFONT";
+  TAG_ID2[TAG_ID2["BGSOUND"] = 11] = "BGSOUND";
+  TAG_ID2[TAG_ID2["BIG"] = 12] = "BIG";
+  TAG_ID2[TAG_ID2["BLOCKQUOTE"] = 13] = "BLOCKQUOTE";
+  TAG_ID2[TAG_ID2["BODY"] = 14] = "BODY";
+  TAG_ID2[TAG_ID2["BR"] = 15] = "BR";
+  TAG_ID2[TAG_ID2["BUTTON"] = 16] = "BUTTON";
+  TAG_ID2[TAG_ID2["CAPTION"] = 17] = "CAPTION";
+  TAG_ID2[TAG_ID2["CENTER"] = 18] = "CENTER";
+  TAG_ID2[TAG_ID2["CODE"] = 19] = "CODE";
+  TAG_ID2[TAG_ID2["COL"] = 20] = "COL";
+  TAG_ID2[TAG_ID2["COLGROUP"] = 21] = "COLGROUP";
+  TAG_ID2[TAG_ID2["DD"] = 22] = "DD";
+  TAG_ID2[TAG_ID2["DESC"] = 23] = "DESC";
+  TAG_ID2[TAG_ID2["DETAILS"] = 24] = "DETAILS";
+  TAG_ID2[TAG_ID2["DIALOG"] = 25] = "DIALOG";
+  TAG_ID2[TAG_ID2["DIR"] = 26] = "DIR";
+  TAG_ID2[TAG_ID2["DIV"] = 27] = "DIV";
+  TAG_ID2[TAG_ID2["DL"] = 28] = "DL";
+  TAG_ID2[TAG_ID2["DT"] = 29] = "DT";
+  TAG_ID2[TAG_ID2["EM"] = 30] = "EM";
+  TAG_ID2[TAG_ID2["EMBED"] = 31] = "EMBED";
+  TAG_ID2[TAG_ID2["FIELDSET"] = 32] = "FIELDSET";
+  TAG_ID2[TAG_ID2["FIGCAPTION"] = 33] = "FIGCAPTION";
+  TAG_ID2[TAG_ID2["FIGURE"] = 34] = "FIGURE";
+  TAG_ID2[TAG_ID2["FONT"] = 35] = "FONT";
+  TAG_ID2[TAG_ID2["FOOTER"] = 36] = "FOOTER";
+  TAG_ID2[TAG_ID2["FOREIGN_OBJECT"] = 37] = "FOREIGN_OBJECT";
+  TAG_ID2[TAG_ID2["FORM"] = 38] = "FORM";
+  TAG_ID2[TAG_ID2["FRAME"] = 39] = "FRAME";
+  TAG_ID2[TAG_ID2["FRAMESET"] = 40] = "FRAMESET";
+  TAG_ID2[TAG_ID2["H1"] = 41] = "H1";
+  TAG_ID2[TAG_ID2["H2"] = 42] = "H2";
+  TAG_ID2[TAG_ID2["H3"] = 43] = "H3";
+  TAG_ID2[TAG_ID2["H4"] = 44] = "H4";
+  TAG_ID2[TAG_ID2["H5"] = 45] = "H5";
+  TAG_ID2[TAG_ID2["H6"] = 46] = "H6";
+  TAG_ID2[TAG_ID2["HEAD"] = 47] = "HEAD";
+  TAG_ID2[TAG_ID2["HEADER"] = 48] = "HEADER";
+  TAG_ID2[TAG_ID2["HGROUP"] = 49] = "HGROUP";
+  TAG_ID2[TAG_ID2["HR"] = 50] = "HR";
+  TAG_ID2[TAG_ID2["HTML"] = 51] = "HTML";
+  TAG_ID2[TAG_ID2["I"] = 52] = "I";
+  TAG_ID2[TAG_ID2["IMG"] = 53] = "IMG";
+  TAG_ID2[TAG_ID2["IMAGE"] = 54] = "IMAGE";
+  TAG_ID2[TAG_ID2["INPUT"] = 55] = "INPUT";
+  TAG_ID2[TAG_ID2["IFRAME"] = 56] = "IFRAME";
+  TAG_ID2[TAG_ID2["KEYGEN"] = 57] = "KEYGEN";
+  TAG_ID2[TAG_ID2["LABEL"] = 58] = "LABEL";
+  TAG_ID2[TAG_ID2["LI"] = 59] = "LI";
+  TAG_ID2[TAG_ID2["LINK"] = 60] = "LINK";
+  TAG_ID2[TAG_ID2["LISTING"] = 61] = "LISTING";
+  TAG_ID2[TAG_ID2["MAIN"] = 62] = "MAIN";
+  TAG_ID2[TAG_ID2["MALIGNMARK"] = 63] = "MALIGNMARK";
+  TAG_ID2[TAG_ID2["MARQUEE"] = 64] = "MARQUEE";
+  TAG_ID2[TAG_ID2["MATH"] = 65] = "MATH";
+  TAG_ID2[TAG_ID2["MENU"] = 66] = "MENU";
+  TAG_ID2[TAG_ID2["META"] = 67] = "META";
+  TAG_ID2[TAG_ID2["MGLYPH"] = 68] = "MGLYPH";
+  TAG_ID2[TAG_ID2["MI"] = 69] = "MI";
+  TAG_ID2[TAG_ID2["MO"] = 70] = "MO";
+  TAG_ID2[TAG_ID2["MN"] = 71] = "MN";
+  TAG_ID2[TAG_ID2["MS"] = 72] = "MS";
+  TAG_ID2[TAG_ID2["MTEXT"] = 73] = "MTEXT";
+  TAG_ID2[TAG_ID2["NAV"] = 74] = "NAV";
+  TAG_ID2[TAG_ID2["NOBR"] = 75] = "NOBR";
+  TAG_ID2[TAG_ID2["NOFRAMES"] = 76] = "NOFRAMES";
+  TAG_ID2[TAG_ID2["NOEMBED"] = 77] = "NOEMBED";
+  TAG_ID2[TAG_ID2["NOSCRIPT"] = 78] = "NOSCRIPT";
+  TAG_ID2[TAG_ID2["OBJECT"] = 79] = "OBJECT";
+  TAG_ID2[TAG_ID2["OL"] = 80] = "OL";
+  TAG_ID2[TAG_ID2["OPTGROUP"] = 81] = "OPTGROUP";
+  TAG_ID2[TAG_ID2["OPTION"] = 82] = "OPTION";
+  TAG_ID2[TAG_ID2["P"] = 83] = "P";
+  TAG_ID2[TAG_ID2["PARAM"] = 84] = "PARAM";
+  TAG_ID2[TAG_ID2["PLAINTEXT"] = 85] = "PLAINTEXT";
+  TAG_ID2[TAG_ID2["PRE"] = 86] = "PRE";
+  TAG_ID2[TAG_ID2["RB"] = 87] = "RB";
+  TAG_ID2[TAG_ID2["RP"] = 88] = "RP";
+  TAG_ID2[TAG_ID2["RT"] = 89] = "RT";
+  TAG_ID2[TAG_ID2["RTC"] = 90] = "RTC";
+  TAG_ID2[TAG_ID2["RUBY"] = 91] = "RUBY";
+  TAG_ID2[TAG_ID2["S"] = 92] = "S";
+  TAG_ID2[TAG_ID2["SCRIPT"] = 93] = "SCRIPT";
+  TAG_ID2[TAG_ID2["SEARCH"] = 94] = "SEARCH";
+  TAG_ID2[TAG_ID2["SECTION"] = 95] = "SECTION";
+  TAG_ID2[TAG_ID2["SELECT"] = 96] = "SELECT";
+  TAG_ID2[TAG_ID2["SOURCE"] = 97] = "SOURCE";
+  TAG_ID2[TAG_ID2["SMALL"] = 98] = "SMALL";
+  TAG_ID2[TAG_ID2["SPAN"] = 99] = "SPAN";
+  TAG_ID2[TAG_ID2["STRIKE"] = 100] = "STRIKE";
+  TAG_ID2[TAG_ID2["STRONG"] = 101] = "STRONG";
+  TAG_ID2[TAG_ID2["STYLE"] = 102] = "STYLE";
+  TAG_ID2[TAG_ID2["SUB"] = 103] = "SUB";
+  TAG_ID2[TAG_ID2["SUMMARY"] = 104] = "SUMMARY";
+  TAG_ID2[TAG_ID2["SUP"] = 105] = "SUP";
+  TAG_ID2[TAG_ID2["TABLE"] = 106] = "TABLE";
+  TAG_ID2[TAG_ID2["TBODY"] = 107] = "TBODY";
+  TAG_ID2[TAG_ID2["TEMPLATE"] = 108] = "TEMPLATE";
+  TAG_ID2[TAG_ID2["TEXTAREA"] = 109] = "TEXTAREA";
+  TAG_ID2[TAG_ID2["TFOOT"] = 110] = "TFOOT";
+  TAG_ID2[TAG_ID2["TD"] = 111] = "TD";
+  TAG_ID2[TAG_ID2["TH"] = 112] = "TH";
+  TAG_ID2[TAG_ID2["THEAD"] = 113] = "THEAD";
+  TAG_ID2[TAG_ID2["TITLE"] = 114] = "TITLE";
+  TAG_ID2[TAG_ID2["TR"] = 115] = "TR";
+  TAG_ID2[TAG_ID2["TRACK"] = 116] = "TRACK";
+  TAG_ID2[TAG_ID2["TT"] = 117] = "TT";
+  TAG_ID2[TAG_ID2["U"] = 118] = "U";
+  TAG_ID2[TAG_ID2["UL"] = 119] = "UL";
+  TAG_ID2[TAG_ID2["SVG"] = 120] = "SVG";
+  TAG_ID2[TAG_ID2["VAR"] = 121] = "VAR";
+  TAG_ID2[TAG_ID2["WBR"] = 122] = "WBR";
+  TAG_ID2[TAG_ID2["XMP"] = 123] = "XMP";
+})(TAG_ID || (TAG_ID = {}));
+var TAG_NAME_TO_ID = /* @__PURE__ */ new Map([
+  [TAG_NAMES.A, TAG_ID.A],
+  [TAG_NAMES.ADDRESS, TAG_ID.ADDRESS],
+  [TAG_NAMES.ANNOTATION_XML, TAG_ID.ANNOTATION_XML],
+  [TAG_NAMES.APPLET, TAG_ID.APPLET],
+  [TAG_NAMES.AREA, TAG_ID.AREA],
+  [TAG_NAMES.ARTICLE, TAG_ID.ARTICLE],
+  [TAG_NAMES.ASIDE, TAG_ID.ASIDE],
+  [TAG_NAMES.B, TAG_ID.B],
+  [TAG_NAMES.BASE, TAG_ID.BASE],
+  [TAG_NAMES.BASEFONT, TAG_ID.BASEFONT],
+  [TAG_NAMES.BGSOUND, TAG_ID.BGSOUND],
+  [TAG_NAMES.BIG, TAG_ID.BIG],
+  [TAG_NAMES.BLOCKQUOTE, TAG_ID.BLOCKQUOTE],
+  [TAG_NAMES.BODY, TAG_ID.BODY],
+  [TAG_NAMES.BR, TAG_ID.BR],
+  [TAG_NAMES.BUTTON, TAG_ID.BUTTON],
+  [TAG_NAMES.CAPTION, TAG_ID.CAPTION],
+  [TAG_NAMES.CENTER, TAG_ID.CENTER],
+  [TAG_NAMES.CODE, TAG_ID.CODE],
+  [TAG_NAMES.COL, TAG_ID.COL],
+  [TAG_NAMES.COLGROUP, TAG_ID.COLGROUP],
+  [TAG_NAMES.DD, TAG_ID.DD],
+  [TAG_NAMES.DESC, TAG_ID.DESC],
+  [TAG_NAMES.DETAILS, TAG_ID.DETAILS],
+  [TAG_NAMES.DIALOG, TAG_ID.DIALOG],
+  [TAG_NAMES.DIR, TAG_ID.DIR],
+  [TAG_NAMES.DIV, TAG_ID.DIV],
+  [TAG_NAMES.DL, TAG_ID.DL],
+  [TAG_NAMES.DT, TAG_ID.DT],
+  [TAG_NAMES.EM, TAG_ID.EM],
+  [TAG_NAMES.EMBED, TAG_ID.EMBED],
+  [TAG_NAMES.FIELDSET, TAG_ID.FIELDSET],
+  [TAG_NAMES.FIGCAPTION, TAG_ID.FIGCAPTION],
+  [TAG_NAMES.FIGURE, TAG_ID.FIGURE],
+  [TAG_NAMES.FONT, TAG_ID.FONT],
+  [TAG_NAMES.FOOTER, TAG_ID.FOOTER],
+  [TAG_NAMES.FOREIGN_OBJECT, TAG_ID.FOREIGN_OBJECT],
+  [TAG_NAMES.FORM, TAG_ID.FORM],
+  [TAG_NAMES.FRAME, TAG_ID.FRAME],
+  [TAG_NAMES.FRAMESET, TAG_ID.FRAMESET],
+  [TAG_NAMES.H1, TAG_ID.H1],
+  [TAG_NAMES.H2, TAG_ID.H2],
+  [TAG_NAMES.H3, TAG_ID.H3],
+  [TAG_NAMES.H4, TAG_ID.H4],
+  [TAG_NAMES.H5, TAG_ID.H5],
+  [TAG_NAMES.H6, TAG_ID.H6],
+  [TAG_NAMES.HEAD, TAG_ID.HEAD],
+  [TAG_NAMES.HEADER, TAG_ID.HEADER],
+  [TAG_NAMES.HGROUP, TAG_ID.HGROUP],
+  [TAG_NAMES.HR, TAG_ID.HR],
+  [TAG_NAMES.HTML, TAG_ID.HTML],
+  [TAG_NAMES.I, TAG_ID.I],
+  [TAG_NAMES.IMG, TAG_ID.IMG],
+  [TAG_NAMES.IMAGE, TAG_ID.IMAGE],
+  [TAG_NAMES.INPUT, TAG_ID.INPUT],
+  [TAG_NAMES.IFRAME, TAG_ID.IFRAME],
+  [TAG_NAMES.KEYGEN, TAG_ID.KEYGEN],
+  [TAG_NAMES.LABEL, TAG_ID.LABEL],
+  [TAG_NAMES.LI, TAG_ID.LI],
+  [TAG_NAMES.LINK, TAG_ID.LINK],
+  [TAG_NAMES.LISTING, TAG_ID.LISTING],
+  [TAG_NAMES.MAIN, TAG_ID.MAIN],
+  [TAG_NAMES.MALIGNMARK, TAG_ID.MALIGNMARK],
+  [TAG_NAMES.MARQUEE, TAG_ID.MARQUEE],
+  [TAG_NAMES.MATH, TAG_ID.MATH],
+  [TAG_NAMES.MENU, TAG_ID.MENU],
+  [TAG_NAMES.META, TAG_ID.META],
+  [TAG_NAMES.MGLYPH, TAG_ID.MGLYPH],
+  [TAG_NAMES.MI, TAG_ID.MI],
+  [TAG_NAMES.MO, TAG_ID.MO],
+  [TAG_NAMES.MN, TAG_ID.MN],
+  [TAG_NAMES.MS, TAG_ID.MS],
+  [TAG_NAMES.MTEXT, TAG_ID.MTEXT],
+  [TAG_NAMES.NAV, TAG_ID.NAV],
+  [TAG_NAMES.NOBR, TAG_ID.NOBR],
+  [TAG_NAMES.NOFRAMES, TAG_ID.NOFRAMES],
+  [TAG_NAMES.NOEMBED, TAG_ID.NOEMBED],
+  [TAG_NAMES.NOSCRIPT, TAG_ID.NOSCRIPT],
+  [TAG_NAMES.OBJECT, TAG_ID.OBJECT],
+  [TAG_NAMES.OL, TAG_ID.OL],
+  [TAG_NAMES.OPTGROUP, TAG_ID.OPTGROUP],
+  [TAG_NAMES.OPTION, TAG_ID.OPTION],
+  [TAG_NAMES.P, TAG_ID.P],
+  [TAG_NAMES.PARAM, TAG_ID.PARAM],
+  [TAG_NAMES.PLAINTEXT, TAG_ID.PLAINTEXT],
+  [TAG_NAMES.PRE, TAG_ID.PRE],
+  [TAG_NAMES.RB, TAG_ID.RB],
+  [TAG_NAMES.RP, TAG_ID.RP],
+  [TAG_NAMES.RT, TAG_ID.RT],
+  [TAG_NAMES.RTC, TAG_ID.RTC],
+  [TAG_NAMES.RUBY, TAG_ID.RUBY],
+  [TAG_NAMES.S, TAG_ID.S],
+  [TAG_NAMES.SCRIPT, TAG_ID.SCRIPT],
+  [TAG_NAMES.SEARCH, TAG_ID.SEARCH],
+  [TAG_NAMES.SECTION, TAG_ID.SECTION],
+  [TAG_NAMES.SELECT, TAG_ID.SELECT],
+  [TAG_NAMES.SOURCE, TAG_ID.SOURCE],
+  [TAG_NAMES.SMALL, TAG_ID.SMALL],
+  [TAG_NAMES.SPAN, TAG_ID.SPAN],
+  [TAG_NAMES.STRIKE, TAG_ID.STRIKE],
+  [TAG_NAMES.STRONG, TAG_ID.STRONG],
+  [TAG_NAMES.STYLE, TAG_ID.STYLE],
+  [TAG_NAMES.SUB, TAG_ID.SUB],
+  [TAG_NAMES.SUMMARY, TAG_ID.SUMMARY],
+  [TAG_NAMES.SUP, TAG_ID.SUP],
+  [TAG_NAMES.TABLE, TAG_ID.TABLE],
+  [TAG_NAMES.TBODY, TAG_ID.TBODY],
+  [TAG_NAMES.TEMPLATE, TAG_ID.TEMPLATE],
+  [TAG_NAMES.TEXTAREA, TAG_ID.TEXTAREA],
+  [TAG_NAMES.TFOOT, TAG_ID.TFOOT],
+  [TAG_NAMES.TD, TAG_ID.TD],
+  [TAG_NAMES.TH, TAG_ID.TH],
+  [TAG_NAMES.THEAD, TAG_ID.THEAD],
+  [TAG_NAMES.TITLE, TAG_ID.TITLE],
+  [TAG_NAMES.TR, TAG_ID.TR],
+  [TAG_NAMES.TRACK, TAG_ID.TRACK],
+  [TAG_NAMES.TT, TAG_ID.TT],
+  [TAG_NAMES.U, TAG_ID.U],
+  [TAG_NAMES.UL, TAG_ID.UL],
+  [TAG_NAMES.SVG, TAG_ID.SVG],
+  [TAG_NAMES.VAR, TAG_ID.VAR],
+  [TAG_NAMES.WBR, TAG_ID.WBR],
+  [TAG_NAMES.XMP, TAG_ID.XMP]
+]);
+function getTagID(tagName) {
+  var _a;
+  return (_a = TAG_NAME_TO_ID.get(tagName)) !== null && _a !== void 0 ? _a : TAG_ID.UNKNOWN;
+}
+var $ = TAG_ID;
+var SPECIAL_ELEMENTS = {
+  [NS.HTML]: /* @__PURE__ */ new Set([
+    $.ADDRESS,
+    $.APPLET,
+    $.AREA,
+    $.ARTICLE,
+    $.ASIDE,
+    $.BASE,
+    $.BASEFONT,
+    $.BGSOUND,
+    $.BLOCKQUOTE,
+    $.BODY,
+    $.BR,
+    $.BUTTON,
+    $.CAPTION,
+    $.CENTER,
+    $.COL,
+    $.COLGROUP,
+    $.DD,
+    $.DETAILS,
+    $.DIR,
+    $.DIV,
+    $.DL,
+    $.DT,
+    $.EMBED,
+    $.FIELDSET,
+    $.FIGCAPTION,
+    $.FIGURE,
+    $.FOOTER,
+    $.FORM,
+    $.FRAME,
+    $.FRAMESET,
+    $.H1,
+    $.H2,
+    $.H3,
+    $.H4,
+    $.H5,
+    $.H6,
+    $.HEAD,
+    $.HEADER,
+    $.HGROUP,
+    $.HR,
+    $.HTML,
+    $.IFRAME,
+    $.IMG,
+    $.INPUT,
+    $.LI,
+    $.LINK,
+    $.LISTING,
+    $.MAIN,
+    $.MARQUEE,
+    $.MENU,
+    $.META,
+    $.NAV,
+    $.NOEMBED,
+    $.NOFRAMES,
+    $.NOSCRIPT,
+    $.OBJECT,
+    $.OL,
+    $.P,
+    $.PARAM,
+    $.PLAINTEXT,
+    $.PRE,
+    $.SCRIPT,
+    $.SECTION,
+    $.SELECT,
+    $.SOURCE,
+    $.STYLE,
+    $.SUMMARY,
+    $.TABLE,
+    $.TBODY,
+    $.TD,
+    $.TEMPLATE,
+    $.TEXTAREA,
+    $.TFOOT,
+    $.TH,
+    $.THEAD,
+    $.TITLE,
+    $.TR,
+    $.TRACK,
+    $.UL,
+    $.WBR,
+    $.XMP
+  ]),
+  [NS.MATHML]: /* @__PURE__ */ new Set([$.MI, $.MO, $.MN, $.MS, $.MTEXT, $.ANNOTATION_XML]),
+  [NS.SVG]: /* @__PURE__ */ new Set([$.TITLE, $.FOREIGN_OBJECT, $.DESC]),
+  [NS.XLINK]: /* @__PURE__ */ new Set(),
+  [NS.XML]: /* @__PURE__ */ new Set(),
+  [NS.XMLNS]: /* @__PURE__ */ new Set()
+};
+var NUMBERED_HEADERS = /* @__PURE__ */ new Set([$.H1, $.H2, $.H3, $.H4, $.H5, $.H6]);
+var UNESCAPED_TEXT = /* @__PURE__ */ new Set([
+  TAG_NAMES.STYLE,
+  TAG_NAMES.SCRIPT,
+  TAG_NAMES.XMP,
+  TAG_NAMES.IFRAME,
+  TAG_NAMES.NOEMBED,
+  TAG_NAMES.NOFRAMES,
+  TAG_NAMES.PLAINTEXT
+]);
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/tokenizer/index.js
+var ATTR_NAME_SET_THRESHOLD = 64;
+var State;
+(function(State2) {
+  State2[State2["DATA"] = 0] = "DATA";
+  State2[State2["RCDATA"] = 1] = "RCDATA";
+  State2[State2["RAWTEXT"] = 2] = "RAWTEXT";
+  State2[State2["SCRIPT_DATA"] = 3] = "SCRIPT_DATA";
+  State2[State2["PLAINTEXT"] = 4] = "PLAINTEXT";
+  State2[State2["TAG_OPEN"] = 5] = "TAG_OPEN";
+  State2[State2["END_TAG_OPEN"] = 6] = "END_TAG_OPEN";
+  State2[State2["TAG_NAME"] = 7] = "TAG_NAME";
+  State2[State2["RCDATA_LESS_THAN_SIGN"] = 8] = "RCDATA_LESS_THAN_SIGN";
+  State2[State2["RCDATA_END_TAG_OPEN"] = 9] = "RCDATA_END_TAG_OPEN";
+  State2[State2["RCDATA_END_TAG_NAME"] = 10] = "RCDATA_END_TAG_NAME";
+  State2[State2["RAWTEXT_LESS_THAN_SIGN"] = 11] = "RAWTEXT_LESS_THAN_SIGN";
+  State2[State2["RAWTEXT_END_TAG_OPEN"] = 12] = "RAWTEXT_END_TAG_OPEN";
+  State2[State2["RAWTEXT_END_TAG_NAME"] = 13] = "RAWTEXT_END_TAG_NAME";
+  State2[State2["SCRIPT_DATA_LESS_THAN_SIGN"] = 14] = "SCRIPT_DATA_LESS_THAN_SIGN";
+  State2[State2["SCRIPT_DATA_END_TAG_OPEN"] = 15] = "SCRIPT_DATA_END_TAG_OPEN";
+  State2[State2["SCRIPT_DATA_END_TAG_NAME"] = 16] = "SCRIPT_DATA_END_TAG_NAME";
+  State2[State2["SCRIPT_DATA_ESCAPE_START"] = 17] = "SCRIPT_DATA_ESCAPE_START";
+  State2[State2["SCRIPT_DATA_ESCAPE_START_DASH"] = 18] = "SCRIPT_DATA_ESCAPE_START_DASH";
+  State2[State2["SCRIPT_DATA_ESCAPED"] = 19] = "SCRIPT_DATA_ESCAPED";
+  State2[State2["SCRIPT_DATA_ESCAPED_DASH"] = 20] = "SCRIPT_DATA_ESCAPED_DASH";
+  State2[State2["SCRIPT_DATA_ESCAPED_DASH_DASH"] = 21] = "SCRIPT_DATA_ESCAPED_DASH_DASH";
+  State2[State2["SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN"] = 22] = "SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN";
+  State2[State2["SCRIPT_DATA_ESCAPED_END_TAG_OPEN"] = 23] = "SCRIPT_DATA_ESCAPED_END_TAG_OPEN";
+  State2[State2["SCRIPT_DATA_ESCAPED_END_TAG_NAME"] = 24] = "SCRIPT_DATA_ESCAPED_END_TAG_NAME";
+  State2[State2["SCRIPT_DATA_DOUBLE_ESCAPE_START"] = 25] = "SCRIPT_DATA_DOUBLE_ESCAPE_START";
+  State2[State2["SCRIPT_DATA_DOUBLE_ESCAPED"] = 26] = "SCRIPT_DATA_DOUBLE_ESCAPED";
+  State2[State2["SCRIPT_DATA_DOUBLE_ESCAPED_DASH"] = 27] = "SCRIPT_DATA_DOUBLE_ESCAPED_DASH";
+  State2[State2["SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH"] = 28] = "SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH";
+  State2[State2["SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN"] = 29] = "SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN";
+  State2[State2["SCRIPT_DATA_DOUBLE_ESCAPE_END"] = 30] = "SCRIPT_DATA_DOUBLE_ESCAPE_END";
+  State2[State2["BEFORE_ATTRIBUTE_NAME"] = 31] = "BEFORE_ATTRIBUTE_NAME";
+  State2[State2["ATTRIBUTE_NAME"] = 32] = "ATTRIBUTE_NAME";
+  State2[State2["AFTER_ATTRIBUTE_NAME"] = 33] = "AFTER_ATTRIBUTE_NAME";
+  State2[State2["BEFORE_ATTRIBUTE_VALUE"] = 34] = "BEFORE_ATTRIBUTE_VALUE";
+  State2[State2["ATTRIBUTE_VALUE_DOUBLE_QUOTED"] = 35] = "ATTRIBUTE_VALUE_DOUBLE_QUOTED";
+  State2[State2["ATTRIBUTE_VALUE_SINGLE_QUOTED"] = 36] = "ATTRIBUTE_VALUE_SINGLE_QUOTED";
+  State2[State2["ATTRIBUTE_VALUE_UNQUOTED"] = 37] = "ATTRIBUTE_VALUE_UNQUOTED";
+  State2[State2["AFTER_ATTRIBUTE_VALUE_QUOTED"] = 38] = "AFTER_ATTRIBUTE_VALUE_QUOTED";
+  State2[State2["SELF_CLOSING_START_TAG"] = 39] = "SELF_CLOSING_START_TAG";
+  State2[State2["BOGUS_COMMENT"] = 40] = "BOGUS_COMMENT";
+  State2[State2["MARKUP_DECLARATION_OPEN"] = 41] = "MARKUP_DECLARATION_OPEN";
+  State2[State2["COMMENT_START"] = 42] = "COMMENT_START";
+  State2[State2["COMMENT_START_DASH"] = 43] = "COMMENT_START_DASH";
+  State2[State2["COMMENT"] = 44] = "COMMENT";
+  State2[State2["COMMENT_LESS_THAN_SIGN"] = 45] = "COMMENT_LESS_THAN_SIGN";
+  State2[State2["COMMENT_LESS_THAN_SIGN_BANG"] = 46] = "COMMENT_LESS_THAN_SIGN_BANG";
+  State2[State2["COMMENT_LESS_THAN_SIGN_BANG_DASH"] = 47] = "COMMENT_LESS_THAN_SIGN_BANG_DASH";
+  State2[State2["COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH"] = 48] = "COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH";
+  State2[State2["COMMENT_END_DASH"] = 49] = "COMMENT_END_DASH";
+  State2[State2["COMMENT_END"] = 50] = "COMMENT_END";
+  State2[State2["COMMENT_END_BANG"] = 51] = "COMMENT_END_BANG";
+  State2[State2["DOCTYPE"] = 52] = "DOCTYPE";
+  State2[State2["BEFORE_DOCTYPE_NAME"] = 53] = "BEFORE_DOCTYPE_NAME";
+  State2[State2["DOCTYPE_NAME"] = 54] = "DOCTYPE_NAME";
+  State2[State2["AFTER_DOCTYPE_NAME"] = 55] = "AFTER_DOCTYPE_NAME";
+  State2[State2["AFTER_DOCTYPE_PUBLIC_KEYWORD"] = 56] = "AFTER_DOCTYPE_PUBLIC_KEYWORD";
+  State2[State2["BEFORE_DOCTYPE_PUBLIC_IDENTIFIER"] = 57] = "BEFORE_DOCTYPE_PUBLIC_IDENTIFIER";
+  State2[State2["DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED"] = 58] = "DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED";
+  State2[State2["DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED"] = 59] = "DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED";
+  State2[State2["AFTER_DOCTYPE_PUBLIC_IDENTIFIER"] = 60] = "AFTER_DOCTYPE_PUBLIC_IDENTIFIER";
+  State2[State2["BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS"] = 61] = "BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS";
+  State2[State2["AFTER_DOCTYPE_SYSTEM_KEYWORD"] = 62] = "AFTER_DOCTYPE_SYSTEM_KEYWORD";
+  State2[State2["BEFORE_DOCTYPE_SYSTEM_IDENTIFIER"] = 63] = "BEFORE_DOCTYPE_SYSTEM_IDENTIFIER";
+  State2[State2["DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED"] = 64] = "DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED";
+  State2[State2["DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED"] = 65] = "DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED";
+  State2[State2["AFTER_DOCTYPE_SYSTEM_IDENTIFIER"] = 66] = "AFTER_DOCTYPE_SYSTEM_IDENTIFIER";
+  State2[State2["BOGUS_DOCTYPE"] = 67] = "BOGUS_DOCTYPE";
+  State2[State2["CDATA_SECTION"] = 68] = "CDATA_SECTION";
+  State2[State2["CDATA_SECTION_BRACKET"] = 69] = "CDATA_SECTION_BRACKET";
+  State2[State2["CDATA_SECTION_END"] = 70] = "CDATA_SECTION_END";
+  State2[State2["CHARACTER_REFERENCE"] = 71] = "CHARACTER_REFERENCE";
+  State2[State2["AMBIGUOUS_AMPERSAND"] = 72] = "AMBIGUOUS_AMPERSAND";
+})(State || (State = {}));
+var TokenizerMode = {
+  DATA: State.DATA,
+  RCDATA: State.RCDATA,
+  RAWTEXT: State.RAWTEXT,
+  SCRIPT_DATA: State.SCRIPT_DATA,
+  PLAINTEXT: State.PLAINTEXT,
+  CDATA_SECTION: State.CDATA_SECTION
+};
+function isAsciiDigit(cp) {
+  return cp >= CODE_POINTS.DIGIT_0 && cp <= CODE_POINTS.DIGIT_9;
+}
+function isAsciiUpper(cp) {
+  return cp >= CODE_POINTS.LATIN_CAPITAL_A && cp <= CODE_POINTS.LATIN_CAPITAL_Z;
+}
+function isAsciiLower(cp) {
+  return cp >= CODE_POINTS.LATIN_SMALL_A && cp <= CODE_POINTS.LATIN_SMALL_Z;
+}
+function isAsciiLetter(cp) {
+  return isAsciiLower(cp) || isAsciiUpper(cp);
+}
+function isAsciiAlphaNumeric(cp) {
+  return isAsciiLetter(cp) || isAsciiDigit(cp);
+}
+function toAsciiLower(cp) {
+  return cp + 32;
+}
+function isWhitespace(cp) {
+  return cp === CODE_POINTS.SPACE || cp === CODE_POINTS.LINE_FEED || cp === CODE_POINTS.TABULATION || cp === CODE_POINTS.FORM_FEED || cp === CODE_POINTS.CARRIAGE_RETURN;
+}
+function isScriptDataDoubleEscapeSequenceEnd(cp) {
+  return isWhitespace(cp) || cp === CODE_POINTS.SOLIDUS || cp === CODE_POINTS.GREATER_THAN_SIGN;
+}
+function getErrorForNumericCharacterReference(code) {
+  if (code === CODE_POINTS.NULL) {
+    return ERR.nullCharacterReference;
+  } else if (code > 1114111) {
+    return ERR.characterReferenceOutsideUnicodeRange;
+  } else if (isSurrogate(code)) {
+    return ERR.surrogateCharacterReference;
+  } else if (isUndefinedCodePoint(code)) {
+    return ERR.noncharacterCharacterReference;
+  } else if (isControlCodePoint(code) || code === CODE_POINTS.CARRIAGE_RETURN) {
+    return ERR.controlCharacterReference;
+  }
+  return null;
+}
+var Tokenizer = class {
+  constructor(options, handler) {
+    this.options = options;
+    this.handler = handler;
+    this.paused = false;
+    this.inLoop = false;
+    this.inForeignNode = false;
+    this.lastStartTagName = "";
+    this.active = false;
+    this.state = State.DATA;
+    this.returnState = State.DATA;
+    this.entityStartPos = 0;
+    this.consumedAfterSnapshot = -1;
+    this.currentCharacterToken = null;
+    this.currentToken = null;
+    this.currentAttr = { name: "", value: "" };
+    this.currentAttrLocation = null;
+    this.currentAttrNames = null;
+    this.runStart = 0;
+    this.runEnd = 0;
+    this.preprocessor = new Preprocessor(handler);
+    this.currentLocation = this.getCurrentLocation(-1);
+    this.entityDecoder = new HtmlEntityDecoder((cp, consumed) => {
+      this.preprocessor.pos = this.entityStartPos + consumed - 1;
+      if (!this._isCharacterReferenceInAttribute()) {
+        this._ensureCharacterToken(isWhitespace(cp) ? TokenType.WHITESPACE_CHARACTER : cp === CODE_POINTS.NULL ? TokenType.NULL_CHARACTER : TokenType.CHARACTER);
+      }
+      this._extendRunWith(String.fromCodePoint(cp), 0);
+      this.entityStartPos = this.preprocessor.pos - consumed + 1;
+    }, handler.onParseError ? {
+      missingSemicolonAfterCharacterReference: () => {
+        this._err(ERR.missingSemicolonAfterCharacterReference, 1);
+      },
+      absenceOfDigitsInNumericCharacterReference: (consumed) => {
+        this._err(ERR.absenceOfDigitsInNumericCharacterReference, this.entityStartPos - this.preprocessor.pos + consumed);
+      },
+      validateNumericCharacterReference: (code) => {
+        const error = getErrorForNumericCharacterReference(code);
+        if (error)
+          this._err(error, 1);
+      }
+    } : void 0);
+  }
+  //Errors
+  _err(code, cpOffset = 0) {
+    var _a, _b;
+    (_b = (_a = this.handler).onParseError) === null || _b === void 0 ? void 0 : _b.call(_a, this.preprocessor.getError(code, cpOffset));
+  }
+  // NOTE: `offset` may never run across line boundaries.
+  getCurrentLocation(offset) {
+    if (!this.options.sourceCodeLocationInfo) {
+      return null;
+    }
+    return {
+      startLine: this.preprocessor.line,
+      startCol: this.preprocessor.col - offset,
+      startOffset: this.preprocessor.offset - offset,
+      endLine: -1,
+      endCol: -1,
+      endOffset: -1
+    };
+  }
+  _runParsingLoop() {
+    if (this.inLoop)
+      return;
+    this.inLoop = true;
+    while (this.active && !this.paused) {
+      this.consumedAfterSnapshot = 0;
+      const cp = this._consume();
+      if (!this._ensureHibernation()) {
+        this._callState(cp);
+      }
+    }
+    this.inLoop = false;
+  }
+  //API
+  /** Emit buffered character tokens without completing the current token or emitting EOF. */
+  flushCharacters() {
+    var _a;
+    if (this.inLoop) {
+      throw new Error("Cannot flush characters from a tokenizer callback");
+    }
+    const location = (_a = this.currentCharacterToken) === null || _a === void 0 ? void 0 : _a.location;
+    let nextLocation = null;
+    if (location) {
+      nextLocation = this.getCharacterTokenEndLocation(location);
+      this.currentLocation = nextLocation;
+    }
+    this.inLoop = true;
+    try {
+      this._emitCurrentCharacterToken(nextLocation);
+    } finally {
+      this.inLoop = false;
+    }
+    this._runParsingLoop();
+  }
+  getCharacterTokenEndLocation(location) {
+    const endOffset = this.getCharacterTokenEndOffset();
+    const html = this.preprocessor.html.slice(location.startOffset - this.preprocessor.droppedBufferSize, endOffset - this.preprocessor.droppedBufferSize);
+    let line = location.startLine;
+    let lastLineBreak = -1;
+    for (let i = html.indexOf("\n"); i !== -1; i = html.indexOf("\n", i + 1)) {
+      line++;
+      lastLineBreak = i;
+    }
+    for (let i = html.indexOf("\r"); i !== -1; i = html.indexOf("\r", i + 1)) {
+      if (html.charCodeAt(i + 1) !== CODE_POINTS.LINE_FEED) {
+        line++;
+        lastLineBreak = Math.max(lastLineBreak, i);
+      }
+    }
+    return {
+      startLine: line,
+      startCol: lastLineBreak === -1 ? location.startCol + html.length : html.length - lastLineBreak,
+      startOffset: endOffset,
+      endLine: -1,
+      endCol: -1,
+      endOffset: -1
+    };
+  }
+  // Return the input boundary before any unfinished token or buffered delimiter.
+  getCharacterTokenEndOffset() {
+    var _a;
+    const end2 = this.preprocessor.droppedBufferSize + this.preprocessor.pos + 1;
+    const tokenLocation = (_a = this.currentToken) === null || _a === void 0 ? void 0 : _a.location;
+    switch (this.state) {
+      case State.TAG_OPEN:
+      case State.RCDATA_LESS_THAN_SIGN:
+      case State.RAWTEXT_LESS_THAN_SIGN:
+      case State.SCRIPT_DATA_LESS_THAN_SIGN:
+      case State.SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN:
+      case State.CDATA_SECTION_BRACKET: {
+        return end2 - 1;
+      }
+      case State.END_TAG_OPEN:
+      case State.MARKUP_DECLARATION_OPEN:
+      case State.RCDATA_END_TAG_OPEN:
+      case State.RCDATA_END_TAG_NAME:
+      case State.RAWTEXT_END_TAG_OPEN:
+      case State.RAWTEXT_END_TAG_NAME:
+      case State.SCRIPT_DATA_END_TAG_OPEN:
+      case State.SCRIPT_DATA_END_TAG_NAME:
+      case State.SCRIPT_DATA_ESCAPED_END_TAG_OPEN:
+      case State.SCRIPT_DATA_ESCAPED_END_TAG_NAME:
+      case State.CDATA_SECTION_END: {
+        return end2 - 2;
+      }
+      case State.CHARACTER_REFERENCE: {
+        return this._isCharacterReferenceInAttribute() && tokenLocation ? tokenLocation.startOffset : this.preprocessor.droppedBufferSize + this.entityStartPos;
+      }
+      case State.DOCTYPE:
+      case State.BEFORE_DOCTYPE_NAME: {
+        return this.currentLocation.startOffset;
+      }
+      default: {
+        if (tokenLocation && (this.state === State.TAG_NAME || this.state >= State.BEFORE_ATTRIBUTE_NAME && this.state <= State.BOGUS_COMMENT || this.state >= State.COMMENT_START && this.state <= State.BOGUS_DOCTYPE)) {
+          return tokenLocation.startOffset;
+        }
+        return end2;
+      }
+    }
+  }
+  pause() {
+    this.paused = true;
+  }
+  resume(writeCallback) {
+    if (!this.paused) {
+      throw new Error("Parser was already resumed");
+    }
+    this.paused = false;
+    if (this.inLoop)
+      return;
+    this._runParsingLoop();
+    if (!this.paused) {
+      writeCallback === null || writeCallback === void 0 ? void 0 : writeCallback();
+    }
+  }
+  write(chunk, isLastChunk, writeCallback) {
+    this.active = true;
+    this.preprocessor.write(chunk, isLastChunk);
+    this._runParsingLoop();
+    if (!this.paused) {
+      writeCallback === null || writeCallback === void 0 ? void 0 : writeCallback();
+    }
+  }
+  insertHtmlAtCurrentPos(chunk) {
+    this.active = true;
+    this.preprocessor.insertHtmlAtCurrentPos(chunk);
+    this._runParsingLoop();
+  }
+  /** @internal Flush completed streaming text without splitting an unfinished token. */
+  flushCurrentCharacterToken() {
+    if (this.paused || this.active || !this.currentCharacterToken || this.currentToken || this.state === State.DOCTYPE || this.state === State.BEFORE_DOCTYPE_NAME || !this.preprocessor.willDropParsedChunk()) {
+      return;
+    }
+    const pending = this.preprocessor.droppedBufferSize + this.preprocessor.pos + 1 - this.getCharacterTokenEndOffset();
+    this.preprocessor.advance();
+    this.currentLocation = this.getCurrentLocation(pending);
+    this.preprocessor.retreat(1);
+    this._emitCurrentCharacterToken(this.currentLocation);
+    this._createCharacterToken(TokenType.CHARACTER);
+    this.preprocessor.dropParsedChunk(Math.max(pending - 1, 0));
+    this.entityStartPos = this.preprocessor.pos + 1 - pending;
+  }
+  //Hibernation
+  _ensureHibernation() {
+    if (this.preprocessor.endOfChunkHit) {
+      this.preprocessor.retreat(this.consumedAfterSnapshot);
+      this.consumedAfterSnapshot = 0;
+      this.active = false;
+      return true;
+    }
+    return false;
+  }
+  //Consumption
+  _consume() {
+    this.consumedAfterSnapshot++;
+    return this.preprocessor.advance();
+  }
+  _advanceBy(count) {
+    this.consumedAfterSnapshot += count;
+    for (let i = 0; i < count; i++) {
+      this.preprocessor.advance();
+    }
+  }
+  _consumeSequenceIfMatch(pattern, caseSensitive) {
+    if (this.preprocessor.startsWith(pattern, caseSensitive)) {
+      this._advanceBy(pattern.length - 1);
+      return true;
+    }
+    return false;
+  }
+  //Token creation
+  _createStartTagToken() {
+    this._flushRun("");
+    this.currentToken = {
+      type: TokenType.START_TAG,
+      tagName: "",
+      tagID: TAG_ID.UNKNOWN,
+      selfClosing: false,
+      ackSelfClosing: false,
+      attrs: [],
+      location: this.getCurrentLocation(1)
+    };
+  }
+  _createEndTagToken() {
+    this._flushRun("");
+    this.currentToken = {
+      type: TokenType.END_TAG,
+      tagName: "",
+      tagID: TAG_ID.UNKNOWN,
+      selfClosing: false,
+      ackSelfClosing: false,
+      attrs: [],
+      location: this.getCurrentLocation(2)
+    };
+  }
+  _createCommentToken(offset) {
+    this._flushRun("");
+    this.currentToken = {
+      type: TokenType.COMMENT,
+      data: "",
+      location: this.getCurrentLocation(offset)
+    };
+  }
+  _createDoctypeToken(initialName) {
+    this._flushRun("");
+    this.currentToken = {
+      type: TokenType.DOCTYPE,
+      name: initialName,
+      forceQuirks: false,
+      publicId: null,
+      systemId: null,
+      location: this.currentLocation
+    };
+  }
+  _createCharacterToken(type) {
+    if (this.currentLocation) {
+      const start = this.currentLocation.startOffset - this.preprocessor.droppedBufferSize;
+      if (this.preprocessor.html[start] === "\n" && this.preprocessor.html[start - 1] === "\r") {
+        this.currentLocation.startOffset++;
+      }
+    }
+    this.currentCharacterToken = {
+      type,
+      chars: "",
+      location: this.currentLocation
+    };
+  }
+  //Tag attributes
+  _createAttr(attrNameFirstCh) {
+    this._flushRun("");
+    this.currentAttr = {
+      name: attrNameFirstCh,
+      value: ""
+    };
+    this.currentAttrLocation = this.getCurrentLocation(0);
+  }
+  _leaveAttrName() {
+    var _a;
+    var _b;
+    const token2 = this.currentToken;
+    const { name } = this.currentAttr;
+    const names = this.currentAttrNames;
+    let duplicate;
+    if (names === null) {
+      duplicate = getTokenAttr(token2, name) !== null;
+      if (!duplicate && token2.attrs.length === ATTR_NAME_SET_THRESHOLD) {
+        this.currentAttrNames = new Set(token2.attrs.map((attr) => attr.name)).add(name);
+      }
+    } else {
+      duplicate = names.has(name);
+      if (!duplicate)
+        names.add(name);
+    }
+    if (duplicate) {
+      this._err(ERR.duplicateAttribute);
+    } else {
+      token2.attrs.push(this.currentAttr);
+      if (token2.location && this.currentAttrLocation) {
+        const attrLocations = (_a = (_b = token2.location).attrs) !== null && _a !== void 0 ? _a : _b.attrs = /* @__PURE__ */ Object.create(null);
+        attrLocations[this.currentAttr.name] = this.currentAttrLocation;
+        this._leaveAttrValue();
+      }
+    }
+  }
+  _leaveAttrValue() {
+    if (this.currentAttrLocation) {
+      this.currentAttrLocation.endLine = this.preprocessor.line;
+      this.currentAttrLocation.endCol = this.preprocessor.col;
+      this.currentAttrLocation.endOffset = this.preprocessor.offset;
+    }
+  }
+  /**
+   * Append the pending run and `text` to the attribute value, comment data or character token being built.
+   * The run is a string of its own: V8 copies a slice of fewer than 13 characters but lets a longer one share
+   * the input's buffer, which would keep that buffer alive for as long as any attribute value or text cut from
+   * it is; a concatenation is flattened into a buffer of its own when it is sliced.
+   */
+  _flushRun(text3) {
+    if (this.runEnd === this.runStart && text3.length === 0) {
+      return;
+    }
+    const slice = this.preprocessor.html.slice(this.runStart, this.runEnd);
+    const run = (slice.length < 13 ? slice : ` ${slice}`.slice(1)) + text3;
+    const token2 = this.currentToken;
+    this.runStart = this.runEnd;
+    if (token2 === null) {
+      this.currentCharacterToken.chars += run;
+    } else if (token2.type === TokenType.COMMENT) {
+      token2.data += run;
+    } else {
+      this.currentAttr.value += run;
+    }
+  }
+  /** Extend the pending run by the current input code point, read as `cp`, or flush it and start a new one. */
+  _extendRun(cp) {
+    const { preprocessor } = this;
+    if (cp === CODE_POINTS.LINE_FEED && preprocessor.html.charCodeAt(preprocessor.pos) !== CODE_POINTS.LINE_FEED) {
+      this._flushRun("\n");
+      this.runStart = preprocessor.pos + 1;
+    } else {
+      const start = preprocessor.pos - Number(cp > 65535);
+      if (start !== this.runEnd) {
+        this._flushRun("");
+        this.runStart = start;
+      }
+    }
+    this.runEnd = preprocessor.pos + 1;
+  }
+  /**
+   * Extend the pending run by `text`, the input that ends `cpOffset` code points after the current one, or flush
+   * the run and append `text` where the input differs (a NUL replacement, a decoded reference, a dropped chunk).
+   */
+  _extendRunWith(text3, cpOffset) {
+    const { preprocessor } = this;
+    const start = preprocessor.codePointStart + 1 + cpOffset - text3.length;
+    if (start >= 0 && preprocessor.html.startsWith(text3, start)) {
+      if (start !== this.runEnd) {
+        this._flushRun("");
+        this.runStart = start;
+      }
+    } else {
+      this._flushRun(text3);
+      this.runStart = start + text3.length;
+    }
+    this.runEnd = start + text3.length;
+  }
+  //Token emission
+  prepareToken(ct) {
+    this._emitCurrentCharacterToken(ct.location);
+    this.currentToken = null;
+    if (ct.location) {
+      ct.location.endLine = this.preprocessor.line;
+      ct.location.endCol = this.preprocessor.col + 1;
+      ct.location.endOffset = this.preprocessor.offset + 1;
+    }
+    this.currentLocation = this.getCurrentLocation(-1);
+  }
+  emitCurrentTagToken() {
+    const ct = this.currentToken;
+    this.currentAttrNames = null;
+    this.prepareToken(ct);
+    ct.tagID = getTagID(ct.tagName);
+    if (ct.type === TokenType.START_TAG) {
+      this.lastStartTagName = ct.tagName;
+      this.handler.onStartTag(ct);
+    } else {
+      if (ct.attrs.length > 0) {
+        this._err(ERR.endTagWithAttributes);
+      }
+      if (ct.selfClosing) {
+        this._err(ERR.endTagWithTrailingSolidus);
+      }
+      this.handler.onEndTag(ct);
+    }
+    this.preprocessor.dropParsedChunk();
+  }
+  emitCurrentComment(ct) {
+    this.prepareToken(ct);
+    this.handler.onComment(ct);
+    this.preprocessor.dropParsedChunk();
+  }
+  emitCurrentDoctype(ct) {
+    this.prepareToken(ct);
+    this.handler.onDoctype(ct);
+    this.preprocessor.dropParsedChunk();
+  }
+  _emitCurrentCharacterToken(nextLocation) {
+    this._flushRun("");
+    if (this.currentCharacterToken) {
+      if (nextLocation && this.currentCharacterToken.location) {
+        this.currentCharacterToken.location.endLine = nextLocation.startLine;
+        this.currentCharacterToken.location.endCol = nextLocation.startCol;
+        this.currentCharacterToken.location.endOffset = nextLocation.startOffset;
+      }
+      switch (this.currentCharacterToken.type) {
+        case TokenType.CHARACTER: {
+          this.handler.onCharacter(this.currentCharacterToken);
+          break;
+        }
+        case TokenType.NULL_CHARACTER: {
+          this.handler.onNullCharacter(this.currentCharacterToken);
+          break;
+        }
+        case TokenType.WHITESPACE_CHARACTER: {
+          this.handler.onWhitespaceCharacter(this.currentCharacterToken);
+          break;
+        }
+      }
+      this.currentCharacterToken = null;
+    }
+  }
+  _emitEOFToken() {
+    var _a, _b;
+    const location = this.getCurrentLocation(0);
+    if (location) {
+      location.endLine = location.startLine;
+      location.endCol = location.startCol;
+      location.endOffset = location.startOffset;
+    }
+    this._emitCurrentCharacterToken((_b = (_a = this.currentToken) === null || _a === void 0 ? void 0 : _a.location) !== null && _b !== void 0 ? _b : location);
+    this.handler.onEof({ type: TokenType.EOF, location });
+    this.active = false;
+  }
+  //Characters emission
+  //OPTIMIZATION: The specification uses only one type of character token (one token per character).
+  //This causes a huge memory overhead and a lot of unnecessary parser loops. parse5 uses 3 groups of characters.
+  //If we have a sequence of characters that belong to the same group, the parser can process it
+  //as a single solid character token.
+  //So, there are 3 types of character tokens in parse5:
+  //1)TokenType.NULL_CHARACTER - \u0000-character sequences (e.g. '\u0000\u0000\u0000')
+  //2)TokenType.WHITESPACE_CHARACTER - any whitespace/new-line character sequences (e.g. '\n  \r\t   \f')
+  //3)TokenType.CHARACTER - any character sequence which don't belong to groups 1 and 2 (e.g. 'abcdef1234@@#$%^')
+  /** Make the current character token one of `type`, emitting the current one if it has another type. */
+  _ensureCharacterToken(type) {
+    if (this.currentCharacterToken) {
+      if (this.currentCharacterToken.type === type) {
+        return;
+      }
+      this.currentLocation = this.getCurrentLocation(0);
+      this._emitCurrentCharacterToken(this.currentLocation);
+      this.preprocessor.dropParsedChunk();
+    }
+    this._createCharacterToken(type);
+  }
+  /** Emit the current input code point, read as `cp`. */
+  _emitCodePoint(cp) {
+    const type = isWhitespace(cp) ? TokenType.WHITESPACE_CHARACTER : cp === CODE_POINTS.NULL ? TokenType.NULL_CHARACTER : TokenType.CHARACTER;
+    const token2 = this.currentCharacterToken;
+    if (token2 === null || token2.type !== type) {
+      this._ensureCharacterToken(type);
+    }
+    this._extendRun(cp);
+  }
+  //NOTE: used when we emit characters explicitly.
+  //This is always for non-whitespace and non-null characters, which allows us to avoid additional checks.
+  // Negative `cpOffset` values locate text emitted before the current input character.
+  _emitChars(ch, cpOffset = 0) {
+    if (this.options.sourceCodeLocationInfo && cpOffset !== 0 && this.currentCharacterToken && this.currentCharacterToken.type !== TokenType.CHARACTER) {
+      this.currentLocation = this.getCurrentLocation(ch.length - 1 - cpOffset);
+      this._emitCurrentCharacterToken(this.currentLocation);
+      this._createCharacterToken(TokenType.CHARACTER);
+    } else {
+      this._ensureCharacterToken(TokenType.CHARACTER);
+    }
+    this._extendRunWith(ch, cpOffset);
+  }
+  // Character reference helpers
+  _startCharacterReference() {
+    this.returnState = this.state;
+    this.state = State.CHARACTER_REFERENCE;
+    this.entityStartPos = this.preprocessor.pos;
+    this.entityDecoder.startEntity(this._isCharacterReferenceInAttribute() ? DecodingMode.Attribute : DecodingMode.Legacy);
+  }
+  _isCharacterReferenceInAttribute() {
+    return this.returnState === State.ATTRIBUTE_VALUE_DOUBLE_QUOTED || this.returnState === State.ATTRIBUTE_VALUE_SINGLE_QUOTED || this.returnState === State.ATTRIBUTE_VALUE_UNQUOTED;
+  }
+  _flushCodePointConsumedAsCharacterReference(cp) {
+    if (this._isCharacterReferenceInAttribute()) {
+      this._extendRun(cp);
+    } else {
+      this._emitCodePoint(cp);
+    }
+  }
+  // Calling states this way turns out to be much faster than any other approach.
+  _callState(cp) {
+    switch (this.state) {
+      case State.DATA: {
+        this._stateData(cp);
+        break;
+      }
+      case State.RCDATA: {
+        this._stateRcdata(cp);
+        break;
+      }
+      case State.RAWTEXT: {
+        this._stateRawtext(cp);
+        break;
+      }
+      case State.SCRIPT_DATA: {
+        this._stateScriptData(cp);
+        break;
+      }
+      case State.PLAINTEXT: {
+        this._statePlaintext(cp);
+        break;
+      }
+      case State.TAG_OPEN: {
+        this._stateTagOpen(cp);
+        break;
+      }
+      case State.END_TAG_OPEN: {
+        this._stateEndTagOpen(cp);
+        break;
+      }
+      case State.TAG_NAME: {
+        this._stateTagName(cp);
+        break;
+      }
+      case State.RCDATA_LESS_THAN_SIGN: {
+        this._stateRcdataLessThanSign(cp);
+        break;
+      }
+      case State.RCDATA_END_TAG_OPEN: {
+        this._stateRcdataEndTagOpen(cp);
+        break;
+      }
+      case State.RCDATA_END_TAG_NAME: {
+        this._stateRcdataEndTagName(cp);
+        break;
+      }
+      case State.RAWTEXT_LESS_THAN_SIGN: {
+        this._stateRawtextLessThanSign(cp);
+        break;
+      }
+      case State.RAWTEXT_END_TAG_OPEN: {
+        this._stateRawtextEndTagOpen(cp);
+        break;
+      }
+      case State.RAWTEXT_END_TAG_NAME: {
+        this._stateRawtextEndTagName(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_LESS_THAN_SIGN: {
+        this._stateScriptDataLessThanSign(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_END_TAG_OPEN: {
+        this._stateScriptDataEndTagOpen(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_END_TAG_NAME: {
+        this._stateScriptDataEndTagName(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPE_START: {
+        this._stateScriptDataEscapeStart(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPE_START_DASH: {
+        this._stateScriptDataEscapeStartDash(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPED: {
+        this._stateScriptDataEscaped(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPED_DASH: {
+        this._stateScriptDataEscapedDash(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPED_DASH_DASH: {
+        this._stateScriptDataEscapedDashDash(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN: {
+        this._stateScriptDataEscapedLessThanSign(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPED_END_TAG_OPEN: {
+        this._stateScriptDataEscapedEndTagOpen(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_ESCAPED_END_TAG_NAME: {
+        this._stateScriptDataEscapedEndTagName(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_DOUBLE_ESCAPE_START: {
+        this._stateScriptDataDoubleEscapeStart(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_DOUBLE_ESCAPED: {
+        this._stateScriptDataDoubleEscaped(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_DOUBLE_ESCAPED_DASH: {
+        this._stateScriptDataDoubleEscapedDash(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH: {
+        this._stateScriptDataDoubleEscapedDashDash(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN: {
+        this._stateScriptDataDoubleEscapedLessThanSign(cp);
+        break;
+      }
+      case State.SCRIPT_DATA_DOUBLE_ESCAPE_END: {
+        this._stateScriptDataDoubleEscapeEnd(cp);
+        break;
+      }
+      case State.BEFORE_ATTRIBUTE_NAME: {
+        this._stateBeforeAttributeName(cp);
+        break;
+      }
+      case State.ATTRIBUTE_NAME: {
+        this._stateAttributeName(cp);
+        break;
+      }
+      case State.AFTER_ATTRIBUTE_NAME: {
+        this._stateAfterAttributeName(cp);
+        break;
+      }
+      case State.BEFORE_ATTRIBUTE_VALUE: {
+        this._stateBeforeAttributeValue(cp);
+        break;
+      }
+      case State.ATTRIBUTE_VALUE_DOUBLE_QUOTED: {
+        this._stateAttributeValueDoubleQuoted(cp);
+        break;
+      }
+      case State.ATTRIBUTE_VALUE_SINGLE_QUOTED: {
+        this._stateAttributeValueSingleQuoted(cp);
+        break;
+      }
+      case State.ATTRIBUTE_VALUE_UNQUOTED: {
+        this._stateAttributeValueUnquoted(cp);
+        break;
+      }
+      case State.AFTER_ATTRIBUTE_VALUE_QUOTED: {
+        this._stateAfterAttributeValueQuoted(cp);
+        break;
+      }
+      case State.SELF_CLOSING_START_TAG: {
+        this._stateSelfClosingStartTag(cp);
+        break;
+      }
+      case State.BOGUS_COMMENT: {
+        this._stateBogusComment(cp);
+        break;
+      }
+      case State.MARKUP_DECLARATION_OPEN: {
+        this._stateMarkupDeclarationOpen(cp);
+        break;
+      }
+      case State.COMMENT_START: {
+        this._stateCommentStart(cp);
+        break;
+      }
+      case State.COMMENT_START_DASH: {
+        this._stateCommentStartDash(cp);
+        break;
+      }
+      case State.COMMENT: {
+        this._stateComment(cp);
+        break;
+      }
+      case State.COMMENT_LESS_THAN_SIGN: {
+        this._stateCommentLessThanSign(cp);
+        break;
+      }
+      case State.COMMENT_LESS_THAN_SIGN_BANG: {
+        this._stateCommentLessThanSignBang(cp);
+        break;
+      }
+      case State.COMMENT_LESS_THAN_SIGN_BANG_DASH: {
+        this._stateCommentLessThanSignBangDash(cp);
+        break;
+      }
+      case State.COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH: {
+        this._stateCommentLessThanSignBangDashDash(cp);
+        break;
+      }
+      case State.COMMENT_END_DASH: {
+        this._stateCommentEndDash(cp);
+        break;
+      }
+      case State.COMMENT_END: {
+        this._stateCommentEnd(cp);
+        break;
+      }
+      case State.COMMENT_END_BANG: {
+        this._stateCommentEndBang(cp);
+        break;
+      }
+      case State.DOCTYPE: {
+        this._stateDoctype(cp);
+        break;
+      }
+      case State.BEFORE_DOCTYPE_NAME: {
+        this._stateBeforeDoctypeName(cp);
+        break;
+      }
+      case State.DOCTYPE_NAME: {
+        this._stateDoctypeName(cp);
+        break;
+      }
+      case State.AFTER_DOCTYPE_NAME: {
+        this._stateAfterDoctypeName(cp);
+        break;
+      }
+      case State.AFTER_DOCTYPE_PUBLIC_KEYWORD: {
+        this._stateAfterDoctypePublicKeyword(cp);
+        break;
+      }
+      case State.BEFORE_DOCTYPE_PUBLIC_IDENTIFIER: {
+        this._stateBeforeDoctypePublicIdentifier(cp);
+        break;
+      }
+      case State.DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED: {
+        this._stateDoctypePublicIdentifierDoubleQuoted(cp);
+        break;
+      }
+      case State.DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED: {
+        this._stateDoctypePublicIdentifierSingleQuoted(cp);
+        break;
+      }
+      case State.AFTER_DOCTYPE_PUBLIC_IDENTIFIER: {
+        this._stateAfterDoctypePublicIdentifier(cp);
+        break;
+      }
+      case State.BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS: {
+        this._stateBetweenDoctypePublicAndSystemIdentifiers(cp);
+        break;
+      }
+      case State.AFTER_DOCTYPE_SYSTEM_KEYWORD: {
+        this._stateAfterDoctypeSystemKeyword(cp);
+        break;
+      }
+      case State.BEFORE_DOCTYPE_SYSTEM_IDENTIFIER: {
+        this._stateBeforeDoctypeSystemIdentifier(cp);
+        break;
+      }
+      case State.DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED: {
+        this._stateDoctypeSystemIdentifierDoubleQuoted(cp);
+        break;
+      }
+      case State.DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED: {
+        this._stateDoctypeSystemIdentifierSingleQuoted(cp);
+        break;
+      }
+      case State.AFTER_DOCTYPE_SYSTEM_IDENTIFIER: {
+        this._stateAfterDoctypeSystemIdentifier(cp);
+        break;
+      }
+      case State.BOGUS_DOCTYPE: {
+        this._stateBogusDoctype(cp);
+        break;
+      }
+      case State.CDATA_SECTION: {
+        this._stateCdataSection(cp);
+        break;
+      }
+      case State.CDATA_SECTION_BRACKET: {
+        this._stateCdataSectionBracket(cp);
+        break;
+      }
+      case State.CDATA_SECTION_END: {
+        this._stateCdataSectionEnd(cp);
+        break;
+      }
+      case State.CHARACTER_REFERENCE: {
+        this._stateCharacterReference();
+        break;
+      }
+      case State.AMBIGUOUS_AMPERSAND: {
+        this._stateAmbiguousAmpersand(cp);
+        break;
+      }
+      default: {
+        throw new Error("Unknown state");
+      }
+    }
+  }
+  // State machine
+  // Data state
+  //------------------------------------------------------------------
+  _stateData(cp) {
+    switch (cp) {
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.TAG_OPEN;
+        break;
+      }
+      case CODE_POINTS.AMPERSAND: {
+        this._startCharacterReference();
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitCodePoint(cp);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  //  RCDATA state
+  //------------------------------------------------------------------
+  _stateRcdata(cp) {
+    switch (cp) {
+      case CODE_POINTS.AMPERSAND: {
+        this._startCharacterReference();
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.RCDATA_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // RAWTEXT state
+  //------------------------------------------------------------------
+  _stateRawtext(cp) {
+    switch (cp) {
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.RAWTEXT_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data state
+  //------------------------------------------------------------------
+  _stateScriptData(cp) {
+    switch (cp) {
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // PLAINTEXT state
+  //------------------------------------------------------------------
+  _statePlaintext(cp) {
+    switch (cp) {
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Tag open state
+  //------------------------------------------------------------------
+  _stateTagOpen(cp) {
+    if (isAsciiLetter(cp)) {
+      this._createStartTagToken();
+      this.state = State.TAG_NAME;
+      this._stateTagName(cp);
+    } else
+      switch (cp) {
+        case CODE_POINTS.EXCLAMATION_MARK: {
+          this.state = State.MARKUP_DECLARATION_OPEN;
+          break;
+        }
+        case CODE_POINTS.SOLIDUS: {
+          this.state = State.END_TAG_OPEN;
+          break;
+        }
+        case CODE_POINTS.QUESTION_MARK: {
+          this._err(ERR.unexpectedQuestionMarkInsteadOfTagName);
+          this._createCommentToken(1);
+          this.state = State.BOGUS_COMMENT;
+          this._stateBogusComment(cp);
+          break;
+        }
+        case CODE_POINTS.EOF: {
+          this._err(ERR.eofBeforeTagName);
+          this._emitChars("<", -1);
+          this._emitEOFToken();
+          break;
+        }
+        default: {
+          this._err(ERR.invalidFirstCharacterOfTagName);
+          this._emitChars("<", -1);
+          this.state = State.DATA;
+          this._stateData(cp);
+        }
+      }
+  }
+  // End tag open state
+  //------------------------------------------------------------------
+  _stateEndTagOpen(cp) {
+    if (isAsciiLetter(cp)) {
+      this._createEndTagToken();
+      this.state = State.TAG_NAME;
+      this._stateTagName(cp);
+    } else
+      switch (cp) {
+        case CODE_POINTS.GREATER_THAN_SIGN: {
+          this._err(ERR.missingEndTagName);
+          this.state = State.DATA;
+          break;
+        }
+        case CODE_POINTS.EOF: {
+          this._err(ERR.eofBeforeTagName);
+          this._emitChars("</", -1);
+          this._emitEOFToken();
+          break;
+        }
+        default: {
+          this._err(ERR.invalidFirstCharacterOfTagName);
+          this._createCommentToken(2);
+          this.state = State.BOGUS_COMMENT;
+          this._stateBogusComment(cp);
+        }
+      }
+  }
+  // Tag name state
+  //------------------------------------------------------------------
+  _stateTagName(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this.state = State.BEFORE_ATTRIBUTE_NAME;
+        break;
+      }
+      case CODE_POINTS.SOLIDUS: {
+        this.state = State.SELF_CLOSING_START_TAG;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentTagToken();
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        token2.tagName += REPLACEMENT_CHARACTER;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        token2.tagName += String.fromCodePoint(isAsciiUpper(cp) ? toAsciiLower(cp) : cp);
+      }
+    }
+  }
+  // RCDATA less-than sign state
+  //------------------------------------------------------------------
+  _stateRcdataLessThanSign(cp) {
+    if (cp === CODE_POINTS.SOLIDUS) {
+      this.state = State.RCDATA_END_TAG_OPEN;
+    } else {
+      this._emitChars("<", -1);
+      this.state = State.RCDATA;
+      this._stateRcdata(cp);
+    }
+  }
+  // RCDATA end tag open state
+  //------------------------------------------------------------------
+  _stateRcdataEndTagOpen(cp) {
+    if (isAsciiLetter(cp)) {
+      this.state = State.RCDATA_END_TAG_NAME;
+      this._stateRcdataEndTagName(cp);
+    } else {
+      this._emitChars("</", -1);
+      this.state = State.RCDATA;
+      this._stateRcdata(cp);
+    }
+  }
+  handleSpecialEndTag(_cp) {
+    if (!this.preprocessor.startsWith(this.lastStartTagName, false)) {
+      return !this._ensureHibernation();
+    }
+    this._createEndTagToken();
+    const token2 = this.currentToken;
+    token2.tagName = this.lastStartTagName;
+    const cp = this.preprocessor.peek(this.lastStartTagName.length);
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this._advanceBy(this.lastStartTagName.length);
+        this.state = State.BEFORE_ATTRIBUTE_NAME;
+        return false;
+      }
+      case CODE_POINTS.SOLIDUS: {
+        this._advanceBy(this.lastStartTagName.length);
+        this.state = State.SELF_CLOSING_START_TAG;
+        return false;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._advanceBy(this.lastStartTagName.length);
+        this.emitCurrentTagToken();
+        this.state = State.DATA;
+        return false;
+      }
+      default: {
+        this.currentToken = null;
+        return !this._ensureHibernation();
+      }
+    }
+  }
+  // RCDATA end tag name state
+  //------------------------------------------------------------------
+  _stateRcdataEndTagName(cp) {
+    if (this.handleSpecialEndTag(cp)) {
+      this._emitChars("</", -1);
+      this.state = State.RCDATA;
+      this._stateRcdata(cp);
+    }
+  }
+  // RAWTEXT less-than sign state
+  //------------------------------------------------------------------
+  _stateRawtextLessThanSign(cp) {
+    if (cp === CODE_POINTS.SOLIDUS) {
+      this.state = State.RAWTEXT_END_TAG_OPEN;
+    } else {
+      this._emitChars("<", -1);
+      this.state = State.RAWTEXT;
+      this._stateRawtext(cp);
+    }
+  }
+  // RAWTEXT end tag open state
+  //------------------------------------------------------------------
+  _stateRawtextEndTagOpen(cp) {
+    if (isAsciiLetter(cp)) {
+      this.state = State.RAWTEXT_END_TAG_NAME;
+      this._stateRawtextEndTagName(cp);
+    } else {
+      this._emitChars("</", -1);
+      this.state = State.RAWTEXT;
+      this._stateRawtext(cp);
+    }
+  }
+  // RAWTEXT end tag name state
+  //------------------------------------------------------------------
+  _stateRawtextEndTagName(cp) {
+    if (this.handleSpecialEndTag(cp)) {
+      this._emitChars("</", -1);
+      this.state = State.RAWTEXT;
+      this._stateRawtext(cp);
+    }
+  }
+  // Script data less-than sign state
+  //------------------------------------------------------------------
+  _stateScriptDataLessThanSign(cp) {
+    switch (cp) {
+      case CODE_POINTS.SOLIDUS: {
+        this.state = State.SCRIPT_DATA_END_TAG_OPEN;
+        break;
+      }
+      case CODE_POINTS.EXCLAMATION_MARK: {
+        this.state = State.SCRIPT_DATA_ESCAPE_START;
+        this._emitChars("<!");
+        break;
+      }
+      default: {
+        this._emitChars("<", -1);
+        this.state = State.SCRIPT_DATA;
+        this._stateScriptData(cp);
+      }
+    }
+  }
+  // Script data end tag open state
+  //------------------------------------------------------------------
+  _stateScriptDataEndTagOpen(cp) {
+    if (isAsciiLetter(cp)) {
+      this.state = State.SCRIPT_DATA_END_TAG_NAME;
+      this._stateScriptDataEndTagName(cp);
+    } else {
+      this._emitChars("</", -1);
+      this.state = State.SCRIPT_DATA;
+      this._stateScriptData(cp);
+    }
+  }
+  // Script data end tag name state
+  //------------------------------------------------------------------
+  _stateScriptDataEndTagName(cp) {
+    if (this.handleSpecialEndTag(cp)) {
+      this._emitChars("</", -1);
+      this.state = State.SCRIPT_DATA;
+      this._stateScriptData(cp);
+    }
+  }
+  // Script data escape start state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapeStart(cp) {
+    if (cp === CODE_POINTS.HYPHEN_MINUS) {
+      this.state = State.SCRIPT_DATA_ESCAPE_START_DASH;
+      this._emitChars("-");
+    } else {
+      this.state = State.SCRIPT_DATA;
+      this._stateScriptData(cp);
+    }
+  }
+  // Script data escape start dash state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapeStartDash(cp) {
+    if (cp === CODE_POINTS.HYPHEN_MINUS) {
+      this.state = State.SCRIPT_DATA_ESCAPED_DASH_DASH;
+      this._emitChars("-");
+    } else {
+      this.state = State.SCRIPT_DATA;
+      this._stateScriptData(cp);
+    }
+  }
+  // Script data escaped state
+  //------------------------------------------------------------------
+  _stateScriptDataEscaped(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.SCRIPT_DATA_ESCAPED_DASH;
+        this._emitChars("-");
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInScriptHtmlCommentLikeText);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data escaped dash state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapedDash(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.SCRIPT_DATA_ESCAPED_DASH_DASH;
+        this._emitChars("-");
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this.state = State.SCRIPT_DATA_ESCAPED;
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInScriptHtmlCommentLikeText);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this.state = State.SCRIPT_DATA_ESCAPED;
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data escaped dash dash state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapedDashDash(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this._emitChars("-");
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_ESCAPED_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA;
+        this._emitChars(">");
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this.state = State.SCRIPT_DATA_ESCAPED;
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInScriptHtmlCommentLikeText);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this.state = State.SCRIPT_DATA_ESCAPED;
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data escaped less-than sign state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapedLessThanSign(cp) {
+    if (cp === CODE_POINTS.SOLIDUS) {
+      this.state = State.SCRIPT_DATA_ESCAPED_END_TAG_OPEN;
+    } else if (isAsciiLetter(cp)) {
+      this._emitChars("<", -1);
+      this.state = State.SCRIPT_DATA_DOUBLE_ESCAPE_START;
+      this._stateScriptDataDoubleEscapeStart(cp);
+    } else {
+      this._emitChars("<", -1);
+      this.state = State.SCRIPT_DATA_ESCAPED;
+      this._stateScriptDataEscaped(cp);
+    }
+  }
+  // Script data escaped end tag open state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapedEndTagOpen(cp) {
+    if (isAsciiLetter(cp)) {
+      this.state = State.SCRIPT_DATA_ESCAPED_END_TAG_NAME;
+      this._stateScriptDataEscapedEndTagName(cp);
+    } else {
+      this._emitChars("</", -1);
+      this.state = State.SCRIPT_DATA_ESCAPED;
+      this._stateScriptDataEscaped(cp);
+    }
+  }
+  // Script data escaped end tag name state
+  //------------------------------------------------------------------
+  _stateScriptDataEscapedEndTagName(cp) {
+    if (this.handleSpecialEndTag(cp)) {
+      this._emitChars("</", -1);
+      this.state = State.SCRIPT_DATA_ESCAPED;
+      this._stateScriptDataEscaped(cp);
+    }
+  }
+  // Script data double escape start state
+  //------------------------------------------------------------------
+  _stateScriptDataDoubleEscapeStart(cp) {
+    if (this.preprocessor.startsWith(SEQUENCES.SCRIPT, false) && isScriptDataDoubleEscapeSequenceEnd(this.preprocessor.peek(SEQUENCES.SCRIPT.length))) {
+      this._emitCodePoint(cp);
+      for (let i = 0; i < SEQUENCES.SCRIPT.length; i++) {
+        this._emitCodePoint(this._consume());
+      }
+      this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+    } else if (!this._ensureHibernation()) {
+      this.state = State.SCRIPT_DATA_ESCAPED;
+      this._stateScriptDataEscaped(cp);
+    }
+  }
+  // Script data double escaped state
+  //------------------------------------------------------------------
+  _stateScriptDataDoubleEscaped(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED_DASH;
+        this._emitChars("-");
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN;
+        this._emitChars("<");
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInScriptHtmlCommentLikeText);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data double escaped dash state
+  //------------------------------------------------------------------
+  _stateScriptDataDoubleEscapedDash(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH;
+        this._emitChars("-");
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN;
+        this._emitChars("<");
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInScriptHtmlCommentLikeText);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data double escaped dash dash state
+  //------------------------------------------------------------------
+  _stateScriptDataDoubleEscapedDashDash(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this._emitChars("-");
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED_LESS_THAN_SIGN;
+        this._emitChars("<");
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.SCRIPT_DATA;
+        this._emitChars(">");
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+        this._emitChars(REPLACEMENT_CHARACTER);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInScriptHtmlCommentLikeText);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // Script data double escaped less-than sign state
+  //------------------------------------------------------------------
+  _stateScriptDataDoubleEscapedLessThanSign(cp) {
+    if (cp === CODE_POINTS.SOLIDUS) {
+      this.state = State.SCRIPT_DATA_DOUBLE_ESCAPE_END;
+      this._emitChars("/");
+    } else {
+      this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+      this._stateScriptDataDoubleEscaped(cp);
+    }
+  }
+  // Script data double escape end state
+  //------------------------------------------------------------------
+  _stateScriptDataDoubleEscapeEnd(cp) {
+    if (this.preprocessor.startsWith(SEQUENCES.SCRIPT, false) && isScriptDataDoubleEscapeSequenceEnd(this.preprocessor.peek(SEQUENCES.SCRIPT.length))) {
+      this._emitCodePoint(cp);
+      for (let i = 0; i < SEQUENCES.SCRIPT.length; i++) {
+        this._emitCodePoint(this._consume());
+      }
+      this.state = State.SCRIPT_DATA_ESCAPED;
+    } else if (!this._ensureHibernation()) {
+      this.state = State.SCRIPT_DATA_DOUBLE_ESCAPED;
+      this._stateScriptDataDoubleEscaped(cp);
+    }
+  }
+  // Before attribute name state
+  //------------------------------------------------------------------
+  _stateBeforeAttributeName(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.SOLIDUS:
+      case CODE_POINTS.GREATER_THAN_SIGN:
+      case CODE_POINTS.EOF: {
+        this.state = State.AFTER_ATTRIBUTE_NAME;
+        this._stateAfterAttributeName(cp);
+        break;
+      }
+      case CODE_POINTS.EQUALS_SIGN: {
+        this._err(ERR.unexpectedEqualsSignBeforeAttributeName);
+        this._createAttr("=");
+        this.state = State.ATTRIBUTE_NAME;
+        break;
+      }
+      default: {
+        this._createAttr("");
+        this.state = State.ATTRIBUTE_NAME;
+        this._stateAttributeName(cp);
+      }
+    }
+  }
+  // Attribute name state
+  //------------------------------------------------------------------
+  _stateAttributeName(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED:
+      case CODE_POINTS.SOLIDUS:
+      case CODE_POINTS.GREATER_THAN_SIGN:
+      case CODE_POINTS.EOF: {
+        this._leaveAttrName();
+        this.state = State.AFTER_ATTRIBUTE_NAME;
+        this._stateAfterAttributeName(cp);
+        break;
+      }
+      case CODE_POINTS.EQUALS_SIGN: {
+        this._leaveAttrName();
+        this.state = State.BEFORE_ATTRIBUTE_VALUE;
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK:
+      case CODE_POINTS.APOSTROPHE:
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this._err(ERR.unexpectedCharacterInAttributeName);
+        this.currentAttr.name += String.fromCodePoint(cp);
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this.currentAttr.name += REPLACEMENT_CHARACTER;
+        break;
+      }
+      default: {
+        this.currentAttr.name += String.fromCodePoint(isAsciiUpper(cp) ? toAsciiLower(cp) : cp);
+      }
+    }
+  }
+  // After attribute name state
+  //------------------------------------------------------------------
+  _stateAfterAttributeName(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.SOLIDUS: {
+        this.state = State.SELF_CLOSING_START_TAG;
+        break;
+      }
+      case CODE_POINTS.EQUALS_SIGN: {
+        this.state = State.BEFORE_ATTRIBUTE_VALUE;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentTagToken();
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._createAttr("");
+        this.state = State.ATTRIBUTE_NAME;
+        this._stateAttributeName(cp);
+      }
+    }
+  }
+  // Before attribute value state
+  //------------------------------------------------------------------
+  _stateBeforeAttributeValue(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        this.state = State.ATTRIBUTE_VALUE_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        this.state = State.ATTRIBUTE_VALUE_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.missingAttributeValue);
+        this.state = State.DATA;
+        this.emitCurrentTagToken();
+        break;
+      }
+      default: {
+        this.state = State.ATTRIBUTE_VALUE_UNQUOTED;
+        this._stateAttributeValueUnquoted(cp);
+      }
+    }
+  }
+  // Attribute value (double-quoted) state
+  //------------------------------------------------------------------
+  _stateAttributeValueDoubleQuoted(cp) {
+    switch (cp) {
+      case CODE_POINTS.QUOTATION_MARK: {
+        this.state = State.AFTER_ATTRIBUTE_VALUE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.AMPERSAND: {
+        this._startCharacterReference();
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._extendRunWith(REPLACEMENT_CHARACTER, 0);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRun(cp);
+      }
+    }
+  }
+  // Attribute value (single-quoted) state
+  //------------------------------------------------------------------
+  _stateAttributeValueSingleQuoted(cp) {
+    switch (cp) {
+      case CODE_POINTS.APOSTROPHE: {
+        this.state = State.AFTER_ATTRIBUTE_VALUE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.AMPERSAND: {
+        this._startCharacterReference();
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._extendRunWith(REPLACEMENT_CHARACTER, 0);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRun(cp);
+      }
+    }
+  }
+  // Attribute value (unquoted) state
+  //------------------------------------------------------------------
+  _stateAttributeValueUnquoted(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this._leaveAttrValue();
+        this.state = State.BEFORE_ATTRIBUTE_NAME;
+        break;
+      }
+      case CODE_POINTS.AMPERSAND: {
+        this._startCharacterReference();
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._leaveAttrValue();
+        this.state = State.DATA;
+        this.emitCurrentTagToken();
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._extendRunWith(REPLACEMENT_CHARACTER, 0);
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK:
+      case CODE_POINTS.APOSTROPHE:
+      case CODE_POINTS.LESS_THAN_SIGN:
+      case CODE_POINTS.EQUALS_SIGN:
+      case CODE_POINTS.GRAVE_ACCENT: {
+        this._err(ERR.unexpectedCharacterInUnquotedAttributeValue);
+        this._extendRun(cp);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRun(cp);
+      }
+    }
+  }
+  // After attribute value (quoted) state
+  //------------------------------------------------------------------
+  _stateAfterAttributeValueQuoted(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this._leaveAttrValue();
+        this.state = State.BEFORE_ATTRIBUTE_NAME;
+        break;
+      }
+      case CODE_POINTS.SOLIDUS: {
+        this._leaveAttrValue();
+        this.state = State.SELF_CLOSING_START_TAG;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._leaveAttrValue();
+        this.state = State.DATA;
+        this.emitCurrentTagToken();
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingWhitespaceBetweenAttributes);
+        this._leaveAttrValue();
+        this.state = State.BEFORE_ATTRIBUTE_NAME;
+        this._stateBeforeAttributeName(cp);
+      }
+    }
+  }
+  // Self-closing start tag state
+  //------------------------------------------------------------------
+  _stateSelfClosingStartTag(cp) {
+    switch (cp) {
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        const token2 = this.currentToken;
+        token2.selfClosing = true;
+        this.state = State.DATA;
+        this.emitCurrentTagToken();
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInTag);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.unexpectedSolidusInTag);
+        this.state = State.BEFORE_ATTRIBUTE_NAME;
+        this._stateBeforeAttributeName(cp);
+      }
+    }
+  }
+  // Bogus comment state
+  //------------------------------------------------------------------
+  _stateBogusComment(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentComment(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this.emitCurrentComment(token2);
+        this._emitEOFToken();
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._extendRunWith(REPLACEMENT_CHARACTER, 0);
+        break;
+      }
+      default: {
+        this._extendRun(cp);
+      }
+    }
+  }
+  // Markup declaration open state
+  //------------------------------------------------------------------
+  _stateMarkupDeclarationOpen(cp) {
+    if (this._consumeSequenceIfMatch(SEQUENCES.DASH_DASH, true)) {
+      this._createCommentToken(SEQUENCES.DASH_DASH.length + 1);
+      this.state = State.COMMENT_START;
+    } else if (this._consumeSequenceIfMatch(SEQUENCES.DOCTYPE, false)) {
+      this.currentLocation = this.getCurrentLocation(SEQUENCES.DOCTYPE.length + 1);
+      this.state = State.DOCTYPE;
+    } else if (this._consumeSequenceIfMatch(SEQUENCES.CDATA_START, true)) {
+      if (this.inForeignNode) {
+        this.state = State.CDATA_SECTION;
+      } else {
+        this._err(ERR.cdataInHtmlContent);
+        this._createCommentToken(SEQUENCES.CDATA_START.length + 1);
+        this.currentToken.data = "[CDATA[";
+        this.state = State.BOGUS_COMMENT;
+      }
+    } else if (!this._ensureHibernation()) {
+      this._err(ERR.incorrectlyOpenedComment);
+      this._createCommentToken(2);
+      this.state = State.BOGUS_COMMENT;
+      this._stateBogusComment(cp);
+    }
+  }
+  // Comment start state
+  //------------------------------------------------------------------
+  _stateCommentStart(cp) {
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.COMMENT_START_DASH;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.abruptClosingOfEmptyComment);
+        this.state = State.DATA;
+        const token2 = this.currentToken;
+        this.emitCurrentComment(token2);
+        break;
+      }
+      default: {
+        this.state = State.COMMENT;
+        this._stateComment(cp);
+      }
+    }
+  }
+  // Comment start dash state
+  //------------------------------------------------------------------
+  _stateCommentStartDash(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.COMMENT_END;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.abruptClosingOfEmptyComment);
+        this.state = State.DATA;
+        this.emitCurrentComment(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInComment);
+        this.emitCurrentComment(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRunWith("-", -1);
+        this.state = State.COMMENT;
+        this._stateComment(cp);
+      }
+    }
+  }
+  // Comment state
+  //------------------------------------------------------------------
+  _stateComment(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.COMMENT_END_DASH;
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this._extendRunWith("<", 0);
+        this.state = State.COMMENT_LESS_THAN_SIGN;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        this._extendRunWith(REPLACEMENT_CHARACTER, 0);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInComment);
+        this.emitCurrentComment(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRun(cp);
+      }
+    }
+  }
+  // Comment less-than sign state
+  //------------------------------------------------------------------
+  _stateCommentLessThanSign(cp) {
+    switch (cp) {
+      case CODE_POINTS.EXCLAMATION_MARK: {
+        this._extendRunWith("!", 0);
+        this.state = State.COMMENT_LESS_THAN_SIGN_BANG;
+        break;
+      }
+      case CODE_POINTS.LESS_THAN_SIGN: {
+        this._extendRunWith("<", 0);
+        break;
+      }
+      default: {
+        this.state = State.COMMENT;
+        this._stateComment(cp);
+      }
+    }
+  }
+  // Comment less-than sign bang state
+  //------------------------------------------------------------------
+  _stateCommentLessThanSignBang(cp) {
+    if (cp === CODE_POINTS.HYPHEN_MINUS) {
+      this.state = State.COMMENT_LESS_THAN_SIGN_BANG_DASH;
+    } else {
+      this.state = State.COMMENT;
+      this._stateComment(cp);
+    }
+  }
+  // Comment less-than sign bang dash state
+  //------------------------------------------------------------------
+  _stateCommentLessThanSignBangDash(cp) {
+    if (cp === CODE_POINTS.HYPHEN_MINUS) {
+      this.state = State.COMMENT_LESS_THAN_SIGN_BANG_DASH_DASH;
+    } else {
+      this.state = State.COMMENT_END_DASH;
+      this._stateCommentEndDash(cp);
+    }
+  }
+  // Comment less-than sign bang dash dash state
+  //------------------------------------------------------------------
+  _stateCommentLessThanSignBangDashDash(cp) {
+    if (cp !== CODE_POINTS.GREATER_THAN_SIGN && cp !== CODE_POINTS.EOF) {
+      this._err(ERR.nestedComment);
+    }
+    this.state = State.COMMENT_END;
+    this._stateCommentEnd(cp);
+  }
+  // Comment end dash state
+  //------------------------------------------------------------------
+  _stateCommentEndDash(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this.state = State.COMMENT_END;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInComment);
+        this.emitCurrentComment(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRunWith("-", -1);
+        this.state = State.COMMENT;
+        this._stateComment(cp);
+      }
+    }
+  }
+  // Comment end state
+  //------------------------------------------------------------------
+  _stateCommentEnd(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentComment(token2);
+        break;
+      }
+      case CODE_POINTS.EXCLAMATION_MARK: {
+        this.state = State.COMMENT_END_BANG;
+        break;
+      }
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this._extendRunWith("-", -2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInComment);
+        this.emitCurrentComment(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRunWith("--", -1);
+        this.state = State.COMMENT;
+        this._stateComment(cp);
+      }
+    }
+  }
+  // Comment end bang state
+  //------------------------------------------------------------------
+  _stateCommentEndBang(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.HYPHEN_MINUS: {
+        this._extendRunWith("--!", -1);
+        this.state = State.COMMENT_END_DASH;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.incorrectlyClosedComment);
+        this.state = State.DATA;
+        this.emitCurrentComment(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInComment);
+        this.emitCurrentComment(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._extendRunWith("--!", -1);
+        this.state = State.COMMENT;
+        this._stateComment(cp);
+      }
+    }
+  }
+  // DOCTYPE state
+  //------------------------------------------------------------------
+  _stateDoctype(cp) {
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this.state = State.BEFORE_DOCTYPE_NAME;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.BEFORE_DOCTYPE_NAME;
+        this._stateBeforeDoctypeName(cp);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        this._createDoctypeToken(null);
+        const token2 = this.currentToken;
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingWhitespaceBeforeDoctypeName);
+        this.state = State.BEFORE_DOCTYPE_NAME;
+        this._stateBeforeDoctypeName(cp);
+      }
+    }
+  }
+  // Before DOCTYPE name state
+  //------------------------------------------------------------------
+  _stateBeforeDoctypeName(cp) {
+    if (isAsciiUpper(cp)) {
+      this._createDoctypeToken(String.fromCharCode(toAsciiLower(cp)));
+      this.state = State.DOCTYPE_NAME;
+    } else
+      switch (cp) {
+        case CODE_POINTS.SPACE:
+        case CODE_POINTS.LINE_FEED:
+        case CODE_POINTS.TABULATION:
+        case CODE_POINTS.FORM_FEED: {
+          break;
+        }
+        case CODE_POINTS.NULL: {
+          this._err(ERR.unexpectedNullCharacter);
+          this._createDoctypeToken(REPLACEMENT_CHARACTER);
+          this.state = State.DOCTYPE_NAME;
+          break;
+        }
+        case CODE_POINTS.GREATER_THAN_SIGN: {
+          this._err(ERR.missingDoctypeName);
+          this._createDoctypeToken(null);
+          const token2 = this.currentToken;
+          token2.forceQuirks = true;
+          this.emitCurrentDoctype(token2);
+          this.state = State.DATA;
+          break;
+        }
+        case CODE_POINTS.EOF: {
+          this._err(ERR.eofInDoctype);
+          this._createDoctypeToken(null);
+          const token2 = this.currentToken;
+          token2.forceQuirks = true;
+          this.emitCurrentDoctype(token2);
+          this._emitEOFToken();
+          break;
+        }
+        default: {
+          this._createDoctypeToken(String.fromCodePoint(cp));
+          this.state = State.DOCTYPE_NAME;
+        }
+      }
+  }
+  // DOCTYPE name state
+  //------------------------------------------------------------------
+  _stateDoctypeName(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this.state = State.AFTER_DOCTYPE_NAME;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        token2.name += REPLACEMENT_CHARACTER;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        token2.name += String.fromCodePoint(isAsciiUpper(cp) ? toAsciiLower(cp) : cp);
+      }
+    }
+  }
+  // After DOCTYPE name state
+  //------------------------------------------------------------------
+  _stateAfterDoctypeName(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        if (this._consumeSequenceIfMatch(SEQUENCES.PUBLIC, false)) {
+          this.state = State.AFTER_DOCTYPE_PUBLIC_KEYWORD;
+        } else if (this._consumeSequenceIfMatch(SEQUENCES.SYSTEM, false)) {
+          this.state = State.AFTER_DOCTYPE_SYSTEM_KEYWORD;
+        } else if (!this._ensureHibernation()) {
+          this._err(ERR.invalidCharacterSequenceAfterDoctypeName);
+          token2.forceQuirks = true;
+          this.state = State.BOGUS_DOCTYPE;
+          this._stateBogusDoctype(cp);
+        }
+      }
+    }
+  }
+  // After DOCTYPE public keyword state
+  //------------------------------------------------------------------
+  _stateAfterDoctypePublicKeyword(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this.state = State.BEFORE_DOCTYPE_PUBLIC_IDENTIFIER;
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        this._err(ERR.missingWhitespaceAfterDoctypePublicKeyword);
+        token2.publicId = "";
+        this.state = State.DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        this._err(ERR.missingWhitespaceAfterDoctypePublicKeyword);
+        token2.publicId = "";
+        this.state = State.DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.missingDoctypePublicIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingQuoteBeforeDoctypePublicIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // Before DOCTYPE public identifier state
+  //------------------------------------------------------------------
+  _stateBeforeDoctypePublicIdentifier(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        token2.publicId = "";
+        this.state = State.DOCTYPE_PUBLIC_IDENTIFIER_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        token2.publicId = "";
+        this.state = State.DOCTYPE_PUBLIC_IDENTIFIER_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.missingDoctypePublicIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingQuoteBeforeDoctypePublicIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // DOCTYPE public identifier (double-quoted) state
+  //------------------------------------------------------------------
+  _stateDoctypePublicIdentifierDoubleQuoted(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.QUOTATION_MARK: {
+        this.state = State.AFTER_DOCTYPE_PUBLIC_IDENTIFIER;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        token2.publicId += REPLACEMENT_CHARACTER;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.abruptDoctypePublicIdentifier);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        token2.publicId += String.fromCodePoint(cp);
+      }
+    }
+  }
+  // DOCTYPE public identifier (single-quoted) state
+  //------------------------------------------------------------------
+  _stateDoctypePublicIdentifierSingleQuoted(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.APOSTROPHE: {
+        this.state = State.AFTER_DOCTYPE_PUBLIC_IDENTIFIER;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        token2.publicId += REPLACEMENT_CHARACTER;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.abruptDoctypePublicIdentifier);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        token2.publicId += String.fromCodePoint(cp);
+      }
+    }
+  }
+  // After DOCTYPE public identifier state
+  //------------------------------------------------------------------
+  _stateAfterDoctypePublicIdentifier(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this.state = State.BETWEEN_DOCTYPE_PUBLIC_AND_SYSTEM_IDENTIFIERS;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        this._err(ERR.missingWhitespaceBetweenDoctypePublicAndSystemIdentifiers);
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        this._err(ERR.missingWhitespaceBetweenDoctypePublicAndSystemIdentifiers);
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingQuoteBeforeDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // Between DOCTYPE public and system identifiers state
+  //------------------------------------------------------------------
+  _stateBetweenDoctypePublicAndSystemIdentifiers(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingQuoteBeforeDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // After DOCTYPE system keyword state
+  //------------------------------------------------------------------
+  _stateAfterDoctypeSystemKeyword(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        this.state = State.BEFORE_DOCTYPE_SYSTEM_IDENTIFIER;
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        this._err(ERR.missingWhitespaceAfterDoctypeSystemKeyword);
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        this._err(ERR.missingWhitespaceAfterDoctypeSystemKeyword);
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.missingDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingQuoteBeforeDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // Before DOCTYPE system identifier state
+  //------------------------------------------------------------------
+  _stateBeforeDoctypeSystemIdentifier(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.QUOTATION_MARK: {
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_DOUBLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.APOSTROPHE: {
+        token2.systemId = "";
+        this.state = State.DOCTYPE_SYSTEM_IDENTIFIER_SINGLE_QUOTED;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.missingDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.DATA;
+        this.emitCurrentDoctype(token2);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.missingQuoteBeforeDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // DOCTYPE system identifier (double-quoted) state
+  //------------------------------------------------------------------
+  _stateDoctypeSystemIdentifierDoubleQuoted(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.QUOTATION_MARK: {
+        this.state = State.AFTER_DOCTYPE_SYSTEM_IDENTIFIER;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        token2.systemId += REPLACEMENT_CHARACTER;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.abruptDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        token2.systemId += String.fromCodePoint(cp);
+      }
+    }
+  }
+  // DOCTYPE system identifier (single-quoted) state
+  //------------------------------------------------------------------
+  _stateDoctypeSystemIdentifierSingleQuoted(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.APOSTROPHE: {
+        this.state = State.AFTER_DOCTYPE_SYSTEM_IDENTIFIER;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        token2.systemId += REPLACEMENT_CHARACTER;
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this._err(ERR.abruptDoctypeSystemIdentifier);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        token2.systemId += String.fromCodePoint(cp);
+      }
+    }
+  }
+  // After DOCTYPE system identifier state
+  //------------------------------------------------------------------
+  _stateAfterDoctypeSystemIdentifier(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.SPACE:
+      case CODE_POINTS.LINE_FEED:
+      case CODE_POINTS.TABULATION:
+      case CODE_POINTS.FORM_FEED: {
+        break;
+      }
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInDoctype);
+        token2.forceQuirks = true;
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._err(ERR.unexpectedCharacterAfterDoctypeSystemIdentifier);
+        this.state = State.BOGUS_DOCTYPE;
+        this._stateBogusDoctype(cp);
+      }
+    }
+  }
+  // Bogus DOCTYPE state
+  //------------------------------------------------------------------
+  _stateBogusDoctype(cp) {
+    const token2 = this.currentToken;
+    switch (cp) {
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.emitCurrentDoctype(token2);
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.NULL: {
+        this._err(ERR.unexpectedNullCharacter);
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this.emitCurrentDoctype(token2);
+        this._emitEOFToken();
+        break;
+      }
+      default:
+    }
+  }
+  // CDATA section state
+  //------------------------------------------------------------------
+  _stateCdataSection(cp) {
+    switch (cp) {
+      case CODE_POINTS.RIGHT_SQUARE_BRACKET: {
+        this.state = State.CDATA_SECTION_BRACKET;
+        break;
+      }
+      case CODE_POINTS.EOF: {
+        this._err(ERR.eofInCdata);
+        this._emitEOFToken();
+        break;
+      }
+      default: {
+        this._emitCodePoint(cp);
+      }
+    }
+  }
+  // CDATA section bracket state
+  //------------------------------------------------------------------
+  _stateCdataSectionBracket(cp) {
+    if (cp === CODE_POINTS.RIGHT_SQUARE_BRACKET) {
+      this.state = State.CDATA_SECTION_END;
+    } else {
+      this._emitChars("]", -1);
+      this.state = State.CDATA_SECTION;
+      this._stateCdataSection(cp);
+    }
+  }
+  // CDATA section end state
+  //------------------------------------------------------------------
+  _stateCdataSectionEnd(cp) {
+    switch (cp) {
+      case CODE_POINTS.GREATER_THAN_SIGN: {
+        this.state = State.DATA;
+        break;
+      }
+      case CODE_POINTS.RIGHT_SQUARE_BRACKET: {
+        this._emitChars("]", -2);
+        break;
+      }
+      default: {
+        this._emitChars("]]", -1);
+        this.state = State.CDATA_SECTION;
+        this._stateCdataSection(cp);
+      }
+    }
+  }
+  // Character reference state
+  //------------------------------------------------------------------
+  _stateCharacterReference() {
+    let length = this.entityDecoder.write(this.preprocessor.html, this.preprocessor.pos);
+    if (length < 0) {
+      if (this.preprocessor.lastChunkWritten) {
+        length = this.entityDecoder.end();
+      } else {
+        this.active = false;
+        this.preprocessor.pos = this.preprocessor.html.length - 1;
+        this.consumedAfterSnapshot = 0;
+        this.preprocessor.endOfChunkHit = true;
+        return;
+      }
+    }
+    if (length === 0) {
+      this.preprocessor.pos = this.entityStartPos;
+      this._flushCodePointConsumedAsCharacterReference(CODE_POINTS.AMPERSAND);
+      this.state = !this._isCharacterReferenceInAttribute() && isAsciiAlphaNumeric(this.preprocessor.peek(1)) ? State.AMBIGUOUS_AMPERSAND : this.returnState;
+    } else {
+      this.state = this.returnState;
+    }
+  }
+  // Ambiguos ampersand state
+  //------------------------------------------------------------------
+  _stateAmbiguousAmpersand(cp) {
+    if (isAsciiAlphaNumeric(cp)) {
+      this._flushCodePointConsumedAsCharacterReference(cp);
+    } else {
+      if (cp === CODE_POINTS.SEMICOLON) {
+        this._err(ERR.unknownNamedCharacterReference);
+      }
+      this.state = this.returnState;
+      this._callState(cp);
+    }
+  }
+};
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/parser/open-element-stack.js
+var IMPLICIT_END_TAG_REQUIRED = /* @__PURE__ */ new Set([TAG_ID.DD, TAG_ID.DT, TAG_ID.LI, TAG_ID.OPTGROUP, TAG_ID.OPTION, TAG_ID.P, TAG_ID.RB, TAG_ID.RP, TAG_ID.RT, TAG_ID.RTC]);
+var IMPLICIT_END_TAG_REQUIRED_THOROUGHLY = /* @__PURE__ */ new Set([
+  ...IMPLICIT_END_TAG_REQUIRED,
+  TAG_ID.CAPTION,
+  TAG_ID.COLGROUP,
+  TAG_ID.TBODY,
+  TAG_ID.TD,
+  TAG_ID.TFOOT,
+  TAG_ID.TH,
+  TAG_ID.THEAD,
+  TAG_ID.TR
+]);
+var INDEX_DEPTH = 64;
+var SVG_KEYS = 256;
+var MATHML_KEYS = 512;
+var NAME_KEYS = 768;
+var NUMBERED_HEADERS2 = [TAG_ID.H1, TAG_ID.H2, TAG_ID.H3, TAG_ID.H4, TAG_ID.H5, TAG_ID.H6];
+var TABLE_BODIES = [TAG_ID.TBODY, TAG_ID.TFOOT, TAG_ID.THEAD];
+var TABLE_ROW_CONTEXT = [TAG_ID.TR, TAG_ID.TEMPLATE, TAG_ID.HTML];
+var TABLE_BODY_CONTEXT = [...TABLE_BODIES, TAG_ID.TEMPLATE, TAG_ID.HTML];
+var TABLE_CONTEXT = [TAG_ID.TABLE, TAG_ID.TEMPLATE, TAG_ID.HTML];
+var TABLE_CELLS = [TAG_ID.TD, TAG_ID.TH];
+var SPECIAL = 1;
+var LIST_ITEM_BOUNDARY = 2;
+var SCOPE = 4;
+var LIST_ITEM_SCOPE = 8;
+var BUTTON_SCOPE = 16;
+var TABLE_SCOPE = 32;
+var KEY_CLASSES = new Uint8Array(NAME_KEYS);
+for (const [ns, offset] of [
+  [NS.HTML, 0],
+  [NS.SVG, SVG_KEYS],
+  [NS.MATHML, MATHML_KEYS]
+]) {
+  for (const tn of SPECIAL_ELEMENTS[ns]) {
+    KEY_CLASSES[offset + tn] = ns === NS.HTML && (tn === TAG_ID.ADDRESS || tn === TAG_ID.DIV || tn === TAG_ID.P) ? SPECIAL : SPECIAL | LIST_ITEM_BOUNDARY;
+  }
+}
+for (const key of [
+  TAG_ID.APPLET,
+  TAG_ID.CAPTION,
+  TAG_ID.HTML,
+  TAG_ID.MARQUEE,
+  TAG_ID.OBJECT,
+  TAG_ID.TABLE,
+  TAG_ID.TD,
+  TAG_ID.TEMPLATE,
+  TAG_ID.TH,
+  SVG_KEYS + TAG_ID.DESC,
+  SVG_KEYS + TAG_ID.FOREIGN_OBJECT,
+  SVG_KEYS + TAG_ID.TITLE,
+  MATHML_KEYS + TAG_ID.ANNOTATION_XML,
+  MATHML_KEYS + TAG_ID.MI,
+  MATHML_KEYS + TAG_ID.MN,
+  MATHML_KEYS + TAG_ID.MO,
+  MATHML_KEYS + TAG_ID.MS,
+  MATHML_KEYS + TAG_ID.MTEXT
+]) {
+  KEY_CLASSES[key] |= SCOPE | LIST_ITEM_SCOPE | BUTTON_SCOPE;
+}
+KEY_CLASSES[TAG_ID.OL] |= LIST_ITEM_SCOPE;
+KEY_CLASSES[TAG_ID.UL] |= LIST_ITEM_SCOPE;
+KEY_CLASSES[TAG_ID.BUTTON] |= BUTTON_SCOPE;
+KEY_CLASSES[TAG_ID.TABLE] |= TABLE_SCOPE;
+KEY_CLASSES[TAG_ID.HTML] |= TABLE_SCOPE;
+var FORMATTING_TAGS = new Uint8Array(NAME_KEYS);
+for (const tn of [TAG_ID.A, TAG_ID.B, TAG_ID.BIG, TAG_ID.CODE, TAG_ID.EM, TAG_ID.FONT, TAG_ID.I, TAG_ID.NOBR, TAG_ID.S, TAG_ID.SMALL, TAG_ID.STRIKE, TAG_ID.STRONG, TAG_ID.TT, TAG_ID.U]) {
+  FORMATTING_TAGS[tn] = 1;
+}
+function tagKey(ns, tagID) {
+  if (tagID === TAG_ID.UNKNOWN)
+    return -1;
+  switch (ns) {
+    case NS.HTML: {
+      return tagID;
+    }
+    case NS.SVG: {
+      return SVG_KEYS + tagID;
+    }
+    case NS.MATHML: {
+      return MATHML_KEYS + tagID;
+    }
+    default: {
+      return -1;
+    }
+  }
+}
+var OpenElementStack = class {
+  get currentTmplContentOrNode() {
+    return this._isInTemplate() ? this.treeAdapter.getTemplateContent(this.current) : this.current;
+  }
+  constructor(document, treeAdapter, handler) {
+    this.treeAdapter = treeAdapter;
+    this.handler = handler;
+    this.items = [];
+    this.tagIDs = [];
+    this.stackTop = -1;
+    this.depth = 0;
+    this.tmplCount = 0;
+    this.currentTagId = TAG_ID.UNKNOWN;
+    this.indexed = false;
+    this.below = [];
+    this.above = [];
+    this.keys = [];
+    this.keyPrev = [];
+    this.keyNext = [];
+    this.keyTops = new Int32Array(0);
+    this.specials = [];
+    this.listItemBoundaries = [];
+    this.scopeBoundaries = [];
+    this.htmlSlots = [];
+    this.formattingSlots = /* @__PURE__ */ new Map();
+    this.current = document;
+  }
+  /** The slot of an open element, or -1. */
+  _indexOf(element) {
+    if (this.indexed) {
+      const idx = this.formattingSlots.get(element);
+      if (idx !== void 0)
+        return idx;
+      if (FORMATTING_TAGS[getTagID(this.treeAdapter.getTagName(element))])
+        return -1;
+    }
+    return this.items.lastIndexOf(element, this.stackTop);
+  }
+  /** The slot of the open element below the one at `idx`, or -1. */
+  slotBelow(idx) {
+    return this.indexed ? this.below[idx] : idx - 1;
+  }
+  /** The slot of the open element above the one at `idx`, or -1. */
+  slotAbove(idx) {
+    if (this.indexed)
+      return this.above[idx];
+    return idx === this.stackTop ? -1 : idx + 1;
+  }
+  //Update current element
+  _isInTemplate() {
+    return this.currentTagId === TAG_ID.TEMPLATE && this.treeAdapter.getNamespaceURI(this.current) === NS.HTML;
+  }
+  _updateCurrentElement() {
+    this.current = this.items[this.stackTop];
+    this.currentTagId = this.tagIDs[this.stackTop];
+  }
+  //Index
+  _nameKey(ns, tagName, create2) {
+    var _a, _b;
+    const name = `${ns} ${tagName}`;
+    let key = (_a = this.nameKeys) === null || _a === void 0 ? void 0 : _a.get(name);
+    if (key === void 0 && create2) {
+      (_b = this.nameKeys) !== null && _b !== void 0 ? _b : this.nameKeys = /* @__PURE__ */ new Map();
+      key = NAME_KEYS + this.nameKeys.size;
+      this.nameKeys.set(name, key);
+      if (key === this.keyTops.length) {
+        const keyTops = new Int32Array(2 * key).fill(-1);
+        keyTops.set(this.keyTops);
+        this.keyTops = keyTops;
+      }
+    }
+    return key !== null && key !== void 0 ? key : -1;
+  }
+  /** Indexes the open elements once the stack is `INDEX_DEPTH` deep. */
+  _indexAll() {
+    this.indexed = true;
+    this.keyTops = new Int32Array(NAME_KEYS).fill(-1);
+    for (let i = 0; i <= this.stackTop; i++)
+      this._index(i, i - 1);
+  }
+  /** Indexes the element at `slot`, above the open element at `belowIdx`. */
+  _index(slot, belowIdx) {
+    const element = this.items[slot];
+    const tagID = this.tagIDs[slot];
+    const ns = this.treeAdapter.getNamespaceURI(element);
+    let key = tagKey(ns, tagID);
+    if (key === -1)
+      key = this._nameKey(ns, this.treeAdapter.getTagName(element), true);
+    const keyPrev = this.keyTops[key];
+    this.keys[slot] = key;
+    this.keyPrev[slot] = keyPrev;
+    this.keyNext[slot] = -1;
+    if (keyPrev !== -1)
+      this.keyNext[keyPrev] = slot;
+    this.keyTops[key] = slot;
+    this.above[slot] = -1;
+    this._link(slot, belowIdx, ns === NS.HTML);
+    if (FORMATTING_TAGS[tagID])
+      this.formattingSlots.set(element, slot);
+  }
+  /** Puts the indexed element at `slot` above the one at `belowIdx`, and counts the elements of each class. */
+  _link(slot, belowIdx, isHtml) {
+    const key = this.keys[slot];
+    const classes = key < NAME_KEYS ? KEY_CLASSES[key] : 0;
+    this.below[slot] = belowIdx;
+    if (belowIdx === -1) {
+      this.specials[slot] = classes & SPECIAL;
+      this.listItemBoundaries[slot] = (classes & LIST_ITEM_BOUNDARY) >> 1;
+      this.scopeBoundaries[slot] = (classes & SCOPE) >> 2;
+      this.htmlSlots[slot] = isHtml ? slot : -1;
+    } else {
+      this.above[belowIdx] = slot;
+      this.specials[slot] = this.specials[belowIdx] + (classes & SPECIAL);
+      this.listItemBoundaries[slot] = this.listItemBoundaries[belowIdx] + ((classes & LIST_ITEM_BOUNDARY) >> 1);
+      this.scopeBoundaries[slot] = this.scopeBoundaries[belowIdx] + ((classes & SCOPE) >> 2);
+      this.htmlSlots[slot] = isHtml ? slot : this.htmlSlots[belowIdx];
+    }
+  }
+  /** Takes the element at `slot` out of the index, except for the links between slots. */
+  _unindex(slot) {
+    const key = this.keys[slot];
+    const keyPrev = this.keyPrev[slot];
+    const keyNext = this.keyNext[slot];
+    if (keyPrev !== -1)
+      this.keyNext[keyPrev] = keyNext;
+    if (keyNext === -1)
+      this.keyTops[key] = keyPrev;
+    else
+      this.keyPrev[keyNext] = keyPrev;
+    if (FORMATTING_TAGS[this.tagIDs[slot]])
+      this.formattingSlots.delete(this.items[slot]);
+  }
+  /** Moves the indexed element at `from` down to the free slot `to`, keeping its key chain in order. */
+  _move(from, to) {
+    const element = this.items[from];
+    const key = this.keys[from];
+    const keyPrev = this.keyPrev[from];
+    const keyNext = this.keyNext[from];
+    this.items[to] = element;
+    this.tagIDs[to] = this.tagIDs[from];
+    this.keys[to] = key;
+    this.keyPrev[to] = keyPrev;
+    this.keyNext[to] = keyNext;
+    if (keyPrev !== -1)
+      this.keyNext[keyPrev] = to;
+    if (keyNext === -1)
+      this.keyTops[key] = to;
+    else
+      this.keyPrev[keyNext] = to;
+    if (FORMATTING_TAGS[this.tagIDs[to]])
+      this.formattingSlots.set(element, to);
+  }
+  //Search by tag
+  /** The slot of the topmost open HTML element with this tag, or -1. */
+  indexOfTopmost(tagID) {
+    if (this.indexed)
+      return this.keyTops[tagID];
+    for (let i = this.stackTop; i >= 0; i--) {
+      if (this.tagIDs[i] === tagID && this.treeAdapter.getNamespaceURI(this.items[i]) === NS.HTML)
+        return i;
+    }
+    return -1;
+  }
+  /** The slot of the topmost open HTML element with any of these tags, or -1. */
+  indexOfTopmostOf(tagIDs) {
+    if (this.indexed) {
+      let top = -1;
+      for (const tagID of tagIDs) {
+        if (this.keyTops[tagID] > top)
+          top = this.keyTops[tagID];
+      }
+      return top;
+    }
+    for (let i = this.stackTop; i >= 0; i--) {
+      if (tagIDs.includes(this.tagIDs[i]) && this.treeAdapter.getNamespaceURI(this.items[i]) === NS.HTML)
+        return i;
+    }
+    return -1;
+  }
+  /** The slot of the topmost open element in this namespace with this tag name, or -1. */
+  indexOfTopmostByName(ns, tagName) {
+    if (this.indexed) {
+      let key = tagKey(ns, getTagID(tagName));
+      if (key === -1)
+        key = this._nameKey(ns, tagName, false);
+      return key === -1 ? -1 : this.keyTops[key];
+    }
+    for (let i = this.stackTop; i >= 0; i--) {
+      const element = this.items[i];
+      if (this.treeAdapter.getTagName(element) === tagName && this.treeAdapter.getNamespaceURI(element) === ns) {
+        return i;
+      }
+    }
+    return -1;
+  }
+  /** The slot of the topmost open HTML element, or -1. */
+  indexOfTopmostHtmlElement() {
+    if (this.indexed)
+      return this.stackTop === -1 ? -1 : this.htmlSlots[this.stackTop];
+    let i = this.stackTop;
+    while (i >= 0 && this.treeAdapter.getNamespaceURI(this.items[i]) !== NS.HTML)
+      i--;
+    return i;
+  }
+  /** Whether an element of the classes is open above the slot `idx`, on a stack that is not indexed. */
+  _hasAbove(idx, classes) {
+    for (let i = this.stackTop; i > idx; i--) {
+      const key = tagKey(this.treeAdapter.getNamespaceURI(this.items[i]), this.tagIDs[i]);
+      if (key !== -1 && KEY_CLASSES[key] & classes)
+        return true;
+    }
+    return false;
+  }
+  /** Whether a special element is open above the slot `idx`. */
+  hasSpecialElementAbove(idx) {
+    return this.indexed ? this.specials[this.stackTop] !== this.specials[idx] : this._hasAbove(idx, SPECIAL);
+  }
+  /** Whether a special element other than HTML `address`, `div` and `p` is open above the slot `idx`. */
+  hasListItemBoundaryAbove(idx) {
+    return this.indexed ? this.listItemBoundaries[this.stackTop] !== this.listItemBoundaries[idx] : this._hasAbove(idx, LIST_ITEM_BOUNDARY);
+  }
+  //Mutations
+  push(element, tagID) {
+    const belowIdx = this.stackTop;
+    this.stackTop++;
+    this.depth++;
+    this.items[this.stackTop] = element;
+    this.current = element;
+    this.tagIDs[this.stackTop] = tagID;
+    this.currentTagId = tagID;
+    if (this.indexed)
+      this._index(this.stackTop, belowIdx);
+    else if (this.depth === INDEX_DEPTH)
+      this._indexAll();
+    if (this._isInTemplate()) {
+      this.tmplCount++;
+    }
+    this.handler.onItemPush(element, tagID, true);
+  }
+  /** Pops the current element without calling the handler. */
+  _popCurrent() {
+    if (this.tmplCount > 0 && this._isInTemplate()) {
+      this.tmplCount--;
+    }
+    if (this.indexed) {
+      this._unindex(this.stackTop);
+      this.stackTop = this.below[this.stackTop];
+      if (this.stackTop !== -1)
+        this.above[this.stackTop] = -1;
+    } else {
+      this.stackTop--;
+    }
+    this.depth--;
+    this._updateCurrentElement();
+  }
+  pop() {
+    const popped = this.current;
+    this._popCurrent();
+    this.handler.onItemPop(popped, true);
+  }
+  replace(oldElement, newElement) {
+    const idx = this._indexOf(oldElement);
+    this.items[idx] = newElement;
+    if (this.indexed && FORMATTING_TAGS[this.tagIDs[idx]]) {
+      this.formattingSlots.delete(oldElement);
+      this.formattingSlots.set(newElement, idx);
+    }
+    if (idx === this.stackTop) {
+      this.current = newElement;
+    }
+  }
+  /**
+   * The adoption agency's last stack step: removes the formatting element at `formattingIdx` and opens `element`
+   * directly above the furthest block at `furthestBlockIdx`. On an indexed stack, only formatting elements the agency
+   * kept are still open between them; the furthest block, with those directly below it, moves down by one slot, and
+   * `element` takes the furthest block's slot. No open element above the furthest block moves, and as all these
+   * elements are HTML elements and only the furthest block is special, the counts above it stay the same.
+   */
+  replaceFormattingElement(formattingIdx, furthestBlockIdx, element, tagID) {
+    const formattingElement = this.items[formattingIdx];
+    if (!this.indexed) {
+      this.items.splice(formattingIdx, 1);
+      this.tagIDs.splice(formattingIdx, 1);
+      this.handler.onItemPop(formattingElement, false);
+      this.items.splice(furthestBlockIdx, 0, element);
+      this.tagIDs.splice(furthestBlockIdx, 0, tagID);
+      if (furthestBlockIdx === this.stackTop)
+        this._updateCurrentElement();
+      if (this.current && this.currentTagId !== void 0) {
+        this.handler.onItemPush(this.current, this.currentTagId, furthestBlockIdx === this.stackTop);
+      }
+      return;
+    }
+    const key = this.keys[formattingIdx];
+    const belowIdx = this.below[formattingIdx];
+    const aboveIdx = this.above[furthestBlockIdx];
+    const kept = [];
+    for (let i = this.above[formattingIdx]; i !== furthestBlockIdx; i = this.above[i])
+      kept.push(i);
+    const keyNext = this.keyNext[formattingIdx];
+    this._unindex(formattingIdx);
+    this.items[formattingIdx] = void 0;
+    this.handler.onItemPop(formattingElement, false);
+    let free = furthestBlockIdx - 1;
+    while (kept.length > 0 && kept[kept.length - 1] === free) {
+      kept.pop();
+      free--;
+    }
+    for (let i = free + 1; i <= furthestBlockIdx; i++)
+      this._move(i, i - 1);
+    const keyPrev = keyNext === -1 ? this.keyTops[key] : this.keyPrev[keyNext];
+    this.items[furthestBlockIdx] = element;
+    this.tagIDs[furthestBlockIdx] = tagID;
+    this.keys[furthestBlockIdx] = key;
+    this.keyPrev[furthestBlockIdx] = keyPrev;
+    this.keyNext[furthestBlockIdx] = keyNext;
+    if (keyPrev !== -1)
+      this.keyNext[keyPrev] = furthestBlockIdx;
+    if (keyNext === -1)
+      this.keyTops[key] = furthestBlockIdx;
+    else
+      this.keyPrev[keyNext] = furthestBlockIdx;
+    if (FORMATTING_TAGS[tagID])
+      this.formattingSlots.set(element, furthestBlockIdx);
+    let prev = belowIdx;
+    for (const i of kept) {
+      this._link(i, prev, true);
+      prev = i;
+    }
+    for (let i = free; i < furthestBlockIdx; i++) {
+      this._link(i, prev, true);
+      prev = i;
+    }
+    this._link(furthestBlockIdx, prev, true);
+    if (aboveIdx === -1)
+      this._updateCurrentElement();
+    if (this.current && this.currentTagId !== void 0) {
+      this.handler.onItemPush(this.current, this.currentTagId, aboveIdx === -1);
+    }
+  }
+  popUntilTagNamePopped(tagName) {
+    this.shortenToLength(Math.max(this.indexOfTopmost(tagName), 0));
+  }
+  shortenToLength(idx) {
+    while (this.stackTop >= idx) {
+      const popped = this.current;
+      this._popCurrent();
+      this.handler.onItemPop(popped, this.stackTop < idx);
+    }
+  }
+  popUntilElementPopped(element) {
+    const idx = this._indexOf(element);
+    this.shortenToLength(Math.max(idx, 0));
+  }
+  popUntilNumberedHeaderPopped() {
+    this.shortenToLength(Math.max(this.indexOfTopmostOf(NUMBERED_HEADERS2), 0));
+  }
+  popUntilTableCellPopped() {
+    this.shortenToLength(Math.max(this.indexOfTopmostOf(TABLE_CELLS), 0));
+  }
+  popAllUpToHtmlElement() {
+    this.tmplCount = 0;
+    this.shortenToLength(1);
+  }
+  clearBackToTableContext() {
+    this.shortenToLength(this.indexOfTopmostOf(TABLE_CONTEXT) + 1);
+  }
+  clearBackToTableBodyContext() {
+    this.shortenToLength(this.indexOfTopmostOf(TABLE_BODY_CONTEXT) + 1);
+  }
+  clearBackToTableRowContext() {
+    this.shortenToLength(this.indexOfTopmostOf(TABLE_ROW_CONTEXT) + 1);
+  }
+  remove(element) {
+    const idx = this._indexOf(element);
+    if (idx !== -1)
+      this.removeAt(idx);
+  }
+  /** Removes the open element at the slot `idx`; on an indexed stack, the elements above it keep their slots. */
+  removeAt(idx) {
+    if (idx === this.stackTop) {
+      this.pop();
+      return;
+    }
+    const element = this.items[idx];
+    this.depth--;
+    if (this.indexed) {
+      const classes = this.keys[idx] < NAME_KEYS ? KEY_CLASSES[this.keys[idx]] : 0;
+      const belowIdx = this.below[idx];
+      const aboveIdx = this.above[idx];
+      this._unindex(idx);
+      this.items[idx] = void 0;
+      this.below[aboveIdx] = belowIdx;
+      if (belowIdx !== -1)
+        this.above[belowIdx] = aboveIdx;
+      if (classes !== 0) {
+        for (let i = aboveIdx; i !== -1; i = this.above[i]) {
+          this.specials[i] -= classes & SPECIAL;
+          this.listItemBoundaries[i] -= (classes & LIST_ITEM_BOUNDARY) >> 1;
+          this.scopeBoundaries[i] -= (classes & SCOPE) >> 2;
+        }
+      }
+      const html = belowIdx === -1 ? -1 : this.htmlSlots[belowIdx];
+      for (let i = aboveIdx; i !== -1 && this.htmlSlots[i] === idx; i = this.above[i]) {
+        this.htmlSlots[i] = html;
+      }
+    } else {
+      this.items.splice(idx, 1);
+      this.tagIDs.splice(idx, 1);
+      this.stackTop--;
+      this._updateCurrentElement();
+    }
+    this.handler.onItemPop(element, false);
+  }
+  //Search
+  tryPeekProperlyNestedBodyElement() {
+    return this.stackTop >= 1 && this.tagIDs[1] === TAG_ID.BODY ? this.items[1] : null;
+  }
+  contains(element) {
+    return this._indexOf(element) > -1;
+  }
+  getCommonAncestor(element) {
+    const idx = this._indexOf(element);
+    const belowIdx = idx === -1 ? -1 : this.slotBelow(idx);
+    return belowIdx === -1 ? null : this.items[belowIdx];
+  }
+  isRootHtmlElementCurrent() {
+    return this.stackTop === 0 && this.tagIDs[0] === TAG_ID.HTML;
+  }
+  //Element in scope
+  /**
+   * On an indexed stack: whether no element of the `scope` class is open above the slot `target`. A target that is not
+   * open is in scope only on a stack without such an element, as a scan from the top would end there.
+   */
+  _isInScope(target2, scope2) {
+    let boundary = -1;
+    switch (scope2) {
+      case LIST_ITEM_SCOPE: {
+        boundary = Math.max(this.keyTops[TAG_ID.OL], this.keyTops[TAG_ID.UL]);
+        break;
+      }
+      case BUTTON_SCOPE: {
+        boundary = this.keyTops[TAG_ID.BUTTON];
+        break;
+      }
+      case TABLE_SCOPE: {
+        boundary = Math.max(this.keyTops[TAG_ID.TABLE], this.keyTops[TAG_ID.HTML]);
+        return target2 === -1 ? boundary === -1 : target2 >= boundary;
+      }
+      default:
+    }
+    return target2 === -1 ? boundary === -1 && (this.stackTop === -1 || this.scopeBoundaries[this.stackTop] === 0) : target2 >= boundary && this.scopeBoundaries[this.stackTop] === this.scopeBoundaries[target2];
+  }
+  /**
+   * On a stack that is not indexed: whether an HTML element with the tag, or one of the tags, and if passed the element
+   * itself, is open above every element of the `scope` class; true if neither is open.
+   */
+  _scanScope(tagID, tagIDs, scope2, element) {
+    for (let i = this.stackTop; i >= 0; i--) {
+      const key = tagKey(this.treeAdapter.getNamespaceURI(this.items[i]), this.tagIDs[i]);
+      if (key === -1)
+        continue;
+      if ((tagIDs ? tagIDs.includes(key) : key === tagID) && (!element || this.items[i] === element))
+        return true;
+      if (KEY_CLASSES[key] & scope2)
+        return false;
+    }
+    return true;
+  }
+  /** If `element` is passed, only that element (which has to be a `tagName` element) is looked for. */
+  hasInScope(tagName, element) {
+    if (!this.indexed)
+      return this._scanScope(tagName, null, SCOPE, element);
+    return this._isInScope(element ? this._indexOf(element) : this.keyTops[tagName], SCOPE);
+  }
+  hasInListItemScope(tagName) {
+    return this.indexed ? this._isInScope(this.keyTops[tagName], LIST_ITEM_SCOPE) : this._scanScope(tagName, null, LIST_ITEM_SCOPE);
+  }
+  hasInButtonScope(tagName) {
+    return this.indexed ? this._isInScope(this.keyTops[tagName], BUTTON_SCOPE) : this._scanScope(tagName, null, BUTTON_SCOPE);
+  }
+  hasNumberedHeaderInScope() {
+    return this.indexed ? this._isInScope(this.indexOfTopmostOf(NUMBERED_HEADERS2), SCOPE) : this._scanScope(TAG_ID.UNKNOWN, NUMBERED_HEADERS2, SCOPE);
+  }
+  hasInTableScope(tagName) {
+    return this.indexed ? this._isInScope(this.keyTops[tagName], TABLE_SCOPE) : this._scanScope(tagName, null, TABLE_SCOPE);
+  }
+  hasTableBodyContextInTableScope() {
+    return this.indexed ? this._isInScope(this.indexOfTopmostOf(TABLE_BODIES), TABLE_SCOPE) : this._scanScope(TAG_ID.UNKNOWN, TABLE_BODIES, TABLE_SCOPE);
+  }
+  hasInSelectScope(tagName) {
+    for (let i = this.stackTop; i >= 0; i = this.slotBelow(i)) {
+      if (this.treeAdapter.getNamespaceURI(this.items[i]) !== NS.HTML) {
+        continue;
+      }
+      switch (this.tagIDs[i]) {
+        case tagName: {
+          return true;
+        }
+        case TAG_ID.OPTION:
+        case TAG_ID.OPTGROUP: {
+          break;
+        }
+        default: {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  //Implied end tags
+  generateImpliedEndTags() {
+    while (this.currentTagId !== void 0 && IMPLICIT_END_TAG_REQUIRED.has(this.currentTagId) && this.treeAdapter.getNamespaceURI(this.current) === NS.HTML) {
+      this.pop();
+    }
+  }
+  generateImpliedEndTagsThoroughly() {
+    while (this.currentTagId !== void 0 && IMPLICIT_END_TAG_REQUIRED_THOROUGHLY.has(this.currentTagId) && this.treeAdapter.getNamespaceURI(this.current) === NS.HTML) {
+      this.pop();
+    }
+  }
+  generateImpliedEndTagsWithExclusion(exclusionId) {
+    while (this.currentTagId !== void 0 && this.currentTagId !== exclusionId && IMPLICIT_END_TAG_REQUIRED_THOROUGHLY.has(this.currentTagId) && this.treeAdapter.getNamespaceURI(this.current) === NS.HTML) {
+      this.pop();
+    }
+  }
+};
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/parser/formatting-element-list.js
+var NOAH_ARK_CAPACITY = 3;
+var EntryType;
+(function(EntryType2) {
+  EntryType2[EntryType2["Marker"] = 0] = "Marker";
+  EntryType2[EntryType2["Element"] = 1] = "Element";
+})(EntryType || (EntryType = {}));
+var FormattingElementList = class {
+  constructor() {
+    this.newest = null;
+    this.bookmark = null;
+    this.index = null;
+    this.elementEntries = /* @__PURE__ */ new Map();
+  }
+  /** Returns the entry's ark, or null if the entries after the last marker are not indexed. */
+  _insertElementEntry(element, token2, older) {
+    const newer = older === null ? null : older.newer;
+    const entry = {
+      type: EntryType.Element,
+      element,
+      token: token2,
+      older,
+      newer,
+      ark: null,
+      olderSameTag: null,
+      newerSameTag: null
+    };
+    if (newer === null) {
+      this.newest = entry;
+    } else {
+      newer.older = entry;
+    }
+    if (older !== null) {
+      older.newer = entry;
+    }
+    return this.index === null ? null : this._addToIndex(this.index, entry);
+  }
+  _addToIndex(index, entry) {
+    const { tagName, attrs } = entry.token;
+    const key = tagName + attrs.map(({ name, value }) => `\0${name}\0${value}`).sort().join("");
+    let ark = index.arks.get(key);
+    if (ark === void 0) {
+      ark = { entries: [], key };
+      index.arks.set(key, ark);
+    }
+    ark.entries.push(entry);
+    entry.ark = ark;
+    this.elementEntries.set(entry.element, entry);
+    let head2 = index.tagNames.get(tagName);
+    if (head2 === void 0) {
+      head2 = { olderSameTag: null };
+      index.tagNames.set(tagName, head2);
+    }
+    entry.olderSameTag = head2.olderSameTag;
+    entry.newerSameTag = head2;
+    if (head2.olderSameTag !== null) {
+      head2.olderSameTag.newerSameTag = entry;
+    }
+    head2.olderSameTag = entry;
+    return ark;
+  }
+  //Mutations
+  insertMarker() {
+    if (this.index === null) {
+      for (let entry = this.newest; entry !== null && entry.type === EntryType.Element; entry = entry.older) {
+        this.elementEntries.set(entry.element, entry);
+      }
+    }
+    const marker = {
+      type: EntryType.Marker,
+      older: this.newest,
+      newer: null,
+      outerIndex: this.index
+    };
+    if (this.newest !== null) {
+      this.newest.newer = marker;
+    }
+    this.newest = marker;
+    this.index = null;
+  }
+  pushElement(element, token2) {
+    if (this.index === null) {
+      let oldest = null;
+      let count = 0;
+      for (let entry = this.newest; entry !== null && entry.type === EntryType.Element; entry = entry.older) {
+        oldest = entry;
+        count++;
+      }
+      if (count >= NOAH_ARK_CAPACITY) {
+        this.index = { arks: /* @__PURE__ */ new Map(), tagNames: /* @__PURE__ */ new Map() };
+        for (let entry = oldest; entry !== null && entry.type === EntryType.Element; entry = entry.newer) {
+          this._addToIndex(this.index, entry);
+        }
+      }
+    }
+    const ark = this._insertElementEntry(element, token2, this.newest);
+    if (ark !== null && ark.entries.length > NOAH_ARK_CAPACITY) {
+      this.removeEntry(ark.entries[0]);
+    }
+  }
+  insertElementAfterBookmark(element, token2) {
+    const { bookmark } = this;
+    this.bookmark = null;
+    this._insertElementEntry(element, token2, bookmark);
+  }
+  removeEntry(entry) {
+    var _a;
+    if (entry.newer === null ? this.newest !== entry : entry.newer.older !== entry) {
+      return;
+    }
+    this.elementEntries.delete(entry.element);
+    if (entry.newer === null) {
+      this.newest = entry.older;
+    } else {
+      entry.newer.older = entry.older;
+    }
+    if (entry.older !== null) {
+      entry.older.newer = entry.newer;
+    }
+    if (entry.ark !== null) {
+      const { entries, key } = entry.ark;
+      entries.splice(entries.indexOf(entry), 1);
+      if (entries.length === 0)
+        (_a = this.index) === null || _a === void 0 ? void 0 : _a.arks.delete(key);
+    }
+    if (entry.newerSameTag !== null) {
+      entry.newerSameTag.olderSameTag = entry.olderSameTag;
+      if (entry.olderSameTag !== null) {
+        entry.olderSameTag.newerSameTag = entry.newerSameTag;
+      }
+    }
+  }
+  replaceElement(entry, element) {
+    if (this.elementEntries.delete(entry.element)) {
+      this.elementEntries.set(element, entry);
+    }
+    entry.element = element;
+  }
+  /**
+   * Clears the list of formatting elements up to the last marker.
+   *
+   * @see https://html.spec.whatwg.org/multipage/parsing.html#clear-the-list-of-active-formatting-elements-up-to-the-last-marker
+   */
+  clearToLastMarker() {
+    let marker = this.newest;
+    for (; marker !== null && marker.type === EntryType.Element; marker = marker.older) {
+      this.elementEntries.delete(marker.element);
+    }
+    this.newest = marker === null ? null : marker.older;
+    this.index = marker === null ? null : marker.outerIndex;
+    if (this.newest !== null) {
+      this.newest.newer = null;
+    }
+  }
+  //Search
+  getElementEntryInScopeWithTagName(tagName) {
+    var _a, _b;
+    if (this.index !== null) {
+      return (_b = (_a = this.index.tagNames.get(tagName)) === null || _a === void 0 ? void 0 : _a.olderSameTag) !== null && _b !== void 0 ? _b : null;
+    }
+    for (let entry = this.newest; entry !== null && entry.type === EntryType.Element; entry = entry.older) {
+      if (entry.token.tagName === tagName) {
+        return entry;
+      }
+    }
+    return null;
+  }
+  getElementEntry(element) {
+    if (this.index === null) {
+      for (let entry = this.newest; entry !== null && entry.type === EntryType.Element; entry = entry.older) {
+        if (entry.element === element) {
+          return entry;
+        }
+      }
+    }
+    return this.elementEntries.get(element);
+  }
+};
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/tree-adapters/default.js
+var attrListIndexes = /* @__PURE__ */ new WeakMap();
+var defaultTreeAdapter = {
+  //Node construction
+  createDocument() {
+    return {
+      nodeName: "#document",
+      mode: DOCUMENT_MODE.NO_QUIRKS,
+      childNodes: []
+    };
+  },
+  createDocumentFragment() {
+    return {
+      nodeName: "#document-fragment",
+      childNodes: []
+    };
+  },
+  createElement(tagName, namespaceURI, attrs) {
+    return {
+      nodeName: tagName,
+      tagName,
+      attrs,
+      namespaceURI,
+      childNodes: [],
+      parentNode: null
+    };
+  },
+  createCommentNode(data) {
+    return {
+      nodeName: "#comment",
+      data,
+      parentNode: null
+    };
+  },
+  createTextNode(value) {
+    return {
+      nodeName: "#text",
+      value,
+      parentNode: null
+    };
+  },
+  //Tree mutation
+  appendChild(parentNode, newNode) {
+    parentNode.childNodes.push(newNode);
+    newNode.parentNode = parentNode;
+  },
+  insertBefore(parentNode, newNode, referenceNode) {
+    const { childNodes } = parentNode;
+    const insertionIdx = childNodes[childNodes.length - 1] === referenceNode ? childNodes.length - 1 : childNodes.indexOf(referenceNode);
+    childNodes.splice(insertionIdx, 0, newNode);
+    newNode.parentNode = parentNode;
+  },
+  setTemplateContent(templateElement, contentElement) {
+    templateElement.content = contentElement;
+  },
+  getTemplateContent(templateElement) {
+    return templateElement.content;
+  },
+  setDocumentType(document, name, publicId, systemId) {
+    const doctypeNode = document.childNodes.find((node) => node.nodeName === "#documentType");
+    if (doctypeNode) {
+      doctypeNode.name = name;
+      doctypeNode.publicId = publicId;
+      doctypeNode.systemId = systemId;
+    } else {
+      const node = {
+        nodeName: "#documentType",
+        name,
+        publicId,
+        systemId,
+        parentNode: null
+      };
+      defaultTreeAdapter.appendChild(document, node);
+    }
+  },
+  setDocumentMode(document, mode) {
+    document.mode = mode;
+  },
+  getDocumentMode(document) {
+    return document.mode;
+  },
+  detachNode(node) {
+    if (node.parentNode) {
+      const { childNodes } = node.parentNode;
+      const idx = childNodes[childNodes.length - 1] === node ? childNodes.length - 1 : childNodes.indexOf(node);
+      childNodes.splice(idx, 1);
+      node.parentNode = null;
+    }
+  },
+  insertText(parentNode, text3) {
+    if (parentNode.childNodes.length > 0) {
+      const prevNode = parentNode.childNodes[parentNode.childNodes.length - 1];
+      if (defaultTreeAdapter.isTextNode(prevNode)) {
+        prevNode.value += text3;
+        return;
+      }
+    }
+    defaultTreeAdapter.appendChild(parentNode, defaultTreeAdapter.createTextNode(text3));
+  },
+  insertTextBefore(parentNode, text3, referenceNode) {
+    const { childNodes } = parentNode;
+    const referenceIdx = childNodes[childNodes.length - 1] === referenceNode ? childNodes.length - 1 : childNodes.indexOf(referenceNode);
+    const prevNode = childNodes[referenceIdx - 1];
+    if (prevNode && defaultTreeAdapter.isTextNode(prevNode)) {
+      prevNode.value += text3;
+    } else {
+      defaultTreeAdapter.insertBefore(parentNode, defaultTreeAdapter.createTextNode(text3), referenceNode);
+    }
+  },
+  /**
+   * Keeps the recipient's names between merges as a map from name to position. The map is rebuilt when the list changed
+   * length or has a repeated name, or when a merged name it holds no longer names the entry at that position. A name that
+   * other code gives an existing entry between two merges is missed otherwise, and merging it appends it a second time.
+   */
+  adoptAttributes(recipient, attrs) {
+    if (attrs.length === 0 || attrs === recipient.attrs)
+      return;
+    const cached = attrListIndexes.get(recipient.attrs);
+    const isIndexed = (cached === null || cached === void 0 ? void 0 : cached.size) === recipient.attrs.length && attrs.every(({ name }) => {
+      var _a;
+      const index = cached.get(name);
+      return index === void 0 || ((_a = recipient.attrs[index]) === null || _a === void 0 ? void 0 : _a.name) === name;
+    });
+    const recipientAttrsMap = isIndexed ? cached : /* @__PURE__ */ new Map();
+    if (!isIndexed) {
+      for (let i = 0; i < recipient.attrs.length; i++) {
+        const attr = recipient.attrs[i];
+        if (attr !== void 0)
+          recipientAttrsMap.set(attr.name, i);
+      }
+      attrListIndexes.set(recipient.attrs, recipientAttrsMap);
+    }
+    const adoptedFrom = recipient.attrs.length;
+    for (let j = 0; j < attrs.length; j++) {
+      if (!recipientAttrsMap.has(attrs[j].name)) {
+        recipient.attrs.push(attrs[j]);
+      }
+    }
+    for (let j = adoptedFrom; j < recipient.attrs.length; j++) {
+      recipientAttrsMap.set(recipient.attrs[j].name, j);
+    }
+    if (recipientAttrsMap.size !== recipient.attrs.length) {
+      attrListIndexes.delete(recipient.attrs);
+    }
+  },
+  //Tree traversing
+  getFirstChild(node) {
+    return node.childNodes[0];
+  },
+  getChildNodes(node) {
+    return node.childNodes;
+  },
+  getParentNode(node) {
+    return node.parentNode;
+  },
+  getAttrList(element) {
+    return element.attrs;
+  },
+  //Node data
+  getTagName(element) {
+    return element.tagName;
+  },
+  getNamespaceURI(element) {
+    return element.namespaceURI;
+  },
+  getTextNodeContent(textNode) {
+    return textNode.value;
+  },
+  getCommentNodeContent(commentNode) {
+    return commentNode.data;
+  },
+  getDocumentTypeNodeName(doctypeNode) {
+    return doctypeNode.name;
+  },
+  getDocumentTypeNodePublicId(doctypeNode) {
+    return doctypeNode.publicId;
+  },
+  getDocumentTypeNodeSystemId(doctypeNode) {
+    return doctypeNode.systemId;
+  },
+  //Node types
+  isTextNode(node) {
+    return node.nodeName === "#text";
+  },
+  isCommentNode(node) {
+    return node.nodeName === "#comment";
+  },
+  isDocumentTypeNode(node) {
+    return node.nodeName === "#documentType";
+  },
+  isElementNode(node) {
+    return Object.prototype.hasOwnProperty.call(node, "tagName");
+  },
+  // Source code location
+  setNodeSourceCodeLocation(node, location) {
+    node.sourceCodeLocation = location;
+  },
+  getNodeSourceCodeLocation(node) {
+    return node.sourceCodeLocation;
+  },
+  updateNodeSourceCodeLocation(node, endLocation) {
+    node.sourceCodeLocation = { ...node.sourceCodeLocation, ...endLocation };
+  }
+};
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/doctype.js
+var VALID_DOCTYPE_NAME = "html";
+var VALID_SYSTEM_ID = "about:legacy-compat";
+var QUIRKS_MODE_SYSTEM_ID = "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd";
+var QUIRKS_MODE_PUBLIC_ID_PREFIXES = [
+  "+//silmaril//dtd html pro v0r11 19970101//",
+  "-//as//dtd html 3.0 aswedit + extensions//",
+  "-//advasoft ltd//dtd html 3.0 aswedit + extensions//",
+  "-//ietf//dtd html 2.0 level 1//",
+  "-//ietf//dtd html 2.0 level 2//",
+  "-//ietf//dtd html 2.0 strict level 1//",
+  "-//ietf//dtd html 2.0 strict level 2//",
+  "-//ietf//dtd html 2.0 strict//",
+  "-//ietf//dtd html 2.0//",
+  "-//ietf//dtd html 2.1e//",
+  "-//ietf//dtd html 3.0//",
+  "-//ietf//dtd html 3.2 final//",
+  "-//ietf//dtd html 3.2//",
+  "-//ietf//dtd html 3//",
+  "-//ietf//dtd html level 0//",
+  "-//ietf//dtd html level 1//",
+  "-//ietf//dtd html level 2//",
+  "-//ietf//dtd html level 3//",
+  "-//ietf//dtd html strict level 0//",
+  "-//ietf//dtd html strict level 1//",
+  "-//ietf//dtd html strict level 2//",
+  "-//ietf//dtd html strict level 3//",
+  "-//ietf//dtd html strict//",
+  "-//ietf//dtd html//",
+  "-//metrius//dtd metrius presentational//",
+  "-//microsoft//dtd internet explorer 2.0 html strict//",
+  "-//microsoft//dtd internet explorer 2.0 html//",
+  "-//microsoft//dtd internet explorer 2.0 tables//",
+  "-//microsoft//dtd internet explorer 3.0 html strict//",
+  "-//microsoft//dtd internet explorer 3.0 html//",
+  "-//microsoft//dtd internet explorer 3.0 tables//",
+  "-//netscape comm. corp.//dtd html//",
+  "-//netscape comm. corp.//dtd strict html//",
+  "-//o'reilly and associates//dtd html 2.0//",
+  "-//o'reilly and associates//dtd html extended 1.0//",
+  "-//o'reilly and associates//dtd html extended relaxed 1.0//",
+  "-//sq//dtd html 2.0 hotmetal + extensions//",
+  "-//softquad software//dtd hotmetal pro 6.0::19990601::extensions to html 4.0//",
+  "-//softquad//dtd hotmetal pro 4.0::19971010::extensions to html 4.0//",
+  "-//spyglass//dtd html 2.0 extended//",
+  "-//sun microsystems corp.//dtd hotjava html//",
+  "-//sun microsystems corp.//dtd hotjava strict html//",
+  "-//w3c//dtd html 3 1995-03-24//",
+  "-//w3c//dtd html 3.2 draft//",
+  "-//w3c//dtd html 3.2 final//",
+  "-//w3c//dtd html 3.2//",
+  "-//w3c//dtd html 3.2s draft//",
+  "-//w3c//dtd html 4.0 frameset//",
+  "-//w3c//dtd html 4.0 transitional//",
+  "-//w3c//dtd html experimental 19960712//",
+  "-//w3c//dtd html experimental 970421//",
+  "-//w3c//dtd w3 html//",
+  "-//w3o//dtd w3 html 3.0//",
+  "-//webtechs//dtd mozilla html 2.0//",
+  "-//webtechs//dtd mozilla html//"
+];
+var QUIRKS_MODE_NO_SYSTEM_ID_PUBLIC_ID_PREFIXES = [
+  ...QUIRKS_MODE_PUBLIC_ID_PREFIXES,
+  "-//w3c//dtd html 4.01 frameset//",
+  "-//w3c//dtd html 4.01 transitional//"
+];
+var QUIRKS_MODE_PUBLIC_IDS = /* @__PURE__ */ new Set([
+  "-//w3o//dtd w3 html strict 3.0//en//",
+  "-/w3c/dtd html 4.0 transitional/en",
+  "html"
+]);
+var LIMITED_QUIRKS_PUBLIC_ID_PREFIXES = ["-//w3c//dtd xhtml 1.0 frameset//", "-//w3c//dtd xhtml 1.0 transitional//"];
+var LIMITED_QUIRKS_WITH_SYSTEM_ID_PUBLIC_ID_PREFIXES = [
+  ...LIMITED_QUIRKS_PUBLIC_ID_PREFIXES,
+  "-//w3c//dtd html 4.01 frameset//",
+  "-//w3c//dtd html 4.01 transitional//"
+];
+function hasPrefix(publicId, prefixes) {
+  return prefixes.some((prefix) => publicId.startsWith(prefix));
+}
+function isConforming(token2) {
+  return token2.name === VALID_DOCTYPE_NAME && token2.publicId === null && (token2.systemId === null || token2.systemId === VALID_SYSTEM_ID);
+}
+function getDocumentMode(token2) {
+  if (token2.name !== VALID_DOCTYPE_NAME) {
+    return DOCUMENT_MODE.QUIRKS;
+  }
+  const { systemId } = token2;
+  if (systemId && systemId.toLowerCase() === QUIRKS_MODE_SYSTEM_ID) {
+    return DOCUMENT_MODE.QUIRKS;
+  }
+  let { publicId } = token2;
+  if (publicId !== null) {
+    publicId = publicId.toLowerCase();
+    if (QUIRKS_MODE_PUBLIC_IDS.has(publicId)) {
+      return DOCUMENT_MODE.QUIRKS;
+    }
+    let prefixes = systemId === null ? QUIRKS_MODE_NO_SYSTEM_ID_PUBLIC_ID_PREFIXES : QUIRKS_MODE_PUBLIC_ID_PREFIXES;
+    if (hasPrefix(publicId, prefixes)) {
+      return DOCUMENT_MODE.QUIRKS;
+    }
+    prefixes = systemId === null ? LIMITED_QUIRKS_PUBLIC_ID_PREFIXES : LIMITED_QUIRKS_WITH_SYSTEM_ID_PUBLIC_ID_PREFIXES;
+    if (hasPrefix(publicId, prefixes)) {
+      return DOCUMENT_MODE.LIMITED_QUIRKS;
+    }
+  }
+  return DOCUMENT_MODE.NO_QUIRKS;
+}
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/common/foreign-content.js
+var MIME_TYPES = {
+  TEXT_HTML: "text/html",
+  APPLICATION_XML: "application/xhtml+xml"
+};
+var DEFINITION_URL_ATTR = "definitionurl";
+var ADJUSTED_DEFINITION_URL_ATTR = "definitionURL";
+var SVG_ATTRS_ADJUSTMENT_MAP = new Map([
+  "attributeName",
+  "attributeType",
+  "baseFrequency",
+  "baseProfile",
+  "calcMode",
+  "clipPathUnits",
+  "diffuseConstant",
+  "edgeMode",
+  "filterUnits",
+  "glyphRef",
+  "gradientTransform",
+  "gradientUnits",
+  "kernelMatrix",
+  "kernelUnitLength",
+  "keyPoints",
+  "keySplines",
+  "keyTimes",
+  "lengthAdjust",
+  "limitingConeAngle",
+  "markerHeight",
+  "markerUnits",
+  "markerWidth",
+  "maskContentUnits",
+  "maskUnits",
+  "numOctaves",
+  "pathLength",
+  "patternContentUnits",
+  "patternTransform",
+  "patternUnits",
+  "pointsAtX",
+  "pointsAtY",
+  "pointsAtZ",
+  "preserveAlpha",
+  "preserveAspectRatio",
+  "primitiveUnits",
+  "refX",
+  "refY",
+  "repeatCount",
+  "repeatDur",
+  "requiredExtensions",
+  "requiredFeatures",
+  "specularConstant",
+  "specularExponent",
+  "spreadMethod",
+  "startOffset",
+  "stdDeviation",
+  "stitchTiles",
+  "surfaceScale",
+  "systemLanguage",
+  "tableValues",
+  "targetX",
+  "targetY",
+  "textLength",
+  "viewBox",
+  "viewTarget",
+  "xChannelSelector",
+  "yChannelSelector",
+  "zoomAndPan"
+].map((attr) => [attr.toLowerCase(), attr]));
+var XML_ATTRS_ADJUSTMENT_MAP = /* @__PURE__ */ new Map([
+  ["xlink:actuate", { prefix: "xlink", name: "actuate", namespace: NS.XLINK }],
+  ["xlink:arcrole", { prefix: "xlink", name: "arcrole", namespace: NS.XLINK }],
+  ["xlink:href", { prefix: "xlink", name: "href", namespace: NS.XLINK }],
+  ["xlink:role", { prefix: "xlink", name: "role", namespace: NS.XLINK }],
+  ["xlink:show", { prefix: "xlink", name: "show", namespace: NS.XLINK }],
+  ["xlink:title", { prefix: "xlink", name: "title", namespace: NS.XLINK }],
+  ["xlink:type", { prefix: "xlink", name: "type", namespace: NS.XLINK }],
+  ["xml:lang", { prefix: "xml", name: "lang", namespace: NS.XML }],
+  ["xml:space", { prefix: "xml", name: "space", namespace: NS.XML }],
+  ["xmlns", { prefix: "", name: "xmlns", namespace: NS.XMLNS }],
+  ["xmlns:xlink", { prefix: "xmlns", name: "xlink", namespace: NS.XMLNS }]
+]);
+var SVG_TAG_NAMES_ADJUSTMENT_MAP = new Map([
+  "altGlyph",
+  "altGlyphDef",
+  "altGlyphItem",
+  "animateColor",
+  "animateMotion",
+  "animateTransform",
+  "clipPath",
+  "feBlend",
+  "feColorMatrix",
+  "feComponentTransfer",
+  "feComposite",
+  "feConvolveMatrix",
+  "feDiffuseLighting",
+  "feDisplacementMap",
+  "feDistantLight",
+  "feFlood",
+  "feFuncA",
+  "feFuncB",
+  "feFuncG",
+  "feFuncR",
+  "feGaussianBlur",
+  "feImage",
+  "feMerge",
+  "feMergeNode",
+  "feMorphology",
+  "feOffset",
+  "fePointLight",
+  "feSpecularLighting",
+  "feSpotLight",
+  "feTile",
+  "feTurbulence",
+  "foreignObject",
+  "glyphRef",
+  "linearGradient",
+  "radialGradient",
+  "textPath"
+].map((tn) => [tn.toLowerCase(), tn]));
+var EXITS_FOREIGN_CONTENT = /* @__PURE__ */ new Set([
+  TAG_ID.B,
+  TAG_ID.BIG,
+  TAG_ID.BLOCKQUOTE,
+  TAG_ID.BODY,
+  TAG_ID.BR,
+  TAG_ID.CENTER,
+  TAG_ID.CODE,
+  TAG_ID.DD,
+  TAG_ID.DIV,
+  TAG_ID.DL,
+  TAG_ID.DT,
+  TAG_ID.EM,
+  TAG_ID.EMBED,
+  TAG_ID.H1,
+  TAG_ID.H2,
+  TAG_ID.H3,
+  TAG_ID.H4,
+  TAG_ID.H5,
+  TAG_ID.H6,
+  TAG_ID.HEAD,
+  TAG_ID.HR,
+  TAG_ID.I,
+  TAG_ID.IMG,
+  TAG_ID.LI,
+  TAG_ID.LISTING,
+  TAG_ID.MENU,
+  TAG_ID.META,
+  TAG_ID.NOBR,
+  TAG_ID.OL,
+  TAG_ID.P,
+  TAG_ID.PRE,
+  TAG_ID.RUBY,
+  TAG_ID.S,
+  TAG_ID.SMALL,
+  TAG_ID.SPAN,
+  TAG_ID.STRONG,
+  TAG_ID.STRIKE,
+  TAG_ID.SUB,
+  TAG_ID.SUP,
+  TAG_ID.TABLE,
+  TAG_ID.TT,
+  TAG_ID.U,
+  TAG_ID.UL,
+  TAG_ID.VAR
+]);
+function causesExit(startTagToken) {
+  const tn = startTagToken.tagID;
+  const isFontWithAttrs = tn === TAG_ID.FONT && startTagToken.attrs.some(({ name }) => name === ATTRS.COLOR || name === ATTRS.SIZE || name === ATTRS.FACE);
+  return isFontWithAttrs || EXITS_FOREIGN_CONTENT.has(tn);
+}
+function adjustTokenMathMLAttrs(token2) {
+  for (let i = 0; i < token2.attrs.length; i++) {
+    if (token2.attrs[i].name === DEFINITION_URL_ATTR) {
+      token2.attrs[i].name = ADJUSTED_DEFINITION_URL_ATTR;
+      break;
+    }
+  }
+}
+function adjustTokenSVGAttrs(token2) {
+  for (let i = 0; i < token2.attrs.length; i++) {
+    const adjustedAttrName = SVG_ATTRS_ADJUSTMENT_MAP.get(token2.attrs[i].name);
+    if (adjustedAttrName != null) {
+      token2.attrs[i].name = adjustedAttrName;
+    }
+  }
+}
+function adjustTokenXMLAttrs(token2) {
+  for (let i = 0; i < token2.attrs.length; i++) {
+    const adjustedAttrEntry = XML_ATTRS_ADJUSTMENT_MAP.get(token2.attrs[i].name);
+    if (adjustedAttrEntry) {
+      token2.attrs[i].prefix = adjustedAttrEntry.prefix;
+      token2.attrs[i].name = adjustedAttrEntry.name;
+      token2.attrs[i].namespace = adjustedAttrEntry.namespace;
+    }
+  }
+}
+function adjustTokenSVGTagName(token2) {
+  const adjustedTagName = SVG_TAG_NAMES_ADJUSTMENT_MAP.get(token2.tagName);
+  if (adjustedTagName != null) {
+    token2.tagName = adjustedTagName;
+    token2.tagID = getTagID(token2.tagName);
+  }
+}
+function isMathMLTextIntegrationPoint(tn, ns) {
+  return ns === NS.MATHML && (tn === TAG_ID.MI || tn === TAG_ID.MO || tn === TAG_ID.MN || tn === TAG_ID.MS || tn === TAG_ID.MTEXT);
+}
+function isHtmlIntegrationPoint(tn, ns, attrs) {
+  if (ns === NS.MATHML && tn === TAG_ID.ANNOTATION_XML) {
+    for (let i = 0; i < attrs.length; i++) {
+      if (attrs[i].name === ATTRS.ENCODING) {
+        const value = attrs[i].value.toLowerCase();
+        return value === MIME_TYPES.TEXT_HTML || value === MIME_TYPES.APPLICATION_XML;
+      }
+    }
+  }
+  return ns === NS.SVG && (tn === TAG_ID.FOREIGN_OBJECT || tn === TAG_ID.DESC || tn === TAG_ID.TITLE);
+}
+function isIntegrationPoint(tn, ns, attrs, foreignNS) {
+  return (!foreignNS || foreignNS === NS.HTML) && isHtmlIntegrationPoint(tn, ns, attrs) || (!foreignNS || foreignNS === NS.MATHML) && isMathMLTextIntegrationPoint(tn, ns);
+}
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/parser/index.js
+var INSERTION_MODE_TAGS = [
+  TAG_ID.TR,
+  TAG_ID.TBODY,
+  TAG_ID.THEAD,
+  TAG_ID.TFOOT,
+  TAG_ID.CAPTION,
+  TAG_ID.COLGROUP,
+  TAG_ID.TABLE,
+  TAG_ID.FRAMESET,
+  TAG_ID.SELECT,
+  TAG_ID.TEMPLATE,
+  TAG_ID.TD,
+  TAG_ID.TH,
+  TAG_ID.HEAD,
+  TAG_ID.BODY,
+  TAG_ID.HTML
+];
+var HIDDEN_INPUT_TYPE = "hidden";
+var EMPTY_ATTRS = [];
+var AA_OUTER_LOOP_ITER = 8;
+var AA_INNER_LOOP_ITER = 3;
+var InsertionMode;
+(function(InsertionMode2) {
+  InsertionMode2[InsertionMode2["INITIAL"] = 0] = "INITIAL";
+  InsertionMode2[InsertionMode2["BEFORE_HTML"] = 1] = "BEFORE_HTML";
+  InsertionMode2[InsertionMode2["BEFORE_HEAD"] = 2] = "BEFORE_HEAD";
+  InsertionMode2[InsertionMode2["IN_HEAD"] = 3] = "IN_HEAD";
+  InsertionMode2[InsertionMode2["IN_HEAD_NO_SCRIPT"] = 4] = "IN_HEAD_NO_SCRIPT";
+  InsertionMode2[InsertionMode2["AFTER_HEAD"] = 5] = "AFTER_HEAD";
+  InsertionMode2[InsertionMode2["IN_BODY"] = 6] = "IN_BODY";
+  InsertionMode2[InsertionMode2["TEXT"] = 7] = "TEXT";
+  InsertionMode2[InsertionMode2["IN_TABLE"] = 8] = "IN_TABLE";
+  InsertionMode2[InsertionMode2["IN_TABLE_TEXT"] = 9] = "IN_TABLE_TEXT";
+  InsertionMode2[InsertionMode2["IN_CAPTION"] = 10] = "IN_CAPTION";
+  InsertionMode2[InsertionMode2["IN_COLUMN_GROUP"] = 11] = "IN_COLUMN_GROUP";
+  InsertionMode2[InsertionMode2["IN_TABLE_BODY"] = 12] = "IN_TABLE_BODY";
+  InsertionMode2[InsertionMode2["IN_ROW"] = 13] = "IN_ROW";
+  InsertionMode2[InsertionMode2["IN_CELL"] = 14] = "IN_CELL";
+  InsertionMode2[InsertionMode2["IN_SELECT"] = 15] = "IN_SELECT";
+  InsertionMode2[InsertionMode2["IN_SELECT_IN_TABLE"] = 16] = "IN_SELECT_IN_TABLE";
+  InsertionMode2[InsertionMode2["IN_TEMPLATE"] = 17] = "IN_TEMPLATE";
+  InsertionMode2[InsertionMode2["AFTER_BODY"] = 18] = "AFTER_BODY";
+  InsertionMode2[InsertionMode2["IN_FRAMESET"] = 19] = "IN_FRAMESET";
+  InsertionMode2[InsertionMode2["AFTER_FRAMESET"] = 20] = "AFTER_FRAMESET";
+  InsertionMode2[InsertionMode2["AFTER_AFTER_BODY"] = 21] = "AFTER_AFTER_BODY";
+  InsertionMode2[InsertionMode2["AFTER_AFTER_FRAMESET"] = 22] = "AFTER_AFTER_FRAMESET";
+})(InsertionMode || (InsertionMode = {}));
+var BASE_LOC = {
+  startLine: -1,
+  startCol: -1,
+  startOffset: -1,
+  endLine: -1,
+  endCol: -1,
+  endOffset: -1
+};
+var TABLE_STRUCTURE_TAGS = /* @__PURE__ */ new Set([TAG_ID.TABLE, TAG_ID.TBODY, TAG_ID.TFOOT, TAG_ID.THEAD, TAG_ID.TR]);
+var defaultParserOptions = {
+  scriptingEnabled: true,
+  sourceCodeLocationInfo: false,
+  treeAdapter: defaultTreeAdapter,
+  onParseError: null
+};
+var Parser = class {
+  constructor(options, document, fragmentContext = null, scriptHandler = null) {
+    this.fragmentContext = fragmentContext;
+    this.scriptHandler = scriptHandler;
+    this.currentToken = null;
+    this.stopped = false;
+    this.insertionMode = InsertionMode.INITIAL;
+    this.originalInsertionMode = InsertionMode.INITIAL;
+    this.headElement = null;
+    this.formElement = null;
+    this.currentNotInHTML = false;
+    this.tmplInsertionModeStack = [];
+    this.pendingCharacterTokens = [];
+    this.hasNonWhitespacePendingCharacterToken = false;
+    this.framesetOk = true;
+    this.skipNextNewLine = false;
+    this.fosterParentingEnabled = false;
+    this.options = {
+      ...defaultParserOptions,
+      ...options
+    };
+    this.treeAdapter = this.options.treeAdapter;
+    this.onParseError = this.options.onParseError;
+    if (this.onParseError) {
+      this.options.sourceCodeLocationInfo = true;
+    }
+    this.document = document !== null && document !== void 0 ? document : this.treeAdapter.createDocument();
+    this.tokenizer = new Tokenizer(this.options, this);
+    this.activeFormattingElements = new FormattingElementList();
+    this.fragmentContextID = fragmentContext ? getTagID(this.treeAdapter.getTagName(fragmentContext)) : TAG_ID.UNKNOWN;
+    this._setContextModes(fragmentContext !== null && fragmentContext !== void 0 ? fragmentContext : this.document, this.fragmentContextID);
+    this.openElements = new OpenElementStack(this.document, this.treeAdapter, this);
+  }
+  // API
+  static parse(html, options) {
+    const parser = new this(options);
+    parser.tokenizer.write(html, true);
+    return parser.document;
+  }
+  static getFragmentParser(fragmentContext, options) {
+    const opts = {
+      ...defaultParserOptions,
+      ...options
+    };
+    fragmentContext !== null && fragmentContext !== void 0 ? fragmentContext : fragmentContext = opts.treeAdapter.createElement(TAG_NAMES.TEMPLATE, NS.HTML, []);
+    const documentMock = opts.treeAdapter.createElement("documentmock", NS.HTML, []);
+    const parser = new this(opts, documentMock, fragmentContext);
+    if (parser.fragmentContextID === TAG_ID.TEMPLATE) {
+      parser.tmplInsertionModeStack.push(InsertionMode.IN_TEMPLATE);
+    }
+    parser._initTokenizerForFragmentParsing();
+    parser._insertFakeRootElement();
+    parser._resetInsertionMode();
+    parser._findFormInFragmentContext();
+    return parser;
+  }
+  getFragment() {
+    const rootElement = this.treeAdapter.getFirstChild(this.document);
+    const fragment = this.treeAdapter.createDocumentFragment();
+    this._adoptNodes(rootElement, fragment);
+    return fragment;
+  }
+  //Errors
+  /** @internal */
+  _err(token2, code, beforeToken) {
+    var _a;
+    if (!this.onParseError)
+      return;
+    const loc = (_a = token2.location) !== null && _a !== void 0 ? _a : BASE_LOC;
+    const err = {
+      code,
+      startLine: loc.startLine,
+      startCol: loc.startCol,
+      startOffset: loc.startOffset,
+      endLine: beforeToken ? loc.startLine : loc.endLine,
+      endCol: beforeToken ? loc.startCol : loc.endCol,
+      endOffset: beforeToken ? loc.startOffset : loc.endOffset
+    };
+    this.onParseError(err);
+  }
+  //Stack events
+  /** @internal */
+  onItemPush(node, tid, isTop) {
+    var _a, _b;
+    (_b = (_a = this.treeAdapter).onItemPush) === null || _b === void 0 ? void 0 : _b.call(_a, node);
+    if (isTop && this.openElements.stackTop > 0)
+      this._setContextModes(node, tid);
+  }
+  /** @internal */
+  onItemPop(node, isTop) {
+    var _a, _b, _c;
+    if (this.options.sourceCodeLocationInfo) {
+      this._setEndLocation(node, this.currentToken);
+    }
+    (_b = (_a = this.treeAdapter).onItemPop) === null || _b === void 0 ? void 0 : _b.call(_a, node, this.openElements.current);
+    (_c = this.annotationXmlIntegrationPoints) === null || _c === void 0 ? void 0 : _c.delete(node);
+    if (isTop) {
+      let current;
+      let currentTagId;
+      if (this.openElements.stackTop === 0 && this.fragmentContext) {
+        current = this.fragmentContext;
+        currentTagId = this.fragmentContextID;
+      } else {
+        ({ current, currentTagId } = this.openElements);
+      }
+      this._setContextModes(current, currentTagId);
+    }
+  }
+  _setContextModes(current, tid) {
+    const isHTML = current === this.document || current && this.treeAdapter.getNamespaceURI(current) === NS.HTML;
+    this.currentNotInHTML = !isHTML;
+    this.tokenizer.inForeignNode = !isHTML && current !== void 0 && tid !== void 0 && !this._isIntegrationPoint(tid, current);
+  }
+  /** @protected */
+  _switchToTextParsing(currentToken, nextTokenizerState) {
+    this._insertElement(currentToken, NS.HTML);
+    this.tokenizer.state = nextTokenizerState;
+    this.originalInsertionMode = this.insertionMode;
+    this.insertionMode = InsertionMode.TEXT;
+  }
+  switchToPlaintextParsing() {
+    this.insertionMode = InsertionMode.TEXT;
+    this.originalInsertionMode = InsertionMode.IN_BODY;
+    this.tokenizer.state = TokenizerMode.PLAINTEXT;
+  }
+  //Fragment parsing
+  /** @protected */
+  _getAdjustedCurrentElement() {
+    return this.openElements.stackTop === 0 && this.fragmentContext ? this.fragmentContext : this.openElements.current;
+  }
+  /** @protected */
+  _findFormInFragmentContext() {
+    let node = this.fragmentContext;
+    while (node) {
+      if (this.treeAdapter.getTagName(node) === TAG_NAMES.FORM && this.treeAdapter.getNamespaceURI(node) === NS.HTML) {
+        this.formElement = node;
+        break;
+      }
+      node = this.treeAdapter.getParentNode(node);
+    }
+  }
+  _initTokenizerForFragmentParsing() {
+    if (!this.fragmentContext || this.treeAdapter.getNamespaceURI(this.fragmentContext) !== NS.HTML) {
+      return;
+    }
+    switch (this.fragmentContextID) {
+      case TAG_ID.TITLE:
+      case TAG_ID.TEXTAREA: {
+        this.tokenizer.state = TokenizerMode.RCDATA;
+        break;
+      }
+      case TAG_ID.STYLE:
+      case TAG_ID.XMP:
+      case TAG_ID.IFRAME:
+      case TAG_ID.NOEMBED:
+      case TAG_ID.NOFRAMES:
+      case TAG_ID.NOSCRIPT: {
+        this.tokenizer.state = TokenizerMode.RAWTEXT;
+        break;
+      }
+      case TAG_ID.SCRIPT: {
+        this.tokenizer.state = TokenizerMode.SCRIPT_DATA;
+        break;
+      }
+      case TAG_ID.PLAINTEXT: {
+        this.tokenizer.state = TokenizerMode.PLAINTEXT;
+        break;
+      }
+      default:
+    }
+  }
+  //Tree mutation
+  /** @protected */
+  _setDocumentType(token2) {
+    const name = token2.name || "";
+    const publicId = token2.publicId || "";
+    const systemId = token2.systemId || "";
+    this.treeAdapter.setDocumentType(this.document, name, publicId, systemId);
+    if (token2.location) {
+      const documentChildren = this.treeAdapter.getChildNodes(this.document);
+      const docTypeNode = documentChildren.find((node) => this.treeAdapter.isDocumentTypeNode(node));
+      if (docTypeNode) {
+        this.treeAdapter.setNodeSourceCodeLocation(docTypeNode, token2.location);
+      }
+    }
+  }
+  /** @protected */
+  _attachElementToTree(element, location, insertionLocation) {
+    if (this.options.sourceCodeLocationInfo) {
+      const loc = location && {
+        ...location,
+        startTag: location
+      };
+      this.treeAdapter.setNodeSourceCodeLocation(element, loc);
+    }
+    if (insertionLocation.beforeElement) {
+      this.treeAdapter.insertBefore(insertionLocation.parent, element, insertionLocation.beforeElement);
+    } else {
+      this.treeAdapter.appendChild(insertionLocation.parent, element);
+    }
+  }
+  /** @protected */
+  _getInsertionLocation() {
+    var _a;
+    if (this._shouldFosterParentOnInsertion()) {
+      return this._findFosterParentingLocation();
+    }
+    return {
+      parent: (_a = this.openElements.currentTmplContentOrNode) !== null && _a !== void 0 ? _a : this.document,
+      beforeElement: null
+    };
+  }
+  /** @protected */
+  _createElement(tagName, namespaceURI, attrs, intendedParent) {
+    var _a, _b;
+    const element = this.treeAdapter.createElement(tagName, namespaceURI, attrs);
+    (_b = (_a = this.treeAdapter).onElementCreated) === null || _b === void 0 ? void 0 : _b.call(_a, element, {
+      intendedParent,
+      formElement: this.formElement,
+      isInTemplate: this.openElements.tmplCount > 0
+    });
+    return element;
+  }
+  /**
+   * For self-closing tags. Add an element to the tree, but skip adding it
+   * to the stack.
+   */
+  /** @protected */
+  _appendElement(token2, namespaceURI) {
+    const insertionLocation = this._getInsertionLocation();
+    const element = this._createElement(token2.tagName, namespaceURI, token2.attrs, insertionLocation.parent);
+    this._attachElementToTree(element, token2.location, insertionLocation);
+  }
+  /** @protected */
+  _insertElement(token2, namespaceURI) {
+    const insertionLocation = this._getInsertionLocation();
+    const element = this._createElement(token2.tagName, namespaceURI, token2.attrs, insertionLocation.parent);
+    this._attachElementToTree(element, token2.location, insertionLocation);
+    this.openElements.push(element, token2.tagID);
+  }
+  /** @protected */
+  _insertFakeElement(tagName, tagID) {
+    const insertionLocation = this._getInsertionLocation();
+    const element = this._createElement(tagName, NS.HTML, [], insertionLocation.parent);
+    this._attachElementToTree(element, null, insertionLocation);
+    this.openElements.push(element, tagID);
+  }
+  /** @protected */
+  _insertTemplate(token2) {
+    const insertionLocation = this._getInsertionLocation();
+    const tmpl = this._createElement(token2.tagName, NS.HTML, token2.attrs, insertionLocation.parent);
+    const content = this.treeAdapter.createDocumentFragment();
+    this.treeAdapter.setTemplateContent(tmpl, content);
+    this._attachElementToTree(tmpl, token2.location, insertionLocation);
+    this.openElements.push(tmpl, token2.tagID);
+    if (this.options.sourceCodeLocationInfo)
+      this.treeAdapter.setNodeSourceCodeLocation(content, null);
+  }
+  /** @protected */
+  _insertFakeRootElement() {
+    const element = this._createElement(TAG_NAMES.HTML, NS.HTML, [], this.document);
+    if (this.options.sourceCodeLocationInfo)
+      this.treeAdapter.setNodeSourceCodeLocation(element, null);
+    this.treeAdapter.appendChild(this.document, element);
+    this.openElements.push(element, TAG_ID.HTML);
+  }
+  /** @protected */
+  _appendCommentNode(token2, parent) {
+    const commentNode = this.treeAdapter.createCommentNode(token2.data);
+    this.treeAdapter.appendChild(parent, commentNode);
+    if (this.options.sourceCodeLocationInfo) {
+      this.treeAdapter.setNodeSourceCodeLocation(commentNode, token2.location);
+    }
+  }
+  /** @protected */
+  _insertCharacters(token2) {
+    let parent;
+    let beforeElement;
+    if (this._shouldFosterParentOnInsertion()) {
+      ({ parent, beforeElement } = this._findFosterParentingLocation());
+      if (beforeElement) {
+        this.treeAdapter.insertTextBefore(parent, token2.chars, beforeElement);
+      } else {
+        this.treeAdapter.insertText(parent, token2.chars);
+      }
+    } else {
+      parent = this.openElements.currentTmplContentOrNode;
+      this.treeAdapter.insertText(parent, token2.chars);
+    }
+    if (!token2.location)
+      return;
+    const siblings = this.treeAdapter.getChildNodes(parent);
+    const textNodeIdx = beforeElement ? siblings.lastIndexOf(beforeElement) : siblings.length;
+    const textNode = siblings[textNodeIdx - 1];
+    const tnLoc = this.treeAdapter.getNodeSourceCodeLocation(textNode);
+    if (tnLoc) {
+      const { endLine, endCol, endOffset } = token2.location;
+      this.treeAdapter.updateNodeSourceCodeLocation(textNode, { endLine, endCol, endOffset });
+    } else if (this.options.sourceCodeLocationInfo) {
+      this.treeAdapter.setNodeSourceCodeLocation(textNode, token2.location);
+    }
+  }
+  /** @protected */
+  _adoptNodes(donor, recipient) {
+    const children = [...this.treeAdapter.getChildNodes(donor)];
+    for (let i = children.length - 1; i >= 0; i--) {
+      this.treeAdapter.detachNode(children[i]);
+    }
+    for (const child3 of children) {
+      this.treeAdapter.appendChild(recipient, child3);
+    }
+  }
+  /** @protected */
+  _setEndLocation(element, closingToken) {
+    if (this.treeAdapter.getNodeSourceCodeLocation(element) && closingToken.location) {
+      const ctLoc = closingToken.location;
+      const tn = this.treeAdapter.getTagName(element);
+      const endLoc = (
+        // NOTE: For cases like <p> <p> </p> - First 'p' closes without a closing
+        // tag and for cases like <td> <p> </td> - 'p' closes without a closing tag.
+        closingToken.type === TokenType.END_TAG && tn === closingToken.tagName ? {
+          endTag: { ...ctLoc },
+          endLine: ctLoc.endLine,
+          endCol: ctLoc.endCol,
+          endOffset: ctLoc.endOffset
+        } : {
+          endLine: ctLoc.startLine,
+          endCol: ctLoc.startCol,
+          endOffset: ctLoc.startOffset
+        }
+      );
+      this.treeAdapter.updateNodeSourceCodeLocation(element, endLoc);
+    }
+  }
+  //Token processing
+  shouldProcessStartTagTokenInForeignContent(token2) {
+    if (!this.currentNotInHTML)
+      return false;
+    let current;
+    let currentTagId;
+    if (this.openElements.stackTop === 0 && this.fragmentContext) {
+      current = this.fragmentContext;
+      currentTagId = this.fragmentContextID;
+    } else {
+      ({ current, currentTagId } = this.openElements);
+    }
+    if (token2.tagID === TAG_ID.SVG && this.treeAdapter.getTagName(current) === TAG_NAMES.ANNOTATION_XML && this.treeAdapter.getNamespaceURI(current) === NS.MATHML) {
+      return false;
+    }
+    return (
+      // Check that `current` is not an integration point for HTML or MathML elements.
+      this.tokenizer.inForeignNode || // If it _is_ an integration point, then we might have to check that it is not an HTML
+      // integration point.
+      (token2.tagID === TAG_ID.MGLYPH || token2.tagID === TAG_ID.MALIGNMARK) && currentTagId !== void 0 && !this._isIntegrationPoint(currentTagId, current, NS.HTML)
+    );
+  }
+  /** @protected */
+  _processToken(token2) {
+    switch (token2.type) {
+      case TokenType.CHARACTER: {
+        this.onCharacter(token2);
+        break;
+      }
+      case TokenType.NULL_CHARACTER: {
+        this.onNullCharacter(token2);
+        break;
+      }
+      case TokenType.COMMENT: {
+        this.onComment(token2);
+        break;
+      }
+      case TokenType.DOCTYPE: {
+        this.onDoctype(token2);
+        break;
+      }
+      case TokenType.START_TAG: {
+        this._processStartTag(token2);
+        break;
+      }
+      case TokenType.END_TAG: {
+        this.onEndTag(token2);
+        break;
+      }
+      case TokenType.EOF: {
+        this.onEof(token2);
+        break;
+      }
+      case TokenType.WHITESPACE_CHARACTER: {
+        this.onWhitespaceCharacter(token2);
+        break;
+      }
+    }
+  }
+  /** @protected */
+  _isIntegrationPoint(tid, element, foreignNS) {
+    var _a;
+    const ns = this.treeAdapter.getNamespaceURI(element);
+    if (tid === TAG_ID.ANNOTATION_XML && ns === NS.MATHML && foreignNS !== NS.MATHML) {
+      const verdicts = (_a = this.annotationXmlIntegrationPoints) !== null && _a !== void 0 ? _a : this.annotationXmlIntegrationPoints = /* @__PURE__ */ new Map();
+      let isIntegrationPoint2 = verdicts.get(element);
+      if (isIntegrationPoint2 === void 0) {
+        isIntegrationPoint2 = isIntegrationPoint(tid, ns, this.treeAdapter.getAttrList(element));
+        verdicts.set(element, isIntegrationPoint2);
+      }
+      return isIntegrationPoint2;
+    }
+    return isIntegrationPoint(tid, ns, EMPTY_ATTRS, foreignNS);
+  }
+  //Active formatting elements reconstruction
+  /** @protected */
+  _reconstructActiveFormattingElements() {
+    let oldest = null;
+    for (let entry = this.activeFormattingElements.newest; entry !== null && entry.type === EntryType.Element && !this.openElements.contains(entry.element); entry = entry.older) {
+      oldest = entry;
+    }
+    for (let entry = oldest; entry !== null && entry.type === EntryType.Element; entry = entry.newer) {
+      this._insertElement(entry.token, this.treeAdapter.getNamespaceURI(entry.element));
+      this.activeFormattingElements.replaceElement(entry, this.openElements.current);
+    }
+  }
+  //Close elements
+  /** @protected */
+  _closeTableCell() {
+    this.openElements.generateImpliedEndTags();
+    this.openElements.popUntilTableCellPopped();
+    this.activeFormattingElements.clearToLastMarker();
+    this.insertionMode = InsertionMode.IN_ROW;
+  }
+  /** @protected */
+  _closePElement() {
+    this.openElements.generateImpliedEndTagsWithExclusion(TAG_ID.P);
+    this.openElements.popUntilTagNamePopped(TAG_ID.P);
+  }
+  //Insertion modes
+  /** @protected */
+  _resetInsertionMode() {
+    const i = this.openElements.indexOfTopmostOf(INSERTION_MODE_TAGS);
+    const tn = i === 0 && this.fragmentContext ? this.fragmentContextID : this.openElements.tagIDs[i];
+    const node = i === 0 && this.fragmentContext ? this.fragmentContext : this.openElements.items[i];
+    if (node !== void 0 && this.treeAdapter.getNamespaceURI(node) === NS.HTML) {
+      switch (tn) {
+        case TAG_ID.TR: {
+          this.insertionMode = InsertionMode.IN_ROW;
+          return;
+        }
+        case TAG_ID.TBODY:
+        case TAG_ID.THEAD:
+        case TAG_ID.TFOOT: {
+          this.insertionMode = InsertionMode.IN_TABLE_BODY;
+          return;
+        }
+        case TAG_ID.CAPTION: {
+          this.insertionMode = InsertionMode.IN_CAPTION;
+          return;
+        }
+        case TAG_ID.COLGROUP: {
+          this.insertionMode = InsertionMode.IN_COLUMN_GROUP;
+          return;
+        }
+        case TAG_ID.TABLE: {
+          this.insertionMode = InsertionMode.IN_TABLE;
+          return;
+        }
+        case TAG_ID.BODY: {
+          this.insertionMode = InsertionMode.IN_BODY;
+          return;
+        }
+        case TAG_ID.FRAMESET: {
+          this.insertionMode = InsertionMode.IN_FRAMESET;
+          return;
+        }
+        case TAG_ID.SELECT: {
+          this._resetInsertionModeForSelect(i);
+          return;
+        }
+        case TAG_ID.TEMPLATE: {
+          this.insertionMode = this.tmplInsertionModeStack[this.tmplInsertionModeStack.length - 1];
+          return;
+        }
+        case TAG_ID.HTML: {
+          this.insertionMode = this.headElement ? InsertionMode.AFTER_HEAD : InsertionMode.BEFORE_HEAD;
+          return;
+        }
+        case TAG_ID.TD:
+        case TAG_ID.TH: {
+          if (i > 0) {
+            this.insertionMode = InsertionMode.IN_CELL;
+            return;
+          }
+          break;
+        }
+        case TAG_ID.HEAD: {
+          if (i > 0) {
+            this.insertionMode = InsertionMode.IN_HEAD;
+            return;
+          }
+          break;
+        }
+      }
+    }
+    this.insertionMode = InsertionMode.IN_BODY;
+  }
+  /** @protected */
+  _resetInsertionModeForSelect(selectIdx) {
+    if (selectIdx > 0) {
+      const tableIdx = this.openElements.indexOfTopmost(TAG_ID.TABLE);
+      if (tableIdx > 0 && tableIdx > this.openElements.indexOfTopmost(TAG_ID.TEMPLATE)) {
+        this.insertionMode = InsertionMode.IN_SELECT_IN_TABLE;
+        return;
+      }
+    }
+    this.insertionMode = InsertionMode.IN_SELECT;
+  }
+  //Foster parenting
+  /** @protected */
+  _isElementCausesFosterParenting(tn) {
+    return TABLE_STRUCTURE_TAGS.has(tn);
+  }
+  /** @protected */
+  _shouldFosterParentOnInsertion() {
+    return this.fosterParentingEnabled && this.openElements.currentTagId !== void 0 && this._isElementCausesFosterParenting(this.openElements.currentTagId);
+  }
+  /** @protected */
+  _findFosterParentingLocation() {
+    const { openElements } = this;
+    const tableIdx = openElements.indexOfTopmost(TAG_ID.TABLE);
+    const templateIdx = openElements.indexOfTopmost(TAG_ID.TEMPLATE);
+    if (templateIdx > tableIdx) {
+      return {
+        parent: this.treeAdapter.getTemplateContent(openElements.items[templateIdx]),
+        beforeElement: null
+      };
+    }
+    if (tableIdx !== -1) {
+      const table = openElements.items[tableIdx];
+      const parent = this.treeAdapter.getParentNode(table);
+      if (parent) {
+        return { parent, beforeElement: table };
+      }
+      return { parent: openElements.items[openElements.slotBelow(tableIdx)], beforeElement: null };
+    }
+    return { parent: openElements.items[0], beforeElement: null };
+  }
+  /** @protected */
+  _fosterParentElement(element) {
+    const location = this._findFosterParentingLocation();
+    if (location.beforeElement) {
+      this.treeAdapter.insertBefore(location.parent, element, location.beforeElement);
+    } else {
+      this.treeAdapter.appendChild(location.parent, element);
+    }
+  }
+  //Special elements
+  /** @protected */
+  _isSpecialElement(element, id) {
+    const ns = this.treeAdapter.getNamespaceURI(element);
+    return SPECIAL_ELEMENTS[ns].has(id);
+  }
+  /** @internal */
+  onCharacter(token2) {
+    this.skipNextNewLine = false;
+    if (this.tokenizer.inForeignNode) {
+      characterInForeignContent(this, token2);
+      return;
+    }
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL: {
+        tokenInInitialMode(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HTML: {
+        tokenBeforeHtml(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HEAD: {
+        tokenBeforeHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD: {
+        tokenInHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD_NO_SCRIPT: {
+        tokenInHeadNoScript(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_HEAD: {
+        tokenAfterHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_BODY:
+      case InsertionMode.IN_CAPTION:
+      case InsertionMode.IN_CELL:
+      case InsertionMode.IN_TEMPLATE: {
+        characterInBody(this, token2);
+        break;
+      }
+      case InsertionMode.TEXT:
+      case InsertionMode.IN_SELECT:
+      case InsertionMode.IN_SELECT_IN_TABLE: {
+        this._insertCharacters(token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE:
+      case InsertionMode.IN_TABLE_BODY:
+      case InsertionMode.IN_ROW: {
+        characterInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        characterInTableText(this, token2);
+        break;
+      }
+      case InsertionMode.IN_COLUMN_GROUP: {
+        tokenInColumnGroup(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_BODY: {
+        tokenAfterBody(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_AFTER_BODY: {
+        tokenAfterAfterBody(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onNullCharacter(token2) {
+    this.skipNextNewLine = false;
+    if (this.tokenizer.inForeignNode) {
+      nullCharacterInForeignContent(this, token2);
+      return;
+    }
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL: {
+        tokenInInitialMode(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HTML: {
+        tokenBeforeHtml(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HEAD: {
+        tokenBeforeHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD: {
+        tokenInHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD_NO_SCRIPT: {
+        tokenInHeadNoScript(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_HEAD: {
+        tokenAfterHead(this, token2);
+        break;
+      }
+      case InsertionMode.TEXT: {
+        this._insertCharacters(token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE:
+      case InsertionMode.IN_TABLE_BODY:
+      case InsertionMode.IN_ROW: {
+        characterInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_COLUMN_GROUP: {
+        tokenInColumnGroup(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_BODY: {
+        tokenAfterBody(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_AFTER_BODY: {
+        tokenAfterAfterBody(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onComment(token2) {
+    this.skipNextNewLine = false;
+    if (this.currentNotInHTML) {
+      appendComment(this, token2);
+      return;
+    }
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL:
+      case InsertionMode.BEFORE_HTML:
+      case InsertionMode.BEFORE_HEAD:
+      case InsertionMode.IN_HEAD:
+      case InsertionMode.IN_HEAD_NO_SCRIPT:
+      case InsertionMode.AFTER_HEAD:
+      case InsertionMode.IN_BODY:
+      case InsertionMode.IN_TABLE:
+      case InsertionMode.IN_CAPTION:
+      case InsertionMode.IN_COLUMN_GROUP:
+      case InsertionMode.IN_TABLE_BODY:
+      case InsertionMode.IN_ROW:
+      case InsertionMode.IN_CELL:
+      case InsertionMode.IN_SELECT:
+      case InsertionMode.IN_SELECT_IN_TABLE:
+      case InsertionMode.IN_TEMPLATE:
+      case InsertionMode.IN_FRAMESET:
+      case InsertionMode.AFTER_FRAMESET: {
+        appendComment(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        tokenInTableText(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_BODY: {
+        appendCommentToRootHtmlElement(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_AFTER_BODY:
+      case InsertionMode.AFTER_AFTER_FRAMESET: {
+        appendCommentToDocument(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onDoctype(token2) {
+    this.skipNextNewLine = false;
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL: {
+        doctypeInInitialMode(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HEAD:
+      case InsertionMode.IN_HEAD:
+      case InsertionMode.IN_HEAD_NO_SCRIPT:
+      case InsertionMode.AFTER_HEAD: {
+        this._err(token2, ERR.misplacedDoctype);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        tokenInTableText(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onStartTag(token2) {
+    this.skipNextNewLine = false;
+    this.currentToken = token2;
+    this._processStartTag(token2);
+    if (token2.selfClosing && !token2.ackSelfClosing) {
+      this._err(token2, ERR.nonVoidHtmlElementStartTagWithTrailingSolidus);
+    }
+  }
+  /**
+   * Processes a given start tag.
+   *
+   * `onStartTag` checks if a self-closing tag was recognized. When a token
+   * is moved inbetween multiple insertion modes, this check for self-closing
+   * could lead to false positives. To avoid this, `_processStartTag` is used
+   * for nested calls.
+   *
+   * @param token The token to process.
+   * @protected
+   */
+  _processStartTag(token2) {
+    if (this.shouldProcessStartTagTokenInForeignContent(token2)) {
+      startTagInForeignContent(this, token2);
+    } else {
+      this._startTagOutsideForeignContent(token2);
+    }
+  }
+  /** @protected */
+  _startTagOutsideForeignContent(token2) {
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL: {
+        tokenInInitialMode(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HTML: {
+        startTagBeforeHtml(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HEAD: {
+        startTagBeforeHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD: {
+        startTagInHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD_NO_SCRIPT: {
+        startTagInHeadNoScript(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_HEAD: {
+        startTagAfterHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_BODY: {
+        startTagInBody(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE: {
+        startTagInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        tokenInTableText(this, token2);
+        break;
+      }
+      case InsertionMode.IN_CAPTION: {
+        startTagInCaption(this, token2);
+        break;
+      }
+      case InsertionMode.IN_COLUMN_GROUP: {
+        startTagInColumnGroup(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_BODY: {
+        startTagInTableBody(this, token2);
+        break;
+      }
+      case InsertionMode.IN_ROW: {
+        startTagInRow(this, token2);
+        break;
+      }
+      case InsertionMode.IN_CELL: {
+        startTagInCell(this, token2);
+        break;
+      }
+      case InsertionMode.IN_SELECT: {
+        startTagInSelect(this, token2);
+        break;
+      }
+      case InsertionMode.IN_SELECT_IN_TABLE: {
+        startTagInSelectInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TEMPLATE: {
+        startTagInTemplate(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_BODY: {
+        startTagAfterBody(this, token2);
+        break;
+      }
+      case InsertionMode.IN_FRAMESET: {
+        startTagInFrameset(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_FRAMESET: {
+        startTagAfterFrameset(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_AFTER_BODY: {
+        startTagAfterAfterBody(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_AFTER_FRAMESET: {
+        startTagAfterAfterFrameset(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onEndTag(token2) {
+    this.skipNextNewLine = false;
+    this.currentToken = token2;
+    if (this.currentNotInHTML) {
+      endTagInForeignContent(this, token2);
+    } else {
+      this._endTagOutsideForeignContent(token2);
+    }
+  }
+  /** @protected */
+  _endTagOutsideForeignContent(token2) {
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL: {
+        tokenInInitialMode(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HTML: {
+        endTagBeforeHtml(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HEAD: {
+        endTagBeforeHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD: {
+        endTagInHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD_NO_SCRIPT: {
+        endTagInHeadNoScript(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_HEAD: {
+        endTagAfterHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_BODY: {
+        endTagInBody(this, token2);
+        break;
+      }
+      case InsertionMode.TEXT: {
+        endTagInText(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE: {
+        endTagInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        tokenInTableText(this, token2);
+        break;
+      }
+      case InsertionMode.IN_CAPTION: {
+        endTagInCaption(this, token2);
+        break;
+      }
+      case InsertionMode.IN_COLUMN_GROUP: {
+        endTagInColumnGroup(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_BODY: {
+        endTagInTableBody(this, token2);
+        break;
+      }
+      case InsertionMode.IN_ROW: {
+        endTagInRow(this, token2);
+        break;
+      }
+      case InsertionMode.IN_CELL: {
+        endTagInCell(this, token2);
+        break;
+      }
+      case InsertionMode.IN_SELECT: {
+        endTagInSelect(this, token2);
+        break;
+      }
+      case InsertionMode.IN_SELECT_IN_TABLE: {
+        endTagInSelectInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TEMPLATE: {
+        endTagInTemplate(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_BODY: {
+        endTagAfterBody(this, token2);
+        break;
+      }
+      case InsertionMode.IN_FRAMESET: {
+        endTagInFrameset(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_FRAMESET: {
+        endTagAfterFrameset(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_AFTER_BODY: {
+        tokenAfterAfterBody(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onEof(token2) {
+    switch (this.insertionMode) {
+      case InsertionMode.INITIAL: {
+        tokenInInitialMode(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HTML: {
+        tokenBeforeHtml(this, token2);
+        break;
+      }
+      case InsertionMode.BEFORE_HEAD: {
+        tokenBeforeHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD: {
+        tokenInHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_HEAD_NO_SCRIPT: {
+        tokenInHeadNoScript(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_HEAD: {
+        tokenAfterHead(this, token2);
+        break;
+      }
+      case InsertionMode.IN_BODY:
+      case InsertionMode.IN_TABLE:
+      case InsertionMode.IN_CAPTION:
+      case InsertionMode.IN_COLUMN_GROUP:
+      case InsertionMode.IN_TABLE_BODY:
+      case InsertionMode.IN_ROW:
+      case InsertionMode.IN_CELL:
+      case InsertionMode.IN_SELECT:
+      case InsertionMode.IN_SELECT_IN_TABLE: {
+        eofInBody(this, token2);
+        break;
+      }
+      case InsertionMode.TEXT: {
+        eofInText(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        tokenInTableText(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TEMPLATE: {
+        eofInTemplate(this, token2);
+        break;
+      }
+      case InsertionMode.AFTER_BODY:
+      case InsertionMode.IN_FRAMESET:
+      case InsertionMode.AFTER_FRAMESET:
+      case InsertionMode.AFTER_AFTER_BODY:
+      case InsertionMode.AFTER_AFTER_FRAMESET: {
+        stopParsing(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+  /** @internal */
+  onWhitespaceCharacter(token2) {
+    if (this.skipNextNewLine) {
+      this.skipNextNewLine = false;
+      if (token2.chars.charCodeAt(0) === CODE_POINTS.LINE_FEED) {
+        if (token2.chars.length === 1) {
+          return;
+        }
+        token2.chars = token2.chars.substr(1);
+      }
+    }
+    if (this.tokenizer.inForeignNode) {
+      this._insertCharacters(token2);
+      return;
+    }
+    switch (this.insertionMode) {
+      case InsertionMode.IN_HEAD:
+      case InsertionMode.IN_HEAD_NO_SCRIPT:
+      case InsertionMode.AFTER_HEAD:
+      case InsertionMode.TEXT:
+      case InsertionMode.IN_COLUMN_GROUP:
+      case InsertionMode.IN_SELECT:
+      case InsertionMode.IN_SELECT_IN_TABLE:
+      case InsertionMode.IN_FRAMESET:
+      case InsertionMode.AFTER_FRAMESET: {
+        this._insertCharacters(token2);
+        break;
+      }
+      case InsertionMode.IN_BODY:
+      case InsertionMode.IN_CAPTION:
+      case InsertionMode.IN_CELL:
+      case InsertionMode.IN_TEMPLATE:
+      case InsertionMode.AFTER_BODY:
+      case InsertionMode.AFTER_AFTER_BODY:
+      case InsertionMode.AFTER_AFTER_FRAMESET: {
+        whitespaceCharacterInBody(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE:
+      case InsertionMode.IN_TABLE_BODY:
+      case InsertionMode.IN_ROW: {
+        characterInTable(this, token2);
+        break;
+      }
+      case InsertionMode.IN_TABLE_TEXT: {
+        whitespaceCharacterInTableText(this, token2);
+        break;
+      }
+      default:
+    }
+  }
+};
+function aaObtainFormattingElementEntry(p, token2) {
+  let formattingElementEntry = p.activeFormattingElements.getElementEntryInScopeWithTagName(token2.tagName);
+  if (formattingElementEntry) {
+    if (!p.openElements.contains(formattingElementEntry.element)) {
+      p.activeFormattingElements.removeEntry(formattingElementEntry);
+      formattingElementEntry = null;
+    } else if (!p.openElements.hasInScope(token2.tagID, formattingElementEntry.element)) {
+      formattingElementEntry = null;
+    }
+  } else {
+    genericEndTagInBody(p, token2);
+  }
+  return formattingElementEntry;
+}
+function aaObtainFurthestBlock(p, formattingElementEntry) {
+  const { openElements } = p;
+  const formattingIdx = openElements._indexOf(formattingElementEntry.element);
+  for (let idx = openElements.slotAbove(formattingIdx); idx !== -1; idx = openElements.slotAbove(idx)) {
+    if (p._isSpecialElement(openElements.items[idx], openElements.tagIDs[idx])) {
+      return idx;
+    }
+  }
+  openElements.shortenToLength(formattingIdx);
+  p.activeFormattingElements.removeEntry(formattingElementEntry);
+  return -1;
+}
+function aaInnerLoop(p, furthestBlockIdx, formattingElement) {
+  const furthestBlock = p.openElements.items[furthestBlockIdx];
+  let lastElement = furthestBlock;
+  let nextIdx = p.openElements.slotBelow(furthestBlockIdx);
+  const intendedParent = p.openElements.getCommonAncestor(formattingElement);
+  for (let i = 0, idx = nextIdx; p.openElements.items[idx] !== formattingElement; i++, idx = nextIdx) {
+    let element = p.openElements.items[idx];
+    nextIdx = p.openElements.slotBelow(idx);
+    const elementEntry = p.activeFormattingElements.getElementEntry(element);
+    const counterOverflow = elementEntry && i >= AA_INNER_LOOP_ITER;
+    const shouldRemoveFromOpenElements = !elementEntry || counterOverflow;
+    if (shouldRemoveFromOpenElements) {
+      if (counterOverflow) {
+        p.activeFormattingElements.removeEntry(elementEntry);
+      }
+      p.openElements.removeAt(idx);
+    } else {
+      element = aaRecreateElementFromEntry(p, elementEntry, intendedParent);
+      if (lastElement === furthestBlock) {
+        p.activeFormattingElements.bookmark = elementEntry;
+      }
+      p.treeAdapter.detachNode(lastElement);
+      p.treeAdapter.appendChild(element, lastElement);
+      lastElement = element;
+    }
+  }
+  return lastElement;
+}
+function aaRecreateElementFromEntry(p, elementEntry, intendedParent) {
+  const ns = p.treeAdapter.getNamespaceURI(elementEntry.element);
+  const newElement = p._createElement(elementEntry.token.tagName, ns, elementEntry.token.attrs, intendedParent);
+  p.openElements.replace(elementEntry.element, newElement);
+  p.activeFormattingElements.replaceElement(elementEntry, newElement);
+  return newElement;
+}
+function aaInsertLastNodeInCommonAncestor(p, commonAncestor, lastElement) {
+  const tn = p.treeAdapter.getTagName(commonAncestor);
+  const tid = getTagID(tn);
+  if (p._isElementCausesFosterParenting(tid)) {
+    p._fosterParentElement(lastElement);
+  } else {
+    const ns = p.treeAdapter.getNamespaceURI(commonAncestor);
+    if (tid === TAG_ID.TEMPLATE && ns === NS.HTML) {
+      commonAncestor = p.treeAdapter.getTemplateContent(commonAncestor);
+    }
+    p.treeAdapter.appendChild(commonAncestor, lastElement);
+  }
+}
+function aaReplaceFormattingElement(p, furthestBlock, formattingElementEntry) {
+  const ns = p.treeAdapter.getNamespaceURI(formattingElementEntry.element);
+  const { token: token2 } = formattingElementEntry;
+  const newElement = p._createElement(token2.tagName, ns, token2.attrs, furthestBlock);
+  p._adoptNodes(furthestBlock, newElement);
+  p.treeAdapter.appendChild(furthestBlock, newElement);
+  p.activeFormattingElements.insertElementAfterBookmark(newElement, token2);
+  p.activeFormattingElements.removeEntry(formattingElementEntry);
+  const formattingIdx = p.openElements._indexOf(formattingElementEntry.element);
+  let furthestBlockIdx = p.openElements.slotAbove(formattingIdx);
+  while (p.openElements.items[furthestBlockIdx] !== furthestBlock) {
+    furthestBlockIdx = p.openElements.slotAbove(furthestBlockIdx);
+  }
+  p.openElements.replaceFormattingElement(formattingIdx, furthestBlockIdx, newElement, token2.tagID);
+}
+function callAdoptionAgency(p, token2) {
+  const { current, currentTagId } = p.openElements;
+  if (currentTagId === token2.tagID && p.treeAdapter.getNamespaceURI(current) === NS.HTML && !p.activeFormattingElements.getElementEntry(current)) {
+    p.openElements.pop();
+    return;
+  }
+  for (let i = 0; i < AA_OUTER_LOOP_ITER; i++) {
+    const formattingElementEntry = aaObtainFormattingElementEntry(p, token2);
+    if (!formattingElementEntry) {
+      break;
+    }
+    const furthestBlockIdx = aaObtainFurthestBlock(p, formattingElementEntry);
+    if (furthestBlockIdx === -1) {
+      break;
+    }
+    const furthestBlock = p.openElements.items[furthestBlockIdx];
+    p.activeFormattingElements.bookmark = formattingElementEntry;
+    const lastElement = aaInnerLoop(p, furthestBlockIdx, formattingElementEntry.element);
+    const commonAncestor = p.openElements.getCommonAncestor(formattingElementEntry.element);
+    p.treeAdapter.detachNode(lastElement);
+    if (commonAncestor)
+      aaInsertLastNodeInCommonAncestor(p, commonAncestor, lastElement);
+    aaReplaceFormattingElement(p, furthestBlock, formattingElementEntry);
+  }
+}
+function appendComment(p, token2) {
+  p._appendCommentNode(token2, p.openElements.currentTmplContentOrNode);
+}
+function appendCommentToRootHtmlElement(p, token2) {
+  p._appendCommentNode(token2, p.openElements.items[0]);
+}
+function appendCommentToDocument(p, token2) {
+  p._appendCommentNode(token2, p.document);
+}
+function stopParsing(p, token2) {
+  p.stopped = true;
+  if (token2.location) {
+    const target2 = p.fragmentContext ? 0 : 2;
+    for (let i = p.openElements.stackTop; i >= target2; i = p.openElements.slotBelow(i)) {
+      p._setEndLocation(p.openElements.items[i], token2);
+    }
+    if (!p.fragmentContext && p.openElements.stackTop >= 0) {
+      const htmlElement = p.openElements.items[0];
+      const htmlLocation = p.treeAdapter.getNodeSourceCodeLocation(htmlElement);
+      if (htmlLocation && !htmlLocation.endTag) {
+        p._setEndLocation(htmlElement, token2);
+        if (p.openElements.stackTop >= 1) {
+          const bodyElement = p.openElements.items[1];
+          const bodyLocation = p.treeAdapter.getNodeSourceCodeLocation(bodyElement);
+          if (bodyLocation && !bodyLocation.endTag) {
+            p._setEndLocation(bodyElement, token2);
+          }
+        }
+      }
+    }
+  }
+}
+function doctypeInInitialMode(p, token2) {
+  p._setDocumentType(token2);
+  const mode = token2.forceQuirks ? DOCUMENT_MODE.QUIRKS : getDocumentMode(token2);
+  if (!isConforming(token2)) {
+    p._err(token2, ERR.nonConformingDoctype);
+  }
+  p.treeAdapter.setDocumentMode(p.document, mode);
+  p.insertionMode = InsertionMode.BEFORE_HTML;
+}
+function tokenInInitialMode(p, token2) {
+  p._err(token2, ERR.missingDoctype, true);
+  p.treeAdapter.setDocumentMode(p.document, DOCUMENT_MODE.QUIRKS);
+  p.insertionMode = InsertionMode.BEFORE_HTML;
+  p._processToken(token2);
+}
+function startTagBeforeHtml(p, token2) {
+  if (token2.tagID === TAG_ID.HTML) {
+    p._insertElement(token2, NS.HTML);
+    p.insertionMode = InsertionMode.BEFORE_HEAD;
+  } else {
+    tokenBeforeHtml(p, token2);
+  }
+}
+function endTagBeforeHtml(p, token2) {
+  const tn = token2.tagID;
+  if (tn === TAG_ID.HTML || tn === TAG_ID.HEAD || tn === TAG_ID.BODY || tn === TAG_ID.BR) {
+    tokenBeforeHtml(p, token2);
+  }
+}
+function tokenBeforeHtml(p, token2) {
+  p._insertFakeRootElement();
+  p.insertionMode = InsertionMode.BEFORE_HEAD;
+  p._processToken(token2);
+}
+function startTagBeforeHead(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.HEAD: {
+      p._insertElement(token2, NS.HTML);
+      p.headElement = p.openElements.current;
+      p.insertionMode = InsertionMode.IN_HEAD;
+      break;
+    }
+    default: {
+      tokenBeforeHead(p, token2);
+    }
+  }
+}
+function endTagBeforeHead(p, token2) {
+  const tn = token2.tagID;
+  if (tn === TAG_ID.HEAD || tn === TAG_ID.BODY || tn === TAG_ID.HTML || tn === TAG_ID.BR) {
+    tokenBeforeHead(p, token2);
+  } else {
+    p._err(token2, ERR.endTagWithoutMatchingOpenElement);
+  }
+}
+function tokenBeforeHead(p, token2) {
+  p._insertFakeElement(TAG_NAMES.HEAD, TAG_ID.HEAD);
+  p.headElement = p.openElements.current;
+  p.insertionMode = InsertionMode.IN_HEAD;
+  p._processToken(token2);
+}
+function startTagInHead(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.BASE:
+    case TAG_ID.BASEFONT:
+    case TAG_ID.BGSOUND:
+    case TAG_ID.LINK:
+    case TAG_ID.META: {
+      p._appendElement(token2, NS.HTML);
+      token2.ackSelfClosing = true;
+      break;
+    }
+    case TAG_ID.TITLE: {
+      p._switchToTextParsing(token2, TokenizerMode.RCDATA);
+      break;
+    }
+    case TAG_ID.NOSCRIPT: {
+      if (p.options.scriptingEnabled) {
+        p._switchToTextParsing(token2, TokenizerMode.RAWTEXT);
+      } else {
+        p._insertElement(token2, NS.HTML);
+        p.insertionMode = InsertionMode.IN_HEAD_NO_SCRIPT;
+      }
+      break;
+    }
+    case TAG_ID.NOFRAMES:
+    case TAG_ID.STYLE: {
+      p._switchToTextParsing(token2, TokenizerMode.RAWTEXT);
+      break;
+    }
+    case TAG_ID.SCRIPT: {
+      p._switchToTextParsing(token2, TokenizerMode.SCRIPT_DATA);
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      p._insertTemplate(token2);
+      p.activeFormattingElements.insertMarker();
+      p.framesetOk = false;
+      p.insertionMode = InsertionMode.IN_TEMPLATE;
+      p.tmplInsertionModeStack.push(InsertionMode.IN_TEMPLATE);
+      break;
+    }
+    case TAG_ID.HEAD: {
+      p._err(token2, ERR.misplacedStartTagForHeadElement);
+      break;
+    }
+    default: {
+      tokenInHead(p, token2);
+    }
+  }
+}
+function endTagInHead(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HEAD: {
+      p.openElements.pop();
+      p.insertionMode = InsertionMode.AFTER_HEAD;
+      break;
+    }
+    case TAG_ID.BODY:
+    case TAG_ID.BR:
+    case TAG_ID.HTML: {
+      tokenInHead(p, token2);
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      templateEndTagInHead(p, token2);
+      break;
+    }
+    default: {
+      p._err(token2, ERR.endTagWithoutMatchingOpenElement);
+    }
+  }
+}
+function templateEndTagInHead(p, token2) {
+  if (p.openElements.tmplCount > 0) {
+    p.openElements.generateImpliedEndTagsThoroughly();
+    if (p.openElements.currentTagId !== TAG_ID.TEMPLATE) {
+      p._err(token2, ERR.closingOfElementWithOpenChildElements);
+    }
+    p.openElements.popUntilTagNamePopped(TAG_ID.TEMPLATE);
+    p.activeFormattingElements.clearToLastMarker();
+    p.tmplInsertionModeStack.pop();
+    p._resetInsertionMode();
+  } else {
+    p._err(token2, ERR.endTagWithoutMatchingOpenElement);
+  }
+}
+function tokenInHead(p, token2) {
+  p.openElements.pop();
+  p.insertionMode = InsertionMode.AFTER_HEAD;
+  p._processToken(token2);
+}
+function startTagInHeadNoScript(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.BASEFONT:
+    case TAG_ID.BGSOUND:
+    case TAG_ID.HEAD:
+    case TAG_ID.LINK:
+    case TAG_ID.META:
+    case TAG_ID.NOFRAMES:
+    case TAG_ID.STYLE: {
+      startTagInHead(p, token2);
+      break;
+    }
+    case TAG_ID.NOSCRIPT: {
+      p._err(token2, ERR.nestedNoscriptInHead);
+      break;
+    }
+    default: {
+      tokenInHeadNoScript(p, token2);
+    }
+  }
+}
+function endTagInHeadNoScript(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.NOSCRIPT: {
+      p.openElements.pop();
+      p.insertionMode = InsertionMode.IN_HEAD;
+      break;
+    }
+    case TAG_ID.BR: {
+      tokenInHeadNoScript(p, token2);
+      break;
+    }
+    default: {
+      p._err(token2, ERR.endTagWithoutMatchingOpenElement);
+    }
+  }
+}
+function tokenInHeadNoScript(p, token2) {
+  const errCode = token2.type === TokenType.EOF ? ERR.openElementsLeftAfterEof : ERR.disallowedContentInNoscriptInHead;
+  p._err(token2, errCode);
+  p.openElements.pop();
+  p.insertionMode = InsertionMode.IN_HEAD;
+  p._processToken(token2);
+}
+function startTagAfterHead(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.BODY: {
+      p._insertElement(token2, NS.HTML);
+      p.framesetOk = false;
+      p.insertionMode = InsertionMode.IN_BODY;
+      break;
+    }
+    case TAG_ID.FRAMESET: {
+      p._insertElement(token2, NS.HTML);
+      p.insertionMode = InsertionMode.IN_FRAMESET;
+      break;
+    }
+    case TAG_ID.BASE:
+    case TAG_ID.BASEFONT:
+    case TAG_ID.BGSOUND:
+    case TAG_ID.LINK:
+    case TAG_ID.META:
+    case TAG_ID.NOFRAMES:
+    case TAG_ID.SCRIPT:
+    case TAG_ID.STYLE:
+    case TAG_ID.TEMPLATE:
+    case TAG_ID.TITLE: {
+      p._err(token2, ERR.abandonedHeadElementChild);
+      p.openElements.push(p.headElement, TAG_ID.HEAD);
+      startTagInHead(p, token2);
+      p.openElements.remove(p.headElement);
+      break;
+    }
+    case TAG_ID.HEAD: {
+      p._err(token2, ERR.misplacedStartTagForHeadElement);
+      break;
+    }
+    default: {
+      tokenAfterHead(p, token2);
+    }
+  }
+}
+function endTagAfterHead(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.BODY:
+    case TAG_ID.HTML:
+    case TAG_ID.BR: {
+      tokenAfterHead(p, token2);
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      templateEndTagInHead(p, token2);
+      break;
+    }
+    default: {
+      p._err(token2, ERR.endTagWithoutMatchingOpenElement);
+    }
+  }
+}
+function tokenAfterHead(p, token2) {
+  p._insertFakeElement(TAG_NAMES.BODY, TAG_ID.BODY);
+  p.insertionMode = InsertionMode.IN_BODY;
+  modeInBody(p, token2);
+}
+function modeInBody(p, token2) {
+  switch (token2.type) {
+    case TokenType.CHARACTER: {
+      characterInBody(p, token2);
+      break;
+    }
+    case TokenType.WHITESPACE_CHARACTER: {
+      whitespaceCharacterInBody(p, token2);
+      break;
+    }
+    case TokenType.COMMENT: {
+      appendComment(p, token2);
+      break;
+    }
+    case TokenType.START_TAG: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TokenType.END_TAG: {
+      endTagInBody(p, token2);
+      break;
+    }
+    case TokenType.EOF: {
+      eofInBody(p, token2);
+      break;
+    }
+    default:
+  }
+}
+function whitespaceCharacterInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._insertCharacters(token2);
+}
+function characterInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._insertCharacters(token2);
+  p.framesetOk = false;
+}
+function htmlStartTagInBody(p, token2) {
+  if (p.openElements.tmplCount === 0) {
+    p.treeAdapter.adoptAttributes(p.openElements.items[0], token2.attrs);
+  }
+}
+function bodyStartTagInBody(p, token2) {
+  const bodyElement = p.openElements.tryPeekProperlyNestedBodyElement();
+  if (bodyElement && p.openElements.tmplCount === 0) {
+    p.framesetOk = false;
+    p.treeAdapter.adoptAttributes(bodyElement, token2.attrs);
+  }
+}
+function framesetStartTagInBody(p, token2) {
+  const bodyElement = p.openElements.tryPeekProperlyNestedBodyElement();
+  if (p.framesetOk && bodyElement) {
+    p.treeAdapter.detachNode(bodyElement);
+    p.openElements.popAllUpToHtmlElement();
+    p._insertElement(token2, NS.HTML);
+    p.insertionMode = InsertionMode.IN_FRAMESET;
+  }
+}
+function addressStartTagInBody(p, token2) {
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._insertElement(token2, NS.HTML);
+}
+function numberedHeaderStartTagInBody(p, token2) {
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  if (p.openElements.currentTagId !== void 0 && NUMBERED_HEADERS.has(p.openElements.currentTagId)) {
+    p.openElements.pop();
+  }
+  p._insertElement(token2, NS.HTML);
+}
+function preStartTagInBody(p, token2) {
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._insertElement(token2, NS.HTML);
+  p.skipNextNewLine = true;
+  p.framesetOk = false;
+}
+function formStartTagInBody(p, token2) {
+  const inTemplate = p.openElements.tmplCount > 0;
+  if (!p.formElement || inTemplate) {
+    if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+      p._closePElement();
+    }
+    p._insertElement(token2, NS.HTML);
+    if (!inTemplate) {
+      p.formElement = p.openElements.current;
+    }
+  }
+}
+function listItemStartTagInBody(p, token2) {
+  p.framesetOk = false;
+  const idx = token2.tagID === TAG_ID.LI ? p.openElements.indexOfTopmost(TAG_ID.LI) : Math.max(p.openElements.indexOfTopmost(TAG_ID.DD), p.openElements.indexOfTopmost(TAG_ID.DT));
+  if (idx !== -1 && !p.openElements.hasListItemBoundaryAbove(idx)) {
+    const elementId = p.openElements.tagIDs[idx];
+    p.openElements.generateImpliedEndTagsWithExclusion(elementId);
+    p.openElements.popUntilTagNamePopped(elementId);
+  }
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._insertElement(token2, NS.HTML);
+}
+function plaintextStartTagInBody(p, token2) {
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._insertElement(token2, NS.HTML);
+  p.tokenizer.state = TokenizerMode.PLAINTEXT;
+}
+function buttonStartTagInBody(p, token2) {
+  if (p.openElements.hasInScope(TAG_ID.BUTTON)) {
+    p.openElements.generateImpliedEndTags();
+    p.openElements.popUntilTagNamePopped(TAG_ID.BUTTON);
+  }
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+  p.framesetOk = false;
+}
+function aStartTagInBody(p, token2) {
+  const activeElementEntry = p.activeFormattingElements.getElementEntryInScopeWithTagName(TAG_NAMES.A);
+  if (activeElementEntry) {
+    callAdoptionAgency(p, token2);
+    p.openElements.remove(activeElementEntry.element);
+    p.activeFormattingElements.removeEntry(activeElementEntry);
+  }
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+  p.activeFormattingElements.pushElement(p.openElements.current, token2);
+}
+function bStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+  p.activeFormattingElements.pushElement(p.openElements.current, token2);
+}
+function nobrStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  if (p.openElements.hasInScope(TAG_ID.NOBR)) {
+    callAdoptionAgency(p, token2);
+    p._reconstructActiveFormattingElements();
+  }
+  p._insertElement(token2, NS.HTML);
+  p.activeFormattingElements.pushElement(p.openElements.current, token2);
+}
+function appletStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+  p.activeFormattingElements.insertMarker();
+  p.framesetOk = false;
+}
+function tableStartTagInBody(p, token2) {
+  if (p.treeAdapter.getDocumentMode(p.document) !== DOCUMENT_MODE.QUIRKS && p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._insertElement(token2, NS.HTML);
+  p.framesetOk = false;
+  p.insertionMode = InsertionMode.IN_TABLE;
+}
+function areaStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._appendElement(token2, NS.HTML);
+  p.framesetOk = false;
+  token2.ackSelfClosing = true;
+}
+function isHiddenInput(token2) {
+  const inputType = getTokenAttr(token2, ATTRS.TYPE);
+  return inputType != null && inputType.toLowerCase() === HIDDEN_INPUT_TYPE;
+}
+function inputStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._appendElement(token2, NS.HTML);
+  if (!isHiddenInput(token2)) {
+    p.framesetOk = false;
+  }
+  token2.ackSelfClosing = true;
+}
+function paramStartTagInBody(p, token2) {
+  p._appendElement(token2, NS.HTML);
+  token2.ackSelfClosing = true;
+}
+function hrStartTagInBody(p, token2) {
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._appendElement(token2, NS.HTML);
+  p.framesetOk = false;
+  token2.ackSelfClosing = true;
+}
+function imageStartTagInBody(p, token2) {
+  token2.tagName = TAG_NAMES.IMG;
+  token2.tagID = TAG_ID.IMG;
+  areaStartTagInBody(p, token2);
+}
+function textareaStartTagInBody(p, token2) {
+  p._insertElement(token2, NS.HTML);
+  p.skipNextNewLine = true;
+  p.tokenizer.state = TokenizerMode.RCDATA;
+  p.originalInsertionMode = p.insertionMode;
+  p.framesetOk = false;
+  p.insertionMode = InsertionMode.TEXT;
+}
+function xmpStartTagInBody(p, token2) {
+  if (p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._closePElement();
+  }
+  p._reconstructActiveFormattingElements();
+  p.framesetOk = false;
+  p._switchToTextParsing(token2, TokenizerMode.RAWTEXT);
+}
+function iframeStartTagInBody(p, token2) {
+  p.framesetOk = false;
+  p._switchToTextParsing(token2, TokenizerMode.RAWTEXT);
+}
+function rawTextStartTagInBody(p, token2) {
+  p._switchToTextParsing(token2, TokenizerMode.RAWTEXT);
+}
+function selectStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+  p.framesetOk = false;
+  p.insertionMode = p.insertionMode === InsertionMode.IN_TABLE || p.insertionMode === InsertionMode.IN_CAPTION || p.insertionMode === InsertionMode.IN_TABLE_BODY || p.insertionMode === InsertionMode.IN_ROW || p.insertionMode === InsertionMode.IN_CELL ? InsertionMode.IN_SELECT_IN_TABLE : InsertionMode.IN_SELECT;
+}
+function optgroupStartTagInBody(p, token2) {
+  if (p.openElements.currentTagId === TAG_ID.OPTION) {
+    p.openElements.pop();
+  }
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+}
+function rbStartTagInBody(p, token2) {
+  if (p.openElements.hasInScope(TAG_ID.RUBY)) {
+    p.openElements.generateImpliedEndTags();
+  }
+  p._insertElement(token2, NS.HTML);
+}
+function rtStartTagInBody(p, token2) {
+  if (p.openElements.hasInScope(TAG_ID.RUBY)) {
+    p.openElements.generateImpliedEndTagsWithExclusion(TAG_ID.RTC);
+  }
+  p._insertElement(token2, NS.HTML);
+}
+function mathStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  adjustTokenMathMLAttrs(token2);
+  adjustTokenXMLAttrs(token2);
+  if (token2.selfClosing) {
+    p._appendElement(token2, NS.MATHML);
+  } else {
+    p._insertElement(token2, NS.MATHML);
+  }
+  token2.ackSelfClosing = true;
+}
+function svgStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  adjustTokenSVGAttrs(token2);
+  adjustTokenXMLAttrs(token2);
+  if (token2.selfClosing) {
+    p._appendElement(token2, NS.SVG);
+  } else {
+    p._insertElement(token2, NS.SVG);
+  }
+  token2.ackSelfClosing = true;
+}
+function genericStartTagInBody(p, token2) {
+  p._reconstructActiveFormattingElements();
+  p._insertElement(token2, NS.HTML);
+}
+function startTagInBody(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.I:
+    case TAG_ID.S:
+    case TAG_ID.B:
+    case TAG_ID.U:
+    case TAG_ID.EM:
+    case TAG_ID.TT:
+    case TAG_ID.BIG:
+    case TAG_ID.CODE:
+    case TAG_ID.FONT:
+    case TAG_ID.SMALL:
+    case TAG_ID.STRIKE:
+    case TAG_ID.STRONG: {
+      bStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.A: {
+      aStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.H1:
+    case TAG_ID.H2:
+    case TAG_ID.H3:
+    case TAG_ID.H4:
+    case TAG_ID.H5:
+    case TAG_ID.H6: {
+      numberedHeaderStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.P:
+    case TAG_ID.DL:
+    case TAG_ID.OL:
+    case TAG_ID.UL:
+    case TAG_ID.DIV:
+    case TAG_ID.DIR:
+    case TAG_ID.NAV:
+    case TAG_ID.MAIN:
+    case TAG_ID.MENU:
+    case TAG_ID.ASIDE:
+    case TAG_ID.CENTER:
+    case TAG_ID.FIGURE:
+    case TAG_ID.FOOTER:
+    case TAG_ID.HEADER:
+    case TAG_ID.HGROUP:
+    case TAG_ID.DIALOG:
+    case TAG_ID.DETAILS:
+    case TAG_ID.ADDRESS:
+    case TAG_ID.ARTICLE:
+    case TAG_ID.SEARCH:
+    case TAG_ID.SECTION:
+    case TAG_ID.SUMMARY:
+    case TAG_ID.FIELDSET:
+    case TAG_ID.BLOCKQUOTE:
+    case TAG_ID.FIGCAPTION: {
+      addressStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.LI:
+    case TAG_ID.DD:
+    case TAG_ID.DT: {
+      listItemStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.BR:
+    case TAG_ID.IMG:
+    case TAG_ID.WBR:
+    case TAG_ID.AREA:
+    case TAG_ID.EMBED:
+    case TAG_ID.KEYGEN: {
+      areaStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.HR: {
+      hrStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.RB:
+    case TAG_ID.RTC: {
+      rbStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.RT:
+    case TAG_ID.RP: {
+      rtStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.PRE:
+    case TAG_ID.LISTING: {
+      preStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.XMP: {
+      xmpStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.SVG: {
+      svgStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.HTML: {
+      htmlStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.BASE:
+    case TAG_ID.LINK:
+    case TAG_ID.META:
+    case TAG_ID.STYLE:
+    case TAG_ID.TITLE:
+    case TAG_ID.SCRIPT:
+    case TAG_ID.BGSOUND:
+    case TAG_ID.BASEFONT:
+    case TAG_ID.TEMPLATE: {
+      startTagInHead(p, token2);
+      break;
+    }
+    case TAG_ID.BODY: {
+      bodyStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.FORM: {
+      formStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.NOBR: {
+      nobrStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.MATH: {
+      mathStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.TABLE: {
+      tableStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.INPUT: {
+      inputStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.PARAM:
+    case TAG_ID.TRACK:
+    case TAG_ID.SOURCE: {
+      paramStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.IMAGE: {
+      imageStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.BUTTON: {
+      buttonStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.APPLET:
+    case TAG_ID.OBJECT:
+    case TAG_ID.MARQUEE: {
+      appletStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.IFRAME: {
+      iframeStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.SELECT: {
+      selectStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.OPTION:
+    case TAG_ID.OPTGROUP: {
+      optgroupStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.NOEMBED:
+    case TAG_ID.NOFRAMES: {
+      rawTextStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.FRAMESET: {
+      framesetStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.TEXTAREA: {
+      textareaStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.NOSCRIPT: {
+      if (p.options.scriptingEnabled) {
+        rawTextStartTagInBody(p, token2);
+      } else {
+        genericStartTagInBody(p, token2);
+      }
+      break;
+    }
+    case TAG_ID.PLAINTEXT: {
+      plaintextStartTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.COL:
+    case TAG_ID.TH:
+    case TAG_ID.TD:
+    case TAG_ID.TR:
+    case TAG_ID.HEAD:
+    case TAG_ID.FRAME:
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD:
+    case TAG_ID.CAPTION:
+    case TAG_ID.COLGROUP: {
+      break;
+    }
+    default: {
+      genericStartTagInBody(p, token2);
+    }
+  }
+}
+function bodyEndTagInBody(p, token2) {
+  if (p.openElements.hasInScope(TAG_ID.BODY)) {
+    p.insertionMode = InsertionMode.AFTER_BODY;
+    if (p.options.sourceCodeLocationInfo) {
+      const bodyElement = p.openElements.tryPeekProperlyNestedBodyElement();
+      if (bodyElement) {
+        p._setEndLocation(bodyElement, token2);
+      }
+    }
+  }
+}
+function htmlEndTagInBody(p, token2) {
+  if (p.openElements.hasInScope(TAG_ID.BODY)) {
+    p.insertionMode = InsertionMode.AFTER_BODY;
+    endTagAfterBody(p, token2);
+  }
+}
+function addressEndTagInBody(p, token2) {
+  const tn = token2.tagID;
+  if (p.openElements.hasInScope(tn)) {
+    p.openElements.generateImpliedEndTags();
+    p.openElements.popUntilTagNamePopped(tn);
+  }
+}
+function formEndTagInBody(p) {
+  const inTemplate = p.openElements.tmplCount > 0;
+  const { formElement } = p;
+  if (!inTemplate) {
+    p.formElement = null;
+  }
+  if ((formElement || inTemplate) && p.openElements.hasInScope(TAG_ID.FORM)) {
+    p.openElements.generateImpliedEndTags();
+    if (inTemplate) {
+      p.openElements.popUntilTagNamePopped(TAG_ID.FORM);
+    } else if (formElement) {
+      p.openElements.remove(formElement);
+    }
+  }
+}
+function pEndTagInBody(p) {
+  if (!p.openElements.hasInButtonScope(TAG_ID.P)) {
+    p._insertFakeElement(TAG_NAMES.P, TAG_ID.P);
+  }
+  p._closePElement();
+}
+function liEndTagInBody(p) {
+  if (p.openElements.hasInListItemScope(TAG_ID.LI)) {
+    p.openElements.generateImpliedEndTagsWithExclusion(TAG_ID.LI);
+    p.openElements.popUntilTagNamePopped(TAG_ID.LI);
+  }
+}
+function ddEndTagInBody(p, token2) {
+  const tn = token2.tagID;
+  if (p.openElements.hasInScope(tn)) {
+    p.openElements.generateImpliedEndTagsWithExclusion(tn);
+    p.openElements.popUntilTagNamePopped(tn);
+  }
+}
+function numberedHeaderEndTagInBody(p) {
+  if (p.openElements.hasNumberedHeaderInScope()) {
+    p.openElements.generateImpliedEndTags();
+    p.openElements.popUntilNumberedHeaderPopped();
+  }
+}
+function appletEndTagInBody(p, token2) {
+  const tn = token2.tagID;
+  if (p.openElements.hasInScope(tn)) {
+    p.openElements.generateImpliedEndTags();
+    p.openElements.popUntilTagNamePopped(tn);
+    p.activeFormattingElements.clearToLastMarker();
+  }
+}
+function brEndTagInBody(p) {
+  p._reconstructActiveFormattingElements();
+  p._insertFakeElement(TAG_NAMES.BR, TAG_ID.BR);
+  p.openElements.pop();
+  p.framesetOk = false;
+}
+function genericEndTagInBody(p, token2) {
+  const tid = token2.tagID;
+  const i = tid === TAG_ID.UNKNOWN ? p.openElements.indexOfTopmostByName(NS.HTML, token2.tagName) : p.openElements.indexOfTopmost(tid);
+  if (i > 0 && !p.openElements.hasSpecialElementAbove(i)) {
+    p.openElements.generateImpliedEndTagsWithExclusion(tid);
+    if (p.openElements.stackTop >= i)
+      p.openElements.shortenToLength(i);
+  }
+}
+function endTagInBody(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.A:
+    case TAG_ID.B:
+    case TAG_ID.I:
+    case TAG_ID.S:
+    case TAG_ID.U:
+    case TAG_ID.EM:
+    case TAG_ID.TT:
+    case TAG_ID.BIG:
+    case TAG_ID.CODE:
+    case TAG_ID.FONT:
+    case TAG_ID.NOBR:
+    case TAG_ID.SMALL:
+    case TAG_ID.STRIKE:
+    case TAG_ID.STRONG: {
+      callAdoptionAgency(p, token2);
+      break;
+    }
+    case TAG_ID.P: {
+      pEndTagInBody(p);
+      break;
+    }
+    case TAG_ID.DL:
+    case TAG_ID.UL:
+    case TAG_ID.OL:
+    case TAG_ID.DIR:
+    case TAG_ID.DIV:
+    case TAG_ID.NAV:
+    case TAG_ID.PRE:
+    case TAG_ID.MAIN:
+    case TAG_ID.MENU:
+    case TAG_ID.ASIDE:
+    case TAG_ID.BUTTON:
+    case TAG_ID.CENTER:
+    case TAG_ID.FIGURE:
+    case TAG_ID.FOOTER:
+    case TAG_ID.HEADER:
+    case TAG_ID.HGROUP:
+    case TAG_ID.DIALOG:
+    case TAG_ID.ADDRESS:
+    case TAG_ID.ARTICLE:
+    case TAG_ID.DETAILS:
+    case TAG_ID.SEARCH:
+    case TAG_ID.SECTION:
+    case TAG_ID.SUMMARY:
+    case TAG_ID.LISTING:
+    case TAG_ID.FIELDSET:
+    case TAG_ID.BLOCKQUOTE:
+    case TAG_ID.FIGCAPTION: {
+      addressEndTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.LI: {
+      liEndTagInBody(p);
+      break;
+    }
+    case TAG_ID.DD:
+    case TAG_ID.DT: {
+      ddEndTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.H1:
+    case TAG_ID.H2:
+    case TAG_ID.H3:
+    case TAG_ID.H4:
+    case TAG_ID.H5:
+    case TAG_ID.H6: {
+      numberedHeaderEndTagInBody(p);
+      break;
+    }
+    case TAG_ID.BR: {
+      brEndTagInBody(p);
+      break;
+    }
+    case TAG_ID.BODY: {
+      bodyEndTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.HTML: {
+      htmlEndTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.FORM: {
+      formEndTagInBody(p);
+      break;
+    }
+    case TAG_ID.APPLET:
+    case TAG_ID.OBJECT:
+    case TAG_ID.MARQUEE: {
+      appletEndTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      templateEndTagInHead(p, token2);
+      break;
+    }
+    default: {
+      genericEndTagInBody(p, token2);
+    }
+  }
+}
+function eofInBody(p, token2) {
+  if (p.tmplInsertionModeStack.length > 0) {
+    eofInTemplate(p, token2);
+  } else {
+    stopParsing(p, token2);
+  }
+}
+function endTagInText(p, token2) {
+  var _a;
+  if (token2.tagID === TAG_ID.SCRIPT) {
+    (_a = p.scriptHandler) === null || _a === void 0 ? void 0 : _a.call(p, p.openElements.current);
+  }
+  p.openElements.pop();
+  p.insertionMode = p.originalInsertionMode;
+}
+function eofInText(p, token2) {
+  p._err(token2, ERR.eofInElementThatCanContainOnlyText);
+  p.openElements.pop();
+  p.insertionMode = p.originalInsertionMode;
+  p.onEof(token2);
+}
+function characterInTable(p, token2) {
+  if (p.openElements.currentTagId !== void 0 && TABLE_STRUCTURE_TAGS.has(p.openElements.currentTagId)) {
+    p.pendingCharacterTokens.length = 0;
+    p.hasNonWhitespacePendingCharacterToken = false;
+    p.originalInsertionMode = p.insertionMode;
+    p.insertionMode = InsertionMode.IN_TABLE_TEXT;
+    switch (token2.type) {
+      case TokenType.CHARACTER: {
+        characterInTableText(p, token2);
+        break;
+      }
+      case TokenType.WHITESPACE_CHARACTER: {
+        whitespaceCharacterInTableText(p, token2);
+        break;
+      }
+    }
+  } else {
+    tokenInTable(p, token2);
+  }
+}
+function captionStartTagInTable(p, token2) {
+  p.openElements.clearBackToTableContext();
+  p.activeFormattingElements.insertMarker();
+  p._insertElement(token2, NS.HTML);
+  p.insertionMode = InsertionMode.IN_CAPTION;
+}
+function colgroupStartTagInTable(p, token2) {
+  p.openElements.clearBackToTableContext();
+  p._insertElement(token2, NS.HTML);
+  p.insertionMode = InsertionMode.IN_COLUMN_GROUP;
+}
+function colStartTagInTable(p, token2) {
+  p.openElements.clearBackToTableContext();
+  p._insertFakeElement(TAG_NAMES.COLGROUP, TAG_ID.COLGROUP);
+  p.insertionMode = InsertionMode.IN_COLUMN_GROUP;
+  startTagInColumnGroup(p, token2);
+}
+function tbodyStartTagInTable(p, token2) {
+  p.openElements.clearBackToTableContext();
+  p._insertElement(token2, NS.HTML);
+  p.insertionMode = InsertionMode.IN_TABLE_BODY;
+}
+function tdStartTagInTable(p, token2) {
+  p.openElements.clearBackToTableContext();
+  p._insertFakeElement(TAG_NAMES.TBODY, TAG_ID.TBODY);
+  p.insertionMode = InsertionMode.IN_TABLE_BODY;
+  startTagInTableBody(p, token2);
+}
+function tableStartTagInTable(p, token2) {
+  if (p.openElements.hasInTableScope(TAG_ID.TABLE)) {
+    p.openElements.popUntilTagNamePopped(TAG_ID.TABLE);
+    p._resetInsertionMode();
+    p._processStartTag(token2);
+  }
+}
+function inputStartTagInTable(p, token2) {
+  if (isHiddenInput(token2)) {
+    p._appendElement(token2, NS.HTML);
+  } else {
+    tokenInTable(p, token2);
+  }
+  token2.ackSelfClosing = true;
+}
+function formStartTagInTable(p, token2) {
+  if (!p.formElement && p.openElements.tmplCount === 0) {
+    p._insertElement(token2, NS.HTML);
+    p.formElement = p.openElements.current;
+    p.openElements.pop();
+  }
+}
+function startTagInTable(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.TD:
+    case TAG_ID.TH:
+    case TAG_ID.TR: {
+      tdStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.STYLE:
+    case TAG_ID.SCRIPT:
+    case TAG_ID.TEMPLATE: {
+      startTagInHead(p, token2);
+      break;
+    }
+    case TAG_ID.COL: {
+      colStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.FORM: {
+      formStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.TABLE: {
+      tableStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD: {
+      tbodyStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.INPUT: {
+      inputStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.CAPTION: {
+      captionStartTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.COLGROUP: {
+      colgroupStartTagInTable(p, token2);
+      break;
+    }
+    default: {
+      tokenInTable(p, token2);
+    }
+  }
+}
+function endTagInTable(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.TABLE: {
+      if (p.openElements.hasInTableScope(TAG_ID.TABLE)) {
+        p.openElements.popUntilTagNamePopped(TAG_ID.TABLE);
+        p._resetInsertionMode();
+      }
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      templateEndTagInHead(p, token2);
+      break;
+    }
+    case TAG_ID.BODY:
+    case TAG_ID.CAPTION:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.HTML:
+    case TAG_ID.TBODY:
+    case TAG_ID.TD:
+    case TAG_ID.TFOOT:
+    case TAG_ID.TH:
+    case TAG_ID.THEAD:
+    case TAG_ID.TR: {
+      break;
+    }
+    default: {
+      tokenInTable(p, token2);
+    }
+  }
+}
+function tokenInTable(p, token2) {
+  const savedFosterParentingState = p.fosterParentingEnabled;
+  p.fosterParentingEnabled = true;
+  modeInBody(p, token2);
+  p.fosterParentingEnabled = savedFosterParentingState;
+}
+function whitespaceCharacterInTableText(p, token2) {
+  p.pendingCharacterTokens.push(token2);
+}
+function characterInTableText(p, token2) {
+  p.pendingCharacterTokens.push(token2);
+  p.hasNonWhitespacePendingCharacterToken = true;
+}
+function tokenInTableText(p, token2) {
+  let i = 0;
+  if (p.hasNonWhitespacePendingCharacterToken) {
+    for (; i < p.pendingCharacterTokens.length; i++) {
+      tokenInTable(p, p.pendingCharacterTokens[i]);
+    }
+  } else {
+    for (; i < p.pendingCharacterTokens.length; i++) {
+      p._insertCharacters(p.pendingCharacterTokens[i]);
+    }
+  }
+  p.insertionMode = p.originalInsertionMode;
+  p._processToken(token2);
+}
+var TABLE_VOID_ELEMENTS = /* @__PURE__ */ new Set([TAG_ID.CAPTION, TAG_ID.COL, TAG_ID.COLGROUP, TAG_ID.TBODY, TAG_ID.TD, TAG_ID.TFOOT, TAG_ID.TH, TAG_ID.THEAD, TAG_ID.TR]);
+function startTagInCaption(p, token2) {
+  const tn = token2.tagID;
+  if (TABLE_VOID_ELEMENTS.has(tn)) {
+    if (p.openElements.hasInTableScope(TAG_ID.CAPTION)) {
+      p.openElements.generateImpliedEndTags();
+      p.openElements.popUntilTagNamePopped(TAG_ID.CAPTION);
+      p.activeFormattingElements.clearToLastMarker();
+      p.insertionMode = InsertionMode.IN_TABLE;
+      startTagInTable(p, token2);
+    }
+  } else {
+    startTagInBody(p, token2);
+  }
+}
+function endTagInCaption(p, token2) {
+  const tn = token2.tagID;
+  switch (tn) {
+    case TAG_ID.CAPTION:
+    case TAG_ID.TABLE: {
+      if (p.openElements.hasInTableScope(TAG_ID.CAPTION)) {
+        p.openElements.generateImpliedEndTags();
+        p.openElements.popUntilTagNamePopped(TAG_ID.CAPTION);
+        p.activeFormattingElements.clearToLastMarker();
+        p.insertionMode = InsertionMode.IN_TABLE;
+        if (tn === TAG_ID.TABLE) {
+          endTagInTable(p, token2);
+        }
+      }
+      break;
+    }
+    case TAG_ID.BODY:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.HTML:
+    case TAG_ID.TBODY:
+    case TAG_ID.TD:
+    case TAG_ID.TFOOT:
+    case TAG_ID.TH:
+    case TAG_ID.THEAD:
+    case TAG_ID.TR: {
+      break;
+    }
+    default: {
+      endTagInBody(p, token2);
+    }
+  }
+}
+function startTagInColumnGroup(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.COL: {
+      p._appendElement(token2, NS.HTML);
+      token2.ackSelfClosing = true;
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      startTagInHead(p, token2);
+      break;
+    }
+    default: {
+      tokenInColumnGroup(p, token2);
+    }
+  }
+}
+function endTagInColumnGroup(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.COLGROUP: {
+      if (p.openElements.currentTagId === TAG_ID.COLGROUP) {
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE;
+      }
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      templateEndTagInHead(p, token2);
+      break;
+    }
+    case TAG_ID.COL: {
+      break;
+    }
+    default: {
+      tokenInColumnGroup(p, token2);
+    }
+  }
+}
+function tokenInColumnGroup(p, token2) {
+  if (p.openElements.currentTagId === TAG_ID.COLGROUP) {
+    p.openElements.pop();
+    p.insertionMode = InsertionMode.IN_TABLE;
+    p._processToken(token2);
+  }
+}
+function startTagInTableBody(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.TR: {
+      p.openElements.clearBackToTableBodyContext();
+      p._insertElement(token2, NS.HTML);
+      p.insertionMode = InsertionMode.IN_ROW;
+      break;
+    }
+    case TAG_ID.TH:
+    case TAG_ID.TD: {
+      p.openElements.clearBackToTableBodyContext();
+      p._insertFakeElement(TAG_NAMES.TR, TAG_ID.TR);
+      p.insertionMode = InsertionMode.IN_ROW;
+      startTagInRow(p, token2);
+      break;
+    }
+    case TAG_ID.CAPTION:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD: {
+      if (p.openElements.hasTableBodyContextInTableScope()) {
+        p.openElements.clearBackToTableBodyContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE;
+        startTagInTable(p, token2);
+      }
+      break;
+    }
+    default: {
+      startTagInTable(p, token2);
+    }
+  }
+}
+function endTagInTableBody(p, token2) {
+  const tn = token2.tagID;
+  switch (token2.tagID) {
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD: {
+      if (p.openElements.hasInTableScope(tn)) {
+        p.openElements.clearBackToTableBodyContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE;
+      }
+      break;
+    }
+    case TAG_ID.TABLE: {
+      if (p.openElements.hasTableBodyContextInTableScope()) {
+        p.openElements.clearBackToTableBodyContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE;
+        endTagInTable(p, token2);
+      }
+      break;
+    }
+    case TAG_ID.BODY:
+    case TAG_ID.CAPTION:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.HTML:
+    case TAG_ID.TD:
+    case TAG_ID.TH:
+    case TAG_ID.TR: {
+      break;
+    }
+    default: {
+      endTagInTable(p, token2);
+    }
+  }
+}
+function startTagInRow(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.TH:
+    case TAG_ID.TD: {
+      p.openElements.clearBackToTableRowContext();
+      p._insertElement(token2, NS.HTML);
+      p.insertionMode = InsertionMode.IN_CELL;
+      p.activeFormattingElements.insertMarker();
+      break;
+    }
+    case TAG_ID.CAPTION:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD:
+    case TAG_ID.TR: {
+      if (p.openElements.hasInTableScope(TAG_ID.TR)) {
+        p.openElements.clearBackToTableRowContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE_BODY;
+        startTagInTableBody(p, token2);
+      }
+      break;
+    }
+    default: {
+      startTagInTable(p, token2);
+    }
+  }
+}
+function endTagInRow(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.TR: {
+      if (p.openElements.hasInTableScope(TAG_ID.TR)) {
+        p.openElements.clearBackToTableRowContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE_BODY;
+      }
+      break;
+    }
+    case TAG_ID.TABLE: {
+      if (p.openElements.hasInTableScope(TAG_ID.TR)) {
+        p.openElements.clearBackToTableRowContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE_BODY;
+        endTagInTableBody(p, token2);
+      }
+      break;
+    }
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD: {
+      if (p.openElements.hasInTableScope(token2.tagID) || p.openElements.hasInTableScope(TAG_ID.TR)) {
+        p.openElements.clearBackToTableRowContext();
+        p.openElements.pop();
+        p.insertionMode = InsertionMode.IN_TABLE_BODY;
+        endTagInTableBody(p, token2);
+      }
+      break;
+    }
+    case TAG_ID.BODY:
+    case TAG_ID.CAPTION:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.HTML:
+    case TAG_ID.TD:
+    case TAG_ID.TH: {
+      break;
+    }
+    default: {
+      endTagInTable(p, token2);
+    }
+  }
+}
+function startTagInCell(p, token2) {
+  const tn = token2.tagID;
+  if (TABLE_VOID_ELEMENTS.has(tn)) {
+    if (p.openElements.hasInTableScope(TAG_ID.TD) || p.openElements.hasInTableScope(TAG_ID.TH)) {
+      p._closeTableCell();
+      startTagInRow(p, token2);
+    }
+  } else {
+    startTagInBody(p, token2);
+  }
+}
+function endTagInCell(p, token2) {
+  const tn = token2.tagID;
+  switch (tn) {
+    case TAG_ID.TD:
+    case TAG_ID.TH: {
+      if (p.openElements.hasInTableScope(tn)) {
+        p.openElements.generateImpliedEndTags();
+        p.openElements.popUntilTagNamePopped(tn);
+        p.activeFormattingElements.clearToLastMarker();
+        p.insertionMode = InsertionMode.IN_ROW;
+      }
+      break;
+    }
+    case TAG_ID.TABLE:
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD:
+    case TAG_ID.TR: {
+      if (p.openElements.hasInTableScope(tn)) {
+        p._closeTableCell();
+        endTagInRow(p, token2);
+      }
+      break;
+    }
+    case TAG_ID.BODY:
+    case TAG_ID.CAPTION:
+    case TAG_ID.COL:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.HTML: {
+      break;
+    }
+    default: {
+      endTagInBody(p, token2);
+    }
+  }
+}
+function startTagInSelect(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.OPTION: {
+      if (p.openElements.currentTagId === TAG_ID.OPTION) {
+        p.openElements.pop();
+      }
+      p._insertElement(token2, NS.HTML);
+      break;
+    }
+    case TAG_ID.OPTGROUP: {
+      if (p.openElements.currentTagId === TAG_ID.OPTION) {
+        p.openElements.pop();
+      }
+      if (p.openElements.currentTagId === TAG_ID.OPTGROUP) {
+        p.openElements.pop();
+      }
+      p._insertElement(token2, NS.HTML);
+      break;
+    }
+    case TAG_ID.HR: {
+      if (p.openElements.currentTagId === TAG_ID.OPTION) {
+        p.openElements.pop();
+      }
+      if (p.openElements.currentTagId === TAG_ID.OPTGROUP) {
+        p.openElements.pop();
+      }
+      p._appendElement(token2, NS.HTML);
+      token2.ackSelfClosing = true;
+      break;
+    }
+    case TAG_ID.INPUT:
+    case TAG_ID.KEYGEN:
+    case TAG_ID.TEXTAREA:
+    case TAG_ID.SELECT: {
+      if (p.openElements.hasInSelectScope(TAG_ID.SELECT)) {
+        p.openElements.popUntilTagNamePopped(TAG_ID.SELECT);
+        p._resetInsertionMode();
+        if (token2.tagID !== TAG_ID.SELECT) {
+          p._processStartTag(token2);
+        }
+      }
+      break;
+    }
+    case TAG_ID.SCRIPT:
+    case TAG_ID.TEMPLATE: {
+      startTagInHead(p, token2);
+      break;
+    }
+    default:
+  }
+}
+function endTagInSelect(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.OPTGROUP: {
+      if (p.openElements.stackTop > 0 && p.openElements.currentTagId === TAG_ID.OPTION && p.openElements.tagIDs[p.openElements.slotBelow(p.openElements.stackTop)] === TAG_ID.OPTGROUP) {
+        p.openElements.pop();
+      }
+      if (p.openElements.currentTagId === TAG_ID.OPTGROUP) {
+        p.openElements.pop();
+      }
+      break;
+    }
+    case TAG_ID.OPTION: {
+      if (p.openElements.currentTagId === TAG_ID.OPTION) {
+        p.openElements.pop();
+      }
+      break;
+    }
+    case TAG_ID.SELECT: {
+      if (p.openElements.hasInSelectScope(TAG_ID.SELECT)) {
+        p.openElements.popUntilTagNamePopped(TAG_ID.SELECT);
+        p._resetInsertionMode();
+      }
+      break;
+    }
+    case TAG_ID.TEMPLATE: {
+      templateEndTagInHead(p, token2);
+      break;
+    }
+    default:
+  }
+}
+function startTagInSelectInTable(p, token2) {
+  const tn = token2.tagID;
+  if (tn === TAG_ID.CAPTION || tn === TAG_ID.TABLE || tn === TAG_ID.TBODY || tn === TAG_ID.TFOOT || tn === TAG_ID.THEAD || tn === TAG_ID.TR || tn === TAG_ID.TD || tn === TAG_ID.TH) {
+    p.openElements.popUntilTagNamePopped(TAG_ID.SELECT);
+    p._resetInsertionMode();
+    p._processStartTag(token2);
+  } else {
+    startTagInSelect(p, token2);
+  }
+}
+function endTagInSelectInTable(p, token2) {
+  const tn = token2.tagID;
+  if (tn === TAG_ID.CAPTION || tn === TAG_ID.TABLE || tn === TAG_ID.TBODY || tn === TAG_ID.TFOOT || tn === TAG_ID.THEAD || tn === TAG_ID.TR || tn === TAG_ID.TD || tn === TAG_ID.TH) {
+    if (p.openElements.hasInTableScope(tn)) {
+      p.openElements.popUntilTagNamePopped(TAG_ID.SELECT);
+      p._resetInsertionMode();
+      p.onEndTag(token2);
+    }
+  } else {
+    endTagInSelect(p, token2);
+  }
+}
+function startTagInTemplate(p, token2) {
+  switch (token2.tagID) {
+    // First, handle tags that can start without a mode change
+    case TAG_ID.BASE:
+    case TAG_ID.BASEFONT:
+    case TAG_ID.BGSOUND:
+    case TAG_ID.LINK:
+    case TAG_ID.META:
+    case TAG_ID.NOFRAMES:
+    case TAG_ID.SCRIPT:
+    case TAG_ID.STYLE:
+    case TAG_ID.TEMPLATE:
+    case TAG_ID.TITLE: {
+      startTagInHead(p, token2);
+      break;
+    }
+    // Re-process the token in the appropriate mode
+    case TAG_ID.CAPTION:
+    case TAG_ID.COLGROUP:
+    case TAG_ID.TBODY:
+    case TAG_ID.TFOOT:
+    case TAG_ID.THEAD: {
+      p.tmplInsertionModeStack[p.tmplInsertionModeStack.length - 1] = InsertionMode.IN_TABLE;
+      p.insertionMode = InsertionMode.IN_TABLE;
+      startTagInTable(p, token2);
+      break;
+    }
+    case TAG_ID.COL: {
+      p.tmplInsertionModeStack[p.tmplInsertionModeStack.length - 1] = InsertionMode.IN_COLUMN_GROUP;
+      p.insertionMode = InsertionMode.IN_COLUMN_GROUP;
+      startTagInColumnGroup(p, token2);
+      break;
+    }
+    case TAG_ID.TR: {
+      p.tmplInsertionModeStack[p.tmplInsertionModeStack.length - 1] = InsertionMode.IN_TABLE_BODY;
+      p.insertionMode = InsertionMode.IN_TABLE_BODY;
+      startTagInTableBody(p, token2);
+      break;
+    }
+    case TAG_ID.TD:
+    case TAG_ID.TH: {
+      p.tmplInsertionModeStack[p.tmplInsertionModeStack.length - 1] = InsertionMode.IN_ROW;
+      p.insertionMode = InsertionMode.IN_ROW;
+      startTagInRow(p, token2);
+      break;
+    }
+    default: {
+      p.tmplInsertionModeStack[p.tmplInsertionModeStack.length - 1] = InsertionMode.IN_BODY;
+      p.insertionMode = InsertionMode.IN_BODY;
+      startTagInBody(p, token2);
+    }
+  }
+}
+function endTagInTemplate(p, token2) {
+  if (token2.tagID === TAG_ID.TEMPLATE) {
+    templateEndTagInHead(p, token2);
+  }
+}
+function eofInTemplate(p, token2) {
+  if (p.openElements.tmplCount > 0) {
+    do {
+      p.openElements.popUntilTagNamePopped(TAG_ID.TEMPLATE);
+      p.activeFormattingElements.clearToLastMarker();
+      p.tmplInsertionModeStack.pop();
+    } while (p.openElements.tmplCount > 0);
+    p._resetInsertionMode();
+    p.onEof(token2);
+  } else {
+    stopParsing(p, token2);
+  }
+}
+function startTagAfterBody(p, token2) {
+  if (token2.tagID === TAG_ID.HTML) {
+    startTagInBody(p, token2);
+  } else {
+    tokenAfterBody(p, token2);
+  }
+}
+function endTagAfterBody(p, token2) {
+  var _a;
+  if (token2.tagID === TAG_ID.HTML) {
+    if (!p.fragmentContext) {
+      p.insertionMode = InsertionMode.AFTER_AFTER_BODY;
+    }
+    if (p.options.sourceCodeLocationInfo && p.openElements.tagIDs[0] === TAG_ID.HTML) {
+      p._setEndLocation(p.openElements.items[0], token2);
+      const bodyElement = p.openElements.items[1];
+      if (bodyElement && !((_a = p.treeAdapter.getNodeSourceCodeLocation(bodyElement)) === null || _a === void 0 ? void 0 : _a.endTag)) {
+        p._setEndLocation(bodyElement, token2);
+      }
+    }
+  } else {
+    tokenAfterBody(p, token2);
+  }
+}
+function tokenAfterBody(p, token2) {
+  p.insertionMode = InsertionMode.IN_BODY;
+  modeInBody(p, token2);
+}
+function startTagInFrameset(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.FRAMESET: {
+      p._insertElement(token2, NS.HTML);
+      break;
+    }
+    case TAG_ID.FRAME: {
+      p._appendElement(token2, NS.HTML);
+      token2.ackSelfClosing = true;
+      break;
+    }
+    case TAG_ID.NOFRAMES: {
+      startTagInHead(p, token2);
+      break;
+    }
+    default:
+  }
+}
+function endTagInFrameset(p, token2) {
+  if (token2.tagID === TAG_ID.FRAMESET && !p.openElements.isRootHtmlElementCurrent()) {
+    p.openElements.pop();
+    if (!p.fragmentContext && p.openElements.currentTagId !== TAG_ID.FRAMESET) {
+      p.insertionMode = InsertionMode.AFTER_FRAMESET;
+    }
+  }
+}
+function startTagAfterFrameset(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.NOFRAMES: {
+      startTagInHead(p, token2);
+      break;
+    }
+    default:
+  }
+}
+function endTagAfterFrameset(p, token2) {
+  if (token2.tagID === TAG_ID.HTML) {
+    p.insertionMode = InsertionMode.AFTER_AFTER_FRAMESET;
+  }
+}
+function startTagAfterAfterBody(p, token2) {
+  if (token2.tagID === TAG_ID.HTML) {
+    startTagInBody(p, token2);
+  } else {
+    tokenAfterAfterBody(p, token2);
+  }
+}
+function tokenAfterAfterBody(p, token2) {
+  p.insertionMode = InsertionMode.IN_BODY;
+  modeInBody(p, token2);
+}
+function startTagAfterAfterFrameset(p, token2) {
+  switch (token2.tagID) {
+    case TAG_ID.HTML: {
+      startTagInBody(p, token2);
+      break;
+    }
+    case TAG_ID.NOFRAMES: {
+      startTagInHead(p, token2);
+      break;
+    }
+    default:
+  }
+}
+function nullCharacterInForeignContent(p, token2) {
+  token2.chars = REPLACEMENT_CHARACTER;
+  p._insertCharacters(token2);
+}
+function characterInForeignContent(p, token2) {
+  p._insertCharacters(token2);
+  p.framesetOk = false;
+}
+function popUntilHtmlOrIntegrationPoint(p) {
+  while (p.treeAdapter.getNamespaceURI(p.openElements.current) !== NS.HTML && p.openElements.currentTagId !== void 0 && !p._isIntegrationPoint(p.openElements.currentTagId, p.openElements.current)) {
+    p.openElements.pop();
+  }
+}
+function startTagInForeignContent(p, token2) {
+  if (causesExit(token2)) {
+    popUntilHtmlOrIntegrationPoint(p);
+    p._startTagOutsideForeignContent(token2);
+  } else {
+    const current = p._getAdjustedCurrentElement();
+    const currentNs = p.treeAdapter.getNamespaceURI(current);
+    if (currentNs === NS.MATHML) {
+      adjustTokenMathMLAttrs(token2);
+    } else if (currentNs === NS.SVG) {
+      adjustTokenSVGTagName(token2);
+      adjustTokenSVGAttrs(token2);
+    }
+    adjustTokenXMLAttrs(token2);
+    if (token2.selfClosing) {
+      p._appendElement(token2, currentNs);
+    } else {
+      p._insertElement(token2, currentNs);
+    }
+    token2.ackSelfClosing = true;
+  }
+}
+function endTagInForeignContent(p, token2) {
+  if (token2.tagID === TAG_ID.P || token2.tagID === TAG_ID.BR) {
+    popUntilHtmlOrIntegrationPoint(p);
+    p._endTagOutsideForeignContent(token2);
+    return;
+  }
+  if (p.openElements.stackTop === 0)
+    return;
+  const { tagName } = token2;
+  const adjustedTagName = SVG_TAG_NAMES_ADJUSTMENT_MAP.get(tagName);
+  const contextNs = p.fragmentContext ? p.treeAdapter.getNamespaceURI(p.fragmentContext) : NS.HTML;
+  const i = Math.max(p.openElements.indexOfTopmostByName(NS.SVG, tagName), p.openElements.indexOfTopmostByName(NS.MATHML, tagName), adjustedTagName === void 0 ? -1 : p.openElements.indexOfTopmostByName(NS.SVG, adjustedTagName), contextNs === NS.HTML || contextNs === NS.SVG || contextNs === NS.MATHML ? -1 : p.openElements.indexOfTopmostByName(contextNs, tagName));
+  if (i > p.openElements.indexOfTopmostHtmlElement()) {
+    token2.tagName = p.treeAdapter.getTagName(p.openElements.items[i]);
+    p.openElements.shortenToLength(i);
+  } else {
+    p._endTagOutsideForeignContent(token2);
+  }
+}
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/serializer/index.js
+var VOID_ELEMENTS = /* @__PURE__ */ new Set([
+  TAG_NAMES.AREA,
+  TAG_NAMES.BASE,
+  TAG_NAMES.BASEFONT,
+  TAG_NAMES.BGSOUND,
+  TAG_NAMES.BR,
+  TAG_NAMES.COL,
+  TAG_NAMES.EMBED,
+  TAG_NAMES.FRAME,
+  TAG_NAMES.HR,
+  TAG_NAMES.IMG,
+  TAG_NAMES.INPUT,
+  TAG_NAMES.KEYGEN,
+  TAG_NAMES.LINK,
+  TAG_NAMES.META,
+  TAG_NAMES.PARAM,
+  TAG_NAMES.SOURCE,
+  TAG_NAMES.TRACK,
+  TAG_NAMES.WBR
+]);
+
+// ../../../../node_modules/.pnpm/parse5@8.1.1/node_modules/parse5/dist/index.js
+function parse(html, options) {
+  return Parser.parse(html, options);
 }
 
 // src/infrastructure/adapters/feedback/stored-values.ts
@@ -18127,6 +32610,106 @@ function readBool(value, field) {
     throw new Error(`Invalid stored feedback boolean for ${field}.`);
   }
   return value === 1n;
+}
+
+// src/infrastructure/adapters/feedback/content-source.ts
+var nonContentElements = /* @__PURE__ */ new Set(["head", "script", "style", "template", "noscript"]);
+var maximumHtmlLength = 1024 * 1024;
+function visibleElement(node) {
+  if (!("tagName" in node) || nonContentElements.has(node.tagName)) {
+    return false;
+  }
+  return !node.attrs.some(
+    ({ name, value }) => name === "hidden" || name === "aria-hidden" && value === "true"
+  );
+}
+function validateHtmlNodes(html, ids) {
+  if (html.length > maximumHtmlLength) {
+    return [];
+  }
+  const requested = new Set(ids);
+  const matches = /* @__PURE__ */ new Map();
+  const document = parse(html);
+  const nodes = [...document.childNodes];
+  for (let index = 0; index < nodes.length; index += 1) {
+    const node = nodes[index];
+    if (!node || !visibleElement(node)) {
+      continue;
+    }
+    const id = node.attrs.find((attribute) => attribute.name === "data-studio-id")?.value;
+    if (id && requested.has(id)) {
+      matches.set(id, (matches.get(id) ?? 0) + 1);
+    }
+    for (const child3 of node.childNodes) {
+      nodes.push(child3);
+    }
+  }
+  return ids.filter((id) => matches.get(id) === 1);
+}
+function contentData(row) {
+  const data = JSON.parse(readText(row.body_json, "body_json"));
+  return data;
+}
+function htmlOf(data) {
+  if (typeof data === "object" && data !== null && "html" in data) {
+    return typeof data.html === "string" ? data.html : void 0;
+  }
+}
+function readContentSource(connection, boardId, target2) {
+  const statement = connection.prepare(`
+    SELECT body_kind, payload_version, body_json
+    FROM object_payloads
+    WHERE board_id = ? AND object_id = ?
+  `);
+  statement.setReadBigInts(true);
+  const row = statement.get(boardId, target2.objectId);
+  if (!row) {
+    return void 0;
+  }
+  const kind = readText(row.body_kind, "body_kind");
+  const payloadVersion = readUnsigned2(row.payload_version, "payload_version");
+  const data = contentData(row);
+  const { content } = target2;
+  const html = content.kind === "html" && kind === "embed" ? htmlOf(data) : void 0;
+  const htmlNodeIds = html !== void 0 && content.kind === "html" ? validateHtmlNodes(html, content.nodeIds) : void 0;
+  return { kind, payloadVersion, data, htmlNodeIds };
+}
+function versionFromText(value) {
+  if (typeof value !== "string" || !/^\d{1,20}$/u.test(value)) {
+    throw new Error("Invalid stored HTML anchor source revision.");
+  }
+  return BigInt(value);
+}
+function unitIds(value) {
+  if (!Array.isArray(value) || !value.every((id) => typeof id === "string")) {
+    throw new Error("Invalid stored content anchor IDs.");
+  }
+  return value.map((id) => readText(id, "content anchor identifier"));
+}
+function decodeFeedbackContentUnit(raw) {
+  const value = JSON.parse(readText(raw, "content anchor"));
+  if (typeof value !== "object" || value === null || !("kind" in value)) {
+    throw new Error("Invalid stored content anchor.");
+  }
+  if (value.kind === "document" && "blockIds" in value) {
+    return { kind: "document", blockIds: unitIds(value.blockIds) };
+  }
+  if (value.kind === "todo" && "itemId" in value) {
+    return { kind: "todo", itemId: readText(value.itemId, "task identifier") };
+  }
+  if (value.kind === "html" && "nodeIds" in value && "sourceRevision" in value) {
+    return {
+      kind: "html",
+      nodeIds: unitIds(value.nodeIds),
+      sourceRevision: versionFromText(value.sourceRevision)
+    };
+  }
+  throw new Error("Invalid stored content anchor unit.");
+}
+function encodeFeedbackContentUnit(unit) {
+  return JSON.stringify(
+    unit.kind === "html" ? { ...unit, sourceRevision: unit.sourceRevision.toString() } : unit
+  );
 }
 
 // src/infrastructure/adapters/feedback/messages.ts
@@ -18170,7 +32753,7 @@ function listReplies(connection, boardId, threadId, afterPosition, limit) {
   return statement.all(boardId, threadId, afterPosition, limit).map(readMessage2);
 }
 function insertMessage(connection, boardId, threadId, position, message) {
-  const { messageId, authorActorId, text: text2, createdAtMillis, updatedAtMillis, version } = message;
+  const { messageId, authorActorId, text: text3, createdAtMillis, updatedAtMillis, version } = message;
   connection.prepare(`
       INSERT INTO feedback_messages (
         board_id, thread_id, message_id, author_actor_id, text,
@@ -18181,7 +32764,7 @@ function insertMessage(connection, boardId, threadId, position, message) {
     threadId,
     messageId,
     authorActorId,
-    text2,
+    text3,
     createdAtMillis,
     updatedAtMillis,
     version,
@@ -18189,12 +32772,12 @@ function insertMessage(connection, boardId, threadId, position, message) {
   );
 }
 function updateMessage(connection, boardId, threadId, message) {
-  const { messageId, text: text2, updatedAtMillis, version } = message;
+  const { messageId, text: text3, updatedAtMillis, version } = message;
   connection.prepare(`
       UPDATE feedback_messages
       SET text = ?, updated_at_millis = ?, version = ?
       WHERE board_id = ? AND thread_id = ? AND message_id = ?
-    `).run(text2, updatedAtMillis, version, boardId, threadId, messageId);
+    `).run(text3, updatedAtMillis, version, boardId, threadId, messageId);
 }
 
 // src/infrastructure/adapters/feedback/receipts.ts
@@ -18301,6 +32884,16 @@ var feedbackSchema = `
   CREATE INDEX IF NOT EXISTS feedback_threads_by_status
     ON feedback_threads (board_id, status, updated_at_millis DESC, thread_id DESC);
 
+  CREATE TABLE IF NOT EXISTS feedback_content_anchors (
+    board_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL,
+    payload_version INTEGER NOT NULL CHECK (payload_version >= 0),
+    unit_json TEXT NOT NULL CHECK (json_valid(unit_json)),
+    frozen_excerpt TEXT,
+    PRIMARY KEY (board_id, thread_id),
+    FOREIGN KEY (board_id, thread_id) REFERENCES feedback_threads (board_id, thread_id) ON DELETE CASCADE
+  ) STRICT;
+
   CREATE TABLE IF NOT EXISTS feedback_messages (
     board_id TEXT NOT NULL,
     thread_id TEXT NOT NULL,
@@ -18336,11 +32929,15 @@ var feedbackSchema = `
 
 // src/infrastructure/adapters/feedback/threads.ts
 var selectThreads = `
-  SELECT t.*, ${messageColumns}, live.object_id AS live_object_id
+  SELECT t.*, ${messageColumns}, live.object_id AS live_object_id,
+         content.payload_version AS content_payload_version,
+         content.unit_json AS content_unit_json, content.frozen_excerpt AS frozen_excerpt
   FROM feedback_threads AS t
   JOIN feedback_messages AS m
     ON m.board_id = t.board_id AND m.thread_id = t.thread_id AND m.position = 0
   LEFT JOIN board_objects AS live ON live.board_id = t.board_id AND live.object_id = t.object_id
+  LEFT JOIN feedback_content_anchors AS content
+    ON content.board_id = t.board_id AND content.thread_id = t.thread_id
 `;
 function readStatus2(value) {
   if (value === "open" || value === "resolved") {
@@ -18373,17 +32970,24 @@ function readAnchor(row) {
       targetMissing: false
     };
   }
+  const point2 = {
+    objectId: readText(row.object_id, "object_id"),
+    u: readFinite(row.object_u, "object_u"),
+    v: readFinite(row.object_v, "object_v"),
+    geometryVersion: readUnsigned2(row.object_geometry_version, "object_geometry_version")
+  };
+  const target2 = row.content_payload_version === null ? { ...point2, kind: "object" } : {
+    ...point2,
+    kind: "content",
+    payloadVersion: readUnsigned2(row.content_payload_version, "content_payload_version"),
+    content: decodeFeedbackContentUnit(row.content_unit_json)
+  };
   return {
-    target: {
-      kind: "object",
-      objectId: readText(row.object_id, "object_id"),
-      u: readFinite(row.object_u, "object_u"),
-      v: readFinite(row.object_v, "object_v"),
-      geometryVersion: readUnsigned2(row.object_geometry_version, "object_geometry_version")
-    },
+    target: target2,
     sourceBoardRevision,
     frozenPoint,
     frozenObject: readFrozenObject(row),
+    frozenExcerpt: row.frozen_excerpt === null ? void 0 : readText(row.frozen_excerpt, "frozen_excerpt"),
     targetMissing: row.live_object_id === null
   };
 }
@@ -18432,7 +33036,7 @@ function listThreads(connection, lookup) {
   statement.setReadBigInts(true);
   return statement.all(...args, limit).map(readThread);
 }
-function objectFields(anchor) {
+function objectFields2(anchor) {
   const { target: target2, frozenObject } = anchor;
   if (target2.kind === "board") {
     return [null, null, null, null, null, null, null, null, null, null, null];
@@ -18440,14 +33044,14 @@ function objectFields(anchor) {
   if (!frozenObject) {
     throw new Error("Object feedback requires frozen source geometry.");
   }
-  const { kind, label, x, y, width, height, rotation } = frozenObject;
+  const { kind, label: label2, x, y, width, height, rotation } = frozenObject;
   return [
     target2.objectId,
     target2.u,
     target2.v,
     target2.geometryVersion,
     kind,
-    label,
+    label2,
     x,
     y,
     width,
@@ -18472,12 +33076,24 @@ function insertThread(connection, boardId, thread) {
     sourceBoardRevision,
     frozenPoint.x,
     frozenPoint.y,
-    ...objectFields(anchor),
+    ...objectFields2(anchor),
     version,
     updatedAtMillis,
     replyCount
   );
   insertMessage(connection, boardId, threadId, 0, thread.first);
+  if (anchor.target.kind === "content") {
+    connection.prepare(`
+      INSERT INTO feedback_content_anchors (board_id, thread_id, payload_version, unit_json, frozen_excerpt)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(
+      boardId,
+      threadId,
+      anchor.target.payloadVersion,
+      encodeFeedbackContentUnit(anchor.target.content),
+      anchor.frozenExcerpt ?? null
+    );
+  }
 }
 function updateThread(connection, boardId, thread) {
   const { threadId, status, updatedAtMillis, version, replyCount } = thread;
@@ -18497,7 +33113,7 @@ function getBoardRevision(connection, boardId) {
   statement.setReadBigInts(true);
   return readUnsigned2(statement.get(boardId)?.revision, "revision");
 }
-function getObject(connection, boardId, objectId) {
+function getObject2(connection, boardId, objectId) {
   const statement = connection.prepare(`
     SELECT kind, label, x, y, width, height, rotation, geometry_version
     FROM board_objects
@@ -18528,7 +33144,8 @@ function createReader(connection) {
   return {
     getAccess: (boardId, actorId2) => readBoardAccess(connection, boardId, actorId2),
     getBoardRevision: (boardId) => getBoardRevision(connection, boardId),
-    getObject: (boardId, objectId) => getObject(connection, boardId, objectId),
+    getObject: (boardId, objectId) => getObject2(connection, boardId, objectId),
+    getContentSource: (boardId, target2) => readContentSource(connection, boardId, target2),
     listThreads: (lookup) => listThreads(connection, lookup),
     getThread: (boardId, threadId) => getThread(connection, boardId, threadId),
     listReplies: (boardId, threadId, afterPosition, limit) => listReplies(connection, boardId, threadId, afterPosition, limit),
@@ -18552,6 +33169,32 @@ function createFeedbackRepository(database) {
         saveReceipt: (actorId2, stored) => saveReceipt(connection, actorId2, stored)
       })
     )
+  };
+}
+
+// src/infrastructure/adapters/board-backup-metadata.ts
+function millis(value) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Invalid board catalog timestamp.");
+  }
+  return value;
+}
+function readBackupMetadata(connection, boardId, actorId2) {
+  if (!readBoardAccess(connection, boardId, actorId2)?.isOwner) {
+    return void 0;
+  }
+  const row = connection.prepare(`
+    SELECT entry.updated_at_millis, entry.pinned,
+      (SELECT MIN(created.updated_at_millis) FROM catalog_create_receipts AS created WHERE created.board_id = entry.board_id) AS created_at_millis
+    FROM catalog_entries AS entry WHERE entry.board_id = ?
+  `).get(boardId);
+  if (!row) {
+    throw new Error("The whiteboard has no catalog entry.");
+  }
+  return {
+    updatedAtMillis: millis(row.updated_at_millis),
+    createdAtMillis: row.created_at_millis === null ? void 0 : millis(row.created_at_millis),
+    pinned: row.pinned === 1
   };
 }
 
@@ -18589,11 +33232,11 @@ function storedVersion(value, field) {
   return value;
 }
 function storedDecimalVersion(value, field) {
-  const text2 = storedText(value, field);
-  if (!versionPattern.test(text2)) {
+  const text3 = storedText(value, field);
+  if (!versionPattern.test(text3)) {
     throw new Error(`Invalid stored decimal version for ${field}.`);
   }
-  return storedVersion(BigInt(text2), field);
+  return storedVersion(BigInt(text3), field);
 }
 function storedRecord(value, field) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -18607,14 +33250,14 @@ function storedArray(value, field) {
   }
   return value;
 }
-function decodeJson(text2, field) {
+function decodeJson(text3, field) {
   return JSON.parse(
-    storedText(text2, field),
+    storedText(text3, field),
     (_key, value) => typeof value === "number" ? storedNumber(value, field) : value
   );
 }
-function decodePayload(text2) {
-  return storedRecord(decodeJson(text2, "body_json"), "body_json");
+function decodePayload(text3) {
+  return storedRecord(decodeJson(text3, "body_json"), "body_json");
 }
 
 // src/infrastructure/adapters/board-object-storage.ts
@@ -18655,8 +33298,8 @@ function decodeHead(value) {
   }
 }
 function decodeEndpoint(value) {
-  const { point, attachment } = storedRecord(value, "endpoint");
-  const position = decodePoint(point);
+  const { point: point2, attachment } = storedRecord(value, "endpoint");
+  const position = decodePoint(point2);
   if (attachment === void 0) {
     return { point: position };
   }
@@ -18677,11 +33320,11 @@ function decodeRelativeBends(value) {
   };
 }
 function decodeConnector(value) {
-  const { start, end, bends, relativeBends, labelOffset, startHead, endHead } = value;
+  const { start, end: end2, bends, relativeBends, labelOffset, startHead, endHead } = value;
   return {
     kind: "connector",
     start: decodeEndpoint(start),
-    end: decodeEndpoint(end),
+    end: decodeEndpoint(end2),
     bends: storedArray(bends, "bends").map(decodePoint),
     relativeBends: relativeBends === void 0 ? void 0 : decodeRelativeBends(relativeBends),
     labelOffset: labelOffset === void 0 ? void 0 : decodePoint(labelOffset),
@@ -18730,19 +33373,19 @@ function decodeSceneObject(row) {
   };
 }
 function decodeReceiptObject(value) {
-  const object = storedRecord(value, "receipt object");
-  const { parentId, groupId, appearance: appearance2, detail, payloadVersion } = object;
+  const object3 = storedRecord(value, "receipt object");
+  const { parentId, groupId, appearance: appearance3, detail, payloadVersion } = object3;
   return {
-    objectId: storedText(object.objectId, "objectId"),
-    kind: storedText(object.kind, "kind"),
-    label: storedText(object.label, "label"),
-    geometry: decodeGeometry(storedRecord(object.geometry, "geometry")),
-    geometryVersion: storedDecimalVersion(object.geometryVersion, "geometryVersion"),
+    objectId: storedText(object3.objectId, "objectId"),
+    kind: storedText(object3.kind, "kind"),
+    label: storedText(object3.label, "label"),
+    geometry: decodeGeometry(storedRecord(object3.geometry, "geometry")),
+    geometryVersion: storedDecimalVersion(object3.geometryVersion, "geometryVersion"),
     payloadVersion: payloadVersion === void 0 ? void 0 : storedDecimalVersion(payloadVersion, "payloadVersion"),
-    locked: storedBool(object.locked, "locked"),
+    locked: storedBool(object3.locked, "locked"),
     parentId: parentId === void 0 ? void 0 : storedText(parentId, "parentId"),
     groupId: groupId === void 0 ? void 0 : storedText(groupId, "groupId"),
-    appearance: appearance2 === void 0 ? void 0 : decodeAppearance(appearance2),
+    appearance: appearance3 === void 0 ? void 0 : decodeAppearance(appearance3),
     detail: detail === void 0 ? void 0 : decodeDetail(detail)
   };
 }
@@ -18924,6 +33567,38 @@ function decodeVersion(row) {
     changedObjectCount: safeVersionNumber(row.changed_object_count, "changed_object_count")
   };
 }
+function readCreationVersion(connection, boardId) {
+  const schema2 = connection.prepare(`
+    SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'catalog_create_receipts'
+  `).get();
+  if (!schema2) {
+    return void 0;
+  }
+  const query = connection.prepare(`
+    SELECT title, actor_id, updated_at_millis FROM catalog_create_receipts
+    WHERE board_id = ?
+    ORDER BY updated_at_millis, actor_id, command_id LIMIT 1
+  `);
+  query.setReadBigInts(true);
+  const created = query.get(boardId);
+  if (created) {
+    return {
+      revision: 0n,
+      title: storedText(created.title, "title"),
+      actorId: storedText(created.actor_id, "actor_id"),
+      kind: "baseline",
+      savedAtMillis: safeVersionNumber(created.updated_at_millis, "updated_at_millis"),
+      changedObjectCount: 0
+    };
+  }
+}
+function withCreationVersion(connection, boardId, row) {
+  const version = decodeVersion(row);
+  if (version.kind === "baseline" && version.revision === 0n) {
+    return readCreationVersion(connection, boardId) ?? version;
+  }
+  return version;
+}
 function readBoardVersions(connection, boardId, before, limit = defaultPageSize3) {
   const cutoff = before === void 0 ? "" : "AND revision < ?3";
   const query = connection.prepare(`
@@ -18932,7 +33607,7 @@ function readBoardVersions(connection, boardId, before, limit = defaultPageSize3
   `);
   query.setReadBigInts(true);
   const rows = before === void 0 ? query.all(boardId, limit) : query.all(boardId, limit, before);
-  return rows.map(decodeVersion);
+  return rows.map((row) => withCreationVersion(connection, boardId, row));
 }
 function readBoardVersion(connection, boardId, revision) {
   const query = connection.prepare(`
@@ -18940,7 +33615,13 @@ function readBoardVersion(connection, boardId, revision) {
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, revision);
-  return row && decodeVersion(row);
+  if (row) {
+    return withCreationVersion(connection, boardId, row);
+  }
+  if (revision === 0n) {
+    const initial = connection.prepare("SELECT 1 FROM boards WHERE board_id = ? AND revision = 0").get(boardId);
+    return initial && readCreationVersion(connection, boardId);
+  }
 }
 function payloadHistoryJoin(source) {
   return `
@@ -19108,13 +33789,13 @@ function storeObjects(connection, boardId, objects) {
       appearance_json = excluded.appearance_json, detail_json = excluded.detail_json
   `);
   let layer = firstRank;
-  for (const object of objects) {
-    const { geometry, objectId, kind, label, geometryVersion, locked } = object;
+  for (const object3 of objects) {
+    const { geometry, objectId, kind, label: label2, geometryVersion, locked } = object3;
     upsert.run(
       boardId,
       objectId,
       kind,
-      label,
+      label2,
       layer,
       geometry.x,
       geometry.y,
@@ -19123,10 +33804,10 @@ function storeObjects(connection, boardId, objects) {
       geometry.rotation,
       geometryVersion,
       Number(locked),
-      object.parentId ?? null,
-      object.groupId ?? null,
-      object.appearance ? JSON.stringify(object.appearance) : null,
-      object.detail ? JSON.stringify(object.detail) : null
+      object3.parentId ?? null,
+      object3.groupId ?? null,
+      object3.appearance ? JSON.stringify(object3.appearance) : null,
+      object3.detail ? JSON.stringify(object3.detail) : null
     );
     layer += 1n;
   }
@@ -19243,8 +33924,8 @@ function boundaryLayerChanges(current, order, positions, placement) {
   }
   const count = BigInt(placement.objectIds.length);
   const start = atFront ? edge.rank + layerSpacing : edge.rank - count * layerSpacing;
-  const end = start + (count - 1n) * layerSpacing;
-  if (start < minimumLayerRank || end > maximumLayerRank) {
+  const end2 = start + (count - 1n) * layerSpacing;
+  if (start < minimumLayerRank || end2 > maximumLayerRank) {
     return void 0;
   }
   return layerChanges(
@@ -19326,7 +34007,8 @@ function applyBoardChanges(connection, board, changes, commit, getObjects) {
     removedObjectIds,
     payloads,
     removedPayloadObjectIds,
-    order
+    order,
+    layerChangedObjectIds: orderedIds
   };
 }
 
@@ -19382,9 +34064,9 @@ function readReceiptDetails(connection, boardId, revision, snapshot) {
     revision,
     references.map(({ objectId }) => objectId)
   ) : readMatchingCurrentPayloads(connection, boardId, references);
-  const byId = new Map(found.map((payload) => [payload.objectId, payload]));
+  const byId2 = new Map(found.map((payload) => [payload.objectId, payload]));
   const payloads = references.flatMap(({ objectId, payloadVersion }) => {
-    const payload = byId.get(objectId);
+    const payload = byId2.get(objectId);
     return payload?.payloadVersion === payloadVersion ? [payload] : [];
   });
   const order = hasOrder && available ? readVersionObjects(connection, boardId, revision).map(({ objectId }) => objectId) : void 0;
@@ -19406,6 +34088,7 @@ function readEditReceipt(connection, boardId, actorId2, commandId) {
   const boardRevision = storedDecimalVersion(value.boardRevision, "boardRevision");
   return {
     signature: storedText(row.signature, "signature"),
+    advancedRevision: value.advancedRevision === true || void 0,
     receipt: {
       boardId,
       commandId,
@@ -19415,6 +34098,7 @@ function readEditReceipt(connection, boardId, actorId2, commandId) {
         objects: storedArray(value.objects, "objects").map(decodeReceiptObject),
         ...readReceiptDetails(connection, boardId, boardRevision, value),
         removedObjectIds: storedIds(value.removedObjectIds, "removedObjectIds"),
+        layerChangedObjectIds: value.layerChangedObjectIds === void 0 ? void 0 : storedIds(value.layerChangedObjectIds, "layerChangedObjectIds"),
         removedPayloadObjectIds: storedIds(
           value.removedPayloadObjectIds,
           "removedPayloadObjectIds"
@@ -19423,22 +34107,24 @@ function readEditReceipt(connection, boardId, actorId2, commandId) {
     }
   };
 }
-function saveEditReceipt(connection, actorId2, { signature, receipt }) {
+function saveEditReceipt(connection, actorId2, { signature, receipt, advancedRevision }) {
   const { boardId, commandId, outcome } = receipt;
   if (outcome.kind !== "applied") {
     throw new Error("Only applied board changes have a durable receipt.");
   }
   const snapshot = JSON.stringify({
+    advancedRevision,
     boardRevision: outcome.boardRevision.toString(),
-    objects: outcome.objects.map((object) => ({
-      ...object,
-      geometryVersion: object.geometryVersion.toString(),
-      payloadVersion: object.payloadVersion?.toString()
+    objects: outcome.objects.map((object3) => ({
+      ...object3,
+      geometryVersion: object3.geometryVersion.toString(),
+      payloadVersion: object3.payloadVersion?.toString()
     })),
     payloads: outcome.payloads.map(serializedReference),
     removedObjectIds: outcome.removedObjectIds,
     removedPayloadObjectIds: outcome.removedPayloadObjectIds ?? [],
-    hasOrder: outcome.order !== void 0
+    hasOrder: outcome.order !== void 0,
+    layerChangedObjectIds: outcome.layerChangedObjectIds
   });
   connection.prepare(`
     INSERT INTO board_edit_receipts (board_id, actor_id, command_id, signature, receipt_json)
@@ -19528,6 +34214,94 @@ var whiteboardSchema = `
   ) STRICT;
 `;
 
+// src/infrastructure/adapters/board-suggestion-review-storage.ts
+function storedIds2(value, field) {
+  return value === void 0 ? void 0 : storedArray(value, field).map((id) => storedText(id, field));
+}
+function storedPayload(value) {
+  const { objectId, payloadVersion, bodyKind, data } = storedRecord(
+    value,
+    "saved_suggestion_payload"
+  );
+  return {
+    objectId: storedText(objectId, "object_id"),
+    payloadVersion: storedDecimalVersion(payloadVersion, "payload_version"),
+    bodyKind: storedText(bodyKind, "body_kind"),
+    data: decodePayload(JSON.stringify(data))
+  };
+}
+function storedInverse(value) {
+  const { objects, removedObjectIds, payloads, removedPayloadObjectIds, order } = storedRecord(
+    value,
+    "suggestion_inverse"
+  );
+  return {
+    kind: "changes",
+    objects: objects === void 0 ? void 0 : storedArray(objects, "inverse_objects").map(decodeReceiptObject),
+    removedObjectIds: storedIds2(removedObjectIds, "inverse_removed_ids"),
+    payloads: payloads === void 0 ? void 0 : storedArray(payloads, "inverse_payloads").map(storedPayload),
+    removedPayloadObjectIds: storedIds2(removedPayloadObjectIds, "inverse_removed_payload_ids"),
+    order: storedIds2(order, "inverse_order")
+  };
+}
+function storedApplication(value) {
+  const data = storedRecord(value, "suggestion_application");
+  const footprint = storedRecord(data.footprint, "suggestion_application_footprint");
+  return {
+    optionId: storedText(data.optionId, "applied_option"),
+    boardRevision: storedDecimalVersion(data.boardRevision, "application_board_revision"),
+    baselineBoardRevision: storedDecimalVersion(
+      data.baselineBoardRevision,
+      "application_baseline_revision"
+    ),
+    footprint: {
+      objectIds: storedIds2(footprint.objectIds, "application_objects") ?? [],
+      payloadIds: storedIds2(footprint.payloadIds, "application_payloads"),
+      editsOrder: storedBool(footprint.editsOrder, "application_order")
+    },
+    inverse: storedInverse(data.inverse),
+    afterFingerprint: storedText(data.afterFingerprint, "application_after_fingerprint")
+  };
+}
+function storedClock(value) {
+  if (value === void 0) {
+    return void 0;
+  }
+  const clock = storedRecord(value, "suggestion_clock");
+  return {
+    physical: storedDecimalVersion(clock.physical, "physical_clock"),
+    logical: storedDecimalVersion(clock.logical, "logical_clock")
+  };
+}
+function storedObjectClock(value) {
+  const { objectId, geometry, payload } = storedRecord(value, "suggestion_object_clock");
+  return {
+    objectId: storedText(objectId, "object_id"),
+    geometry: storedClock(geometry),
+    payload: storedClock(payload)
+  };
+}
+function decodeSuggestionReview(json) {
+  if (json === null) {
+    return void 0;
+  }
+  const { applications, objectClocks, boardClock } = storedRecord(
+    decodeJson(json, "suggestion_review_json"),
+    "suggestion_review"
+  );
+  return {
+    applications: storedArray(applications, "suggestion_applications").map(storedApplication),
+    objectClocks: storedArray(objectClocks, "suggestion_object_clocks").map(storedObjectClock),
+    boardClock: storedClock(boardClock)
+  };
+}
+function encodeSuggestionReview(review) {
+  return JSON.stringify(
+    review,
+    (_key, value) => typeof value === "bigint" ? value.toString() : value
+  );
+}
+
 // src/infrastructure/adapters/board-suggestions.ts
 var boardSuggestionsSchema = `
   CREATE TABLE IF NOT EXISTS board_review_sources (
@@ -19582,6 +34356,24 @@ var boardSuggestionsSchema = `
     FOREIGN KEY (board_id, proposal_id)
       REFERENCES board_suggestions (board_id, proposal_id) ON DELETE CASCADE
   ) STRICT;
+  CREATE TABLE IF NOT EXISTS board_suggestion_option_plans (
+    board_id TEXT NOT NULL,
+    proposal_id TEXT NOT NULL,
+    option_id TEXT NOT NULL,
+    plan_json TEXT NOT NULL CHECK (json_valid(plan_json)),
+    PRIMARY KEY (board_id, proposal_id, option_id),
+    FOREIGN KEY (board_id, proposal_id, option_id)
+      REFERENCES board_suggestion_options (board_id, proposal_id, option_id) ON DELETE CASCADE
+  ) STRICT;
+  CREATE TABLE IF NOT EXISTS board_suggestion_review_states (
+    board_id TEXT NOT NULL,
+    proposal_id TEXT NOT NULL,
+    review_json TEXT NOT NULL CHECK (json_valid(review_json)),
+    active_ids_json TEXT NOT NULL CHECK (json_valid(active_ids_json)),
+    PRIMARY KEY (board_id, proposal_id),
+    FOREIGN KEY (board_id, proposal_id)
+      REFERENCES board_suggestions (board_id, proposal_id) ON DELETE CASCADE
+  ) STRICT;
   CREATE TABLE IF NOT EXISTS board_suggestion_receipts (
     board_id TEXT NOT NULL REFERENCES boards (board_id) ON DELETE CASCADE,
     actor_id TEXT NOT NULL,
@@ -19592,7 +34384,7 @@ var boardSuggestionsSchema = `
     PRIMARY KEY (board_id, actor_id, command_id)
   ) STRICT;
 `;
-function optionalText(value, field) {
+function optionalText2(value, field) {
   return value === null ? void 0 : storedText(value, field);
 }
 function decodeReviewTarget(value) {
@@ -19615,7 +34407,7 @@ function decodeReviewTarget(value) {
     }
   };
 }
-function readSource(connection, boardId, sourceId) {
+function readSource2(connection, boardId, sourceId) {
   const query = connection.prepare(`
     SELECT sources.*, snapshots.targets_board_revision, snapshots.targets_json
     FROM board_review_sources AS sources
@@ -19636,7 +34428,7 @@ function readSource(connection, boardId, sourceId) {
       decodeJson(row.object_ids_json, "object_ids_json"),
       "object_ids_json"
     ).map((id) => storedText(id, "object_id")),
-    feedbackThreadId: optionalText(row.feedback_thread_id, "feedback_thread_id"),
+    feedbackThreadId: optionalText2(row.feedback_thread_id, "feedback_thread_id"),
     targets: row.targets_json === null ? [] : storedArray(decodeJson(row.targets_json, "targets_json"), "targets_json").map(
       decodeReviewTarget
     ),
@@ -19644,40 +34436,83 @@ function readSource(connection, boardId, sourceId) {
   };
 }
 function metadataFromRow(row) {
+  const acceptedOptionId = optionalText2(row.accepted_option_id, "accepted_option_id");
+  const fallbackActiveIds = acceptedOptionId ? [acceptedOptionId] : [];
+  const activeOptionIds = row.active_ids_json === null ? fallbackActiveIds : readStoredIds(decodeJson(row.active_ids_json, "active_ids_json"), "active_option_ids");
   return {
     proposalId: storedText(row.proposal_id, "proposal_id"),
     sourceId: storedText(row.source_id, "source_id"),
     observation: storedText(row.observation, "observation"),
     proposalVersion: storedVersion(row.proposal_version, "proposal_version"),
     expiresAtMillis: storedVersion(row.expires_at_millis, "expires_at_millis"),
-    acceptedOptionId: optionalText(row.accepted_option_id, "accepted_option_id"),
+    acceptedOptionId,
     acceptedBoardRevision: row.accepted_board_revision === null ? void 0 : storedVersion(row.accepted_board_revision, "accepted_board_revision"),
-    rejected: storedSqliteBool(row.rejected, "rejected")
+    rejected: storedSqliteBool(row.rejected, "rejected"),
+    activeOptionIds
   };
 }
 function optionMetadata(row) {
   return {
     optionId: storedText(row.option_id, "option_id"),
     label: storedText(row.label, "label"),
-    description: optionalText(row.description, "description")
+    description: optionalText2(row.description, "description")
+  };
+}
+function storedEditKind(value) {
+  if (value === "geometry" || value === "content") {
+    return value;
+  }
+  throw new Error("A saved board suggestion option has an invalid edit kind.");
+}
+function decodeAdditionalEdit(value) {
+  const { kind, bytes } = storedRecord(value, "suggestion_operation");
+  return {
+    kind: storedEditKind(kind),
+    bytes: new Uint8Array(Buffer.from(storedText(bytes, "suggestion_operation"), "base64"))
+  };
+}
+function readStoredIds(value, field) {
+  return storedArray(value, field).map((id) => storedText(id, field));
+}
+function decodePlanMeta(value) {
+  if (value === null) {
+    return void 0;
+  }
+  const { footprint, additionalEdits } = storedRecord(
+    decodeJson(value, "suggestion_plan_json"),
+    "suggestion_plan"
+  );
+  const scope2 = storedRecord(footprint, "suggestion_plan_scope");
+  return {
+    footprint: {
+      objectIds: readStoredIds(scope2.objectIds, "option_object_ids"),
+      editsOrder: storedBool(scope2.editsOrder, "option_edits_order")
+    },
+    additionalEdits: storedArray(additionalEdits, "suggestion_additional_edits").map(
+      decodeAdditionalEdit
+    )
   };
 }
 function decodeOption(row) {
-  const kind = storedText(row.edit_kind, "edit_kind");
+  const kind = storedEditKind(row.edit_kind);
   const bytes = row.edit_bytes;
-  if (kind !== "geometry" && kind !== "content" || !(bytes instanceof Uint8Array)) {
+  if (!(bytes instanceof Uint8Array)) {
     throw new Error("A saved board suggestion option has an invalid typed edit.");
   }
   return {
     ...optionMetadata(row),
     edit: { kind, bytes },
     editFingerprint: storedText(row.edit_fingerprint, "edit_fingerprint"),
-    plannedFingerprint: storedText(row.planned_fingerprint, "planned_fingerprint")
+    plannedFingerprint: storedText(row.planned_fingerprint, "planned_fingerprint"),
+    ...decodePlanMeta(row.plan_json)
   };
 }
 function readProposal(connection, boardId, proposalId) {
   const query = connection.prepare(`
-    SELECT * FROM board_suggestions WHERE board_id = ? AND proposal_id = ?
+    SELECT proposals.*, reviews.review_json, reviews.active_ids_json
+    FROM board_suggestions AS proposals
+    LEFT JOIN board_suggestion_review_states AS reviews USING (board_id, proposal_id)
+    WHERE proposals.board_id = ? AND proposals.proposal_id = ?
   `);
   query.setReadBigInts(true);
   const row = query.get(boardId, proposalId);
@@ -19685,24 +34520,32 @@ function readProposal(connection, boardId, proposalId) {
     return void 0;
   }
   const options = connection.prepare(
-    `SELECT * FROM board_suggestion_options WHERE board_id = ? AND proposal_id = ? ORDER BY position`
+    `
+        SELECT options.*, plans.plan_json
+        FROM board_suggestion_options AS options
+        LEFT JOIN board_suggestion_option_plans AS plans USING (board_id, proposal_id, option_id)
+        WHERE options.board_id = ? AND options.proposal_id = ? ORDER BY options.position
+      `
   ).all(boardId, proposalId).map(decodeOption);
   return {
     ...metadataFromRow(row),
     boardId,
     ownerActorId: storedText(row.owner_actor_id, "owner_actor_id"),
     createdAtMillis: storedVersion(row.created_at_millis, "created_at_millis"),
-    options
+    options,
+    reviewState: decodeSuggestionReview(row.review_json)
   };
 }
 function listProposals(connection, boardId, nowMillis, limit, beforeProposalId) {
   const query = connection.prepare(`
-    SELECT * FROM board_suggestions
-    WHERE board_id = ? AND expires_at_millis > ?
-      AND (? IS NULL OR (created_at_millis, proposal_id) <
+    SELECT proposals.*, reviews.active_ids_json
+    FROM board_suggestions AS proposals
+    LEFT JOIN board_suggestion_review_states AS reviews USING (board_id, proposal_id)
+    WHERE proposals.board_id = ? AND expires_at_millis > ? AND rejected = 0
+      AND (? IS NULL OR (created_at_millis, proposals.proposal_id) <
         (SELECT created_at_millis, proposal_id FROM board_suggestions
           WHERE board_id = ? AND proposal_id = ?))
-    ORDER BY created_at_millis DESC, proposal_id DESC LIMIT ?
+    ORDER BY created_at_millis DESC, proposals.proposal_id DESC LIMIT ?
   `);
   query.setReadBigInts(true);
   const cursor = beforeProposalId ?? null;
@@ -19743,7 +34586,7 @@ function createSuggestionQueries(connection) {
       const access = readBoardAccess(connection, boardId, actorId2);
       return access?.isOwner === true && access.canEdit;
     },
-    getReviewSource: (boardId, sourceId) => readSource(connection, boardId, sourceId),
+    getReviewSource: (boardId, sourceId) => readSource2(connection, boardId, sourceId),
     getSuggestion: (boardId, proposalId) => readProposal(connection, boardId, proposalId),
     listSuggestions: (boardId, now, limit, cursor) => listProposals(connection, boardId, now, limit, cursor),
     getSuggestionReceipt: (boardId, actorId2, commandId) => readReceipt3(connection, boardId, actorId2, commandId)
@@ -19782,6 +34625,10 @@ function insertOptions(connection, proposal) {
       edit_kind, edit_bytes, edit_fingerprint, planned_fingerprint
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+  const planInsert = connection.prepare(`
+    INSERT INTO board_suggestion_option_plans (board_id, proposal_id, option_id, plan_json)
+    VALUES (?, ?, ?, ?)
+  `);
   for (const [position, option] of proposal.options.entries()) {
     insert.run(
       proposal.boardId,
@@ -19795,6 +34642,16 @@ function insertOptions(connection, proposal) {
       option.editFingerprint,
       option.plannedFingerprint
     );
+    if (option.footprint) {
+      const planJson = JSON.stringify({
+        footprint: option.footprint,
+        additionalEdits: (option.additionalEdits ?? []).map(({ kind, bytes }) => ({
+          kind,
+          bytes: Buffer.from(bytes).toString("base64")
+        }))
+      });
+      planInsert.run(proposal.boardId, proposal.proposalId, option.optionId, planJson);
+    }
   }
 }
 function insertProposal(connection, proposal) {
@@ -19831,6 +34688,21 @@ function updateProposal(connection, proposal) {
   );
   if (Number(result.changes) !== 1) {
     throw new Error("The whiteboard suggestion state changed before it could be saved.");
+  }
+  if (proposal.reviewState) {
+    const ids = proposal.reviewState.applications.map(({ optionId }) => optionId);
+    connection.prepare(`
+        INSERT INTO board_suggestion_review_states (board_id, proposal_id, review_json, active_ids_json)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (board_id, proposal_id) DO UPDATE SET
+          review_json = excluded.review_json,
+          active_ids_json = excluded.active_ids_json
+      `).run(
+      proposal.boardId,
+      proposal.proposalId,
+      encodeSuggestionReview(proposal.reviewState),
+      JSON.stringify(ids)
+    );
   }
 }
 function createSuggestionMutations(connection) {
@@ -19984,8 +34856,8 @@ function saveGeometry(connection, boardId, objects) {
     WHERE board_id = ? AND object_id = ? AND geometry_version = ?
   `);
   update2.setReadBigInts(true);
-  for (const object of objects) {
-    const { objectId, geometry, geometryVersion, detail } = object;
+  for (const object3 of objects) {
+    const { objectId, geometry, geometryVersion, detail } = object3;
     const detailJson = detail === void 0 ? null : JSON.stringify(detail);
     const result = update2.run(
       geometry.x,
@@ -20008,10 +34880,10 @@ function saveReceipt2(connection, actorId2, stored) {
   }
   const receiptJson = JSON.stringify({
     boardRevision: outcome.boardRevision.toString(),
-    objects: outcome.objects.map((object) => ({
-      ...object,
-      geometryVersion: object.geometryVersion.toString(),
-      payloadVersion: object.payloadVersion?.toString()
+    objects: outcome.objects.map((object3) => ({
+      ...object3,
+      geometryVersion: object3.geometryVersion.toString(),
+      payloadVersion: object3.payloadVersion?.toString()
     }))
   });
   connection.prepare(`
@@ -20026,6 +34898,7 @@ function createReader2(connection) {
       return access && { canEdit: access.canEdit };
     },
     getBoard: (boardId) => readBoard2(connection, boardId),
+    getBackupMetadata: (boardId, actorId2) => readBackupMetadata(connection, boardId, actorId2),
     listObjects: (boardId, limit) => limit === void 0 ? readObjects(connection, listScene, boardId) : readObjects(connection, listScene + " LIMIT ?", boardId, limit),
     getObjects: (boardId, objectIds) => objectIds.length === 0 ? [] : readObjects(connection, listTargets, JSON.stringify(objectIds), boardId),
     getPayloads: (boardId, objectIds) => readPayloads(connection, boardId, objectIds),
@@ -20326,7 +35199,7 @@ function readRole(value) {
   }
   throw new Error("Invalid stored guest role.");
 }
-function readScope2(value) {
+function readScope3(value) {
   if (value === "local" || value === "lan") {
     return value;
   }
@@ -20335,7 +35208,7 @@ function readScope2(value) {
 function readSettings(row) {
   return {
     enabled: readFlag2(row.enabled, "enabled"),
-    scope: readScope2(row.scope),
+    scope: readScope3(row.scope),
     version: readVersion2(row.version, "version")
   };
 }
@@ -20379,7 +35252,7 @@ function createSharingReader(connection) {
         WHERE s.enabled = 1 AND l.trashed_at_millis IS NULL
         ORDER BY s.scope
       `
-      ).map(({ scope: scope2 }) => readScope2(scope2));
+      ).map(({ scope: scope2 }) => readScope3(scope2));
     },
     getBoard(boardId) {
       const row = findRow(
@@ -20588,6 +35461,39 @@ function createSharingRepository(database) {
   };
 }
 
+// src/bootstrap/room-workspace-scope.ts
+var radiansPerDegree2 = Math.PI / 180;
+function boundsOf2({ x, y, width, height, rotation }) {
+  const angle = rotation * radiansPerDegree2;
+  const sine = Math.abs(Math.sin(angle));
+  const cosine = Math.abs(Math.cos(angle));
+  const wrappedWidth = cosine * width + sine * height;
+  const wrappedHeight = sine * width + cosine * height;
+  return {
+    x: x + (width - wrappedWidth) / 2,
+    y: y + (height - wrappedHeight) / 2,
+    width: wrappedWidth,
+    height: wrappedHeight
+  };
+}
+function createRoomWorkspaceScope(repository) {
+  return (boardId, ownerId, scope2) => repository.read((reader2) => {
+    if (!reader2.getAccess(boardId, ownerId)?.canEdit) {
+      return;
+    }
+    if (scope2.kind === "area") {
+      return [];
+    }
+    const objects = reader2.getObjects(boardId, scope2.objectIds);
+    if (objects.length === scope2.objectIds.length) {
+      return objects.map(({ objectId, geometry }) => ({
+        id: objectId,
+        bounds: boundsOf2(geometry)
+      }));
+    }
+  });
+}
+
 // src/bootstrap/index.ts
 var loopback2 = "127.0.0.1";
 var maxPort = 65535;
@@ -20641,7 +35547,14 @@ function createWhiteboardServer(options) {
   let sharing;
   try {
     const repository = createWhiteboardRepository(database);
-    const application = createWhiteboardApplication(repository, Date.now);
+    const application = createWhiteboardApplication(repository, Date.now, {
+      renderPng: renderSvgPng,
+      exportArchive: createBoardBackup(
+        repository,
+        packWhiteboardBackup,
+        (time) => new Date(time).toISOString()
+      )
+    });
     const archives = createArchiveImportRepository(database);
     const catalog = createCatalogRepository(database);
     const catalogApplication = createCatalogApplication(catalog, {
@@ -20668,7 +35581,7 @@ function createWhiteboardServer(options) {
             const anchor = thread.anchor;
             return {
               capturedBoardRevision: anchor.sourceBoardRevision,
-              objectId: anchor.target.kind === "object" ? anchor.target.objectId : void 0
+              objectId: anchor.target.kind === "board" ? void 0 : anchor.target.objectId
             };
           } catch (error) {
             if (error instanceof FeedbackThreadNotFoundError) {
@@ -20691,15 +35604,16 @@ function createWhiteboardServer(options) {
     rooms = createRoomsApplication(
       createRoomsRepository(database, readBoardAccess),
       { nowMillis: Date.now },
-      randomUUID()
+      randomUUID(),
+      { mintGeneration: randomUUID, resolveScope: createRoomWorkspaceScope(repository) }
     );
     httpOptions = {
       application,
       catalogApplication,
       archiveApplication,
       features: {
-        editor: createBoardEditorApplication(repository, Date.now),
-        history: createBoardHistoryApplication(repository, Date.now),
+        editor: createBoardEditorApplication(repository, Date.now, renderSvgUpload),
+        history: createBoardHistoryApplication(repository, Date.now, renderSvgPng),
         feedback,
         rooms,
         suggestions,
@@ -20708,6 +35622,8 @@ function createWhiteboardServer(options) {
       sharing: {
         application: sharing,
         activateScope: options.sharing?.activateScope,
+        onlineActorIds: (boardId) => rooms.onlineActorIds(boardId),
+        ownerDisplayName: options.sharing?.ownerDisplayName,
         newBrowserToken: () => randomBytes(32).toString("base64url"),
         onActivationError: options.onError,
         onAccessChanged: (boardId) => rooms.notifyAccessChanged(boardId)
@@ -20802,6 +35718,14 @@ function reportFailure(error) {
   const name = error instanceof Error ? error.name : "UnknownError";
   process2.stderr.write("Whiteboard request failed (" + name + ").\n");
 }
+function readOwnerDisplayName() {
+  try {
+    return userInfo().username;
+  } catch (error) {
+    reportFailure(error);
+    return void 0;
+  }
+}
 var guestWeb = createGuestWeb({
   loadAssets: () => loadGuestWebAssets(
     process2.env[webRootVariable] ?? fileURLToPath(new URL("../../../web/dist/app/", import.meta.url))
@@ -20830,7 +35754,8 @@ var runtime = createWhiteboardServer({
   onError: reportFailure,
   sharing: {
     inviteOrigin: guestWeb.origin,
-    activateScope: guestWeb.activate
+    activateScope: guestWeb.activate,
+    ownerDisplayName: readOwnerDisplayName()
   }
 });
 try {

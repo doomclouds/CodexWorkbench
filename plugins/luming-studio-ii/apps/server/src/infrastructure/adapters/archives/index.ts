@@ -7,6 +7,7 @@ import type {
 import {
   ArchiveReadError,
   stageCurrentArchive,
+  writeBoardArchive,
   type StagedCurrentArchive,
 } from '../../platform/archives/index.js';
 import type { SqliteConnection, SqliteDatabase } from '../../platform/index.js';
@@ -18,6 +19,13 @@ import {
 } from './publication.js';
 import { ArchiveObjectError } from './scene.js';
 import { archiveSchema } from './schema.js';
+
+export function packWhiteboardBackup(
+  snapshot: Parameters<typeof writeBoardArchive>[0],
+  maximumBytes: number,
+) {
+  return writeBoardArchive(snapshot, maximumBytes);
+}
 
 interface StoredReceipt {
   readonly signature: string;

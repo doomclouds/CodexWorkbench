@@ -25,6 +25,8 @@ import { asyncUnaryRoute, unaryRoute, type RouteEntry } from './unary-route.js';
 export interface SharingRoutesOptions {
   readonly application: SharingApplication;
   readonly activateScope?: (scope: SharingScope) => Promise<void>;
+  readonly onlineActorIds?: (boardId: string) => ReadonlySet<string>;
+  readonly ownerDisplayName?: string;
   readonly newBrowserToken: () => string;
   readonly onActivationError: (error: unknown) => void;
   readonly onAccessChanged?: (boardId: string) => void;
@@ -125,13 +127,23 @@ function readCommand(request: UpdateBoardSharingRequest): SharingCommand {
   };
 }
 
-function writeSharing(sharing: BoardSharing): MessageInitShape<typeof BoardSharingSchema> {
+function writeSharing(
+  sharing: BoardSharing,
+  options: SharingRoutesOptions,
+): MessageInitShape<typeof BoardSharingSchema> {
+  const owner = sharing.role === 'owner';
+  const online = owner ? options.onlineActorIds?.(sharing.boardId) : undefined;
   return {
     ...sharing,
     scope: sharing.scope === 'local' ? WireScope.LOCAL : WireScope.LAN,
     role: wireRoles[sharing.role],
     links: sharing.links.map((link) => ({ ...link, role: wireRoles[link.role] })),
-    members: sharing.members.map((member) => ({ ...member, role: wireRoles[member.role] })),
+    members: sharing.members.map((member) => ({
+      ...member,
+      role: wireRoles[member.role],
+      online: online && member.active && online.has(member.actorId),
+    })),
+    ownerDisplayName: owner ? options.ownerDisplayName?.trim() || undefined : undefined,
   };
 }
 
@@ -186,7 +198,10 @@ export function createSharingRoutes(options: SharingRoutesOptions): readonly Rou
 
   return [
     unaryRoute(getBoardSharing, (actor, { boardId }) => ({
-      sharing: writeSharing(application.getSharing(requireId(boardId), actor.id, actor.guestScope)),
+      sharing: writeSharing(
+        application.getSharing(requireId(boardId), actor.id, actor.guestScope),
+        options,
+      ),
     })),
     asyncUnaryRoute(updateBoardSharing, async (actor, request) => ({
       receipt: await update(options, actor.id, readCommand(request)),

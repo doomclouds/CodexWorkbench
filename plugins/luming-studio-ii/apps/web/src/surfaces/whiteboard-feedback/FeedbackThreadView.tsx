@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import type {
   FeedbackMessage,
+  FeedbackAnchor,
   FeedbackOperation,
   FeedbackThread,
   FeedbackThreadPage,
@@ -11,6 +12,7 @@ import { ActionMenu, Button, Dialog, StatusText, type ButtonHandle } from '../..
 import { FeedbackComposer } from './FeedbackComposer.js';
 import { FeedbackAvatar, feedbackAuthorName } from './feedback-author.js';
 import { hasDraftChanges, type ThreadDraft } from './thread-draft.js';
+import type { FeedbackAttachment } from './use-feedback-attachment.js';
 
 interface FeedbackThreadViewProps {
   readonly page?: FeedbackThreadPage;
@@ -22,15 +24,23 @@ interface FeedbackThreadViewProps {
   readonly pending: boolean;
   readonly error?: string;
   readonly targetMissing: boolean;
+  readonly contentAnchor?: FeedbackAnchor;
   readonly hasMore: boolean;
   readonly loadMore: () => void;
   readonly onRefresh: () => void;
   readonly onBack: () => void;
   readonly onLocate: () => void;
-  readonly onSubmit: (operation: FeedbackOperation) => void;
+  readonly onSubmit: (operation: FeedbackOperation, attach?: boolean) => void;
+  readonly attachment: FeedbackAttachment;
 }
 
-const displayTime = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' });
+const displayTime = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
 
 interface MenuAction {
   readonly id: string;
@@ -109,7 +119,8 @@ interface ThreadComposerProps {
   readonly canWrite: boolean;
   readonly blocked: boolean;
   readonly setDraft: (draft: ThreadDraft | undefined) => void;
-  readonly onSubmit: (operation: FeedbackOperation) => void;
+  readonly onSubmit: (operation: FeedbackOperation, attach?: boolean) => void;
+  readonly attachment: FeedbackAttachment;
 }
 
 function ThreadComposer({
@@ -119,6 +130,7 @@ function ThreadComposer({
   blocked,
   setDraft,
   onSubmit,
+  attachment,
 }: ThreadComposerProps) {
   const editing = draft?.kind === 'edit';
 
@@ -129,19 +141,23 @@ function ThreadComposer({
 
     const threadId = thread.id;
     if (draft.kind === 'reply') {
-      onSubmit({ kind: 'reply', threadId, text: draft.text });
+      onSubmit({ kind: 'reply', threadId, text: draft.text }, draft.attach);
       return;
     }
 
     const { messageId, expectedVersion, text } = draft;
-    onSubmit({ kind: 'edit', threadId, messageId, expectedVersion, text });
+    onSubmit({ kind: 'edit', threadId, messageId, expectedVersion, text }, draft.attach);
+  }
+
+  function toggleAttachment(attach: boolean) {
+    setDraft(draft ? { ...draft, attach } : { kind: 'reply', text: '', attach });
   }
 
   return (
     <FeedbackComposer
       key={editing ? 'edit-' + draft.messageId : 'reply'}
       label={editing ? '编辑备注内容' : '回复批注：' + thread.first.text}
-      submitLabel={editing ? '保存修改' : '发送回复'}
+      submitLabel={editing ? '保存' : '发送回复'}
       value={draft?.text ?? ''}
       variant={editing ? 'edit' : 'reply'}
       resolved={thread.status === 'resolved'}
@@ -151,6 +167,16 @@ function ThreadComposer({
       disabled={!canWrite}
       cancelDisabled={blocked}
       focusOnMount={editing}
+      attachment={
+        attachment.available
+          ? {
+              checked: draft?.attach === true,
+              label: attachment.mode === 'copy' ? '复制批注引用' : '附加到对话',
+              disabled: Boolean(attachment.pending),
+              onChange: toggleAttachment,
+            }
+          : undefined
+      }
     />
   );
 }
@@ -166,22 +192,62 @@ interface ThreadContentsProps extends ThreadComposerProps {
   readonly onClose: () => void;
 }
 
-function ThreadContents({
-  thread,
-  replies,
-  draft,
-  canEdit,
-  canWrite,
-  blocked,
-  setDraft,
-  onSubmit,
-  hasMore,
-  pending,
-  loadMore,
-  onEdit,
-  onLocate,
-  onClose,
-}: ThreadContentsProps) {
+function threadMenu(
+  { thread, canEdit, canWrite, onEdit, onLocate, attachment }: ThreadContentsProps,
+  onReopen: () => void,
+  onDelete: () => void,
+): MenuAction[] {
+  const menu: MenuAction[] = [];
+  if (thread.first.canEdit && canEdit) {
+    menu.push({ id: 'edit', label: '编辑', run: () => onEdit(thread.first) });
+  }
+  if (thread.canResolve && thread.status === 'resolved' && canEdit) {
+    menu.push({ id: 'reopen', label: '重新打开', run: onReopen });
+  }
+
+  menu.push({ id: 'locate', label: '定位备注', run: onLocate });
+  if (attachment.available && canWrite) {
+    const label = attachment.mode === 'copy' ? '复制批注引用' : '附加到对话';
+    menu.push({
+      id: 'attach',
+      label,
+      run: () => attachment.request({ threadId: thread.id, threadVersion: thread.version }),
+    });
+  }
+  if (thread.canDelete && canEdit) {
+    menu.push({ id: 'delete', label: '删除备注线程', run: onDelete });
+  }
+
+  return menu;
+}
+
+function attachedStatus(thread: FeedbackThread, attachment: FeedbackAttachment) {
+  if (attachment.complete.get(thread.id) !== thread.version) {
+    return null;
+  }
+
+  const label = attachment.mode === 'copy' ? '已复制批注引用' : '已附加到对话';
+
+  return <StatusText message={label} announcement="polite" />;
+}
+
+function ThreadContents(props: ThreadContentsProps) {
+  const {
+    thread,
+    replies,
+    draft,
+    canEdit,
+    canWrite,
+    blocked,
+    setDraft,
+    onSubmit,
+    hasMore,
+    pending,
+    loadMore,
+    onEdit,
+    onClose,
+    attachment,
+  } = props;
   const [confirm, setConfirm] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
   const cancelDelete = useRef<ButtonHandle>(null);
@@ -189,18 +255,11 @@ function ThreadContents({
   const editing = draft?.kind === 'edit';
   const editingLoadedMessage =
     editing && [thread.first, ...replies].some(({ id }) => id === draft.messageId);
-  const menu: MenuAction[] = [];
-  if (thread.first.canEdit && canEdit) {
-    menu.push({ id: 'edit', label: '编辑', run: () => onEdit(thread.first) });
-  }
-  if (thread.canResolve && resolved && canEdit) {
-    menu.push({ id: 'reopen', label: '重新打开', run: () => handleChangeStatus('reopen') });
-  }
-
-  menu.push({ id: 'locate', label: '定位备注', run: onLocate });
-  if (thread.canDelete && canEdit) {
-    menu.push({ id: 'delete', label: '删除备注线程', run: () => setConfirm(true) });
-  }
+  const menu = threadMenu(
+    props,
+    () => handleChangeStatus('reopen'),
+    () => setConfirm(true),
+  );
 
   useLayoutEffect(() => {
     if (confirm) {
@@ -243,6 +302,7 @@ function ThreadContents({
         blocked={blocked}
         setDraft={setDraft}
         onSubmit={onSubmit}
+        attachment={attachment}
       />
     );
   }
@@ -293,6 +353,7 @@ function ThreadContents({
         </span>
         {resolved && <span className="whiteboard-feedback__resolved">已解决</span>}
         {bodyOf(thread.first)}
+        {attachedStatus(thread, attachment)}
       </div>
       {confirm && (
         <div
@@ -378,12 +439,14 @@ export function FeedbackThreadView({
   pending,
   error,
   targetMissing,
+  contentAnchor,
   hasMore,
   loadMore,
   onRefresh,
   onBack,
   onLocate,
   onSubmit,
+  attachment,
 }: FeedbackThreadViewProps) {
   const [replacement, setReplacement] = useState<FeedbackMessage>();
   const thread = page?.thread;
@@ -429,7 +492,19 @@ export function FeedbackThreadView({
         </div>
       )}
       {targetMissing && (
-        <StatusText message="原对象已删除，显示留下备注时的位置。" tone="warning" />
+        <StatusText
+          message={
+            contentAnchor
+              ? '原内容已不可用，显示留下备注时的位置。'
+              : '原对象已删除，显示留下备注时的位置。'
+          }
+          tone="warning"
+        />
+      )}
+      {contentAnchor?.frozenExcerpt && (
+        <blockquote className="whiteboard-feedback__frozen-excerpt">
+          {contentAnchor.frozenExcerpt}
+        </blockquote>
       )}
       {thread && (
         <ThreadContents
@@ -447,6 +522,7 @@ export function FeedbackThreadView({
           onEdit={handleEditMessage}
           onLocate={onLocate}
           onClose={onBack}
+          attachment={attachment}
         />
       )}
       {replacement && canWrite && (

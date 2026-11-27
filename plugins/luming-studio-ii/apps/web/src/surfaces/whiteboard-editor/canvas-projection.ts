@@ -2,6 +2,7 @@ import type {
   WhiteboardObject,
   WhiteboardPayload,
   WhiteboardScene,
+  WhiteboardStylePatch,
 } from '../../data/whiteboard/index.js';
 import type {
   CanvasInk,
@@ -194,6 +195,33 @@ export function projectEditablePayload(
   const value = projectPayloadValue(body, id, version, object?.geometry.width);
 
   return value && { version, value };
+}
+
+function readTextStyle(value: Readonly<Record<string, unknown>>): WhiteboardStylePatch {
+  const { color, fontSize, fontFamily, align, bold, italic } = value;
+  const validAlignment = align === 'left' || align === 'center' || align === 'right';
+  return {
+    textColor: typeof color === 'string' ? color : undefined,
+    fontSize: typeof fontSize === 'number' ? fontSize : undefined,
+    fontFamily: typeof fontFamily === 'string' ? fontFamily : undefined,
+    textAlign: validAlignment ? align : undefined,
+    bold: typeof bold === 'boolean' ? bold : undefined,
+    italic: typeof italic === 'boolean' ? italic : undefined,
+  };
+}
+
+export function projectTextStyles(
+  payloads: ReadonlyMap<string, WhiteboardPayload>,
+  selection: readonly string[],
+) {
+  const styles = new Map<string, WhiteboardStylePatch>();
+  for (const id of selection) {
+    const body = payloads.get(id)?.body;
+    if (body?.kind === 'text') {
+      styles.set(id, readTextStyle(body.value));
+    }
+  }
+  return styles;
 }
 
 function projectPayloadValue(

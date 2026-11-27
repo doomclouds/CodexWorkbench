@@ -19,6 +19,7 @@ interface AnchoredLayerOptions {
   placement?: OverlayPlacement;
   align?: OverlayAlignment;
   persistent?: boolean;
+  escapeWithinLayer?: boolean;
   priority?: number;
   onRequestClose: (reason: OverlayCloseReason) => void;
 }
@@ -101,6 +102,7 @@ export function useAnchoredLayer({
   placement = 'bottom',
   align,
   persistent = false,
+  escapeWithinLayer = persistent,
   priority = 0,
   onRequestClose,
 }: AnchoredLayerOptions) {
@@ -144,6 +146,7 @@ export function useAnchoredLayer({
       priority,
       openingOrder,
       persistent,
+      escapeWithinLayer,
       dismiss: (reason) => requestClose(reason),
     });
 
@@ -151,7 +154,7 @@ export function useAnchoredLayer({
       disposeDismiss();
       disposePosition();
     };
-  }, [open, anchor, placement, align, persistent, priority]);
+  }, [open, anchor, placement, align, persistent, escapeWithinLayer, priority]);
 
   return root;
 }

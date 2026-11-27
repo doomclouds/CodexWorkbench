@@ -15,6 +15,7 @@ import type {
   CatalogRejectionReason as ApplicationRejection,
   ManageBoardCommand,
 } from '../../modules/catalog/application/index.js';
+import { WhiteboardAccessError } from '../../modules/whiteboard/application/index.js';
 import { HttpRequestError, requireId } from './request.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
@@ -83,6 +84,14 @@ function requireEntryVersion(value: bigint | undefined): bigint {
   return value;
 }
 
+function requireThumbnailRevision(revision: bigint | undefined): bigint {
+  if (revision === undefined) {
+    throw new HttpRequestError(400, 'The saved preview revision is required.');
+  }
+
+  return revision;
+}
+
 function toManageOperation(operation: ManageBoardRequest['operation']): ManageOperation {
   switch (operation.case) {
     case 'title':
@@ -107,6 +116,7 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
   const {
     listBoards,
     listTrashedBoards,
+    getBoardThumbnail,
     createBoard,
     duplicateBoard,
     manageBoard,
@@ -116,12 +126,13 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
 
   return [
     unaryRoute(listBoards, (actor, request) => {
-      const { query, order, pageSize, cursor } = request;
+      const { query, order, pageSize, cursor, pinnedOnly } = request;
       const result = application.listBoards(actor, {
         query,
         order: toSortOrder(order),
         pageSize,
         cursor,
+        pinnedOnly,
       });
 
       return { boards: [...result.boards], nextCursor: result.nextCursor };
@@ -136,6 +147,19 @@ export function createCatalogRoutes(application: CatalogApplication): readonly R
       });
 
       return { boards: [...result.boards], nextCursor: result.nextCursor };
+    }),
+    unaryRoute(getBoardThumbnail, (actor, { boardId, revision, trashed }) => {
+      const result = application.getBoardThumbnail(actor, {
+        boardId: requireId(boardId),
+        revision: requireThumbnailRevision(revision),
+        trashed,
+      });
+
+      if (result.kind === 'forbidden') {
+        throw new WhiteboardAccessError();
+      }
+
+      return { thumbnail: result.kind === 'thumbnail' ? result.thumbnail : undefined };
     }),
     unaryRoute(createBoard, (actor, request) => {
       const receipt = application.createBoard(actor, {

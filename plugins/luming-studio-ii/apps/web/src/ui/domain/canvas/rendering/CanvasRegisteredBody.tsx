@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { ComponentType } from 'react';
 import type {
+  CanvasContentAnnotationRequest,
   CanvasObjectNavigation,
   CanvasObjectOperation,
   CanvasObjectReceipt,
@@ -14,13 +15,20 @@ type RetainObject = (id: string, retain: boolean) => void;
 
 interface CanvasRegisteredBodyProps extends Omit<
   CanvasObjectViewProps,
-  'request' | 'onNavigation' | 'onRetentionChange' | 'onOpenPresentation'
+  | 'request'
+  | 'onNavigation'
+  | 'onRetentionChange'
+  | 'onOpenPresentation'
+  | 'onAnnotateContent'
+  | 'uploadDocumentImage'
 > {
   readonly View: ComponentType<CanvasObjectViewProps>;
   readonly onObjectIntent?: SubmitObjectIntent;
   readonly onObjectNavigation?: NavigateObject;
   readonly onObjectRetentionChange?: RetainObject;
   readonly onOpenPresentation?: CanvasProps['onOpenPresentation'];
+  readonly onAnnotateContent?: CanvasProps['onAnnotateContent'];
+  readonly uploadDocumentImage?: CanvasProps['uploadDocumentImage'];
 }
 
 interface CanvasBodyTarget {
@@ -33,6 +41,8 @@ interface CanvasBodyAuthority {
   readonly target: CanvasBodyTarget;
   readonly submit?: SubmitObjectIntent;
   readonly navigate?: NavigateObject;
+  readonly annotate?: CanvasProps['onAnnotateContent'];
+  readonly upload?: CanvasProps['uploadDocumentImage'];
 }
 
 const unavailableReceipt: CanvasObjectReceipt = Object.freeze({
@@ -46,6 +56,8 @@ export function CanvasRegisteredBody({
   onObjectNavigation,
   onObjectRetentionChange,
   onOpenPresentation,
+  onAnnotateContent,
+  uploadDocumentImage,
   ...props
 }: CanvasRegisteredBodyProps) {
   const { id, object, readOnly } = props;
@@ -83,12 +95,21 @@ export function CanvasRegisteredBody({
       target,
       submit: readOnly ? undefined : onObjectIntent,
       navigate: onObjectNavigation,
+      annotate: onAnnotateContent,
+      upload: readOnly ? undefined : uploadDocumentImage,
     };
 
     return () => {
       authority.current = null;
     };
-  }, [target, readOnly, onObjectIntent, onObjectNavigation]);
+  }, [
+    target,
+    readOnly,
+    onObjectIntent,
+    onObjectNavigation,
+    onAnnotateContent,
+    uploadDocumentImage,
+  ]);
 
   const request = useCallback(
     async (operation: CanvasObjectOperation): Promise<CanvasObjectReceipt> => {
@@ -139,6 +160,26 @@ export function CanvasRegisteredBody({
       onOpenPresentation?.([id]);
     }
   }, [id, target, onOpenPresentation]);
+  const annotate = useCallback(
+    (annotation: CanvasContentAnnotationRequest) => {
+      const active = authority.current;
+      if (id !== undefined && active?.target === target) {
+        active.annotate?.(id, annotation);
+      }
+    },
+    [id, target],
+  );
+  const upload = useCallback(
+    (file: File) => {
+      const active = authority.current;
+      if (id === undefined || active?.target !== target || !active.upload) {
+        return Promise.reject(new Error('文档当前无法上传图片。'));
+      }
+
+      return active.upload(id, file);
+    },
+    [id, target],
+  );
 
   return (
     <View
@@ -147,6 +188,10 @@ export function CanvasRegisteredBody({
       onNavigation={id !== undefined && onObjectNavigation ? navigate : undefined}
       onRetentionChange={id !== undefined && onObjectRetentionChange ? retain : undefined}
       onOpenPresentation={onOpenPresentation && id !== undefined ? openPresentation : undefined}
+      onAnnotateContent={onAnnotateContent && id !== undefined ? annotate : undefined}
+      uploadDocumentImage={
+        uploadDocumentImage && !readOnly && id !== undefined ? upload : undefined
+      }
     />
   );
 }

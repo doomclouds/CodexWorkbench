@@ -1,5 +1,7 @@
 import { Lightbulb, X } from 'lucide-react';
-import { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef } from 'react';
+import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { BoardSuggestion } from '../../data/suggestions/index.js';
 import { AnchoredPopover, Button, StatusText, type ButtonHandle } from '../../ui/base/index.js';
 import type { BoardSuggestionsSurfaceProps } from './contracts.js';
@@ -32,8 +34,15 @@ function ReviewRecovery({ decision }: { readonly decision: Decision }) {
 }
 
 type SuggestionList = ReturnType<typeof useSuggestionList>;
+type SuggestionPreview = ReturnType<typeof useSuggestionPreview>;
 
-function SuggestionReadStatus({ list }: { readonly list: SuggestionList }) {
+function SuggestionReadStatus({
+  list,
+  showEmpty,
+}: {
+  readonly list: SuggestionList;
+  readonly showEmpty: boolean;
+}) {
   const { loading, failure, snapshot, requestRead } = list;
   if (failure) {
     return (
@@ -47,77 +56,77 @@ function SuggestionReadStatus({ list }: { readonly list: SuggestionList }) {
     return <StatusText message="正在读取私人建议…" announcement="polite" busy />;
   }
 
-  return snapshot.proposals.length === 0 ? <StatusText message="暂无私人建议。" /> : null;
+  return showEmpty && snapshot.proposals.length === 0 ? (
+    <StatusText message="暂无私人建议。" />
+  ) : null;
 }
 
-interface SuggestionChoiceState {
-  readonly proposalId: string;
-  readonly proposalVersion: bigint;
-  readonly optionId: string;
+function SuggestionResults({
+  list,
+  preview,
+  showEmpty,
+  renderCard,
+}: {
+  readonly list: SuggestionList;
+  readonly preview: SuggestionPreview;
+  readonly showEmpty: boolean;
+  readonly renderCard: (suggestion: BoardSuggestion) => ReactNode;
+}) {
+  const cursor = list.snapshot?.nextBeforeProposalId;
+
+  return (
+    <>
+      <SuggestionReadStatus list={list} showEmpty={showEmpty} />
+      {preview.failure && (
+        <StatusText message={preview.failure} tone="error" announcement="polite" />
+      )}
+      {preview.loading && <StatusText message="正在读取方案预览…" announcement="polite" busy />}
+      <div className="board-suggestion-panel__list">{list.snapshot?.proposals.map(renderCard)}</div>
+      {cursor && (
+        <Button
+          label="更多建议"
+          disabled={list.loading}
+          onActivate={() => list.requestRead(cursor)}
+        />
+      )}
+    </>
+  );
 }
 
-function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
-  const { anchor, boardId, service, onRequestClose, restoreFocus, renderPreview } = props;
-  const open = anchor !== null;
+interface SuggestionLayoutProps extends Pick<
+  BoardSuggestionsSurfaceProps,
+  'inline' | 'anchor' | 'restoreFocus'
+> {
+  readonly open: boolean;
+  readonly onClose: () => void;
+  readonly children: ReactNode;
+  readonly overlay: ReactNode;
+}
+
+function SuggestionLayout({
+  inline,
+  anchor,
+  restoreFocus,
+  open,
+  onClose,
+  children,
+  overlay,
+}: SuggestionLayoutProps) {
   const closeButton = useRef<ButtonHandle>(null);
-  const [choice, setChoice] = useState<SuggestionChoiceState>();
-  const [reviewed, setReviewed] = useState<ReadonlySet<string>>(() => new Set());
-  const list = useSuggestionList(boardId, open, service);
-  const refresh = () => list.requestRead();
-  const preview = useSuggestionPreview({ boardId, service, active: open, refresh });
-  const decision = useSuggestionDecision({ ...props, refresh, onReviewed: handleReviewed });
-  const attachment = useReviewAttachment(props);
-  const busy = Boolean(decision.recovery) || preview.loading;
-  const previewEnabled = renderPreview !== undefined;
-  const previewVisible = open && preview.frame !== undefined && previewEnabled;
-  const reportPreview = useEffectEvent((active: boolean) => props.onPreviewChange?.(active));
-
-  useEffect(() => {
-    if (previewVisible) {
-      reportPreview(true);
-      return () => reportPreview(false);
-    }
-  }, [previewVisible]);
-
-  function handleReviewed(proposalId: string) {
-    setReviewed((current) => new Set([...current, proposalId]));
-    setChoice(undefined);
-  }
-
-  function handleClose() {
-    preview.dismiss();
-    onRequestClose();
-  }
-
-  function decide(suggestion: BoardSuggestion, optionId?: string) {
-    preview.dismiss();
-    decision.handleDecide(suggestion, optionId);
-  }
-
-  function renderCard(suggestion: BoardSuggestion) {
-    const { proposalId, proposalVersion } = suggestion;
-    const awaitingRefresh = reviewed.has(proposalId);
-    const chosen = choice?.proposalId === proposalId && choice.proposalVersion === proposalVersion;
-
+  if (inline) {
     return (
-      <SuggestionCard
-        key={proposalId}
-        suggestion={suggestion}
-        chosenOption={chosen ? choice.optionId : undefined}
-        busy={busy || awaitingRefresh}
-        previewEnabled={previewEnabled}
-        onSelect={(optionId) => {
-          preview.dismiss();
-          setChoice({ proposalId, proposalVersion, optionId });
-        }}
-        onPreview={(optionId) => preview.requestPreview(suggestion, optionId)}
-        onAccept={(optionId) => decide(suggestion, optionId)}
-        onReject={() => decide(suggestion)}
-      />
+      <>
+        {inline.outlet &&
+          createPortal(
+            <section className="board-suggestion-panel board-suggestion-panel--inline">
+              {children}
+            </section>,
+            inline.outlet,
+          )}
+        {inline.previewHost && overlay && createPortal(overlay, inline.previewHost)}
+      </>
     );
   }
-
-  const cursor = list.snapshot?.nextBeforeProposalId;
 
   return (
     <>
@@ -129,7 +138,7 @@ function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
         align="end"
         initialFocus={() => closeButton.current?.focus()}
         restoreFocus={restoreFocus}
-        onRequestClose={handleClose}
+        onRequestClose={onClose}
       >
         <section className="board-suggestion-panel">
           <header className="board-suggestion-panel__header">
@@ -142,38 +151,100 @@ function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
               label="关闭建议"
               iconOnly
               icon={<X size={14} />}
-              onActivate={handleClose}
+              onActivate={onClose}
             />
           </header>
-          <SuggestionAttachment {...props} attachment={attachment} />
-          <ReviewRecovery decision={decision} />
-          <SuggestionReadStatus list={list} />
-          {preview.failure && (
-            <StatusText message={preview.failure} tone="error" announcement="polite" />
-          )}
-          {preview.loading && <StatusText message="正在读取方案预览…" announcement="polite" busy />}
-          <div className="board-suggestion-panel__list">
-            {list.snapshot?.proposals.map(renderCard)}
-          </div>
-          {cursor && (
-            <Button
-              label="更多建议"
-              disabled={list.loading}
-              onActivate={() => list.requestRead(cursor)}
-            />
-          )}
+          {children}
         </section>
       </AnchoredPopover>
-      {open && preview.frame && renderPreview && (
-        <section className="board-suggestion-preview" aria-label="只读方案预览">
-          <header className="board-suggestion-preview__header">
-            <span>只读方案预览</span>
-            <Button label="退出方案预览" onActivate={preview.dismiss} />
-          </header>
-          <div className="board-suggestion-preview__canvas">{renderPreview(preview.frame)}</div>
-        </section>
-      )}
+      {overlay}
     </>
+  );
+}
+
+function SuggestionReviewSurface(props: BoardSuggestionsSurfaceProps) {
+  const { anchor, boardId, service, onRequestClose, restoreFocus, renderPreview, inline } = props;
+  const open = inline ? inline.outlet !== null : anchor !== null;
+  const showCards = inline?.showCards ?? true;
+  const active = open && showCards;
+  const list = useSuggestionList(boardId, active, service);
+  const refresh = () => list.requestRead();
+  const preview = useSuggestionPreview({ boardId, service, active, refresh });
+  const decision = useSuggestionDecision({ ...props, refresh });
+  const attachment = useReviewAttachment(props);
+  const busy = Boolean(decision.recovery) || list.loading || list.failure !== undefined;
+  const hasPreviewHost = !inline || inline.previewHost !== null;
+  const previewEnabled = renderPreview !== undefined && hasPreviewHost;
+  const previewVisible = active && preview.frame !== undefined && previewEnabled;
+  const hasCards = list.snapshot?.proposals.some((item) => !item.rejected) === true;
+  const reportPreview = useEffectEvent((active: boolean) => props.onPreviewChange?.(active));
+  const reportCards = useEffectEvent((visible: boolean) => inline?.onCardsVisibleChange(visible));
+
+  useEffect(() => {
+    if (previewVisible) {
+      reportPreview(true);
+      return () => reportPreview(false);
+    }
+  }, [previewVisible]);
+
+  useEffect(() => {
+    reportCards(active && hasCards);
+  }, [active, hasCards]);
+
+  function handleClose() {
+    preview.dismiss();
+    onRequestClose();
+  }
+
+  function decide(suggestion: BoardSuggestion, optionId?: string) {
+    preview.dismiss();
+    decision.handleDecide(suggestion, optionId);
+  }
+
+  function renderCard(suggestion: BoardSuggestion) {
+    return (
+      <SuggestionCard
+        key={suggestion.proposalId}
+        suggestion={suggestion}
+        busy={busy}
+        onPreview={
+          previewEnabled ? (optionId) => preview.requestPreview(suggestion, optionId) : undefined
+        }
+        onEndPreview={preview.dismiss}
+        onChoose={(optionId) => decide(suggestion, optionId)}
+      />
+    );
+  }
+
+  const overlay = previewVisible && preview.frame && renderPreview && (
+    <section className="board-suggestion-preview" aria-label="只读方案预览">
+      <header className="board-suggestion-preview__header">
+        <span>只读方案预览</span>
+      </header>
+      <div className="board-suggestion-preview__canvas">{renderPreview(preview.frame)}</div>
+    </section>
+  );
+
+  return (
+    <SuggestionLayout
+      inline={inline}
+      anchor={anchor}
+      restoreFocus={restoreFocus}
+      open={open}
+      onClose={handleClose}
+      overlay={overlay}
+    >
+      <SuggestionAttachment {...props} attachment={attachment} />
+      <ReviewRecovery decision={decision} />
+      {active && (
+        <SuggestionResults
+          list={list}
+          preview={preview}
+          showEmpty={!inline}
+          renderCard={renderCard}
+        />
+      )}
+    </SuggestionLayout>
   );
 }
 

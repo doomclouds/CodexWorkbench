@@ -24,9 +24,11 @@ type Sharing = ReturnType<typeof useBoardSharing>;
 
 function ShareBody({
   sharing,
+  confirming,
   onConfirm,
 }: {
   sharing: Sharing;
+  confirming: boolean;
   onConfirm: (confirmation: SharingConfirmation) => void;
 }) {
   const {
@@ -52,28 +54,36 @@ function ShareBody({
     <Button label="重新读取" onActivate={readSharing} />
   );
 
-  function handleCopy(role: InvitationRole, url?: string) {
+  function handleCopy(role: InvitationRole, trigger: HTMLButtonElement, url?: string) {
     if (url) {
-      copyInvitation(url);
+      copyInvitation(url, trigger);
       return;
     }
 
     if (snapshot && !snapshot.enabled && owner) {
-      requestUpdate({ kind: 'setScope', scope: 'local' }, role);
+      requestUpdate({ kind: 'setScope', scope: 'local' }, { role, trigger });
     }
   }
 
   return (
     <div className="board-sharing__scroll">
-      {notice ? (
+      {notice && !confirming ? (
         <p className="board-sharing__notice" role={notice.error ? 'alert' : 'status'}>
           {notice.text}
         </p>
       ) : null}
-      {pending ? <Button label="重试原操作" disabled={busy} onActivate={retry} /> : null}
+      {pending && !confirming ? (
+        <Button
+          label="重试原操作"
+          disabled={busy}
+          onActivate={() => {
+            retry().catch(sharing.reportFailure);
+          }}
+        />
+      ) : null}
       {snapshot ? (
         <>
-          {owner ? <SharingMembers members={snapshot.members} actions={actions} /> : null}
+          {owner ? <SharingMembers state={snapshot} actions={actions} /> : null}
           {owner ? (
             <GeneralAccess
               scope={snapshot.scope}
@@ -108,8 +118,13 @@ function ConfirmSharing({
   const cancelButton = useRef<ButtonHandle>(null);
 
   async function handleConfirm() {
-    await sharing.update(current.operation);
-    close();
+    const success = sharing.pending
+      ? await sharing.retry()
+      : await sharing.update(current.operation);
+
+    if (success) {
+      close();
+    }
   }
 
   function restoreTrigger() {
@@ -135,16 +150,58 @@ function ConfirmSharing({
         }
       }}
     >
+      {sharing.notice?.error && (
+        <p className="board-sharing__notice" role="alert">
+          {sharing.notice.text}
+        </p>
+      )}
       <div className="board-sharing__confirmation">
         <Button ref={cancelButton} label="取消" disabled={sharing.busy} onActivate={close} />
         <Button
-          label={current.label}
-          disabled={sharing.busy || Boolean(sharing.pending)}
+          label={sharing.pending ? '重试原操作' : current.label}
+          variant="primary"
+          disabled={sharing.busy}
           onActivate={() => {
             handleConfirm().catch(sharing.reportFailure);
           }}
         />
       </div>
+    </Dialog>
+  );
+}
+
+function ManualLink({
+  url,
+  close,
+  restoreFocus,
+}: {
+  url: string;
+  close: () => void;
+  restoreFocus: () => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  function focusLink() {
+    input.current?.focus();
+    input.current?.select();
+  }
+
+  return (
+    <Dialog
+      open
+      title="复制链接"
+      description="浏览器未能自动复制，请复制下面的邀请链接。"
+      closeLabel="关闭"
+      initialFocus={focusLink}
+      restoreFocus={restoreFocus}
+      onRequestClose={close}
+    >
+      <input
+        className="board-sharing__manual-link"
+        ref={input}
+        aria-label="邀请链接"
+        value={url}
+        readOnly
+      />
     </Dialog>
   );
 }
@@ -165,10 +222,17 @@ export function BoardSharingSurface({
   const closeButton = useRef<ButtonHandle>(null);
   const open = Boolean(anchor);
   const sharing = useBoardSharing({ boardId, open, service, createCommandId, copyLink });
-  const shareBody = <ShareBody sharing={sharing} onConfirm={setConfirmation} />;
+  const showExport = sharing.snapshot?.role === 'owner' && exportContent;
+  const shareBody = (
+    <ShareBody
+      sharing={sharing}
+      confirming={confirmation !== undefined}
+      onConfirm={setConfirmation}
+    />
+  );
 
   function close(restore = true) {
-    if (confirmation) {
+    if (confirmation || sharing.manualLink) {
       return;
     }
 
@@ -201,7 +265,7 @@ export function BoardSharingSurface({
             onActivate={() => close()}
           />
         </header>
-        {exportContent ? (
+        {showExport ? (
           <Tabs
             label="分享与导出"
             value={tab}
@@ -222,6 +286,20 @@ export function BoardSharingSurface({
             restoreFocus={() => closeButton.current?.focus()}
           />
         ) : null}
+        {sharing.manualLink && (
+          <ManualLink
+            url={sharing.manualLink.url}
+            close={sharing.dismissManualLink}
+            restoreFocus={() => {
+              const trigger = sharing.manualLink?.trigger;
+              if (trigger?.isConnected) {
+                trigger.focus();
+              } else {
+                closeButton.current?.focus();
+              }
+            }}
+          />
+        )}
       </section>
     </AnchoredPopover>
   );

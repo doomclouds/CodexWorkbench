@@ -6,6 +6,7 @@ import { createControlFixture } from '../support/render-control.js';
 
 type CreateCommand = Parameters<BoardCatalogService['createBoard']>[0];
 type ListRequest = Parameters<BoardCatalogService['listBoards']>[0];
+type VisibilityHandler = (entries: readonly { readonly isIntersecting: boolean }[]) => void;
 
 const existingBoard: CatalogBoardSummary = {
   boardId: 'release-board',
@@ -23,6 +24,47 @@ const secondBoard: CatalogBoardSummary = {
   boardId: 'follow-up-board',
   title: '交付复盘',
 };
+
+function observePreviewVisibility() {
+  const original = Object.getOwnPropertyDescriptor(window, 'IntersectionObserver');
+  const registrations = new Set<VisibilityHandler>();
+
+  class VisibilityObserver {
+    private readonly listener: VisibilityHandler;
+
+    constructor(listener: VisibilityHandler) {
+      this.listener = listener;
+    }
+
+    observe() {
+      registrations.add(this.listener);
+    }
+
+    disconnect() {
+      registrations.delete(this.listener);
+    }
+  }
+
+  Object.defineProperty(window, 'IntersectionObserver', {
+    configurable: true,
+    value: VisibilityObserver,
+  });
+
+  return {
+    report(isIntersecting: boolean) {
+      for (const listener of registrations) {
+        listener([{ isIntersecting }]);
+      }
+    },
+    restore() {
+      if (original) {
+        Object.defineProperty(window, 'IntersectionObserver', original);
+      } else {
+        Reflect.deleteProperty(window, 'IntersectionObserver');
+      }
+    },
+  };
+}
 
 function click(host: HTMLElement, label: string) {
   const button = [...host.querySelectorAll('button')].find(
@@ -60,6 +102,9 @@ function catalogFixture(service: BoardCatalogService) {
     ...service,
     listBoards(request) {
       requests.push(request);
+      if (request.pinnedOnly) {
+        return Promise.resolve({ boards: [] });
+      }
       if (request.query || request.cursor) {
         return Promise.resolve({ boards: [secondBoard] });
       }
@@ -133,6 +178,86 @@ function appMock() {
 }
 
 describe('legacy Workbench creation through the Studio app', () => {
+  it('loads only listed thumbnail revisions and reuses them when returning to the card layout', async () => {
+    const { props } = appMock();
+    const visibility = observePreviewVisibility();
+    const thumbnailRequests: { boardId: string; revision: bigint; trashed: boolean }[] = [];
+    const image = 'data:image/svg+xml;base64,PHN2Zy8+';
+    const catalog: BoardCatalogService = {
+      ...props.catalog,
+      listBoards: async () => ({
+        boards: [{ ...existingBoard, previewRevision: 2n }, secondBoard],
+      }),
+      getBoardThumbnail: async (request) => {
+        thumbnailRequests.push(request);
+        return image;
+      },
+    };
+    const fixture = createControlFixture();
+
+    try {
+      await act(async () => fixture.render(<StudioApp {...props} catalog={catalog} />));
+      await act(async () => visibility.report(false));
+      expect(thumbnailRequests).toEqual([]);
+      await act(async () => visibility.report(true));
+      expect(fixture.host.querySelector('.studio-workbench-preview img')?.getAttribute('src')).toBe(
+        image,
+      );
+      expect(thumbnailRequests).toEqual([
+        { boardId: existingBoard.boardId, revision: 2n, trashed: false },
+      ]);
+
+      await click(fixture.host, '切换为列表视图');
+      expect(fixture.host.querySelector('.studio-workbench-preview img')).toBeNull();
+      await click(fixture.host, '切换为卡片视图');
+      await act(async () => visibility.report(true));
+      expect(fixture.host.querySelector('.studio-workbench-preview img')?.getAttribute('src')).toBe(
+        image,
+      );
+      expect(thumbnailRequests).toHaveLength(1);
+    } finally {
+      fixture.dispose();
+      visibility.restore();
+    }
+  });
+
+  it('retries a failed page at the same cursor and preserves rows already read', async () => {
+    const { props } = appMock();
+    const requests: ListRequest[] = [];
+    let failed = false;
+    const catalog: BoardCatalogService = {
+      ...props.catalog,
+      async listBoards(request) {
+        requests.push(request);
+        if (!request.cursor) {
+          return { boards: [existingBoard], nextCursor: 'next' };
+        }
+
+        if (!failed) {
+          failed = true;
+          throw new Error('目录连接中断');
+        }
+
+        return { boards: [secondBoard] };
+      },
+    };
+    const fixture = createControlFixture();
+
+    try {
+      await act(async () => fixture.render(<StudioApp {...props} catalog={catalog} />));
+      await click(fixture.host, '加载更多');
+      expect(fixture.host.textContent).toContain('目录连接中断');
+      expect(fixture.host.textContent).toContain(existingBoard.title);
+
+      await click(fixture.host, '重试');
+      expect(requests.map(({ cursor }) => cursor)).toEqual([undefined, 'next', 'next']);
+      expect(fixture.host.textContent).toContain(existingBoard.title);
+      expect(fixture.host.textContent).toContain(secondBoard.title);
+    } finally {
+      fixture.dispose();
+    }
+  });
+
   it('opens a confirmed board after checking and retrying the same create command', async () => {
     const { props, attempts, lookup, opened } = appMock();
     const fixture = createControlFixture();
@@ -168,7 +293,7 @@ describe('legacy Workbench creation through the Studio app', () => {
     }
   });
 
-  it('keeps search, ordering, pagination and display switches in the original controls', async () => {
+  it('keeps search, fixed scope, pagination and display switches in the original controls', async () => {
     const { props } = appMock();
     const { catalog, requests } = catalogFixture(props.catalog);
     const fixture = createControlFixture();
@@ -183,12 +308,17 @@ describe('legacy Workbench creation through the Studio app', () => {
       expect(fixture.host.textContent).toContain('交付复盘');
 
       await click(fixture.host, '筛选作品');
-      await click(fixture.host, '按名称');
-      expect(requests.at(-1)).toMatchObject({ order: 'title' });
+      await click(fixture.host, '已固定');
+      expect(requests.at(-1)).toMatchObject({ order: 'recent', pinnedOnly: true });
+      expect(fixture.host.querySelector('h1')?.textContent).toBe('已固定');
+      expect(fixture.host.textContent).toContain('还没有固定作品');
+      await click(fixture.host, '返回 Luming Studio');
+      expect(document.activeElement?.getAttribute('aria-label')).toBe('筛选作品');
+      expect(requests.at(-1)?.pinnedOnly).toBeUndefined();
 
       await click(fixture.host, '搜索作品');
       await enterSearch(fixture.host, '交付');
-      expect(requests.at(-1)).toMatchObject({ query: '交付', order: 'title' });
+      expect(requests.at(-1)).toMatchObject({ query: '交付', order: 'recent' });
       expect(fixture.host.textContent).not.toContain('产品发布工作台');
 
       await click(fixture.host, '切换为列表视图');

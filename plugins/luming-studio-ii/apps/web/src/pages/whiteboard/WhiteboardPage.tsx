@@ -30,6 +30,11 @@ interface BoardReviewReference extends AttachedReviewSource {
   readonly boardId: string;
 }
 
+interface DocumentAsset {
+  readonly mimeType: string;
+  readonly content: Uint8Array;
+}
+
 export interface WhiteboardPageProps {
   readonly boardId?: string;
   readonly service: WhiteboardService;
@@ -37,6 +42,15 @@ export interface WhiteboardPageProps {
   readonly onBack?: () => void;
   readonly exportBoard?: ExportBoard;
   readonly downloadExport?: (file: ExportBoardFile) => void;
+  readonly downloadObjectFile?: WhiteboardEditorFeatures['downloadObjectFile'];
+  readonly clipboard?: WhiteboardEditorFeatures['clipboard'];
+  readonly localDrafts?: WhiteboardEditorFeatures['localDrafts'];
+  readonly readDocumentAsset?: (
+    boardId: string,
+    source: string,
+    signal?: AbortSignal,
+  ) => Promise<DocumentAsset | undefined>;
+  readonly readDocumentImageFile?: (file: File) => Promise<Uint8Array>;
   readonly editService?: WhiteboardEditService;
   readonly historyService?: BoardHistoryService;
   readonly feedbackService?: BoardFeedbackService;
@@ -51,6 +65,7 @@ export interface WhiteboardPageProps {
   readonly onRoomAccessLost?: () => void;
   readonly onViewContext?: WhiteboardEditorFeatures['onViewContext'];
   readonly prepareImage?: ComponentProps<typeof WhiteboardMediaSurface>['prepareImage'];
+  readonly prepareVideo?: ComponentProps<typeof WhiteboardMediaSurface>['prepareVideo'];
   readonly renameBoard?: WhiteboardEditorSurfaceProps['renameBoard'];
   readonly readHtmlSource?: WhiteboardEditorFeatures['readHtmlSource'];
 }
@@ -104,6 +119,7 @@ function shareAndExport({
           <WhiteboardExportSurface
             {...frame}
             inline
+            canBackup
             exportBoard={exportBoard}
             download={downloadExport}
           />
@@ -113,14 +129,45 @@ function shareAndExport({
   );
 }
 
+function documentImages(
+  props: WhiteboardPageProps,
+): Pick<WhiteboardEditorFeatures, 'readDocumentAsset' | 'uploadDocumentImage'> {
+  const { boardId, readDocumentAsset, readDocumentImageFile, editService, createCommandId } = props;
+  if (!boardId) {
+    return {};
+  }
+
+  return {
+    readDocumentAsset:
+      readDocumentAsset && ((source, signal) => readDocumentAsset(boardId, source, signal)),
+    uploadDocumentImage:
+      readDocumentImageFile &&
+      editService?.uploadDocumentImage &&
+      (async (objectId, file) => {
+        const content = await readDocumentImageFile(file);
+        const command = { boardId, objectId, content, commandId: createCommandId() };
+        const result = await editService.uploadDocumentImage?.(command);
+        if (result?.receipt.kind !== 'applied' || !result.assetUrl) {
+          throw new Error('白板服务未能保存文档图片。');
+        }
+
+        return result.assetUrl;
+      }),
+  };
+}
+
 function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeatures {
   const {
     createCommandId,
     downloadExport,
+    downloadObjectFile,
+    clipboard,
+    localDrafts,
     editService,
     historyService,
     feedbackService,
     prepareImage,
+    prepareVideo,
     readHtmlSource,
     commentAccess,
     suggestions,
@@ -130,9 +177,13 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
 
   return {
     ...roomFeatures(props),
+    ...documentImages(props),
     Viewing: WhiteboardViewingSurface,
     editService,
     readHtmlSource,
+    downloadObjectFile,
+    clipboard,
+    localDrafts,
     commentAccess,
     consumeShareEntry: props.consumeShareEntry,
     renderExport: shareAndExport(props),
@@ -153,7 +204,25 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
             {...frame}
             service={feedbackService}
             createCommandId={createCommandId}
-            onReviewThread={suggestions && onAttachReviewSource ? frame.onReviewThread : undefined}
+            attachmentMode={reviewSourceMode}
+            onAttachThread={
+              suggestions && onAttachReviewSource
+                ? async ({ boardId, threadId, commandId, signal }) => {
+                    const source = await suggestions.createReviewSource(
+                      { boardId, commandId, origin: { kind: 'feedback', threadId } },
+                      signal,
+                    );
+                    signal.throwIfAborted();
+                    await onAttachReviewSource({
+                      boardId,
+                      sourceId: source.sourceId,
+                      capturedBoardRevision: source.capturedBoardRevision,
+                      targetsBoardRevision: source.targetsBoardRevision,
+                      targets: source.targets,
+                    });
+                  }
+                : undefined
+            }
           />
         )
       : undefined,
@@ -161,6 +230,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
       ? (frame) => (
           <BoardSuggestionsSurface
             anchor={frame.anchor}
+            inline={frame.inline}
             boardId={frame.boardId}
             revision={frame.revision}
             service={suggestions}
@@ -191,6 +261,7 @@ function whiteboardFeatures(props: WhiteboardPageProps): WhiteboardEditorFeature
               service={editService}
               createCommandId={createCommandId}
               prepareImage={prepareImage}
+              prepareVideo={prepareVideo}
             />
           )
         : undefined,

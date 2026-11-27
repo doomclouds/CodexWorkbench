@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import { WhiteboardApp } from '../../src/app/index.js';
 import type {
   BoardRoomContentChange,
+  BoardRoomGesturePreview,
   BoardRoomObserver,
   BoardRoomPresence,
   BoardRoomSession,
@@ -73,6 +74,15 @@ function createRoomFixture() {
     updates,
     change(change: BoardRoomContentChange) {
       observer?.onContentChanged?.(change);
+    },
+    gesture(gesture: BoardRoomGesturePreview | undefined) {
+      const participants = state.participants.map((peer) => ({
+        ...peer,
+        gesture,
+        gestureExpiresAtMillis: 1_200,
+      }));
+      state = { ...state, participants };
+      listeners.forEach((listener) => listener());
     },
     revoke() {
       state = { ...state, status: 'accessLost', participants: [], canEdit: false };
@@ -163,6 +173,30 @@ async function click(label: string) {
   await act(async () => button.click());
 }
 
+function gesturePointer(root: Element, kind: 'pointerdown' | 'pointermove', x: number, y: number) {
+  root.dispatchEvent(
+    new PointerEvent(kind, {
+      bubbles: true,
+      cancelable: true,
+      button: kind === 'pointerdown' ? 0 : -1,
+      buttons: 1,
+      pointerId: 1,
+      isPrimary: true,
+      pointerType: 'mouse',
+      clientX: x,
+      clientY: y,
+    }),
+  );
+}
+
+async function nextFrame() {
+  await act(async () => {
+    await new Promise<void>((done) => {
+      requestAnimationFrame(() => done());
+    });
+  });
+}
+
 test('follows a larger peer viewport, publishes world pointer coordinates and detaches on a real action', async () => {
   const app = roomApp();
   try {
@@ -237,5 +271,50 @@ test('applies room object metadata without rereading the scene and clears view c
     expect(app.accessLoss).toEqual(['revoked']);
   } finally {
     app.dispose();
+  }
+});
+
+test('shows an unsaved pointer drag in a second whiteboard view and clears it on cancel', async () => {
+  const sender = roomApp();
+  const recipient = roomApp();
+  try {
+    await sender.open();
+    await recipient.open();
+    await nextFrame();
+    const canvas = sender.host.querySelector('[data-canvas-root]');
+    const camera = sender.views.at(-1)?.viewport;
+    if (!canvas || !camera) {
+      throw new Error('The source whiteboard did not render a camera.');
+    }
+
+    const clientX = camera.x + 80 * camera.zoom;
+    const clientY = camera.y + 80 * camera.zoom;
+    act(() => {
+      gesturePointer(canvas, 'pointerdown', clientX, clientY);
+      gesturePointer(canvas, 'pointermove', clientX + 140, clientY);
+    });
+    await nextFrame();
+    const preview = sender.room.updates.at(-1)?.gesture;
+    expect(preview?.kind).toBe('move');
+    const x = preview?.changes[0]?.geometry.x;
+    expect(x).toBeGreaterThan(40);
+
+    act(() => recipient.room.gesture(preview));
+    const position = () =>
+      recipient.host.querySelector<HTMLElement>('[data-canvas-object="card"]')?.style.left;
+    expect(position()).toBe(x + 'px');
+    expect(recipient.board.sceneReads).toEqual(['shared']);
+    expect(recipient.board.payloadReads).toEqual([]);
+
+    act(() => {
+      canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    const cleared = sender.room.updates.at(-1)?.gesture;
+    expect(cleared).toBeUndefined();
+    act(() => recipient.room.gesture(cleared));
+    expect(position()).toBe('40px');
+  } finally {
+    recipient.dispose();
+    sender.dispose();
   }
 });

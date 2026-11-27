@@ -269,7 +269,7 @@ export function selectionRuntime(
     lastSentAt = now;
     const selected = elements
       .filter((element) => !element.closest('[data-studio-runtime]'))
-      .slice(0, 80);
+      .slice(0, 64);
     const targetIds = [
       ...new Set(
         selected

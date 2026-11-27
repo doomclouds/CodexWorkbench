@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
+import { BoardEditService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
+import { BoardHistoryService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 import {
   BoardExportFormat,
   BoardExportRejectionReason,
   WhiteboardService,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
+import { pngImage } from '../fixtures/board-image-bytes.js';
 import { callWhiteboard, sendWhiteboardRequest } from '../support/whiteboard-client.js';
 import {
+  documentContent,
   editorId,
   lockedId,
   mainBoardId,
@@ -18,6 +22,7 @@ import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
 const server = useWhiteboardTestServer();
 const { exportBoard, getBoardScene, moveObjects } = WhiteboardService.method;
+const { exportBoardVersion } = BoardHistoryService.method;
 const whole = { case: 'whole', value: {} } as const;
 const request = {
   boardId: mainBoardId,
@@ -52,6 +57,163 @@ test('exports a read-only board and limits a safe SVG to the exact confirmed sel
     boardId: mainBoardId,
   });
   expect(after.scene?.boardRevision).toBe(0n);
+});
+
+test('rasterizes native content as a real PNG and exports the same saved historical version', async () => {
+  const selection = { case: 'selection' as const, value: { objectIds: [shapeId] } };
+  const live = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...request,
+    scope: selection,
+    format: BoardExportFormat.PNG,
+  });
+  assert.equal(live.result.case, 'file');
+  const bytes = live.result.value.content;
+  const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  expect(live.result.value).toMatchObject({
+    filename: 'Architecture.png',
+    mimeType: 'image/png',
+    revision: 0n,
+  });
+  expect([...bytes.slice(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+  expect([header.getUint32(16), header.getUint32(20)]).toEqual([164, 144]);
+
+  const version = await callWhiteboard(server.address, viewerId, exportBoardVersion, {
+    boardId: mainBoardId,
+    revision: 0n,
+    scope: selection,
+    format: BoardExportFormat.PNG,
+  });
+  expect(version.result).toEqual(live.result);
+});
+
+async function createExportDiagram(html: string) {
+  const { receipt } = await callWhiteboard(
+    server.address,
+    editorId,
+    BoardEditService.method.editBoardGeometry,
+    {
+      boardId: mainBoardId,
+      commandId: 'insert-export-html',
+      operation: {
+        case: 'create',
+        value: {
+          object: {
+            objectId: 'html-card',
+            kind: 'html',
+            label: 'Offline',
+            geometry: { x: 8, y: -6, width: 200, height: 120 },
+          },
+          initialPayload: {
+            body: { case: 'embed', value: { title: 'Offline', html, sourceRevision: 0n } },
+          },
+        },
+      },
+    },
+  );
+  expect(receipt?.outcome.case).toBe('applied');
+}
+
+test('exports complete native documents plus isolated embedded content, and prepares its rich PNG', async () => {
+  const html =
+    '<!doctype html><html><body><p>Offline diagram</p><script>window.loaded=true</script></body></html>';
+  await createExportDiagram(html);
+  const current = { ...request, expectedRevision: 1n };
+  const web = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...current,
+    format: BoardExportFormat.HTML,
+  });
+  assert.equal(web.result.case, 'file');
+  expect(web.result.value).toMatchObject({
+    filename: 'Architecture.html',
+    mimeType: 'text/html',
+    revision: 1n,
+  });
+  const contents = new TextDecoder().decode(web.result.value.content);
+  expect(contents).toContain(documentContent);
+  expect(contents).toContain('sandbox="allow-scripts"');
+  expect(contents).toContain('Offline diagram');
+  expect(contents).toContain('connect-src &apos;none&apos;');
+
+  const png = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...current,
+    format: BoardExportFormat.PNG,
+  });
+  assert.equal(png.result.case, 'browserPng');
+  const plan = png.result.value;
+  const region = plan.regions[0];
+  assert.ok(region);
+  expect(plan).toMatchObject({ filename: 'Architecture.png', revision: 1n });
+  expect(plan.svgTemplate).toContain(
+    `<foreignObject width="200" height="120"><div xmlns="http://www.w3.org/1999/xhtml" data-studio-png-region="${region.index}"></div>`,
+  );
+  expect(plan.svgTemplate).not.toContain('<script>');
+  expect(region.html).toContain("script-src 'none'");
+  expect(region.html).toContain('Offline diagram');
+  expect(region.html).not.toContain('Object.defineProperty(window');
+});
+
+test('prepares live and historical SVG from the requested rich-object selection and its own media', async () => {
+  const attach = await callWhiteboard(
+    server.address,
+    editorId,
+    BoardEditService.method.attachBoardImage,
+    {
+      boardId: mainBoardId,
+      commandId: 'rich-svg-media',
+      objectId: 'rich-svg-media',
+      displayName: 'Figure.png',
+      geometry: { x: 0, y: 0, width: 100, height: 80 },
+      content: pngImage,
+    },
+  );
+  expect(attach.receipt?.outcome.case).toBe('applied');
+  await createExportDiagram(
+    `<p>Diagram at revision two</p><img src="/studio-archive-assets/${mainBoardId}/image-rich-svg-media">`,
+  );
+
+  const selection = { case: 'selection' as const, value: { objectIds: ['html-card'] } };
+  const live = await callWhiteboard(server.address, viewerId, exportBoard, {
+    ...request,
+    expectedRevision: 2n,
+    scope: selection,
+    format: BoardExportFormat.SVG,
+  });
+  assert.equal(live.result.case, 'browserPng');
+  expect(live.result.value).toMatchObject({
+    filename: 'Architecture.svg',
+    revision: 2n,
+    width: 264,
+    height: 184,
+  });
+  expect(live.result.value.svgTemplate).toContain('data-studio-png-region="0"');
+  expect(live.result.value.regions[0]?.html).toContain('src="data:image/png;base64,');
+
+  const changed = await callWhiteboard(
+    server.address,
+    editorId,
+    BoardEditService.method.editObjectContent,
+    {
+      boardId: mainBoardId,
+      commandId: 'edit-rich-svg',
+      objectId: 'html-card',
+      expectedPayloadVersion: 0n,
+      edit: {
+        case: 'embedSource',
+        value: { title: 'Offline', html: '<p>Later diagram</p>', expectedSourceRevision: 0n },
+      },
+    },
+  );
+  expect(changed.receipt?.outcome.case).toBe('applied');
+  const archived = await callWhiteboard(server.address, viewerId, exportBoardVersion, {
+    boardId: mainBoardId,
+    revision: 2n,
+    scope: selection,
+    format: BoardExportFormat.SVG,
+  });
+  expect(archived.result).toEqual(live.result);
+  assert.equal(archived.result.case, 'browserPng');
+  expect(archived.result.value.regions[0]?.html).toContain('Diagram at revision two');
+  expect(archived.result.value.regions[0]?.html).not.toContain('Later diagram');
 });
 
 test('returns the newer revision without a file after a concurrent saved move', async () => {

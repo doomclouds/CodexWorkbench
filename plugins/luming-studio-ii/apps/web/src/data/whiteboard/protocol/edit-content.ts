@@ -267,6 +267,8 @@ function writeContentEdit(edit: EditObjectContentOperation, resolveAsset: AssetR
       };
     case 'crop':
       return { case: 'crop', value: edit.value };
+    case 'link':
+      return { case: 'link', value: edit.value };
   }
 }
 
@@ -279,6 +281,7 @@ export function writeContent(
     commandId,
     objectId,
     expectedPayloadVersion,
+    deleteEmptyText: edit.kind === 'text' ? edit.deleteEmpty : undefined,
     edit: writeContentEdit(edit, resolveAsset),
   };
 }
@@ -308,6 +311,8 @@ export function writeInitialPayload(
     }
     case 'embed':
       return { body: { case: 'embed', value: { ...payload.value, sourceRevision: 0n } } };
+    case 'link':
+      return { body: { case: 'link', value: payload.value } };
     case 'ink':
       return { body: { case: 'ink', value: { points: [...payload.points] } } };
   }

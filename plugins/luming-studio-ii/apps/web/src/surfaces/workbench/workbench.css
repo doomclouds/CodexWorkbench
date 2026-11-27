@@ -183,6 +183,14 @@
   letter-spacing: -0.03em;
 }
 
+.studio-workbench-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-right: auto;
+  gap: 10px;
+}
+
 .studio-workbench-controls,
 .studio-workbench-search-group {
   display: flex;
@@ -474,6 +482,8 @@
 }
 
 .studio-workbench-preview {
+  --catalog-thumbnail-background: var(--workbench-soft);
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;

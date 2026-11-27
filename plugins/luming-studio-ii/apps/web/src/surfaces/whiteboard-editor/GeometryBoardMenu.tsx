@@ -8,6 +8,12 @@ export interface GeometryActionContext {
   readonly onAction: (action: GeometrySelectionAction, ids: readonly string[]) => void;
   readonly onFit?: (scope: 'board' | 'selection') => void;
   readonly onSelectAll?: () => void;
+  readonly onRenameSection?: () => void;
+  readonly clipboard?: {
+    readonly copy?: () => void;
+    readonly cut?: () => void;
+    readonly paste?: () => void;
+  };
 }
 
 interface BoardMenuProps extends GeometryActionContext {
@@ -39,18 +45,29 @@ function boardMenuItems({
   canEdit,
   onFit,
   onSelectAll,
+  onRenameSection,
+  clipboard,
 }: GeometryActionContext): readonly ActionMenuItem[] {
   const general = [
     { id: 'select-all', label: '全选', disabled: !onSelectAll },
     { id: 'fit', label: '适应白板', shortcut: 'Shift 1', disabled: !onFit },
   ];
-  const paste = { id: 'paste', label: '粘贴', shortcut: 'Ctrl/⌘ V', disabled: true } as const;
+  const paste = {
+    id: 'paste',
+    label: '粘贴',
+    shortcut: 'Ctrl/⌘ V',
+    disabled: !clipboard?.paste,
+  } as const;
+
   if (selection.length === 0) {
     return [paste, ...general];
   }
 
   const locked = selection.some((object) => object.locked);
   const blockGeometry = !canEdit || locked;
+  const multiple = selection.length >= 2;
+  const onlySection = !multiple && selection[0]?.kind === 'section';
+  const renameSection = onRenameSection && canEdit && onlySection;
   const layers = [
     directionRows.front,
     directionRows.back,
@@ -59,14 +76,22 @@ function boardMenuItems({
   ];
 
   return [
-    { id: 'cut', label: '剪切', shortcut: 'Ctrl/⌘ X', disabled: true },
-    { id: 'copy', label: '复制', shortcut: 'Ctrl/⌘ C', disabled: true },
+    ...(renameSection ? [{ id: 'rename-section', label: '重命名分区', shortcut: 'F2' }] : []),
+    ...(canEdit && multiple
+      ? [{ id: 'createSection', label: '从选区创建分区', disabled: locked }]
+      : []),
+    { id: 'cut', label: '剪切', shortcut: 'Ctrl/⌘ X', disabled: blockGeometry || !clipboard?.cut },
+    { id: 'copy', label: '复制', shortcut: 'Ctrl/⌘ C', disabled: !clipboard?.copy },
     paste,
     { id: 'duplicate', label: '重复', shortcut: 'Ctrl/⌘ D', disabled: !canEdit },
     ...layers.map((row) => ({ ...row, disabled: blockGeometry })),
-    { id: 'group', label: '组合', disabled: true },
-    { id: 'ungroup', label: '取消组合', disabled: true },
-    { id: 'tidy', label: '整理', disabled: true },
+    { id: 'group', label: '组合', disabled: blockGeometry || !multiple },
+    {
+      id: 'ungroup',
+      label: '取消组合',
+      disabled: blockGeometry || selection.every(({ groupId }) => !groupId),
+    },
+    { id: 'tidy', label: '整理', disabled: blockGeometry || !multiple },
     {
       id: 'lock',
       label: selection.every((object) => object.locked) ? '解锁位置与尺寸' : '锁定位置与尺寸',
@@ -86,8 +111,16 @@ function selectionAction(
   if (id === 'lock') {
     return { kind: 'changeLock', locked: !selection.every((object) => object.locked) };
   }
-  if (id === 'delete' || id === 'duplicate') {
-    return { kind: id };
+
+  switch (id) {
+    case 'delete':
+    case 'duplicate':
+    case 'group':
+    case 'ungroup':
+    case 'createSection':
+      return { kind: id };
+    case 'tidy':
+      return { kind: 'arrange', preset: id };
   }
 
   const direction = layerDirection(id);
@@ -95,9 +128,27 @@ function selectionAction(
 }
 
 export function GeometryBoardMenu(props: BoardMenuProps) {
-  const { anchor, selection, onAction, onFit, onSelectAll, onRequestClose, returnFocus } = props;
+  const {
+    anchor,
+    selection,
+    onAction,
+    onFit,
+    onSelectAll,
+    onRenameSection,
+    clipboard,
+    onRequestClose,
+    returnFocus,
+  } = props;
   function handleAction(id: string) {
     onRequestClose();
+    if (id === 'copy' || id === 'cut' || id === 'paste') {
+      clipboard?.[id]?.();
+      return;
+    }
+    if (id === 'rename-section') {
+      onRenameSection?.();
+      return;
+    }
     if (id === 'select-all') {
       onSelectAll?.();
       return;

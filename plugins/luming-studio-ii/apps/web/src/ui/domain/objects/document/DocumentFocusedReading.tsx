@@ -115,7 +115,7 @@ function DocumentFocusedReading({
         {onBack && (
           <div className="studio-document-focused-back" data-canvas-presentation-exit="">
             <Button
-              label="返回白板"
+              label="返回画板"
               icon={<DocumentBackIcon />}
               disabled={closingDisabled}
               onActivate={onBack}
@@ -140,7 +140,7 @@ function DocumentFocusedReading({
             aria-label="文档目录"
             onKeyDown={handleOutlineKey}
           >
-            <strong>文档目录</strong>
+            <strong>目录</strong>
             {viewport.headings.map((block) => (
               <button
                 key={block.id}

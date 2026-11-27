@@ -10,7 +10,11 @@ import type { BoardSuggestionsSurfaceProps, SuggestionNotice } from './contracts
 import { rejectionMessage, requestFailure, reviewConflict } from './review-messages.js';
 
 type Decision =
-  | { readonly kind: 'accept'; readonly command: AcceptSuggestionCommand }
+  | {
+      readonly kind: 'accept';
+      readonly command: AcceptSuggestionCommand;
+      readonly wasActive: boolean;
+    }
   | { readonly kind: 'reject'; readonly command: RejectSuggestionCommand };
 
 type ReviewAction = 'submit' | 'check' | 'retry';
@@ -30,7 +34,6 @@ interface DecisionOptions extends Pick<
   'boardId' | 'service' | 'createCommandId' | 'onApplied'
 > {
   readonly refresh: () => void;
-  readonly onReviewed: (proposalId: string) => void;
 }
 
 async function checkAcceptance(
@@ -94,16 +97,11 @@ async function review(
   };
 }
 
-function proposalOpen(proposal: BoardSuggestion): boolean {
-  return !proposal.rejected && proposal.acceptedOptionId === undefined;
-}
-
 export function useSuggestionDecision({
   boardId,
   service,
   createCommandId,
   onApplied,
-  onReviewed,
   refresh,
 }: DecisionOptions) {
   const active = useRef<ReviewAttempt>(undefined);
@@ -124,11 +122,13 @@ export function useSuggestionDecision({
     return true;
   }
 
-  function acceptResult(receipt: SuggestionReviewReceipt, proposalId: string) {
+  function acceptResult(receipt: SuggestionReviewReceipt, wasActive: boolean) {
     setRecovery(undefined);
     if (receipt.kind === 'applied') {
-      setNotice({ tone: 'success', message: '已接受方案并保存白板。' });
-      onReviewed(proposalId);
+      setNotice({
+        tone: 'success',
+        message: wasActive ? '已撤回方案并保存白板。' : '已应用方案并保存白板。',
+      });
       onApplied(receipt);
       refresh();
       return;
@@ -146,11 +146,10 @@ export function useSuggestionDecision({
       return;
     }
 
-    const proposalId = attempt.decision.command.proposalId;
+    const { decision } = attempt;
     if (result.kind === 'reject') {
       setRecovery(undefined);
-      setNotice({ tone: 'success', message: '已拒绝建议，白板内容保持原样。' });
-      onReviewed(proposalId);
+      setNotice({ tone: 'success', message: '已清除建议，保留已应用内容。' });
       refresh();
       return;
     }
@@ -159,7 +158,7 @@ export function useSuggestionDecision({
       return;
     }
 
-    acceptResult(result.receipt, proposalId);
+    acceptResult(result.receipt, decision.kind === 'accept' && decision.wasActive);
   }
 
   function handleFailure(attempt: ReviewAttempt, error: unknown) {
@@ -190,7 +189,7 @@ export function useSuggestionDecision({
   }
 
   function handleDecide(proposal: BoardSuggestion, optionId?: string) {
-    if (active.current || recovery || !proposalOpen(proposal)) {
+    if (active.current || recovery || proposal.rejected) {
       return;
     }
 
@@ -203,7 +202,11 @@ export function useSuggestionDecision({
         expectedProposalVersion: proposal.proposalVersion,
       };
       const decision: Decision = optionId
-        ? { kind: 'accept', command: { ...command, optionId } }
+        ? {
+            kind: 'accept',
+            command: { ...command, optionId },
+            wasActive: proposal.activeOptionIds.includes(optionId),
+          }
         : { kind: 'reject', command };
       start(decision, 'submit');
     } catch (error) {

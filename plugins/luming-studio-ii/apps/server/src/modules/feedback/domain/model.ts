@@ -13,15 +13,39 @@ export interface FeedbackPoint {
   readonly y: number;
 }
 
+export type FeedbackContentUnit =
+  | { readonly kind: 'document'; readonly blockIds: readonly string[] }
+  | { readonly kind: 'todo'; readonly itemId: string }
+  | {
+      readonly kind: 'html';
+      readonly nodeIds: readonly string[];
+      readonly sourceRevision: bigint;
+    };
+
+interface FeedbackObjectLocation {
+  readonly objectId: string;
+  readonly u: number;
+  readonly v: number;
+  readonly geometryVersion: bigint;
+}
+
+export interface FeedbackContentTarget extends FeedbackObjectLocation {
+  readonly kind: 'content';
+  readonly payloadVersion: bigint;
+  readonly content: FeedbackContentUnit;
+}
+
 export type FeedbackAnchorTarget =
   | { readonly kind: 'board'; readonly point: FeedbackPoint }
-  | {
-      readonly kind: 'object';
-      readonly objectId: string;
-      readonly u: number;
-      readonly v: number;
-      readonly geometryVersion: bigint;
-    };
+  | (FeedbackObjectLocation & { readonly kind: 'object' })
+  | FeedbackContentTarget;
+
+export interface FeedbackContentSource {
+  readonly kind: string;
+  readonly payloadVersion: bigint;
+  readonly data: unknown;
+  readonly htmlNodeIds?: readonly string[];
+}
 
 export interface FeedbackFrozenObject extends FeedbackPoint {
   readonly kind: string;
@@ -41,6 +65,7 @@ export interface FeedbackAnchor {
   readonly sourceBoardRevision: bigint;
   readonly frozenPoint: FeedbackPoint;
   readonly frozenObject?: FeedbackFrozenObject;
+  readonly frozenExcerpt?: string;
   readonly targetMissing: boolean;
 }
 

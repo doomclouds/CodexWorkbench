@@ -12,7 +12,10 @@ const themeKey = 'luming-studio-ii:theme';
 const guestAccessInterval = 3_000;
 const guestRequestHeaders = { 'x-luming-guest': '1', 'content-type': protobufContentType };
 
+export { createBoardDraftStorage } from './board-drafts.js';
 export { prepareBoardImage } from './board-image.js';
+export { prepareBoardVideo } from './board-video.js';
+export { renderBrowserVectorExport } from './board-vector.js';
 export { boardRoomClock, subscribeGuestRoomEvents, subscribeRoomEvents } from './room-events.js';
 
 type LibraryLayout = 'grid' | 'list';
@@ -81,6 +84,44 @@ export function createCommandId(): string {
 
 export function resolveArchiveAssetUrl(source: string): string {
   return archiveAssetPath.test(source) ? new URL(source, window.location.origin).href : source;
+}
+
+const maximumDocumentImageBytes = 8 * 1024 * 1024;
+
+export async function readDocumentImageFile(file: File): Promise<Uint8Array> {
+  if (file.size <= 0 || file.size > maximumDocumentImageBytes) {
+    throw new Error('文档图片的大小必须在 8 MiB 以内。');
+  }
+
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+export async function readArchivedDocumentAsset(
+  boardId: string,
+  source: string,
+  signal?: AbortSignal,
+) {
+  const { origin } = window.location;
+  if (!URL.canParse(source, origin)) {
+    return undefined;
+  }
+
+  const url = new URL(source, origin);
+  const path = url.pathname;
+  const boardPrefix = '/studio-archive-assets/' + boardId + '/';
+  const sameAssetOrigin = url.origin === origin && !url.search && !url.hash;
+  const boardAsset = path.startsWith(boardPrefix) && archiveAssetPath.test(path);
+  if (!sameAssetOrigin || !boardAsset) {
+    return undefined;
+  }
+
+  const response = await fetch(path, { credentials: 'same-origin', redirect: 'error', signal });
+  const mimeType = response.headers.get('content-type')?.split(';', 1)[0];
+  if (!response.ok || !mimeType?.startsWith('image/')) {
+    return undefined;
+  }
+
+  return { mimeType, content: new Uint8Array(await response.arrayBuffer()) };
 }
 
 export function writeStudioLocation(location: StudioLocation) {
@@ -203,6 +244,14 @@ export async function copyShareLink(url: string): Promise<void> {
   }
 
   await navigator.clipboard.writeText(url);
+}
+
+export async function readCanvasClipboard(): Promise<string> {
+  if (!navigator.clipboard?.readText) {
+    throw new Error('当前浏览器无法直接读取剪贴板，请按 Ctrl/⌘ V 粘贴。');
+  }
+
+  return navigator.clipboard.readText();
 }
 
 export async function postArchive(

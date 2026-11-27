@@ -12,6 +12,7 @@ import {
   BoardRoomService as roomService,
   type ChangeBoardTimerRequestSchema,
 } from '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+import { checkWorkspaceRelease } from './agent-workspaces.js';
 import type {
   BoardRoomEvent,
   BoardRoomEventPort,
@@ -20,6 +21,7 @@ import type {
   BoardRoomStreamObserver,
   BoardRoomTimerAction,
 } from './contracts.js';
+import { writeRoomGesture } from './room-gesture.js';
 import { readRoomEvent, readServerTime, readTimerReceipt } from './room-message.js';
 
 interface SnapshotObserver {
@@ -118,7 +120,7 @@ export function createBoardRoomService(
       const result = await request(
         post,
         methods.updateBoardPresence,
-        { boardId, viewId, sequence, ...presence },
+        { boardId, viewId, sequence, ...presence, gesture: writeRoomGesture(presence.gesture) },
         signal,
       );
 
@@ -159,6 +161,20 @@ export function createBoardRoomService(
         receipt: readTimerReceipt(receipt, boardId, commandId),
         serverTimeUnixMs: readServerTime(serverTimeUnixMs),
       };
+    },
+    async releaseAgentWorkspace(boardId, { agentId, taskId, generation }, signal) {
+      const result = await request(
+        post,
+        methods.changeAgentActivity,
+        {
+          boardId,
+          agentId,
+          taskId,
+          action: { case: 'release', value: { generation } },
+        },
+        signal,
+      );
+      checkWorkspaceRelease(result, generation);
     },
   };
 }

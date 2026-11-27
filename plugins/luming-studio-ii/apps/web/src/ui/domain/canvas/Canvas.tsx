@@ -12,6 +12,7 @@ import type { FocusEvent } from 'react';
 import { useCanvasDrafts } from './canvas-drafts.js';
 import { canvasNativeId } from './canvas-events.js';
 import { useCanvasFrame, useCanvasSize } from './canvas-frame.js';
+import { useCanvasGesturePreview } from './canvas-gesture-preview.js';
 import { useCanvasInput } from './canvas-input.js';
 import { selectionControls, useCanvasModel } from './canvas-model.js';
 import { createCanvasObjectRegistry } from './canvas-registry.js';
@@ -59,6 +60,13 @@ function selectionActionSlot(props: CanvasProps, input: ReturnType<typeof useCan
   return visible ? props.selectionActions : undefined;
 }
 
+function availableFormatRequest(props: CanvasProps, input: ReturnType<typeof useCanvasInput>) {
+  const selecting = input.toolKind === 'select' && !input.temporaryPan;
+  const blocked = props.presentation || props.annotationActive || input.pointerActive;
+
+  return props.canEdit && selecting && !blocked ? props.formatObjectRequest : undefined;
+}
+
 function CanvasSession(props: CanvasProps) {
   const {
     label,
@@ -104,6 +112,7 @@ function CanvasSession(props: CanvasProps) {
   const controller = useCanvasFrame(root, initialViewport);
   const focusedId = presentation?.focusObjectId;
   const { frame, update } = controller;
+  useCanvasGesturePreview(frame.preview, props.onGesturePreviewChange, canEdit);
   const { index, pending, selected, painted, visibleIds } = useCanvasModel(
     props,
     frame,
@@ -392,7 +401,16 @@ function CanvasSession(props: CanvasProps) {
           canEdit={canEdit}
           canEditExpandedObject={props.canEditExpandedObject}
           editRequest={editRequest}
+          formatObjectRequest={availableFormatRequest(props, input)}
           readHtmlSource={props.readHtmlSource}
+          downloadFile={props.downloadFile}
+          readDocumentAsset={props.readDocumentAsset}
+          uploadDocumentImage={props.uploadDocumentImage}
+          onOpenNativeSource={props.onOpenNativeSource}
+          nativeSourceLabel={props.nativeSourceLabel}
+          nativeSourceRequest={props.nativeSourceRequest}
+          annotationActive={props.annotationActive}
+          onAnnotateContent={props.onAnnotateContent}
           isLocked={(id) => isObjectLocked(index, id)}
           canWriteObject={props.canWriteObject}
           onObjectIntent={props.onObjectIntent}

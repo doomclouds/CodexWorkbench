@@ -1,5 +1,6 @@
 import { BoardEditService as wireService } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import type { WhiteboardPayloadBody, WhiteboardPost } from './contracts.js';
+import { createDocumentImageUpload } from './document-images.js';
 import type {
   BoardEditReceipt,
   EditBoardGeometryOperation,
@@ -13,19 +14,29 @@ import { request } from './protocol/index.js';
 
 export type {
   AttachBoardImageCommand,
+  AttachBoardVideoCommand,
   BoardEditReceipt,
   BoardEditRejection,
+  BoardVideoType,
   EditBoardGeometryCommand,
   EditBoardGeometryOperation,
   EditObjectContentCommand,
   EditObjectContentOperation,
+  UploadBoardDocumentImageCommand,
+  UploadBoardDocumentImageResult,
+  ReverseBoardEditCommand,
+  WhiteboardArrangePreset,
   WhiteboardDocumentBlock,
   WhiteboardDocumentContent,
   WhiteboardEditService,
   WhiteboardInitialPayload,
   WhiteboardJson,
   WhiteboardLayerDirection,
+  WhiteboardLinkContent,
   WhiteboardObjectDraft,
+  WhiteboardPasteTarget,
+  WhiteboardStylePatch,
+  WhiteboardStyleTarget,
   WhiteboardTableContent,
   WhiteboardTextContent,
   WhiteboardTodoChange,
@@ -43,6 +54,7 @@ const confirmedPayloadKinds = {
   embedState: 'embed',
   sticker: 'sticker',
   crop: 'image',
+  link: 'link',
 } as const satisfies Record<EditObjectContentOperation['kind'], WhiteboardPayloadBody['kind']>;
 
 function confirmCreated(receipt: BoardEditReceipt, ids: readonly string[]): void {
@@ -58,9 +70,14 @@ function confirmCreated(receipt: BoardEditReceipt, ids: readonly string[]): void
 
 function confirmGeometry(receipt: BoardEditReceipt, operation: EditBoardGeometryOperation): void {
   if (operation.kind === 'create') {
-    confirmCreated(receipt, [operation.object.id]);
+    const { attachment, object } = operation;
+    const ids = attachment ? [object.id, attachment.connectorId] : [object.id];
+    confirmCreated(receipt, ids);
   }
-  if (operation.kind === 'duplicate') {
+  if (operation.kind === 'createSection') {
+    confirmCreated(receipt, [operation.sectionId]);
+  }
+  if (operation.kind === 'duplicate' || operation.kind === 'paste') {
     confirmCreated(
       receipt,
       operation.targets.map(({ newObjectId }) => newObjectId),
@@ -93,10 +110,34 @@ export function createWhiteboardEditService(
   post: WhiteboardPost,
   resolveArchiveAsset: (source: string) => string = (source) => source,
 ): WhiteboardEditService {
-  const { editBoardGeometry, editObjectContent, attachBoardImage, getBoardEditReceipt } =
-    wireService.method;
+  const {
+    editBoardGeometry,
+    editObjectContent,
+    attachBoardImage,
+    attachBoardVideo,
+    reverseBoardEdit,
+    getBoardEditReceipt,
+  } = wireService.method;
 
   return {
+    uploadDocumentImage: createDocumentImageUpload(post),
+    async reverseEdit({ boardId, commandId, source }, signal) {
+      const response = await request(
+        post,
+        reverseBoardEdit,
+        {
+          boardId,
+          commandId,
+          source: {
+            case: source.kind === 'move' ? 'moveCommandId' : 'editCommandId',
+            value: source.commandId,
+          },
+        },
+        signal,
+      );
+
+      return readBoardEditReceipt(response.receipt, boardId, commandId, resolveArchiveAsset);
+    },
     async editGeometry(command, signal) {
       const { boardId, commandId, operation } = command;
       const response = await request(
@@ -144,6 +185,20 @@ export function createWhiteboardEditService(
       );
       confirmCreated(receipt, [objectId]);
       confirmContent(receipt, objectId, 'image');
+
+      return receipt;
+    },
+    async attachVideo(command, signal) {
+      const { boardId, commandId, objectId } = command;
+      const response = await request(post, attachBoardVideo, command, signal);
+      const receipt = readBoardEditReceipt(
+        response.receipt,
+        boardId,
+        commandId,
+        resolveArchiveAsset,
+      );
+      confirmCreated(receipt, [objectId]);
+      confirmContent(receipt, objectId, 'video');
 
       return receipt;
     },

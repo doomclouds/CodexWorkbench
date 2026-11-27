@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/catalog/service';
 import {
   BoardEditRejectionReason,
   BoardEditService,
@@ -14,6 +15,7 @@ import {
   WhiteboardService,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
 import { expect, test } from 'vitest';
+import { pngImage } from '../fixtures/board-image-bytes.js';
 import { seedLargeHistoricalPayloads } from '../support/board-restore-database.js';
 import { callWhiteboard, sendWhiteboardRequest } from '../support/whiteboard-client.js';
 import {
@@ -32,7 +34,9 @@ import { useWhiteboardTestServer } from './whiteboard-test-server.js';
 
 const server = useWhiteboardTestServer();
 const { getBoardScene, moveObjects } = WhiteboardService.method;
-const { editBoardGeometry, editObjectContent, getBoardEditReceipt } = BoardEditService.method;
+const { createBoard, manageBoard } = BoardCatalogService.method;
+const { attachBoardImage, editBoardGeometry, editObjectContent, getBoardEditReceipt } =
+  BoardEditService.method;
 const {
   listBoardVersions,
   getBoardVersionScene,
@@ -81,6 +85,7 @@ test('exposes the initial baseline, fixed scene and separately loaded payloads t
     versions: [{ revision: 0n, kind: BoardVersionKind.BASELINE }],
   });
   expect(initial.nextBeforeRevision).toBeUndefined();
+  expect(initial.versions[0]?.savedAtMillis).toBeUndefined();
 
   expect(await move(shapeId, 0n, 40, 'move-history-shape')).toBe(1n);
   const current = await callWhiteboard(server.address, viewerId, getBoardScene, board);
@@ -119,6 +124,53 @@ test('exposes the initial baseline, fixed scene and separately loaded payloads t
   });
   expect(earlier.versions.map(({ revision }) => revision)).toEqual([0n]);
   expect(earlier.nextBeforeRevision).toBeUndefined();
+});
+
+test('uses the persisted creation title and timestamp for a known initial revision after rename and edit', async () => {
+  const { receipt } = await callWhiteboard(server.address, editorId, createBoard, {
+    commandId: 'create-history-baseline',
+    title: 'Original title',
+  });
+  assert.equal(receipt?.outcome.case, 'created');
+  const { boardId, updatedAtMillis, entryVersion } = receipt.outcome.value;
+  assert.ok(updatedAtMillis !== undefined);
+  const initial = await callWhiteboard(server.address, editorId, listBoardVersions, { boardId });
+  const original = {
+    revision: 0n,
+    kind: BoardVersionKind.BASELINE,
+    savedAtMillis: updatedAtMillis,
+    title: 'Original title',
+  };
+  expect(initial.versions).toMatchObject([original]);
+
+  const renamed = await callWhiteboard(server.address, editorId, manageBoard, {
+    boardId,
+    commandId: 'rename-for-history',
+    expectedEntryVersion: entryVersion,
+    operation: { case: 'title', value: 'New title' },
+  });
+  expect(renamed.receipt?.outcome.case).toBe('changed');
+  const afterRename = await callWhiteboard(server.address, editorId, listBoardVersions, {
+    boardId,
+  });
+  expect(afterRename.versions).toMatchObject([original]);
+
+  const changed = await callWhiteboard(server.address, editorId, attachBoardImage, {
+    boardId,
+    commandId: 'edit-after-rename',
+    objectId: 'starting-content',
+    displayName: 'Figure.png',
+    geometry: { x: 0, y: 0, width: 100, height: 80 },
+    content: pngImage,
+  });
+  expect(changed.receipt?.outcome.case).toBe('applied');
+  const history = await callWhiteboard(server.address, editorId, listBoardVersions, { boardId });
+  expect(history.versions).toMatchObject([{ revision: 1n, title: 'New title' }, original]);
+  const opening = await callWhiteboard(server.address, editorId, getBoardVersionScene, {
+    boardId,
+    revision: 0n,
+  });
+  expect(opening.scene).toMatchObject({ title: 'Original title', boardRevision: 0n, objects: [] });
 });
 
 test('exports the saved title, geometry and payload instead of the current geometry', async () => {

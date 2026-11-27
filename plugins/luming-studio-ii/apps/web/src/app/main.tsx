@@ -21,6 +21,7 @@ import {
 import {
   boardRoomClock,
   copyShareLink,
+  createBoardDraftStorage,
   createCommandId,
   downloadBoardFile,
   isGuestAccessDenied,
@@ -28,12 +29,17 @@ import {
   postGuestProtobuf,
   postProtobuf,
   prepareBoardImage,
+  prepareBoardVideo,
+  readCanvasClipboard,
+  readArchivedDocumentAsset,
+  readDocumentImageFile,
   readHtmlSource,
   readPreferences,
   readStudioGuestEntry,
   readStudioLocation,
   rememberLayout,
   rememberTheme,
+  renderBrowserVectorExport,
   replaceStudioGuestLocation,
   resolveArchiveAssetUrl,
   subscribeGuestAccessRefresh,
@@ -50,9 +56,13 @@ if (!container) {
 }
 
 const service = createWhiteboardService(postProtobuf, resolveArchiveAssetUrl);
-const exportBoard = createWhiteboardExportService(postProtobuf);
+const exportBoard = createWhiteboardExportService(postProtobuf, renderBrowserVectorExport);
 const editService = createWhiteboardEditService(postProtobuf, resolveArchiveAssetUrl);
-const historyService = createBoardHistoryService(postProtobuf, resolveArchiveAssetUrl);
+const historyService = createBoardHistoryService(
+  postProtobuf,
+  resolveArchiveAssetUrl,
+  renderBrowserVectorExport,
+);
 const feedbackService = createBoardFeedbackService(postProtobuf);
 const suggestions = createSuggestionService(postProtobuf, editService, resolveArchiveAssetUrl);
 const catalog = createBoardCatalogService(postProtobuf);
@@ -75,9 +85,13 @@ function roomFactory(service: BoardRoomService) {
 const guest = {
   sharingService: createBoardSharingService(postGuestProtobuf),
   service: createWhiteboardService(postGuestProtobuf, resolveArchiveAssetUrl),
-  exportBoard: createWhiteboardExportService(postGuestProtobuf),
+  exportBoard: createWhiteboardExportService(postGuestProtobuf, renderBrowserVectorExport),
   editService: createWhiteboardEditService(postGuestProtobuf, resolveArchiveAssetUrl),
-  historyService: createBoardHistoryService(postGuestProtobuf, resolveArchiveAssetUrl),
+  historyService: createBoardHistoryService(
+    postGuestProtobuf,
+    resolveArchiveAssetUrl,
+    renderBrowserVectorExport,
+  ),
   feedbackService: createBoardFeedbackService(postGuestProtobuf),
   createRoomSession: roomFactory(guestRoomService),
   readEntry: readStudioGuestEntry,
@@ -117,6 +131,11 @@ createRoot(container).render(
     service={service}
     exportBoard={exportBoard}
     downloadExport={downloadBoardFile}
+    downloadObjectFile={downloadBoardFile}
+    clipboard={{ writeText: copyShareLink, readText: readCanvasClipboard }}
+    localDrafts={{ actorId: 'owner', storage: createBoardDraftStorage(createCommandId) }}
+    readDocumentAsset={readArchivedDocumentAsset}
+    readDocumentImageFile={readDocumentImageFile}
     editService={editService}
     historyService={historyService}
     feedbackService={feedbackService}
@@ -125,6 +144,7 @@ createRoot(container).render(
     reviewSourceMode="copy"
     createRoomSession={roomFactory(roomService)}
     prepareImage={prepareBoardImage}
+    prepareVideo={prepareBoardVideo}
     readHtmlSource={readHtmlSource}
     archiveImport={archiveImport}
     sharingService={sharingService}

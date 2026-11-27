@@ -1,14 +1,17 @@
 import type {
   EditBoardGeometryOperation,
+  WhiteboardArrangePreset,
   WhiteboardInitialPayload,
   WhiteboardLayerDirection,
   WhiteboardObjectDraft,
+  WhiteboardStylePatch,
 } from '../../data/whiteboard/index.js';
 import type {
   CanvasConnectorHead,
   CanvasEditIntent,
   CanvasObject,
   CanvasObjectDraft,
+  CanvasPoint,
 } from '../../ui/domain/canvas/index.js';
 
 export type GeometrySelectionAction =
@@ -16,6 +19,11 @@ export type GeometrySelectionAction =
   | { readonly kind: 'delete' }
   | { readonly kind: 'reorder'; readonly direction: WhiteboardLayerDirection }
   | { readonly kind: 'duplicate' }
+  | { readonly kind: 'group' }
+  | { readonly kind: 'ungroup' }
+  | { readonly kind: 'createSection' }
+  | { readonly kind: 'arrange'; readonly preset: WhiteboardArrangePreset }
+  | { readonly kind: 'style'; readonly patch: WhiteboardStylePatch }
   | {
       readonly kind: 'connectorHead';
       readonly end: 'start' | 'end';
@@ -23,6 +31,58 @@ export type GeometrySelectionAction =
     };
 
 const duplicateOffset = { x: 32, y: 32 };
+const adjacentGap = 24;
+const literalPaint = /^(?:transparent|#[\da-f]{3,4}|#[\da-f]{6}|#[\da-f]{8})$/iu;
+
+function persistedPaint(value: string | undefined) {
+  return value !== undefined && literalPaint.test(value) ? value : undefined;
+}
+
+export interface BoardClipboardSelection {
+  readonly sourceBoardId: string;
+  readonly sourceRevision: bigint;
+  readonly objectIds: readonly string[];
+}
+
+export function pasteOperation(source: BoardClipboardSelection, commandId: string) {
+  const { sourceBoardId, sourceRevision, objectIds } = source;
+  return {
+    kind: 'paste',
+    sourceBoardId,
+    sourceRevision,
+    targets: objectIds.map((sourceObjectId, index) => ({
+      sourceObjectId,
+      newObjectId: commandId + '-' + (index + 1),
+    })),
+    delta: duplicateOffset,
+  } satisfies EditBoardGeometryOperation;
+}
+
+export function clipboardTextDraft(text: string, point: CanvasPoint): CanvasObjectDraft {
+  const height = Math.max(70, Math.min(600, text.split('\n').length * 30));
+  return {
+    kind: 'text',
+    label: '',
+    geometry: { ...point, width: 380, height, rotation: 0 },
+    metadata: { text },
+  };
+}
+
+export function adjacentTextDraft(
+  source: CanvasObject,
+  style?: WhiteboardStylePatch,
+): CanvasObjectDraft {
+  const { x, y, width, height } = source.geometry;
+  const point =
+    source.kind === 'text' ? { x, y: y + height + adjacentGap } : { x: x + width + adjacentGap, y };
+
+  return {
+    ...source,
+    label: '',
+    geometry: { ...point, width, height, rotation: 0 },
+    metadata: { text: '', textColor: style?.textColor, fontSize: style?.fontSize },
+  };
+}
 
 function outlineFor(draft: CanvasObjectDraft): WhiteboardObjectDraft['detail'] {
   if (draft.kind === 'shape') {
@@ -39,9 +99,23 @@ function outlineFor(draft: CanvasObjectDraft): WhiteboardObjectDraft['detail'] {
   }
 }
 
+function initialText(metadata?: Readonly<Record<string, unknown>>): WhiteboardInitialPayload {
+  const { text, textColor, fontSize } = metadata ?? {};
+  return {
+    kind: 'text',
+    value: {
+      text: typeof text === 'string' ? text : '',
+      color: typeof textColor === 'string' ? textColor : undefined,
+      fontSize: typeof fontSize === 'number' ? fontSize : undefined,
+    },
+  };
+}
+
 function payloadFor(draft: CanvasObjectDraft): WhiteboardInitialPayload | undefined {
-  if (draft.kind === 'text' || draft.kind === 'note') {
-    return { kind: 'text', value: { text: '' } };
+  const textKind = draft.kind === 'text' || draft.kind === 'note';
+  const explicitText = typeof draft.metadata?.text === 'string';
+  if (textKind || explicitText) {
+    return initialText(draft.metadata);
   }
   if (draft.kind === 'document') {
     return {
@@ -66,12 +140,19 @@ function payloadFor(draft: CanvasObjectDraft): WhiteboardInitialPayload | undefi
 
     return typeof sticker === 'string' ? { kind: 'sticker', value: { id: sticker } } : undefined;
   }
+  if (draft.kind === 'link') {
+    const href = draft.metadata?.href;
+    return typeof href === 'string' ? { kind: 'link', value: { href } } : undefined;
+  }
   if (draft.kind === 'ink') {
     return { kind: 'ink', points: draft.ink.points };
   }
 }
 
-function createOperation(id: string, draft: CanvasObjectDraft): EditBoardGeometryOperation {
+function createOperation(
+  id: string,
+  draft: CanvasObjectDraft,
+): Extract<EditBoardGeometryOperation, { kind: 'create' }> {
   const { kind, label, geometry, fill, stroke, strokeWidth, dashed, hollow } = draft;
 
   return {
@@ -81,7 +162,13 @@ function createOperation(id: string, draft: CanvasObjectDraft): EditBoardGeometr
       kind,
       label,
       geometry,
-      appearance: { fill, stroke, strokeWidth, dashed: dashed ?? false, hollow: hollow ?? false },
+      appearance: {
+        fill: persistedPaint(fill),
+        stroke: persistedPaint(stroke),
+        strokeWidth,
+        dashed: dashed ?? false,
+        hollow: hollow ?? false,
+      },
       detail: outlineFor(draft),
     },
     initialPayload: payloadFor(draft),
@@ -93,8 +180,26 @@ export function geometryOperation(
   commandId: string,
 ): EditBoardGeometryOperation | undefined {
   switch (intent.kind) {
-    case 'create':
-      return intent.link ? undefined : createOperation(commandId, intent.object);
+    case 'create': {
+      const operation = createOperation(commandId, intent.object);
+      const link = intent.link;
+      if (!link) {
+        return operation;
+      }
+
+      return {
+        ...operation,
+        attachment: {
+          source: {
+            id: link.source.objectId,
+            expectedGeometryVersion: BigInt(link.source.expectedVersion),
+          },
+          sourcePort: link.source.port,
+          targetPort: link.target.port,
+          connectorId: commandId + '-connector',
+        },
+      };
+    }
     case 'duplicate':
       return {
         kind: 'duplicate',
@@ -126,12 +231,16 @@ export function selectionOperation(
   objectsById: ReadonlyMap<string, CanvasObject>,
   revision: bigint,
   commandId: string,
+  payloadVersion: (objectId: string) => bigint | undefined,
 ): EditBoardGeometryOperation | undefined {
   const targets = [];
   for (const id of new Set(ids)) {
     const object = objectsById.get(id);
     const changesLockedGeometry =
-      object?.locked && action.kind !== 'changeLock' && action.kind !== 'duplicate';
+      object?.locked &&
+      action.kind !== 'changeLock' &&
+      action.kind !== 'duplicate' &&
+      action.kind !== 'style';
 
     if (!object || changesLockedGeometry) {
       return undefined;
@@ -147,7 +256,21 @@ export function selectionOperation(
   switch (action.kind) {
     case 'changeLock':
     case 'delete':
+    case 'ungroup':
+    case 'arrange':
       return { ...action, targets };
+    case 'group':
+      return { kind: 'group', targets, groupId: commandId };
+    case 'createSection':
+      return { kind: 'createSection', targets, sectionId: commandId };
+    case 'style':
+      return {
+        ...action,
+        targets: targets.map((target) => ({
+          target,
+          expectedPayloadVersion: payloadVersion(target.id),
+        })),
+      };
     case 'reorder':
       return { ...action, targets, expectedBoardRevision: revision };
     case 'duplicate':
@@ -191,6 +314,12 @@ export function selectionForOperation(
   }
   if (operation.kind === 'duplicate') {
     return operation.targets.map(({ newObjectId }) => newObjectId);
+  }
+  if (operation.kind === 'paste') {
+    return operation.targets.map(({ newObjectId }) => newObjectId);
+  }
+  if (operation.kind === 'createSection') {
+    return [operation.sectionId];
   }
   if (operation.kind === 'delete') {
     return [];

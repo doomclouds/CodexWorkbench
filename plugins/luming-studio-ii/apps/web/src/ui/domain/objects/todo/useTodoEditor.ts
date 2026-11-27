@@ -40,6 +40,8 @@ export class TodoContentConflict extends Error {
 const saveError = '清单草稿未保存。';
 const invalidEdit = '任务更改无效。';
 const tooManyLines = '粘贴的任务过多，请分批添加。';
+const textTooLong = '任务文字须在 2,000 UTF-8 字节以内。';
+const utf8 = new TextEncoder();
 
 function newestSnapshot(value: TodoObjectSnapshot, receipt?: TodoObjectSnapshot) {
   return receipt && receipt.revision > value.revision ? receipt : value;
@@ -71,11 +73,13 @@ function validReceipt(receipt: TodoObjectSnapshot | false, edit: TodoObjectEdit)
 export function useTodoEditor({
   value,
   onEdit,
+  canSave,
   editable,
   dragging,
   editRequest,
   onEditingChange,
 }: Pick<TodoObjectProps, 'value' | 'onEdit' | 'editRequest' | 'onEditingChange'> & {
+  canSave: boolean;
   editable: boolean;
   dragging: boolean;
 }) {
@@ -89,7 +93,8 @@ export function useTodoEditor({
   const saving = useRef(false);
   const editorFocused = useRef(false);
   const current = newestSnapshot(value, receipt);
-  const writable = editable && !busy && !pending;
+  const canCommit = canSave && !busy && !pending;
+  const writable = editable && canCommit;
   const reconciled = !busy && canReconcile(current, pending);
   if (reconciled) {
     setPending(undefined);
@@ -123,7 +128,7 @@ export function useTodoEditor({
   }
 
   async function save(change: PendingTodoEdit) {
-    if (!editable || !onEdit || saving.current) {
+    if (!canSave || !onEdit || saving.current) {
       return;
     }
 
@@ -164,11 +169,11 @@ export function useTodoEditor({
     });
   }
 
-  function changeRows(changes: readonly TodoObjectChange[], base = current, keepAdding = false) {
-    if (!writable || saving.current) {
-      return;
-    }
-
+  function submitRows(
+    changes: readonly TodoObjectChange[],
+    base: TodoObjectSnapshot,
+    keepAdding = false,
+  ) {
     const edit = editOf(base, changes);
     try {
       const preview = applyTodoObjectEdit(base, edit);
@@ -180,6 +185,12 @@ export function useTodoEditor({
     }
   }
 
+  function changeRows(changes: readonly TodoObjectChange[]) {
+    if (writable && !saving.current) {
+      submitRows(changes, current);
+    }
+  }
+
   function addRows(lines: readonly string[], base: TodoObjectSnapshot, keepAdding: boolean) {
     const size = base.items.length + lines.length;
     if (size > maxTodoItems) {
@@ -187,11 +198,11 @@ export function useTodoEditor({
       return;
     }
 
-    changeRows(lines.map(insertedItem), base, keepAdding && size < maxTodoItems);
+    submitRows(lines.map(insertedItem), base, keepAdding && size < maxTodoItems);
   }
 
   function commit(keepAdding = false) {
-    if (!draft || !writable || saving.current) {
+    if (!draft || !canCommit || saving.current) {
       return;
     }
 
@@ -213,7 +224,7 @@ export function useTodoEditor({
       return;
     }
 
-    changeRows([change], base);
+    submitRows([change], base);
   }
 
   function paste(text: string) {
@@ -250,6 +261,9 @@ export function useTodoEditor({
 
   function setText(text: string) {
     setDraft((previous) => (previous ? { ...previous, text } : undefined));
+    const invalidText =
+      draft?.target.kind !== 'title' && utf8.encode(text).byteLength > maxTodoTextBytes;
+    setError(invalidText ? textTooLong : undefined);
   }
 
   function trackFocus(focused: boolean) {

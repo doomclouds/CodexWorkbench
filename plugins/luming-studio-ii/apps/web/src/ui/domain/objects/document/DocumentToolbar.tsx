@@ -1,14 +1,8 @@
+import { useEffect, useEffectEvent, useImperativeHandle, useRef } from 'react';
 import type { KeyboardEvent, ReactNode, Ref } from 'react';
-import {
-  Button,
-  SearchField,
-  Select,
-  StatusText,
-  TextField,
-  Toolbar,
-} from '../../../base/index.js';
+import { Button, Select, StatusText, Toolbar } from '../../../base/index.js';
 import type { SearchFieldHandle } from '../../../base/index.js';
-import type { DocumentActivity, DocumentDraft, DocumentObjectProps } from './contracts.js';
+import type { DocumentActivity, DocumentObjectProps } from './contracts.js';
 import { blockText, documentText, documentTitleLimit, untitledDocument } from './model.js';
 import type { useDocumentDraft } from './useDocumentDraft.js';
 import type { useDocumentViewport } from './useDocumentViewport.js';
@@ -27,8 +21,10 @@ interface EditorToolbarProps {
   readonly onRead: () => void;
   readonly onOpen: () => void;
   readonly onToggleExport: () => void;
+  readonly onCloseExport: () => void;
   readonly onExport?: DocumentObjectProps['onExport'];
   readonly onAnnotate?: () => void;
+  readonly canAnnotate: boolean;
   readonly onCompare: () => void;
 }
 
@@ -112,23 +108,28 @@ function DocumentSaveStatus({ draft }: { readonly draft: EditorToolbarProps['dra
     return <StatusText message="保存中" busy announcement="polite" />;
   }
 
-  return <StatusText message={draft.dirty ? '待保存' : '已保存'} />;
+  return <StatusText message={draft.dirty ? '待保存' : '已保存'} announcement="polite" />;
 }
 
 function DocumentCanvasSaveStatus({ draft }: { readonly draft: EditorToolbarProps['draft'] }) {
   const confirmed = !draft.failure && !draft.saving && !draft.dirty;
 
   return (
-    <span className="studio-document-canvas-save">
+    <span
+      className="studio-document-canvas-save"
+      data-document-save-failed={Boolean(draft.failure) || undefined}
+    >
       {confirmed && (
         <svg
-          viewBox="0 0 16 16"
+          viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.5"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="m2 8 4 4 8-8" />
+          <path d="M20 6 9 17l-5-5" />
         </svg>
       )}
       <DocumentSaveStatus draft={draft} />
@@ -141,18 +142,66 @@ function DocumentExport({
   iconOnly,
   exportOpen,
   onToggleExport,
+  onCloseExport,
   onExport,
-}: Pick<EditorToolbarProps, 'exportOpen' | 'iconOnly' | 'onToggleExport'> & {
-  readonly draft: DocumentDraft;
+}: Pick<
+  EditorToolbarProps,
+  'draft' | 'exportOpen' | 'iconOnly' | 'onToggleExport' | 'onCloseExport'
+> & {
   readonly onExport: ExportAction;
 }) {
-  function exportDocument(format: 'html' | 'json') {
-    onExport(format, draft);
-    onToggleExport();
+  const menu = useRef<HTMLDivElement>(null);
+  const activeExport = useRef<AbortController | undefined>(undefined);
+  const closeMenu = useEffectEvent(onCloseExport);
+
+  useEffect(() => () => activeExport.current?.abort(), []);
+  useEffect(() => {
+    const node = menu.current;
+    if (!exportOpen || !node) {
+      return;
+    }
+
+    function closeOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !node?.contains(event.target)) {
+        closeMenu();
+      }
+    }
+
+    const owner = node.ownerDocument;
+    owner.addEventListener('pointerdown', closeOutside);
+
+    return () => owner.removeEventListener('pointerdown', closeOutside);
+  }, [exportOpen]);
+
+  async function exportDocument(format: 'html' | 'json', signal: AbortSignal) {
+    const value = await draft.prepareExport();
+    if (value && !signal.aborted) {
+      const { title, document } = value;
+      await onExport(format, { title, document }, signal);
+    }
+  }
+
+  function handleExport(format: 'html' | 'json') {
+    if (activeExport.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+    activeExport.current = controller;
+    onCloseExport();
+    exportDocument(format, controller.signal)
+      .finally(() => {
+        activeExport.current = undefined;
+      })
+      .catch((failure: unknown) => {
+        if (!controller.signal.aborted) {
+          draft.reportFailure(failure);
+        }
+      });
   }
 
   return (
-    <div className="studio-document-export">
+    <div ref={menu} className="studio-document-export">
       <Button
         label="导出文档"
         variant="ghost"
@@ -161,9 +210,13 @@ function DocumentExport({
         onActivate={onToggleExport}
       />
       {exportOpen && (
-        <div className="studio-document-export-options" role="group" aria-label="文档导出格式">
-          <Button label="全文 HTML" onActivate={() => exportDocument('html')} />
-          <Button label="块 JSON" onActivate={() => exportDocument('json')} />
+        <div className="studio-document-export-options" role="menu" aria-label="文档导出格式">
+          <button type="button" role="menuitem" onClick={() => handleExport('html')}>
+            全文 HTML
+          </button>
+          <button type="button" role="menuitem" onClick={() => handleExport('json')}>
+            块 JSON
+          </button>
         </div>
       )}
     </div>
@@ -176,7 +229,8 @@ function DocumentModeAction({
   readOnly,
   onEdit,
   onRead,
-}: Pick<EditorToolbarProps, 'mode' | 'iconOnly' | 'readOnly' | 'onEdit' | 'onRead'>) {
+  onOpen,
+}: Pick<EditorToolbarProps, 'mode' | 'iconOnly' | 'readOnly' | 'onEdit' | 'onRead' | 'onOpen'>) {
   const variant = iconOnly ? 'ghost' : undefined;
   if (mode === 'edit') {
     return (
@@ -189,8 +243,16 @@ function DocumentModeAction({
       />
     );
   }
-  if (readOnly && !iconOnly) {
-    return null;
+  if (readOnly) {
+    return (
+      <Button
+        label="阅读文档"
+        icon={iconOnly ? <DocumentReadIcon /> : undefined}
+        iconOnly={iconOnly}
+        variant={variant}
+        onActivate={onOpen}
+      />
+    );
   }
 
   return (
@@ -199,7 +261,6 @@ function DocumentModeAction({
       icon={iconOnly ? <DocumentEditIcon /> : undefined}
       iconOnly={iconOnly}
       variant={variant}
-      disabled={readOnly}
       onActivate={onEdit}
     />
   );
@@ -241,8 +302,10 @@ export function DocumentToolbar({
   onOpen,
   exportOpen,
   onToggleExport,
+  onCloseExport,
   onExport,
   onAnnotate,
+  canAnnotate,
   onCompare,
 }: EditorToolbarProps) {
   function handleRetry() {
@@ -259,6 +322,7 @@ export function DocumentToolbar({
           readOnly={readOnly}
           onEdit={onEdit}
           onRead={onRead}
+          onOpen={onOpen}
         />
         {mode === 'inline' && (
           <DocumentExpandAction iconOnly={iconOnly} expandControl={expandControl} onOpen={onOpen} />
@@ -266,10 +330,11 @@ export function DocumentToolbar({
         {outline}
         {onExport && (
           <DocumentExport
-            draft={draft.draft}
+            draft={draft}
             iconOnly={iconOnly}
             exportOpen={exportOpen}
             onToggleExport={onToggleExport}
+            onCloseExport={onCloseExport}
             onExport={onExport}
           />
         )}
@@ -282,8 +347,13 @@ export function DocumentToolbar({
             disabled
           />
         )}
-        {onAnnotate && mode !== 'edit' && (
-          <Button label="标注所选段落" variant="ghost" onActivate={onAnnotate} />
+        {onAnnotate && !iconOnly && mode !== 'edit' && (
+          <Button
+            label="标注所选段落"
+            variant="ghost"
+            disabled={!canAnnotate}
+            onActivate={onAnnotate}
+          />
         )}
         {!iconOnly && mode === 'edit' && <DocumentSaveStatus draft={draft} />}
       </Toolbar>
@@ -306,19 +376,36 @@ interface DocumentReaderToolsProps {
 
 function outlineOptions(headings: ReturnType<typeof useDocumentViewport>['headings']) {
   return [
-    { id: '', label: '跳到标题' },
-    ...headings.map((block) => ({ id: block.id, label: blockText(block) || untitledDocument })),
+    { id: '', label: '文档目录', disabled: true },
+    ...headings.map((block) => ({ id: block.id, label: blockText(block) || '未命名标题' })),
   ];
 }
 
 export function DocumentOutlineSelect({ viewport }: Pick<DocumentReaderToolsProps, 'viewport'>) {
   return (
     <Select
-      label="文档目录"
+      label="跳转文档标题"
       value=""
       options={outlineOptions(viewport.headings)}
       onValueChange={viewport.reveal}
     />
+  );
+}
+
+function DocumentSearchIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="7" />
+      <path d="m16 16 4 4" />
+    </svg>
   );
 }
 
@@ -327,38 +414,69 @@ export function DocumentReaderTools({
   searchField,
   showOutline = true,
 }: DocumentReaderToolsProps) {
-  const { headings, find, matches, matchIndex, handleFind, advance } = viewport;
+  const { headings, find, matches, matchIndex, handleFind, advance, reveal } = viewport;
+  const input = useRef<HTMLInputElement>(null);
+  const current = matches[Math.min(matchIndex, matches.length - 1)];
+  const count = matches.length;
+  const position = current ? String(matchIndex + 1) + ' / ' : '';
 
-  function handleSearchKey(event: KeyboardEvent<HTMLDivElement>) {
-    const searchInput = event.target instanceof HTMLInputElement;
-    if (searchInput && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+  useImperativeHandle(
+    searchField,
+    () => ({
+      focus() {
+        input.current?.focus();
+      },
+    }),
+    [],
+  );
+
+  function handleSearchKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
       event.preventDefault();
       advance(event.shiftKey ? -1 : 1);
     }
   }
 
   return (
-    <div className="studio-document-reader-tools" onKeyDown={handleSearchKey}>
-      <SearchField
-        label="查找文档"
-        clearLabel="清空查找"
+    <div className="studio-document-reader-tools">
+      <DocumentSearchIcon />
+      <input
+        ref={input}
+        type="search"
+        aria-label="文档内查找"
+        placeholder="查找文档…"
         value={find}
-        onValueChange={handleFind}
-        ref={searchField}
+        onChange={(event) => handleFind(event.currentTarget.value)}
+        onKeyDown={handleSearchKey}
       />
-      {find.trim() && (
-        <StatusText
-          message={
-            matches.length ? String(matchIndex + 1) + ' / ' + matches.length : '没有匹配结果'
-          }
-          announcement="polite"
-        />
-      )}
-      {matches.length > 1 && (
+      {find.trim() && <StatusText message={position + count + ' 处'} announcement="polite" />}
+      {current && (
         <>
-          <Button label="上一处" variant="ghost" onActivate={() => advance(-1)} />
-          <Button label="下一处" variant="ghost" onActivate={() => advance(1)} />
+          <Button label="定位" variant="ghost" onActivate={() => reveal(current.id)} />
+          <Button
+            label="上一个匹配"
+            iconOnly
+            icon="‹"
+            variant="ghost"
+            onActivate={() => advance(-1)}
+          />
+          <Button
+            label="下一个匹配"
+            iconOnly
+            icon="›"
+            variant="ghost"
+            onActivate={() => advance(1)}
+          />
         </>
+      )}
+      {find && (
+        <Button
+          label="清除文档查找"
+          iconOnly
+          icon="×"
+          variant="ghost"
+          onActivate={() => handleFind('')}
+        />
       )}
       {showOutline && headings.length > 0 && <DocumentOutlineSelect viewport={viewport} />}
     </div>
@@ -376,24 +494,30 @@ export function DocumentTitle({
   readonly readOnly: boolean;
   readonly inline: boolean;
 }) {
-  function handleTitleChange(title: string) {
-    draft.change({ title: title.slice(0, documentTitleLimit) });
-  }
-
-  if (editing) {
+  const title = draft.draft.title || untitledDocument;
+  if (!inline) {
     return (
-      <TextField
-        label="文档名称"
+      <input
+        className="studio-document-title"
+        aria-label="文档标题"
         value={draft.draft.title}
-        readOnly={readOnly}
-        onValueChange={handleTitleChange}
+        readOnly={!editing || readOnly}
+        maxLength={documentTitleLimit}
+        onChange={(event) =>
+          draft.change({ title: event.currentTarget.value.slice(0, documentTitleLimit) })
+        }
       />
     );
   }
 
   return (
-    <h2 className="studio-document-title" data-canvas-drag-surface={inline ? 'title' : undefined}>
-      {draft.draft.title || untitledDocument}
+    <h2
+      className="studio-document-title"
+      aria-label="文档标题"
+      title={title}
+      data-canvas-drag-surface="title"
+    >
+      {title}
     </h2>
   );
 }
@@ -423,7 +547,7 @@ export function DocumentComparison({
   }
 
   return (
-    <section className="studio-document-comparison" aria-label="比较文档草稿">
+    <section className="studio-document-comparison" role="dialog" aria-label="比较文档草稿">
       <div>
         <h3>最新已保存内容</h3>
         <p>{model.confirmed.title}</p>

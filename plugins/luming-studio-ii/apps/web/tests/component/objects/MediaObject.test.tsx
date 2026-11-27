@@ -2,8 +2,10 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   imageExtension,
+  linkExtension,
   LinkObject,
   MediaObject,
+  videoExtension,
 } from '../../../src/ui/domain/objects/media/index.js';
 import type {
   ImageObjectProps,
@@ -256,6 +258,101 @@ describe('LinkObject', () => {
       expect(fixture.host.querySelector('a')).toBeNull();
     },
   );
+});
+
+describe('legacy media canvas controls', () => {
+  const geometry = { x: 0, y: 0, width: 100, height: 55, rotation: 0 };
+
+  it('keeps zoomed-out link cards compact and enables media controls when expanded', () => {
+    const Link = linkExtension.View;
+    const Video = videoExtension.View;
+    const request = vi.fn<Parameters<typeof Link>[0]['request']>();
+    const common = {
+      geometry,
+      zoom: 0.1,
+      selected: true,
+      interactive: false,
+      readOnly: true,
+      request,
+    };
+    const link = {
+      ...common,
+      object: { kind: 'link' as const, label: '架构规范', geometry },
+      payload: { version: 1, value: { href: 'https://example.test/guide' } },
+    };
+    const player = {
+      ...common,
+      object: { kind: 'video' as const, label: '播放器', geometry },
+      payload: { version: 1, value: { src: video } },
+    };
+    fixture.render(
+      <>
+        <Link {...link} />
+        <Video {...player} />
+      </>,
+    );
+    expect(element('[title="架构规范"]')).toBeTruthy();
+    expect(fixture.host.querySelector('strong, a')).toBeNull();
+    expect(element<HTMLVideoElement>('video').controls).toBe(false);
+
+    fixture.render(
+      <>
+        <Link {...link} interactive expanded />
+        <Video {...player} expanded />
+      </>,
+    );
+    expect(element('strong').textContent).toBe('架构规范');
+    expect(element('a').hasAttribute('data-canvas-native')).toBe(true);
+    expect(element<HTMLVideoElement>('video').controls).toBe(true);
+  });
+
+  it('edits a link using the original payload version and keeps the draft after a rejected receipt', async () => {
+    const View = linkExtension.View;
+    const request = vi
+      .fn<Parameters<typeof View>[0]['request']>()
+      .mockResolvedValueOnce({ ok: false, message: '链接版本变化' })
+      .mockResolvedValueOnce({
+        ok: true,
+        payload: { version: 6, value: { href: 'https://example.test/new' } },
+      });
+    const onRetentionChange = vi.fn();
+    const props = {
+      object: { kind: 'link' as const, label: '架构规范', geometry },
+      geometry,
+      zoom: 1,
+      selected: true,
+      interactive: true,
+      readOnly: false,
+      editRequest: 1,
+      request,
+      onRetentionChange,
+    };
+    fixture.render(
+      <View {...props} payload={{ version: 4, value: { href: 'https://example.test/old' } }} />,
+    );
+    const address = element<HTMLInputElement>('dialog input[placeholder="https://"]');
+    expect(document.activeElement).toBe(address);
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    act(() => {
+      descriptor?.set?.call(address, 'https://example.test/new');
+      address.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    fixture.render(
+      <View {...props} payload={{ version: 5, value: { href: 'https://example.test/remote' } }} />,
+    );
+    await act(async () => button('保存到白板').click());
+
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      name: 'link.commit',
+      expectedVersion: 4,
+      value: { title: '架构规范', href: 'https://example.test/new' },
+    });
+    expect(element('[role="alert"]').textContent).toBe('链接版本变化');
+    expect(address.value).toBe('https://example.test/new');
+    await act(async () => button('保存到白板').click());
+    expect(fixture.host.querySelector('dialog')).toBeNull();
+    expect(onRetentionChange.mock.calls).toEqual([[true], [false]]);
+  });
 });
 
 describe('imageExtension', () => {

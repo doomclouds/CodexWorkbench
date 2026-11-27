@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import type { MessageInitShape } from '@bufbuild/protobuf';
+import { create, type MessageInitShape } from '@bufbuild/protobuf';
 import {
+  BoardCreationAttachmentSchema,
   BoardEditRejectionReason,
   BoardEditService,
   BoardLayerDirection,
@@ -41,7 +42,7 @@ type Request = MessageInitShape<typeof EditBoardGeometryRequestSchema>;
 type Operation = NonNullable<Request['operation']>;
 
 const server = useWhiteboardTestServer();
-const { editBoardGeometry, getBoardEditReceipt } = BoardEditService.method;
+const { editBoardGeometry, getBoardEditReceipt, reverseBoardEdit } = BoardEditService.method;
 const { getBoardScene, getObjectPayloads, moveObjects } = WhiteboardService.method;
 const box = { x: 20, y: 30, width: 144, height: 100, rotation: 0 };
 const tableBox = { ...box, width: 480, height: 180 };
@@ -64,7 +65,7 @@ function target(objectId: string, expectedGeometryVersion = 0n) {
   return { objectId, expectedGeometryVersion };
 }
 
-function createShape(objectId: string): Operation {
+function createShape(objectId: string, geometry = box): Extract<Operation, { case: 'create' }> {
   return {
     case: 'create',
     value: {
@@ -72,9 +73,30 @@ function createShape(objectId: string): Operation {
         objectId,
         kind: 'shape',
         label: 'New shape',
-        geometry: box,
+        geometry,
         geometryDetail: { case: 'shape', value: { outline: 'rounded' } },
       },
+    },
+  };
+}
+
+function createAdjacent(
+  sourceId: string,
+  expectedVersion = 0n,
+  connectorId = 'port-arrow',
+): Operation {
+  const { value } = createShape('port-shape', { ...box, x: 240 });
+
+  return {
+    case: 'create',
+    value: {
+      ...value,
+      attachment: create(BoardCreationAttachmentSchema, {
+        source: target(sourceId, expectedVersion),
+        sourcePort: ConnectorPort.RIGHT,
+        targetPort: ConnectorPort.LEFT,
+        connectorId,
+      }),
     },
   };
 }
@@ -171,6 +193,101 @@ test('creates geometry and a version-zero body, then replays its recorded result
     case: 'rejected',
     value: { reason: BoardEditRejectionReason.COMMAND_ID_REUSE },
   });
+});
+
+test('creates a shape and its attached arrow in one durable, reversible edit', async () => {
+  const sourceId = 'port-source';
+  const commandId = 'create-adjacent';
+  applied((await edit('place-port-source', createShape(sourceId))).receipt);
+  const operation = createAdjacent(sourceId);
+  const result = await edit(commandId, operation);
+  const saved = applied(result.receipt);
+  expect(saved).toMatchObject({
+    boardRevision: 2n,
+    changedObjects: [
+      { objectId: 'port-shape', kind: 'shape', geometry: { x: 240 } },
+      {
+        objectId: 'port-arrow',
+        kind: 'connector',
+        geometry: { x: 164, y: 80, width: 76, height: 0 },
+        geometryDetail: {
+          case: 'connector',
+          value: {
+            start: {
+              point: { x: 164, y: 80 },
+              attachment: { objectId: sourceId, port: ConnectorPort.RIGHT },
+            },
+            end: {
+              point: { x: 240, y: 80 },
+              attachment: { objectId: 'port-shape', port: ConnectorPort.LEFT },
+            },
+          },
+        },
+      },
+    ],
+    changedPayloads: [
+      { objectId: 'port-shape', result: { case: 'payload' } },
+      { objectId: 'port-arrow', result: { case: 'payload' } },
+    ],
+  });
+
+  await server.restart();
+  expect((await edit(commandId, operation)).receipt).toEqual(result.receipt);
+  const beforeUndo = await currentScene();
+  expect(beforeUndo.objects).toEqual(expect.arrayContaining(saved.changedObjects));
+  expect(beforeUndo.objects.find(({ objectId }) => objectId === sourceId)?.geometryVersion).toBe(
+    0n,
+  );
+
+  const undone = await callWhiteboard(server.address, editorId, reverseBoardEdit, {
+    boardId: mainBoardId,
+    commandId: 'undo-adjacent',
+    source: { case: 'editCommandId', value: commandId },
+  });
+  const previous = applied(undone.receipt);
+  expect(previous.boardRevision).toBe(3n);
+  expect(new Set(previous.removedObjectIds)).toEqual(new Set(['port-shape', 'port-arrow']));
+  const afterUndo = await currentScene();
+  expect(afterUndo.objects.map(({ objectId }) => objectId)).toContain(sourceId);
+  expect(afterUndo.objects.map(({ objectId }) => objectId)).not.toContain('port-shape');
+  expect(afterUndo.objects.map(({ objectId }) => objectId)).not.toContain('port-arrow');
+});
+
+test('leaves the board unchanged for attachment conflicts, locks, invalid IDs or viewer writes', async () => {
+  const sourceId = 'protected-port-source';
+  applied((await edit('place-protected-port', createShape(sourceId))).receipt);
+  const duplicate = await edit('attach-reused-id', createAdjacent(sourceId, 0n, sourceId));
+  expect(duplicate.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.INVALID_EDIT },
+  });
+
+  const actor = await edit('attach-by-viewer', createAdjacent(sourceId), viewerId);
+  expect(actor.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.FORBIDDEN },
+  });
+
+  const unavailable = await edit('attach-missing-source', createAdjacent('missing-port-source'));
+  expect(unavailable.receipt?.outcome).toMatchObject({ case: 'conflict' });
+
+  applied((await edit('lock-port-source', lock(sourceId, 0n, true))).receipt);
+  const stale = await edit('attach-with-old-port-version', createAdjacent(sourceId));
+  expect(stale.receipt?.outcome).toMatchObject({
+    case: 'conflict',
+    value: { boardRevision: 2n, currentObjects: [{ objectId: sourceId, geometryVersion: 1n }] },
+  });
+
+  const locked = await edit('attach-to-locked-source', createAdjacent(sourceId, 1n));
+  expect(locked.receipt?.outcome).toMatchObject({
+    case: 'rejected',
+    value: { reason: BoardEditRejectionReason.GEOMETRY_LOCKED },
+  });
+
+  const scene = await currentScene();
+  expect(scene.boardRevision).toBe(2n);
+  expect(scene.objects.map(({ objectId }) => objectId)).not.toContain('port-shape');
+  expect(scene.objects.map(({ objectId }) => objectId)).not.toContain('port-arrow');
 });
 
 test('opens a new table with the original dimensions, example cells and stable scoped axes', async () => {

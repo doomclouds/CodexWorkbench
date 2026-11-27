@@ -52,7 +52,8 @@
   min-block-size: 0;
 }
 
-.studio-object-table[data-table-canvas-frame] .studio-object-table-frame {
+.studio-object-table[data-table-canvas-frame]:not([data-table-detail='full'])
+  .studio-object-table-frame {
   position: relative;
   display: block;
   block-size: 100%;
@@ -212,6 +213,16 @@
 
 .studio-object-table-controls [role='toolbar'] > button[aria-pressed='true'] {
   background: var(--studio-ui-hover, ButtonFace);
+}
+
+.studio-ui-anchored-popover:has(> .studio-object-table-link) {
+  z-index: 39;
+  inline-size: min(260px, calc(100vw - 30px));
+  padding: 10px;
+  border-color: var(--board-float-border, GrayText);
+  border-radius: 9px;
+  background: var(--board-float, Canvas);
+  color: var(--board-chrome-text, CanvasText);
 }
 
 [data-table-floating-menu] .studio-ui-action-menu {

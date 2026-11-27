@@ -4,6 +4,7 @@ import { BoardCatalogService } from '@codexworkbench/luming-studio-ii-contracts/
 import {
   BoardEditRejectionReason,
   BoardEditService,
+  BoardLayerDirection,
   BoardTransformKind,
 } from '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 import { BoardSuggestionService } from '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
@@ -492,5 +493,290 @@ test('rejects acceptance if a new attached line would now be removed outside the
   assert.deepEqual(
     board.objects.map((object) => object.objectId),
     [objectId, connectorId],
+  );
+});
+
+function textOperation(text: string, id = objectId) {
+  return {
+    objectId: id,
+    expectedPayloadVersion: 0n,
+    edit: { case: 'text', value: { text } },
+  } as const;
+}
+
+test('previews and commits ordered geometry plus content as one revision and replays both changes', async () => {
+  const boardId = await boardWithText();
+  const proposal = await privateProposal(boardId, [
+    {
+      optionId: 'compound',
+      label: '同时扩大和修改文字',
+      operations: [
+        { edit: { case: 'geometry', value: { operation: widthChange(315) } } },
+        { edit: { case: 'content', value: textOperation('复合方案') } },
+      ],
+    },
+    ...suggestionOptions().slice(1),
+  ]);
+  const choice = { ...chooseWidth(boardId, proposal.proposalId), optionId: 'compound' };
+  const preview = await callWhiteboard(server.address, owner, previewBoardSuggestion, choice);
+  assert.equal(preview.result.case, 'preview');
+  assert.equal(preview.result.value.changedObjects[0]?.geometry?.width, 315);
+  assert.equal(preview.result.value.changedPayloads[0]?.result.case, 'payload');
+  assert.equal((await currentBoard(boardId)).boardRevision, 1n);
+
+  const accepted = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.equal(accepted.receipt?.outcome.case, 'applied');
+  assert.equal(accepted.receipt.outcome.value.boardRevision, 2n);
+  const payload = accepted.receipt.outcome.value.changedPayloads[0]?.result;
+  assert.equal(payload?.case, 'payload');
+  assert.equal(payload.value.body.case, 'text');
+  assert.equal(payload.value.body.value.text, '复合方案');
+  assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 315);
+
+  await server.restart();
+  const replay = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.deepEqual(replay, accepted);
+  assert.equal((await currentBoard(boardId)).boardRevision, 2n);
+});
+
+function resizeAlternatives(id = objectId): NonNullable<SuggestionInput['options']> {
+  return [
+    {
+      optionId: 'wide',
+      label: '方案一',
+      edit: { case: 'geometry', value: { operation: widthChange(210) } },
+    },
+    {
+      optionId: 'larger',
+      label: '方案二',
+      edit: { case: 'geometry', value: { operation: widthChange(330, id) } },
+    },
+  ];
+}
+
+test('replaces an overlapping active option and safely withdraws it with monotonic object versions', async () => {
+  const boardId = await boardWithText();
+  const proposal = await privateProposal(boardId, resizeAlternatives());
+  const first = chooseWidth(boardId, proposal.proposalId);
+  const applied = await callWhiteboard(server.address, owner, acceptBoardSuggestion, first);
+  assert.equal(applied.receipt?.outcome.case, 'applied');
+  assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 210);
+
+  const replacement = {
+    ...first,
+    optionId: 'larger',
+    expectedProposalVersion: 1n,
+    commandId: 'replace-with-larger',
+  };
+  const preview = await callWhiteboard(server.address, owner, previewBoardSuggestion, replacement);
+  assert.equal(preview.result.case, 'preview');
+  assert.equal(preview.result.value.changedObjects[0]?.geometry?.width, 330);
+  assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 210);
+
+  const switched = await callWhiteboard(server.address, owner, acceptBoardSuggestion, replacement);
+  assert.equal(switched.receipt?.outcome.case, 'applied');
+  assert.equal(switched.receipt.outcome.value.boardRevision, 3n);
+  const switchedBoard = await currentBoard(boardId);
+  assert.equal(switchedBoard.objects[0]?.geometry?.width, 330);
+  assert.equal(switchedBoard.objects[0]?.geometryVersion, 2n);
+
+  await server.restart();
+  const withdrawal = { ...replacement, expectedProposalVersion: 2n, commandId: 'withdraw-larger' };
+  const undone = await callWhiteboard(server.address, owner, acceptBoardSuggestion, withdrawal);
+  assert.equal(undone.receipt?.outcome.case, 'applied');
+  assert.equal(undone.receipt.outcome.value.boardRevision, 4n);
+  const restored = await currentBoard(boardId);
+  assert.equal(restored.objects[0]?.geometry?.width, geometry.width);
+  assert.equal(restored.objects[0]?.geometryVersion, 3n);
+
+  const again = await callWhiteboard(server.address, owner, acceptBoardSuggestion, {
+    ...first,
+    expectedProposalVersion: 3n,
+    commandId: 'reapply-first',
+  });
+  assert.equal(again.receipt?.outcome.case, 'applied');
+  assert.equal((await currentBoard(boardId)).objects[0]?.geometry?.width, 210);
+  const listed = await callWhiteboard(server.address, owner, listBoardSuggestions, { boardId });
+  assert.deepEqual(listed.proposals[0]?.activeOptionIds, ['wide']);
+});
+
+test('keeps a later object change intact when someone clicks the older active option', async () => {
+  const boardId = await boardWithText();
+  const proposal = await privateProposal(boardId, resizeAlternatives());
+  const choice = chooseWidth(boardId, proposal.proposalId);
+  const accepted = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.equal(accepted.receipt?.outcome.case, 'applied');
+  const laterEdit = await callWhiteboard(server.address, owner, editObjectContent, {
+    boardId,
+    commandId: 'later-owner-edit',
+    ...textOperation('保留后来的正文'),
+  });
+  assert.equal(laterEdit.receipt?.outcome.case, 'applied');
+
+  const withdrawn = await callWhiteboard(server.address, owner, acceptBoardSuggestion, {
+    ...choice,
+    expectedProposalVersion: 1n,
+    commandId: 'cannot-overwrite-later-text',
+  });
+  assert.equal(withdrawn.receipt?.outcome.case, 'conflict');
+  const board = await currentBoard(boardId);
+  assert.equal(board.boardRevision, 3n);
+  assert.equal(board.objects[0]?.geometry?.width, 210);
+  assert.equal(board.objects[0]?.payloadVersion, 1n);
+});
+
+test('keeps non-overlapping options active together and clears the card without changing their board effects', async () => {
+  const boardId = await boardWithText();
+  const alternateId = 'suggestion-alternate-object';
+  const addition = await callWhiteboard(server.address, owner, editBoardGeometry, {
+    boardId,
+    commandId: 'create-alternate-suggestion-object',
+    operation: {
+      case: 'create',
+      value: {
+        object: { objectId: alternateId, kind: 'text', geometry, label: '第二对象' },
+      },
+    },
+  });
+  assert.equal(addition.receipt?.outcome.case, 'applied');
+
+  const source = await captureSource(boardId, [objectId, alternateId], 2n);
+  const { suggestion } = await callWhiteboard(
+    server.address,
+    agentCredential,
+    submitBoardSuggestion,
+    {
+      ...submitRequest(boardId, source.sourceId),
+      options: resizeAlternatives(alternateId),
+    },
+  );
+  assert.ok(suggestion);
+  const first = chooseWidth(boardId, suggestion.proposalId);
+  const firstResult = await callWhiteboard(server.address, owner, acceptBoardSuggestion, first);
+  assert.equal(firstResult.receipt?.outcome.case, 'applied');
+  const secondResult = await callWhiteboard(server.address, owner, acceptBoardSuggestion, {
+    ...first,
+    optionId: 'larger',
+    expectedProposalVersion: 1n,
+    commandId: 'apply-next-disjoint-option',
+  });
+  assert.equal(secondResult.receipt?.outcome.case, 'applied');
+  const before = await currentBoard(boardId);
+  assert.equal(before.boardRevision, 4n);
+  assert.deepEqual(
+    before.objects.map((object) => object.geometry?.width),
+    [210, 330],
+  );
+  const listed = await callWhiteboard(server.address, owner, listBoardSuggestions, { boardId });
+  assert.deepEqual(listed.proposals[0]?.activeOptionIds, ['wide', 'larger']);
+
+  const clear = {
+    boardId,
+    proposalId: suggestion.proposalId,
+    expectedProposalVersion: 2n,
+    commandId: 'clear-active-card',
+  };
+  const cleared = await callWhiteboard(server.address, owner, rejectBoardSuggestion, clear);
+  assert.equal(cleared.suggestion?.rejected, true);
+  const replayed = await callWhiteboard(server.address, owner, rejectBoardSuggestion, clear);
+  assert.deepEqual(replayed, cleared);
+  const visible = await callWhiteboard(server.address, owner, listBoardSuggestions, { boardId });
+  assert.deepEqual(visible.proposals, []);
+  assert.deepEqual(await currentBoard(boardId), before);
+});
+
+test('leaves the first staged edit unapplied when a later operation in the accepted option conflicts', async () => {
+  const boardId = await boardWithText();
+  const proposal = await privateProposal(boardId, [
+    {
+      optionId: 'compound',
+      label: '扩大并改写正文',
+      operations: [
+        { edit: { case: 'geometry', value: { operation: widthChange(315) } } },
+        { edit: { case: 'content', value: textOperation('旧建议正文') } },
+      ],
+    },
+    ...suggestionOptions().slice(1),
+  ]);
+  const later = await callWhiteboard(server.address, owner, editObjectContent, {
+    boardId,
+    commandId: 'refresh-stale-compound-body',
+    ...textOperation('用户刚保存的正文'),
+  });
+  assert.equal(later.receipt?.outcome.case, 'applied');
+  const before = await currentBoard(boardId);
+  const choice = { ...chooseWidth(boardId, proposal.proposalId), optionId: 'compound' };
+  const rejected = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.equal(rejected.receipt?.outcome.case, 'conflict');
+  assert.deepEqual(await currentBoard(boardId), before);
+  const stored = await callWhiteboard(server.address, owner, getBoardEditReceipt, {
+    boardId,
+    commandId: choice.commandId,
+  });
+  assert.equal(stored.receipt, undefined);
+});
+
+test('restores real layer order when an active layering option is clicked again', async () => {
+  const boardId = await boardWithText();
+  const second = 'layer-neighbor';
+  const created = await callWhiteboard(server.address, owner, editBoardGeometry, {
+    boardId,
+    commandId: 'create-layer-neighbor',
+    operation: {
+      case: 'create',
+      value: { object: { objectId: second, kind: 'text', geometry, label: '相邻对象' } },
+    },
+  });
+  assert.equal(created.receipt?.outcome.case, 'applied');
+
+  const source = await captureSource(boardId, [objectId], 2n);
+  const { suggestion } = await callWhiteboard(
+    server.address,
+    agentCredential,
+    submitBoardSuggestion,
+    {
+      ...submitRequest(boardId, source.sourceId),
+      options: [
+        {
+          optionId: 'onto-front',
+          label: '移到顶部',
+          edit: {
+            case: 'geometry',
+            value: {
+              operation: {
+                case: 'reorder',
+                value: {
+                  expectedBoardRevision: 2n,
+                  direction: BoardLayerDirection.FRONT,
+                  targets: [{ objectId, expectedGeometryVersion: 0n }],
+                },
+              },
+            },
+          },
+        },
+        ...suggestionOptions().slice(1),
+      ],
+    },
+  );
+  assert.ok(suggestion);
+  const choice = { ...chooseWidth(boardId, suggestion.proposalId), optionId: 'onto-front' };
+  const selected = await callWhiteboard(server.address, owner, acceptBoardSuggestion, choice);
+  assert.equal(selected.receipt?.outcome.case, 'applied');
+  assert.deepEqual(
+    (await currentBoard(boardId)).objects.map((object) => object.objectId),
+    [second, objectId],
+  );
+
+  const restored = await callWhiteboard(server.address, owner, acceptBoardSuggestion, {
+    ...choice,
+    expectedProposalVersion: 1n,
+    commandId: 'withdraw-layer-order',
+  });
+  assert.equal(restored.receipt?.outcome.case, 'applied');
+  const board = await currentBoard(boardId);
+  assert.equal(board.boardRevision, 4n);
+  assert.deepEqual(
+    board.objects.map((object) => object.objectId),
+    [objectId, second],
   );
 });
