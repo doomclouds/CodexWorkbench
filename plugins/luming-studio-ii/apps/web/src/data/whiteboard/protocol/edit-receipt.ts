@@ -40,7 +40,12 @@ function readEditPayloads(results: readonly ObjectPayloadResult[], resolveAsset:
   return readPayloads(results, ids, resolveAsset);
 }
 
-function readApplied(value: BoardEditApplied, resolveAsset: AssetResolver) {
+type BoardChangeMessage = Pick<
+  BoardEditApplied,
+  'boardRevision' | 'changedObjects' | 'removedObjectIds' | 'objectOrder' | 'changedPayloads'
+> & { readonly detailsExpired?: boolean };
+
+export function readBoardEditChanges(value: BoardChangeMessage, resolveAsset: AssetResolver) {
   const objects = readObjects(value.changedObjects);
   const removedIds = readIds(value.removedObjectIds, 'removed object');
   const order = readIds(value.objectOrder, 'ordered object');
@@ -80,7 +85,7 @@ export function readBoardEditReceipt(
 
   switch (kind) {
     case 'applied':
-      return { ...identity, kind, ...readApplied(value, resolveAsset) };
+      return { ...identity, kind, ...readBoardEditChanges(value, resolveAsset) };
     case 'conflict':
       return {
         ...identity,

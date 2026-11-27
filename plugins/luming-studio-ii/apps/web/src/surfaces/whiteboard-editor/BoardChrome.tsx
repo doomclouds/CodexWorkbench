@@ -1,5 +1,13 @@
 import { ArrowLeft, ChevronDown, Clock3, Maximize, MessageSquare, Share2 } from 'lucide-react';
-import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import {
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
 
 import type { GeometryToolbarProps } from './GeometryToolbar.js';
 import './board-chrome.css';
@@ -11,6 +19,7 @@ export type BoardTool = GeometryToolbarProps['tool'];
 interface BoardHeaderProps {
   readonly title: string;
   readonly status: ReactNode;
+  readonly participants?: ReactNode;
   readonly canManage?: boolean;
   readonly onBack?: () => void;
   readonly onRename?: (title: string) => void;
@@ -18,6 +27,7 @@ interface BoardHeaderProps {
   readonly historyOpen?: boolean;
   readonly onOpenShare?: (trigger: HTMLButtonElement) => void;
   readonly shareOpen?: boolean;
+  readonly consumeShareEntry?: () => boolean;
   readonly onToggleFeedback?: (trigger: HTMLButtonElement) => void;
   readonly feedbackOpen?: boolean;
   readonly annotationActive?: boolean;
@@ -149,6 +159,7 @@ function FeedbackTools({
 export function BoardHeader({
   title,
   status,
+  participants,
   onBack,
   onRename,
   canManage = onBack !== undefined || onRename !== undefined,
@@ -156,12 +167,28 @@ export function BoardHeader({
   historyOpen = false,
   onOpenShare,
   shareOpen = false,
+  consumeShareEntry,
   onToggleFeedback,
   feedbackOpen,
   annotationActive,
   onToggleAnnotation,
   unresolvedFeedback,
 }: BoardHeaderProps) {
+  const shareButton = useRef<HTMLButtonElement>(null);
+  const canOpenOnEntry = Boolean(onOpenShare && consumeShareEntry);
+  const openShareEntry = useEffectEvent(() => {
+    const anchor = shareButton.current;
+    if (anchor && onOpenShare && consumeShareEntry?.()) {
+      onOpenShare(anchor);
+    }
+  });
+
+  useLayoutEffect(() => {
+    if (canOpenOnEntry) {
+      openShareEntry();
+    }
+  }, [canOpenOnEntry]);
+
   return (
     <header className="whiteboard-chrome">
       <div className="whiteboard-chrome__identity">
@@ -180,6 +207,7 @@ export function BoardHeader({
         <div className="whiteboard-chrome__status">{status}</div>
       </div>
       <div className="whiteboard-chrome__actions">
+        {participants}
         <button
           className="whiteboard-chrome__action"
           aria-label="版本历史"
@@ -192,6 +220,7 @@ export function BoardHeader({
           <Clock3 size={20} />
         </button>
         <button
+          ref={shareButton}
           className="whiteboard-chrome__action whiteboard-chrome__share"
           aria-label="分享"
           title={onOpenShare ? '分享（可导出本地副本）' : '当前白板服务暂未接通分享'}

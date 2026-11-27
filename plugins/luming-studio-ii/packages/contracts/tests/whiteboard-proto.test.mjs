@@ -84,7 +84,7 @@ function assertRoundTrip(type, value) {
   assert.deepEqual(decode(type, wire), value);
 }
 
-test('declares typed unary methods for catalog, whiteboard, history and feedback workflows', () => {
+test('declares typed unary methods for every Studio workflow', () => {
   const descriptor = JSON.parse(
     runBuf([
       'build',
@@ -126,6 +126,37 @@ test('declares typed unary methods for catalog, whiteboard, history and feedback
         'ExportBoardVersion',
       ],
     ],
+    [
+      'BoardRoomService',
+      [
+        'GetBoardRoom',
+        'UpdateBoardPresence',
+        'LeaveBoardPresence',
+        'ChangeBoardTimer',
+        'GetBoardTimerReceipt',
+      ],
+    ],
+    [
+      'BoardSharingService',
+      [
+        'GetBoardSharing',
+        'UpdateBoardSharing',
+        'GetBoardSharingReceipt',
+        'InspectBoardInvitation',
+        'JoinBoardInvitation',
+      ],
+    ],
+    [
+      'BoardSuggestionService',
+      [
+        'CreateBoardReviewSource',
+        'SubmitBoardSuggestion',
+        'ListBoardSuggestions',
+        'PreviewBoardSuggestion',
+        'AcceptBoardSuggestion',
+        'RejectBoardSuggestion',
+      ],
+    ],
     ['FeedbackService', ['ListThreads', 'GetThread', 'ApplyFeedback', 'GetFeedbackReceipt']],
     [
       'WhiteboardService',
@@ -156,6 +187,58 @@ test('declares typed unary methods for catalog, whiteboard, history and feedback
       })),
     );
   }
+});
+
+test('preserves the expected sharing version and keeps invitations separate from guest sessions', () => {
+  assertRoundTrip('UpdateBoardSharingRequest', {
+    boardId,
+    commandId,
+    expectedVersion: '0',
+    setScope: { scope: 'SHARING_SCOPE_LAN' },
+  });
+  assertRoundTrip('JoinBoardInvitationResponse', {
+    session: {
+      boardId,
+      actorId: 'guest-123',
+      name: '访客',
+      role: 'SHARING_ROLE_COMMENTER',
+      version: boardRevision,
+      canComment: true,
+    },
+  });
+});
+
+test('preserves suggestion source references and existing typed edit operations', () => {
+  assertRoundTrip('CreateBoardReviewSourceRequest', {
+    boardId,
+    commandId,
+    selection: { objectIds: ['shape-1'] },
+    expectedBoardRevision: '0',
+  });
+  assertRoundTrip('SubmitBoardSuggestionRequest', {
+    boardId,
+    commandId,
+    sourceId: 'selection-1',
+    observation: '更新任务标记。',
+    options: [
+      {
+        optionId: 'alternative-1',
+        label: '修改名称',
+        content: {
+          objectId: 'shape-1',
+          expectedPayloadVersion: '0',
+          text: { text: '新名称' },
+        },
+      },
+    ],
+  });
+  assertRoundTrip('AcceptBoardSuggestionRequest', {
+    boardId,
+    commandId,
+    proposalId: 'proposal-1',
+    optionId: 'alternative-1',
+    expectedProposalVersion: '0',
+  });
 });
 
 test('preserves native content commands and independent table width checks', () => {

@@ -8,6 +8,7 @@ import {
   type StagedCurrentArchive,
 } from '../../platform/archives/index.js';
 import type { SqliteConnection } from '../../platform/index.js';
+import { readBoardAccess } from '../authorization/index.js';
 import { ArchiveObjectError, prepareArchiveObjects } from './scene.js';
 
 export interface ArchivePublication {
@@ -188,16 +189,16 @@ export function readPublishedAsset(
   boardId: string,
   assetId: string,
 ): ImportedArchiveAsset | undefined {
+  if (!readBoardAccess(connection, boardId, actorId)) {
+    return undefined;
+  }
+
   const row = connection
     .prepare(`
-    SELECT a.mime_type, a.bytes
-    FROM board_archive_assets AS a
-    JOIN board_members AS m ON m.board_id = a.board_id
-    LEFT JOIN board_lifecycle AS l ON l.board_id = a.board_id
-    WHERE m.actor_id = ? AND a.board_id = ? AND a.asset_id = ?
-      AND l.trashed_at_millis IS NULL
+    SELECT mime_type, bytes FROM board_archive_assets
+    WHERE board_id = ? AND asset_id = ?
   `)
-    .get(actorId, boardId, assetId);
+    .get(boardId, assetId);
 
   if (!row) {
     return undefined;

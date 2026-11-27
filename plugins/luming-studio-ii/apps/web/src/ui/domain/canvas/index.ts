@@ -47,5 +47,7 @@ export type {
   CanvasTool,
   CanvasTransformIntent,
   CanvasViewport,
+  CanvasViewportNavigation,
   CanvasViewportRequest,
+  CanvasViewportSize,
 } from './contracts.js';

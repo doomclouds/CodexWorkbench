@@ -10,6 +10,8 @@ const scriptExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/u;
 const moduleRoots = new Set(['pages', 'surfaces', 'data', 'platform']);
 const applicationLayer = 'app';
 const shellRoot = resolve(sourceRoot, 'app/shell');
+const mcpPlatform = resolve(sourceRoot, 'platform/mcp');
+const mcpSdkLibraries = new Set(['@modelcontextprotocol/ext-apps', '@openai/mcp-extensions/app']);
 const uiDirectories = new Map([
   ['ui/base', 'base'],
   ['ui/domain/canvas', 'canvas'],
@@ -38,7 +40,11 @@ const whiteboardData = resolve(sourceRoot, 'data/whiteboard');
 const catalogData = resolve(sourceRoot, 'data/catalog');
 const archiveImportData = resolve(sourceRoot, 'data/archive-import');
 const feedbackData = resolve(sourceRoot, 'data/feedback');
+const sharingData = resolve(sourceRoot, 'data/sharing');
+const roomsData = resolve(sourceRoot, 'data/rooms');
+const suggestionsData = resolve(sourceRoot, 'data/suggestions');
 const whiteboardPage = resolve(sourceRoot, 'pages/whiteboard');
+const guestShell = resolve(shellRoot, 'AppShell.tsx');
 const workbenchSurface = resolve(sourceRoot, 'surfaces/workbench');
 const editorSurface = resolve(sourceRoot, 'surfaces/whiteboard-editor');
 const viewingSurface = resolve(sourceRoot, 'surfaces/whiteboard-viewing');
@@ -46,7 +52,20 @@ const exportSurface = resolve(sourceRoot, 'surfaces/whiteboard-export');
 const historySurface = resolve(sourceRoot, 'surfaces/whiteboard-history');
 const feedbackSurface = resolve(sourceRoot, 'surfaces/whiteboard-feedback');
 const mediaSurface = resolve(sourceRoot, 'surfaces/whiteboard-media');
-const extraWhiteboardSurfaces = new Set([historySurface, feedbackSurface, mediaSurface]);
+const sharingSurface = resolve(sourceRoot, 'surfaces/board-sharing');
+const suggestionsSurface = resolve(sourceRoot, 'surfaces/board-suggestions');
+const guestJoinSurface = resolve(sourceRoot, 'surfaces/guest-join');
+const roomPresenceSurface = resolve(sourceRoot, 'surfaces/room-presence');
+const sharedTimerSurface = resolve(sourceRoot, 'surfaces/shared-timer');
+const extraWhiteboardSurfaces = new Set([
+  historySurface,
+  feedbackSurface,
+  mediaSurface,
+  sharingSurface,
+  suggestionsSurface,
+  roomPresenceSurface,
+  sharedTimerSurface,
+]);
 const iconSurfaces = new Set([
   workbenchSurface,
   viewingSurface,
@@ -55,10 +74,25 @@ const iconSurfaces = new Set([
   editorSurface,
   resolve(sourceRoot, 'surfaces/recycle-bin'),
 ]);
-const surfaceDataMounts = new Map([
+const surfaceDataValues = new Map([
   [resolve(editorSurface, 'WhiteboardEditorSurface.tsx'), 'createWhiteboardSession'],
   [resolve(editorSurface, 'HistoryCanvasView.tsx'), 'createWhiteboardSession'],
+  [resolve(editorSurface, 'suggestion-preview.tsx'), 'projectBoardChanges'],
   [resolve(workbenchSurface, 'WorkbenchSurface.tsx'), 'createCatalogDirectory'],
+]);
+const whiteboardDecoderImports = new Map([
+  [
+    resolve(roomsData, 'room-message.ts'),
+    { types: new Set(['WhiteboardObject']), values: new Set(['readObjects']) },
+  ],
+  [
+    resolve(suggestionsData, 'client.ts'),
+    {
+      types: new Set(['WhiteboardEditService', 'BoardEditReceipt']),
+      values: new Set(['readBoardEditReceipt', 'readBoardEditChanges']),
+    },
+  ],
+  [resolve(suggestionsData, 'contracts.ts'), { types: new Set(['BoardEditReceipt']) }],
 ]);
 const injectedSurfacePorts = new Map([
   [workbenchSurface, catalogData],
@@ -68,6 +102,11 @@ const injectedSurfacePorts = new Map([
   [historySurface, whiteboardData],
   [feedbackSurface, feedbackData],
   [mediaSurface, whiteboardData],
+  [sharingSurface, sharingData],
+  [suggestionsSurface, suggestionsData],
+  [guestJoinSurface, sharingData],
+  [roomPresenceSurface, roomsData],
+  [sharedTimerSurface, roomsData],
 ]);
 const protocolOwners = new Map([
   [contractPackage + '/whiteboard/scene', whiteboardData],
@@ -76,6 +115,9 @@ const protocolOwners = new Map([
   [contractPackage + '/whiteboard/edits', whiteboardData],
   [contractPackage + '/whiteboard/history', whiteboardData],
   [contractPackage + '/feedback/service', feedbackData],
+  [contractPackage + '/sharing/service', sharingData],
+  [contractPackage + '/suggestions/service', suggestionsData],
+  [contractPackage + '/rooms/service', roomsData],
   [contractPackage + '/catalog/service', catalogData],
   [contractPackage + '/archives/service', archiveImportData],
 ]);
@@ -152,17 +194,43 @@ function isTypeOnly(node) {
   );
 }
 
-function isSurfaceDataMountImport(file, node) {
-  const factory = surfaceDataMounts.get(file);
-  if (!factory || node.type !== 'ImportDeclaration' || !node.specifiers.length) {
+function isSurfaceDataValueImport(file, node) {
+  const value = surfaceDataValues.get(file);
+  if (!value || node.type !== 'ImportDeclaration' || !node.specifiers.length) {
     return false;
   }
 
   return node.specifiers.every(
     (member) =>
       member.type === 'ImportSpecifier' &&
-      (member.importKind === 'type' || member.imported.name === factory),
+      (member.importKind === 'type' || member.imported.name === value),
   );
+}
+
+function guestShellImport(file, target, targetOwner, typeOnly) {
+  if (targetOwner.root === guestJoinSurface) {
+    return file === guestShell && publicEntry(target, targetOwner);
+  }
+  if (file === guestShell && targetOwner.root === sharingData) {
+    return typeOnly && publicEntry(target, targetOwner);
+  }
+}
+
+function isWhiteboardDecoderImport(node, imports) {
+  if (node.type !== 'ImportDeclaration' || node.specifiers.length === 0) {
+    return false;
+  }
+
+  return node.specifiers.every((member) => {
+    if (member.type !== 'ImportSpecifier') {
+      return false;
+    }
+
+    const typeOnly = node.importKind === 'type' || member.importKind === 'type';
+    const allowed = typeOnly ? imports.types : imports.values;
+
+    return allowed?.has(member.imported.name);
+  });
 }
 
 function allowedLocal(owner, target, targetOwner, file, node) {
@@ -172,14 +240,23 @@ function allowedLocal(owner, target, targetOwner, file, node) {
   if (targetOwner.root === owner.root) {
     return true;
   }
+
+  const decoderImports = whiteboardDecoderImports.get(file);
+  if (decoderImports && targetOwner.root === whiteboardData) {
+    return publicEntry(target, targetOwner) && isWhiteboardDecoderImport(node, decoderImports);
+  }
+
+  const typeOnly = isTypeOnly(node);
+  const guestImport = guestShellImport(file, target, targetOwner, typeOnly);
+  if (guestImport !== undefined) {
+    return guestImport;
+  }
   if (!dependencies.get(owner.layer)?.includes(targetOwner.layer)) {
     return false;
   }
   if (extraWhiteboardSurfaces.has(targetOwner.root) && owner.root !== whiteboardPage) {
     return false;
   }
-
-  const typeOnly = isTypeOnly(node);
   if (owner.layer === 'pages' && targetOwner.layer === 'data') {
     return typeOnly && publicEntry(target, targetOwner);
   }
@@ -188,7 +265,7 @@ function allowedLocal(owner, target, targetOwner, file, node) {
     const publicPort =
       targetOwner.root === injectedSurfacePorts.get(owner.root) && publicEntry(target, targetOwner);
 
-    return publicPort && (typeOnly || isSurfaceDataMountImport(file, node));
+    return publicPort && (typeOnly || isSurfaceDataValueImport(file, node));
   }
 
   return publicEntry(target, targetOwner);
@@ -215,6 +292,9 @@ function isPortalImport(node) {
 }
 
 function allowedLibrary(owner, specifier, node) {
+  if (mcpSdkLibraries.has(specifier)) {
+    return owner.root === mcpPlatform;
+  }
   if (specifier === 'lucide-react') {
     return iconSurfaces.has(owner.root);
   }
@@ -310,7 +390,9 @@ const contractBoundary = {
       if (governed && !allowedLibrary(owner, specifier, node)) {
         return 'dependency';
       }
-      if (governed && reexport && !isTypeOnly(node)) {
+
+      const privateExport = !isTypeOnly(node) || mcpSdkLibraries.has(specifier);
+      if (governed && reexport && privateExport) {
         return 'reexport';
       }
       if (applicationTest && !testLibraries.has(specifier)) {
@@ -359,14 +441,17 @@ const contractBoundary = {
       }
     }
 
-    function checkExportedBinding(node, identifier) {
+    function checkExportedBinding(node, identifier, typeOnly = false) {
       if (!governed || identifier?.type !== 'Identifier') {
         return;
       }
 
       const definition = bindingOf(context.sourceCode, identifier)?.defs[0];
       if (definition?.type === 'ImportBinding') {
-        checkReference(node, definition.parent.source, true);
+        const source = definition.parent.source;
+        if (!typeOnly || mcpSdkLibraries.has(source.value)) {
+          checkReference(node, source, true);
+        }
       }
     }
 
@@ -396,10 +481,9 @@ const contractBoundary = {
           checkReference(node, node.source, true);
           return;
         }
-        if (!isTypeOnly(node)) {
-          for (const member of node.specifiers) {
-            checkExportedBinding(member, member.local);
-          }
+        const typeOnly = isTypeOnly(node);
+        for (const member of node.specifiers) {
+          checkExportedBinding(member, member.local, typeOnly);
         }
       },
       ExportDefaultDeclaration: (node) => checkExportedBinding(node, node.declaration),

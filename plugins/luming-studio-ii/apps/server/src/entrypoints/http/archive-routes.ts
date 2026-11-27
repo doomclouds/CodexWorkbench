@@ -108,6 +108,7 @@ function serveArchiveAsset(
     return;
   }
 
+  actor.authorize?.({ boardId });
   const asset = application.getAsset(actor.id, boardId, assetId);
   if (!asset) {
     sendStatus(response, 404);

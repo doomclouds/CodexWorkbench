@@ -32,5 +32,6 @@ export interface WhiteboardFeedbackSurfaceProps {
   readonly singleKeys?: boolean;
   readonly onAnnotationActiveChange?: (active: boolean) => void;
   readonly onUnresolvedChange?: (unresolved: boolean) => void;
+  readonly onReviewThread?: (threadId: string) => void;
   readonly annotationRequest?: { readonly objectId: string; readonly sequence: number };
 }

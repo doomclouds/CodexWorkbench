@@ -145,7 +145,12 @@ export function useCanvasInput({
   const key = typeof tool === 'string' ? tool : 'place:' + tool.requestId;
   const [activation, setActivation] = useState({ key, completed: false });
   const settled = useRef<typeof activation | undefined>(undefined);
-  const objectNavigation = useObjectNavigation(root, frame, updateSpace);
+  const objectNavigation = useObjectNavigation(
+    root,
+    frame,
+    updateSpace,
+    props.onViewportNavigation,
+  );
 
   if (activation.key !== key) {
     setActivation({ key, completed: false });
@@ -604,6 +609,11 @@ export function useCanvasInput({
     const screen = relativePoint(event, session.origin);
     const modifiers = { altKey: event.altKey, shiftKey: event.shiftKey };
     const { action, viewport } = session;
+    const moved = screen.x !== session.start.x || screen.y !== session.start.y;
+    if (action.kind === 'pan' && moved && !action.reported) {
+      action.reported = true;
+      props.onViewportNavigation?.('pan');
+    }
     if (action.kind === 'ink') {
       const point = screenToBoard(screen, viewport);
       recordInk(action, point, viewport.zoom, event.shiftKey, final);
@@ -621,7 +631,13 @@ export function useCanvasInput({
 
   function handlePointerMove(event: ReactPointerEvent<HTMLDivElement>) {
     if (!ownsEvent(event.target, event.currentTarget)) {
+      props.onWorldPointerChange?.(undefined);
       return;
+    }
+
+    if (props.onWorldPointerChange && isPrimaryPointer(event)) {
+      const screen = relativePoint(event, containerOrigin(event.currentTarget));
+      props.onWorldPointerChange(screenToBoard(screen, read().viewport));
     }
 
     const session = active.current;
@@ -660,6 +676,7 @@ export function useCanvasInput({
   }
 
   function handlePointerLeave() {
+    props.onWorldPointerChange?.(undefined);
     if (!active.current && currentTool() === 'connector') {
       cancel();
     }
@@ -693,6 +710,7 @@ export function useCanvasInput({
   }
 
   function escapeCanvas(event: ReactKeyboardEvent<HTMLDivElement>) {
+    props.onViewportNavigation?.('escape');
     const toolNow = currentTool();
     const drawingTool = toolNow !== 'select' && toolNow !== 'pan';
     if (active.current || objectNavigation.panning || drawingTool) {
@@ -714,6 +732,7 @@ export function useCanvasInput({
       event.preventDefault();
       const viewport = fitScene(fit);
       if (viewport) {
+        props.onViewportNavigation?.('fit');
         cancel();
         update({ viewport }, 'now');
       }
@@ -728,6 +747,7 @@ export function useCanvasInput({
     }
 
     event.preventDefault();
+    props.onViewportNavigation?.('zoom');
     cancel();
     const anchor = { x: size.width / 2, y: size.height / 2 };
     update({ viewport: zoomViewport(viewport, anchor, factor) }, 'now');
@@ -838,9 +858,15 @@ export function useCanvasInput({
     if (zoom) {
       const point = relativePoint(event, containerOrigin(element));
       const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+      if (factor !== 1) {
+        props.onViewportNavigation?.('zoom');
+      }
       update({ viewport: zoomViewport(viewport, point, factor) });
     } else {
       const delta = wheelDelta(event, size);
+      if (delta.x !== 0 || delta.y !== 0) {
+        props.onViewportNavigation?.('pan');
+      }
       update({ viewport: panViewport(viewport, { x: -delta.x, y: -delta.y }) });
     }
   });

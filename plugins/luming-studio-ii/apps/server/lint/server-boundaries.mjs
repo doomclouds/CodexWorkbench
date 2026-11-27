@@ -5,9 +5,13 @@ const whiteboard = 'src/modules/whiteboard/';
 const catalog = 'src/modules/catalog/';
 const archives = 'src/modules/archives/';
 const feedback = 'src/modules/feedback/';
+const sharing = 'src/modules/sharing/';
+const rooms = 'src/modules/rooms/';
 const catalogAdapters = 'src/infrastructure/adapters/catalog/';
 const archivesAdapters = 'src/infrastructure/adapters/archives/';
 const feedbackAdapters = 'src/infrastructure/adapters/feedback/';
+const sharingAdapters = 'src/infrastructure/adapters/sharing/';
+const roomsAdapters = 'src/infrastructure/adapters/rooms/';
 const authorizationAdapters = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
 const layers = new Map([
@@ -27,9 +31,17 @@ const layers = new Map([
   [feedback + 'application/', 'feedback-application'],
   [feedback + 'domain/', 'feedback-domain'],
   [feedback + 'ports/', 'feedback-ports'],
+  [sharing + 'application/', 'sharing-application'],
+  [sharing + 'domain/', 'sharing-domain'],
+  [sharing + 'ports/', 'sharing-ports'],
+  [rooms + 'application/', 'rooms-application'],
+  [rooms + 'domain/', 'rooms-domain'],
+  [rooms + 'ports/', 'rooms-ports'],
   [catalogAdapters, 'catalog-adapters'],
   [archivesAdapters, 'archives-adapters'],
   [feedbackAdapters, 'feedback-adapters'],
+  [sharingAdapters, 'sharing-adapters'],
+  [roomsAdapters, 'rooms-adapters'],
   [authorizationAdapters, 'authorization-adapters'],
   ['src/infrastructure/adapters/', 'adapters'],
   [archivesPlatform, 'archives-platform'],
@@ -58,8 +70,16 @@ const entries = new Map([
   ['feedback-application', feedback + 'application/index'],
   ['feedback-domain', feedback + 'domain/index'],
   ['feedback-ports', feedback + 'ports/index'],
+  ['sharing-application', sharing + 'application/index'],
+  ['sharing-domain', sharing + 'domain/index'],
+  ['sharing-ports', sharing + 'ports/index'],
+  ['rooms-application', rooms + 'application/index'],
+  ['rooms-domain', rooms + 'domain/index'],
+  ['rooms-ports', rooms + 'ports/index'],
   ['archives-adapters', archivesAdapters + 'index'],
   ['feedback-adapters', feedbackAdapters + 'index'],
+  ['sharing-adapters', sharingAdapters + 'index'],
+  ['rooms-adapters', roomsAdapters + 'index'],
   ['authorization-adapters', authorizationAdapters + 'index'],
   ['archives-platform', archivesPlatform + 'index'],
   ['adapters', 'src/infrastructure/adapters/index'],
@@ -75,15 +95,29 @@ const dependencies = new Map([
       'catalog-application',
       'archives-application',
       'feedback-application',
+      'sharing-application',
+      'rooms-application',
       'adapters',
       'catalog-adapters',
       'archives-adapters',
       'feedback-adapters',
+      'sharing-adapters',
+      'rooms-adapters',
+      'authorization-adapters',
       'platform',
     ],
   ],
-  ['http', ['application', 'catalog-application', 'archives-application', 'feedback-application']],
-  ['mcp', ['application']],
+  [
+    'http',
+    [
+      'application',
+      'catalog-application',
+      'archives-application',
+      'feedback-application',
+      'sharing-application',
+      'rooms-application',
+    ],
+  ],
   ['workflows', ['application']],
   ['application', ['domain', 'ports']],
   ['ports', ['domain']],
@@ -93,10 +127,19 @@ const dependencies = new Map([
   ['catalog-adapters', ['catalog-ports', 'platform']],
   ['archives-application', ['archives-domain', 'archives-ports']],
   ['archives-ports', ['archives-domain']],
-  ['archives-adapters', ['archives-ports', 'platform', 'archives-platform']],
+  [
+    'archives-adapters',
+    ['archives-ports', 'platform', 'archives-platform', 'authorization-adapters'],
+  ],
   ['feedback-application', ['feedback-domain', 'feedback-ports']],
   ['feedback-ports', ['feedback-domain']],
   ['feedback-adapters', ['feedback-ports', 'platform', 'authorization-adapters']],
+  ['sharing-application', ['sharing-domain', 'sharing-ports']],
+  ['sharing-ports', ['sharing-domain']],
+  ['sharing-adapters', ['sharing-ports', 'platform', 'authorization-adapters']],
+  ['rooms-application', ['rooms-domain', 'rooms-ports']],
+  ['rooms-ports', ['rooms-domain']],
+  ['rooms-adapters', ['rooms-ports', 'platform']],
   ['authorization-adapters', ['platform']],
   ['contracts', ['bootstrap', 'support', 'fixtures']],
   [
@@ -114,6 +157,12 @@ const dependencies = new Map([
       'feedback-application',
       'feedback-domain',
       'feedback-ports',
+      'sharing-application',
+      'sharing-domain',
+      'sharing-ports',
+      'rooms-application',
+      'rooms-domain',
+      'rooms-ports',
       'fixtures',
     ],
   ],
@@ -127,12 +176,24 @@ const dependencies = new Map([
       'catalog-adapters',
       'archives-adapters',
       'feedback-adapters',
+      'sharing-adapters',
+      'rooms-adapters',
       'fixtures',
     ],
   ],
 ]);
-const portLayers = new Set(['ports', 'catalog-ports', 'archives-ports', 'feedback-ports']);
+const portLayers = new Set([
+  'ports',
+  'catalog-ports',
+  'archives-ports',
+  'feedback-ports',
+  'sharing-ports',
+  'rooms-ports',
+]);
 const protocolPrefix = '@codexworkbench/luming-studio-ii-contracts/whiteboard/';
+const catalogProtocol = '@codexworkbench/luming-studio-ii-contracts/catalog/service';
+const mcpRuntime = 'src/infrastructure/platform/mcp-runtime';
+const mcpRuntimeBuiltins = new Set(['child_process', 'readline', 'process']);
 const protocols = new Set([
   protocolPrefix + 'scene',
   protocolPrefix + 'payload',
@@ -143,9 +204,19 @@ const protocolLayers = new Set(['http', 'mcp', 'contracts', 'integration', 'supp
 const httpProtocols = new Set([
   protocolPrefix + 'edits',
   protocolPrefix + 'history',
-  '@codexworkbench/luming-studio-ii-contracts/catalog/service',
+  catalogProtocol,
   '@codexworkbench/luming-studio-ii-contracts/archives/service',
   '@codexworkbench/luming-studio-ii-contracts/feedback/service',
+  '@codexworkbench/luming-studio-ii-contracts/sharing/service',
+  '@codexworkbench/luming-studio-ii-contracts/rooms/service',
+  '@codexworkbench/luming-studio-ii-contracts/suggestions/service',
+]);
+const mcpLibraries = new Set([
+  '@modelcontextprotocol/sdk/server/mcp.js',
+  '@modelcontextprotocol/sdk/server/stdio.js',
+  '@modelcontextprotocol/ext-apps/server',
+  '@openai/mcp-extensions/server',
+  'zod',
 ]);
 const testLayers = new Set([
   'contracts',
@@ -217,8 +288,13 @@ function allowsLocal(sourceLayer, targetPath, typeOnly) {
 }
 
 function allowsLibrary(layer, specifier, from) {
+  if (mcpLibraries.has(specifier)) {
+    return layer === 'mcp';
+  }
   if (httpProtocols.has(specifier)) {
-    return layer !== 'mcp' && protocolLayers.has(layer);
+    return layer === 'mcp'
+      ? specifier === catalogProtocol && from === entries.get('mcp')
+      : protocolLayers.has(layer);
   }
   if (protocols.has(specifier)) {
     return protocolLayers.has(layer);
@@ -226,8 +302,14 @@ function allowsLibrary(layer, specifier, from) {
 
   if (isBuiltin(specifier)) {
     const name = specifier.replace(/^node:/u, '');
+    if (from === mcpRuntime && mcpRuntimeBuiltins.has(name)) {
+      return true;
+    }
 
     return builtins.get(layer)?.has(name) || (testLayers.has(layer) && testBuiltins.has(name));
+  }
+  if (specifier === 'proper-lockfile') {
+    return from === mcpRuntime;
   }
   if (specifier === 'eslint') {
     return from === 'tests/contracts/server-lint.test';

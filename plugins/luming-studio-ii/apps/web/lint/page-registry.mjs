@@ -5,6 +5,7 @@ import { sourceRoot } from './project-paths.mjs';
 
 export const pageRegistryFile = resolve(sourceRoot, 'app/routes.ts');
 const pageImport = /^\.\.\/pages\/([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\/index\.js$/u;
+const pageModules = new Set(['workbench', 'whiteboard', 'recycle-bin']);
 let previousSource;
 let previousEntries;
 
@@ -52,7 +53,10 @@ export function pageRegistryEntries(program) {
   const entries = new Set();
   for (const member of initializer.properties) {
     const name = pageName(member);
-    if (!name || imports.get(member.value.name) !== name || entries.has(name)) {
+    if (!pageModules.has(name)) {
+      return undefined;
+    }
+    if (imports.get(member.value.name) !== name || entries.has(name)) {
       return undefined;
     }
 

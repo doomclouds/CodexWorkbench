@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+service BoardSharingService {
+  rpc GetBoardSharing(GetBoardSharingRequest) returns (GetBoardSharingResponse);
+  rpc UpdateBoardSharing(UpdateBoardSharingRequest) returns (UpdateBoardSharingResponse);
+  rpc GetBoardSharingReceipt(GetBoardSharingReceiptRequest) returns (GetBoardSharingReceiptResponse);
+  rpc InspectBoardInvitation(InspectBoardInvitationRequest) returns (InspectBoardInvitationResponse);
+  rpc JoinBoardInvitation(JoinBoardInvitationRequest) returns (JoinBoardInvitationResponse);
+}
+
+enum SharingRole {
+  SHARING_ROLE_UNSPECIFIED = 0;
+  SHARING_ROLE_OWNER = 1;
+  SHARING_ROLE_EDITOR = 2;
+  SHARING_ROLE_COMMENTER = 3;
+  SHARING_ROLE_VIEWER = 4;
+}
+
+enum SharingScope {
+  SHARING_SCOPE_UNSPECIFIED = 0;
+  SHARING_SCOPE_LOCAL = 1;
+  SHARING_SCOPE_LAN = 2;
+}
+
+enum SharingRejectionReason {
+  SHARING_REJECTION_REASON_UNSPECIFIED = 0;
+  SHARING_REJECTION_REASON_FORBIDDEN = 1;
+  SHARING_REJECTION_REASON_VERSION_CHANGED = 2;
+  SHARING_REJECTION_REASON_COMMAND_ID_REUSE = 3;
+  SHARING_REJECTION_REASON_INVALID_COMMAND = 4;
+  SHARING_REJECTION_REASON_LAN_UNAVAILABLE = 5;
+  SHARING_REJECTION_REASON_INVITATION_UNAVAILABLE = 6;
+  SHARING_REJECTION_REASON_NAME_TAKEN = 7;
+  SHARING_REJECTION_REASON_MEMBER_UNAVAILABLE = 8;
+  SHARING_REJECTION_REASON_ROLE_DISABLED = 9;
+}
+
+message GetBoardSharingRequest {
+  string board_id = 1;
+}
+
+message GetBoardSharingResponse {
+  BoardSharing sharing = 1;
+}
+
+message BoardSharing {
+  string board_id = 1;
+  bool enabled = 2;
+  SharingScope scope = 3;
+  optional uint64 version = 4;
+  SharingRole role = 5;
+  bool can_edit = 6;
+  bool can_comment = 7;
+  repeated SharingLink links = 8;
+  repeated SharingMember members = 9;
+  string member_url = 10;
+}
+
+message SharingLink {
+  SharingRole role = 1;
+  bool enabled = 2;
+  string url = 3;
+}
+
+message SharingMember {
+  string actor_id = 1;
+  string name = 2;
+  SharingRole role = 3;
+  bool removed = 4;
+  bool active = 5;
+}
+
+message UpdateBoardSharingRequest {
+  string board_id = 1;
+  string command_id = 2;
+  optional uint64 expected_version = 3;
+  oneof operation {
+    SetSharingScope set_scope = 4;
+    StopBoardSharing stop = 5;
+    SetSharingInvitation set_invitation = 6;
+    ResetSharingInvitation reset_invitation = 7;
+    ChangeSharingMemberRole change_member_role = 8;
+    SharingMemberTarget remove_member = 9;
+    ChangeSharingMemberRole restore_member = 10;
+    SharingMemberTarget forget_member = 11;
+  }
+}
+
+message SetSharingScope {
+  SharingScope scope = 1;
+}
+
+message StopBoardSharing {}
+
+message SetSharingInvitation {
+  SharingRole role = 1;
+  bool enabled = 2;
+}
+
+message ResetSharingInvitation {
+  SharingRole role = 1;
+}
+
+message ChangeSharingMemberRole {
+  string actor_id = 1;
+  SharingRole role = 2;
+}
+
+message SharingMemberTarget {
+  string actor_id = 1;
+}
+
+message UpdateBoardSharingResponse {
+  SharingCommandReceipt receipt = 1;
+}
+
+message GetBoardSharingReceiptRequest {
+  string board_id = 1;
+  string command_id = 2;
+}
+
+message GetBoardSharingReceiptResponse {
+  SharingCommandReceipt receipt = 1;
+}
+
+message SharingCommandReceipt {
+  string board_id = 1;
+  string command_id = 2;
+  oneof outcome {
+    SharingCommandApplied applied = 3;
+    SharingCommandRejected rejected = 4;
+  }
+}
+
+message SharingCommandApplied {
+  optional uint64 version = 1;
+}
+
+message SharingCommandRejected {
+  SharingRejectionReason reason = 1;
+}
+
+message InspectBoardInvitationRequest {
+  string board_id = 1;
+  string invitation_token = 2;
+}
+
+message InspectBoardInvitationResponse {
+  BoardInvitation invitation = 1;
+  SharingRejectionReason rejection = 2;
+}
+
+message BoardInvitation {
+  string board_id = 1;
+  string title = 2;
+  SharingRole role = 3;
+}
+
+message JoinBoardInvitationRequest {
+  string board_id = 1;
+  string invitation_token = 2;
+  string name = 3;
+}
+
+message JoinBoardInvitationResponse {
+  SharingGuestSession session = 1;
+  SharingRejectionReason rejection = 2;
+}
+
+message SharingGuestSession {
+  string board_id = 1;
+  string actor_id = 2;
+  string name = 3;
+  SharingRole role = 4;
+  optional uint64 version = 5;
+  bool can_edit = 6;
+  bool can_comment = 7;
+}

@@ -1,5 +1,5 @@
 import { ChevronDown, Maximize, Minus, Plus, Redo2, RotateCcw } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { AnchoredPopover } from '../../ui/base/index.js';
 import { BoardTimer } from './BoardTimer.js';
 import './board-viewport-tools.css';
@@ -24,6 +24,7 @@ interface BoardViewportToolsProps {
   readonly onSingleKeysChange: (enabled: boolean) => void;
   readonly history?: ViewportHistory;
   readonly timerEditable?: boolean;
+  readonly timer?: ReactNode;
 }
 
 type ViewSettingsProps = Pick<
@@ -97,6 +98,7 @@ export function BoardViewportTools({
   hasSelection,
   history,
   timerEditable = true,
+  timer,
   ...settings
 }: BoardViewportToolsProps) {
   const [open, setOpen] = useState(false);
@@ -121,7 +123,7 @@ export function BoardViewportTools({
 
   return (
     <div className="whiteboard-viewport-tools">
-      <BoardTimer canEdit={timerEditable} />
+      {timer ?? <BoardTimer canEdit={timerEditable} />}
       <span className="whiteboard-viewport-tools__divider" aria-hidden="true" />
       <div ref={setAnchor} className="whiteboard-viewport-tools__zoom">
         <button

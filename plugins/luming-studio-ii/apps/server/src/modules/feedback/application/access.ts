@@ -9,6 +9,10 @@ import type {
 import type { FeedbackReader } from '../ports/index.js';
 import { FeedbackAccessError } from './errors.js';
 
+export function permitsFeedback(access: FeedbackBoardAccess) {
+  return access.canComment ?? access.canEdit;
+}
+
 export function requireAccess(
   reader: FeedbackReader,
   actor: FeedbackActor,
@@ -28,7 +32,7 @@ export function requireWriteAccess(
   boardId: string,
 ): FeedbackBoardAccess {
   const access = requireAccess(reader, actor, boardId);
-  if (!access.canEdit) {
+  if (!permitsFeedback(access)) {
     throw new FeedbackAccessError();
   }
 
@@ -40,7 +44,7 @@ export function canDeleteThread(
   access: FeedbackBoardAccess,
   thread: FeedbackThread,
 ): boolean {
-  return access.canEdit && (access.isOwner || thread.first.authorActorId === actor.id);
+  return permitsFeedback(access) && (access.isOwner || thread.first.authorActorId === actor.id);
 }
 
 export function viewMessage(
@@ -50,7 +54,7 @@ export function viewMessage(
 ): FeedbackMessageView {
   const authoredByViewer = message.authorActorId === actor.id;
 
-  return { ...message, authoredByViewer, canEdit: access.canEdit && authoredByViewer };
+  return { ...message, authoredByViewer, canEdit: permitsFeedback(access) && authoredByViewer };
 }
 
 export function viewThread(
@@ -61,7 +65,7 @@ export function viewThread(
   return {
     ...thread,
     first: viewMessage(actor, access, thread.first),
-    canResolve: access.canEdit,
+    canResolve: permitsFeedback(access),
     canDelete: canDeleteThread(actor, access, thread),
   };
 }

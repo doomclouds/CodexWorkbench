@@ -1,0 +1,192 @@
+.whiteboard-shared-timer {
+  align-self: stretch;
+}
+
+.whiteboard-shared-timer__trigger {
+  inline-size: auto;
+  min-inline-size: 33px;
+  gap: 5px;
+}
+
+.whiteboard-viewport-tools .whiteboard-shared-timer__trigger[aria-expanded='true'] {
+  color: #b95129;
+  background: #fbe9df;
+}
+
+.whiteboard-shared-timer > .studio-ui-anchored-popover {
+  box-sizing: border-box;
+  z-index: 2;
+  inline-size: min(268px, calc(100vw - 16px));
+  padding: 16px;
+}
+
+.whiteboard-shared-timer__layout {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.whiteboard-shared-timer__layout[data-readonly] {
+  grid-template-columns: 1fr;
+}
+
+.whiteboard-shared-timer__play {
+  inline-size: 40px;
+  block-size: 40px;
+  border-radius: 50%;
+  color: white;
+  background: #2563eb;
+}
+
+.whiteboard-shared-timer__play:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.whiteboard-shared-timer__play:focus-visible {
+  outline: 2px solid var(--studio-ui-text);
+  outline-offset: 3px;
+}
+
+.whiteboard-shared-timer__face {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 140px;
+  block-size: 54px;
+}
+
+.whiteboard-shared-timer__digits {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 50px;
+  font-weight: 300;
+  line-height: 54px;
+  font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.whiteboard-shared-timer__digits[data-ended] {
+  color: var(--board-chrome-muted, #707784);
+}
+
+.whiteboard-shared-timer__duration {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.whiteboard-shared-timer__duration > input {
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  color: transparent;
+  background: transparent;
+  font: inherit;
+  text-align: center;
+  caret-color: transparent;
+}
+
+.whiteboard-shared-timer__duration > input:focus-visible {
+  background: color-mix(in srgb, var(--studio-ui-text) 7%, transparent);
+  box-shadow: inset 0 -2px var(--studio-ui-text);
+}
+
+.whiteboard-shared-timer__slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 32px;
+  block-size: 54px;
+}
+
+.whiteboard-shared-timer__adjust {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.whiteboard-shared-timer__adjust > button {
+  inline-size: 32px;
+  block-size: 26px;
+}
+
+.whiteboard-shared-timer__reset {
+  inline-size: 32px;
+  block-size: 40px;
+}
+
+.whiteboard-shared-timer__status {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .whiteboard-shared-timer > .studio-ui-anchored-popover {
+    inline-size: min(284px, calc(100vw - 16px));
+  }
+
+  .whiteboard-shared-timer__layout {
+    gap: 8px;
+  }
+
+  .whiteboard-shared-timer__slot {
+    inline-size: 40px;
+    block-size: 82px;
+  }
+
+  .whiteboard-shared-timer__adjust > button {
+    inline-size: 40px;
+    block-size: 40px;
+  }
+}
+
+.whiteboard-shared-timer__trigger,
+.whiteboard-shared-timer__play,
+.whiteboard-shared-timer__adjust > button,
+.whiteboard-shared-timer__reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+}
+
+.whiteboard-shared-timer__trigger,
+.whiteboard-shared-timer__adjust > button,
+.whiteboard-shared-timer__reset {
+  color: inherit;
+  background: transparent;
+}
+
+.whiteboard-shared-timer__adjust > button:hover:not(:disabled),
+.whiteboard-shared-timer__reset:hover:not(:disabled) {
+  background: var(--board-chrome-hover, #f1f3f4);
+}
+
+.whiteboard-shared-timer__recovery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block-start: 8px;
+}
+
+.whiteboard-shared-timer__recovery > button {
+  inline-size: auto;
+  min-block-size: 28px;
+  padding-inline: 6px;
+  font-size: 12px;
+}

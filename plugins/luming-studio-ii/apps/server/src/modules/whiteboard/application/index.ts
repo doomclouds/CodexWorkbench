@@ -12,6 +12,17 @@ import { payloadResult, requireAccess, WhiteboardAccessError } from './board-rea
 import { executeBoardExport } from './export-board.js';
 import { executeMove } from './move-objects.js';
 
+export { BoardSuggestionError, createBoardSuggestionApplication } from './board-suggestions.js';
+export type { BoardSuggestionApplication } from './board-suggestions.js';
+export type {
+  BoardReviewActor,
+  BoardReviewOrigin,
+  BoardReviewSource,
+  BoardSuggestion,
+  BoardSuggestionEdit,
+  BoardSuggestionOptionDraft,
+  BoardSuggestionPreview,
+} from '../domain/index.js';
 export type {
   Actor,
   Appearance,

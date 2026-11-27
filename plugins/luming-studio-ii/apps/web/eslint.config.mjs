@@ -19,6 +19,12 @@ const reactRules = Object.fromEntries(
   }),
 );
 const scripts = '**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}';
+const platformGlobals = ['require', 'Buffer', 'process'];
+const browserEvents = {
+  name: 'EventSource',
+  message: 'Open browser event streams in platform/browser.',
+};
+const mcpHost = { name: 'openai', message: 'Use the host interface in platform/mcp.' };
 const indirectImports = [
   { selector: 'TSImportEqualsDeclaration', message: 'Use an ES module import.' },
   {
@@ -246,7 +252,30 @@ export default defineConfig([
       'no-new-func': 'error',
       'no-restricted-globals': [
         'error',
-        { globals: ['require', 'Buffer', 'process'], checkGlobalObject: true },
+        { globals: [...platformGlobals, mcpHost, browserEvents], checkGlobalObject: true },
+      ],
+    },
+  },
+  {
+    files: ['src/platform/' + scripts],
+    ignores: ['src/platform/mcp/' + scripts],
+    rules: { 'base/no-browser-io': ['error', { hostOnly: true }] },
+  },
+  {
+    files: ['src/platform/browser/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { globals: [...platformGlobals, mcpHost], checkGlobalObject: true },
+      ],
+    },
+  },
+  {
+    files: ['src/platform/mcp/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        { globals: [...platformGlobals, browserEvents], checkGlobalObject: true },
       ],
     },
   },

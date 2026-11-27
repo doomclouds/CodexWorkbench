@@ -36,6 +36,26 @@ const feedbackData = 'src/data/feedback/client.ts';
 const editsProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 const historyProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 const feedbackProtocol = '@codexworkbench/luming-studio-ii-contracts/feedback/service';
+const sharingProtocol = '@codexworkbench/luming-studio-ii-contracts/sharing/service';
+const sharing = 'src/surfaces/board-sharing/BoardSharingSurface.tsx';
+const guestJoin = 'src/surfaces/guest-join/GuestJoinSurface.tsx';
+const sharingData = 'src/data/sharing/client.ts';
+const roomProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+const roomsData = 'src/data/rooms/client.ts';
+const roomMessage = 'src/data/rooms/room-message.ts';
+const roomPresence = 'src/surfaces/room-presence/RoomPresenceSurface.tsx';
+const sharedTimer = 'src/surfaces/shared-timer/SharedTimerSurface.tsx';
+const mcpMain = 'src/app/mcp-main.tsx';
+const mcpAdapter = 'src/platform/mcp/bridge.ts';
+const mcpEntry = 'src/platform/mcp/index.ts';
+const browserEntry = 'src/platform/browser/index.ts';
+const mcpSdk = '@modelcontextprotocol/ext-apps';
+const hostSdk = '@openai/mcp-extensions/app';
+const suggestionsProtocol = '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
+const suggestions = 'src/surfaces/board-suggestions/BoardSuggestionsSurface.tsx';
+const suggestionsData = 'src/data/suggestions/client.ts';
+const suggestionContracts = 'src/data/suggestions/contracts.ts';
+const suggestionPreview = 'src/surfaces/whiteboard-editor/suggestion-preview.tsx';
 const editorContent = 'src/surfaces/whiteboard-editor/use-content-edits.ts';
 const editorCommand = 'src/surfaces/whiteboard-editor/content-edit-command.ts';
 const editorMount = 'src/surfaces/whiteboard-editor/WhiteboardEditorSurface.tsx';
@@ -48,6 +68,63 @@ const actualPages = [
 ].join('\n');
 
 const accepted = [
+  [
+    suggestionsData,
+    "import { readBoardEditChanges, readBoardEditReceipt, type WhiteboardEditService } from '../whiteboard/index.js';",
+  ],
+  [suggestionContracts, "import type { BoardEditReceipt } from '../whiteboard/index.js';"],
+  [
+    suggestionPreview,
+    "import { projectBoardChanges, type WhiteboardPayloadResult, type WhiteboardReadyState } from '../../data/whiteboard/index.js';",
+  ],
+  [page, "import { BoardSuggestionsSurface } from '../../surfaces/board-suggestions/index.js';"],
+  [suggestions, "import type { SuggestionService } from '../../data/suggestions/index.js';"],
+  [suggestionsData, `import { BoardSuggestionsService } from '${suggestionsProtocol}';`],
+  ['src/app/main.tsx', "import { createSuggestionService } from '../data/suggestions/index.js';"],
+  [mcpMain, "import { createSuggestionService } from '../data/suggestions/index.js';"],
+  [
+    'tests/integration/board-suggestions.test.tsx',
+    `import { BoardSuggestionsService } from '${suggestionsProtocol}';`,
+  ],
+  [roomMessage, "import { readObjects, type WhiteboardObject } from '../whiteboard/index.js';"],
+  [roomMessage, "import type { WhiteboardObject } from '../whiteboard/index.js';"],
+  [mcpAdapter, `import { App } from '${mcpSdk}';`],
+  [mcpAdapter, `import { OpenAIExtensions } from '${hostSdk}';`],
+  [mcpAdapter, 'const host = window.openai;'],
+  [mcpEntry, "export { connectMcpApp } from './bridge.js';"],
+  [mcpMain, "import { StudioApp } from './StudioApp.js';"],
+  [mcpMain, "import { connectMcpApp } from '../platform/mcp/index.js';"],
+  [mcpMain, "import { downloadBoardFile } from '../platform/browser/index.js';"],
+  [mcpMain, "import { createBoardRoomService } from '../data/rooms/index.js';"],
+  [mcpMain, "import { createBoardSharingService } from '../data/sharing/index.js';"],
+  [page, "import { RoomPresenceSurface } from '../../surfaces/room-presence/index.js';"],
+  [page, "import { SharedTimerSurface } from '../../surfaces/shared-timer/index.js';"],
+  [roomPresence, "import type { BoardRoomService } from '../../data/rooms/index.js';"],
+  [sharedTimer, "import type { RoomTimer } from '../../data/rooms/index.js';"],
+  [roomsData, `import { BoardRoomService } from '${roomProtocol}';`],
+  [roomsData, "import { fromJsonString } from '@bufbuild/protobuf';"],
+  ['src/app/main.tsx', "import { createBoardRoomService } from '../data/rooms/index.js';"],
+  ['src/platform/browser/room-events.ts', 'const source = new EventSource(path);'],
+  ['tests/integration/board-room.test.tsx', `import { BoardRoomService } from '${roomProtocol}';`],
+  [page, "import { BoardSharingSurface } from '../../surfaces/board-sharing/index.js';"],
+  [appShell, "import { GuestJoinSurface } from '../../surfaces/guest-join/index.js';"],
+  [appShell, "import type { GuestAccess } from '../../data/sharing/index.js';"],
+  [sharing, "import type { SharingService } from '../../data/sharing/index.js';"],
+  [guestJoin, "import type { GuestAccess } from '../../data/sharing/index.js';"],
+  [guestJoin, 'const source = new URL(inviteUrl);'],
+  [guestJoin, 'const location = new URL(inviteUrl);\n\nconst source = location.href;'],
+  [
+    'src/app/StudioApp.tsx',
+    'interface StudioNavigation { readonly write: (location: StudioLocation) => void }',
+  ],
+  [sharingData, `import { BoardSharingService } from '${sharingProtocol}';`],
+  ['src/app/main.tsx', "import { createBoardSharingService } from '../data/sharing/index.js';"],
+  ['src/platform/browser/index.ts', 'const origin = window.location.origin;'],
+  [support, "import { AppShell } from '../../src/app/shell/index.js';"],
+  [
+    'tests/integration/guest-join.test.tsx',
+    "import { GuestJoinSurface } from '../../src/surfaces/guest-join/index.js';",
+  ],
   [
     workbenchMount,
     "import { createCatalogDirectory, type BoardCatalogService } from '../../data/catalog/index.js';",
@@ -161,6 +238,420 @@ const accepted = [
 ];
 
 const rejected = [
+  [
+    'the suggestions adapter also constructs the whiteboard writer',
+    suggestionsData,
+    "import { readBoardEditReceipt, createWhiteboardEditService } from '../whiteboard/index.js';",
+  ],
+  [
+    'the suggestions adapter deep imports the edit decoder',
+    suggestionsData,
+    "import { readBoardEditChanges } from '../whiteboard/protocol/edit-receipt.js';",
+  ],
+  [
+    'a different suggestions file accesses the edit decoder',
+    'src/data/suggestions/review-source.ts',
+    "import { readBoardEditReceipt } from '../whiteboard/index.js';",
+  ],
+  [
+    'suggestion contracts import a runtime decoder',
+    suggestionContracts,
+    "import { readBoardEditReceipt } from '../whiteboard/index.js';",
+  ],
+  [
+    'suggestion contracts consume a writer port',
+    suggestionContracts,
+    "import type { WhiteboardEditService } from '../whiteboard/index.js';",
+  ],
+  [
+    'the suggestion preview also creates a board session',
+    suggestionPreview,
+    "import { projectBoardChanges, createWhiteboardSession } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'another editor file accesses the preview projection',
+    surface,
+    "import { projectBoardChanges } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'the workbench mounts whiteboard suggestion review',
+    workbenchPage,
+    "import { BoardSuggestionsSurface } from '../../surfaces/board-suggestions/index.js';",
+  ],
+  [
+    'the editor mounts suggestion review instead of accepting a feature slot',
+    surface,
+    "import { BoardSuggestionsSurface } from '../board-suggestions/index.js';",
+  ],
+  [
+    'the editor directly accesses the suggestion client',
+    surface,
+    "import type { SuggestionService } from '../../data/suggestions/index.js';",
+  ],
+  [
+    'suggestion review constructs its own service',
+    suggestions,
+    "import { createSuggestionService } from '../../data/suggestions/index.js';",
+  ],
+  [
+    'suggestion review reaches a private implementation of its port',
+    suggestions,
+    "import type { SuggestionService } from '../../data/suggestions/client.js';",
+  ],
+  [
+    'suggestion review consumes another data module',
+    suggestions,
+    "import type { SharingService } from '../../data/sharing/index.js';",
+  ],
+  [
+    'suggestion review decodes wire messages directly',
+    suggestions,
+    `import type { ResolveSuggestionRequest } from '${suggestionsProtocol}';`,
+  ],
+  [
+    'room data consumes generated suggestion messages',
+    roomsData,
+    `import { BoardSuggestionsService } from '${suggestionsProtocol}';`,
+  ],
+  [
+    'a model host adapter accesses the human decision port',
+    mcpAdapter,
+    "import { createSuggestionService } from '../../data/suggestions/index.js';",
+  ],
+  [
+    'suggestion review uses the model host SDK',
+    suggestions,
+    `import { OpenAIExtensions } from '${hostSdk}';`,
+  ],
+  [
+    'another room module reads the Whiteboard decoder',
+    roomsData,
+    "import { readObjects } from '../whiteboard/index.js';",
+  ],
+  [
+    'the room message decoder also imports the board writer',
+    roomMessage,
+    "import { readObjects, createWhiteboardEditService } from '../whiteboard/index.js';",
+  ],
+  [
+    'the room message decoder aliases a board client to the approved name',
+    roomMessage,
+    "import { createWhiteboardService as readObjects } from '../whiteboard/index.js';",
+  ],
+  [
+    'the room message decoder depends on whiteboard commands',
+    roomMessage,
+    "import type { EditObjectContentCommand } from '../whiteboard/index.js';",
+  ],
+  [
+    'the room message decoder imports the whiteboard decoder privately',
+    roomMessage,
+    "import { readObjects } from '../whiteboard/protocol/scene.js';",
+  ],
+  [
+    'the room message decoder dynamically loads whiteboard data',
+    roomMessage,
+    "const data = import('../whiteboard/index.js');",
+  ],
+  [
+    'the room message decoder re-exports the whiteboard decoder',
+    roomMessage,
+    "export { readObjects } from '../whiteboard/index.js';",
+  ],
+  [
+    'the room message decoder depends on an unrelated data module',
+    roomMessage,
+    "import type { SharingService } from '../sharing/index.js';",
+  ],
+  [
+    'the thread entry connects to the MCP App SDK directly',
+    mcpMain,
+    `import { App } from '${mcpSdk}';`,
+  ],
+  [
+    'the thread entry uses a private platform bridge',
+    mcpMain,
+    "import { connectMcpApp } from '../platform/mcp/bridge.js';",
+  ],
+  [
+    'the thread entry mounts a page outside the existing StudioApp routes',
+    mcpMain,
+    "import { WhiteboardPage } from '../pages/whiteboard/index.js';",
+  ],
+  [
+    'thread composition decodes a sharing wire message',
+    mcpMain,
+    `import { BoardSharingService } from '${sharingProtocol}';`,
+  ],
+  [
+    'room data reaches the host platform',
+    roomsData,
+    "import { connectMcpApp } from '../../platform/mcp/index.js';",
+  ],
+  [
+    'the browser adapter imports the host SDK',
+    browserEntry,
+    `import { OpenAIExtensions } from '${hostSdk}';`,
+  ],
+  [
+    'the browser adapter accesses the remote host directly',
+    browserEntry,
+    'const host = window.openai;',
+    'base/no-browser-io',
+  ],
+  [
+    'the browser adapter aliases the host from a document window',
+    browserEntry,
+    'const { openai: host } = element.ownerDocument.defaultView;',
+    'base/no-browser-io',
+  ],
+  [
+    'a whiteboard surface reads the host object through its document',
+    surface,
+    'const host = node.ownerDocument.defaultView.openai;',
+    'base/no-browser-io',
+  ],
+  [
+    'the MCP adapter creates a browser SSE connection',
+    mcpAdapter,
+    'const source = new EventSource(path);',
+    'no-restricted-globals',
+  ],
+  [
+    'the MCP adapter deep-imports an SDK implementation',
+    mcpAdapter,
+    `import { App } from '${mcpSdk}/dist/src/app.js';`,
+  ],
+  [
+    'the MCP public entry re-exports a host SDK type',
+    mcpEntry,
+    `export type { OpenAIModelContextHostState } from '${hostSdk}';`,
+    boundary,
+    'reexport',
+  ],
+  [
+    'the MCP public entry re-exports an aliased host SDK type',
+    mcpEntry,
+    `import type { OpenAIModelContextHostState as HostState } from '${hostSdk}';\n\nexport type { HostState };`,
+    boundary,
+    'reexport',
+  ],
+  [
+    'a workbench page mounts room presence',
+    workbenchPage,
+    "import { RoomPresenceSurface } from '../../surfaces/room-presence/index.js';",
+  ],
+  [
+    'a workbench page mounts a whiteboard room timer',
+    workbenchPage,
+    "import { SharedTimerSurface } from '../../surfaces/shared-timer/index.js';",
+  ],
+  [
+    'the whiteboard page imports private room presence',
+    page,
+    "import { RoomPresenceSurface } from '../../surfaces/room-presence/RoomPresenceSurface.js';",
+  ],
+  [
+    'the editor imports room presence instead of accepting a slot',
+    surface,
+    "import { RoomPresenceSurface } from '../room-presence/index.js';",
+  ],
+  [
+    'the timer reaches a private peer component',
+    sharedTimer,
+    "import { PeerTable } from '../room-presence/PeerTable.js';",
+  ],
+  [
+    'room presence constructs a room service',
+    roomPresence,
+    "import { createBoardRoomService } from '../../data/rooms/index.js';",
+  ],
+  [
+    'the timer constructs a room service',
+    sharedTimer,
+    "import { createBoardRoomService } from '../../data/rooms/index.js';",
+  ],
+  [
+    'room presence uses an unrelated data port',
+    roomPresence,
+    "import type { WhiteboardService } from '../../data/whiteboard/index.js';",
+  ],
+  [
+    'the editor directly consumes room data',
+    surface,
+    "import type { BoardRoomService } from '../../data/rooms/index.js';",
+  ],
+  [
+    'the timer decodes generated room messages directly',
+    sharedTimer,
+    `import { BoardRoomService } from '${roomProtocol}';`,
+  ],
+  [
+    'sharing data decodes room messages instead of its own protocol',
+    sharingData,
+    `import { BoardRoomService } from '${roomProtocol}';`,
+  ],
+  [
+    'room data imports the browser event connection',
+    roomsData,
+    "import { openRoomEvents } from '../../platform/browser/index.js';",
+  ],
+  [
+    'a platform module outside the browser opens a browser event connection',
+    'src/platform/transport/room-events.ts',
+    'const source = new EventSource(path);',
+    'no-restricted-globals',
+  ],
+  [
+    'room data opens its own event connection',
+    roomsData,
+    'const source = new EventSource(path);',
+    'no-restricted-globals',
+  ],
+  [
+    'room presence opens its own event connection',
+    roomPresence,
+    'const source = new EventSource(path);',
+    'no-restricted-globals',
+  ],
+  [
+    'the timer aliases the browser event constructor',
+    sharedTimer,
+    'const { EventSource: Events } = element.ownerDocument.defaultView;',
+    'base/no-browser-io',
+  ],
+  [
+    'viewing opens a browser event connection',
+    viewer,
+    'const source = new window.EventSource(path);',
+    'base/no-browser-io',
+  ],
+  [
+    'editing reads the browser room URL',
+    surface,
+    'const room = node.ownerDocument.defaultView.location.href;',
+    'base/no-browser-io',
+  ],
+  [
+    'a workbench page mounts the board sharing surface',
+    workbenchPage,
+    "import { BoardSharingSurface } from '../../surfaces/board-sharing/index.js';",
+  ],
+  [
+    'the whiteboard editor imports the sharing surface instead of accepting a slot',
+    surface,
+    "import { BoardSharingSurface } from '../board-sharing/index.js';",
+  ],
+  [
+    'a whiteboard page mounts the guest access gate',
+    page,
+    "import { GuestJoinSurface } from '../../surfaces/guest-join/index.js';",
+  ],
+  [
+    'the shell reaches a private guest access implementation',
+    appShell,
+    "import { GuestJoinSurface } from '../../surfaces/guest-join/GuestJoinSurface.js';",
+  ],
+  [
+    'a shell notice mounts the guest access gate',
+    operationNotice,
+    "import { GuestJoinSurface } from '../../../surfaces/guest-join/index.js';",
+  ],
+  [
+    'the shell constructs the sharing service',
+    appShell,
+    "import { createBoardSharingService } from '../../data/sharing/index.js';",
+  ],
+  [
+    'sharing constructs its own service',
+    sharing,
+    "import { createBoardSharingService } from '../../data/sharing/index.js';",
+  ],
+  [
+    'guest access constructs its own service',
+    guestJoin,
+    "import { createBoardSharingService } from '../../data/sharing/index.js';",
+  ],
+  [
+    'sharing uses an unrelated data contract',
+    sharing,
+    "import type { BoardCatalogService } from '../../data/catalog/index.js';",
+  ],
+  [
+    'a guest access surface reads the internal sharing client',
+    guestJoin,
+    "import type { GuestAccess } from '../../data/sharing/client.js';",
+  ],
+  [
+    'sharing reaches the private guest access component',
+    sharing,
+    "import { GuestJoinSurface } from '../guest-join/GuestJoinSurface.js';",
+  ],
+  [
+    'guest access reaches the private sharing component',
+    guestJoin,
+    "import { BoardSharingSurface } from '../board-sharing/BoardSharingSurface.js';",
+  ],
+  [
+    'sharing imports the generated sharing protocol',
+    sharing,
+    `import type { SharingState } from '${sharingProtocol}';`,
+  ],
+  [
+    'another data module decodes the sharing protocol',
+    catalog,
+    `import { BoardSharingService } from '${sharingProtocol}';`,
+  ],
+  [
+    'guest access imports the browser platform',
+    guestJoin,
+    "import { readHostLocation } from '../../platform/browser/index.js';",
+  ],
+  [
+    'sharing imports the Codex host',
+    sharing,
+    "import { App } from '@modelcontextprotocol/ext-apps';",
+  ],
+  [
+    'sharing imports a private Canvas module',
+    sharing,
+    "import type { Bounds } from '../../ui/domain/canvas/scene/index.js';",
+  ],
+  [
+    'guest access reads credentials from the document',
+    guestJoin,
+    'const credentials = document.cookie;',
+    'base/no-browser-io',
+  ],
+  [
+    'sharing reads the clipboard directly',
+    sharing,
+    'const copy = navigator.clipboard.writeText(url);',
+    'base/no-browser-io',
+  ],
+  ...['location.href', 'URL', 'documentURI', 'baseURI', 'referrer'].map((field) => [
+    'guest access obtains a browser URL from document.' + field,
+    guestJoin,
+    'const source = document.' + field + ';',
+    'base/no-browser-io',
+  ]),
+  [
+    'guest access obtains the navigation URL from a global',
+    guestJoin,
+    'const source = location.href;',
+    'base/no-browser-io',
+  ],
+  [
+    'guest access destructures a browser Location alias',
+    guestJoin,
+    'const current = location;\n\nconst { href } = current;',
+    'base/no-browser-io',
+  ],
+  [
+    'an AppMock bypasses the public guest access entry',
+    support,
+    "import { GuestJoinSurface } from '../../src/surfaces/guest-join/GuestJoinSurface.js';",
+  ],
   [
     'the workbench card owns the copy protocol',
     workbenchCard,
@@ -731,6 +1222,16 @@ const rejected = [
 
 const rejectedPages = [
   [
+    'guest access registered as its own page',
+    routes,
+    "import { GuestJoinPage } from '../pages/guest-join/index.js';\n" +
+      actualPages.replace(
+        'workbench: WorkbenchPage',
+        "workbench: WorkbenchPage, 'guest-join': GuestJoinPage",
+      ),
+    'pageRegistry',
+  ],
+  [
     'an unregistered Page module without imports',
     'src/pages/archive-import/ArchiveImportNoticePage.tsx',
     'export const ArchiveImportNoticePage = () => null;',
@@ -775,12 +1276,14 @@ for (const [title, filePath, text, messageId] of rejectedPages) {
   });
 }
 
-for (const [title, filePath, text, rule = boundary] of rejected) {
+for (const [title, filePath, text, rule = boundary, messageId] of rejected) {
   test('rejects ' + title, async () => {
     const [result] = await eslint.lintText(text, { filePath });
 
     assert.ok(
-      result.messages.some(({ ruleId }) => ruleId === rule),
+      result.messages.some(
+        (report) => report.ruleId === rule && (!messageId || report.messageId === messageId),
+      ),
       JSON.stringify(result.messages),
     );
   });

@@ -1,14 +1,17 @@
 # 鹿鸣 · Luming Studio II
 
-面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。当前 Web 入口支持工作台、白板与对象编辑、备注、版本历史、观看、导出和当前格式归档导入。
+面向共享白板、架构图解和 Agent 协作的 CodexWorkbench 插件。插件 ID 为 `luming-studio-ii`，起始版本为 `1.0.0`。Web 与 Codex 对话面板共用工作台和白板，也支持分享、访客加入、视口跟随、共享计时和私人建议。
 
 ## 项目结构
 
 ```text
 luming-studio-ii/
 ├── plugin.json
+├── mcp.json
 ├── package.json
 ├── assets/
+├── runtime/
+├── skills/luming-studio-ii/
 ├── apps/
 │   ├── web/
 │   │   ├── src/
@@ -30,14 +33,24 @@ luming-studio-ii/
 │   │   └── tests/{unit,component,contracts,integration,fixtures,support}/
 │   └── server/
 │       ├── src/
-│       │   ├── entrypoints/http/
-│       │   ├── modules/{archives,catalog,feedback,whiteboard}/
+│       │   ├── entrypoints/{http,mcp}/
+│       │   ├── modules/{archives,catalog,feedback,rooms,sharing,whiteboard}/
 │       │   ├── infrastructure/{platform,adapters}/
 │       │   └── bootstrap/
 │       └── tests/{unit,contracts,integration,fixtures,support}/
 └── packages/
     └── contracts/proto/luming/studio/v1/
 ```
+
+## 对话面板与打包
+
+通过 Codex 对话顶部的「＋」打开「鹿鸣 · Luming Studio II」。面板把业务请求交给 App 专用 MCP 桥，Web 直接调用同一 Protobuf 服务。长期后台按独立的 II 数据根复用，房主切换本机或局域网分享时才启用相应的访客入口。
+
+```sh
+pnpm --filter @codexworkbench/luming-studio-ii build:runtime
+```
+
+构建通过前后端 Lint 和类型检查后，生成 `runtime/server.mjs`、`backend.mjs`、`app.html` 与独立 Web 文件。打包验证从隔离副本通过 stdio 启动插件，检查资源读取、App 请求、归档分块、冻结来源、Agent 建议和人工接受。Agent 可调用目录查询和提交建议，写入真实白板的决议在房主界面完成。
 
 ## 依赖与状态归属
 

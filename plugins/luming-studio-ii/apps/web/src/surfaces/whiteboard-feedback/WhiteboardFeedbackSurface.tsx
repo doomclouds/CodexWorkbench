@@ -1,6 +1,6 @@
 import { X } from 'lucide-react';
 import type { FeedbackPoint } from '../../data/feedback/index.js';
-import { StatusText } from '../../ui/base/index.js';
+import { Button, StatusText } from '../../ui/base/index.js';
 import type { FeedbackViewport, WhiteboardFeedbackSurfaceProps } from './contracts.js';
 import { FeedbackComposer } from './FeedbackComposer.js';
 import { FeedbackList } from './FeedbackList.js';
@@ -21,7 +21,7 @@ function layerPoint(point: FeedbackPoint | undefined, viewport: FeedbackViewport
 }
 
 export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps) {
-  const { viewport, anchor, panelOpen, canEdit, viewing } = props;
+  const { viewport, anchor, panelOpen, canEdit, viewing, onReviewThread } = props;
   const surface = useFeedbackSurface(props);
   const { stage, queries, command, objectsById, createDraft, activeThreadId } = surface;
   if (viewing) {
@@ -33,18 +33,27 @@ export function WhiteboardFeedbackSurface(props: WhiteboardFeedbackSurfaceProps)
     createDraft && (locateDraft(createDraft.target, objectsById) ?? createDraft.frozenPoint);
   const draftPoint = layerPoint(draftPosition, viewport);
   const details = activeThreadId && (
-    <FeedbackDetails
-      threadId={activeThreadId}
-      queries={queries}
-      objects={objectsById}
-      draft={surface.threadDraft}
-      setDraft={surface.handleSetThreadDraft}
-      canEdit={canEdit}
-      blocked={surface.blocked}
-      onLocate={surface.handleLocateCurrentThread}
-      onClose={surface.handleCloseThread}
-      onSubmit={command.submit}
-    />
+    <>
+      <FeedbackDetails
+        threadId={activeThreadId}
+        queries={queries}
+        objects={objectsById}
+        draft={surface.threadDraft}
+        setDraft={surface.handleSetThreadDraft}
+        canEdit={canEdit}
+        blocked={surface.blocked}
+        onLocate={surface.handleLocateCurrentThread}
+        onClose={surface.handleCloseThread}
+        onSubmit={command.submit}
+      />
+      {onReviewThread && queries.detail.page?.thread.id === activeThreadId && (
+        <Button
+          label="使用此批注作为建议来源"
+          disabled={surface.blocked}
+          onActivate={() => onReviewThread(activeThreadId)}
+        />
+      )}
+    </>
   );
 
   return (

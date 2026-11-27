@@ -62,7 +62,7 @@ interface TransformAction {
 }
 
 export type PointerAction =
-  | { kind: 'pan' }
+  | { kind: 'pan'; reported?: boolean }
   | { kind: 'marquee'; selection: readonly string[] }
   | TransformAction
   | PlacementGesture

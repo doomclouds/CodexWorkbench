@@ -12,9 +12,13 @@ const whiteboard = 'src/modules/whiteboard/';
 const catalog = 'src/modules/catalog/';
 const archives = 'src/modules/archives/';
 const feedback = 'src/modules/feedback/';
+const sharing = 'src/modules/sharing/';
+const rooms = 'src/modules/rooms/';
 const catalogAdapter = 'src/infrastructure/adapters/catalog/';
 const archivesAdapter = 'src/infrastructure/adapters/archives/';
 const feedbackAdapter = 'src/infrastructure/adapters/feedback/';
+const sharingAdapter = 'src/infrastructure/adapters/sharing/';
+const roomsAdapter = 'src/infrastructure/adapters/rooms/';
 const authorizationAdapter = 'src/infrastructure/adapters/authorization/';
 const archivesPlatform = 'src/infrastructure/platform/archives/';
 const protocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/service';
@@ -23,11 +27,22 @@ const archivesProtocol = '@codexworkbench/luming-studio-ii-contracts/archives/se
 const editingProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/edits';
 const historyProtocol = '@codexworkbench/luming-studio-ii-contracts/whiteboard/history';
 const feedbackProtocol = '@codexworkbench/luming-studio-ii-contracts/feedback/service';
+const sharingProtocol = '@codexworkbench/luming-studio-ii-contracts/sharing/service';
+const roomsProtocol = '@codexworkbench/luming-studio-ii-contracts/rooms/service';
+const suggestionsProtocol = '@codexworkbench/luming-studio-ii-contracts/suggestions/service';
+const mcpServerSdk = '@modelcontextprotocol/sdk/server/mcp.js';
+const mcpStdioSdk = '@modelcontextprotocol/sdk/server/stdio.js';
+const mcpAppServerSdk = '@modelcontextprotocol/ext-apps/server';
+const openAiMcpServerSdk = '@openai/mcp-extensions/server';
 const boundaryRule = 'server/contract-boundary';
 
 const fixtureFiles = [
   'src/bootstrap/index.ts',
   'src/entrypoints/http/index.ts',
+  'src/entrypoints/http/guest-sharing.ts',
+  'src/entrypoints/http/unary-route.ts',
+  'src/entrypoints/mcp/index.ts',
+  'src/entrypoints/mcp/private.ts',
   whiteboard + 'application/index.ts',
   whiteboard + 'application/private.ts',
   whiteboard + 'domain/index.ts',
@@ -57,6 +72,18 @@ const fixtureFiles = [
   feedback + 'ports/index.ts',
   feedbackAdapter + 'index.ts',
   feedbackAdapter + 'private.ts',
+  sharing + 'application/index.ts',
+  sharing + 'application/private.ts',
+  sharing + 'domain/index.ts',
+  sharing + 'ports/index.ts',
+  sharingAdapter + 'index.ts',
+  sharingAdapter + 'private.ts',
+  rooms + 'application/index.ts',
+  rooms + 'application/private.ts',
+  rooms + 'domain/index.ts',
+  rooms + 'ports/index.ts',
+  roomsAdapter + 'index.ts',
+  roomsAdapter + 'private.ts',
   authorizationAdapter + 'index.ts',
   authorizationAdapter + 'private.ts',
   'src/infrastructure/adapters/index.ts',
@@ -105,6 +132,104 @@ async function inspect(filePath, code) {
 }
 
 const permitted = [
+  [
+    'src/entrypoints/http/suggestion-routes.ts',
+    `import { BoardSuggestionService } from '${suggestionsProtocol}';\nimport type { BoardSuggestionsApplication } from '@board-app';`,
+  ],
+  [
+    whiteboard + 'application/board-suggestions.ts',
+    "import { planSuggestion } from '../domain/index.js';\nimport type { BoardEditWriter } from '../ports/index.js';",
+  ],
+  [
+    'src/infrastructure/adapters/board-suggestions.ts',
+    "import type { BoardEditWriter } from '@board/ports/index.js';\nimport type { SqliteDatabase } from '../platform/index.js';",
+  ],
+  [
+    'tests/integration/board-suggestions.test.ts',
+    `import { BoardSuggestionService } from '${suggestionsProtocol}';\nimport { createWhiteboardServer } from '../../src/bootstrap/index.js';`,
+  ],
+  [
+    'src/entrypoints/mcp/index.ts',
+    `import { BoardCatalogService, BoardSortOrder } from '${catalogProtocol}';`,
+  ],
+  [
+    'src/infrastructure/platform/mcp-runtime.ts',
+    "import { spawn } from 'node:child_process';\nimport { createInterface } from 'node:readline';\nimport process from 'node:process';\nimport lockfile from 'proper-lockfile';",
+  ],
+  [
+    'src/entrypoints/mcp/index.ts',
+    `import { McpServer } from '${mcpServerSdk}';\nimport { StdioServerTransport } from '${mcpStdioSdk}';`,
+  ],
+  [
+    'src/entrypoints/mcp/thread-resource.ts',
+    `import { registerAppResource } from '${mcpAppServerSdk}';\nimport '${openAiMcpServerSdk}';`,
+  ],
+  [
+    'src/entrypoints/mcp/thread-operations.ts',
+    `import { fromBinary, toBinary } from '@bufbuild/protobuf';\nimport type { GetBoardSceneRequest } from '${protocol}';\nimport { z } from 'zod';`,
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { startThreadMcp } from '../entrypoints/mcp/index.js';\nimport process from 'node:process';\nimport { openThreadResource } from '../infrastructure/platform/index.js';",
+  ],
+  [
+    archivesAdapter + 'publication.ts',
+    "import { readBoardAccess } from '../authorization/index.js';",
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { readBoardAccess } from '../infrastructure/adapters/authorization/index.js';",
+  ],
+  [
+    'src/entrypoints/http/room-routes.ts',
+    `import { BoardRoomsService } from '${roomsProtocol}';\nimport type { RoomsApplication } from '../../modules/rooms/application/index.js';`,
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { createRoomsApplication } from '../modules/rooms/application/index.js';\nimport { createRoomsRuntime } from '../infrastructure/adapters/rooms/index.js';",
+  ],
+  [
+    rooms + 'application/index.ts',
+    "import { deriveTimer } from '../domain/index.js';\nimport type { RoomBoardAccess } from '../ports/index.js';",
+  ],
+  [rooms + 'ports/index.ts', "import type { Participant } from '../domain/index.js';"],
+  [
+    roomsAdapter + 'index.ts',
+    "import type { RoomClock } from '../../../modules/rooms/ports/index.js';\nimport { createClock } from '../../platform/index.js';",
+  ],
+  [
+    'tests/integration/rooms-http.test.ts',
+    `import { BoardRoomsService } from '${roomsProtocol}';\nimport { createWhiteboardServer } from '../../src/bootstrap/index.js';`,
+  ],
+  [
+    'tests/unit/rooms.test.ts',
+    "import { deriveTimer } from '../../src/modules/rooms/domain/index.js';",
+  ],
+  [
+    'src/entrypoints/http/share-routes.ts',
+    `import { BoardSharingService } from '${sharingProtocol}';\nimport type { SharingApplication } from '../../modules/sharing/application/index.js';`,
+  ],
+  [
+    'src/bootstrap/index.ts',
+    "import { createSharingApplication } from '../modules/sharing/application/index.js';\nimport { createSharingRepository } from '../infrastructure/adapters/sharing/index.js';\nimport { randomBytes } from 'node:crypto';",
+  ],
+  [
+    sharing + 'application/index.ts',
+    "import { normalizeGuestName } from '../domain/index.js';\nimport type { SharingRepository } from '../ports/index.js';",
+  ],
+  [sharing + 'ports/index.ts', "import type { GuestRole } from '../domain/index.js';"],
+  [
+    sharingAdapter + 'index.ts',
+    "import type { SharingRepository } from '../../../modules/sharing/ports/index.js';\nimport type { SqliteConnection } from '../../platform/index.js';\nimport { readBoardAccess } from '../authorization/index.js';",
+  ],
+  [
+    'tests/integration/sharing-http.test.ts',
+    `import { BoardSharingService } from '${sharingProtocol}';\nimport { createWhiteboardServer } from '../../src/bootstrap/index.js';`,
+  ],
+  [
+    'tests/unit/sharing.test.ts',
+    "import { normalizeGuestName } from '../../src/modules/sharing/domain/index.js';",
+  ],
   [
     'src/entrypoints/http/catalog-routes.ts',
     `import { BoardCatalogService } from '${catalogProtocol}';\nimport type { CatalogApplication } from '@catalog/application/index.js';`,
@@ -279,6 +404,346 @@ for (const [file, code] of permitted) {
 }
 
 const rejected = [
+  [
+    'suggestion application consumes the wire request instead of domain input',
+    whiteboard + 'application/board-suggestions.ts',
+    `import type { SubmitSuggestionRequest } from '${suggestionsProtocol}';`,
+  ],
+  [
+    'suggestion persistence imports wire messages',
+    'src/infrastructure/adapters/board-suggestions.ts',
+    `import type { Suggestion } from '${suggestionsProtocol}';`,
+  ],
+  [
+    'suggestion application derives authority from the HTTP entrypoint',
+    whiteboard + 'application/board-suggestions.ts',
+    "import type { HttpActor } from '../../../entrypoints/http/unary-route.js';",
+  ],
+  [
+    'suggestion HTTP bypasses the whiteboard application public entry',
+    'src/entrypoints/http/suggestion-routes.ts',
+    "import { acceptSuggestion } from '@board/application/private.js';",
+  ],
+  [
+    'MCP cannot use the human suggestion acceptance protocol directly',
+    'src/entrypoints/mcp/thread-suggestions.ts',
+    `import { AcceptSuggestionRequestSchema } from '${suggestionsProtocol}';`,
+  ],
+  [
+    'MCP cannot use the board edit wire to apply a proposal directly',
+    'src/entrypoints/mcp/thread-suggestions.ts',
+    `import { BoardEditService } from '${editingProtocol}';`,
+  ],
+  [
+    'MCP cannot invoke the private suggestion application directly',
+    'src/entrypoints/mcp/thread-suggestions.ts',
+    "import { acceptSuggestion } from '@board/application/private.js';",
+  ],
+  [
+    'MCP entrypoint cannot open the runtime process or filesystem directly',
+    'src/entrypoints/mcp/index.ts',
+    "import { spawn } from 'node:child_process';",
+  ],
+  [
+    'other platform files cannot start an MCP process',
+    'src/infrastructure/platform/guest-web.ts',
+    "import { spawn } from 'node:child_process';",
+  ],
+  [
+    'other platform files cannot read host input streams',
+    'src/infrastructure/platform/index.ts',
+    "import { createInterface } from 'node:readline';",
+  ],
+  [
+    'bootstrap cannot create an MCP runtime filesystem lock directly',
+    'src/bootstrap/index.ts',
+    "import lockfile from 'proper-lockfile';",
+  ],
+  [
+    'other platform files cannot create runtime locks',
+    'src/infrastructure/platform/mcp-spool.ts',
+    "import lockfile from 'proper-lockfile';",
+  ],
+  [
+    'MCP entrypoint calls the whiteboard application instead of injected operations',
+    'src/entrypoints/mcp/thread-operations.ts',
+    "import { createWhiteboardApplication } from '@board-app';",
+  ],
+  [
+    'MCP entrypoint loads catalogue protocol instead of an injected catalogue operation',
+    'src/entrypoints/mcp/thread-operations.ts',
+    `import { BoardCatalogService } from '${catalogProtocol}';`,
+  ],
+  [
+    'HTTP entrypoint imports a Thread tool schema library',
+    'src/entrypoints/http/index.ts',
+    "import { z } from 'zod';",
+  ],
+  [
+    'MCP entrypoint reads a thread HTML file directly',
+    'src/entrypoints/mcp/thread-resource.ts',
+    "import { readFile } from 'node:fs/promises';",
+  ],
+  [
+    'MCP entrypoint uses a platform resource reader without injection',
+    'src/entrypoints/mcp/thread-resource.ts',
+    "import { openThreadResource } from '../../infrastructure/platform/index.js';",
+  ],
+  [
+    'MCP entrypoint opens SQLite directly',
+    'src/entrypoints/mcp/thread-operations.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'MCP entrypoint bypasses injected operations and reads object persistence',
+    'src/entrypoints/mcp/thread-operations.ts',
+    "import { createWhiteboardRepository } from '../../infrastructure/adapters/index.js';",
+  ],
+  [
+    'MCP entrypoint reuses visitor cookie resolution',
+    'src/entrypoints/mcp/thread-operations.ts',
+    "import { resolveGuestActor } from '../http/guest-sharing.js';",
+  ],
+  [
+    'MCP entrypoint issues outbound HTTP requests',
+    'src/entrypoints/mcp/thread-operations.ts',
+    'const result = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'MCP entrypoint reads host configuration directly',
+    'src/entrypoints/mcp/index.ts',
+    'const location = process.env.STUDIO_ROOT;',
+    'no-restricted-globals',
+  ],
+  [
+    'MCP entrypoint reaches host configuration via the global object',
+    'src/entrypoints/mcp/index.ts',
+    'const location = globalThis.process.env.STUDIO_ROOT;',
+    'no-restricted-globals',
+  ],
+  [
+    'MCP entrypoint loads the SDK client surface',
+    'src/entrypoints/mcp/index.ts',
+    "import { Client } from '@modelcontextprotocol/sdk/client/index.js';",
+  ],
+  [
+    'bootstrap reaches the private Thread entrypoint',
+    'src/bootstrap/index.ts',
+    "import { startThreadMcp } from '../entrypoints/mcp/private.js';",
+  ],
+  [
+    'bootstrap uses the MCP transport SDK directly',
+    'src/bootstrap/index.ts',
+    `import { StdioServerTransport } from '${mcpStdioSdk}';`,
+  ],
+  [
+    'whiteboard application imports the MCP SDK',
+    whiteboard + 'application/index.ts',
+    `import { McpServer } from '${mcpServerSdk}';`,
+  ],
+  [
+    'HTTP entrypoint imports MCP app resource registration',
+    'src/entrypoints/http/index.ts',
+    `import { registerAppResource } from '${mcpAppServerSdk}';`,
+  ],
+  [
+    'HTTP entrypoint imports OpenAI MCP host capabilities',
+    'src/entrypoints/http/index.ts',
+    `import '${openAiMcpServerSdk}';`,
+  ],
+  [
+    'archived asset authorization bypasses the public adapter entry',
+    archivesAdapter + 'publication.ts',
+    "import { readBoardAccess } from '../authorization/private.js';",
+  ],
+  [
+    'bootstrap bypasses the public authorization adapter entry',
+    'src/bootstrap/index.ts',
+    "import { readBoardAccess } from '../infrastructure/adapters/authorization/private.js';",
+  ],
+  [
+    'authorization adapter imports archive publication machinery',
+    authorizationAdapter + 'index.ts',
+    "import { createArchiveImportRepository } from '../archives/index.js';",
+  ],
+  [
+    'room HTTP inspects domain room states directly',
+    'src/entrypoints/http/room-routes.ts',
+    "import { deriveTimer } from '../../modules/rooms/domain/index.js';",
+  ],
+  [
+    'room HTTP bypasses the application entry',
+    'src/entrypoints/http/room-routes.ts',
+    "import { followViewport } from '../../modules/rooms/application/private.js';",
+  ],
+  [
+    'room HTTP reaches the real-time state adapter',
+    'src/entrypoints/http/room-routes.ts',
+    "import { createRoomsRuntime } from '../../infrastructure/adapters/rooms/index.js';",
+  ],
+  [
+    'room application reads sharing services instead of its scoped authorization port',
+    rooms + 'application/index.ts',
+    "import type { SharingApplication } from '../../sharing/application/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'room application consumes a generated motion frame',
+    rooms + 'application/index.ts',
+    `import type { UpdateRoomPresenceRequest } from '${roomsProtocol}';`,
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'room domain reads the host timer directly',
+    rooms + 'domain/index.ts',
+    'const elapsed = Date.now();',
+    'no-restricted-globals',
+  ],
+  [
+    'room domain fetches peer presence directly',
+    rooms + 'domain/index.ts',
+    'const response = fetch(url);',
+    'no-restricted-globals',
+  ],
+  [
+    'room domain imports SQLite',
+    rooms + 'domain/index.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'room ports import mutable domain implementation',
+    rooms + 'ports/index.ts',
+    "import { deriveTimer } from '../domain/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'room adapter wires authorization directly instead of using composition',
+    roomsAdapter + 'index.ts',
+    "import { readBoardAccess } from '../authorization/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'room adapter takes a whiteboard storage port for movement frames',
+    roomsAdapter + 'index.ts',
+    "import type { WhiteboardRepository } from '@board/ports/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'room adapter enters sharing persistence internals',
+    roomsAdapter + 'index.ts',
+    "import { resolveGuest } from '../sharing/private.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'MCP imports room HTTP wire contracts',
+    'src/entrypoints/mcp/runtime.ts',
+    `import { BoardRoomsService } from '${roomsProtocol}';`,
+  ],
+  [
+    'room integration tests bypass server composition',
+    'tests/integration/rooms-http.test.ts',
+    "import { createRoomsRuntime } from '../../src/infrastructure/adapters/rooms/index.js';",
+  ],
+  [
+    'sharing HTTP bypasses the application to infer authorization in the domain',
+    'src/entrypoints/http/share-routes.ts',
+    "import { resolveGuestRole } from '../../modules/sharing/domain/index.js';",
+  ],
+  [
+    'sharing HTTP reaches the private guest credential implementation',
+    'src/entrypoints/http/share-routes.ts',
+    "import { resolveGuest } from '../../modules/sharing/application/private.js';",
+  ],
+  [
+    'sharing HTTP accesses persisted guest sessions directly',
+    'src/entrypoints/http/share-routes.ts',
+    "import { createSharingRepository } from '../../infrastructure/adapters/sharing/index.js';",
+  ],
+  [
+    'sharing HTTP opens SQLite directly',
+    'src/entrypoints/http/share-routes.ts',
+    "import { DatabaseSync } from 'node:sqlite';",
+  ],
+  [
+    'sharing application reads caller identity from transport internals',
+    sharing + 'application/index.ts',
+    "import type { HttpActor } from '../../../entrypoints/http/unary-route.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'sharing application uses wire identity data as a domain principal',
+    sharing + 'application/index.ts',
+    `import type { JoinBoardRequest } from '${sharingProtocol}';`,
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'sharing application generates session credentials outside an injected capability',
+    sharing + 'application/index.ts',
+    "import { randomBytes } from 'node:crypto';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'sharing domain generates unpredictable session identity directly',
+    sharing + 'domain/index.ts',
+    'const session = crypto.randomUUID();',
+    'no-restricted-globals',
+  ],
+  [
+    'sharing domain uses weak host randomness for invite codes',
+    sharing + 'domain/index.ts',
+    'const candidate = Math.random();',
+    'no-restricted-properties',
+  ],
+  [
+    'sharing ports import domain values',
+    sharing + 'ports/index.ts',
+    "import { normalizeGuestName } from '../domain/index.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'sharing application calls the private whiteboard entry to elevate a guest',
+    sharing + 'application/index.ts',
+    "import { open } from '@board/application/private.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'sharing adapter reaches catalogue persistence internals',
+    sharingAdapter + 'index.ts',
+    "import { update } from '../catalog/private.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'sharing adapter bypasses the public authorization entry',
+    sharingAdapter + 'index.ts',
+    "import { readBoardAccess } from '../authorization/private.js';",
+    boundaryRule,
+    'dependency',
+  ],
+  [
+    'MCP imports guest HTTP wire contracts',
+    'src/entrypoints/mcp/runtime.ts',
+    `import { BoardSharingService } from '${sharingProtocol}';`,
+  ],
+  [
+    'sharing integration tests skip server composition and use a session adapter',
+    'tests/integration/sharing-http.test.ts',
+    "import { createSharingRepository } from '../../src/infrastructure/adapters/sharing/index.js';",
+  ],
   [
     'copy HTTP reaches the catalogue duplication adapter',
     'src/entrypoints/http/catalog-routes.ts',

@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { Lightbulb } from 'lucide-react';
+import type { ReactNode, Ref } from 'react';
 import type { BoardEditReceipt } from '../../data/whiteboard/index.js';
 import { OperationNotice, StatusText } from '../../ui/base/index.js';
 import {
@@ -14,6 +15,7 @@ import type {
   BoardExportContext,
   BoardHistoryFrame,
   BoardMediaAction,
+  BoardSuggestionFrame,
   WhiteboardEditorFeatures,
 } from './board-features.js';
 import {
@@ -113,7 +115,9 @@ interface WorkspaceHeaderProps {
   readonly historyPreview: boolean;
   readonly historyOpen: boolean;
   readonly feedbackOpen: boolean;
+  readonly suggestionsOpen: boolean;
   readonly shareOpen: boolean;
+  readonly consumeShareEntry?: () => boolean;
   readonly annotationActive: boolean;
   readonly unresolvedFeedback: boolean;
   readonly writeAccess: boolean;
@@ -122,11 +126,14 @@ interface WorkspaceHeaderProps {
   readonly geometry: WorkspaceGeometry;
   readonly notice: ContentNotice;
   readonly readNotices: ReactNode;
+  readonly participants?: ReactNode;
+  readonly suggestionTrigger: Ref<HTMLButtonElement>;
   readonly onBack?: () => void;
   readonly onRename?: (title: string) => void;
   readonly onOpenShare?: BoardAnchorAction;
   readonly onOpenHistory?: BoardAnchorAction;
   readonly onToggleFeedback?: BoardAnchorAction;
+  readonly onOpenSuggestions?: BoardAnchorAction;
   readonly onToggleAnnotation?: () => void;
 }
 
@@ -139,6 +146,33 @@ function boardStatus({ writeAccess, moving, geometry, move }: WorkspaceHeaderPro
   }
 
   return <MoveStatus controls={move} />;
+}
+
+function headerParticipants({
+  participants,
+  suggestionsOpen,
+  suggestionTrigger,
+  onOpenSuggestions,
+}: WorkspaceHeaderProps) {
+  return (
+    <>
+      {participants}
+      {onOpenSuggestions && (
+        <button
+          ref={suggestionTrigger}
+          type="button"
+          className="whiteboard-chrome__action"
+          aria-label="私人建议"
+          aria-haspopup="dialog"
+          aria-expanded={suggestionsOpen}
+          title="私人建议"
+          onClick={(event) => onOpenSuggestions(event.currentTarget)}
+        >
+          <Lightbulb size={18} aria-hidden="true" />
+        </button>
+      )}
+    </>
+  );
 }
 
 export function WorkspaceHeader(props: WorkspaceHeaderProps) {
@@ -171,8 +205,10 @@ export function WorkspaceHeader(props: WorkspaceHeaderProps) {
         onBack={onBack}
         onRename={historyPreview ? undefined : onRename}
         status={boardStatus(props)}
+        participants={headerParticipants(props)}
         onOpenShare={historyPreview ? undefined : onOpenShare}
         shareOpen={shareOpen}
+        consumeShareEntry={props.consumeShareEntry}
         onOpenHistory={onOpenHistory}
         historyOpen={historyOpen}
         onToggleFeedback={onToggleFeedback}
@@ -272,13 +308,20 @@ interface WorkspacePanelsProps {
   readonly features: WhiteboardEditorFeatures;
   readonly feedback: BoardFeedbackFrame;
   readonly history: BoardHistoryFrame;
+  readonly suggestions: BoardSuggestionFrame;
 }
 
-export function WorkspacePanels({ features, feedback, history }: WorkspacePanelsProps) {
+export function WorkspacePanels({
+  features,
+  feedback,
+  history,
+  suggestions,
+}: WorkspacePanelsProps) {
   return (
     <>
       {features.renderFeedback?.(feedback)}
       {features.renderHistory?.(history)}
+      {features.renderSuggestions?.(suggestions)}
     </>
   );
 }
@@ -291,14 +334,14 @@ interface WorkspaceExportProps {
 }
 
 export function WorkspaceExport({ anchor, context, render, onClose }: WorkspaceExportProps) {
-  if (!anchor || !render) {
+  if (!render) {
     return null;
   }
 
   return render({
-    anchor,
+    anchor: anchor ?? null,
     context,
     onRequestClose: onClose,
-    restoreFocus: () => anchor.focus({ preventScroll: true }),
+    restoreFocus: () => anchor?.focus({ preventScroll: true }),
   });
 }

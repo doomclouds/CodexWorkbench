@@ -146,3 +146,125 @@ test('keeps authoritative conflict details until a complete scene reaches that r
     close();
   }
 });
+
+test('applies room metadata in order and refetches only changed visible payload versions', async () => {
+  const unedited = documentObject('原版正文', 0n, 0n);
+  const edited = documentObject('远端改动', 0n, 1n);
+  let latest = unedited;
+  let sceneReads = 0;
+  const payloadReads: (readonly string[])[] = [];
+  const session = createWhiteboardSession(
+    {
+      async getScene() {
+        sceneReads++;
+        return boardScene(0n, unedited);
+      },
+      async getPayloads(_board, ids) {
+        payloadReads.push(ids);
+        return [
+          {
+            kind: 'loaded',
+            payload: {
+              id: objectId,
+              version: latest.payloadVersion,
+              body: { kind: 'document', value: { title: latest.label } },
+            },
+          },
+        ];
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    await opened;
+    const before = nextSnapshot(session);
+    session.observeVisible([objectId]);
+    await before;
+    latest = edited;
+
+    session.acceptRoomContent({
+      revision: 1n,
+      changedObjectIds: [objectId],
+      changedObjects: [edited],
+      removedObjectIds: [],
+      refreshScene: false,
+    });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'ready', scene: boardScene(1n, edited) });
+    const reflected = await nextSnapshot(session);
+    expect(reflected.kind === 'ready' && reflected.payloads.get(objectId)?.version).toBe(1n);
+
+    const moved = { ...edited, geometryVersion: 1n, geometry: { ...edited.geometry, x: 36 } };
+    session.acceptRoomContent({
+      revision: 2n,
+      changedObjectIds: [objectId],
+      changedObjects: [moved],
+      removedObjectIds: [],
+      refreshScene: false,
+    });
+    expect(session.getSnapshot()).toMatchObject({ kind: 'ready', scene: boardScene(2n, moved) });
+    expect(sceneReads).toBe(1);
+    expect(payloadReads).toEqual([[objectId], [objectId]]);
+  } finally {
+    close();
+  }
+});
+
+test('coalesces room revision gaps and ordering invalidations while a scene is already fetching', async () => {
+  const initial = documentObject('原版正文', 0n, 0n);
+  const firstRefresh = deferScene();
+  const latestRefresh = deferScene();
+  const reloads = [
+    Promise.resolve(boardScene(0n, initial)),
+    firstRefresh.response,
+    latestRefresh.response,
+  ];
+  let sceneReads = 0;
+  let firstRefreshStarted!: () => void;
+  let secondRefreshStarted!: () => void;
+  const first = new Promise<void>((resolve) => {
+    firstRefreshStarted = resolve;
+  });
+  const second = new Promise<void>((resolve) => {
+    secondRefreshStarted = resolve;
+  });
+  const session = createWhiteboardSession(
+    {
+      getScene() {
+        sceneReads++;
+        if (sceneReads === 2) {
+          firstRefreshStarted();
+        } else if (sceneReads === 3) {
+          secondRefreshStarted();
+        }
+
+        return reloads.shift() ?? Promise.reject(new Error('Unexpected scene fetch.'));
+      },
+      async getPayloads() {
+        return [];
+      },
+    },
+    boardId,
+  );
+  const opened = nextSnapshot(session);
+  const close = session.open();
+  try {
+    await opened;
+    const change = { changedObjectIds: [], removedObjectIds: [], refreshScene: true };
+    session.acceptRoomContent({ ...change, revision: 2n });
+    await first;
+    session.acceptRoomContent({ ...change, revision: 3n });
+    session.acceptRoomContent({ ...change, revision: 4n });
+    expect(sceneReads).toBe(2);
+    firstRefresh.deliver(boardScene(2n, initial));
+    await second;
+
+    const latest = nextSnapshot(session);
+    latestRefresh.deliver(boardScene(4n, initial));
+    expect(await latest).toMatchObject({ kind: 'ready', scene: boardScene(4n, initial) });
+    expect(sceneReads).toBe(3);
+  } finally {
+    close();
+  }
+});

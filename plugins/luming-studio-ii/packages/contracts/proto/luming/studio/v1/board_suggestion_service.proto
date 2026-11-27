@@ -1,0 +1,149 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "luming/studio/v1/whiteboard_edits.proto";
+import "luming/studio/v1/whiteboard_scene.proto";
+import "luming/studio/v1/whiteboard_service.proto";
+
+service BoardSuggestionService {
+  rpc CreateBoardReviewSource(CreateBoardReviewSourceRequest) returns (CreateBoardReviewSourceResponse);
+  rpc SubmitBoardSuggestion(SubmitBoardSuggestionRequest) returns (SubmitBoardSuggestionResponse);
+  rpc ListBoardSuggestions(ListBoardSuggestionsRequest) returns (ListBoardSuggestionsResponse);
+  rpc PreviewBoardSuggestion(PreviewBoardSuggestionRequest) returns (PreviewBoardSuggestionResponse);
+  rpc AcceptBoardSuggestion(AcceptBoardSuggestionRequest) returns (AcceptBoardSuggestionResponse);
+  rpc RejectBoardSuggestion(RejectBoardSuggestionRequest) returns (RejectBoardSuggestionResponse);
+}
+
+message BoardReviewSelection {
+  repeated string object_ids = 1;
+}
+
+message CreateBoardReviewSourceRequest {
+  string board_id = 1;
+  string command_id = 2;
+  oneof origin {
+    BoardReviewSelection selection = 3;
+    string feedback_thread_id = 4;
+  }
+  optional uint64 expected_board_revision = 5;
+}
+
+message BoardReviewSource {
+  string source_id = 1;
+  string board_id = 2;
+  optional uint64 captured_board_revision = 3;
+  repeated string object_ids = 4;
+  optional string feedback_thread_id = 5;
+  repeated BoardReviewTarget targets = 6;
+  optional uint64 targets_board_revision = 7;
+}
+
+message BoardReviewTarget {
+  string object_id = 1;
+  string kind = 2;
+  optional uint64 geometry_version = 3;
+  optional uint64 payload_version = 4;
+  Geometry geometry = 5;
+}
+
+message CreateBoardReviewSourceResponse {
+  BoardReviewSource source = 1;
+}
+
+message BoardSuggestionOptionInput {
+  string option_id = 1;
+  string label = 2;
+  optional string description = 3;
+  oneof edit {
+    EditBoardGeometryRequest geometry = 4;
+    EditObjectContentRequest content = 5;
+  }
+}
+
+message SubmitBoardSuggestionRequest {
+  string board_id = 1;
+  string command_id = 2;
+  string source_id = 3;
+  string observation = 4;
+  repeated BoardSuggestionOptionInput options = 5;
+}
+
+message BoardSuggestionOption {
+  string option_id = 1;
+  string label = 2;
+  optional string description = 3;
+}
+
+message BoardSuggestion {
+  string proposal_id = 1;
+  string source_id = 2;
+  string observation = 3;
+  optional uint64 proposal_version = 4;
+  uint64 expires_at_millis = 5;
+  repeated BoardSuggestionOption options = 6;
+  optional string accepted_option_id = 7;
+  optional uint64 accepted_board_revision = 8;
+  bool rejected = 9;
+}
+
+message SubmitBoardSuggestionResponse {
+  BoardSuggestion suggestion = 1;
+}
+
+message ListBoardSuggestionsRequest {
+  string board_id = 1;
+  uint32 limit = 2;
+  optional string before_proposal_id = 3;
+}
+
+message ListBoardSuggestionsResponse {
+  repeated BoardSuggestion proposals = 1;
+  optional string next_before_proposal_id = 2;
+}
+
+message PreviewBoardSuggestionRequest {
+  string board_id = 1;
+  string proposal_id = 2;
+  string option_id = 3;
+  optional uint64 expected_proposal_version = 4;
+}
+
+message BoardSuggestionPreview {
+  optional uint64 board_revision = 1;
+  repeated ObjectMetadata changed_objects = 2;
+  repeated string removed_object_ids = 3;
+  repeated string object_order = 4;
+  repeated ObjectPayloadResult changed_payloads = 5;
+}
+
+message PreviewBoardSuggestionResponse {
+  oneof result {
+    BoardSuggestionPreview preview = 1;
+    BoardEditConflict conflict = 2;
+    BoardEditRejected rejected = 3;
+  }
+}
+
+message AcceptBoardSuggestionRequest {
+  string board_id = 1;
+  string proposal_id = 2;
+  string option_id = 3;
+  optional uint64 expected_proposal_version = 4;
+  string command_id = 5;
+}
+
+message AcceptBoardSuggestionResponse {
+  BoardEditReceipt receipt = 1;
+}
+
+message RejectBoardSuggestionRequest {
+  string board_id = 1;
+  string proposal_id = 2;
+  optional uint64 expected_proposal_version = 3;
+  string command_id = 4;
+}
+
+message RejectBoardSuggestionResponse {
+  BoardSuggestion suggestion = 1;
+}

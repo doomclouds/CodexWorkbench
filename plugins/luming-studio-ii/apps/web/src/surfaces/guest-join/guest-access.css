@@ -1,0 +1,84 @@
+.guest-access {
+  --guest-background: light-dark(#f7f6f3, #1f1e1d);
+  --guest-card: light-dark(#fff, #2a2927);
+  --guest-text: light-dark(#1f1e1d, #f2f1ee);
+  --guest-muted: light-dark(#6b6a66, #a8a6a0);
+  --guest-border: light-dark(#e3e1dc, #3a3936);
+  --studio-ui-accent: #c96442;
+  --studio-ui-accent-text: #fff;
+  display: grid;
+  box-sizing: border-box;
+  min-block-size: 100dvh;
+  place-items: center;
+  padding: 16px;
+  background: var(--guest-background);
+  color: var(--guest-text);
+  font:
+    15px/1.5 system-ui,
+    -apple-system,
+    'Microsoft YaHei',
+    sans-serif;
+}
+
+.guest-access__card {
+  box-sizing: border-box;
+  inline-size: min(420px, 100%);
+  padding: 28px;
+  border: 1px solid var(--guest-border);
+  border-radius: 14px;
+  background: var(--guest-card);
+}
+
+.guest-access__card h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.guest-access__card p {
+  margin: 0 0 20px;
+  color: var(--guest-muted);
+}
+
+.guest-access__card p[role='alert'] {
+  color: light-dark(#a53131, #ff9b9b);
+}
+
+.guest-access__card .guest-access__note {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+
+.guest-access__card label {
+  display: block;
+  margin-block-end: 8px;
+  color: var(--guest-muted);
+  font-size: 13px;
+}
+
+.guest-access__card :is(input, button) {
+  box-sizing: border-box;
+  inline-size: 100%;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.guest-access__card input {
+  padding: 10px 11px;
+  border: 1px solid var(--guest-border);
+  background: transparent;
+  color: inherit;
+}
+
+.guest-access__card button {
+  margin-block-start: 16px;
+  padding: 10px;
+  border: 0;
+  font-weight: 600;
+}
+
+.guest-access__card :is(input, button):focus-visible {
+  outline: 2px solid var(--studio-ui-accent);
+  outline-offset: 3px;
+}

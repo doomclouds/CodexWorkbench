@@ -1,0 +1,181 @@
+syntax = "proto3";
+
+package luming.studio.v1;
+
+import "luming/studio/v1/whiteboard_scene.proto";
+
+service BoardRoomService {
+  rpc GetBoardRoom(GetBoardRoomRequest) returns (GetBoardRoomResponse);
+  rpc UpdateBoardPresence(UpdateBoardPresenceRequest) returns (UpdateBoardPresenceResponse);
+  rpc LeaveBoardPresence(LeaveBoardPresenceRequest) returns (LeaveBoardPresenceResponse);
+  rpc ChangeBoardTimer(ChangeBoardTimerRequest) returns (ChangeBoardTimerResponse);
+  rpc GetBoardTimerReceipt(GetBoardTimerReceiptRequest) returns (GetBoardTimerReceiptResponse);
+}
+
+message GetBoardRoomRequest {
+  string board_id = 1;
+}
+
+message GetBoardRoomResponse {
+  BoardRoomEvent event = 1;
+}
+
+message BoardRoomViewport {
+  double center_x = 1;
+  double center_y = 2;
+  double zoom = 3;
+  double width = 4;
+  double height = 5;
+}
+
+message BoardRoomParticipantKey {
+  string actor_id = 1;
+  string view_id = 2;
+}
+
+message BoardRoomParticipant {
+  BoardRoomParticipantKey key = 1;
+  string display_name = 2;
+  string role = 3;
+  optional uint64 sequence = 4;
+  optional uint64 expires_at_unix_ms = 5;
+  Point cursor = 6;
+  BoardRoomViewport viewport = 7;
+  bool following = 8;
+}
+
+message UpdateBoardPresenceRequest {
+  string board_id = 1;
+  string view_id = 2;
+  optional uint64 sequence = 3;
+  Point cursor = 4;
+  BoardRoomViewport viewport = 5;
+  bool following = 6;
+}
+
+message UpdateBoardPresenceResponse {
+  bool accepted = 1;
+}
+
+message LeaveBoardPresenceRequest {
+  string board_id = 1;
+  string view_id = 2;
+  optional uint64 sequence = 3;
+}
+
+message LeaveBoardPresenceResponse {
+  bool accepted = 1;
+}
+
+message BoardRoomSnapshot {
+  string actor_id = 1;
+  bool can_edit = 2;
+  optional uint64 board_revision = 3;
+  repeated BoardRoomParticipant participants = 4;
+  BoardRoomTimer timer = 5;
+}
+
+message BoardRoomParticipants {
+  repeated BoardRoomParticipant upserts = 1;
+  repeated BoardRoomParticipantKey removals = 2;
+}
+
+message BoardRoomContentChanged {
+  optional uint64 board_revision = 1;
+  repeated string changed_object_ids = 2;
+  repeated string removed_object_ids = 3;
+  bool refresh_scene = 4;
+  repeated ObjectMetadata changed_objects = 5;
+}
+
+message BoardRoomAccessLost {}
+
+message BoardRoomEvent {
+  string board_id = 1;
+  string room_instance_id = 2;
+  optional uint64 sequence = 3;
+  optional uint64 server_time_unix_ms = 4;
+  oneof payload {
+    BoardRoomSnapshot snapshot = 5;
+    BoardRoomParticipants participants = 6;
+    BoardRoomTimer timer = 7;
+    BoardRoomContentChanged content_changed = 8;
+    BoardRoomAccessLost access_lost = 9;
+  }
+}
+
+enum BoardRoomTimerPhase {
+  BOARD_ROOM_TIMER_PHASE_UNSPECIFIED = 0;
+  BOARD_ROOM_TIMER_PHASE_IDLE = 1;
+  BOARD_ROOM_TIMER_PHASE_RUNNING = 2;
+  BOARD_ROOM_TIMER_PHASE_PAUSED = 3;
+  BOARD_ROOM_TIMER_PHASE_ENDED = 4;
+}
+
+message BoardRoomTimer {
+  optional uint64 version = 1;
+  BoardRoomTimerPhase phase = 2;
+  uint32 duration_ms = 3;
+  optional uint64 deadline_unix_ms = 4;
+  uint32 remaining_ms = 5;
+}
+
+message BoardTimerAction {}
+
+message ChangeBoardTimerRequest {
+  string board_id = 1;
+  string command_id = 2;
+  optional uint64 expected_version = 3;
+  oneof action {
+    BoardTimerAction start = 4;
+    BoardTimerAction pause = 5;
+    BoardTimerAction resume = 6;
+    BoardTimerAction reset = 7;
+    uint32 set_duration_ms = 8;
+    sint32 adjust_duration_ms = 9;
+  }
+}
+
+message BoardTimerApplied {
+  BoardRoomTimer timer = 1;
+}
+
+message BoardTimerConflict {
+  BoardRoomTimer timer = 1;
+}
+
+enum BoardTimerRejection {
+  BOARD_TIMER_REJECTION_UNSPECIFIED = 0;
+  BOARD_TIMER_REJECTION_FORBIDDEN = 1;
+  BOARD_TIMER_REJECTION_INVALID_ACTION = 2;
+  BOARD_TIMER_REJECTION_COMMAND_ID_REUSE = 3;
+}
+
+message BoardTimerRejected {
+  BoardTimerRejection reason = 1;
+}
+
+message BoardTimerReceipt {
+  string board_id = 1;
+  string command_id = 2;
+  oneof outcome {
+    BoardTimerApplied applied = 3;
+    BoardTimerConflict conflict = 4;
+    BoardTimerRejected rejected = 5;
+  }
+}
+
+message ChangeBoardTimerResponse {
+  BoardTimerReceipt receipt = 1;
+  optional uint64 server_time_unix_ms = 2;
+}
+
+message GetBoardTimerReceiptRequest {
+  string board_id = 1;
+  string command_id = 2;
+}
+
+message GetBoardTimerReceiptResponse {
+  BoardTimerReceipt receipt = 1;
+  optional uint64 server_time_unix_ms = 2;
+}

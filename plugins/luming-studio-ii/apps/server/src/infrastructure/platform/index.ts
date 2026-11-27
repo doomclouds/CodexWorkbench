@@ -1,6 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLOutputValue } from 'node:sqlite';
 
+export { loadGuestWebAssets } from './guest-web-assets.js';
+export { loadMcpRuntime } from './mcp-runtime.js';
+export { createMcpSpool } from './mcp-spool.js';
+
 export type SqliteConnection = Pick<DatabaseSync, 'exec' | 'prepare'>;
 export type SqliteRow = Record<string, SQLOutputValue>;
 

@@ -1,4 +1,9 @@
-import { mergeConfirmedEdit, type AppliedBoardEdit } from './confirmed-edits.js';
+import {
+  mergeConfirmedEdit,
+  mergeRoomContent,
+  type AppliedBoardEdit,
+  type WhiteboardContentChange,
+} from './confirmed-edits.js';
 import { mergeConfirmedScene } from './confirmed-scene.js';
 import type {
   WhiteboardMoveCommand,
@@ -39,6 +44,7 @@ interface WhiteboardSession {
   readonly observeVisible: (ids: readonly string[]) => void;
   readonly retryPayloads: () => void;
   readonly acceptEdit: (receipt: AppliedBoardEdit) => void;
+  readonly acceptRoomContent: (change: WhiteboardContentChange) => void;
   readonly acceptConflict: (receipt: ConflictingEdit) => void;
   readonly submitMove: (command: WhiteboardMoveCommand) => Promise<WhiteboardMoveReceipt>;
   readonly readReceipt: (commandId: string) => Promise<WhiteboardMoveReceipt | undefined>;
@@ -65,6 +71,8 @@ export function createWhiteboardSession(
   let controller: AbortController | undefined;
   let readingPayloads: AbortSignal | undefined;
   let sceneRequest = 0;
+  let readingScene: number | undefined;
+  let roomReloadQueued = false;
   let confirmedRevision = 0n;
 
   function rememberRevision(revision: bigint) {
@@ -175,7 +183,12 @@ export function createWhiteboardSession(
     if (scene.boardId !== boardId) {
       throw new Error('服务返回了其他白板。');
     }
+
     if (!rememberRevision(scene.revision)) {
+      if (roomReloadQueued) {
+        return;
+      }
+
       throw new Error('当前白板场景早于已确认版次，请重新读取。');
     }
 
@@ -193,7 +206,33 @@ export function createWhiteboardSession(
     }
 
     const request = ++sceneRequest;
-    loadScene(request, signal).catch((error: unknown) => failScene(error, request, signal));
+    readingScene = request;
+    roomReloadQueued = false;
+    loadScene(request, signal)
+      .catch((error: unknown) => failScene(error, request, signal))
+      .finally(() => finishScene(request, signal));
+  }
+
+  function finishScene(request: number, signal: AbortSignal) {
+    if (readingScene !== request) {
+      return;
+    }
+
+    readingScene = undefined;
+    const outOfDate = snapshot.kind !== 'ready' || snapshot.scene.revision < confirmedRevision;
+    const needsRoomReload = roomReloadQueued && !signal.aborted;
+    roomReloadQueued = false;
+    if (outOfDate && needsRoomReload) {
+      reload();
+    }
+  }
+
+  function refreshRoomScene() {
+    if (readingScene !== undefined) {
+      roomReloadQueued = true;
+    } else {
+      reload();
+    }
   }
 
   function open() {
@@ -259,6 +298,26 @@ export function createWhiteboardSession(
     }
   }
 
+  function acceptRoomContent(change: WhiteboardContentChange) {
+    const signal = controller?.signal;
+    if (!signal || signal.aborted) {
+      return;
+    }
+
+    const scene = snapshot.kind === 'ready' ? snapshot.scene : undefined;
+    const outdated = scene !== undefined && change.revision <= scene.revision;
+    if (outdated || !rememberRevision(change.revision)) {
+      return;
+    }
+
+    const updated = scene && mergeRoomContent(scene, change);
+    if (updated) {
+      acceptScene(updated);
+    } else {
+      refreshRoomScene();
+    }
+  }
+
   function acceptConflict(receipt: ConflictingEdit) {
     if (receipt.boardId !== boardId || controller?.signal.aborted || snapshot.kind !== 'ready') {
       return;
@@ -290,6 +349,7 @@ export function createWhiteboardSession(
     open,
     reload,
     acceptEdit,
+    acceptRoomContent,
     acceptConflict,
     observeVisible(ids) {
       visible = [...new Set(ids)];

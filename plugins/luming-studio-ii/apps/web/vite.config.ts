@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type ProxyOptions, type UserConfig } from 'vite';
+import { viteSingleFile } from 'vite-plugin-singlefile';
 
 const whiteboardRpcPrefix = '/luming.studio.v1.WhiteboardService/';
 const boardEditRpcPrefix = '/luming.studio.v1.BoardEditService/';
@@ -7,6 +8,10 @@ const boardHistoryRpcPrefix = '/luming.studio.v1.BoardHistoryService/';
 const feedbackRpcPrefix = '/luming.studio.v1.FeedbackService/';
 const catalogRpcPrefix = '/luming.studio.v1.BoardCatalogService/';
 const archiveRpcPrefix = '/luming.studio.v1.BoardArchiveService/';
+const sharingRpcPrefix = '/luming.studio.v1.BoardSharingService/';
+const suggestionRpcPrefix = '/luming.studio.v1.BoardSuggestionService/';
+const roomRpcPrefix = '/luming.studio.v1.BoardRoomService/';
+const roomEventPath = '/studio-room-events';
 const archiveAssetsPrefix = '/studio-archive-assets/';
 
 const editorPackages = [
@@ -35,9 +40,22 @@ function whiteboardProxy(): Record<string, ProxyOptions> {
     throw new Error('Set the whiteboard API to a bare origin.');
   }
 
-  const proxy = {
+  const proxy: ProxyOptions = {
     target: url.origin,
     headers: { authorization: 'Bearer ' + token },
+    configure(proxy) {
+      proxy.on('proxyReq', (outgoing, incoming) => {
+        const incomingUrl = URL.parse(incoming.url ?? '', url.origin);
+        const roomEvent = incomingUrl?.pathname === roomEventPath;
+        const guestRoom = roomEvent && incomingUrl.searchParams.get('guest') === '1';
+        const guest = incoming.headers['x-luming-guest'] === '1' || guestRoom;
+        if (guest) {
+          outgoing.removeHeader('authorization');
+        }
+
+        outgoing.removeHeader('x-luming-guest');
+      });
+    },
   };
 
   return {
@@ -47,6 +65,10 @@ function whiteboardProxy(): Record<string, ProxyOptions> {
     [feedbackRpcPrefix]: proxy,
     [catalogRpcPrefix]: proxy,
     [archiveRpcPrefix]: proxy,
+    [sharingRpcPrefix]: proxy,
+    [suggestionRpcPrefix]: proxy,
+    [roomRpcPrefix]: proxy,
+    [roomEventPath]: proxy,
     [archiveAssetsPrefix]: proxy,
   };
 }
@@ -79,6 +101,15 @@ const libraryConfig = {
 } satisfies UserConfig;
 
 export default defineConfig(({ command, mode }) => {
+  if (mode === 'mcp') {
+    return {
+      plugins: [viteSingleFile()],
+      build: {
+        outDir: 'dist/mcp',
+        rolldownOptions: { input: entry('./mcp.html') },
+      },
+    };
+  }
   if (mode !== 'whiteboard') {
     return libraryConfig;
   }

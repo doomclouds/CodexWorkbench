@@ -1,14 +1,43 @@
 import type { ComponentType, ReactNode } from 'react';
 import type {
   BoardEditReceipt,
+  WhiteboardContentChange,
   WhiteboardEditService,
   WhiteboardObject,
   WhiteboardPayloadResult,
   WhiteboardScene,
 } from '../../data/whiteboard/index.js';
-import type { CanvasPoint, CanvasViewport } from '../../ui/domain/canvas/index.js';
+import type {
+  CanvasPoint,
+  CanvasViewport,
+  CanvasViewportSize,
+} from '../../ui/domain/canvas/index.js';
 
 type AppliedEdit = Extract<BoardEditReceipt, { kind: 'applied' }>;
+
+export interface BoardViewContext {
+  readonly boardId: string;
+  readonly selectedIds: readonly string[];
+  readonly viewport: CanvasViewport;
+}
+
+export interface BoardPresenceSlot {
+  readonly participants: ReactNode;
+  readonly notice: ReactNode;
+  readonly overlay: ReactNode;
+  readonly accessLost: boolean;
+  readonly onCursorChange: (point: CanvasPoint | undefined) => void;
+}
+
+interface BoardPresenceFrame {
+  readonly viewport?: CanvasViewport & CanvasViewportSize;
+  readonly paused: boolean;
+  readonly detachSequence: number;
+  readonly onViewportRequest: (viewport: CanvasViewport) => void;
+  readonly onContentChanged: (change: WhiteboardContentChange) => void;
+  readonly onAccessLost: () => void;
+  readonly render: (slot: BoardPresenceSlot) => ReactNode;
+}
 
 interface BoardViewingFrame {
   readonly active: boolean;
@@ -29,8 +58,8 @@ export interface BoardExportContext {
   readonly selectedIds: readonly string[];
 }
 
-interface BoardExportFrame {
-  readonly anchor: Element;
+export interface BoardExportFrame {
+  readonly anchor: HTMLButtonElement | null;
   readonly context: BoardExportContext;
   readonly onRequestClose: () => void;
   readonly restoreFocus: () => void;
@@ -74,6 +103,25 @@ export interface BoardFeedbackFrame {
   readonly onUnresolvedChange?: (unresolved: boolean) => void;
   readonly annotationRequest?: { readonly objectId: string; readonly sequence: number };
   readonly singleKeys?: boolean;
+  readonly onReviewThread?: (threadId: string) => void;
+}
+
+export type BoardSuggestionPreviewChanges = Pick<
+  AppliedEdit,
+  'revision' | 'objects' | 'removedIds' | 'order' | 'payloads'
+>;
+
+export interface BoardSuggestionFrame {
+  readonly anchor: HTMLButtonElement | null;
+  readonly boardId: string;
+  readonly revision: bigint;
+  readonly selection: readonly string[];
+  readonly feedbackThreadId?: string;
+  readonly onClose: () => void;
+  readonly restoreFocus: () => void;
+  readonly onPreviewChange: (active: boolean) => void;
+  readonly onApplied: (receipt: AppliedEdit) => void;
+  readonly renderPreview: (key: string, changes: BoardSuggestionPreviewChanges) => ReactNode;
 }
 
 export type BoardMediaAction = (onChoose: () => void) => ReactNode;
@@ -92,8 +140,15 @@ export interface WhiteboardEditorFeatures {
   readonly Viewing: ComponentType<BoardViewingFrame>;
   readonly editService?: WhiteboardEditService;
   readonly readHtmlSource?: (file: File) => Promise<string>;
+  readonly commentAccess?: boolean;
+  readonly consumeShareEntry?: () => boolean;
+  readonly renderPresence?: (frame: BoardPresenceFrame) => ReactNode;
+  readonly renderSharedTimer?: () => ReactNode;
+  readonly onRoomAccessLost?: () => void;
+  readonly onViewContext?: (context: BoardViewContext | undefined) => void;
   readonly renderExport?: (frame: BoardExportFrame) => ReactNode;
   readonly renderHistory?: (frame: BoardHistoryFrame) => ReactNode;
   readonly renderFeedback?: (frame: BoardFeedbackFrame) => ReactNode;
+  readonly renderSuggestions?: (frame: BoardSuggestionFrame) => ReactNode;
   readonly renderMedia?: (frame: BoardMediaFrame) => ReactNode;
 }

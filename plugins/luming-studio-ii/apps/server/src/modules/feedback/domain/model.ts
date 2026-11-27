@@ -4,6 +4,7 @@ export interface FeedbackActor {
 
 export interface FeedbackBoardAccess {
   readonly canEdit: boolean;
+  readonly canComment?: boolean;
   readonly isOwner: boolean;
 }
 

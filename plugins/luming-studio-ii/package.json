@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Luming Studio II plugin workspace",
+  "scripts": {
+    "build:runtime": "pnpm --filter @codexworkbench/luming-studio-ii-server check && pnpm --filter @codexworkbench/luming-studio-ii-web check && node ../../tooling/build-luming-studio-ii.mjs"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=24"

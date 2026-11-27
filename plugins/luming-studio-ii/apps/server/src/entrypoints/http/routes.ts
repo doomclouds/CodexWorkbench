@@ -8,12 +8,16 @@ import { createExportRoute } from './export-route.js';
 import { toPayloadResult } from './payload.js';
 import { toCommandReceipt, toMoveCommand } from './receipt.js';
 import { requireId } from './request.js';
+import type { ObserveMove } from './room-changes.js';
 import { toBoardScene } from './scene.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
 type ReceiptResponseInit = MessageInitShape<typeof GetCommandReceiptResponseSchema>;
 
-export function createWhiteboardRoutes(application: WhiteboardApplication): readonly RouteEntry[] {
+export function createWhiteboardRoutes(
+  application: WhiteboardApplication,
+  observe?: ObserveMove,
+): readonly RouteEntry[] {
   const { getBoardScene, getObjectPayloads, moveObjects, getCommandReceipt } =
     WhiteboardService.method;
 
@@ -28,9 +32,12 @@ export function createWhiteboardRoutes(application: WhiteboardApplication): read
 
       return { boardId, results: results.map(toPayloadResult) };
     }),
-    unaryRoute(moveObjects, (actor, request) => ({
-      receipt: toCommandReceipt(application.moveObjects(actor, toMoveCommand(request))),
-    })),
+    unaryRoute(moveObjects, (actor, request) => {
+      const receipt = application.moveObjects(actor, toMoveCommand(request));
+      observe?.(receipt);
+
+      return { receipt: toCommandReceipt(receipt) };
+    }),
     unaryRoute(getCommandReceipt, (actor, request): ReceiptResponseInit => {
       const boardId = requireId(request.boardId);
       const commandId = requireId(request.commandId);

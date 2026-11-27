@@ -20,6 +20,7 @@ import type {
   CanvasObjectActivation,
   CanvasProps,
   CanvasViewportRequest,
+  CanvasViewportSize,
 } from './contracts.js';
 import { CanvasOverlays } from './overlays/index.js';
 import { CanvasObjects } from './rendering/index.js';
@@ -65,6 +66,7 @@ function CanvasSession(props: CanvasProps) {
     initialViewport,
     fitOnMount,
     onViewportChange,
+    onViewportSizeChange,
     onVisibleObjectsChange,
     presentation,
     ref,
@@ -187,6 +189,9 @@ function CanvasSession(props: CanvasProps) {
   const openingFitApplied = useRef(false);
   const observeVisible = useEffectEvent((ids: readonly string[]) => onVisibleObjectsChange?.(ids));
   const observeViewport = useEffectEvent(onViewportChange ?? (() => undefined));
+  const observeViewportSize = useEffectEvent((value: CanvasViewportSize) =>
+    onViewportSizeChange?.(value),
+  );
 
   function requestedViewport(request: CanvasViewportRequest) {
     if ('viewport' in request) {
@@ -236,6 +241,10 @@ function CanvasSession(props: CanvasProps) {
   useEffect(() => {
     observeViewport(frame.viewport);
   }, [frame.viewport]);
+
+  useEffect(() => {
+    observeViewportSize(size);
+  }, [size]);
 
   function focus() {
     root.current?.focus({ preventScroll: true });

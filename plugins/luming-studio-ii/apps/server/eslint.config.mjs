@@ -104,6 +104,12 @@ export default defineConfig([
       'src/modules/feedback/application/' + scripts,
       'src/modules/feedback/domain/' + scripts,
       'src/modules/feedback/ports/' + scripts,
+      'src/modules/sharing/application/' + scripts,
+      'src/modules/sharing/domain/' + scripts,
+      'src/modules/sharing/ports/' + scripts,
+      'src/modules/rooms/application/' + scripts,
+      'src/modules/rooms/domain/' + scripts,
+      'src/modules/rooms/ports/' + scripts,
       'src/application/workflows/' + scripts,
     ],
     rules: {
@@ -117,6 +123,27 @@ export default defineConfig([
           object: 'Math',
           property: 'random',
           message: 'Provide randomness through a server port.',
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/entrypoints/mcp/' + scripts],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        {
+          globals: [
+            'require',
+            'process',
+            'global',
+            'globalThis',
+            'fetch',
+            'WebSocket',
+            'EventSource',
+            'XMLHttpRequest',
+          ],
+          checkGlobalObject: true,
         },
       ],
     },

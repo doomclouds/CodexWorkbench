@@ -21,6 +21,7 @@ import { WorkbenchToolbar } from './WorkbenchToolbar.js';
 import type { WorkbenchPreferences } from './preferences.js';
 import { useBoardCreation } from './useBoardCreation.js';
 import { useBoardManagement } from './useBoardManagement.js';
+import { useCopyBoardLink, type BoardLinkNotice, type CopyBoardLink } from './useCopyBoardLink.js';
 import './workbench.css';
 
 interface WorkbenchArchiveImport {
@@ -37,6 +38,8 @@ export interface WorkbenchSurfaceProps {
   readonly archiveImport?: WorkbenchArchiveImport;
   readonly management?: CatalogManagementService;
   readonly onOpenTrash?: () => void;
+  readonly copyBoardLink?: CopyBoardLink;
+  readonly onOpenSharing?: (boardId: string) => void;
   readonly readRouteGeneration?: () => number;
 }
 
@@ -56,6 +59,7 @@ interface CatalogResultsProps {
     trigger: HTMLButtonElement,
   ) => void;
   readonly onDuplicate?: (board: CatalogBoardSummary, trigger: HTMLButtonElement) => void;
+  readonly onCopyLink?: (boardId: string) => void;
 }
 
 interface RenameTarget {
@@ -123,6 +127,21 @@ function CreationStatus({ creation }: { readonly creation: BoardCreation }) {
 const createProgressMessages = { creating: '正在创建白板', checking: '正在查询创建回执' };
 const copyProgressMessages = { creating: '正在复制作品', checking: '正在查询复制回执' };
 
+function LinkCopyStatus({ notice }: { readonly notice?: BoardLinkNotice }) {
+  if (!notice) {
+    return null;
+  }
+
+  return (
+    <div
+      className={notice.error ? 'studio-workbench-error' : 'studio-workbench-copy-progress'}
+      role={notice.error ? 'alert' : 'status'}
+    >
+      {notice.message}
+    </div>
+  );
+}
+
 function EmptyBoards({
   hasQuery,
   createBlocked,
@@ -158,6 +177,7 @@ function CatalogResults({
   onCreate,
   onManage,
   onDuplicate,
+  onCopyLink,
 }: CatalogResultsProps) {
   const { kind, boards, error, query, nextCursor, loadingMore } = snapshot;
   const waiting = kind === 'loading' && boards.length === 0;
@@ -197,6 +217,7 @@ function CatalogResults({
               managementBlocked={createBlocked}
               onAction={onManage}
               onDuplicate={onDuplicate}
+              onCopyLink={onCopyLink}
             />
           ))}
         </div>
@@ -223,6 +244,8 @@ export function WorkbenchSurface({
   archiveImport,
   management,
   onOpenTrash,
+  copyBoardLink,
+  onOpenSharing,
   readRouteGeneration,
 }: WorkbenchSurfaceProps) {
   const directory = useMemo(() => createCatalogDirectory(catalog), [catalog]);
@@ -239,6 +262,7 @@ export function WorkbenchSurface({
   const duplicateTrigger = useRef<HTMLButtonElement | undefined>(undefined);
   const [rename, setRename] = useState<RenameTarget>();
   const controls = useBoardManagement(management, createCommandId, handleManaged, directory.reload);
+  const linkCopy = useCopyBoardLink(copyBoardLink, onOpenSharing);
   const createBlocked = creation.blocked || archiveImport?.busy === true || controls.blocked;
   const catalogRefresh = archiveImport?.catalogRefresh ?? 0;
   const observedRefresh = useRef(catalogRefresh);
@@ -338,6 +362,7 @@ export function WorkbenchSurface({
     <div className="studio-workbench" data-studio-theme={preferences.resolvedTheme}>
       <CreationStatus creation={creation} />
       {!rename && <ManagementStatus management={controls} />}
+      <LinkCopyStatus notice={linkCopy.notice} />
       <main className="studio-workbench-main" aria-label="Luming Studio">
         <header className="studio-workbench-header">
           <h1>Luming Studio</h1>
@@ -375,6 +400,7 @@ export function WorkbenchSurface({
           onCreate={creation.create}
           onManage={management ? handleManage : undefined}
           onDuplicate={catalog.duplicateBoard ? handleDuplicate : undefined}
+          onCopyLink={linkCopy.copy}
         />
       </main>
       {rename && (

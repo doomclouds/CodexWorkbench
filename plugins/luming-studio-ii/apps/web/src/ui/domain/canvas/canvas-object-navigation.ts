@@ -2,7 +2,12 @@ import { useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { containerOrigin, wheelZoomFactor } from './canvas-events.js';
 import type { CanvasFrameController } from './canvas-frame.js';
-import type { CanvasObjectNavigation, CanvasPoint, CanvasViewport } from './contracts.js';
+import type {
+  CanvasObjectNavigation,
+  CanvasPoint,
+  CanvasViewport,
+  CanvasViewportNavigation,
+} from './contracts.js';
 import { panViewport, zoomViewport } from './viewport/index.js';
 
 interface EmbeddedPan {
@@ -10,12 +15,14 @@ interface EmbeddedPan {
   pointerId: number;
   start: CanvasPoint;
   viewport: CanvasViewport;
+  reported?: boolean;
 }
 
 export function useObjectNavigation(
   root: RefObject<HTMLDivElement | null>,
   frame: CanvasFrameController,
   setSpace: (held: boolean) => void,
+  onViewportNavigation?: (navigation: CanvasViewportNavigation) => void,
 ) {
   const pan = useRef<EmbeddedPan | undefined>(undefined);
   const [panning, setPanning] = useState(false);
@@ -46,6 +53,11 @@ export function useObjectNavigation(
 
     if (event.phase !== 'cancel') {
       const delta = { x: event.screenX - current.start.x, y: event.screenY - current.start.y };
+      const moved = delta.x !== 0 || delta.y !== 0;
+      if (moved && !current.reported) {
+        current.reported = true;
+        onViewportNavigation?.('pan');
+      }
       frame.update({ viewport: panViewport(current.viewport, delta) });
     }
     if (event.phase !== 'move') {
@@ -62,6 +74,9 @@ export function useObjectNavigation(
     const origin = containerOrigin(element);
     const anchor = { x: event.x - origin.x, y: event.y - origin.y };
     const factor = wheelZoomFactor(event.deltaY, event.deltaMode);
+    if (factor !== 1) {
+      onViewportNavigation?.('zoom');
+    }
     frame.update({ viewport: zoomViewport(frame.read().viewport, anchor, factor) });
   }
 

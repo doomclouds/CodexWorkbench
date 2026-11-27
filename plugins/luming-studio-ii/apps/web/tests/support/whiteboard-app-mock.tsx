@@ -1,4 +1,5 @@
 import { act } from 'react';
+import type { ComponentProps } from 'react';
 import { WhiteboardApp } from '../../src/app/index.js';
 import {
   createWhiteboardService,
@@ -64,14 +65,22 @@ async function update(action: () => void) {
   });
 }
 
-interface AppMockOptions {
+interface AppMockOptions extends Pick<
+  ComponentProps<typeof WhiteboardApp>,
+  'suggestions' | 'onAttachReviewSource'
+> {
   readonly editService?: WhiteboardEditService;
   readonly createCommandId?: () => string;
 }
 
 export function createAppMock(
   source: WhiteboardPost | WhiteboardService,
-  { editService, createCommandId = () => boardCommandId }: AppMockOptions = {},
+  {
+    editService,
+    suggestions,
+    onAttachReviewSource,
+    createCommandId = () => boardCommandId,
+  }: AppMockOptions = {},
 ) {
   const restoreLayout = withCanvasLayout();
   const fixture = createControlFixture();
@@ -98,6 +107,8 @@ export function createAppMock(
             boardId={boardId}
             service={service}
             editService={editService}
+            suggestions={suggestions}
+            onAttachReviewSource={onAttachReviewSource}
             createCommandId={createCommandId}
           />,
         ),

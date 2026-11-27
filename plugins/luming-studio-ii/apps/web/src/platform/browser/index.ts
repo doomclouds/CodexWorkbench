@@ -1,4 +1,5 @@
 const boardParameter = 'board';
+const invitationParameter = 'invite';
 const viewParameter = 'view';
 const trashView = 'trash';
 const protobufContentType = 'application/protobuf';
@@ -8,8 +9,11 @@ const archiveTooLargeStatus = 413;
 const archiveAssetPath = /^\/studio-archive-assets\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128}$/u;
 const layoutKey = 'luming-studio-ii:library-layout';
 const themeKey = 'luming-studio-ii:theme';
+const guestAccessInterval = 3_000;
+const guestRequestHeaders = { 'x-luming-guest': '1', 'content-type': protobufContentType };
 
 export { prepareBoardImage } from './board-image.js';
+export { boardRoomClock, subscribeGuestRoomEvents, subscribeRoomEvents } from './room-events.js';
 
 type LibraryLayout = 'grid' | 'list';
 type StudioTheme = 'light' | 'dark';
@@ -18,6 +22,45 @@ export type StudioLocation =
   | { readonly kind: 'workbench' }
   | { readonly kind: 'whiteboard'; readonly boardId: string }
   | { readonly kind: 'recycle-bin' };
+
+export function readStudioGuestEntry() {
+  const url = new URL(window.location.href);
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const boardId = url.searchParams.get(boardParameter)?.trim();
+  const invitationToken = fragment.get(invitationParameter);
+  if (invitationToken !== null) {
+    return boardId && invitationToken
+      ? { kind: 'invitation' as const, boardId, invitationToken }
+      : { kind: 'invalid' as const };
+  }
+
+  const guestHost = document.documentElement.dataset.studioGuestEntry === 'true';
+  const guestNavigation = window.history.state?.studioGuest === true;
+  if (guestHost || guestNavigation) {
+    return boardId ? { kind: 'board' as const, boardId } : { kind: 'restricted' as const };
+  }
+}
+
+export function replaceStudioGuestLocation(boardId?: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(boardParameter);
+  url.searchParams.delete(viewParameter);
+  url.hash = '';
+  if (boardId) {
+    url.searchParams.set(boardParameter, boardId);
+  }
+  window.history.replaceState({ studioGuest: true }, '', url);
+}
+
+export function subscribeGuestAccessRefresh(listener: () => void): () => void {
+  const timer = window.setInterval(listener, guestAccessInterval);
+  window.addEventListener('focus', listener);
+
+  return () => {
+    window.clearInterval(timer);
+    window.removeEventListener('focus', listener);
+  };
+}
 
 export function readStudioLocation(): StudioLocation {
   const query = new URLSearchParams(window.location.search);
@@ -31,7 +74,9 @@ export function readStudioLocation(): StudioLocation {
 }
 
 export function createCommandId(): string {
-  return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export function resolveArchiveAssetUrl(source: string): string {
@@ -56,7 +101,12 @@ export function writeStudioLocation(location: StudioLocation) {
 
 export function subscribeStudioLocation(listener: () => void) {
   window.addEventListener('popstate', listener);
-  return () => window.removeEventListener('popstate', listener);
+  window.addEventListener('hashchange', listener);
+
+  return () => {
+    window.removeEventListener('popstate', listener);
+    window.removeEventListener('hashchange', listener);
+  };
 }
 
 export function readPreferences(): { layout: LibraryLayout; resolvedTheme: StudioTheme } {
@@ -101,7 +151,7 @@ async function postBinary(
 
 async function readProtobufResponse(response: Response): Promise<Uint8Array> {
   if (!response.ok) {
-    throw new Error(`白板服务请求失败（HTTP ${response.status}）。`);
+    throw new StudioHttpError(response.status);
   }
 
   const mediaType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
@@ -110,6 +160,16 @@ async function readProtobufResponse(response: Response): Promise<Uint8Array> {
   }
 
   return new Uint8Array(await response.arrayBuffer());
+}
+
+export class StudioHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`白板服务请求失败（HTTP ${status}）。`);
+  }
+}
+
+export function isGuestAccessDenied(error: unknown): boolean {
+  return error instanceof StudioHttpError && (error.status === 401 || error.status === 403);
 }
 
 export async function postProtobuf(
@@ -125,6 +185,24 @@ export async function postProtobuf(
   );
 
   return readProtobufResponse(response);
+}
+
+export async function postGuestProtobuf(
+  path: string,
+  body: Uint8Array,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  const response = await postBinary(path, new Uint8Array(body), guestRequestHeaders, signal);
+
+  return readProtobufResponse(response);
+}
+
+export async function copyShareLink(url: string): Promise<void> {
+  if (!navigator.clipboard) {
+    throw new Error('当前浏览器无法访问剪贴板，请手动复制链接。');
+  }
+
+  await navigator.clipboard.writeText(url);
 }
 
 export async function postArchive(

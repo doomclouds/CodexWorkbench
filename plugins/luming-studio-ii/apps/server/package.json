@@ -19,13 +19,17 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.17.0",
-    "@codexworkbench/luming-studio-ii-contracts": "workspace:*"
+    "@codexworkbench/luming-studio-ii-contracts": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "proper-lockfile": "4.1.2",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@babel/core": "8.0.7",
     "@babel/eslint-parser": "8.1.2",
     "@stylistic/eslint-plugin": "6.0.1",
     "@types/node": "24.12.1",
+    "@types/proper-lockfile": "4.1.4",
     "eslint": "10.15.0",
     "oxfmt": "0.79.0",
     "oxlint": "1.94.0",

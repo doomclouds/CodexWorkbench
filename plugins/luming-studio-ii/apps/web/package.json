@@ -18,7 +18,7 @@
     "./ui/domain/objects/todo": "./src/ui/domain/objects/todo/index.ts"
   },
   "scripts": {
-    "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && oxlint --deny-warnings src tests vite.config.ts vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vite.config.ts vitest.config.mts index.html && node ../../../../tooling/studio-lint/check-markup.mjs src tests index.html",
+    "lint": "eslint --max-warnings 0 src tests lint eslint.config.mjs vite.config.ts vitest.config.mts && oxlint --deny-warnings src tests vite.config.ts vitest.config.mts && oxfmt --check src tests lint eslint.config.mjs vite.config.ts vitest.config.mts index.html mcp.html && node ../../../../tooling/studio-lint/check-markup.mjs src tests index.html mcp.html",
     "typecheck": "tsc --noEmit",
     "check": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && pnpm lint && pnpm typecheck",
     "test": "pnpm --filter @codexworkbench/luming-studio-ii-contracts generate && node --test tests/contracts/base-lint.test.mjs tests/contracts/canvas-lint.test.mjs tests/contracts/objects-lint.test.mjs tests/contracts/frontend-lint.test.mjs && vitest run",
@@ -32,6 +32,9 @@
     "@blocknote/react": "0.54.0",
     "@bufbuild/protobuf": "2.17.0",
     "@codexworkbench/luming-studio-ii-contracts": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@openai/mcp-extensions": "0.2.1",
     "lucide-react": "1.70.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
@@ -52,6 +55,7 @@
     "oxlint-tsgolint": "7.0.2007",
     "typescript": "7.0.2",
     "vite": "8.3.6",
+    "vite-plugin-singlefile": "2.3.4",
     "vitest": "5.1.0"
   }
 }

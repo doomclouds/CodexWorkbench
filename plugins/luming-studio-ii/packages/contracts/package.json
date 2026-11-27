@@ -30,6 +30,18 @@
       "types": "./dist/proto/luming/studio/v1/feedback_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/feedback_service_pb.js"
     },
+    "./suggestions/service": {
+      "types": "./dist/proto/luming/studio/v1/board_suggestion_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/board_suggestion_service_pb.js"
+    },
+    "./sharing/service": {
+      "types": "./dist/proto/luming/studio/v1/board_sharing_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/board_sharing_service_pb.js"
+    },
+    "./rooms/service": {
+      "types": "./dist/proto/luming/studio/v1/board_room_service_pb.d.ts",
+      "default": "./dist/proto/luming/studio/v1/board_room_service_pb.js"
+    },
     "./catalog/service": {
       "types": "./dist/proto/luming/studio/v1/board_catalog_service_pb.d.ts",
       "default": "./dist/proto/luming/studio/v1/board_catalog_service_pb.js"

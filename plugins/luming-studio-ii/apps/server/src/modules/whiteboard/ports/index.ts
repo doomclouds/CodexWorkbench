@@ -103,3 +103,19 @@ export interface BoardEditRepository extends WhiteboardRepository {
   read<T>(work: (reader: BoardEditReader) => T): T;
   write<T>(work: (writer: BoardEditWriter) => T): T;
 }
+
+export type {
+  BoardEditPlanningReader,
+  BoardSuggestionQueries,
+  BoardSuggestionReader,
+  BoardSuggestionRepository,
+  BoardSuggestionWriter,
+} from './board-suggestions.js';
+export type {
+  BoardReviewSource,
+  BoardReviewTarget,
+  BoardSuggestion,
+  BoardSuggestionCommandReceipt,
+  BoardSuggestionOptionRecord,
+  StoredBoardSuggestion,
+} from '../domain/index.js';

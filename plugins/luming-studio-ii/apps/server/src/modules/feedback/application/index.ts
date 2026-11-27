@@ -5,7 +5,13 @@ import type {
   FeedbackThreadView,
 } from '../domain/index.js';
 import type { FeedbackRepository } from '../ports/index.js';
-import { requireAccess, requireWriteAccess, viewMessage, viewThread } from './access.js';
+import {
+  permitsFeedback,
+  requireAccess,
+  requireWriteAccess,
+  viewMessage,
+  viewThread,
+} from './access.js';
 import { applyFeedback, type FeedbackCommand, type FeedbackServices } from './commands.js';
 import { FeedbackThreadNotFoundError } from './errors.js';
 import {
@@ -78,7 +84,7 @@ export function createFeedbackApplication(
         return {
           threads: page.map((thread) => viewThread(actor, access, thread)),
           nextCursor: last && rows.length > limit ? writeThreadPosition(last) : undefined,
-          canWrite: access.canEdit,
+          canWrite: permitsFeedback(access),
         };
       }),
     getThread: (actor, boardId, threadId, query) =>
@@ -97,7 +103,7 @@ export function createFeedbackApplication(
           thread: viewThread(actor, access, thread),
           replies: replies.slice(0, limit).map((reply) => viewMessage(actor, access, reply)),
           nextCursor: replies.length > limit ? String(position + limit) : undefined,
-          canWrite: access.canEdit,
+          canWrite: permitsFeedback(access),
         };
       }),
     applyFeedback: (actor, command) => applyFeedback(repository, services, actor, command),

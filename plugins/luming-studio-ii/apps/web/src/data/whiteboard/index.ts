@@ -16,6 +16,8 @@ export type {
   WhiteboardService,
 } from './contracts.js';
 export { createWhiteboardEditService } from './edits.js';
+export { projectBoardChanges } from './confirmed-edits.js';
+export type { WhiteboardContentChange } from './confirmed-edits.js';
 export type {
   AttachBoardImageCommand,
   BoardEditReceipt,
@@ -58,5 +60,7 @@ export type {
   RestoreBoardVersionCommand,
 } from './history.js';
 export { createWhiteboardService } from './protocol/index.js';
+export { readBoardEditChanges, readBoardEditReceipt } from './protocol/edit-receipt.js';
+export { readObjects } from './protocol/scene.js';
 export { createWhiteboardSession } from './session.js';
 export type { WhiteboardReadyState, WhiteboardSnapshot } from './session.js';

@@ -18,6 +18,9 @@ export interface CanvasViewport extends CanvasPoint {
   readonly zoom: number;
 }
 
+export type CanvasViewportSize = Pick<CanvasRect, 'width' | 'height'>;
+export type CanvasViewportNavigation = 'pan' | 'zoom' | 'fit' | 'escape';
+
 export type CanvasFitScope = 'auto' | 'board' | 'selection';
 
 export type CanvasViewportRequest = {
@@ -342,6 +345,9 @@ export interface CanvasProps {
   readonly onToolChange?: (tool: CanvasTool) => void;
   readonly onEditIntent: (intent: CanvasEditIntent) => void;
   readonly onViewportChange?: (viewport: CanvasViewport) => void;
+  readonly onViewportSizeChange?: (size: CanvasViewportSize) => void;
+  readonly onViewportNavigation?: (navigation: CanvasViewportNavigation) => void;
+  readonly onWorldPointerChange?: (point: CanvasPoint | undefined) => void;
   readonly onVisibleObjectsChange?: (ids: readonly string[]) => void;
   readonly ref?: Ref<CanvasHandle>;
 }

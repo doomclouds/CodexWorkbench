@@ -30,6 +30,7 @@ export interface WhiteboardExportSurfaceProps {
   readonly download: (file: ExportBoardFile) => void;
   readonly onRequestClose: () => void;
   readonly restoreFocus?: () => void;
+  readonly inline?: boolean;
 }
 
 interface ExportNotice {
@@ -63,8 +64,6 @@ function resultNotice(result: ExportBoardResult): ExportNotice {
   }
 }
 
-type OpenExportProps = WhiteboardExportSurfaceProps & { readonly anchor: Element };
-
 function OpenExport({
   anchor,
   context,
@@ -72,7 +71,8 @@ function OpenExport({
   download,
   onRequestClose,
   restoreFocus,
-}: OpenExportProps) {
+  inline = false,
+}: WhiteboardExportSurfaceProps) {
   const [scope, setScope] = useState<'whole' | 'selection'>('whole');
   const [pendingFormat, setPendingFormat] = useState<ExportBoardFormat>();
   const [notice, setNotice] = useState<ExportNotice>();
@@ -138,17 +138,9 @@ function OpenExport({
       });
   }
 
-  return (
-    <AnchoredPopover
-      open
-      anchor={anchor}
-      label="导出白板"
-      placement="bottom"
-      initialFocus={() => firstFormat.current?.focus({ preventScroll: true })}
-      restoreFocus={restoreFocus}
-      onRequestClose={handleClose}
-    >
-      <section className="whiteboard-export" aria-busy={pendingFormat !== undefined}>
+  const content = (
+    <section className="whiteboard-export" aria-busy={pendingFormat !== undefined}>
+      {!inline && (
         <header className="whiteboard-export__header">
           <h2 className="whiteboard-export__title">导出白板</h2>
           <Button
@@ -159,48 +151,66 @@ function OpenExport({
             onActivate={handleClose}
           />
         </header>
-        <p className="whiteboard-export__revision">
-          {context.title} · 保存版次 {context.revision.toString()}
-        </p>
-        <Select
-          label="导出范围"
-          value={scope}
-          disabled={pendingFormat !== undefined}
-          options={[
-            { id: 'whole', label: '整板' },
-            {
-              id: 'selection',
-              label: `当前选区（${selectionCount} 项）`,
-              disabled: selectionCount === 0,
-            },
-          ]}
-          onValueChange={(value) => setScope(value === 'selection' ? 'selection' : 'whole')}
-        />
-        <div className="whiteboard-export__formats">
-          {formats.map(({ format, label }) => (
-            <button
-              key={format}
-              type="button"
-              ref={format === 'json' ? firstFormat : undefined}
-              className="whiteboard-export__format"
-              disabled={pendingFormat !== undefined || selectionUnavailable}
-              onClick={() => startExport(format)}
-            >
-              <Download size={18} aria-hidden="true" />
-              <span>{label}</span>
-              <small>{format.toUpperCase()}</small>
-            </button>
-          ))}
-        </div>
-        {pendingFormat && <StatusText message="正在导出…" announcement="polite" busy />}
-        {notice && <StatusText message={notice.message} tone={notice.tone} announcement="polite" />}
-      </section>
+      )}
+      <p className="whiteboard-export__revision">
+        {context.title} · 保存版次 {context.revision.toString()}
+      </p>
+      <Select
+        label="导出范围"
+        value={scope}
+        disabled={pendingFormat !== undefined}
+        options={[
+          { id: 'whole', label: '整板' },
+          {
+            id: 'selection',
+            label: `当前选区（${selectionCount} 项）`,
+            disabled: selectionCount === 0,
+          },
+        ]}
+        onValueChange={(value) => setScope(value === 'selection' ? 'selection' : 'whole')}
+      />
+      <div className="whiteboard-export__formats">
+        {formats.map(({ format, label }) => (
+          <button
+            key={format}
+            type="button"
+            ref={format === 'json' ? firstFormat : undefined}
+            className="whiteboard-export__format"
+            disabled={pendingFormat !== undefined || selectionUnavailable}
+            onClick={() => startExport(format)}
+          >
+            <Download size={18} aria-hidden="true" />
+            <span>{label}</span>
+            <small>{format.toUpperCase()}</small>
+          </button>
+        ))}
+      </div>
+      {pendingFormat && <StatusText message="正在导出…" announcement="polite" busy />}
+      {notice && <StatusText message={notice.message} tone={notice.tone} announcement="polite" />}
+    </section>
+  );
+
+  if (inline) {
+    return content;
+  }
+
+  return (
+    <AnchoredPopover
+      open
+      anchor={anchor}
+      label="导出白板"
+      placement="bottom"
+      initialFocus={() => firstFormat.current?.focus({ preventScroll: true })}
+      restoreFocus={restoreFocus}
+      onRequestClose={handleClose}
+    >
+      {content}
     </AnchoredPopover>
   );
 }
 
 export function WhiteboardExportSurface(props: WhiteboardExportSurfaceProps) {
-  const { anchor, context } = props;
+  const { anchor, context, inline } = props;
 
-  return anchor ? <OpenExport key={context.boardId} {...props} anchor={anchor} /> : null;
+  return anchor || inline ? <OpenExport key={context.boardId} {...props} /> : null;
 }

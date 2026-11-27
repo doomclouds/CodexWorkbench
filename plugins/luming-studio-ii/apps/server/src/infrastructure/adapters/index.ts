@@ -4,6 +4,8 @@ import type {
   BoardEditWriter,
   BoardHeader,
   BoardObject,
+  BoardEditPlanningReader,
+  BoardSuggestionRepository,
   ExportAssetRead,
   PayloadRecord,
   StoredReceipt,
@@ -38,6 +40,11 @@ import {
   storedVersion,
 } from './stored-values.js';
 import { whiteboardSchema } from './whiteboard-schema.js';
+import {
+  boardSuggestionsSchema,
+  createSuggestionMutations,
+  createSuggestionQueries,
+} from './board-suggestions.js';
 
 const sceneFields = `
   SELECT o.object_id, o.kind, o.label, o.x, o.y, o.width, o.height, o.rotation,
@@ -334,7 +341,9 @@ function readRelatedConnectors(
   return readObjects(connection, query, targets, boardId, targets, boardId, boardId);
 }
 
-function createWriter(connection: SqliteConnection): BoardEditWriter {
+function createPlanningReader(
+  connection: SqliteConnection,
+): BoardEditReader & BoardEditPlanningReader {
   const reader = createReader(connection);
 
   return {
@@ -342,6 +351,16 @@ function createWriter(connection: SqliteConnection): BoardEditWriter {
     listGroupObjects: (boardId, groupId) => readObjects(connection, listGroup, boardId, groupId),
     listChildObjects: (boardId, parentId) =>
       readObjects(connection, listChildren, boardId, parentId),
+    hasUsedObjectId: (boardId, objectId) => hasUsedObjectId(connection, boardId, objectId),
+    listRelatedConnectors: (boardId, ids) => readRelatedConnectors(connection, boardId, ids),
+  };
+}
+
+function createWriter(connection: SqliteConnection): BoardEditWriter {
+  const reader = createPlanningReader(connection);
+
+  return {
+    ...reader,
     saveGeometry: (boardId, objects) => saveGeometry(connection, boardId, objects),
     advanceBoardRevision(boardId, commit) {
       const before = commit ? readBoard(connection, boardId) : undefined;
@@ -353,8 +372,6 @@ function createWriter(connection: SqliteConnection): BoardEditWriter {
       return revision;
     },
     saveReceipt: (actorId, stored) => saveReceipt(connection, actorId, stored),
-    hasUsedObjectId: (boardId, objectId) => hasUsedObjectId(connection, boardId, objectId),
-    listRelatedConnectors: (boardId, ids) => readRelatedConnectors(connection, boardId, ids),
     applyBoardChanges: (board, changes, commit) =>
       applyBoardChanges(connection, board, changes, commit, (ids) =>
         reader.getObjects(board.boardId, ids),
@@ -373,5 +390,26 @@ export function createWhiteboardRepository(database: SqliteDatabase): BoardEditR
   return {
     read: (work) => database.read((connection) => work(createReader(connection))),
     write: (work) => database.write((connection) => work(createWriter(connection))),
+  };
+}
+
+export function createBoardSuggestionRepository(
+  database: SqliteDatabase,
+): BoardSuggestionRepository {
+  database.write((connection) => connection.exec(boardSuggestionsSchema));
+
+  return {
+    read: (work) =>
+      database.read((connection) =>
+        work({ ...createPlanningReader(connection), ...createSuggestionQueries(connection) }),
+      ),
+    write: (work) =>
+      database.write((connection) =>
+        work({
+          ...createWriter(connection),
+          ...createSuggestionQueries(connection),
+          ...createSuggestionMutations(connection),
+        }),
+      ),
   };
 }

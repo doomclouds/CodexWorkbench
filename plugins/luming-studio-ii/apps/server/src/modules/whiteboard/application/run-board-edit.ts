@@ -30,37 +30,46 @@ export function runBoardEdit(
   request: BoardEditRequest,
   plan: PlanBoardEdit,
 ): BoardEditReceipt {
+  return repository.write((writer) =>
+    runBoardEditInTransaction(writer, actor, identity, request, plan),
+  );
+}
+
+export function runBoardEditInTransaction(
+  writer: BoardEditWriter,
+  actor: Actor,
+  identity: BoardEditIdentity,
+  request: BoardEditRequest,
+  plan: PlanBoardEdit,
+): BoardEditReceipt {
   const { boardId, commandId } = identity;
+  const access = writer.getAccess(boardId, actor.id);
+  const board = access?.canEdit ? writer.getBoard(boardId) : undefined;
+  if (!board) {
+    return rejected(identity, 'forbidden');
+  }
 
-  return repository.write((writer) => {
-    const access = writer.getAccess(boardId, actor.id);
-    const board = access?.canEdit ? writer.getBoard(boardId) : undefined;
-    if (!board) {
-      return rejected(identity, 'forbidden');
-    }
+  const stored = writer.getEditReceipt(boardId, actor.id, commandId);
+  if (stored) {
+    return stored.signature === request.signature
+      ? stored.receipt
+      : rejected(identity, 'commandIdReuse');
+  }
 
-    const stored = writer.getEditReceipt(boardId, actor.id, commandId);
-    if (stored) {
-      return stored.signature === request.signature
-        ? stored.receipt
-        : rejected(identity, 'commandIdReuse');
-    }
+  const decision = plan(writer, board);
+  if (decision.kind !== 'changes') {
+    return { ...identity, outcome: decision };
+  }
+  if (!canAdvanceVersion(board.revision)) {
+    return rejected(identity, 'invalidEdit');
+  }
 
-    const decision = plan(writer, board);
-    if (decision.kind !== 'changes') {
-      return { ...identity, outcome: decision };
-    }
-    if (!canAdvanceVersion(board.revision)) {
-      return rejected(identity, 'invalidEdit');
-    }
+  const { signature, ...details } = request;
+  const outcome = writer.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
+  const receipt = { ...identity, outcome };
+  writer.saveEditReceipt(actor.id, { signature, receipt });
 
-    const { signature, ...details } = request;
-    const outcome = writer.applyBoardChanges(board, decision, { ...details, actorId: actor.id });
-    const receipt = { ...identity, outcome };
-    writer.saveEditReceipt(actor.id, { signature, receipt });
-
-    return receipt;
-  });
+  return receipt;
 }
 
 export function readBoardEditReceipt(

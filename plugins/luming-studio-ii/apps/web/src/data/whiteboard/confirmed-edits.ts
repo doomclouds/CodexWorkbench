@@ -1,11 +1,52 @@
-import type { WhiteboardScene } from './contracts.js';
+import type { WhiteboardObject, WhiteboardScene } from './contracts.js';
 import type { BoardEditReceipt } from './edits-types.js';
 
 export type AppliedBoardEdit = Extract<BoardEditReceipt, { kind: 'applied' }>;
+type ConfirmedSceneEdit = Pick<AppliedBoardEdit, 'revision' | 'removedIds' | 'objects' | 'order'>;
+type BoardSceneChanges = Omit<ConfirmedSceneEdit, 'revision'>;
+
+export interface WhiteboardContentChange {
+  readonly revision: bigint;
+  readonly changedObjectIds: readonly string[];
+  readonly removedObjectIds: readonly string[];
+  readonly changedObjects?: readonly WhiteboardObject[];
+  readonly refreshScene: boolean;
+}
+
+const existingOrder: readonly string[] = [];
+
+function coversChange(change: WhiteboardContentChange, metadata: readonly WhiteboardObject[]) {
+  const changed = new Set(change.changedObjectIds);
+  const removed = new Set(change.removedObjectIds);
+  const metadataIds = new Set(metadata.map(({ id }) => id));
+  const distinctChanges = changed.size === change.changedObjectIds.length;
+  const distinctMetadata = metadataIds.size === metadata.length;
+  const sameSize = metadataIds.size === changed.size;
+  const matching = metadata.every(({ id }) => changed.has(id) && !removed.has(id));
+
+  return distinctChanges && distinctMetadata && sameSize ? matching : false;
+}
+
+export function mergeRoomContent(
+  scene: WhiteboardScene,
+  change: WhiteboardContentChange,
+): WhiteboardScene | undefined {
+  const objects = change.changedObjects ?? [];
+  if (change.refreshScene || !coversChange(change, objects)) {
+    return undefined;
+  }
+
+  return mergeConfirmedEdit(scene, {
+    revision: change.revision,
+    removedIds: change.removedObjectIds,
+    objects,
+    order: existingOrder,
+  });
+}
 
 export function mergeConfirmedEdit(
   scene: WhiteboardScene,
-  receipt: AppliedBoardEdit,
+  receipt: ConfirmedSceneEdit,
 ): WhiteboardScene | undefined {
   if (receipt.revision <= scene.revision) {
     return scene;
@@ -14,17 +55,26 @@ export function mergeConfirmedEdit(
     return undefined;
   }
 
+  const next = projectBoardChanges(scene, receipt);
+
+  return next && { ...next, revision: receipt.revision };
+}
+
+export function projectBoardChanges(
+  scene: WhiteboardScene,
+  changes: BoardSceneChanges,
+): WhiteboardScene | undefined {
   const objects = new Map(scene.objects.map((object) => [object.id, object]));
-  for (const id of receipt.removedIds) {
+  for (const id of changes.removedIds) {
     objects.delete(id);
   }
-  for (const object of receipt.objects) {
+  for (const object of changes.objects) {
     objects.set(object.id, object);
   }
 
-  const { order } = receipt;
+  const { order } = changes;
   if (!order.length) {
-    return { ...scene, revision: receipt.revision, objects: [...objects.values()] };
+    return { ...scene, objects: [...objects.values()] };
   }
 
   const ordered = order.flatMap((id) => {
@@ -41,5 +91,5 @@ export function mergeConfirmedEdit(
     return undefined;
   }
 
-  return { ...scene, revision: receipt.revision, objects: ordered };
+  return { ...scene, objects: ordered };
 }

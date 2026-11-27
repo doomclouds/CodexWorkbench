@@ -24,7 +24,7 @@ import {
   type MoveTarget,
   type PayloadRecord,
 } from '../domain/index.js';
-import type { BoardEditWriter } from '../ports/index.js';
+import type { BoardEditPlanningReader } from '../ports/index.js';
 
 type Create = Extract<GeometryOperation, { kind: 'create' }>;
 type Transform = Extract<GeometryOperation, { kind: 'transform' }>;
@@ -34,7 +34,7 @@ type Duplicate = Extract<GeometryOperation, { kind: 'duplicate' }>;
 
 interface GeometryScope {
   readonly board: BoardHeader;
-  readonly writer: BoardEditWriter;
+  readonly writer: BoardEditPlanningReader;
   readonly object: (objectId: string) => BoardObject | undefined;
   readonly objects: (objectIds: readonly string[]) => readonly BoardObject[];
 }
@@ -53,7 +53,7 @@ function reject(reason: BoardEditRejection): BoardEditRejected {
   return { kind: 'rejected', reason };
 }
 
-function createGeometryScope(writer: BoardEditWriter, board: BoardHeader): GeometryScope {
+function createGeometryScope(writer: BoardEditPlanningReader, board: BoardHeader): GeometryScope {
   const cache = new Map<string, BoardObject | undefined>();
 
   function objects(objectIds: readonly string[]): readonly BoardObject[] {
@@ -581,7 +581,7 @@ function duplicateObjects(scope: GeometryScope, operation: Duplicate): BoardEdit
 }
 
 export function planGeometryEdit(
-  writer: BoardEditWriter,
+  writer: BoardEditPlanningReader,
   board: BoardHeader,
   operation: GeometryOperation,
 ): BoardEditDecision {

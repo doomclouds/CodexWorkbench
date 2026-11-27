@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   createWhiteboardSession,
   type BoardEditReceipt,
@@ -14,6 +14,7 @@ import {
   type CanvasProps,
   type CanvasViewport,
   type CanvasViewportRequest,
+  type CanvasViewportSize,
 } from '../../ui/domain/canvas/index.js';
 import { studioObjectExtensions } from '../../ui/domain/objects/index.js';
 import { documentExtension } from '../../ui/domain/objects/document/index.js';
@@ -22,11 +23,16 @@ import { BoardHtmlCreation, useBoardHtmlCreation } from './BoardHtmlCreation.js'
 import { BoardViewportTools } from './BoardViewportTools.js';
 import { BoardWelcome } from './BoardWelcome.js';
 import { renderBoardHistoryCanvas } from './HistoryCanvasView.js';
-import type { WhiteboardEditorFeatures } from './board-features.js';
+import type {
+  BoardPresenceSlot,
+  BoardViewContext,
+  WhiteboardEditorFeatures,
+} from './board-features.js';
 import { projectPayloads, projectScene } from './canvas-projection.js';
 import { GeometryBoardMenu } from './geometry-controls.js';
 import { useGeometryEdits } from './geometry-session.js';
 import { useMoveSession } from './move-session.js';
+import { renderSuggestionPreview } from './suggestion-preview.js';
 import { useBoardPresentation } from './use-board-presentation.js';
 import { useBoardTitle, type RenameBoard } from './use-board-title.js';
 import { useContentEdits } from './use-content-edits.js';
@@ -106,14 +112,33 @@ function useBoardPanels() {
   const [historyPreview, setHistoryPreview] = useState(false);
   const [feedbackAnchor, setFeedbackAnchor] = useState<HTMLButtonElement | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [suggestionAnchor, setSuggestionAnchor] = useState<HTMLButtonElement | null>(null);
+  const [suggestionThreadId, setSuggestionThreadId] = useState<string>();
+  const [suggestionPreview, setSuggestionPreview] = useState(false);
+
+  function closeSuggestions() {
+    setSuggestionAnchor(null);
+    setSuggestionThreadId(undefined);
+    setSuggestionPreview(false);
+  }
+
+  function openSuggestions(anchor: HTMLButtonElement, threadId?: string) {
+    setExportAnchor(undefined);
+    setHistoryAnchor(null);
+    setFeedbackOpen(false);
+    setSuggestionThreadId(threadId);
+    setSuggestionAnchor((current) => (current === anchor && !threadId ? null : anchor));
+  }
 
   function openHistory(anchor: HTMLButtonElement) {
+    closeSuggestions();
     setExportAnchor(undefined);
     setFeedbackOpen(false);
     setHistoryAnchor((current) => (current === anchor ? null : anchor));
   }
 
   function toggleFeedback(anchor: HTMLButtonElement) {
+    closeSuggestions();
     setExportAnchor(undefined);
     setHistoryAnchor(null);
     setFeedbackAnchor(anchor);
@@ -121,6 +146,7 @@ function useBoardPanels() {
   }
 
   function openExport(anchor: HTMLButtonElement) {
+    closeSuggestions();
     setHistoryAnchor(null);
     setFeedbackOpen(false);
     setExportAnchor((current) => (current === anchor ? undefined : anchor));
@@ -140,6 +166,12 @@ function useBoardPanels() {
     historyPreview,
     feedbackAnchor,
     feedbackOpen,
+    suggestionAnchor,
+    suggestionThreadId,
+    suggestionPreview,
+    openSuggestions,
+    closeSuggestions,
+    setSuggestionPreview,
     openHistory,
     toggleFeedback,
     openExport,
@@ -158,6 +190,7 @@ function boardPanelActions(
     onOpenShare: features.renderExport ? panels.openExport : undefined,
     onOpenHistory: features.renderHistory ? panels.openHistory : undefined,
     onToggleFeedback: features.renderFeedback ? panels.toggleFeedback : undefined,
+    onOpenSuggestions: features.renderSuggestions ? panels.openSuggestions : undefined,
   };
 }
 
@@ -197,6 +230,24 @@ function annotationActions(
   return { onToggleAnnotation, onAnnotate };
 }
 
+interface BoardViewReporterProps extends BoardViewContext {
+  readonly onViewContext: (context: BoardViewContext | undefined) => void;
+}
+
+function BoardViewReporter({
+  boardId,
+  selectedIds,
+  viewport: { x, y, zoom },
+  onViewContext,
+}: BoardViewReporterProps) {
+  const publish = useEffectEvent(onViewContext);
+  useEffect(() => {
+    publish({ boardId, selectedIds, viewport: { x, y, zoom } });
+  }, [boardId, selectedIds, x, y, zoom]);
+  useEffect(() => () => publish(undefined), []);
+  return null;
+}
+
 function BoardWorkspace({
   state,
   session,
@@ -208,6 +259,7 @@ function BoardWorkspace({
 }: BoardWorkspaceProps) {
   const board = state.scene;
   const canvasRef = useRef<CanvasHandle>(null);
+  const suggestionTrigger = useRef<HTMLButtonElement>(null);
   const [canvasArea, setCanvasArea] = useState<HTMLDivElement | null>(null);
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [tool, setTool] = useState<BoardTool>('select');
@@ -224,6 +276,8 @@ function BoardWorkspace({
   const [objectEdit, setObjectEdit] = useState<CanvasProps['editObjectRequest']>();
   const nextWelcomePlacement = useRef(0);
   const [viewport, setViewport] = useState<CanvasViewport>({ x: 0, y: 0, zoom: 1 });
+  const [viewportSize, setViewportSize] = useState<CanvasViewportSize>();
+  const [detachSequence, setDetachSequence] = useState(0);
   const [viewportRequest, setViewportRequest] = useState<CanvasViewportRequest>();
   const panels = useBoardPanels();
   const creation = useBoardHtmlCreation();
@@ -251,6 +305,33 @@ function BoardWorkspace({
 
   function handleZoomBoard(zoom: number) {
     requestViewport({ zoom });
+  }
+
+  function detachFollow() {
+    if (features.renderPresence) {
+      setDetachSequence((sequence) => sequence + 1);
+    }
+  }
+
+  function handleManualZoom(zoom: number) {
+    detachFollow();
+    handleZoomBoard(zoom);
+  }
+
+  function handleManualFit(fit: CanvasFitScope) {
+    detachFollow();
+    fitViewport(fit);
+  }
+
+  function handleRoomAccessLost() {
+    panels.closeExport();
+    panels.closeHistory();
+    panels.closeSuggestions();
+    panels.setFeedbackOpen(false);
+    setAnnotationActive(false);
+    setMenuAnchor(null);
+    session.reload();
+    features.onRoomAccessLost?.();
   }
 
   function restoreViewport(restored: CanvasViewport) {
@@ -287,6 +368,7 @@ function BoardWorkspace({
   function handleOpenViewing(ids: readonly string[], trigger?: HTMLButtonElement) {
     panels.closeExport();
     panels.closeHistory();
+    panels.closeSuggestions();
     panels.setFeedbackOpen(false);
     setAnnotationActive(false);
     setMenuAnchor(null);
@@ -294,9 +376,11 @@ function BoardWorkspace({
   }
 
   const watching = Boolean(scope);
-  const viewOnly = watching || panels.historyPreview;
+  const previewing = panels.historyPreview || panels.suggestionPreview;
+  const viewOnly = watching || previewing;
   const online = mayEdit && !viewOnly;
-  const canEditExpanded = mayEdit && !panels.historyPreview;
+  const canComment = (features.commentAccess ?? mayEdit) && !viewOnly;
+  const canEditExpanded = mayEdit && !previewing;
   const move = useMoveSession(session, board.boardId, online, createCommandId);
   const moving = move.pendingEdits.length > 0;
   const { editService, Viewing, renderExport, renderFeedback } = features;
@@ -424,7 +508,7 @@ function BoardWorkspace({
   }
 
   const annotation = annotationActions(
-    online,
+    canComment,
     Boolean(renderFeedback),
     handleToggleAnnotation,
     handleAnnotateSelection,
@@ -444,190 +528,255 @@ function BoardWorkspace({
     />
   );
   const pendingEdits = moving ? move.pendingEdits : geometry.pendingEdits;
-  const canvas = (
-    <WorkspaceCanvas
-      viewOnly={viewOnly}
-      annotating={annotationActive}
-      input={{
-        ref: canvasRef,
-        viewId: board.boardId,
-        label: title,
-        scene: projected.scene,
-        selection,
-        tool,
-        penStyle: { stroke: penColor },
-        fitOnMount: Boolean(onBack),
-        viewportRequest,
-        showGrid,
-        presentation: scope,
-        selectionActions,
-        canEdit,
-        canEditExpandedObject: canEditExpanded,
-        pendingEdits,
-        objectExtensions: editService ? editExtensions : moveExtensions,
-        payloadById: projected.payloadById,
-        onSelectionChange: setSelected,
-        onToolChange: handleToolChange,
-        onContextMenu: handleContextMenu,
-        editObjectRequest: objectEdit,
-        onEditIntent: handleEdit,
-        canWriteObject: content.canWriteObject,
-        onObjectIntent: content.handleObjectIntent,
-        readHtmlSource: features.readHtmlSource,
-        onOpenPresentation: handleOpenViewing,
-        onClosePresentation: exit,
-        onViewportChange: setViewport,
-        onVisibleObjectsChange: session.observeVisible,
-      }}
-    />
-  );
+  function renderCanvas(onWorldPointerChange: CanvasProps['onWorldPointerChange']) {
+    return (
+      <WorkspaceCanvas
+        viewOnly={viewOnly}
+        annotating={annotationActive}
+        input={{
+          ref: canvasRef,
+          viewId: board.boardId,
+          label: title,
+          scene: projected.scene,
+          selection,
+          tool,
+          penStyle: { stroke: penColor },
+          fitOnMount: Boolean(onBack),
+          viewportRequest,
+          showGrid,
+          presentation: scope,
+          selectionActions,
+          canEdit,
+          canEditExpandedObject: canEditExpanded,
+          pendingEdits,
+          objectExtensions: editService ? editExtensions : moveExtensions,
+          payloadById: projected.payloadById,
+          onSelectionChange: setSelected,
+          onToolChange: handleToolChange,
+          onContextMenu: handleContextMenu,
+          editObjectRequest: objectEdit,
+          onEditIntent: handleEdit,
+          canWriteObject: content.canWriteObject,
+          onObjectIntent: content.handleObjectIntent,
+          readHtmlSource: features.readHtmlSource,
+          onOpenPresentation: handleOpenViewing,
+          onClosePresentation: exit,
+          onViewportChange: setViewport,
+          onViewportSizeChange: features.renderPresence ? setViewportSize : undefined,
+          onViewportNavigation: viewOnly ? undefined : detachFollow,
+          onWorldPointerChange: viewOnly ? undefined : onWorldPointerChange,
+          onVisibleObjectsChange: session.observeVisible,
+        }}
+      />
+    );
+  }
   const exportAnchor = panels.exportAnchor;
 
-  return (
-    <>
-      <WorkspaceHeader
-        title={title}
-        watching={watching}
-        historyPreview={panels.historyPreview}
-        historyOpen={Boolean(panels.historyAnchor)}
-        feedbackOpen={panels.feedbackOpen}
-        shareOpen={Boolean(exportAnchor)}
-        annotationActive={annotationActive}
-        unresolvedFeedback={unresolvedFeedback}
-        writeAccess={board.canEdit}
-        moving={moving}
-        move={move}
-        geometry={geometry}
-        notice={content.notice}
-        onBack={onBack}
-        onRename={boardTitle.rename}
-        {...boardPanelActions(features, panels)}
-        onToggleAnnotation={annotation.onToggleAnnotation}
-        readNotices={
-          <BoardReadNotices
-            state={state}
-            session={session}
-            unsafePayloadVersion={projected.unsafePayloadVersion}
-            renameError={boardTitle.error}
-          />
-        }
-      />
-      <div className="whiteboard-editor__canvas" ref={setCanvasArea}>
-        <div className="whiteboard-editor__live-canvas" inert={panels.historyPreview}>
-          <Viewing
-            active={watching}
-            documentReading={Boolean(scope?.focusObjectId)}
-            title={title}
-            viewport={viewport}
-            onZoom={handleZoomBoard}
-            onFit={fitPresentation}
-            onExit={exit}
-            onCanvasFocus={focusCanvas}
-          >
-            {canvas}
-          </Viewing>
-          <div hidden={watching}>
-            <BoardViewportTools
-              zoom={viewport.zoom}
-              onZoom={handleZoomBoard}
-              onFit={fitViewport}
-              hasSelection={selection.length > 0}
-              showGrid={showGrid}
-              onShowGridChange={setShowGrid}
-              singleKeys={singleKeys}
-              onSingleKeysChange={setSingleKeys}
-              timerEditable={board.canEdit}
-            />
-            <WorkspaceToolbar
-              boardId={board.boardId}
-              tool={tool}
-              viewport={viewport}
-              visible={board.canEdit}
-              canInsertImage={board.canEdit}
-              mediaPaused={!online}
-              canEditGeometry={canInsert}
-              renderMedia={features.renderMedia}
-              onApplied={handleEditApplied}
-              onToolChange={handleToolChange}
-              onCanvasFocus={focusCanvas}
-              singleKeys={singleKeys}
-              penColor={penColor}
-              onPenColorChange={setPenColor}
-              onAddHtml={canInsert ? handleOpenHtml : undefined}
-            />
-          </div>
-          {welcomeAvailable(viewOnly, annotationActive, tool, projected.scene.objects.length) && (
-            <BoardWelcome
-              canEdit={board.canEdit}
-              disabled={!canInsert}
-              onAddDocument={handleAddDocument}
-              onAddHtml={handleOpenHtml}
-            />
-          )}
+  function handleReviewThread(threadId: string) {
+    if (suggestionTrigger.current) {
+      panels.openSuggestions(suggestionTrigger.current, threadId);
+    }
+  }
+
+  function restoreSuggestionsFocus() {
+    suggestionTrigger.current?.focus({ preventScroll: true });
+  }
+
+  function renderWorkspace(room?: BoardPresenceSlot) {
+    if (room?.accessLost) {
+      return (
+        <div className="whiteboard-editor__state">
+          <StatePanel kind="error" title="白板访问已撤销" />
         </div>
-        <WorkspacePanels
-          features={features}
-          feedback={{
-            boardId: board.boardId,
-            canEdit: online,
-            viewing: viewOnly,
-            viewport,
-            objects: board.objects,
-            selectedIds: selection,
-            panelOpen: panels.feedbackOpen,
-            onPanelOpenChange: panels.setFeedbackOpen,
-            anchor: panels.feedbackAnchor,
-            focusWorldPoint,
-            annotationActive,
-            onAnnotationActiveChange: changeAnnotation,
-            onUnresolvedChange: setUnresolvedFeedback,
-            annotationRequest,
-            singleKeys,
-          }}
-          history={{
+      );
+    }
+
+    return (
+      <>
+        {!viewOnly && features.onViewContext && (
+          <BoardViewReporter
+            boardId={board.boardId}
+            selectedIds={selection}
+            viewport={viewport}
+            onViewContext={features.onViewContext}
+          />
+        )}
+        <WorkspaceHeader
+          title={title}
+          watching={watching}
+          historyPreview={previewing}
+          historyOpen={Boolean(panels.historyAnchor)}
+          feedbackOpen={panels.feedbackOpen}
+          suggestionsOpen={Boolean(panels.suggestionAnchor)}
+          suggestionTrigger={suggestionTrigger}
+          shareOpen={Boolean(exportAnchor)}
+          consumeShareEntry={features.consumeShareEntry}
+          annotationActive={annotationActive}
+          unresolvedFeedback={unresolvedFeedback}
+          writeAccess={board.canEdit}
+          moving={moving}
+          move={move}
+          geometry={geometry}
+          notice={content.notice}
+          participants={room?.participants}
+          onBack={onBack}
+          onRename={boardTitle.rename}
+          {...boardPanelActions(features, panels)}
+          onToggleAnnotation={annotation.onToggleAnnotation}
+          readNotices={
+            <BoardReadNotices
+              state={state}
+              session={session}
+              unsafePayloadVersion={projected.unsafePayloadVersion}
+              renameError={boardTitle.error}
+            />
+          }
+        />
+        {room?.notice}
+        <div className="whiteboard-editor__canvas" ref={setCanvasArea}>
+          <div className="whiteboard-editor__live-canvas" inert={previewing}>
+            <Viewing
+              active={watching}
+              documentReading={Boolean(scope?.focusObjectId)}
+              title={title}
+              viewport={viewport}
+              onZoom={handleZoomBoard}
+              onFit={fitPresentation}
+              onExit={exit}
+              onCanvasFocus={focusCanvas}
+            >
+              {renderCanvas(room?.onCursorChange)}
+            </Viewing>
+            {room?.overlay}
+            <div hidden={watching}>
+              <BoardViewportTools
+                zoom={viewport.zoom}
+                onZoom={handleManualZoom}
+                onFit={handleManualFit}
+                hasSelection={selection.length > 0}
+                showGrid={showGrid}
+                onShowGridChange={setShowGrid}
+                singleKeys={singleKeys}
+                onSingleKeysChange={setSingleKeys}
+                timerEditable={board.canEdit}
+                timer={features.renderSharedTimer?.()}
+              />
+              <WorkspaceToolbar
+                boardId={board.boardId}
+                tool={tool}
+                viewport={viewport}
+                visible={board.canEdit}
+                canInsertImage={board.canEdit}
+                mediaPaused={!online}
+                canEditGeometry={canInsert}
+                renderMedia={features.renderMedia}
+                onApplied={handleEditApplied}
+                onToolChange={handleToolChange}
+                onCanvasFocus={focusCanvas}
+                singleKeys={singleKeys}
+                penColor={penColor}
+                onPenColorChange={setPenColor}
+                onAddHtml={canInsert ? handleOpenHtml : undefined}
+              />
+            </div>
+            {welcomeAvailable(viewOnly, annotationActive, tool, projected.scene.objects.length) && (
+              <BoardWelcome
+                canEdit={board.canEdit}
+                disabled={!canInsert}
+                onAddDocument={handleAddDocument}
+                onAddHtml={handleOpenHtml}
+              />
+            )}
+          </div>
+          <WorkspacePanels
+            features={features}
+            feedback={{
+              boardId: board.boardId,
+              canEdit: canComment,
+              viewing: viewOnly,
+              viewport,
+              objects: board.objects,
+              selectedIds: selection,
+              panelOpen: panels.feedbackOpen,
+              onPanelOpenChange: panels.setFeedbackOpen,
+              anchor: panels.feedbackAnchor,
+              focusWorldPoint,
+              annotationActive,
+              onAnnotationActiveChange: changeAnnotation,
+              onUnresolvedChange: setUnresolvedFeedback,
+              annotationRequest,
+              singleKeys,
+              onReviewThread: features.renderSuggestions ? handleReviewThread : undefined,
+            }}
+            history={{
+              boardId: board.boardId,
+              title,
+              revision: board.revision,
+              canEdit: mayEdit && !moving && !geometry.hasPendingEdit,
+              anchor: panels.historyAnchor,
+              onClose: panels.closeHistory,
+              onPreviewChange: panels.setHistoryPreview,
+              onRestored: handleRestore,
+              renderPreview: renderBoardHistoryCanvas,
+            }}
+            suggestions={{
+              boardId: board.boardId,
+              revision: board.revision,
+              selection,
+              feedbackThreadId: panels.suggestionThreadId,
+              anchor: panels.suggestionAnchor,
+              onClose: panels.closeSuggestions,
+              restoreFocus: restoreSuggestionsFocus,
+              onApplied: handleEditApplied,
+              onPreviewChange: panels.setSuggestionPreview,
+              renderPreview: (key, changes) => renderSuggestionPreview(key, state, changes),
+            }}
+          />
+        </div>
+        <GeometryBoardMenu
+          anchor={menuAnchor}
+          selection={selectedObjects}
+          canEdit={canInsert}
+          onAction={geometry.handleSelectionAction}
+          onFit={handleManualFit}
+          onSelectAll={selectAll}
+          onRequestClose={() => setMenuAnchor(null)}
+          returnFocus={focusCanvas}
+        />
+        <BoardHtmlCreation
+          creation={creation}
+          geometry={geometry}
+          viewport={viewport}
+          canInsert={canInsert}
+          readHtmlSource={features.readHtmlSource}
+          onRestoreFocus={focusCanvas}
+        />
+        <WorkspaceExport
+          anchor={exportAnchor}
+          context={{
             boardId: board.boardId,
             title,
             revision: board.revision,
-            canEdit: mayEdit && !moving && !geometry.hasPendingEdit,
-            anchor: panels.historyAnchor,
-            onClose: panels.closeHistory,
-            onPreviewChange: panels.setHistoryPreview,
-            onRestored: handleRestore,
-            renderPreview: renderBoardHistoryCanvas,
+            selectedIds: selection,
           }}
+          render={renderExport}
+          onClose={panels.closeExport}
         />
-      </div>
-      <GeometryBoardMenu
-        anchor={menuAnchor}
-        selection={selectedObjects}
-        canEdit={canInsert}
-        onAction={geometry.handleSelectionAction}
-        onFit={fitViewport}
-        onSelectAll={selectAll}
-        onRequestClose={() => setMenuAnchor(null)}
-        returnFocus={focusCanvas}
-      />
-      <BoardHtmlCreation
-        creation={creation}
-        geometry={geometry}
-        viewport={viewport}
-        canInsert={canInsert}
-        readHtmlSource={features.readHtmlSource}
-        onRestoreFocus={focusCanvas}
-      />
-      <WorkspaceExport
-        anchor={exportAnchor}
-        context={{
-          boardId: board.boardId,
-          title,
-          revision: board.revision,
-          selectedIds: selection,
-        }}
-        render={renderExport}
-        onClose={panels.closeExport}
-      />
-    </>
-  );
+      </>
+    );
+  }
+
+  return features.renderPresence
+    ? features.renderPresence({
+        viewport: viewportSize && { ...viewport, ...viewportSize },
+        paused: viewOnly,
+        detachSequence,
+        onViewportRequest: restoreViewport,
+        onContentChanged: session.acceptRoomContent,
+        onAccessLost: handleRoomAccessLost,
+        render: renderWorkspace,
+      })
+    : renderWorkspace();
 }
 
 interface BoardReadNoticesProps {

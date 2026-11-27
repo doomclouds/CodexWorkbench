@@ -19,9 +19,9 @@ export const browserCapabilities = [
 const browserGlobals = new Set(['globalThis', 'window', 'self']);
 const frameMessageMembers = new Set(['parent', 'postMessage']);
 const restrictedMembers = new Map([
-  ['window', new Set([...browserCapabilities, 'parent', 'top'])],
+  ['window', new Set([...browserCapabilities, 'parent', 'top', 'location', 'openai'])],
   ['navigator', new Set(['clipboard'])],
-  ['document', new Set(['cookie'])],
+  ['document', new Set(['cookie', 'location', 'URL', 'documentURI', 'baseURI', 'referrer'])],
   ['URL', new Set(['createObjectURL', 'revokeObjectURL'])],
 ]);
 
@@ -80,7 +80,7 @@ const noBrowserIo = {
     schema: [
       {
         type: 'object',
-        properties: { frameMessaging: { type: 'boolean' } },
+        properties: { frameMessaging: { type: 'boolean' }, hostOnly: { type: 'boolean' } },
         additionalProperties: false,
       },
     ],
@@ -89,12 +89,21 @@ const noBrowserIo = {
 
   create(context) {
     function reportCapability(node, target, name) {
+      if (context.options[0]?.hostOnly && name !== 'openai') {
+        return;
+      }
+
       const group = browserGlobals.has(target) ? 'window' : target;
       const frameMessage =
         context.options[0]?.frameMessaging && group === 'window' && frameMessageMembers.has(name);
+      const hostLocation = target === 'location';
 
-      if (!frameMessage && restrictedMembers.get(group)?.has(name)) {
-        context.report({ node, messageId: 'capability', data: { name } });
+      if (hostLocation || (!frameMessage && restrictedMembers.get(group)?.has(name))) {
+        context.report({
+          node,
+          messageId: 'capability',
+          data: { name: hostLocation ? 'location' : name },
+        });
       }
     }
 

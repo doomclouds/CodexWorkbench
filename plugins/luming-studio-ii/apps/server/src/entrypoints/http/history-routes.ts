@@ -16,6 +16,7 @@ import { toBoardEditReceipt } from './board-edit-receipt.js';
 import { toExportFormat, toExportResponse, toExportScope } from './export-route.js';
 import { toPayloadResult } from './payload.js';
 import { HttpRequestError, requireId } from './request.js';
+import type { ObserveEdit } from './room-changes.js';
 import { toBoardScene } from './scene.js';
 import { unaryRoute, type RouteEntry } from './unary-route.js';
 
@@ -82,6 +83,7 @@ function toVersionExport(
 export function createBoardHistoryRoutes(
   application: BoardHistoryApplication,
   digest: (body: Uint8Array) => string,
+  observe?: ObserveEdit,
 ): readonly RouteEntry[] {
   const {
     listBoardVersions,
@@ -131,8 +133,10 @@ export function createBoardHistoryRoutes(
     unaryRoute(restoreBoardVersion, (actor, request) => {
       const command = toRestoreCommand(request);
       const signature = 'restore:' + digest(toBinary(restoreBoardVersion.input, request));
+      const receipt = application.restoreVersion(actor, command, signature);
+      observe?.(receipt);
 
-      return { receipt: toBoardEditReceipt(application.restoreVersion(actor, command, signature)) };
+      return { receipt: toBoardEditReceipt(receipt) };
     }),
     unaryRoute(exportBoardVersion, (actor, request) =>
       toVersionExport(

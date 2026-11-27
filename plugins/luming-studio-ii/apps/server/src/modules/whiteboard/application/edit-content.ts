@@ -19,14 +19,14 @@ import {
   type PayloadRecord,
   type TodoContentSource,
 } from '../domain/index.js';
-import type { BoardEditWriter } from '../ports/index.js';
+import type { BoardEditPlanningReader } from '../ports/index.js';
 
 const stableId = /^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/u;
 const sourceVersionPattern = /^(?:0|[1-9]\d{0,18})$/u;
 const maxSourceVersion = (1n << 63n) - 1n;
 
 interface ContentEditScope {
-  readonly writer: BoardEditWriter;
+  readonly writer: BoardEditPlanningReader;
   readonly boardId: string;
   readonly object: BoardObject;
   readonly current: PayloadRecord;
@@ -69,7 +69,7 @@ function optionalStableId(value: string | undefined): boolean {
 }
 
 function resolveSourceLocation(
-  writer: BoardEditWriter,
+  writer: BoardEditPlanningReader,
   boardId: string,
   { objectId, blockId, itemId }: TodoContentSource,
 ): boolean {
@@ -94,7 +94,11 @@ function resolveSourceLocation(
   );
 }
 
-function validTodoSource(writer: BoardEditWriter, boardId: string, source: TodoContentSource) {
+function validTodoSource(
+  writer: BoardEditPlanningReader,
+  boardId: string,
+  source: TodoContentSource,
+) {
   const { boardId: owner, objectId, blockId, itemId, version } = source;
   const sameBoard = owner === undefined || owner === boardId;
   const validIds = [objectId, blockId, itemId].every(optionalStableId);
@@ -129,7 +133,11 @@ function objectTakesContent(kind: string, expected: string) {
   return kind === expected || (kind === 'note' && expected === 'text');
 }
 
-function contentGeometryLocked(writer: BoardEditWriter, boardId: string, object: BoardObject) {
+function contentGeometryLocked(
+  writer: BoardEditPlanningReader,
+  boardId: string,
+  object: BoardObject,
+) {
   const visited = new Set<string>();
   let candidate: BoardObject | undefined = object;
   while (candidate) {
@@ -145,7 +153,7 @@ function contentGeometryLocked(writer: BoardEditWriter, boardId: string, object:
   return false;
 }
 
-function assetLookup(writer: BoardEditWriter, boardId: string) {
+function assetLookup(writer: BoardEditPlanningReader, boardId: string) {
   const checked = new Map<string, boolean>();
 
   return (assetId: string) => {
@@ -227,7 +235,7 @@ function withTableWidth(
 }
 
 export function planContentEdit(
-  writer: BoardEditWriter,
+  writer: BoardEditPlanningReader,
   board: BoardHeader,
   operation: ContentOperation,
 ): BoardEditDecision {

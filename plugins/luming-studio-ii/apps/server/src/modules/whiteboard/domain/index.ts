@@ -90,4 +90,25 @@ export { editTableContent, tableContentIssue } from './object-content-edits-tabl
 export { editEmbedSource, editEmbedState } from './object-content-edits-embed.js';
 export { editImageCrop, editStickerContent } from './object-content-edits-media.js';
 export { planImageChanges, type ImageOperation } from './image-edits.js';
+export type {
+  AcceptBoardSuggestion,
+  BoardReviewActor,
+  BoardReviewOrigin,
+  BoardReviewSource,
+  BoardReviewTarget,
+  BoardSuggestion,
+  BoardSuggestionChoice,
+  BoardSuggestionCommandReceipt,
+  BoardSuggestionEdit,
+  BoardSuggestionList,
+  BoardSuggestionOperation,
+  BoardSuggestionOptionDraft,
+  BoardSuggestionOptionRecord,
+  BoardSuggestionPreview,
+  CreateBoardReviewSource,
+  DecodeBoardSuggestionEdit,
+  RejectBoardSuggestion,
+  StoredBoardSuggestion,
+  SubmitBoardSuggestion,
+} from './board-suggestions.js';
 export { boardWritePayloadLimit } from './board-edits.js';

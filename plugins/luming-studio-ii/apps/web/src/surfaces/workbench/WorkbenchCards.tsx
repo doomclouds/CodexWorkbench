@@ -15,10 +15,11 @@ interface BoardCardProps {
     trigger: HTMLButtonElement,
   ) => void;
   readonly onDuplicate?: (board: CatalogBoardSummary, trigger: HTMLButtonElement) => void;
+  readonly onCopyLink?: (boardId: string) => void;
 }
 
 export type WorkbenchBoardAction = 'rename' | 'pin' | 'trash';
-type CardMenuAction = WorkbenchBoardAction | 'duplicate';
+type CardMenuAction = WorkbenchBoardAction | 'duplicate' | 'copyLink';
 
 interface CardMenuAnchor {
   readonly button: HTMLButtonElement;
@@ -102,10 +103,16 @@ function BoardPreview() {
 
 type BoardCardMenuProps = Pick<
   BoardCardProps,
-  'board' | 'managementBlocked' | 'onAction' | 'onDuplicate'
+  'board' | 'managementBlocked' | 'onAction' | 'onDuplicate' | 'onCopyLink'
 >;
 
-function BoardCardMenu({ board, managementBlocked, onAction, onDuplicate }: BoardCardMenuProps) {
+function BoardCardMenu({
+  board,
+  managementBlocked,
+  onAction,
+  onDuplicate,
+  onCopyLink,
+}: BoardCardMenuProps) {
   const [anchor, setAnchor] = useState<CardMenuAnchor>();
   const { title, pinned, canManage } = board;
   const label = '管理作品：' + title;
@@ -113,7 +120,7 @@ function BoardCardMenu({ board, managementBlocked, onAction, onDuplicate }: Boar
   const options = [
     { label: pinned ? '取消固定' : '固定', icon: Pin, action: 'pin' },
     { label: '重命名', icon: FileCode2, action: 'rename' },
-    { label: '复制链接', icon: Share2 },
+    { label: '复制链接', icon: Share2, action: 'copyLink' },
     { label: '复制作品', icon: Copy, action: 'duplicate' },
   ] as const;
 
@@ -124,17 +131,20 @@ function BoardCardMenu({ board, managementBlocked, onAction, onDuplicate }: Boar
     }
   }
 
-  function actionAvailable(action: CardMenuAction | undefined) {
+  function actionAvailable(action: CardMenuAction) {
     if (action === 'duplicate') {
       return canManage === true && onDuplicate !== undefined;
     }
+    if (action === 'copyLink') {
+      return canManage === true && onCopyLink !== undefined;
+    }
 
-    return action !== undefined && actionsAvailable;
+    return actionsAvailable;
   }
 
-  function runAction(action: CardMenuAction | undefined) {
+  function runAction(action: CardMenuAction) {
     const blocked = !actionAvailable(action) || managementBlocked;
-    if (!anchor || blocked || !action) {
+    if (!anchor || blocked) {
       return;
     }
 
@@ -143,6 +153,10 @@ function BoardCardMenu({ board, managementBlocked, onAction, onDuplicate }: Boar
     trigger.focus();
     if (action === 'duplicate') {
       onDuplicate?.(board, trigger);
+      return;
+    }
+    if (action === 'copyLink') {
+      onCopyLink?.(board.boardId);
       return;
     }
 
@@ -176,10 +190,8 @@ function BoardCardMenu({ board, managementBlocked, onAction, onDuplicate }: Boar
           initialFocus={anchor.focus}
           onClose={() => setAnchor(undefined)}
         >
-          {options.map((option) => {
-            const action = 'action' in option ? option.action : undefined;
+          {options.map(({ action, label: text, icon: Icon }) => {
             const enabled = actionAvailable(action);
-            const { label: text, icon: Icon } = option;
 
             return (
               <button
@@ -220,6 +232,7 @@ export function BoardCard({
   managementBlocked,
   onAction,
   onDuplicate,
+  onCopyLink,
 }: BoardCardProps) {
   return (
     <article className="studio-workbench-card">
@@ -245,6 +258,7 @@ export function BoardCard({
         managementBlocked={managementBlocked}
         onAction={onAction}
         onDuplicate={onDuplicate}
+        onCopyLink={onCopyLink}
       />
     </article>
   );

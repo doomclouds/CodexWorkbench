@@ -54,7 +54,10 @@ function canReconcile(value: TodoObjectSnapshot, pending?: PendingTodoEdit) {
 }
 
 function insertedItem(text: string): TodoObjectChange {
-  return { op: 'insert', item: { id: 'task-' + crypto.randomUUID(), text, checked: false } };
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const key = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+
+  return { op: 'insert', item: { id: 'task-' + key, text, checked: false } };
 }
 
 function editOf(base: TodoObjectSnapshot, changes: readonly TodoObjectChange[]): TodoObjectEdit {
